@@ -1,6 +1,7 @@
 import {
   evaluateStudioTrustGate,
   generateWithRetry,
+  normalizeGenerationPayload,
   validateCoverLetterOutput,
   validateResumeOutput,
 } from "@/lib/studioTrustGate";
@@ -80,6 +81,58 @@ describe("Studio trust gate", () => {
 
     expect(result.valid).toBe(false);
     expect(result.reasons.some((reason) => reason.includes("echo"))).toBe(true);
+  });
+
+  it("normalizes resume payload and enforces strict evidence source policy", () => {
+    const normalized = normalizeGenerationPayload(
+      {
+        jobId: "job-1",
+        baselineId: "base-1",
+        editedResume: {
+          experience: [
+            {
+              company: "Acme | Other Co",
+              roleTitle: "Director / Lead",
+              bullets: ["- Led team", "Own", "Built compliant support workflows with measurable outcomes"],
+            },
+          ],
+        },
+      },
+      "resume",
+    );
+
+    expect(normalized.evidenceSourcePolicy).toBe(
+      "verified_baseline_and_accepted_interview_additions_only",
+    );
+    expect(normalized.strictEvidenceOnly).toBe(true);
+    expect(normalized.preventCrossRoleBleed).toBe(true);
+    const editedResume = normalized.editedResume as { experience: Array<{ company: string; roleTitle: string; bullets: string[] }> };
+    expect(editedResume.experience[0]?.company).toBe("Acme");
+    expect(editedResume.experience[0]?.roleTitle).toBe("Director");
+    expect(editedResume.experience[0]?.bullets).toEqual([
+      "Built compliant support workflows with measurable outcomes",
+    ]);
+  });
+
+  it("blocks inflated scope and invented entity placeholders", () => {
+    const result = validateResumeOutput({
+      preview: {
+        resume: {
+          summary: "Summary",
+          experience: [
+            {
+              company: "Confidential Company",
+              roleTitle: "Director",
+              bullets: ["Owned enterprise-wide operations across the entire company globally."],
+            },
+          ],
+        },
+      },
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.reasons.some((reason) => reason.includes("invented company"))).toBe(true);
+    expect(result.reasons.some((reason) => reason.includes("inflate scope"))).toBe(true);
   });
 
   it("retry executes once and then stops when validation keeps failing", async () => {

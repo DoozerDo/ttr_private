@@ -36,12 +36,13 @@ describe("Results opportunity map", () => {
       activeScore: 91,
       studioHref: "/studio",
       canOpenStudio: true,
+      canGenerate: true,
+      reasonsBlocked: [],
       fitReviewPath: "/fit-review?jobId=job-1",
-      analysisId: "analysis-1",
     });
 
     expect(cta).toMatchObject({
-      label: "Generate Resume & Cover Letter",
+      label: "Open Studio to Generate",
       href: "/studio",
       disabled: false,
     });
@@ -52,8 +53,9 @@ describe("Results opportunity map", () => {
       activeScore: 74,
       studioHref: "/studio?analysisId=analysis-1&baselineId=base-1",
       canOpenStudio: true,
+      canGenerate: false,
+      reasonsBlocked: [],
       fitReviewPath: "/fit-review?jobId=job-1",
-      analysisId: "analysis-1",
     });
 
     expect(cta).toMatchObject({
@@ -63,13 +65,14 @@ describe("Results opportunity map", () => {
     });
   });
 
-  it("maps 50-69 scores to fit improvement and <50 to review gaps anchor", () => {
+  it("maps below-70 scores to fit improvement", () => {
     const improveCta = getPrimaryResultsCta({
       activeScore: 62,
       studioHref: "/studio",
       canOpenStudio: true,
+      canGenerate: false,
+      reasonsBlocked: [],
       fitReviewPath: "/fit-review?jobId=job-1",
-      analysisId: "analysis-1",
     });
     expect(improveCta).toMatchObject({
       label: "Start Fit Improvement",
@@ -81,13 +84,14 @@ describe("Results opportunity map", () => {
       activeScore: 41,
       studioHref: "/studio",
       canOpenStudio: true,
+      canGenerate: false,
+      reasonsBlocked: [],
       fitReviewPath: "/fit-review?jobId=job-1",
-      analysisId: "analysis-1",
     });
 
     expect(cta).toMatchObject({
-      label: "Review Gaps",
-      href: "#fit-improvement-opportunities",
+      label: "Start Fit Improvement",
+      href: "/fit-review?jobId=job-1",
       disabled: false,
     });
   });
@@ -97,8 +101,9 @@ describe("Results opportunity map", () => {
       activeScore: 90,
       studioHref: "/studio?jobId=job-1&analysisId=analysis-88&baselineId=base-1&baselineVersionId=base-version-4",
       canOpenStudio: true,
+      canGenerate: true,
+      reasonsBlocked: [],
       fitReviewPath: "/fit-review?jobId=job-1",
-      analysisId: "analysis-88",
     });
 
     expect(cta.href).toBe(

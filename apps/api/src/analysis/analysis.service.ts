@@ -2570,6 +2570,20 @@ export class AnalysisService {
       }
 
       const savedAssessment = await this.fitAssessmentRepository.save(assessment);
+      if (
+        savedAssessment.userId !== userId ||
+        savedAssessment.baselineId !== baseline.id
+      ) {
+        throw new InternalServerErrorException(
+          'Persisted assessment linkage does not match requested user/baseline',
+        );
+      }
+
+      if (process.env.NODE_ENV !== 'production') {
+        this.logger.log(
+          `runFitAssessment persisted assessment id=${savedAssessment.id} userId=${savedAssessment.userId} baselineId=${savedAssessment.baselineId} createdAt=${savedAssessment.createdAt.toISOString()} score=${savedAssessment.overallScore}`,
+        );
+      }
 
       const successScoringProof: ScoringProofSnapshot = {
         ...scoringProof,

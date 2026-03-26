@@ -5,13 +5,13 @@ const BASELINE_UPDATED_STORAGE_KEY = "ttr:baseline-updated-at";
 
 export type BaselineUpdatedDetail = {
   baselineId?: string | null;
-  source?: "baseline" | "interview" | "policy" | "unknown";
+  source?: "analysis" | "baseline" | "interview" | "policy" | "unknown";
   updatedAt?: string;
 };
 
 type BaselineUpdatedPayload = {
   baselineId: string | null;
-  source: "baseline" | "interview" | "policy" | "unknown";
+  source: "analysis" | "baseline" | "interview" | "policy" | "unknown";
   updatedAt: string;
 };
 

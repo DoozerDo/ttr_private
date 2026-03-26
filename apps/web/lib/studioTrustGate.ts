@@ -22,6 +22,8 @@ export type OutputValidationResult = {
   reasons: string[];
 };
 
+type GenerationDocumentType = "resume" | "cover_letter";
+
 type ResumeModel = {
   summary?: string;
   competencies?: string[];
@@ -37,6 +39,14 @@ type ResumeModel = {
     location?: string;
   }>;
 };
+
+const JD_ECHO_BLOCK_RATIO = 0.65;
+const INFLATED_SCOPE_PATTERN =
+  /\b(global(?:ly)?|worldwide|end[\s-]?to[\s-]?end|enterprise[\s-]?wide|org[\s-]?wide|all teams|entire company)\b/i;
+const INVENTED_ENTITY_PATTERN =
+  /\b(confidential company|stealth startup|fortune\s*\d{2,3}|unnamed company|undisclosed company)\b/i;
+const ROLE_FRAGMENT_SPLIT = /\s*[|/]\s*/;
+const JD_REUSE_SNIPPET_LENGTH = 28;
 
 const MIN_EVIDENCE_UNITS = 2;
 const BULLET_ARTIFACT_PATTERN = /^(?:[•*\-]\s+|\d{1,2}[.)]\s+)/m;
@@ -87,6 +97,82 @@ function computeTokenOverlapRatio(source: string, target: string): number {
     if (targetTokens.has(token)) overlap += 1;
   });
   return overlap / Math.max(sourceTokens.size, 1);
+}
+
+function normalizeLine(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function normalizeRoleHeader(value: string): string {
+  const trimmed = normalizeLine(value);
+  if (!trimmed) return "";
+  return trimmed.split(ROLE_FRAGMENT_SPLIT)[0]?.trim() ?? trimmed;
+}
+
+function normalizeBulletLine(value: string): string {
+  return normalizeLine(value.replace(/^[â€¢*\-\d.)\s]+/, ""));
+}
+
+function shouldDropBulletFragment(value: string): boolean {
+  if (!value) return true;
+  if (value.length < 18) return true;
+  const words = value.split(/\s+/).filter(Boolean);
+  return words.length < 4;
+}
+
+function normalizeEditedResumeModel(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+  const source = value as Record<string, unknown>;
+  const experience = Array.isArray(source.experience) ? source.experience : [];
+  const normalizedExperience = experience
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const typed = entry as Record<string, unknown>;
+      const company = normalizeRoleHeader(trimToString(typed.company));
+      const roleTitle = normalizeRoleHeader(trimToString(typed.roleTitle));
+      const bulletsRaw = Array.isArray(typed.bullets) ? typed.bullets : [];
+      const bullets = Array.from(
+        new Set(
+          bulletsRaw
+            .map((bullet) => normalizeBulletLine(trimToString(bullet)))
+            .filter((bullet) => !shouldDropBulletFragment(bullet)),
+        ),
+      ).slice(0, 8);
+      if (!company || !roleTitle || bullets.length === 0) {
+        return null;
+      }
+      return {
+        ...typed,
+        company,
+        roleTitle,
+        bullets,
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    ...source,
+    experience: normalizedExperience,
+  };
+}
+
+export function normalizeGenerationPayload(
+  payload: Record<string, unknown>,
+  documentType: GenerationDocumentType,
+): Record<string, unknown> {
+  const normalized: Record<string, unknown> = {
+    ...payload,
+    documentType,
+    evidenceSourcePolicy: "verified_baseline_and_accepted_interview_additions_only",
+    strictEvidenceOnly: true,
+    preventCrossRoleBleed: true,
+  };
+
+  if (documentType === "resume" && payload.editedResume !== undefined) {
+    normalized.editedResume = normalizeEditedResumeModel(payload.editedResume);
+  }
+
+  return normalized;
 }
 
 export function evaluateStudioTrustGate(params: TrustGateParams): TrustGateDecision {
@@ -177,6 +263,20 @@ export function validateResumeOutput(generation: unknown): OutputValidationResul
     if ((company.match(/[|/]/g)?.length ?? 0) > 1 || (role.match(/[|/]/g)?.length ?? 0) > 1) {
       reasons.push("Role header appears merged across multiple entries.");
     }
+    if (INVENTED_ENTITY_PATTERN.test(company)) {
+      reasons.push(`Experience entry ${index + 1} includes an invented company placeholder.`);
+    }
+    if (INVENTED_ENTITY_PATTERN.test(role)) {
+      reasons.push(`Experience entry ${index + 1} includes an invented role placeholder.`);
+    }
+    bullets.forEach((bullet) => {
+      if (INFLATED_SCOPE_PATTERN.test(bullet)) {
+        reasons.push(`Experience entry ${index + 1} appears to inflate scope.`);
+      }
+      if (bullet.includes("\n")) {
+        reasons.push(`Experience entry ${index + 1} includes merged paragraph bullets.`);
+      }
+    });
   });
 
   const educationKeys = new Set<string>();
@@ -241,8 +341,22 @@ export function validateCoverLetterOutput(
   }
 
   const overlapRatio = computeTokenOverlapRatio(fullText, jobDescriptionText);
-  if (overlapRatio > 0.65) {
+  if (overlapRatio > JD_ECHO_BLOCK_RATIO) {
     reasons.push("Cover letter appears to echo the job description verbatim.");
+  }
+  const normalizedJd = normalizeLine(jobDescriptionText);
+  const normalizedLetter = normalizeLine(fullText).toLowerCase();
+  if (
+    normalizedJd.length >= JD_REUSE_SNIPPET_LENGTH &&
+    normalizedLetter.includes(normalizedJd.slice(0, JD_REUSE_SNIPPET_LENGTH).toLowerCase())
+  ) {
+    reasons.push("Cover letter reuses job description sentence fragments.");
+  }
+  if (INVENTED_ENTITY_PATTERN.test(fullText)) {
+    reasons.push("Cover letter includes invented company or role placeholders.");
+  }
+  if (INFLATED_SCOPE_PATTERN.test(fullText)) {
+    reasons.push("Cover letter appears to inflate scope beyond verified evidence.");
   }
 
   return { valid: reasons.length === 0, reasons };
@@ -274,13 +388,17 @@ export function hasBlockingComplianceViolations(
       return (
         code.includes("invented_role") ||
         code.includes("invented_company") ||
-        code.includes("invented_metric")
+        code.includes("invented_metric") ||
+        code.includes("scope_inflation") ||
+        code.includes("jd_echo")
       );
     }
     return (
       code.includes("invented_role") ||
       code.includes("invented_company") ||
-      code.includes("invented_metric")
+      code.includes("invented_metric") ||
+      code.includes("scope_inflation") ||
+      code.includes("jd_echo")
     );
   });
 }

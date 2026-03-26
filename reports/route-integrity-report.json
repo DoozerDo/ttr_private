@@ -1,0 +1,2970 @@
+{
+  "generatedAt": "2026-03-25T21:04:56.291Z",
+  "baseUrl": "http://localhost:3000",
+  "summary": {
+    "pageRoutes": 49,
+    "apiRoutes": 112,
+    "references": 193,
+    "brokenPageRefs": 0,
+    "brokenApiRefs": 3,
+    "orphans": 11
+  },
+  "inventory": {
+    "pageRoutes": [
+      "/",
+      "/admin",
+      "/admin/access-codes",
+      "/admin/baselines",
+      "/admin/beta-command-center",
+      "/admin/beta-feedback",
+      "/admin/beta-friction-dashboard",
+      "/admin/bug-reporting",
+      "/admin/bugs",
+      "/admin/bugs/[id]",
+      "/admin/error-health",
+      "/admin/funnel-diagnostics",
+      "/admin/jobs",
+      "/admin/metrics",
+      "/admin/product-signal",
+      "/admin/user-engagement",
+      "/admin/users",
+      "/analyze",
+      "/applications",
+      "/auth/access-code",
+      "/auth/confirm",
+      "/auth/login",
+      "/auth/signup",
+      "/awaiting-access",
+      "/baseline",
+      "/baseline/[id]",
+      "/beta",
+      "/calibrate",
+      "/cover-letters",
+      "/fit-review",
+      "/interview-toolkit",
+      "/interview-toolkit/resources",
+      "/interview-toolkit/star-stories",
+      "/interviews/[id]",
+      "/job-tracker",
+      "/jobs",
+      "/jobs/[jobId]",
+      "/jobs/new",
+      "/onboarding/profile",
+      "/opportunities",
+      "/pricing",
+      "/reality-check",
+      "/redeem",
+      "/results",
+      "/settings",
+      "/studio",
+      "/support/history",
+      "/target",
+      "/waitlist"
+    ],
+    "apiRoutes": [
+      "/api/admin/access-codes",
+      "/api/admin/access-codes/[id]",
+      "/api/admin/bug-reports",
+      "/api/admin/bug-reports/[id]",
+      "/api/admin/bug-reports/[id]/screenshot",
+      "/api/admin/feedback",
+      "/api/admin/feedback/[id]",
+      "/api/admin/friction-events",
+      "/api/admin/friction-events/[id]",
+      "/api/admin/friction-events/run-detection",
+      "/api/admin/friction-patterns",
+      "/api/admin/funnel-metrics",
+      "/api/admin/funnel-segments",
+      "/api/admin/funnel-users",
+      "/api/admin/generate-outreach-draft",
+      "/api/admin/generate-product-narrative",
+      "/api/admin/investor-snapshot",
+      "/api/admin/product-signal",
+      "/api/admin/run-trigger-evaluation",
+      "/api/admin/user-engagement-states",
+      "/api/admin/user-triggers",
+      "/api/admin/users",
+      "/api/admin/users/[id]",
+      "/api/analysis/career-gravity",
+      "/api/analysis/fit-assessments",
+      "/api/analysis/fit-assessments/[assessmentId]",
+      "/api/analysis/fit-assessments/[assessmentId]/simulation",
+      "/api/analysis/fit-scores",
+      "/api/analysis/history",
+      "/api/analysis/job/[jobId]/baseline/[baselineId]/latest",
+      "/api/analysis/job/[jobId]/latest",
+      "/api/analysis/latest",
+      "/api/analysis/run",
+      "/api/analytics/beta-command-center",
+      "/api/analytics/event",
+      "/api/analytics/summary",
+      "/api/analyze",
+      "/api/applications",
+      "/api/applications/[id]",
+      "/api/applications/export",
+      "/api/applications/insights",
+      "/api/auth/confirm",
+      "/api/auth/login",
+      "/api/auth/logout",
+      "/api/auth/redeem-access-code-and-login",
+      "/api/auth/register",
+      "/api/auth/resend-confirmation",
+      "/api/baselines",
+      "/api/baselines/[baselineId]",
+      "/api/baselines/[baselineId]/analysis-score",
+      "/api/baselines/[baselineId]/archive",
+      "/api/baselines/[baselineId]/blocks",
+      "/api/baselines/[baselineId]/delete",
+      "/api/baselines/[baselineId]/fit-review/clone",
+      "/api/baselines/[baselineId]/reparse",
+      "/api/baselines/[baselineId]/restore",
+      "/api/baselines/[baselineId]/strengthening-additions",
+      "/api/baselines/[baselineId]/versions",
+      "/api/beta-feedback",
+      "/api/beta-feedback/summary",
+      "/api/bug-reports",
+      "/api/calibration",
+      "/api/cover-letters",
+      "/api/cover-letters/[id]",
+      "/api/cover-letters/export",
+      "/api/cover-letters/readiness",
+      "/api/dev/purge-baselines",
+      "/api/feedback",
+      "/api/fit-scores",
+      "/api/interview-records",
+      "/api/interview-toolkit/[jobId]/follow-up",
+      "/api/interview-toolkit/[jobId]/study-packet",
+      "/api/interviews",
+      "/api/interviews/[id]",
+      "/api/interviews/[id]/accepted-additions",
+      "/api/interviews/[id]/compute-expanded-fit",
+      "/api/interviews/[id]/decisions",
+      "/api/interviews/[id]/promote-accepted-additions",
+      "/api/interviews/[id]/recommended-additions",
+      "/api/interviews/[id]/responses",
+      "/api/interviews/start",
+      "/api/job-tracker",
+      "/api/job-tracker/[id]",
+      "/api/job-tracker/export.csv",
+      "/api/jobs",
+      "/api/jobs/[id]",
+      "/api/jobs/[id]/archive",
+      "/api/jobs/[id]/restore",
+      "/api/jobs/ingest",
+      "/api/opportunities",
+      "/api/opportunities/[id]",
+      "/api/opportunities/[id]/status",
+      "/api/opportunities/actions-needed",
+      "/api/opportunities/export",
+      "/api/opportunities/grouped",
+      "/api/preview/compatibility-score",
+      "/api/resume",
+      "/api/resume/export",
+      "/api/resume/readiness",
+      "/api/star-stories",
+      "/api/star-stories/[id]",
+      "/api/status",
+      "/api/support/auto-error",
+      "/api/support/config",
+      "/api/support/critical-flow-health",
+      "/api/support/error-health",
+      "/api/support/history",
+      "/api/support/history/still-seeing",
+      "/api/support/report-bug",
+      "/api/users/me",
+      "/api/users/me/last-assessment",
+      "/api/users/me/profile"
+    ],
+    "references": [
+      {
+        "kind": "fetch",
+        "target": "/api/analytics/beta-command-center",
+        "sourceFile": "apps/web/app/(app)/admin/beta-command-center/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/analytics/beta-command-center"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/beta-feedback",
+        "sourceFile": "apps/web/app/(app)/admin/beta-feedback/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/beta-feedback"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/beta-feedback/summary",
+        "sourceFile": "apps/web/app/(app)/admin/beta-feedback/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/beta-feedback/summary"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/beta-feedback",
+        "sourceFile": "apps/web/app/(app)/admin/beta-feedback/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/beta-feedback"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/feedback",
+        "sourceFile": "apps/web/app/(app)/admin/beta-friction-dashboard/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/admin/feedback"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/friction-events",
+        "sourceFile": "apps/web/app/(app)/admin/beta-friction-dashboard/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/admin/friction-events"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/friction-patterns",
+        "sourceFile": "apps/web/app/(app)/admin/beta-friction-dashboard/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/admin/friction-patterns"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/friction-events/run-detection",
+        "sourceFile": "apps/web/app/(app)/admin/beta-friction-dashboard/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/admin/friction-events/run-detection"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/feedback/${id}",
+        "sourceFile": "apps/web/app/(app)/admin/beta-friction-dashboard/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/admin/feedback/[id]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/friction-events/${id}",
+        "sourceFile": "apps/web/app/(app)/admin/beta-friction-dashboard/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/admin/friction-events/[id]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/support/config",
+        "sourceFile": "apps/web/app/(app)/admin/bug-reporting/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/support/config"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/bug-reports",
+        "sourceFile": "apps/web/app/(app)/admin/bugs/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/admin/bug-reports"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/bug-reports/${id}",
+        "sourceFile": "apps/web/app/(app)/admin/bugs/[id]/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/admin/bug-reports/[id]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/bug-reports/${id}",
+        "sourceFile": "apps/web/app/(app)/admin/bugs/[id]/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/admin/bug-reports/[id]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/support/error-health",
+        "sourceFile": "apps/web/app/(app)/admin/error-health/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/support/error-health"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/support/critical-flow-health",
+        "sourceFile": "apps/web/app/(app)/admin/error-health/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/support/critical-flow-health"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/funnel-metrics",
+        "sourceFile": "apps/web/app/(app)/admin/funnel-diagnostics/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/admin/funnel-metrics"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/funnel-users",
+        "sourceFile": "apps/web/app/(app)/admin/funnel-diagnostics/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/admin/funnel-users"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/funnel-segments",
+        "sourceFile": "apps/web/app/(app)/admin/funnel-diagnostics/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/admin/funnel-segments"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/admin/metrics",
+        "sourceFile": "apps/web/app/(app)/admin/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/admin/metrics"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/admin/users",
+        "sourceFile": "apps/web/app/(app)/admin/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/admin/users"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/admin/jobs",
+        "sourceFile": "apps/web/app/(app)/admin/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/admin/jobs"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/admin/baselines",
+        "sourceFile": "apps/web/app/(app)/admin/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/admin/baselines"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/admin/access-codes",
+        "sourceFile": "apps/web/app/(app)/admin/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/admin/access-codes"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/admin/bugs",
+        "sourceFile": "apps/web/app/(app)/admin/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/admin/bugs"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/admin/error-health",
+        "sourceFile": "apps/web/app/(app)/admin/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/admin/error-health"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/admin/beta-friction-dashboard",
+        "sourceFile": "apps/web/app/(app)/admin/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/admin/beta-friction-dashboard"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/admin/funnel-diagnostics",
+        "sourceFile": "apps/web/app/(app)/admin/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/admin/funnel-diagnostics"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/admin/product-signal",
+        "sourceFile": "apps/web/app/(app)/admin/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/admin/product-signal"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/product-signal",
+        "sourceFile": "apps/web/app/(app)/admin/product-signal/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/admin/product-signal"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/investor-snapshot",
+        "sourceFile": "apps/web/app/(app)/admin/product-signal/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/admin/investor-snapshot"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/generate-product-narrative",
+        "sourceFile": "apps/web/app/(app)/admin/product-signal/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/admin/generate-product-narrative"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/user-engagement-states",
+        "sourceFile": "apps/web/app/(app)/admin/user-engagement/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/admin/user-engagement-states"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/user-triggers",
+        "sourceFile": "apps/web/app/(app)/admin/user-engagement/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/admin/user-triggers"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/run-trigger-evaluation",
+        "sourceFile": "apps/web/app/(app)/admin/user-engagement/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/admin/run-trigger-evaluation"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/generate-outreach-draft",
+        "sourceFile": "apps/web/app/(app)/admin/user-engagement/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/admin/generate-outreach-draft"
+        }
+      },
+      {
+        "kind": "router_push",
+        "target": "/results",
+        "sourceFile": "apps/web/app/(app)/analyze/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/results"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines",
+        "sourceFile": "apps/web/app/(app)/analyze/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/baselines"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/jobs",
+        "sourceFile": "apps/web/app/(app)/analyze/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/jobs"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/jobs",
+        "sourceFile": "apps/web/app/(app)/analyze/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/jobs"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/run",
+        "sourceFile": "apps/web/app/(app)/analyze/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/analysis/run"
+        }
+      },
+      {
+        "kind": "window_location",
+        "target": "/auth/login",
+        "sourceFile": "apps/web/app/(app)/baseline/baseline-dashboard.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/auth/login"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines/${encodeURIComponent(baselineId)}",
+        "sourceFile": "apps/web/app/(app)/baseline/baseline-dashboard.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/baselines/[baselineId]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines",
+        "sourceFile": "apps/web/app/(app)/baseline/baseline-dashboard.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/baselines"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/target",
+        "sourceFile": "apps/web/app/(app)/baseline/BaselineStudioHome.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/target"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/history",
+        "sourceFile": "apps/web/app/(app)/baseline/BaselineStudioHome.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/analysis/history"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines",
+        "sourceFile": "apps/web/app/(app)/baseline/BaselineStudioHome.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/baselines"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines/${encodeURIComponent(baselineId)}",
+        "sourceFile": "apps/web/app/(app)/baseline/BaselineStudioHome.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/baselines/[baselineId]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines/${encodeURIComponent(baselineId)}/analysis-score",
+        "sourceFile": "apps/web/app/(app)/baseline/BaselineStudioHome.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/baselines/[baselineId]/analysis-score"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines/${encodeURIComponent(primaryBaselineId)}/strengthening-additions",
+        "sourceFile": "apps/web/app/(app)/baseline/BaselineStudioHome.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/baselines/[baselineId]/strengthening-additions"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines",
+        "sourceFile": "apps/web/app/(app)/baseline/BaselineStudioHome.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/baselines"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines/${baselineId}/blocks",
+        "sourceFile": "apps/web/app/(app)/baseline/[id]/baseline-policy-editor.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/baselines/[baselineId]/blocks"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines/${baselineId}/versions",
+        "sourceFile": "apps/web/app/(app)/baseline/[id]/baseline-policy-editor.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/baselines/[baselineId]/versions"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines/${baselineId}/blocks",
+        "sourceFile": "apps/web/app/(app)/baseline/[id]/baseline-policy-editor.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/baselines/[baselineId]/blocks"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/baseline",
+        "sourceFile": "apps/web/app/(app)/baseline/[id]/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/baseline"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/run",
+        "sourceFile": "apps/web/app/(app)/baseline/_components/WorkspaceRunner.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/analysis/run"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/analyze",
+        "sourceFile": "apps/web/app/(app)/beta/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/analyze"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/analyze",
+        "sourceFile": "apps/web/app/(app)/beta/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/analyze"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/analyze",
+        "sourceFile": "apps/web/app/(app)/calibrate/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/analyze"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/calibration",
+        "sourceFile": "apps/web/app/(app)/calibrate/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/calibration"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/calibration",
+        "sourceFile": "apps/web/app/(app)/calibrate/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/calibration"
+        }
+      },
+      {
+        "kind": "router_push",
+        "target": "/auth/login",
+        "sourceFile": "apps/web/app/(app)/components/auth-status.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/auth/login"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/auth/logout",
+        "sourceFile": "apps/web/app/(app)/components/auth-status.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/auth/logout"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/feedback",
+        "sourceFile": "apps/web/app/(app)/components/BetaFeedbackCapture.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/feedback"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/analyze",
+        "sourceFile": "apps/web/app/(app)/components/last-analysis-card.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/analyze"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/results",
+        "sourceFile": "apps/web/app/(app)/components/last-analysis-card.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/results"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/results",
+        "sourceFile": "apps/web/app/(app)/components/last-analysis-card.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/results"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/analyze",
+        "sourceFile": "apps/web/app/(app)/components/last-analysis-card.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/analyze"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/baseline",
+        "sourceFile": "apps/web/app/(app)/components/next-step-card.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/baseline"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/analyze",
+        "sourceFile": "apps/web/app/(app)/components/next-step-card.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/analyze"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/results",
+        "sourceFile": "apps/web/app/(app)/components/next-step-card.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/results"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/analyze",
+        "sourceFile": "apps/web/app/(app)/components/next-step-card.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/analyze"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/analyze",
+        "sourceFile": "apps/web/app/(app)/components/next-step-card.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/analyze"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/status",
+        "sourceFile": "apps/web/app/(app)/components/status-section.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/status"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/results",
+        "sourceFile": "apps/web/app/(app)/cover-letters/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/results"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/pricing",
+        "sourceFile": "apps/web/app/(app)/cover-letters/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/pricing"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/cover-letters",
+        "sourceFile": "apps/web/app/(app)/cover-letters/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/cover-letters"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/cover-letters/export",
+        "sourceFile": "apps/web/app/(app)/cover-letters/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/cover-letters/export"
+        }
+      },
+      {
+        "kind": "router_push",
+        "target": "/interviews/${encodeURIComponent(interviewId)}",
+        "sourceFile": "apps/web/app/(app)/fit-review/FitReviewClient.tsx",
+        "classification": {
+          "type": "dynamic_page_route",
+          "matchedRoute": "/interviews/[id]"
+        }
+      },
+      {
+        "kind": "router_push",
+        "target": "/analyze",
+        "sourceFile": "apps/web/app/(app)/fit-review/FitReviewClient.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/analyze"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/job/${encodeURIComponent(resolvedJobId)}/latest",
+        "sourceFile": "apps/web/app/(app)/fit-review/FitReviewClient.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/analysis/job/[jobId]/latest"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/interviews/start",
+        "sourceFile": "apps/web/app/(app)/fit-review/FitReviewClient.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/interviews/start"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/interview-toolkit/star-stories",
+        "sourceFile": "apps/web/app/(app)/interview-toolkit/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/interview-toolkit/star-stories"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/jobs",
+        "sourceFile": "apps/web/app/(app)/interview-toolkit/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/jobs"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/fit-assessments/${encodeURIComponent(assessmentId)}",
+        "sourceFile": "apps/web/app/(app)/interview-toolkit/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/analysis/fit-assessments/[assessmentId]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/interview-toolkit/follow-up",
+        "sourceFile": "apps/web/app/(app)/interview-toolkit/page.tsx",
+        "classification": {
+          "type": "missing_api_route",
+          "matchedRoute": null
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/interview-toolkit",
+        "sourceFile": "apps/web/app/(app)/interview-toolkit/resources/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/interview-toolkit"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/interview-toolkit",
+        "sourceFile": "apps/web/app/(app)/interview-toolkit/star-stories/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/interview-toolkit"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/baseline",
+        "sourceFile": "apps/web/app/(app)/interviews/[id]/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/baseline"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/job-tracker",
+        "sourceFile": "apps/web/app/(app)/interviews/[id]/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/job-tracker"
+        }
+      },
+      {
+        "kind": "router_push",
+        "target": "/results",
+        "sourceFile": "apps/web/app/(app)/interviews/[id]/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/results"
+        }
+      },
+      {
+        "kind": "router_push",
+        "target": "/job-tracker",
+        "sourceFile": "apps/web/app/(app)/interviews/[id]/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/job-tracker"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/job-tracker/export.csv",
+        "sourceFile": "apps/web/app/(app)/job-tracker/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/job-tracker/export.csv"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/analyze",
+        "sourceFile": "apps/web/app/(app)/jobs/new/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/analyze"
+        }
+      },
+      {
+        "kind": "router_push",
+        "target": "/baseline",
+        "sourceFile": "apps/web/app/(app)/jobs/new/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/baseline"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/jobs",
+        "sourceFile": "apps/web/app/(app)/jobs/new/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/jobs"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/jobs",
+        "sourceFile": "apps/web/app/(app)/jobs/[jobId]/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/jobs"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/jobs",
+        "sourceFile": "apps/web/app/(app)/jobs/[jobId]/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/jobs"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/jobs",
+        "sourceFile": "apps/web/app/(app)/jobs/[jobId]/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/jobs"
+        }
+      },
+      {
+        "kind": "window_location",
+        "target": "/auth/login",
+        "sourceFile": "apps/web/app/(app)/jobs/_components/JobIngestionForm.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/auth/login"
+        }
+      },
+      {
+        "kind": "window_location",
+        "target": "/auth/login",
+        "sourceFile": "apps/web/app/(app)/jobs/_components/JobIngestionForm.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/auth/login"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/jobs/ingest",
+        "sourceFile": "apps/web/app/(app)/jobs/_components/JobIngestionForm.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/jobs/ingest"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/jobs",
+        "sourceFile": "apps/web/app/(app)/jobs/_components/JobIngestionForm.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/jobs"
+        }
+      },
+      {
+        "kind": "window_location",
+        "target": "/auth/login",
+        "sourceFile": "apps/web/app/(app)/lib/api.ts",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/auth/login"
+        }
+      },
+      {
+        "kind": "router_push",
+        "target": "/results",
+        "sourceFile": "apps/web/app/(app)/opportunities/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/results"
+        }
+      },
+      {
+        "kind": "router_push",
+        "target": "/results",
+        "sourceFile": "apps/web/app/(app)/opportunities/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/results"
+        }
+      },
+      {
+        "kind": "router_push",
+        "target": "/results",
+        "sourceFile": "apps/web/app/(app)/opportunities/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/results"
+        }
+      },
+      {
+        "kind": "router_push",
+        "target": "/studio",
+        "sourceFile": "apps/web/app/(app)/opportunities/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/studio"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/opportunities${query ",
+        "sourceFile": "apps/web/app/(app)/opportunities/page.tsx",
+        "classification": {
+          "type": "missing_api_route",
+          "matchedRoute": null
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/fit-assessments/${encodeURIComponent(analysisId)}",
+        "sourceFile": "apps/web/app/(app)/opportunities/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/analysis/fit-assessments/[assessmentId]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines/${encodeURIComponent(baselineId)}/versions",
+        "sourceFile": "apps/web/app/(app)/opportunities/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/baselines/[baselineId]/versions"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/opportunities/${encodeURIComponent(id)}",
+        "sourceFile": "apps/web/app/(app)/opportunities/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/opportunities/[id]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/run",
+        "sourceFile": "apps/web/app/(app)/opportunities/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/analysis/run"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/history",
+        "sourceFile": "apps/web/app/(app)/results/components/CareerAlignmentProgress.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/analysis/history"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/career-gravity",
+        "sourceFile": "apps/web/app/(app)/results/components/CareerGravity.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/analysis/career-gravity"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/history",
+        "sourceFile": "apps/web/app/(app)/results/components/CareerInsightEmerging.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/analysis/history"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/career-gravity",
+        "sourceFile": "apps/web/app/(app)/results/components/CareerInsightEmerging.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/analysis/career-gravity"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/fit-assessments/${encodeURIComponent(assessmentId)}/simulation",
+        "sourceFile": "apps/web/app/(app)/results/components/FitImprovementOpportunities.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/analysis/fit-assessments/[assessmentId]/simulation"
+        }
+      },
+      {
+        "kind": "router_replace",
+        "target": "/results",
+        "sourceFile": "apps/web/app/(app)/results/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/results"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/fit-assessments",
+        "sourceFile": "apps/web/app/(app)/results/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/analysis/fit-assessments"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/users/me/last-assessment",
+        "sourceFile": "apps/web/app/(app)/results/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/users/me/last-assessment"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/applications/insights",
+        "sourceFile": "apps/web/app/(app)/results/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/applications/insights"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines/${encodeURIComponent(baselineIdValue)}/versions",
+        "sourceFile": "apps/web/app/(app)/results/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/baselines/[baselineId]/versions"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/resume/readiness",
+        "sourceFile": "apps/web/app/(app)/results/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/resume/readiness"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/cover-letters/readiness",
+        "sourceFile": "apps/web/app/(app)/results/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/cover-letters/readiness"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/fit-assessments/${encodeURIComponent(assessmentId)}",
+        "sourceFile": "apps/web/app/(app)/results/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/analysis/fit-assessments/[assessmentId]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/job/${encodeURIComponent(targetJobId)}/baseline/${encodeURIComponent(targetBaselineId)}/latest",
+        "sourceFile": "apps/web/app/(app)/results/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/analysis/job/[jobId]/baseline/[baselineId]/latest"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/run",
+        "sourceFile": "apps/web/app/(app)/results/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/analysis/run"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/users/me/last-assessment",
+        "sourceFile": "apps/web/app/(app)/results/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/users/me/last-assessment"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/opportunities",
+        "sourceFile": "apps/web/app/(app)/results/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/opportunities"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/run",
+        "sourceFile": "apps/web/app/(app)/results/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/analysis/run"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/opportunities",
+        "sourceFile": "apps/web/app/(app)/results/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/opportunities"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/opportunities/${encodeURIComponent(match.id)}",
+        "sourceFile": "apps/web/app/(app)/results/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/opportunities/[id]"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/pricing",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/pricing"
+        }
+      },
+      {
+        "kind": "router_push",
+        "target": "/job-tracker",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/job-tracker"
+        }
+      },
+      {
+        "kind": "router_replace",
+        "target": "/studio",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/studio"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/applications/${encodeURIComponent(trackerEntryId)}",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/applications/[id]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/applications/insights",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/applications/insights"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/opportunities",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/opportunities"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/resume/readiness",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/resume/readiness"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/cover-letters/readiness",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/cover-letters/readiness"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/run",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/analysis/run"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines/${encodeURIComponent(selectedBaselineId)}/versions",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/baselines/[baselineId]/versions"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/resume",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/resume"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/resume",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/resume"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/resume/export",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/resume/export"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/cover-letters/${encodeURIComponent(coverLetterId)}",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/cover-letters/[id]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/cover-letters",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/cover-letters"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/cover-letters",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/cover-letters"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/resume",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/resume"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/cover-letters/export",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/cover-letters/export"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/support/history",
+        "sourceFile": "apps/web/app/(app)/support/history/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/support/history"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/support/history/still-seeing",
+        "sourceFile": "apps/web/app/(app)/support/history/page.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/support/history/still-seeing"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/pricing",
+        "sourceFile": "apps/web/app/(app)/waitlist/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/pricing"
+        }
+      },
+      {
+        "kind": "router_replace",
+        "target": "/onboarding/profile",
+        "sourceFile": "apps/web/app/(public)/auth/access-code/access-code-form.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/onboarding/profile"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/auth/redeem-access-code-and-login",
+        "sourceFile": "apps/web/app/(public)/auth/access-code/access-code-form.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/auth/redeem-access-code-and-login"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/users/me",
+        "sourceFile": "apps/web/app/(public)/auth/access-code/access-code-form.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/users/me"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/auth/login",
+        "sourceFile": "apps/web/app/(public)/auth/confirm/ConfirmClient.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/auth/login"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/auth/confirm",
+        "sourceFile": "apps/web/app/(public)/auth/confirm/ConfirmClient.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/auth/confirm"
+        }
+      },
+      {
+        "kind": "router_replace",
+        "target": "/onboarding/profile",
+        "sourceFile": "apps/web/app/(public)/auth/_components/auth-form.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/onboarding/profile"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/users/me",
+        "sourceFile": "apps/web/app/(public)/auth/_components/auth-form.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/users/me"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/auth/login",
+        "sourceFile": "apps/web/app/(public)/auth/_components/auth-form.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/auth/login"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/auth/resend-confirmation",
+        "sourceFile": "apps/web/app/(public)/auth/_components/auth-form.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/auth/resend-confirmation"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/auth/login",
+        "sourceFile": "apps/web/app/(public)/awaiting-access/page.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/auth/login"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/users/me/profile",
+        "sourceFile": "apps/web/app/(public)/onboarding/profile/profile-completion-form.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/users/me/profile"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/auth/signup",
+        "sourceFile": "apps/web/src/components/landing/HeroAnalysisConsole.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/auth/signup"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/auth/signup",
+        "sourceFile": "apps/web/src/components/landing/HeroAnalysisConsole.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/auth/signup"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/preview/compatibility-score",
+        "sourceFile": "apps/web/src/components/landing/LandingCompatibilityInputSection.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/preview/compatibility-score"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/baseline",
+        "sourceFile": "apps/web/src/components/landing/LandingFinalCta.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/baseline"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/auth/signup",
+        "sourceFile": "apps/web/src/components/landing/LandingFinalCta.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/auth/signup"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/auth/login",
+        "sourceFile": "apps/web/src/components/landing/LandingFinalCta.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/auth/login"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/auth/login",
+        "sourceFile": "apps/web/src/components/landing/LandingFooter.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/auth/login"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/auth/signup",
+        "sourceFile": "apps/web/src/components/landing/LandingFooter.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/auth/signup"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/",
+        "sourceFile": "apps/web/src/components/landing/LandingNav.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/baseline",
+        "sourceFile": "apps/web/src/components/landing/LandingNav.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/baseline"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/auth/login",
+        "sourceFile": "apps/web/src/components/landing/LandingNav.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/auth/login"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/auth/signup",
+        "sourceFile": "apps/web/src/components/landing/LandingNav.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/auth/signup"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/baseline",
+        "sourceFile": "apps/web/src/components/landing/OpportunityPreviewSection.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/baseline"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/auth/signup",
+        "sourceFile": "apps/web/src/components/landing/OpportunityPreviewSection.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/auth/signup"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/auth/login",
+        "sourceFile": "apps/web/src/components/landing/OpportunityPreviewSection.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/auth/login"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines",
+        "sourceFile": "apps/web/src/components/layout/AppShell.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/baselines"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/jobs",
+        "sourceFile": "apps/web/src/components/layout/AppShell.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/jobs"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/beta",
+        "sourceFile": "apps/web/src/components/layout/BetaGuideNudge.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/beta"
+        }
+      },
+      {
+        "kind": "router_push",
+        "target": "/auth/login",
+        "sourceFile": "apps/web/src/components/layout/TopNavAccountArea.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/auth/login"
+        }
+      },
+      {
+        "kind": "router_push",
+        "target": "/auth/login",
+        "sourceFile": "apps/web/src/components/layout/TopNavAccountArea.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/auth/login"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/users/me",
+        "sourceFile": "apps/web/src/components/layout/TopNavAccountArea.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/users/me"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/auth/logout",
+        "sourceFile": "apps/web/src/components/layout/TopNavAccountArea.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/auth/logout"
+        }
+      },
+      {
+        "kind": "link",
+        "target": "/support/history",
+        "sourceFile": "apps/web/src/components/settings/SettingsPanel.tsx",
+        "classification": {
+          "type": "page_route",
+          "matchedRoute": "/support/history"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/users/me",
+        "sourceFile": "apps/web/src/components/settings/SettingsPanel.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/users/me"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/users/me/profile",
+        "sourceFile": "apps/web/src/components/settings/SettingsPanel.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/users/me/profile"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/bug-reports",
+        "sourceFile": "apps/web/src/components/support/ReportBugModal.tsx",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/bug-reports"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analytics/event",
+        "sourceFile": "apps/web/src/lib/analytics.ts",
+        "classification": {
+          "type": "api_route",
+          "matchedRoute": "/api/analytics/event"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/session/last-analysis",
+        "sourceFile": "apps/web/lib/session.ts",
+        "classification": {
+          "type": "missing_api_route",
+          "matchedRoute": null
+        }
+      }
+    ]
+  },
+  "findings": {
+    "brokenPageRefs": [],
+    "brokenApiRefs": [
+      {
+        "kind": "fetch",
+        "target": "/api/interview-toolkit/follow-up",
+        "sourceFile": "apps/web/app/(app)/interview-toolkit/page.tsx",
+        "classification": {
+          "type": "missing_api_route",
+          "matchedRoute": null
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/opportunities${query ",
+        "sourceFile": "apps/web/app/(app)/opportunities/page.tsx",
+        "classification": {
+          "type": "missing_api_route",
+          "matchedRoute": null
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/session/last-analysis",
+        "sourceFile": "apps/web/lib/session.ts",
+        "classification": {
+          "type": "missing_api_route",
+          "matchedRoute": null
+        }
+      }
+    ],
+    "dynamicOrUnresolved": [
+      {
+        "kind": "fetch",
+        "target": "/api/admin/feedback/${id}",
+        "sourceFile": "apps/web/app/(app)/admin/beta-friction-dashboard/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/admin/feedback/[id]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/friction-events/${id}",
+        "sourceFile": "apps/web/app/(app)/admin/beta-friction-dashboard/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/admin/friction-events/[id]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/bug-reports/${id}",
+        "sourceFile": "apps/web/app/(app)/admin/bugs/[id]/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/admin/bug-reports/[id]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/admin/bug-reports/${id}",
+        "sourceFile": "apps/web/app/(app)/admin/bugs/[id]/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/admin/bug-reports/[id]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines/${encodeURIComponent(baselineId)}",
+        "sourceFile": "apps/web/app/(app)/baseline/baseline-dashboard.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/baselines/[baselineId]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines/${encodeURIComponent(baselineId)}",
+        "sourceFile": "apps/web/app/(app)/baseline/BaselineStudioHome.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/baselines/[baselineId]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines/${encodeURIComponent(baselineId)}/analysis-score",
+        "sourceFile": "apps/web/app/(app)/baseline/BaselineStudioHome.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/baselines/[baselineId]/analysis-score"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines/${encodeURIComponent(primaryBaselineId)}/strengthening-additions",
+        "sourceFile": "apps/web/app/(app)/baseline/BaselineStudioHome.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/baselines/[baselineId]/strengthening-additions"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines/${baselineId}/blocks",
+        "sourceFile": "apps/web/app/(app)/baseline/[id]/baseline-policy-editor.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/baselines/[baselineId]/blocks"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines/${baselineId}/versions",
+        "sourceFile": "apps/web/app/(app)/baseline/[id]/baseline-policy-editor.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/baselines/[baselineId]/versions"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines/${baselineId}/blocks",
+        "sourceFile": "apps/web/app/(app)/baseline/[id]/baseline-policy-editor.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/baselines/[baselineId]/blocks"
+        }
+      },
+      {
+        "kind": "router_push",
+        "target": "/interviews/${encodeURIComponent(interviewId)}",
+        "sourceFile": "apps/web/app/(app)/fit-review/FitReviewClient.tsx",
+        "classification": {
+          "type": "dynamic_page_route",
+          "matchedRoute": "/interviews/[id]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/job/${encodeURIComponent(resolvedJobId)}/latest",
+        "sourceFile": "apps/web/app/(app)/fit-review/FitReviewClient.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/analysis/job/[jobId]/latest"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/fit-assessments/${encodeURIComponent(assessmentId)}",
+        "sourceFile": "apps/web/app/(app)/interview-toolkit/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/analysis/fit-assessments/[assessmentId]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/fit-assessments/${encodeURIComponent(analysisId)}",
+        "sourceFile": "apps/web/app/(app)/opportunities/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/analysis/fit-assessments/[assessmentId]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines/${encodeURIComponent(baselineId)}/versions",
+        "sourceFile": "apps/web/app/(app)/opportunities/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/baselines/[baselineId]/versions"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/opportunities/${encodeURIComponent(id)}",
+        "sourceFile": "apps/web/app/(app)/opportunities/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/opportunities/[id]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/fit-assessments/${encodeURIComponent(assessmentId)}/simulation",
+        "sourceFile": "apps/web/app/(app)/results/components/FitImprovementOpportunities.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/analysis/fit-assessments/[assessmentId]/simulation"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines/${encodeURIComponent(baselineIdValue)}/versions",
+        "sourceFile": "apps/web/app/(app)/results/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/baselines/[baselineId]/versions"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/fit-assessments/${encodeURIComponent(assessmentId)}",
+        "sourceFile": "apps/web/app/(app)/results/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/analysis/fit-assessments/[assessmentId]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/analysis/job/${encodeURIComponent(targetJobId)}/baseline/${encodeURIComponent(targetBaselineId)}/latest",
+        "sourceFile": "apps/web/app/(app)/results/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/analysis/job/[jobId]/baseline/[baselineId]/latest"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/opportunities/${encodeURIComponent(match.id)}",
+        "sourceFile": "apps/web/app/(app)/results/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/opportunities/[id]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/applications/${encodeURIComponent(trackerEntryId)}",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/applications/[id]"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/baselines/${encodeURIComponent(selectedBaselineId)}/versions",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/baselines/[baselineId]/versions"
+        }
+      },
+      {
+        "kind": "fetch",
+        "target": "/api/cover-letters/${encodeURIComponent(coverLetterId)}",
+        "sourceFile": "apps/web/app/(app)/studio/page.tsx",
+        "classification": {
+          "type": "dynamic_api_route",
+          "matchedRoute": "/api/cover-letters/[id]"
+        }
+      }
+    ],
+    "orphans": [
+      {
+        "route": "/applications",
+        "classification": "likely_orphaned"
+      },
+      {
+        "route": "/awaiting-access",
+        "classification": "likely_orphaned"
+      },
+      {
+        "route": "/calibrate",
+        "classification": "likely_orphaned"
+      },
+      {
+        "route": "/cover-letters",
+        "classification": "likely_orphaned"
+      },
+      {
+        "route": "/fit-review",
+        "classification": "likely_orphaned"
+      },
+      {
+        "route": "/interview-toolkit/resources",
+        "classification": "likely_orphaned"
+      },
+      {
+        "route": "/jobs/new",
+        "classification": "likely_orphaned"
+      },
+      {
+        "route": "/reality-check",
+        "classification": "likely_orphaned"
+      },
+      {
+        "route": "/redeem",
+        "classification": "likely_orphaned"
+      },
+      {
+        "route": "/settings",
+        "classification": "likely_orphaned"
+      },
+      {
+        "route": "/waitlist",
+        "classification": "likely_orphaned"
+      }
+    ]
+  },
+  "runtime": [
+    {
+      "skipped": false,
+      "mode": "user",
+      "pageChecks": [
+        {
+          "route": "/",
+          "status": 200,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "route": "/admin",
+          "status": 200,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "route": "/admin/access-codes",
+          "status": 200,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "route": "/admin/baselines",
+          "status": 200,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "route": "/admin/beta-command-center",
+          "status": 200,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "route": "/admin/beta-feedback",
+          "status": 200,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "route": "/admin/beta-friction-dashboard",
+          "status": 200,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "route": "/admin/bug-reporting",
+          "status": 200,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "route": "/admin/bugs",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/admin/error-health",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/admin/funnel-diagnostics",
+          "status": 200,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "route": "/admin/jobs",
+          "status": 200,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "route": "/admin/metrics",
+          "status": 200,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "route": "/admin/product-signal",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/admin/user-engagement",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/admin/users",
+          "status": 200,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "route": "/analyze",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/applications",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/auth/access-code",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/auth/confirm",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/auth/login",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/auth/signup",
+          "status": 200,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "route": "/awaiting-access",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/baseline",
+          "status": 200,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "route": "/beta",
+          "status": 200,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "route": "/calibrate",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/cover-letters",
+          "status": 200,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "route": "/fit-review",
+          "status": 200,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "route": "/interview-toolkit",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/interview-toolkit/resources",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/interview-toolkit/star-stories",
+          "status": 200,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "route": "/job-tracker",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/jobs",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/jobs/new",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/onboarding/profile",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/opportunities",
+          "status": 200,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "route": "/pricing",
+          "status": 200,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "route": "/reality-check",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/redeem",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/results",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/settings",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/studio",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/support/history",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/target",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "route": "/waitlist",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        }
+      ],
+      "apiChecks": [
+        {
+          "path": "/api/analytics/beta-command-center",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/beta-feedback",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/beta-feedback/summary",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/admin/feedback",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/admin/friction-events",
+          "status": 401,
+          "kind": "unauthorized",
+          "mode": "user"
+        },
+        {
+          "path": "/api/admin/friction-patterns",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/admin/friction-events/run-detection",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/admin/feedback/${id}",
+          "status": 405,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "path": "/api/admin/friction-events/${id}",
+          "status": 405,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "path": "/api/support/config",
+          "status": 401,
+          "kind": "unauthorized",
+          "mode": "user"
+        },
+        {
+          "path": "/api/admin/bug-reports",
+          "status": 401,
+          "kind": "unauthorized",
+          "mode": "user"
+        },
+        {
+          "path": "/api/admin/bug-reports/${id}",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/support/error-health",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/support/critical-flow-health",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/admin/funnel-metrics",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/admin/funnel-users",
+          "status": 401,
+          "kind": "unauthorized",
+          "mode": "user"
+        },
+        {
+          "path": "/api/admin/funnel-segments",
+          "status": 401,
+          "kind": "unauthorized",
+          "mode": "user"
+        },
+        {
+          "path": "/api/admin/product-signal",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/admin/investor-snapshot",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/admin/generate-product-narrative",
+          "status": 405,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "path": "/api/admin/user-engagement-states",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/admin/user-triggers",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/admin/run-trigger-evaluation",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/admin/generate-outreach-draft",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/baselines",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/jobs",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/analysis/run",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/baselines/${encodeURIComponent(baselineId)}",
+          "status": 401,
+          "kind": "unauthorized",
+          "mode": "user"
+        },
+        {
+          "path": "/api/analysis/history",
+          "status": 401,
+          "kind": "unauthorized",
+          "mode": "user"
+        },
+        {
+          "path": "/api/baselines/${encodeURIComponent(baselineId)}/analysis-score",
+          "status": 405,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "path": "/api/baselines/${encodeURIComponent(primaryBaselineId)}/strengthening-additions",
+          "status": 405,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "path": "/api/baselines/${baselineId}/blocks",
+          "status": 401,
+          "kind": "unauthorized",
+          "mode": "user"
+        },
+        {
+          "path": "/api/baselines/${baselineId}/versions",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/calibration",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/auth/logout",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/feedback",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/status",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/cover-letters",
+          "status": 401,
+          "kind": "unauthorized",
+          "mode": "user"
+        },
+        {
+          "path": "/api/cover-letters/export",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/analysis/job/${encodeURIComponent(resolvedJobId)}/latest",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/interviews/start",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/analysis/fit-assessments/${encodeURIComponent(assessmentId)}",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/interview-toolkit/follow-up",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/job-tracker/export.csv",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/jobs/ingest",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/opportunities${query ",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/analysis/fit-assessments/${encodeURIComponent(analysisId)}",
+          "status": 401,
+          "kind": "unauthorized",
+          "mode": "user"
+        },
+        {
+          "path": "/api/baselines/${encodeURIComponent(baselineId)}/versions",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/opportunities/${encodeURIComponent(id)}",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/analysis/career-gravity",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/analysis/fit-assessments/${encodeURIComponent(assessmentId)}/simulation",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/analysis/fit-assessments",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/users/me/last-assessment",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/applications/insights",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/baselines/${encodeURIComponent(baselineIdValue)}/versions",
+          "status": 401,
+          "kind": "unauthorized",
+          "mode": "user"
+        },
+        {
+          "path": "/api/resume/readiness",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/cover-letters/readiness",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/analysis/job/${encodeURIComponent(targetJobId)}/baseline/${encodeURIComponent(targetBaselineId)}/latest",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/opportunities",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/opportunities/${encodeURIComponent(match.id)}",
+          "status": 405,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "path": "/api/applications/${encodeURIComponent(trackerEntryId)}",
+          "status": 401,
+          "kind": "unauthorized",
+          "mode": "user"
+        },
+        {
+          "path": "/api/baselines/${encodeURIComponent(selectedBaselineId)}/versions",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/resume",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/resume/export",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/cover-letters/${encodeURIComponent(coverLetterId)}",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/support/history",
+          "status": 401,
+          "kind": "unauthorized",
+          "mode": "user"
+        },
+        {
+          "path": "/api/support/history/still-seeing",
+          "status": 405,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "path": "/api/auth/redeem-access-code-and-login",
+          "status": 405,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "path": "/api/users/me",
+          "status": 401,
+          "kind": "unauthorized",
+          "mode": "user"
+        },
+        {
+          "path": "/api/auth/confirm",
+          "status": 400,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "path": "/api/auth/login",
+          "status": 405,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "path": "/api/auth/resend-confirmation",
+          "status": 405,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "path": "/api/users/me/profile",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/preview/compatibility-score",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        },
+        {
+          "path": "/api/bug-reports",
+          "status": 405,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "path": "/api/analytics/event",
+          "status": 405,
+          "kind": "ok",
+          "mode": "user"
+        },
+        {
+          "path": "/api/session/last-analysis",
+          "status": 0,
+          "kind": "missing_target",
+          "mode": "user"
+        }
+      ],
+      "discoveredLinks": [
+        "/",
+        "/auth/login",
+        "/auth/signup"
+      ]
+    }
+  ]
+}

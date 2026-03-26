@@ -160,21 +160,33 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
 
     let content = this.composeTextContent(document);
     content = this.removeDisallowedPhrases(content, input.complianceConstraints);
+    content = this.removeJobDescriptionEcho(content, normalizedJob);
     content = this.normalizeWritingStyle(content);
     content = this.ensureMinimumWordCount(content, document, targetWords);
     content = this.trimToWordLimit(content, targetWords);
 
     // Keep evidence anchored paragraphs immutable after sanitization.
     const parsed = this.parseContentToDocument(content, document);
-    const parsedContent = this.composeTextContent(parsed);
+    const parsedContent = this.ensureMinimumWordCount(
+      this.composeTextContent(parsed),
+      parsed,
+      targetWords,
+    );
+    const reparsed = this.parseContentToDocument(parsedContent, parsed);
+    const finalContent = this.composeTextContent(reparsed);
 
     return {
-      document: parsed,
-      content: parsedContent,
-      wordCount: this.countWords(parsedContent),
-      greeting: parsed.salutation,
-      paragraphs: [parsed.opening, ...parsed.bodyParagraphs],
-      closingParagraphs: [parsed.closingParagraph],
+      document: reparsed,
+      content: finalContent,
+      wordCount: this.countWords(finalContent),
+      greeting: reparsed.salutation,
+      // Keep one canonical ordered paragraph array for consumers.
+      paragraphs: [
+        reparsed.opening,
+        ...reparsed.bodyParagraphs,
+        reparsed.closingParagraph,
+      ],
+      closingParagraphs: [reparsed.closingParagraph],
       constraintSummary: this.buildConstraintSummary(input.complianceConstraints),
       paragraphEvidence,
     };
@@ -421,12 +433,29 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       .trim();
   }
 
+  private removeJobDescriptionEcho(content: string, job: NormalizedJob) {
+    let sanitized = content;
+    const candidates = [...job.responsibilities, ...job.requirements]
+      .map((value) => this.cleanText(value))
+      .filter((value) => value.length >= 42);
+
+    for (const phrase of candidates) {
+      const escaped = this.escapeRegExp(phrase);
+      sanitized = sanitized.replace(new RegExp(escaped, 'gi'), '');
+    }
+
+    return sanitized
+      .replace(/\s{2,}/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
   private describeRole(job: NormalizedJob) {
     if (job.title && job.company) {
-      return `the ${job.title} role at ${job.company}`;
+      return `the ${job.title} opportunity at ${job.company}`;
     }
     if (job.title) {
-      return `the ${job.title} role`;
+      return `the ${job.title} opportunity`;
     }
     if (job.company) {
       return `an opening at ${job.company}`;
@@ -472,7 +501,8 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     document: NormalizedCoverLetterDocument,
     targetWords: number,
   ): string {
-    if (this.countWords(content) >= COVER_LETTER_WORD_LIMITS.minimum) {
+    const minimumTarget = COVER_LETTER_WORD_LIMITS.minimum + 10;
+    if (this.countWords(content) >= minimumTarget) {
       return content;
     }
 
@@ -513,7 +543,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     ];
 
     for (const apply of appendPlan) {
-      if (this.countWords(expanded) >= COVER_LETTER_WORD_LIMITS.minimum) {
+      if (this.countWords(expanded) >= minimumTarget) {
         break;
       }
       apply();
@@ -529,7 +559,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
         .join('\n\n');
     }
 
-    while (this.countWords(expanded) < COVER_LETTER_WORD_LIMITS.minimum) {
+    while (this.countWords(expanded) < minimumTarget) {
       document.closingParagraph = this.joinSentences([
         document.closingParagraph,
         'Thank you for considering my application.',

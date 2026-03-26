@@ -28,7 +28,6 @@ function getInterpretation(score: number) {
 export function DemoAnalysisPreviewSection() {
   const sectionRef = useRef<HTMLElement | null>(null);
   const [hasTriggered, setHasTriggered] = useState(false);
-  const [displayScore, setDisplayScore] = useState(0);
   const [showRadar, setShowRadar] = useState(false);
   const [showStrongest, setShowStrongest] = useState(false);
   const [showSignalCards, setShowSignalCards] = useState(false);
@@ -53,28 +52,11 @@ export function DemoAnalysisPreviewSection() {
   useEffect(() => {
     if (!hasTriggered) return;
 
-    let rafId = 0;
-    const scoreStart = performance.now();
-    const scoreDurationMs = 650;
-
-    const stepScore = (now: number) => {
-      const progress = Math.min(1, (now - scoreStart) / scoreDurationMs);
-      const eased = 1 - (1 - progress) * (1 - progress);
-      setDisplayScore(Math.round(demoScenario.score * eased));
-      if (progress < 1) {
-        rafId = window.requestAnimationFrame(stepScore);
-      } else {
-        setDisplayScore(demoScenario.score);
-      }
-    };
-
-    rafId = window.requestAnimationFrame(stepScore);
     const radarTimer = window.setTimeout(() => setShowRadar(true), 700);
     const strongestTimer = window.setTimeout(() => setShowStrongest(true), 1200);
     const cardsTimer = window.setTimeout(() => setShowSignalCards(true), 1550);
 
     return () => {
-      window.cancelAnimationFrame(rafId);
       window.clearTimeout(radarTimer);
       window.clearTimeout(strongestTimer);
       window.clearTimeout(cardsTimer);
@@ -90,10 +72,9 @@ export function DemoAnalysisPreviewSection() {
 
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
           <article className="rounded-2xl bg-slate-900/70 p-6 shadow-[0_16px_40px_rgba(15,23,42,0.35)]">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Compatibility Score</p>
-            <p className="mt-3 text-5xl font-bold leading-none text-white lg:text-6xl">{displayScore}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Example Output</p>
             <p className="mt-3 inline-flex rounded-md bg-slate-800/80 px-2.5 py-1 text-sm font-semibold text-slate-100">
-              {demoScenario.tier}
+              Evidence-aligned readout
             </p>
             <p className="mt-4 text-base leading-relaxed text-slate-300">{getInterpretation(demoScenario.score)}</p>
 
@@ -137,7 +118,7 @@ export function DemoAnalysisPreviewSection() {
         </div>
 
         <p className="mt-4 text-sm font-medium text-slate-200">
-          Example analysis. Upload your resume to generate your own.
+          This is a static example for format only. Your uploaded inputs produce your actual result.
         </p>
       </div>
     </section>

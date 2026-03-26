@@ -1087,6 +1087,39 @@ const sampleScoringV2: CxFitV2Result = {
     );
   });
 
+  it('fails when persisted assessment baseline linkage does not match requested baseline', async () => {
+    fitAssessmentRepository.save.mockResolvedValueOnce({
+      id: 'fit-mismatch',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'other-baseline',
+      baselineVersion: 2,
+      overallScore: 81,
+      verdict: FitAssessmentVerdict.APPLY,
+      createdAt: new Date(),
+    });
+
+    await expect(
+      service.runFitAssessment('user-1', {
+        baselineId: 'b-1',
+        jobId: 'job-1',
+        baselineVersion: 2,
+      }),
+    ).rejects.toThrow('Unexpected error while running fit assessment');
+  });
+
+  it('does not return success when assessment persistence fails', async () => {
+    fitAssessmentRepository.save.mockRejectedValueOnce(new Error('db write failed'));
+
+    await expect(
+      service.runFitAssessment('user-1', {
+        baselineId: 'b-1',
+        jobId: 'job-1',
+        baselineVersion: 2,
+      }),
+    ).rejects.toThrow('Unexpected error while running fit assessment');
+  });
+
   describe('runFitAssessment validation', () => {
     it('returns a detailed error when baselineId is missing', async () => {
       await expect(

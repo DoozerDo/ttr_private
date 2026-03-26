@@ -16,6 +16,7 @@ import {
   saveLastAnalysis,
 } from "../lib/session";
 import { markJourneyStepCompleted } from "@/src/lib/journeyNavStore";
+import { publishBaselineUpdated } from "@/src/lib/baseline-sync";
 
 const GENERATION_SCORE_THRESHOLD = 70;
 const TIMESTAMP_KEYS = [
@@ -48,6 +49,18 @@ function resolveScore(analysis: AnalysisResult | null): number | null {
             ? analysis.overall_score
             : null;
   return typeof candidate === "number" ? candidate : null;
+}
+
+function isCanonicalCompletedAnalysis(
+  analysis: AnalysisResult | null,
+  selectedBaselineId: string,
+): analysis is AnalysisResult & { assessmentId: string; baselineId: string } {
+  if (!analysis) return false;
+  const assessmentId =
+    typeof analysis.assessmentId === "string" ? analysis.assessmentId.trim() : "";
+  const baselineId =
+    typeof analysis.baselineId === "string" ? analysis.baselineId.trim() : "";
+  return Boolean(assessmentId && baselineId && baselineId === selectedBaselineId);
 }
 
 function resolveTimestamp(analysis: AnalysisResult | null, fallback: string | null): string | null {
@@ -306,6 +319,7 @@ type CompatibilitySectionProps = {
   loading: boolean;
   score: number | null;
   animatedScore: number;
+  assessmentId: string | null;
   alignmentLabel: string;
   timestampLabel: string | null;
   error: string | null;
@@ -317,6 +331,7 @@ function CompatibilitySection({
   loading,
   score,
   animatedScore,
+  assessmentId,
   alignmentLabel,
   timestampLabel,
   error,
@@ -353,6 +368,9 @@ function CompatibilitySection({
             {alignmentLabel}
           </p>
           <p className="text-xs text-slate-500">Last evaluated: {timestampLabel ?? "—"}</p>
+          <p className="text-xs text-emerald-300">
+            Analysis completed and saved{assessmentId ? ` · Assessment ${assessmentId}` : ""}.
+          </p>
         </div>
       ) : inputsReady && !loading ? (
         <p className="mt-6 text-sm text-slate-400">
@@ -464,13 +482,21 @@ export default function AnalyzePage() {
   const inputsReady = hasBaseline && (hasSelectedJob || hasJobDescription);
 
   const resultScore = useMemo(() => resolveScore(result), [result]);
-  const alignmentLabel = getAlignmentLabel(resultScore);
+  const canonicalResult = useMemo(
+    () => (isCanonicalCompletedAnalysis(result, baselineId) ? result : null),
+    [result, baselineId],
+  );
+  const canonicalScore = useMemo(() => resolveScore(canonicalResult), [canonicalResult]);
+  const alignmentLabel = getAlignmentLabel(canonicalScore);
   const timestampLabel = useMemo(
-    () => formatTimestamp(resolveTimestamp(result, restoredAt)),
-    [result, restoredAt],
+    () => formatTimestamp(resolveTimestamp(canonicalResult, restoredAt)),
+    [canonicalResult, restoredAt],
   );
 
-  const jobContextId = useMemo(() => (result?.jobId || jobId).trim(), [result?.jobId, jobId]);
+  const jobContextId = useMemo(
+    () => (canonicalResult?.jobId || jobId).trim(),
+    [canonicalResult?.jobId, jobId],
+  );
   const resultsHref = jobContextId ? `/results?jobId=${encodeURIComponent(jobContextId)}` : "/results";
   const studioHref = useMemo(() => {
     if (!jobContextId) return "/studio";
@@ -583,6 +609,20 @@ export default function AnalyzePage() {
   }, [baselineId, baselines]);
 
   useEffect(() => {
+    const requestedBaselineId = searchParams?.get("baselineId")?.trim() ?? "";
+    if (!requestedBaselineId) return;
+    if (!baselines.some((baseline) => baseline.id === requestedBaselineId)) return;
+    setBaselineId(requestedBaselineId);
+  }, [baselines, searchParams]);
+
+  useEffect(() => {
+    const requestedJobId = searchParams?.get("jobId")?.trim() ?? "";
+    if (!requestedJobId) return;
+    if (!jobs.some((job) => job.id === requestedJobId)) return;
+    setJobId(requestedJobId);
+  }, [jobs, searchParams]);
+
+  useEffect(() => {
     if (!suggestedRole) return;
     setJobDescription((current) => {
       if (current.trim().length > 0) return current;
@@ -593,6 +633,18 @@ export default function AnalyzePage() {
   useEffect(() => {
     const stored = readStoredAnalysis();
     if (!stored) return;
+    const storedAssessmentId =
+      typeof stored.analysis?.assessmentId === "string"
+        ? stored.analysis.assessmentId.trim()
+        : "";
+    const storedBaselineId =
+      typeof stored.analysis?.baselineId === "string"
+        ? stored.analysis.baselineId.trim()
+        : "";
+    if (!storedAssessmentId || !storedBaselineId) {
+      return;
+    }
+
     setResult(stored.analysis);
       setRestoredAt(stored.savedAt);
 
@@ -622,13 +674,13 @@ export default function AnalyzePage() {
       setAnimatedScore(0);
       return;
     }
-    if (resultScore !== null) {
+    if (canonicalScore !== null) {
       setAnimatedScore(0);
-      const frame = requestAnimationFrame(() => setAnimatedScore(resultScore));
+      const frame = requestAnimationFrame(() => setAnimatedScore(canonicalScore));
       return () => cancelAnimationFrame(frame);
     }
     setAnimatedScore(0);
-  }, [loading, resultScore]);
+  }, [loading, canonicalScore]);
 
   const handleAnalyze = useCallback(async () => {
     if (!hasBaseline || (!hasSelectedJob && !hasJobDescription)) {
@@ -684,18 +736,10 @@ export default function AnalyzePage() {
         setJobId(resolvedJobId);
       }
 
-      if (!baselineVersionId) {
-        throw new Error("A baseline resume is required to run this assessment.");
-      }
-
-      const requestJob = hasSelectedJob
-        ? { id: resolvedJobId }
-        : { raw_jd_text: jobDescription };
-
-      const response = await fetch("/api/fit-scores", {
+      const response = await fetch("/api/analysis/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ baseline_version_id: baselineVersionId, job: requestJob }),
+        body: JSON.stringify({ baselineId, jobId: resolvedJobId }),
       });
 
       if (!response.ok) {
@@ -705,9 +749,23 @@ export default function AnalyzePage() {
 
       const raw = await response.json();
       const data = normalizeAnalysisResult(raw);
+      const returnedAssessmentId =
+        typeof data.assessmentId === "string" ? data.assessmentId.trim() : "";
+      const returnedBaselineId =
+        typeof data.baselineId === "string" ? data.baselineId.trim() : "";
+
+      if ((data.status === undefined || data.status === "ok") && !returnedAssessmentId) {
+        throw new Error("Analysis completed but no persisted assessment record was returned.");
+      }
+
+      if (returnedBaselineId && returnedBaselineId !== baselineId) {
+        throw new Error("Analysis baseline linkage mismatch. Please retry.");
+      }
+
       setResult(data);
       setRestoredAt(null);
       markJourneyStepCompleted("analyze");
+      publishBaselineUpdated({ baselineId, source: "analysis" });
 
       const storedAt = new Date().toISOString();
       const jobForRecord = jobs.find((job) => job.id === resolvedJobId);
@@ -739,18 +797,17 @@ export default function AnalyzePage() {
 
       saveLastAnalysis(record);
 
-      const targetJobId = data.jobId ?? resolvedJobId ?? jobId;
-      if (targetJobId) {
-        await router.push(`/results?jobId=${encodeURIComponent(targetJobId)}`);
+      if (returnedAssessmentId) {
+        await router.push(`/results?assessmentId=${encodeURIComponent(returnedAssessmentId)}`);
       }
     } catch (analysisError) {
+      setResult(null);
       setError(analysisError instanceof Error ? analysisError.message : "Unexpected error");
     } finally {
       setLoading(false);
     }
   }, [
     baselineId,
-    baselineVersionId,
     hasBaseline,
     hasJobDescription,
     hasSelectedJob,
@@ -796,16 +853,21 @@ export default function AnalyzePage() {
         <CompatibilitySection
           inputsReady={inputsReady}
           loading={loading}
-          score={resultScore}
+          score={canonicalScore}
           animatedScore={animatedScore}
+          assessmentId={
+            canonicalResult && typeof canonicalResult.assessmentId === "string"
+              ? canonicalResult.assessmentId
+              : null
+          }
           alignmentLabel={alignmentLabel}
           timestampLabel={timestampLabel}
           error={error}
           onAssess={handleAnalyze}
         />
-        {resultScore !== null ? (
+        {canonicalScore !== null ? (
           <OutputsSection
-            score={resultScore}
+            score={canonicalScore}
             threshold={GENERATION_SCORE_THRESHOLD}
             onGenerateResume={handleGenerateResume}
             onGenerateCoverLetter={handleGenerateCoverLetter}

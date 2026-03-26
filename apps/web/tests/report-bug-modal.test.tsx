@@ -15,7 +15,7 @@ describe("ReportBugModal", () => {
     setFetchImplementation(async () => createResponse({}));
     render(<ReportBugModal open onClose={() => {}} />);
 
-    const button = screen.getByRole("button", { name: /send bug report/i });
+    const button = screen.getByRole("button", { name: /send issue report/i });
     expect(button).toBeDisabled();
 
     fireEvent.change(screen.getByPlaceholderText("Describe the problem"), {
@@ -37,7 +37,7 @@ describe("ReportBugModal", () => {
     fireEvent.change(screen.getByPlaceholderText("Describe the problem"), {
       target: { value: "Results page crashes on load with error" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /send bug report/i }));
+    fireEvent.click(screen.getByRole("button", { name: /send issue report/i }));
 
     await waitFor(() => {
       expect(screen.getByText("Thanks - your report was submitted successfully.")).toBeInTheDocument();
@@ -57,7 +57,7 @@ describe("ReportBugModal", () => {
     fireEvent.change(screen.getByPlaceholderText("Describe the problem"), {
       target: { value: "Saving baseline failed unexpectedly" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /send bug report/i }));
+    fireEvent.click(screen.getByRole("button", { name: /send issue report/i }));
 
     await waitFor(() => {
       expect(screen.getByText("Bug report failed to send. Please try again.")).toBeInTheDocument();

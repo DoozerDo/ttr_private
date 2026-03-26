@@ -24,11 +24,13 @@ import {
   normalizeUserFacingRequirementLabel,
 } from "@/lib/generationReadiness";
 import { getGenerationAuthorityState, type GenerationAuthorityState } from "@/lib/generationAuthority";
+import { buildGenerationProductReadiness } from "@/lib/generationProductReadiness";
 import { normalizeClaimVerifications } from "@/lib/claimVerification";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import { BaselineDto, BaselineVersionDto, listBaselines } from "@/lib/baselines";
 import { appendStrengtheningAddition } from "@/lib/baselines";
 import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
+import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
 import { type JobDto } from "@/lib/jobs";
 import {
   buildCoverLetterParagraphs,
@@ -51,6 +53,7 @@ import {
   evaluateStudioTrustGate,
   generateWithRetry,
   hasBlockingComplianceViolations,
+  normalizeGenerationPayload,
   validateCoverLetterOutput,
   validateResumeOutput,
 } from "@/lib/studioTrustGate";
@@ -658,6 +661,26 @@ export default function StudioPage() {
   }
 
   const router = useRouter();
+  useEffect(() => {
+    if (!requestedBaselineId) return;
+    let canceled = false;
+    const alignCanonicalAssessment = async () => {
+      const latest = await fetchLatestAssessmentForBaseline(requestedBaselineId);
+      if (canceled || !latest?.assessmentId) return;
+      const requestedId = requestedAnalysisId?.trim() ?? "";
+      if (requestedId === latest.assessmentId) return;
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("baselineId", requestedBaselineId);
+      params.set("analysisId", latest.assessmentId);
+      params.set("assessmentId", latest.assessmentId);
+      const query = params.toString();
+      await router.replace(query ? `/studio?${query}` : "/studio");
+    };
+    void alignCanonicalAssessment();
+    return () => {
+      canceled = true;
+    };
+  }, [requestedAnalysisId, requestedBaselineId, router, searchParams]);
   const trackerEntryId =
     readTrackerField(resumeState.response, "opportunityId") ??
     readTrackerField(resumeState.response, "trackerEntryId");
@@ -1149,17 +1172,49 @@ export default function StudioPage() {
   const generationBlockerCount = generationBlockerCodes.length;
   const remediationHref = "/results#advanced-insights";
 
-  const readyForDocuments =
-    Boolean(effectiveJobId && effectiveBaselineId && effectiveBaselineVersionId) &&
-    analysisScore !== null;
-  const canGenerateDocuments =
-    Boolean(effectiveJobId && effectiveBaselineId) &&
-    analysisScore !== null &&
-    (Boolean(effectiveBaselineVersionId) || isNonProduction) &&
-    Boolean(requestedAnalysisId) &&
-    !analysisError &&
-    studioGenerationState !== "BLOCKED" &&
-    trustGateDecision.allowed;
+  const productReadiness = useMemo(
+    () =>
+      buildGenerationProductReadiness({
+        score: analysisScore,
+        authorityState: studioGenerationState,
+        hasCanonicalAssessment: Boolean(requestedAnalysisId) && !analysisError,
+        hasRequiredContext:
+          Boolean(effectiveJobId && effectiveBaselineId) &&
+          (Boolean(effectiveBaselineVersionId) || isNonProduction),
+        isPro,
+      }),
+    [
+      analysisError,
+      analysisScore,
+      effectiveBaselineId,
+      effectiveBaselineVersionId,
+      effectiveJobId,
+      isNonProduction,
+      isPro,
+      requestedAnalysisId,
+      studioGenerationState,
+    ],
+  );
+  const canGenerateDocuments = productReadiness.generation_readiness.canGenerate && trustGateDecision.allowed;
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    if (!effectiveBaselineId || !requestedAnalysisId) return;
+    console.info("[studio] assessment_truth_snapshot", {
+      baselineId: effectiveBaselineId,
+      assessmentId: requestedAnalysisId,
+      readiness: {
+        status: activeGenerationReadiness.status,
+        authority: studioGenerationState,
+        generation_readiness: productReadiness.generation_readiness,
+      },
+    });
+  }, [
+    activeGenerationReadiness.status,
+    effectiveBaselineId,
+    productReadiness.generation_readiness,
+    requestedAnalysisId,
+    studioGenerationState,
+  ]);
   const improveBaselineHref = useMemo(() => {
     const params = new URLSearchParams();
     if (requestedAnalysisId) params.set("analysisId", requestedAnalysisId);
@@ -1187,7 +1242,7 @@ export default function StudioPage() {
     JSON.stringify(draftResumeModel ?? null) !==
       JSON.stringify((savedEditedResumeModel ?? generatedResumeModel) ?? null);
   const hasResumeArtifact = resumePresenter.hasExportableContent;
-  const canExportDocuments = readyForDocuments && isPro;
+  const canExportDocuments = productReadiness.generation_readiness.canExport;
   const canExportResume =
     canExportDocuments &&
     resumePresenter.status === "success" &&
@@ -1978,7 +2033,7 @@ export default function StudioPage() {
     setResumeState(createDocumentState());
     setResumeWarningFlags([]);
     setResumeAuditId(undefined);
-    const payload = buildResumePayload(false);
+    const payload = normalizeGenerationPayload(buildResumePayload(false), "resume");
     try {
       const response = await fetch("/api/resume", {
         method: "POST",
@@ -2052,7 +2107,7 @@ export default function StudioPage() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              ...buildResumePayload(false),
+              ...normalizeGenerationPayload(buildResumePayload(false), "resume"),
               trustGateMode: "strict",
             }),
           });
@@ -2175,7 +2230,7 @@ export default function StudioPage() {
     }
     setResumeExportFormat(format);
     setResumeState((current) => ({ ...current, error: null, tierGateError: null }));
-    const payload = buildResumePayload(true);
+    const payload = normalizeGenerationPayload(buildResumePayload(true), "resume");
     try {
       const response = await fetch(`/api/resume/export?format=${encodeURIComponent(format)}`, {
         method: "POST",
@@ -2270,7 +2325,7 @@ export default function StudioPage() {
     setCoverWarningFlags([]);
     setCoverAuditId(undefined);
     setCoverLetterComplianceBlocked(null);
-    const payload = buildCoverLetterPayload(false);
+    const payload = normalizeGenerationPayload(buildCoverLetterPayload(false), "cover_letter");
     try {
       const response = await fetch("/api/cover-letters", {
         method: "POST",
@@ -2334,7 +2389,7 @@ export default function StudioPage() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              ...buildCoverLetterPayload(false),
+              ...normalizeGenerationPayload(buildCoverLetterPayload(false), "cover_letter"),
               trustGateMode: "strict",
             }),
           });
@@ -2402,7 +2457,7 @@ export default function StudioPage() {
     setResumeState(createDocumentState());
     setResumeWarningFlags([]);
     setResumeAuditId(undefined);
-    const payload = buildResumePayload(true);
+    const payload = normalizeGenerationPayload(buildResumePayload(true), "resume");
     try {
       const response = await fetch("/api/resume", {
         method: "POST",
@@ -2448,7 +2503,7 @@ export default function StudioPage() {
     }
     setCoverExportFormat(format);
     setCoverState((current) => ({ ...current, error: null, tierGateError: null }));
-    const payload = buildCoverLetterPayload(true);
+    const payload = normalizeGenerationPayload(buildCoverLetterPayload(true), "cover_letter");
     try {
       const response = await fetch(
         `/api/cover-letters/export?format=${encodeURIComponent(format)}`,

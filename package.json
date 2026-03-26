@@ -16,6 +16,7 @@
     "check:beta-scope": "node scripts/check-beta-scope.js",
     "verify:ci": "npm run check:beta-scope && npm run lint:api && npm run lint:web && npm run test:api && npm run build:both",
     "smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1",
+    "scan:routes": "npm -w apps/web run scan:routes",
     "postinstall": "patch-package"
   },
   "devDependencies": {

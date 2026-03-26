@@ -32,6 +32,24 @@ export interface BaselineVersionDto {
 
 export type BaselineStatus = "ACTIVE" | "ARCHIVED";
 
+export interface BaselineAssessmentSummaryDto {
+  latestAssessmentId: string | null;
+  latestAssessmentCreatedAt: string | null;
+  latestFitScore: number | null;
+  hasCompletedAssessment: boolean;
+}
+
+export function isBaselineAnalyzedFromSummary(
+  summary?: BaselineAssessmentSummaryDto | null,
+): boolean {
+  if (!summary) return false;
+  return (
+    summary.hasCompletedAssessment === true ||
+    Boolean(summary.latestAssessmentId) ||
+    typeof summary.latestFitScore === "number"
+  );
+}
+
 export interface BaselineDto {
   id: string;
   userId: string;
@@ -46,6 +64,7 @@ export interface BaselineDto {
   latestBaselineScore?: number | null;
   firstAnalyzedAt?: string | null;
   lastAnalyzedAt?: string | null;
+  latestAssessmentSummary?: BaselineAssessmentSummaryDto;
   createdAt: string;
   updatedAt: string;
   sections?: BaselineSectionDto[];

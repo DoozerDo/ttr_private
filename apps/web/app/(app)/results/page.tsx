@@ -28,6 +28,8 @@ import {
   normalizeUserFacingRequirementLabel,
   type VerificationCoverage,
 } from "@/lib/generationReadiness";
+import { getGenerationAuthorityState } from "@/lib/generationAuthority";
+import { buildGenerationProductReadiness } from "@/lib/generationProductReadiness";
 import { normalizeClaimVerifications } from "@/lib/claimVerification";
 import { sanitizeScoreExplanationLine, sanitizeScoreExplanationList } from "@/lib/scoreExplanationCopy";
 import { getDecisionFromFitScore } from "@/lib/fit-verdict";
@@ -35,8 +37,8 @@ import { buildStrategicBrief } from "@/lib/resultsInsights";
 import { buildResultsSignalAlignment } from "@/lib/professionalSignals";
 import { appendStrengtheningAddition } from "@/lib/baselines";
 import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
-import { getNextMove, type NextMove } from "@/lib/nextMove";
 import { buildScoreDelta, hasBaselineUpdated } from "@/lib/reanalysis";
+import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
 import { resolveScoreBucket, trackEvent } from "@/src/lib/analytics";
 import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
 
@@ -389,8 +391,6 @@ function buildEvidenceLines(scoreBreakdown: ScoreBreakdownShape | null): string[
 }
 
 const INTERVIEW_TOOLKIT_PATH = "/interview-toolkit";
-const RESULTS_GAPS_SECTION_ANCHOR = "#fit-improvement-opportunities";
-
 const LAST_ASSESSMENT_STORAGE_KEY = "ttr-last-assessment-id";
 
 function readLastAssessmentFromStorage(): string | null {
@@ -590,8 +590,9 @@ type PrimaryResultsCtaInput = {
   activeScore: number | null;
   studioHref: string;
   canOpenStudio: boolean;
+  canGenerate?: boolean;
+  reasonsBlocked?: string[];
   fitReviewPath: string;
-  analysisId?: string | null;
 };
 
 type PrimaryResultsCtaOutput = {
@@ -605,46 +606,51 @@ export function getPrimaryResultsCta({
   activeScore,
   studioHref,
   canOpenStudio,
+  canGenerate = false,
+  reasonsBlocked = [],
   fitReviewPath,
-  analysisId,
 }: PrimaryResultsCtaInput): PrimaryResultsCtaOutput {
-  if (typeof activeScore !== "number") {
+  if (typeof activeScore !== "number" || activeScore < 70) {
     return {
       label: "Start Fit Improvement",
       href: fitReviewPath,
       disabled: false,
-      description: "You're close, but missing key signals. Improve fit before applying.",
+      description: "Fit score is below 70. Complete Fit Review before Studio unlocks.",
     };
   }
 
-  const nextMove = getNextMove(activeScore);
-  if ((nextMove.action === "generate" || nextMove.action === "studio") && !analysisId) {
-    console.warn("[results] Missing analysisId for Next Move studio routing fallback.");
-  }
-
-  if (nextMove.action === "generate" || nextMove.action === "studio") {
+  if (activeScore < 85) {
     return {
-      label: nextMove.ctaText,
+      label: "Open Studio",
       href: studioHref,
       disabled: !canOpenStudio,
-      description: nextMove.description,
+      description: "Studio is unlocked at 70+. Generation unlocks at 85+.",
     };
   }
 
-  if (nextMove.action === "improve") {
+  if (canGenerate) {
     return {
-      label: nextMove.ctaText,
-      href: fitReviewPath,
-      disabled: false,
-      description: nextMove.description,
+      label: "Open Studio to Generate",
+      href: studioHref,
+      disabled: !canOpenStudio,
+      description: "Generation is available for this analyzed baseline.",
+    };
+  }
+
+  if (reasonsBlocked.length > 0) {
+    return {
+      label: "Resolve Readiness in Studio",
+      href: studioHref,
+      disabled: !canOpenStudio,
+      description: "Generation is blocked until readiness checks pass.",
     };
   }
 
   return {
-    label: nextMove.ctaText,
-    href: RESULTS_GAPS_SECTION_ANCHOR,
+    label: "Start Fit Improvement",
+    href: fitReviewPath,
     disabled: false,
-    description: nextMove.description,
+    description: "Generation remains blocked until required checks are complete.",
   };
 }
 
@@ -1714,7 +1720,18 @@ export default function ResultsPage() {
         typeof scoringRubric.weights[key] === "number" ? scoringRubric.weights[key] : null,
     }));
   }, [scoringRubric]);
-  const canOpenStudio = Boolean(latest?.jobId && latestBaselineId);
+  const productReadiness = useMemo(
+    () =>
+      buildGenerationProductReadiness({
+        score: typeof activeScore === "number" ? activeScore : null,
+        authorityState: getGenerationAuthorityState(generationReadiness),
+        hasCanonicalAssessment: Boolean(latest?.assessmentId),
+        hasRequiredContext: Boolean(latest?.jobId && latestBaselineId),
+        isPro: true,
+      }),
+    [activeScore, generationReadiness, latest?.assessmentId, latest?.jobId, latestBaselineId],
+  );
+  const canOpenStudio = productReadiness.canOpenStudio;
   const claimVerifications = useMemo(
     () => normalizeClaimVerifications(debugFields?.toolingCoverage?.claims),
     [debugFields?.toolingCoverage?.claims],
@@ -1903,11 +1920,12 @@ export default function ResultsPage() {
             activeScore,
             studioHref,
             canOpenStudio,
+            canGenerate: productReadiness.generation_readiness.canGenerate,
+            reasonsBlocked: productReadiness.generation_readiness.reasonsBlocked,
             fitReviewPath,
-            analysisId: latest?.assessmentId,
           })
         : null,
-    [activeScore, studioHref, canOpenStudio, fitReviewPath, latest?.assessmentId],
+    [activeScore, studioHref, canOpenStudio, fitReviewPath, productReadiness],
   );
   const oneClickResultsCta = useMemo(() => {
     if (!predictiveUnlock) return primaryResultsCta;
@@ -2401,6 +2419,30 @@ export default function ResultsPage() {
 
   useEffect(() => {
     if (runIdentifier) return;
+    const queryBaselineId = searchParams?.get("baselineId")?.trim() ?? "";
+    const queryJobId = searchParams?.get("jobId")?.trim() ?? "";
+    if (!queryBaselineId || queryJobId) return;
+    let canceled = false;
+    const resolveLatestForBaseline = async () => {
+      const latestForBaseline = await fetchLatestAssessmentForBaseline(queryBaselineId);
+      if (canceled || !latestForBaseline?.assessmentId) return;
+      const params = new URLSearchParams(searchParams?.toString() ?? "");
+      params.delete("analysisId");
+      params.delete("fitScoreId");
+      params.delete("jobId");
+      params.set("assessmentId", latestForBaseline.assessmentId);
+      const query = params.toString();
+      const destination = query ? `/results?${query}` : "/results";
+      await router.replace(destination);
+    };
+    void resolveLatestForBaseline();
+    return () => {
+      canceled = true;
+    };
+  }, [runIdentifier, router, searchParams]);
+
+  useEffect(() => {
+    if (runIdentifier) return;
     const queryJobId = searchParams?.get("jobId")?.trim() ?? "";
     const queryBaselineId = searchParams?.get("baselineId")?.trim() ?? "";
     if (!queryJobId || !queryBaselineId) return;
@@ -2418,6 +2460,20 @@ export default function ResultsPage() {
       interactive: false,
     });
   }, [runIdentifier, searchParams]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    if (!latest?.baselineId || !latest?.assessmentId) return;
+    console.info("[results] assessment_truth_snapshot", {
+      baselineId: latest.baselineId,
+      assessmentId: latest.assessmentId,
+      readiness: {
+        status: generationReadiness.status,
+        authority: getGenerationAuthorityState(generationReadiness),
+        generation_readiness: productReadiness.generation_readiness,
+      },
+    });
+  }, [generationReadiness, latest?.assessmentId, latest?.baselineId, productReadiness]);
 
   useEffect(() => {
     if (runIdentifier || lastAssessmentHydrationAttempted.current) return;

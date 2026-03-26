@@ -2,9 +2,20 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { vi } from "vitest";
 
 import { BaselineStudioHome } from "@/app/(app)/baseline/BaselineStudioHome";
+import { publishBaselineUpdated } from "@/src/lib/baseline-sync";
 import { setFetchImplementation } from "@/tests/setup";
 
-function createBaseline(id: string, createdAt: string, filename = `${id}.pdf`) {
+function createBaseline(
+  id: string,
+  createdAt: string,
+  filename = `${id}.pdf`,
+  latestAssessmentSummary?: {
+    latestAssessmentId: string | null;
+    latestAssessmentCreatedAt: string | null;
+    latestFitScore: number | null;
+    hasCompletedAssessment: boolean;
+  },
+) {
   return {
     id,
     userId: "user-1",
@@ -15,6 +26,7 @@ function createBaseline(id: string, createdAt: string, filename = `${id}.pdf`) {
     hash: null,
     status: "ACTIVE" as const,
     archivedAt: null,
+    latestAssessmentSummary,
     createdAt,
     updatedAt: createdAt,
   };
@@ -23,6 +35,12 @@ function createBaseline(id: string, createdAt: string, filename = `${id}.pdf`) {
 function createAnalyzedBaseline(id: string, filename = `${id}.pdf`) {
   return {
     ...createBaseline(id, "2026-01-01T00:00:00.000Z", filename),
+    latestAssessmentSummary: {
+      latestAssessmentId: `assessment-${id}`,
+      latestAssessmentCreatedAt: "2026-03-20T12:00:00.000Z",
+      latestFitScore: 82,
+      hasCompletedAssessment: true,
+    },
     sections: [
       {
         id: "section-1",
@@ -321,6 +339,137 @@ describe("BaselineStudioHome", () => {
     });
     expect(screen.queryByText(/% current/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/% original/i)).not.toBeInTheDocument();
+  });
+
+  it("renders analyzed state from server assessment summary", async () => {
+    setFetchImplementation(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(
+      <BaselineStudioHome
+        baselines={[
+          createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf", {
+            latestAssessmentId: "assessment-1",
+            latestAssessmentCreatedAt: "2026-03-20T12:00:00.000Z",
+            latestFitScore: 82,
+            hasCompletedAssessment: true,
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Analysis ready")).toBeInTheDocument();
+    expect(screen.getByText(/Last analyzed/i)).toBeInTheDocument();
+    expect(screen.getByText(/Fit 82%/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View baseline analysis" })).toBeInTheDocument();
+  });
+
+  it("replaces stale not-analyzed card state with canonical analyzed summary after detail fetch", async () => {
+    setFetchImplementation(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      if (url.includes("/api/baselines/base-1/analysis-score")) {
+        return createJsonResponse(createAnalyzedBaseline("base-1", "resume-1.pdf"));
+      }
+      if (url.includes("/api/baselines/base-1")) {
+        return createJsonResponse(createAnalyzedBaseline("base-1", "resume-1.pdf"));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(
+      <BaselineStudioHome
+        baselines={[
+          createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf", {
+            latestAssessmentId: null,
+            latestAssessmentCreatedAt: null,
+            latestFitScore: null,
+            hasCompletedAssessment: false,
+          }),
+        ]}
+      />,
+    );
+
+    const baselineArticle = within(screen.getByText("resume-1.pdf").closest("article") as HTMLElement);
+    expect(baselineArticle.getByText("Not analyzed")).toBeInTheDocument();
+
+    fireEvent.click(baselineArticle.getByRole("button", { name: "ANALYZE" }));
+
+    await waitFor(() => {
+      expect(baselineArticle.getByText("Analysis ready")).toBeInTheDocument();
+    });
+    expect(baselineArticle.queryByText("Not analyzed")).toBeNull();
+  });
+
+  it("refetches authoritative baselines on baseline-updated event and updates only the analyzed baseline", async () => {
+    const initialA = createBaseline("base-a", "2026-01-01T00:00:00.000Z", "resume-a.pdf", {
+      latestAssessmentId: null,
+      latestAssessmentCreatedAt: null,
+      latestFitScore: null,
+      hasCompletedAssessment: false,
+    });
+    const initialB = createBaseline("base-b", "2026-01-02T00:00:00.000Z", "resume-b.pdf", {
+      latestAssessmentId: null,
+      latestAssessmentCreatedAt: null,
+      latestFitScore: null,
+      hasCompletedAssessment: false,
+    });
+    const refreshedA = createBaseline("base-a", "2026-01-01T00:00:00.000Z", "resume-a.pdf", {
+      latestAssessmentId: "assessment-a",
+      latestAssessmentCreatedAt: "2026-03-25T12:00:00.000Z",
+      latestFitScore: 88,
+      hasCompletedAssessment: true,
+    });
+    const refreshedB = createBaseline("base-b", "2026-01-02T00:00:00.000Z", "resume-b.pdf", {
+      latestAssessmentId: null,
+      latestAssessmentCreatedAt: null,
+      latestFitScore: null,
+      hasCompletedAssessment: false,
+    });
+
+    const fetchMock = vi.fn(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return createJsonResponse([refreshedA, refreshedB]);
+      }
+      if (url.includes("/api/baselines/base-a")) {
+        return createJsonResponse({
+          ...createAnalyzedBaseline("base-a", "resume-a.pdf"),
+          latestAssessmentSummary: refreshedA.latestAssessmentSummary,
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    setFetchImplementation(fetchMock);
+
+    render(<BaselineStudioHome baselines={[initialA, initialB]} />);
+
+    const baselineAArticle = within(screen.getByText("resume-a.pdf").closest("article") as HTMLElement);
+    const baselineBArticle = within(screen.getByText("resume-b.pdf").closest("article") as HTMLElement);
+    expect(baselineAArticle.getByText("Not analyzed")).toBeInTheDocument();
+    expect(baselineBArticle.getByText("Not analyzed")).toBeInTheDocument();
+
+    publishBaselineUpdated({ baselineId: "base-a", source: "analysis" });
+
+    await waitFor(() => {
+      expect(baselineAArticle.getByText("Analysis ready")).toBeInTheDocument();
+    });
+    expect(baselineBArticle.getByText("Not analyzed")).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        ([url]) => typeof url === "string" && url.includes("/api/baselines?includeArchived=true"),
+      ),
+    ).toBe(true);
   });
 
   it("shows updated guidance state after baseline strengthening updates", async () => {

@@ -4,8 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { readLastAnalysis, type StoredAnalysisRecord } from "@/app/(app)/lib/session";
 
-const MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024;
-const ALLOWED_SCREENSHOT_TYPES = ["image/png", "image/jpeg", "image/webp"];
+const LAST_API_SNAPSHOT_KEY = "ttr:last-api-response-snapshot";
 
 const resolvedGitSha =
   process.env.NEXT_PUBLIC_GIT_SHA ??
@@ -27,11 +26,8 @@ type BugReportCreateResponse = {
 export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalProps) {
   const pathname = usePathname() ?? "/";
   const [whatHappened, setWhatHappened] = useState("");
-  const [attemptedAction, setAttemptedAction] = useState("");
-  const [expectedBehavior, setExpectedBehavior] = useState("");
   const [reporterEmail, setReporterEmail] = useState(initialEmail ?? "");
-  const [screenshot, setScreenshot] = useState<File | null>(null);
-  const [screenshotError, setScreenshotError] = useState<string | null>(null);
+  const [includeApiSnapshot, setIncludeApiSnapshot] = useState(true);
   const [storedAnalysis, setStoredAnalysis] = useState<StoredAnalysisRecord | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -40,11 +36,8 @@ export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalPr
   useEffect(() => {
     if (!open) return;
     setWhatHappened("");
-    setAttemptedAction("");
-    setExpectedBehavior("");
     setReporterEmail(initialEmail ?? "");
-    setScreenshot(null);
-    setScreenshotError(null);
+    setIncludeApiSnapshot(true);
     setStatus("idle");
     setStatusMessage(null);
     setCreatedReportId(null);
@@ -53,24 +46,6 @@ export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalPr
 
   const pageUrl = useMemo(() => (typeof window !== "undefined" ? window.location.href : ""), []);
   const userAgent = useMemo(() => (typeof navigator !== "undefined" ? navigator.userAgent : ""), []);
-
-  const onScreenshotChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0] ?? null;
-    event.target.value = "";
-    setScreenshotError(null);
-    setScreenshot(null);
-    if (!file) return;
-
-    if (!ALLOWED_SCREENSHOT_TYPES.includes(file.type)) {
-      setScreenshotError("Screenshot must be PNG, JPEG, or WebP.");
-      return;
-    }
-    if (file.size > MAX_SCREENSHOT_BYTES) {
-      setScreenshotError("Screenshot must be 5 MB or smaller.");
-      return;
-    }
-    setScreenshot(file);
-  }, []);
 
   const isValid = whatHappened.trim().length >= 10;
 
@@ -102,12 +77,20 @@ export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalPr
           height: window.innerHeight,
         },
         lastUserAction: window.sessionStorage.getItem("ttr:last-user-action") ?? undefined,
+        lastApiResponseSnapshot: includeApiSnapshot
+          ? (() => {
+              try {
+                const raw = window.sessionStorage.getItem(LAST_API_SNAPSHOT_KEY);
+                return raw ? JSON.parse(raw) : undefined;
+              } catch {
+                return undefined;
+              }
+            })()
+          : undefined,
       };
 
       const formData = new FormData();
       formData.set("whatHappened", whatHappened.trim());
-      if (attemptedAction.trim()) formData.set("attemptedAction", attemptedAction.trim());
-      if (expectedBehavior.trim()) formData.set("expectedBehavior", expectedBehavior.trim());
       if (reporterEmail.trim()) formData.set("reporterEmail", reporterEmail.trim());
       formData.set("route", `${window.location.pathname}${window.location.search}`);
       formData.set("pageLabel", document.title || pathname);
@@ -122,7 +105,6 @@ export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalPr
       if (typeof fitScore === "number") formData.set("fitScore", String(fitScore));
       if (userAgent) formData.set("browserInfo", userAgent);
       formData.set("runtimeContext", JSON.stringify(runtimeContext));
-      if (screenshot) formData.set("screenshot", screenshot);
 
       try {
         const response = await fetch("/api/bug-reports", {
@@ -141,16 +123,12 @@ export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalPr
         setStatusMessage("Thanks - your report was submitted successfully.");
         setCreatedReportId(payload.reportId);
         setWhatHappened("");
-        setAttemptedAction("");
-        setExpectedBehavior("");
-        setScreenshot(null);
-        setScreenshotError(null);
       } catch (err) {
         setStatus("error");
         setStatusMessage(err instanceof Error ? err.message : "Bug report failed to send. Please try again.");
       }
     },
-    [attemptedAction, expectedBehavior, isValid, pathname, pageUrl, reporterEmail, screenshot, status, storedAnalysis, userAgent, whatHappened],
+    [includeApiSnapshot, isValid, pathname, pageUrl, reporterEmail, status, storedAnalysis, userAgent, whatHappened],
   );
 
   if (!open) return null;
@@ -172,8 +150,8 @@ export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalPr
       >
         <div className="flex items-start justify-between">
           <div>
-            <h2 className="text-2xl font-semibold text-white">Report a bug</h2>
-            <p className="text-sm text-slate-400">Tell us what happened. We attach runtime context automatically.</p>
+            <h2 className="text-2xl font-semibold text-white">Report Issue</h2>
+            <p className="text-sm text-slate-400">Describe the issue. Context is attached automatically.</p>
           </div>
           <button
             type="button"
@@ -199,38 +177,6 @@ export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalPr
 
         <div className="grid gap-4 md:grid-cols-2">
           <label className="space-y-1 text-sm text-slate-200">
-            <span>What were you trying to do? (optional)</span>
-            <textarea
-              value={attemptedAction}
-              onChange={(event) => setAttemptedAction(event.target.value)}
-              maxLength={4000}
-              className="h-20 w-full rounded-2xl border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white outline-none transition focus:border-amber-300/70"
-            />
-          </label>
-          <label className="space-y-1 text-sm text-slate-200">
-            <span>What did you expect? (optional)</span>
-            <textarea
-              value={expectedBehavior}
-              onChange={(event) => setExpectedBehavior(event.target.value)}
-              maxLength={4000}
-              className="h-20 w-full rounded-2xl border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white outline-none transition focus:border-amber-300/70"
-            />
-          </label>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="space-y-1 text-sm text-slate-200">
-            <span>Screenshot (optional)</span>
-            <input
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              onChange={onScreenshotChange}
-              className="w-full rounded-2xl border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white outline-none transition focus:border-amber-300/70"
-            />
-            {screenshot ? <p className="text-xs text-slate-400">Attached: {screenshot.name}</p> : null}
-            {screenshotError ? <p className="text-xs text-rose-300">{screenshotError}</p> : null}
-          </label>
-          <label className="space-y-1 text-sm text-slate-200">
             <span>Email (optional)</span>
             <input
               type="email"
@@ -241,6 +187,14 @@ export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalPr
               placeholder="you@example.com"
             />
           </label>
+          <label className="flex items-center gap-2 pt-6 text-sm text-slate-200">
+            <input
+              type="checkbox"
+              checked={includeApiSnapshot}
+              onChange={(event) => setIncludeApiSnapshot(event.target.checked)}
+            />
+            Include recent API response snapshot
+          </label>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -249,7 +203,7 @@ export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalPr
             disabled={!isValid || status === "loading"}
             className="flex-1 rounded-2xl border border-amber-400/60 bg-amber-400/20 px-4 py-2 text-sm font-semibold text-amber-100 transition hover:border-amber-400/90 hover:bg-amber-400/30 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {status === "loading" ? "Sending..." : "Send bug report"}
+            {status === "loading" ? "Sending..." : "Send issue report"}
           </button>
           <span
             className={`text-xs ${status === "success" ? "text-emerald-300" : status === "error" ? "text-rose-300" : "text-slate-400"}`}

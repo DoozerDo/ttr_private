@@ -163,14 +163,12 @@ describe("BaselineWorkspace live score panel", () => {
         expect(screen.getByText("Strong Match")).toBeInTheDocument();
       });
 
-      expect(screen.getByText("You should be confident applying to this role.")).toBeInTheDocument();
+      expect(screen.getByText("Strong alignment with this role.")).toBeInTheDocument();
       expect(screen.getByText(/Led global support operations at sentinelone/i)).toBeInTheDocument();
       expect(screen.getByText("Why this is a strong match")).toBeInTheDocument();
+      expect(screen.getByText("Ready to generate tailored materials now.")).toBeInTheDocument();
       expect(
-        screen.getByText("Recommended next step: Generate tailored materials and apply."),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByRole("link", { name: "Generate Tailored Materials" }),
+        screen.getByRole("link", { name: "Open Studio" }),
       ).toHaveAttribute("href", "/studio?analysisId=assessment-1&jobId=job-1&baselineId=base-1");
       expect(screen.getByRole("link", { name: "View detailed analysis" })).toHaveAttribute(
         "href",
@@ -406,12 +404,12 @@ describe("BaselineWorkspace live score panel", () => {
       fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
 
       await waitFor(() => {
-        expect(screen.getByRole("link", { name: "Generate Tailored Materials" })).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
       });
 
-      expect(screen.getByRole("link", { name: "Generate Tailored Materials" })).toHaveAttribute(
+      expect(screen.getByRole("link", { name: "Start Fit Review" })).toHaveAttribute(
         "href",
-        "/studio?analysisId=assessment-4&jobId=job-1&baselineId=base-1",
+        "/results?assessmentId=assessment-4",
       );
       expect(screen.queryByText("Strong match, but not ready to generate")).toBeNull();
     } finally {
@@ -453,5 +451,66 @@ describe("BaselineWorkspace live score panel", () => {
         "Your baseline defines the experience signals used for compatibility scoring and resume generation.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("does not render completed score when canonical assessmentId is missing", async () => {
+    stubWindowState();
+    const setTimeoutSpy = vi.spyOn(window, "setTimeout");
+
+    try {
+      setFetchImplementation(
+        vi.fn((input: RequestInfo) => {
+          const url =
+            typeof input === "string"
+              ? input
+              : input instanceof URL
+                ? input.toString()
+                : "url" in input
+                  ? input.url
+                  : String(input);
+
+          if (url.includes("/api/analysis/run")) {
+            return Promise.resolve(
+              createResponse({
+                baselineId: "base-1",
+                jobId: "job-1",
+                score: 88,
+              }),
+            );
+          }
+
+          if (url.includes("/api/analysis/") && url.includes("/latest")) {
+            return Promise.resolve(createResponse({}, false, 404));
+          }
+
+          return Promise.resolve(createResponse({}));
+        }),
+      );
+
+      render(
+        <BaselineWorkspace
+          initialBaselines={[
+            {
+              id: "base-1",
+              originalFilename: "resume.pdf",
+              version: 1,
+            } as never,
+          ]}
+          initialFetchError={null}
+          initialBaselineId="base-1"
+          initialJobId="job-1"
+        />,
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("Analysis did not complete successfully. No persisted assessment was created."),
+        ).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText("Compatibility Score")).toBeNull();
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
   });
 });

@@ -68,6 +68,26 @@ describe('TemplateCoverLetterGenerator', () => {
     expect(letter.includes(jdLine)).toBe(false);
   });
 
+  it('returns canonical paragraph ordering including closing paragraph and enforces minimum length', () => {
+    const generator = new TemplateCoverLetterGenerator();
+    const output = generator.generate({
+      ...supportOperationsFixture,
+      allowedBaselineBlocks: [
+        {
+          ...supportOperationsFixture.allowedBaselineBlocks[0],
+          content:
+            'Managed escalation flows and coordinated incident handoffs across product, support, and engineering teams.',
+        },
+      ],
+    });
+
+    expect(output.paragraphs.length).toBeGreaterThanOrEqual(4);
+    expect(output.paragraphs[output.paragraphs.length - 1]).toBe(
+      output.closingParagraphs[0],
+    );
+    expect(countWords(output.content)).toBeGreaterThanOrEqual(250);
+  });
+
   it('surfaces constraints summary in strict mode', () => {
     const generator = new TemplateCoverLetterGenerator();
 

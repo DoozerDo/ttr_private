@@ -1,0 +1,50 @@
+[
+  {
+    "testCase": "1. Clean baseline, strong match",
+    "passed": true,
+    "failures": [],
+    "severity": "low"
+  },
+  {
+    "testCase": "2. Baseline with messy bullet formatting",
+    "passed": true,
+    "failures": [],
+    "severity": "low"
+  },
+  {
+    "testCase": "3. Baseline with multiple roles at same company",
+    "passed": true,
+    "failures": [],
+    "severity": "low"
+  },
+  {
+    "testCase": "4. Baseline missing explicit SaaS keywords but implying them",
+    "passed": true,
+    "failures": [],
+    "severity": "low"
+  },
+  {
+    "testCase": "5. Job description with heavy buzzwords and repeated phrases",
+    "passed": true,
+    "failures": [],
+    "severity": "low"
+  },
+  {
+    "testCase": "6. Job description with ambiguous requirements",
+    "passed": true,
+    "failures": [],
+    "severity": "low"
+  },
+  {
+    "testCase": "7. High score (>=92) case",
+    "passed": true,
+    "failures": [],
+    "severity": "low"
+  },
+  {
+    "testCase": "8. Borderline score (85-89) case",
+    "passed": true,
+    "failures": [],
+    "severity": "low"
+  }
+]

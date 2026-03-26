@@ -15,6 +15,7 @@ import { FormButton } from "@/components/FormButton";
 import { buildEvidenceLines, type ScoreBreakdown } from "@/lib/evidenceLines";
 import { getGenerationReadiness } from "@/lib/generationReadiness";
 import { getGenerationAuthorityState } from "@/lib/generationAuthority";
+import { buildGenerationProductReadiness } from "@/lib/generationProductReadiness";
 import { sanitizeScoreExplanationLine, sanitizeScoreExplanationList } from "@/lib/scoreExplanationCopy";
 import { trackEvent } from "@/src/lib/analytics";
 import { SetupModuleCard } from "./SetupModuleCard";
@@ -635,12 +636,26 @@ export function WorkspaceRunner({
     () => getGenerationAuthorityState(generationReadiness),
     [generationReadiness],
   );
-  const isHighFit = typeof score === "number" && score > 70;
-  const isGenerationReady = targetGenerationState === "READY";
+  const productReadiness = useMemo(
+    () =>
+      buildGenerationProductReadiness({
+        score,
+        authorityState: targetGenerationState,
+        hasCanonicalAssessment: Boolean(
+          asString((displayResult as { assessmentId?: unknown } | null)?.assessmentId),
+        ),
+        hasRequiredContext: Boolean(latestBaselineId && latestJobId),
+        isPro: true,
+      }),
+    [displayResult, latestBaselineId, latestJobId, score, targetGenerationState],
+  );
+  const isHighFit = productReadiness.canOpenStudio;
   const isGenerationLimited = targetGenerationState === "LIMITED";
   const isGenerationBlocked = targetGenerationState === "BLOCKED";
-  const isLimitedHighFit = isHighFit && isGenerationLimited;
-  const isBlockedHighFit = isHighFit && isGenerationBlocked;
+  const isLimitedHighFit =
+    isHighFit && !productReadiness.generation_readiness.canGenerate && isGenerationLimited;
+  const isBlockedHighFit =
+    isHighFit && !productReadiness.generation_readiness.canGenerate && isGenerationBlocked;
   const scoreBandSummary =
     isBlockedHighFit
       ? "This role scored well, but your current baseline does not support compliant generation yet."
@@ -673,8 +688,11 @@ export function WorkspaceRunner({
         score,
         actionType: isLimitedHighFit ? "open_studio_limited" : "open_studio_generate",
       });
-      if (isBlockedHighFit) {
+      if (isBlockedHighFit || !productReadiness.canOpenStudio) {
         event.preventDefault();
+        if (!productReadiness.canOpenStudio) {
+          return;
+        }
         trackEvent("target_cta_clicked", {
           state: targetGenerationState,
           score,
@@ -686,7 +704,14 @@ export function WorkspaceRunner({
         });
       }
     },
-    [generationReadiness.verificationIssues, isBlockedHighFit, isLimitedHighFit, score, targetGenerationState],
+    [
+      generationReadiness.verificationIssues,
+      isBlockedHighFit,
+      isLimitedHighFit,
+      productReadiness.canOpenStudio,
+      score,
+      targetGenerationState,
+    ],
   );
 
   const runAssessment = useCallback(async () => {
@@ -734,6 +759,22 @@ export function WorkspaceRunner({
       if (selectedBaselineId !== baselineForRun || selectedJobId !== jobForRun) {
         return;
       }
+
+      if (runState === "ok") {
+        const canonicalAssessmentId =
+          typeof nextResult.assessmentId === "string" ? nextResult.assessmentId.trim() : "";
+        const canonicalBaselineId =
+          typeof nextResult.baselineId === "string" ? nextResult.baselineId.trim() : "";
+        if (!canonicalAssessmentId) {
+          throw new Error(
+            "Analysis did not complete successfully. No persisted assessment was created.",
+          );
+        }
+        if (canonicalBaselineId !== baselineForRun) {
+          throw new Error("Analysis baseline linkage mismatch. Please retry.");
+        }
+      }
+
       setResult(nextResult);
       setRunState(runState);
       const resolvedJobId =
@@ -796,6 +837,9 @@ export function WorkspaceRunner({
       const message =
         extractErrorMessage(runError) ?? "Unable to run compatibility scoring right now.";
       const shouldShowUploadCTA = isMissingCanonicalRunError(runError, message);
+      setResult(null);
+      setLatestCompletedScore(null);
+      setRevealedScoreValue(null);
       setError(message);
       setShowUploadAgainCTA(shouldShowUploadCTA);
       setLatestJobId(null);
@@ -803,7 +847,6 @@ export function WorkspaceRunner({
       setRunState(null);
       autoRunInitiatedRef.current = false;
       setIsRevealAnalyzing(false);
-      setRevealedScoreValue(null);
       reportProgressState({
         isScoring: false,
         isCompletionMoment: false,
@@ -1202,11 +1245,15 @@ export function WorkspaceRunner({
               </div>
             ) : (
               <a
-                href={studioHref}
+                href={productReadiness.canOpenStudio ? studioHref : resultsHref}
                 onClick={handleGenerateClick}
                 className="inline-flex items-center justify-center whitespace-nowrap rounded-2xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
               >
-                {isLimitedHighFit ? "Open Studio With Limits" : "Open Studio"}
+                {!productReadiness.canOpenStudio
+                  ? "Start Fit Review"
+                  : isLimitedHighFit
+                  ? "Open Studio With Limits"
+                  : "Open Studio"}
               </a>
             )}
           </div>

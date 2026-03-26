@@ -40,6 +40,7 @@ import {
   INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
 } from '../compliance/extracted-text.utils';
 import { EmbeddingService } from '../ai/embedding.service';
+import { FitAssessment } from '../analysis/fit-assessment.entity';
 import {
   FIT_REVIEW_DIMENSION_LABELS,
   type FitReviewDimensionKey,
@@ -94,6 +95,49 @@ export type BaselineCreationResult = {
   normalization?: CanonicalNormalizationResult;
 };
 
+export type BaselineAssessmentSummary = {
+  latestAssessmentId: string | null;
+  latestAssessmentCreatedAt: Date | null;
+  latestFitScore: number | null;
+  hasCompletedAssessment: boolean;
+};
+
+export type BaselineWithAssessmentSummary = Baseline & {
+  latestAssessmentSummary: BaselineAssessmentSummary;
+};
+
+export type BaselineAssessmentDebugState = {
+  baselineId: string;
+  latestPersistedAssessment: {
+    id: string;
+    userId: string;
+    baselineId: string;
+    createdAt: Date;
+    score: number;
+  } | null;
+  summary: BaselineAssessmentSummary;
+};
+
+export type BaselineAnalysisTrace = {
+  baselineId: string;
+  userId: string;
+  persistedAssessment: {
+    exists: boolean;
+    assessmentId?: string;
+    baselineId?: string;
+    userId?: string;
+    createdAt?: string;
+    score?: number;
+  };
+  baselineSummary: {
+    baselineId: string;
+    latestAssessmentId?: string;
+    hasCompletedAssessment: boolean;
+    latestFitScore?: number;
+    latestAssessmentCreatedAt?: string;
+  };
+};
+
  type CanonicalNormalizationResult = {
    canonical: BaselineSchemaCoreShape;
    roleCount: number;
@@ -137,6 +181,8 @@ export class BaselineService {
     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
     @InjectRepository(BaselineParsed)
     private readonly baselineParsedRepository: Repository<BaselineParsed>,
+    @InjectRepository(FitAssessment)
+    private readonly fitAssessmentRepository: Repository<FitAssessment>,
     private readonly embeddingService: EmbeddingService,
     private readonly baselineIngestionService: BaselineIngestionService,
   ) {}
@@ -688,12 +734,76 @@ return {
     await manager.save(parsedRecord);
   }
 
-  async listBaselinesForUser(userId: string, includeArchived = false) {
+  private async buildLatestAssessmentSummaryByBaselineId(
+    userId: string,
+    baselineIds: string[],
+  ): Promise<Map<string, BaselineAssessmentSummary>> {
+    const summaryByBaselineId = new Map<string, BaselineAssessmentSummary>();
+    for (const baselineId of baselineIds) {
+      summaryByBaselineId.set(baselineId, {
+        latestAssessmentId: null,
+        latestAssessmentCreatedAt: null,
+        latestFitScore: null,
+        hasCompletedAssessment: false,
+      });
+    }
+
+    if (!baselineIds.length) {
+      return summaryByBaselineId;
+    }
+
+    // Completion rule: a baseline is analyzed if there is at least one
+    // persisted fit_assessments row for the same userId + exact baselineId.
+    const latestPerBaseline = await this.fitAssessmentRepository
+      .createQueryBuilder('assessment')
+      .select('DISTINCT ON (assessment."baselineId") assessment."baselineId"', 'baselineId')
+      .addSelect('assessment.id', 'id')
+      .addSelect('assessment."createdAt"', 'createdAt')
+      .addSelect('assessment."overallScore"', 'overallScore')
+      .where('assessment."userId" = :userId', { userId })
+      .andWhere('assessment."baselineId" IN (:...baselineIds)', { baselineIds })
+      .orderBy('assessment."baselineId"', 'ASC')
+      .addOrderBy('assessment."createdAt"', 'DESC')
+      .addOrderBy('assessment.id', 'DESC')
+      .getRawMany<{
+        baselineId: string;
+        id: string;
+        createdAt: Date | string;
+        overallScore: number | string | null;
+      }>();
+
+    for (const row of latestPerBaseline) {
+      const parsedScore =
+        typeof row.overallScore === 'number'
+          ? row.overallScore
+          : typeof row.overallScore === 'string'
+            ? Number.parseInt(row.overallScore, 10)
+            : null;
+      summaryByBaselineId.set(row.baselineId, {
+        latestAssessmentId: row.id,
+        latestAssessmentCreatedAt: row.createdAt
+          ? new Date(row.createdAt)
+          : null,
+        latestFitScore:
+          typeof parsedScore === 'number' && Number.isFinite(parsedScore)
+            ? parsedScore
+            : null,
+        hasCompletedAssessment: true,
+      });
+    }
+
+    return summaryByBaselineId;
+  }
+
+  async listBaselinesForUser(
+    userId: string,
+    includeArchived = false,
+  ): Promise<BaselineWithAssessmentSummary[]> {
     const statusFilter = includeArchived
       ? {}
       : { status: BaselineStatus.ACTIVE };
 
-    return this.baselineRepository.find({
+    const baselines = await this.baselineRepository.find({
       where: {
         userId,
         ...statusFilter,
@@ -702,6 +812,112 @@ return {
         createdAt: 'DESC',
       },
     });
+
+    let summaries: Map<string, BaselineAssessmentSummary> = new Map();
+    try {
+      summaries = await this.buildLatestAssessmentSummaryByBaselineId(
+        userId,
+        baselines.map((baseline) => baseline.id),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? error.stack : undefined;
+      this.logger.error(
+        `Failed to load fit_assessments summary for baseline list userId=${userId}; returning baselines without assessment summary. message=${message}`,
+        stack,
+      );
+    }
+
+    const rows = baselines.map((baseline) => ({
+      ...baseline,
+      latestAssessmentSummary: summaries.get(baseline.id) ?? {
+        latestAssessmentId: null,
+        latestAssessmentCreatedAt: null,
+        latestFitScore: null,
+        hasCompletedAssessment: false,
+      },
+    }));
+
+    if (process.env.NODE_ENV !== 'production') {
+      rows.forEach((baseline) => {
+        this.logger.log(
+          `baselines.summary userId=${userId} baselineId=${baseline.id} latestAssessmentId=${baseline.latestAssessmentSummary.latestAssessmentId ?? 'null'} hasCompletedAssessment=${baseline.latestAssessmentSummary.hasCompletedAssessment} latestFitScore=${baseline.latestAssessmentSummary.latestFitScore ?? 'null'}`,
+        );
+      });
+    }
+
+    return rows;
+  }
+
+  async getBaselineAssessmentDebugState(
+    userId: string,
+    baselineId: string,
+  ): Promise<BaselineAssessmentDebugState> {
+    const trimmedBaselineId = baselineId.trim();
+    if (!trimmedBaselineId) {
+      throw new BadRequestException('baselineId is required');
+    }
+
+    await this.getBaselineByIdForUser(trimmedBaselineId, userId);
+
+    const latestPersistedAssessment = await this.fitAssessmentRepository.findOne({
+      where: { userId, baselineId: trimmedBaselineId },
+      order: { createdAt: 'DESC', id: 'DESC' },
+    });
+    const summaries = await this.buildLatestAssessmentSummaryByBaselineId(userId, [
+      trimmedBaselineId,
+    ]);
+    const summary = summaries.get(trimmedBaselineId) ?? {
+      latestAssessmentId: null,
+      latestAssessmentCreatedAt: null,
+      latestFitScore: null,
+      hasCompletedAssessment: false,
+    };
+
+    return {
+      baselineId: trimmedBaselineId,
+      latestPersistedAssessment: latestPersistedAssessment
+        ? {
+            id: latestPersistedAssessment.id,
+            userId: latestPersistedAssessment.userId,
+            baselineId: latestPersistedAssessment.baselineId,
+            createdAt: latestPersistedAssessment.createdAt,
+            score: latestPersistedAssessment.overallScore,
+          }
+        : null,
+      summary,
+    };
+  }
+
+  async getBaselineAnalysisTrace(
+    userId: string,
+    baselineId: string,
+  ): Promise<BaselineAnalysisTrace> {
+    const state = await this.getBaselineAssessmentDebugState(userId, baselineId);
+
+    return {
+      baselineId: state.baselineId,
+      userId,
+      persistedAssessment: state.latestPersistedAssessment
+        ? {
+            exists: true,
+            assessmentId: state.latestPersistedAssessment.id,
+            baselineId: state.latestPersistedAssessment.baselineId,
+            userId: state.latestPersistedAssessment.userId,
+            createdAt: state.latestPersistedAssessment.createdAt.toISOString(),
+            score: state.latestPersistedAssessment.score,
+          }
+        : { exists: false },
+      baselineSummary: {
+        baselineId: state.baselineId,
+        latestAssessmentId: state.summary.latestAssessmentId ?? undefined,
+        hasCompletedAssessment: state.summary.hasCompletedAssessment,
+        latestFitScore: state.summary.latestFitScore ?? undefined,
+        latestAssessmentCreatedAt: state.summary.latestAssessmentCreatedAt
+          ? state.summary.latestAssessmentCreatedAt.toISOString()
+          : undefined,
+      },
+    };
   }
 
   async archiveBaseline(userId: string, baselineId: string) {
@@ -740,7 +956,10 @@ return {
     return this.baselineRepository.save(baseline);
   }
 
-  async getBaselineByIdForUser(id: string, userId: string) {
+  async getBaselineByIdForUser(
+    id: string,
+    userId: string,
+  ): Promise<BaselineWithAssessmentSummary> {
     const baseline = await this.baselineRepository.findOne({
       where: { id, userId },
       relations: ['sections'],
@@ -755,7 +974,29 @@ return {
       throw new NotFoundException('Baseline not found');
     }
 
-    return baseline;
+    let summary: BaselineAssessmentSummary | undefined;
+    try {
+      summary = (
+        await this.buildLatestAssessmentSummaryByBaselineId(userId, [baseline.id])
+      ).get(baseline.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? error.stack : undefined;
+      this.logger.error(
+        `Failed to load fit_assessments summary for baseline detail userId=${userId} baselineId=${id}; returning baseline detail with default summary. message=${message}`,
+        stack,
+      );
+    }
+
+    return {
+      ...baseline,
+      latestAssessmentSummary: summary ?? {
+        latestAssessmentId: null,
+        latestAssessmentCreatedAt: null,
+        latestFitScore: null,
+        hasCompletedAssessment: false,
+      },
+    };
   }
 
   async recordBaselineAnalysisScore(

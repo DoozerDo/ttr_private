@@ -78,24 +78,25 @@ export function RunYourAnalysisSection({
       <div id="check-compatibility" className="scroll-mt-24" />
       <section id="compatibility-form" className="scroll-mt-24 border-b border-slate-800/60 bg-slate-900/15">
       <div className="mx-auto w-full max-w-[1200px] px-4 py-12 md:px-10 lg:px-16">
-        <div className="mx-auto max-w-4xl rounded-2xl bg-slate-900/70 p-5 shadow-[0_18px_50px_rgba(15,23,42,0.3)]">
-          <h2 className="text-2xl font-semibold text-white lg:text-3xl">Check your compatibility</h2>
+        <div className="mx-auto max-w-4xl rounded-2xl bg-slate-900/55 p-5 shadow-[0_18px_50px_rgba(15,23,42,0.3)]">
+          <h2 className="text-2xl font-semibold text-white lg:text-3xl">Run your analysis</h2>
+          <p className="mt-2 text-sm text-slate-300">
+            After you upload and paste the role, we generate a compatibility score and clear next action.
+          </p>
           <div className="mt-6 space-y-5">
-            <div className="rounded-xl border border-slate-700/70 bg-slate-950/60 p-4">
-              <h3 className="text-base font-semibold text-white">Upload your resume</h3>
-              <p className="mt-1 text-sm text-slate-300">
-                Start by uploading your resume to generate your baseline.
-              </p>
-              <div className="mt-4">
+            <div className="rounded-xl border border-slate-700/70 bg-slate-950/40 p-4">
+              <div className="flex flex-wrap items-center gap-3">
                 <button
                   type="button"
                   onClick={handleUploadClick}
-                  className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300/70"
+                  className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300/70"
                 >
-                  Upload your resume
+                  Select resume
                 </button>
+                <p className="text-sm text-slate-200">
+                  {resumeFilename ? `Ready: ${resumeFilename}` : "PDF or DOCX"}
+                </p>
               </div>
-              <p className="mt-2 text-xs text-slate-400">{resumeFilename ? `Selected: ${resumeFilename}` : "PDF or DOCX"}</p>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -150,10 +151,10 @@ export function RunYourAnalysisSection({
               {!jdReady ? (
                 <p className="text-xs text-slate-600">Paste more of the job description to enable analysis.</p>
               ) : (
-                <p className="text-xs text-slate-500">Job description looks ready to analyze.</p>
+                <p className="text-xs text-slate-500">Ready. Click Analyze to generate your score.</p>
               )}
               <p className="text-xs text-slate-600">
-                No signup required for your first analysis. Resume content is not stored unless you create an account.
+                No signup required for your first analysis. We process your resume for scoring only.
               </p>
             </div>
           </div>

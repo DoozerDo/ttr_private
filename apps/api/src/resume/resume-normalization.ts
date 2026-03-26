@@ -403,6 +403,23 @@ function parseExperienceHeader(line: string): Omit<NormalizedResumeExperienceEnt
       };
     }
 
+    // Handle canonical company|role|date layouts.
+    if (
+      parts.length >= 3 &&
+      !firstLooksRole &&
+      isLikelyRoleTitle(second) &&
+      parseDateRange(third || parts[parts.length - 1] || '').dateRange
+    ) {
+      const dateInfo = parseDateRange(third || parts[parts.length - 1] || '');
+      const locationParts = parts.slice(2, -1).filter((part) => isLikelyLocation(part));
+      return {
+        roleTitle: second,
+        company: first || 'Company',
+        location: locationParts.length ? locationParts.join(' | ') : undefined,
+        ...dateInfo,
+      };
+    }
+
     const roleTitle = parts[0] || '';
     const remainder = parts.slice(1);
     const dateCandidate = remainder[remainder.length - 1] ?? '';
@@ -638,13 +655,28 @@ function buildExperienceFromSection(section: ResumeExportSection): NormalizedRes
 
     if (parsedDate || line.includes('|')) {
       const currentEntry = current as ExperienceCandidate | null;
+      const roleNorm = parsedRole ? normalizeLine(parsedRole).toLowerCase() : '';
+      const currentRoleNorm = currentEntry?.roleTitle
+        ? normalizeLine(currentEntry.roleTitle).toLowerCase()
+        : '';
+      const hasRoleTransition =
+        Boolean(currentRoleNorm) &&
+        Boolean(roleNorm) &&
+        roleNorm !== currentRoleNorm;
+      const hasDateTransition =
+        Boolean(currentEntry?.dateRange) &&
+        Boolean(parsedDate?.dateRange) &&
+        normalizeLine(parsedDate?.dateRange ?? '').toLowerCase() !==
+          normalizeLine(currentEntry?.dateRange ?? '').toLowerCase();
       if (
         currentEntry &&
-        currentEntry.company &&
-        parsedCompany &&
-        normalizeLine(parsedCompany).toLowerCase() !==
-          normalizeLine(currentEntry.company).toLowerCase() &&
-        currentEntry.bullets.length > 0
+        currentEntry.bullets.length > 0 &&
+        ((currentEntry.company &&
+          parsedCompany &&
+          normalizeLine(parsedCompany).toLowerCase() !==
+            normalizeLine(currentEntry.company).toLowerCase()) ||
+          hasRoleTransition ||
+          hasDateTransition)
       ) {
         finalizeCurrent();
       }

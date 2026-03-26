@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Logger,
   Param,
   Post,
   Req,
@@ -22,6 +23,8 @@ import { ScoreSimulatorService } from './services/score-simulator.service';
 @Controller('analysis')
 @UseGuards(AuthGuard('jwt'))
 export class AnalysisController {
+  private readonly logger = new Logger(AnalysisController.name);
+
   constructor(
     private readonly analysisService: AnalysisService,
     private readonly alignmentHistoryService: AlignmentHistoryService,
@@ -59,9 +62,38 @@ export class AnalysisController {
       debug === '1' ||
       debug === 'true' ||
       Boolean(body.debug);
+
     const payload = { ...body, debug: debugEnabled };
 
-    return this.analysisService.runFitAssessment(userId, payload);
+    if (process.env.NODE_ENV !== 'production') {
+      const baselineId = payload.baselineId;
+      const jobId = payload.jobId;
+
+      this.logger.log(
+        `analysis.run request userId=${userId} baselineId=${baselineId ?? 'missing'} jobId=${jobId ?? 'missing'}`,
+      );
+    }
+
+    const result = await this.analysisService.runFitAssessment(userId, payload);
+
+    if (process.env.NODE_ENV !== 'production') {
+      const assessmentId =
+        'assessmentId' in result ? result.assessmentId : undefined;
+      const baselineId =
+        'baselineId' in result ? result.baselineId : undefined;
+      const score =
+        'score' in result
+          ? result.score
+          : 'fit_score' in result
+            ? result.fit_score
+            : undefined;
+
+      this.logger.log(
+        `analysis.run response userId=${userId} assessmentId=${assessmentId ?? 'missing'} baselineId=${baselineId ?? 'missing'} score=${score ?? 'missing'}`,
+      );
+    }
+
+    return result;
   }
 
   @Post('run-expanded')
@@ -192,4 +224,3 @@ export class AnalysisController {
     return this.scoreSimulatorService.getSimulation(userId, assessmentId);
   }
 }
-

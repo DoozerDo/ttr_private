@@ -14,7 +14,13 @@ import {
 import { Alert } from "@/components/Alert";
 import { FormButton } from "@/components/FormButton";
 import { InsufficientExtractedText } from "@/components/compliance/InsufficientExtractedText";
-import { archiveBaseline, deleteBaseline, type BaselineDto } from "@/lib/baselines";
+import {
+  archiveBaseline,
+  deleteBaseline,
+  isBaselineAnalyzedFromSummary,
+  type BaselineAssessmentSummaryDto,
+  type BaselineDto,
+} from "@/lib/baselines";
 import {
   parseComplianceError,
   readResponsePayload,
@@ -40,8 +46,7 @@ type BaselineStudioHomeProps = {
   libraryMode?: "editable" | "readonly";
 };
 
-type ResumeAnalysisStatus = "not_analyzed" | "loading" | "ready" | "failed";
-type BaselineStrengthState = "empty" | "needs_analysis" | "failed" | "ready";
+type BaselineStrengthState = "empty" | "needs_analysis" | "ready";
 
 type StrengtheningPrompt = {
   question: string;
@@ -178,30 +183,32 @@ function getUploadedBaselineRecord(data: unknown): BaselineDto | null {
   return baseline;
 }
 
-function getStatusLabel(status: ResumeAnalysisStatus) {
-  switch (status) {
-    case "loading":
-      return "Analyzing";
-    case "ready":
-      return "Analysis ready";
-    case "failed":
-      return "Analysis failed";
-    default:
-      return "Not analyzed";
-  }
+function getAssessmentSummaryStatusTone(hasCompletedAssessment: boolean) {
+  return hasCompletedAssessment
+    ? "border-emerald-300/15 bg-emerald-400/[0.08] text-emerald-100"
+    : "border-white/10 bg-white/[0.05] text-slate-300";
 }
 
-function getStatusTone(status: ResumeAnalysisStatus) {
-  switch (status) {
-    case "ready":
-      return "border-emerald-300/15 bg-emerald-400/[0.08] text-emerald-100";
-    case "failed":
-      return "border-amber-300/15 bg-amber-400/[0.08] text-amber-100";
-    case "loading":
-      return "border-sky-300/15 bg-sky-400/[0.08] text-sky-100";
-    default:
-      return "border-white/10 bg-white/[0.05] text-slate-300";
-  }
+function toEpoch(value: string | null | undefined) {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function resolveCanonicalAssessmentSummary(
+  ...candidates: Array<BaselineAssessmentSummaryDto | null | undefined>
+): BaselineAssessmentSummaryDto | undefined {
+  const summaries = candidates.filter(
+    (candidate): candidate is BaselineAssessmentSummaryDto => Boolean(candidate),
+  );
+  if (!summaries.length) return undefined;
+
+  const analyzed = summaries.filter((summary) => isBaselineAnalyzedFromSummary(summary));
+  const pool = analyzed.length ? analyzed : summaries;
+  return [...pool].sort(
+    (left, right) =>
+      toEpoch(right.latestAssessmentCreatedAt) - toEpoch(left.latestAssessmentCreatedAt),
+  )[0];
 }
 
 function createBaselineUpdateProposal(signalLabel: string, answer: string) {
@@ -234,9 +241,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     getMostRecentBaselineId(baselines),
   );
   const [baselineDetails, setBaselineDetails] = useState<Record<string, BaselineDto>>({});
-  const [analysisStatusByBaselineId, setAnalysisStatusByBaselineId] = useState<
-    Record<string, ResumeAnalysisStatus>
-  >({});
   const [activeStrengtheningSignalId, setActiveStrengtheningSignalId] =
     useState<ProfessionalSignalId | null>(null);
   const [strengtheningAnswer, setStrengtheningAnswer] = useState("");
@@ -294,15 +298,27 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
 
   const primaryBaseline = useMemo(() => {
     if (!primaryBaselineId) return null;
-    return (
-      baselineDetails[primaryBaselineId] ??
-      allBaselines.find((item) => item.id === primaryBaselineId && item.status !== "ARCHIVED") ??
-      null
-    );
+    const listBaseline =
+      allBaselines.find((item) => item.id === primaryBaselineId && item.status !== "ARCHIVED") ?? null;
+    const detailBaseline = baselineDetails[primaryBaselineId] ?? null;
+
+    if (!listBaseline) return detailBaseline;
+    if (!detailBaseline) return listBaseline;
+
+    return {
+      ...listBaseline,
+      ...detailBaseline,
+      latestAssessmentSummary: resolveCanonicalAssessmentSummary(
+        detailBaseline.latestAssessmentSummary,
+        listBaseline.latestAssessmentSummary,
+      ),
+    };
   }, [allBaselines, baselineDetails, primaryBaselineId]);
 
-  const primaryAnalysisStatus = primaryBaselineId
-    ? analysisStatusByBaselineId[primaryBaselineId] ?? "not_analyzed"
+  const primaryAnalysisStatus = isBaselineAnalyzedFromSummary(
+    primaryBaseline?.latestAssessmentSummary,
+  )
+    ? "ready"
     : "not_analyzed";
 
   const approvedSignalAdditions = useMemo(
@@ -355,7 +371,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   );
   const baselineStrengthState: BaselineStrengthState = useMemo(() => {
     if (activeBaselines.length === 0) return "empty";
-    if (primaryAnalysisStatus === "failed") return "failed";
     if (!primaryBaselineId || primaryAnalysisStatus !== "ready" || !primaryBaseline?.sections?.length) {
       return "needs_analysis";
     }
@@ -446,6 +461,19 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
 
     const payload = (await response.json()) as BaselineDto[];
     setBaselineList(payload);
+    setBaselineDetails({});
+
+    if (process.env.NODE_ENV !== "production") {
+      payload.forEach((baseline) => {
+        console.debug("[BaselineStudioHome] refreshed baseline summary", {
+          baselineId: baseline.id,
+          hasCompletedAssessment: isBaselineAnalyzedFromSummary(
+            baseline.latestAssessmentSummary,
+          ),
+          latestAssessmentCreatedAt: baseline.latestAssessmentSummary?.latestAssessmentCreatedAt ?? null,
+        });
+      });
+    }
     return payload;
   }, []);
 
@@ -478,7 +506,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
       setPrimaryBaselineId(baselineId);
       setLoadingBaselineId(baselineId);
       setError(null);
-      setAnalysisStatusByBaselineId((current) => ({ ...current, [baselineId]: "loading" }));
 
       try {
         const response = await fetch(`/api/baselines/${encodeURIComponent(baselineId)}`, {
@@ -494,10 +521,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         const hasAnalysis = Boolean(payload.sections?.length);
 
         setBaselineDetails((current) => ({ ...current, [baselineId]: payload }));
-        setAnalysisStatusByBaselineId((current) => ({
-          ...current,
-          [baselineId]: hasAnalysis ? "ready" : "failed",
-        }));
         if (hasAnalysis) {
           const scoredGraph = buildBaselineSignalGraph({ baseline: payload });
           const scoredPercent = deriveBaselineStrengthPercent(payload, scoredGraph);
@@ -526,7 +549,18 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
 
           setBaselineDetails((current) => ({ ...current, [baselineId]: optimisticBaseline }));
           setBaselineList((current) =>
-            current.map((item) => (item.id === baselineId ? { ...item, ...optimisticBaseline } : item)),
+            current.map((item) =>
+              item.id === baselineId
+                ? {
+                    ...item,
+                    ...optimisticBaseline,
+                    latestAssessmentSummary: resolveCanonicalAssessmentSummary(
+                      item.latestAssessmentSummary,
+                      optimisticBaseline.latestAssessmentSummary,
+                    ),
+                  }
+                : item,
+            ),
           );
           setBaselineUpdatedNotice(buildBaselineUpdatedMessage(previousScore, scoredPercent));
 
@@ -559,7 +593,16 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
               }));
               setBaselineList((current) =>
                 current.map((item) =>
-                  item.id === baselineId ? { ...item, ...persistedBaseline } : item,
+                  item.id === baselineId
+                    ? {
+                        ...item,
+                        ...persistedBaseline,
+                        latestAssessmentSummary: resolveCanonicalAssessmentSummary(
+                          item.latestAssessmentSummary,
+                          persistedBaseline.latestAssessmentSummary,
+                        ),
+                      }
+                    : item,
                 ),
               );
               setBaselineUpdatedNotice(
@@ -579,7 +622,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         scrollToAnalysis();
       } catch (fetchError) {
         console.error("Unable to load baseline details", fetchError);
-        setAnalysisStatusByBaselineId((current) => ({ ...current, [baselineId]: "failed" }));
         setError(
           fetchError instanceof Error
             ? fetchError.message
@@ -733,10 +775,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         setUploadSuccessId(baselineRecord.id);
         setHighlightedBaselineId(baselineRecord.id);
         setPostUploadCtaBaselineId(baselineRecord.id);
-        setAnalysisStatusByBaselineId((current) => ({
-          ...current,
-          [baselineRecord.id]: "not_analyzed",
-        }));
       } catch (uploadError) {
         console.error("Upload failed", uploadError);
         setError("Unable to upload resume right now.");
@@ -779,11 +817,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           delete next[baselineId];
           return next;
         });
-        setAnalysisStatusByBaselineId((current) => {
-          const next = { ...current };
-          delete next[baselineId];
-          return next;
-        });
         setPostUploadCtaBaselineId((current) => (current === baselineId ? null : current));
         setUploadSuccessId((current) => (current === baselineId ? null : current));
         setPrimaryBaselineId(nextPrimaryId);
@@ -816,11 +849,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
 
         setBaselineList((current) => current.filter((item) => item.id !== baselineId));
         setBaselineDetails((current) => {
-          const next = { ...current };
-          delete next[baselineId];
-          return next;
-        });
-        setAnalysisStatusByBaselineId((current) => {
           const next = { ...current };
           delete next[baselineId];
           return next;
@@ -893,10 +921,41 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   }, [fetchBaselineDetails, primaryBaselineId, refreshBaselineLibrary]);
 
   useEffect(() => {
+    const refetchFromServer = () => {
+      void refreshBaselineLibrary();
+    };
+
+    window.addEventListener("focus", refetchFromServer);
+    window.addEventListener("pageshow", refetchFromServer);
+
+    return () => {
+      window.removeEventListener("focus", refetchFromServer);
+      window.removeEventListener("pageshow", refetchFromServer);
+    };
+  }, [refreshBaselineLibrary]);
+
+  useEffect(() => {
     if (!baselineUpdatedNotice) return;
     const timer = window.setTimeout(() => setBaselineUpdatedNotice(null), 3000);
     return () => window.clearTimeout(timer);
   }, [baselineUpdatedNotice]);
+
+  const debugEnabled = process.env.NODE_ENV !== "production";
+  const handleDebugBaselineTrace = useCallback(async (baselineId: string) => {
+    try {
+      const response = await fetch(
+        `/api/debug/baseline-analysis-trace?baselineId=${encodeURIComponent(baselineId)}`,
+        {
+          cache: "no-store",
+          credentials: "include",
+        },
+      );
+      const payload = await response.json();
+      console.log("[Baseline debug trace]", payload);
+    } catch (traceError) {
+      console.error("Unable to load baseline debug trace", traceError);
+    }
+  }, []);
 
   return (
     <div className="mx-auto w-full max-w-6xl px-6 2xl:px-8">
@@ -940,10 +999,10 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
               ) : heroState === "in_progress" && primaryBaselineId ? (
                 <FormButton
                   onClick={() => void fetchBaselineDetails(primaryBaselineId)}
-                  disabled={loadingBaselineId === primaryBaselineId || !isHydrated}
+                  disabled={!isHydrated}
                   className="bg-indigo-600 text-white hover:bg-indigo-500"
                 >
-                  {loadingBaselineId === primaryBaselineId ? "Analyzing..." : "Analyze baseline"}
+                  Analyze baseline
                 </FormButton>
               ) : (
                 <FormButton
@@ -975,10 +1034,13 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             <div className="space-y-3">
               {allBaselines.slice(0, 3).map((baseline) => {
                 const isPrimary = primaryBaselineId === baseline.id;
-                const status = analysisStatusByBaselineId[baseline.id] ?? "not_analyzed";
                 const isArchived = baseline.status === "ARCHIVED";
-                const canView = status === "ready";
+                const assessmentSummary = baseline.latestAssessmentSummary;
+                const hasCompletedAssessment = isBaselineAnalyzedFromSummary(assessmentSummary);
+                const canView = hasCompletedAssessment;
                 const isLoading = loadingBaselineId === baseline.id;
+                const latestFitScore = assessmentSummary?.latestFitScore;
+                const latestAssessmentTimestamp = assessmentSummary?.latestAssessmentCreatedAt;
 
                 return (
                   <article
@@ -997,14 +1059,23 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                         </span>
                       ) : null}
                       <span
-                        className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] ${getStatusTone(
-                          status,
+                        className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] ${getAssessmentSummaryStatusTone(
+                          hasCompletedAssessment,
                         )}`}
                       >
-                        {getStatusLabel(status)}
+                        {isLoading ? "Analyzing..." : hasCompletedAssessment ? "Analysis ready" : "Not analyzed"}
                       </span>
                     </div>
                     <p className="mt-2 text-xs text-slate-400">Uploaded {formatDateTime(baseline.createdAt)}</p>
+                    {hasCompletedAssessment ? (
+                      <p className="mt-1 text-xs text-slate-400">
+                        Last analyzed{" "}
+                        {latestAssessmentTimestamp
+                          ? formatDateTime(latestAssessmentTimestamp)
+                          : "recently"}
+                        {typeof latestFitScore === "number" ? ` • Fit ${latestFitScore}%` : ""}
+                      </p>
+                    ) : null}
                     <div className="mt-4 flex flex-wrap gap-2">
                       <FormButton
                         onClick={() => {
@@ -1041,6 +1112,14 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                           >
                             {deletingBaselineId === baseline.id ? "Deleting..." : "Delete"}
                           </FormButton>
+                          {debugEnabled ? (
+                            <FormButton
+                              variant="ghost"
+                              onClick={() => void handleDebugBaselineTrace(baseline.id)}
+                            >
+                              Debug baseline
+                            </FormButton>
+                          ) : null}
                         </>
                       ) : null}
                     </div>
@@ -1137,13 +1216,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
 
         <section className="space-y-3 rounded-[20px] border border-white/10 bg-slate-900/20 p-5">
           <h2 className="text-xl font-semibold tracking-tight text-slate-100">Baseline readiness</h2>
-          {baselineStrengthState === "failed" && primaryBaselineId ? (
-            <p className="text-sm leading-6 text-slate-300">
-              Analysis failed for your current baseline. Retry analysis before targeting.
-            </p>
-          ) : (
-            <p className="text-sm leading-6 text-slate-300">{certification.summary}</p>
-          )}
+          <p className="text-sm leading-6 text-slate-300">{certification.summary}</p>
           <details className="rounded-[14px] border border-white/10 bg-slate-950/30 px-4 py-3">
             <summary className="cursor-pointer text-sm font-semibold text-slate-200">
               View readiness details

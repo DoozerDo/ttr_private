@@ -220,6 +220,41 @@ export class BaselineController {
     );
   }
 
+  @Get('debug/baseline-assessment-state')
+  async getBaselineAssessmentDebugState(
+    @Req() request: Request & { user?: { id?: string } },
+    @Query('baselineId') baselineId?: string,
+  ) {
+    const userId = request.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+    if (!baselineId?.trim()) {
+      throw new BadRequestException('baselineId is required');
+    }
+
+    return this.baselineService.getBaselineAssessmentDebugState(
+      userId,
+      baselineId.trim(),
+    );
+  }
+
+  @Get('debug/baseline-analysis-trace')
+  async getBaselineAnalysisTrace(
+    @Req() request: Request & { user?: { id?: string } },
+    @Query('baselineId') baselineId?: string,
+  ) {
+    const userId = request.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+    if (!baselineId?.trim()) {
+      throw new BadRequestException('baselineId is required');
+    }
+
+    return this.baselineService.getBaselineAnalysisTrace(userId, baselineId.trim());
+  }
+
   @Patch(':id/archive')
   async archiveBaseline(
     @Param('id') id: string,

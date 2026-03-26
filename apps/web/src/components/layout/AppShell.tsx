@@ -102,6 +102,7 @@ type AutoErrorPayload = {
 
 const AUTO_ERROR_RECENT_LIMIT = 12;
 const AUTO_ERROR_LOCAL_DEDUPE_WINDOW_MS = 60_000;
+const LAST_API_SNAPSHOT_KEY = "ttr:last-api-response-snapshot";
 
 export function AppShell({ children, userEmail, userId }: AppShellProps) {
   const router = useRouter();
@@ -324,6 +325,20 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
 
       try {
         const response = await originalFetch(...args);
+        if (typeof window !== "undefined" && endpoint.startsWith("/api/")) {
+          const snapshot = {
+            endpoint,
+            method,
+            status: response.status,
+            ok: response.ok,
+            at: new Date().toISOString(),
+          };
+          try {
+            window.sessionStorage.setItem(LAST_API_SNAPSHOT_KEY, JSON.stringify(snapshot));
+          } catch {
+            // best effort only
+          }
+        }
         if (response.status >= 500 && !isAutoErrorEndpoint) {
           appendDiagnostic({
             source: "fetch",
@@ -427,7 +442,10 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
               }}
             >
               <div className="absolute right-0 top-0 z-50 flex items-center gap-3">
-                <ReportBugTrigger className="text-xs font-semibold text-slate-200 hover:text-white" />
+                <ReportBugTrigger
+                  className="text-xs font-semibold text-slate-200 hover:text-white"
+                  label="Report Issue"
+                />
                 <TopNavAccountArea initialEmail={userEmail} />
               </div>
               <JourneyNavV1 state={journeyNavState} onStepClick={handleJourneyStepClick} />
@@ -438,10 +456,10 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
           </main>
           <footer className="border-t border-[var(--border-strong)] bg-[var(--bg-app)] px-6 py-4 text-slate-400">
             <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
-              <p>Need help? Report a bug and we will investigate with context.</p>
+              <p>Need help? Report an issue and we will store raw context for investigation.</p>
               <ReportBugTrigger
                 className="rounded-full border border-white/10 px-3 py-1 text-[0.75rem] text-white hover:border-white/40"
-                label="Report a bug"
+                label="Report Issue"
               />
             </div>
             <p className="mt-2 text-[0.65rem] text-slate-500">Build {shortBuildSha}</p>

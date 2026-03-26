@@ -25,6 +25,24 @@ function extractParagraphXml(documentXml: string): string[] {
 }
 
 describe('resume-normalization', () => {
+  it('parses company | role | date headers without losing the role title', () => {
+    const document = buildNormalizedResumeDocument([
+      {
+        type: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        content: [
+          'Northstar Cloud | Senior Product Operations Manager | 2021 - Present',
+          '- Built onboarding experiments that increased activation by 21 percent.',
+        ].join('\n'),
+      },
+    ] as any);
+
+    expect(document.experience).toHaveLength(1);
+    expect(document.experience[0]?.company).toBe('Northstar Cloud');
+    expect(document.experience[0]?.roleTitle).toBe('Senior Product Operations Manager');
+    expect(document.experience[0]?.dateRange).toBe('2021 - Present');
+  });
+
   it('keeps bullets attached to the correct experience role', () => {
     const document = buildNormalizedResumeDocument([
       {
