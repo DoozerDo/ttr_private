@@ -207,7 +207,8 @@ function Show-BuildModeBanner {
 function Invoke-ComposeRebuild {
     param(
         [Parameter(Mandatory = $true)][string]$ComposeFile,
-        [switch]$ResetDbVolume
+        [switch]$ResetDbVolume,
+        [string[]]$Services
     )
 
     # Full schema rebuild mode explicitly tears down volumes to avoid
@@ -215,7 +216,11 @@ function Invoke-ComposeRebuild {
     if ($ResetDbVolume) {
         docker compose -f $ComposeFile down -v
     }
-    docker compose -f $ComposeFile up -d --build
+    if ($Services -and $Services.Count -gt 0) {
+        docker compose -f $ComposeFile up -d --build @Services
+    } else {
+        docker compose -f $ComposeFile up -d --build
+    }
 }
 
 function Get-ChangedRepoPaths {
@@ -245,31 +250,137 @@ function Get-ChangedRepoPaths {
         Sort-Object -Unique
 }
 
-function Get-PersistenceRiskChanges {
+function Test-IsStrictWebPresentationPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    if ($Path -match '^apps/web/app/api/') { return $false }
+    if ($Path -match '^apps/web/app/') { return $true }
+    if ($Path -match '^apps/web/components/') { return $true }
+    if ($Path -match '^apps/web/tests/') { return $true }
+    if ($Path -match '^apps/web/public/') { return $true }
+    if ($Path -match '^apps/web/styles/') { return $true }
+
+    if ($Path -match '^apps/web/lib/') {
+        # Keep this strict: only clearly presentational helpers are allowed in build-both.
+        if ($Path -match '^apps/web/lib/(ui/|theme/|styles?/|color|colors|copy|copywriting|format|formatters|classnames|classNames|icons?)(/|\.|$)') {
+            return $true
+        }
+        return $false
+    }
+
+    return $false
+}
+
+function Get-BuildBothClassification {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot
     )
 
     $paths = Get-ChangedRepoPaths -RepoRoot $RepoRoot
-    $riskMatches = @()
+    $grouped = [ordered]@{
+        "API/backend code changes" = @()
+        "Server route or proxy changes" = @()
+        "Shared contract/type changes" = @()
+        "Persistence/schema changes" = @()
+        "Auth/config/env changes" = @()
+        "Build/infra/tooling changes" = @()
+        "Ambiguous non-presentational runtime changes" = @()
+    }
 
     foreach ($path in $paths) {
-        $isRisk = $false
+        if (Test-IsStrictWebPresentationPath -Path $path) {
+            continue
+        }
 
-        if ($path -match '^apps/api/src/migrations/') { $isRisk = $true }
-        elseif ($path -match '^apps/api/src/.+\.entity\.ts$') { $isRisk = $true }
-        elseif ($path -match '^apps/api/src/data-source(\..+)?$') { $isRisk = $true }
-        elseif ($path -eq 'apps/api/src/app.module.ts') { $isRisk = $true }
-        elseif ($path -eq 'infra/docker/docker-compose.dev.yml') { $isRisk = $true }
-        elseif ($path -eq 'infra/docker/docker-compose.local.yml') { $isRisk = $true }
-        elseif ($path -eq 'apps/api/package.json') { $isRisk = $true }
+        if ($path -match '^apps/api/') {
+            $grouped["API/backend code changes"] += $path
+            continue
+        }
 
-        if ($isRisk) {
-            $riskMatches += $path
+        if ($path -match '^apps/web/app/api/' -or $path -match '^apps/web/app/.+/route\.tsx?$' -or $path -match '^apps/web/app/api/.+/route\.tsx?$') {
+            $grouped["Server route or proxy changes"] += $path
+            continue
+        }
+
+        if ($path -match '^apps/web/middleware(\.|$)' -or
+            $path -match '^packages/' -or
+            $path -match '^shared/' -or
+            $path -match '/(schema|schemas|types?|contracts?)(/|\.|$)') {
+            $grouped["Shared contract/type changes"] += $path
+            continue
+        }
+
+        if ($path -match '/migrations?/' -or
+            $path -match '\.entity\.ts$' -or
+            $path -match 'data-source' -or
+            $path -match 'typeorm' -or
+            $path -match 'prisma' -or
+            $path -match 'database') {
+            $grouped["Persistence/schema changes"] += $path
+            continue
+        }
+
+        if ($path -match '(^|/)\.env' -or
+            $path -match '/env(\.|/|$)' -or
+            $path -match '/auth(\.|/|$)' -or
+            $path -match '/config(\.|/|$)' -or
+            $path -match '/settings(\.|/|$)') {
+            $grouped["Auth/config/env changes"] += $path
+            continue
+        }
+
+        if ($path -match '^infra/' -or
+            $path -match 'docker' -or
+            $path -match '^scripts/' -or
+            $path -match '(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|tsconfig.*\.json|turbo\.json|nx\.json|vite\.config|next\.config|webpack\.config)($|/)') {
+            $grouped["Build/infra/tooling changes"] += $path
+            continue
+        }
+
+        $grouped["Ambiguous non-presentational runtime changes"] += $path
+    }
+
+    $blockingGroups = [ordered]@{}
+    foreach ($key in $grouped.Keys) {
+        $values = @($grouped[$key] | Sort-Object -Unique)
+        if ($values.Count -gt 0) {
+            $blockingGroups[$key] = $values
         }
     }
 
-    return $riskMatches | Sort-Object -Unique
+    return [pscustomobject]@{
+        changedFiles = $paths
+        safeForBuildBoth = ($blockingGroups.Count -eq 0)
+        blockingGroups = $blockingGroups
+    }
+}
+
+function Show-BuildBothDecision {
+    param(
+        [Parameter(Mandatory = $true)]$classification
+    )
+
+    if ($classification.safeForBuildBoth) {
+        Write-Host "build-both allowed: only presentation-only web files changed."
+        return
+    }
+
+    Write-Host ""
+    Write-Host "build-both blocked. Detected changes outside strict web-only scope."
+    foreach ($group in $classification.blockingGroups.GetEnumerator()) {
+        Write-Host " - $($group.Key):"
+        foreach ($file in $group.Value) {
+            Write-Host "   - $file"
+        }
+    }
+    Write-Host ""
+    Write-Host "Reason:"
+    Write-Host "build-both is reserved for presentation-only web changes. These changes can affect API behavior, contracts, runtime state, or container stability. Use build-all instead."
+    Write-Host ""
+    Write-Host "Next step:"
+    Write-Host "Run build-all."
 }
 
 Function Invoke-BuildBoth {
@@ -286,30 +397,18 @@ Function Invoke-BuildBoth {
         Show-BuildModeBanner `
             -Mode "Web/UI rebuild" `
             -DbVolumeState "preserved" `
-            -UseWhen "no schema or migration changes"
+            -UseWhen "presentation-only web changes"
 
-        $riskChanges = Get-PersistenceRiskChanges -RepoRoot $repoRoot
-        if ($riskChanges.Count -gt 0 -and -not $Force) {
-            Write-Host ""
-            Write-Host "build-both blocked."
-            Write-Host "Detected persistence/schema-related changes:"
-            foreach ($file in $riskChanges) {
-                Write-Host " - $file"
-            }
-            Write-Host ""
-            Write-Host "Reason:"
-            Write-Host "build-both preserves the local DB volume and is intended only for Web/UI work."
-            Write-Host ""
-            Write-Host "Next step:"
-            Write-Host "Run build-all instead."
-            throw "build-both blocked due to persistence/schema-risk changes."
+        $classification = Get-BuildBothClassification -RepoRoot $repoRoot
+        if (-not $classification.safeForBuildBoth -and -not $Force) {
+            Show-BuildBothDecision -classification $classification
+            throw "build-both blocked due to strict web-only gate."
         }
-        if ($riskChanges.Count -gt 0 -and $Force) {
+        if (-not $classification.safeForBuildBoth -and $Force) {
             Write-Host "WARNING: build-both override enabled with -Force."
-            Write-Host "WARNING: persistence/schema-risk files detected while DB volume is preserved:"
-            foreach ($file in $riskChanges) {
-                Write-Host " - $file"
-            }
+            Show-BuildBothDecision -classification $classification
+        } else {
+            Show-BuildBothDecision -classification $classification
         }
 
         if (-not $SkipEnvSync) {
@@ -319,7 +418,9 @@ Function Invoke-BuildBoth {
         if (-not $SkipPrecheck) {
             Invoke-LocalBuildPrecheck -RepoRoot $repoRoot
         }
-        Invoke-ComposeRebuild -ComposeFile $script:BuildBothComposeFile
+        Write-Host "Compose scope: web service only (strict web-only mode)."
+        Write-Host "Note: API may still start if not running due compose depends_on wiring, but this path avoids rebuilding the API image."
+        Invoke-ComposeRebuild -ComposeFile $script:BuildBothComposeFile -Services @("web")
     } finally {
         Pop-Location
     }
@@ -341,11 +442,14 @@ function Invoke-BuildAll {
             -DbVolumeState "RESET" `
             -UseWhen "API/entities/migrations/auth/persistence changes" `
             -Reason "prevent local migration drift"
-        $riskChanges = Get-PersistenceRiskChanges -RepoRoot $repoRoot
-        if ($riskChanges.Count -gt 0) {
-            Write-Host "Detected persistence/schema-related changes:"
-            foreach ($file in $riskChanges) {
-                Write-Host " - $file"
+        $classification = Get-BuildBothClassification -RepoRoot $repoRoot
+        if (-not $classification.safeForBuildBoth) {
+            Write-Host "Detected changes outside strict web-only scope (expected for build-all):"
+            foreach ($group in $classification.blockingGroups.GetEnumerator()) {
+                Write-Host " - $($group.Key):"
+                foreach ($file in $group.Value) {
+                    Write-Host "   - $file"
+                }
             }
         }
         if (-not $SkipEnvSync) {
