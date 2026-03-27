@@ -13,6 +13,7 @@ const NAV_LINKS = [
   { href: "/admin/access-codes", label: "Access Codes" },
   { href: "/admin/user-engagement", label: "User Engagement" },
   { href: "/admin/beta-command-center", label: "Beta Command Center" },
+  { href: "/admin/bug-reporting", label: "Beta Triage" },
   { href: "/admin/beta-feedback", label: "Beta Feedback" },
   { href: "/admin/bugs", label: "Bug Reports" },
   { href: "/admin/beta-friction-dashboard", label: "Beta Friction" },

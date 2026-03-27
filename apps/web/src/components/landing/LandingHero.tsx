@@ -17,7 +17,7 @@ export function LandingHero() {
       <div className="relative mx-auto w-full max-w-[1200px] px-4 pb-6 pt-10 md:px-10 md:pb-8 md:pt-12 lg:px-16">
         <div className="max-w-[900px]">
           <h1 className="text-3xl font-semibold leading-tight text-white md:text-4xl lg:text-[38px]">
-            Upload your resume, paste the job description, and get your fit in seconds.
+            Upload your resume, paste the job description, and run your first analysis.
           </h1>
           <p className="mt-2.5 max-w-[760px] text-base leading-relaxed text-slate-300 lg:text-lg">
             We compare your resume evidence to role requirements, then show your score and next step.

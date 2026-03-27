@@ -606,7 +606,7 @@ describe("BaselineStudioHome", () => {
       expect(screen.getByText("Ready for targeting")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("Analyze your baseline to get started.")).toBeInTheDocument();
+    expect(screen.getByText("Upload your baseline to get started.")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Run Career Compatibility Analysis" })).toHaveLength(1);
   });
 
@@ -765,7 +765,7 @@ describe("BaselineStudioHome", () => {
     expect(screen.getAllByRole("button", { name: "Upload your resume" })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Choose resume" })).not.toBeInTheDocument();
     expect(screen.getByText("Upload support")).toBeInTheDocument();
-    expect(screen.getByText("Your uploaded baseline will appear here.")).toBeInTheDocument();
+    expect(screen.getByText("No baseline uploaded yet. Upload one resume file to start your first analysis.")).toBeInTheDocument();
   });
 
   it("uploads successfully from wrapped API payload and does not persist score history prematurely", async () => {

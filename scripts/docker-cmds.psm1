@@ -208,7 +208,8 @@ function Invoke-ComposeRebuild {
     param(
         [Parameter(Mandatory = $true)][string]$ComposeFile,
         [switch]$ResetDbVolume,
-        [string[]]$Services
+        [string[]]$Services,
+        [switch]$NoDeps
     )
 
     # Full schema rebuild mode explicitly tears down volumes to avoid
@@ -217,10 +218,99 @@ function Invoke-ComposeRebuild {
         docker compose -f $ComposeFile down -v
     }
     if ($Services -and $Services.Count -gt 0) {
-        docker compose -f $ComposeFile up -d --build @Services
+        $args = @("-f", $ComposeFile, "up", "-d", "--build")
+        if ($NoDeps) { $args += "--no-deps" }
+        $args += $Services
+        docker compose @args
     } else {
-        docker compose -f $ComposeFile up -d --build
+        $args = @("-f", $ComposeFile, "up", "-d", "--build")
+        if ($NoDeps) { $args += "--no-deps" }
+        docker compose @args
     }
+}
+
+function Get-ComposeServiceHealthState {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComposeFile,
+        [Parameter(Mandatory = $true)][string]$Service
+    )
+
+    $containerId = docker compose -f $ComposeFile ps -q $Service
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to inspect compose service '$Service'."
+    }
+
+    $containerId = $containerId.Trim()
+    if ([string]::IsNullOrWhiteSpace($containerId)) {
+        return [pscustomobject]@{
+            exists = $false
+            status = "not_running"
+            health = "not_running"
+            containerId = $null
+        }
+    }
+
+    $inspectFormat = "{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}"
+    $inspect = docker inspect --format $inspectFormat $containerId
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to inspect container health for '$Service'."
+    }
+
+    $parts = $inspect.Trim().Split("|", 2)
+    $status = if ($parts.Count -gt 0) { $parts[0] } else { "unknown" }
+    $health = if ($parts.Count -gt 1) { $parts[1] } else { "none" }
+
+    return [pscustomobject]@{
+        exists = $true
+        status = $status
+        health = $health
+        containerId = $containerId
+    }
+}
+
+function Ensure-ApiAvailableForBuildBoth {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComposeFile
+    )
+
+    $state = Get-ComposeServiceHealthState -ComposeFile $ComposeFile -Service "api"
+    if (-not $state.exists) {
+        Write-Host "API state: not running. Starting existing API container without rebuild..."
+        docker compose -f $ComposeFile up -d --no-build api
+        if ($LASTEXITCODE -ne 0) {
+            throw "API is stopped and could not be started without rebuilding."
+        }
+
+        for ($i = 0; $i -lt 30; $i++) {
+            Start-Sleep -Seconds 2
+            $state = Get-ComposeServiceHealthState -ComposeFile $ComposeFile -Service "api"
+            if ($state.exists -and $state.status -eq "running" -and ($state.health -eq "healthy" -or $state.health -eq "none")) {
+                return $state
+            }
+        }
+
+        throw "API started without rebuild but did not become healthy in time. Run Restart-Api or inspect the container logs."
+    }
+
+    if ($state.status -eq "running" -and ($state.health -eq "healthy" -or $state.health -eq "none")) {
+        Write-Host "API state: healthy. Reusing existing container."
+        return $state
+    }
+
+    if ($state.status -eq "running" -and $state.health -eq "unhealthy") {
+        throw "API is running but unhealthy. build-both will not proceed. Run Restart-Api or inspect the container logs."
+    }
+
+    if ($state.status -in @("exited", "created", "paused")) {
+        Write-Host "API state: $($state.status). Starting existing API container without rebuild..."
+        docker compose -f $ComposeFile up -d --no-build api
+        if ($LASTEXITCODE -ne 0) {
+            throw "API is stopped and could not be started without rebuilding."
+        }
+        return Ensure-ApiAvailableForBuildBoth -ComposeFile $ComposeFile
+    }
+
+    throw "API is in an unexpected state ($($state.status)/$($state.health)). build-both will not proceed."
 }
 
 function Get-ChangedRepoPaths {
@@ -421,9 +511,22 @@ Function Invoke-BuildBoth {
         if (-not $SkipPrecheck) {
             Invoke-LocalBuildPrecheck -RepoRoot $repoRoot
         }
+        $apiStateBefore = Ensure-ApiAvailableForBuildBoth -ComposeFile $script:BuildBothComposeFile
         Write-Host "Compose scope: web service only (strict web-only mode)."
-        Write-Host "Note: API may still start if not running due compose depends_on wiring, but this path avoids rebuilding the API image."
-        Invoke-ComposeRebuild -ComposeFile $script:BuildBothComposeFile -Services @("web")
+        Write-Host "API rebuild policy: never rebuild API; reuse if healthy, start existing container if stopped."
+        Invoke-ComposeRebuild -ComposeFile $script:BuildBothComposeFile -Services @("web") -NoDeps
+        $apiStateAfter = Get-ComposeServiceHealthState -ComposeFile $script:BuildBothComposeFile -Service "api"
+        Write-Host ""
+        Write-Host "Build summary:"
+        Write-Host "  - Web rebuilt successfully."
+        Write-Host "  - API rebuild: skipped."
+        Write-Host "  - API state before: $($apiStateBefore.status)/$($apiStateBefore.health)"
+        Write-Host "  - API state after: $($apiStateAfter.status)/$($apiStateAfter.health)"
+        if ($apiStateAfter.status -ne "running" -or ($apiStateAfter.health -ne "healthy" -and $apiStateAfter.health -ne "none")) {
+            Write-Host "  - Next action: run Restart-Api or inspect API logs before continuing."
+        } else {
+            Write-Host "  - Next action: none."
+        }
     } finally {
         Pop-Location
     }

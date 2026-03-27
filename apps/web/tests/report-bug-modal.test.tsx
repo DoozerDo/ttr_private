@@ -156,6 +156,7 @@ describe("ReportBugModal", () => {
       score: 82,
       nextAction: "ADD_TO_OPPORTUNITIES",
       timestamp: "2026-03-27T10:00:00.000Z",
+      userAgent: expect.any(String),
     });
 
     global.Date = originalDate;

@@ -27,16 +27,16 @@ export default async function AwaitingAccessPage({
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-10">
       <div className="mx-auto w-full max-w-xl space-y-5 rounded-xl border border-white/10 bg-white p-6 shadow-lg">
-        <h1 className="text-2xl font-bold text-slate-900">Account created successfully</h1>
+        <h1 className="text-2xl font-bold text-slate-900">Your beta account is ready</h1>
         <p className="text-sm text-slate-700">
-          Your account exists, but access is not active yet. This is expected until your invite code is redeemed or access is approved.
+          Your account exists, but beta access is not active yet. Redeem your invite code or wait for approval to continue.
         </p>
         <div className="flex flex-wrap gap-3">
           <Link
             href={`/redeem?${redeemParams.toString()}`}
             className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
           >
-            Redeem access code now
+          Redeem access code
           </Link>
           <Link
             href="/auth/login"
@@ -46,7 +46,7 @@ export default async function AwaitingAccessPage({
           </Link>
         </div>
         <p className="text-xs text-slate-500">
-          If you do not have a code yet, access may still be pending invite issuance.
+          If you do not have a code yet, access is still pending invite issuance.
         </p>
       </div>
     </main>

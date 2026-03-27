@@ -110,26 +110,21 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
       setStatus("loading");
       setStatusMessage(null);
 
-      const runtimeContext = {
-        timestamp: new Date().toISOString(),
-        route: `${window.location.pathname}${window.location.search}`,
-        pageLabel: document.title || undefined,
-        userId,
-        lastUserAction: window.sessionStorage.getItem("ttr:last-user-action") ?? undefined,
-      };
+      const timestamp = new Date().toISOString();
+      const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : null;
 
       const requestPayload = {
         description: whatHappened.trim(),
         details: details.trim() || undefined,
         route: `${window.location.pathname}${window.location.search}`,
-        timestamp: runtimeContext.timestamp,
+        timestamp,
         userId: userId ?? null,
         baselineId: structuredContext.baselineId,
         jobId: structuredContext.jobId,
         assessmentId: structuredContext.assessmentId,
         score: structuredContext.score,
         nextAction: structuredContext.nextAction,
-        runtimeContext,
+        userAgent,
       };
 
       try {

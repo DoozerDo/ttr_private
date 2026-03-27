@@ -205,11 +205,13 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
       const messageFromApi = extractAuthApiMessage(data) ?? "Login failed";
 
       if (response.status === 403 && hasAccessCodeRequired(data)) {
+        setError("This account needs an active beta access code. Redeem your code to continue.");
         router.push(buildRedeemPath(trimmedEmail));
         return;
       }
 
       if (isAccessRequiredError(messageFromApi, response.status)) {
+        setError("This account needs an active beta access code. Redeem your code to continue.");
         router.push(buildRedeemPath(trimmedEmail));
         return;
       }
@@ -381,7 +383,7 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
     <div className="mx-auto w-full max-w-md space-y-6">
       <div className="space-y-2 text-center">
         <h1 className="text-3xl font-bold text-white">{title}</h1>
-        <p className="text-sm text-slate-300">Use your Target This Role credentials to continue.</p>
+        <p className="text-sm text-slate-300">Use your invite email and password to enter beta.</p>
       </div>
 
       <form onSubmit={onSubmit} className="space-y-4 rounded-xl border border-white/10 bg-white p-6 shadow-lg">

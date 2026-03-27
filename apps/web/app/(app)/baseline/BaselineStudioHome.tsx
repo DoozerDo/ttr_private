@@ -956,15 +956,15 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   {heroState === "ready"
                     ? "Your baseline is ready for the next analysis."
                     : heroState === "in_progress"
-                      ? "Analyze your baseline to get started."
-                    : "Create your baseline."}
+                      ? "Upload your baseline to get started."
+                    : "Upload your baseline to get started."}
                 </h1>
                 <p className="text-base leading-7 text-slate-300">
                   {heroState === "ready"
                     ? "You can continue building or run career compatibility analysis."
                     : heroState === "in_progress"
-                      ? "We'll evaluate your experience and unlock role targeting and generation."
-                    : "Start by uploading your baseline source file."}
+                      ? "We’ll evaluate your experience and unlock the next analysis step."
+                    : "Upload one resume baseline file. We’ll turn it into your first analysis-ready baseline."}
               </p>
               <p className="text-sm text-slate-400">
                 Built from your uploaded baseline and readiness checks.
@@ -1008,7 +1008,14 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             <p className="text-sm text-slate-400">Current file and status.</p>
           </header>
           {allBaselines.length === 0 ? (
-            <p className="text-sm leading-6 text-slate-300">Your uploaded baseline will appear here.</p>
+            <div className="space-y-2">
+              <p className="text-sm leading-6 text-slate-300">
+                No baseline uploaded yet. Upload one resume file to start your first analysis.
+              </p>
+              <p className="text-sm leading-6 text-slate-400">
+                After upload, you can run Career Compatibility Analysis from the same page.
+              </p>
+            </div>
           ) : (
             <div className="space-y-3">
               {allBaselines.slice(0, 3).map((baseline) => {
