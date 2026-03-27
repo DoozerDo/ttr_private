@@ -51,6 +51,7 @@ type AppShellProps = {
   children: ReactNode;
   userEmail?: string | null;
   userId?: string | null;
+  footerSlot?: ReactNode;
 };
 
 async function safeJson<T>(response: Response): Promise<T | null> {
@@ -104,7 +105,7 @@ const AUTO_ERROR_RECENT_LIMIT = 12;
 const AUTO_ERROR_LOCAL_DEDUPE_WINDOW_MS = 60_000;
 const LAST_API_SNAPSHOT_KEY = "ttr:last-api-response-snapshot";
 
-export function AppShell({ children, userEmail, userId }: AppShellProps) {
+export function AppShell({ children, userEmail, userId, footerSlot }: AppShellProps) {
   const router = useRouter();
   const pathname = usePathname() ?? "/";
   const isBaseline = pathname.startsWith("/baseline");
@@ -462,6 +463,7 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
                 label="Report Issue"
               />
             </div>
+            {footerSlot ? <div className="mt-3 flex justify-center">{footerSlot}</div> : null}
             <p className="mt-2 text-[0.65rem] text-slate-500">Build {shortBuildSha}</p>
           </footer>
         </div>

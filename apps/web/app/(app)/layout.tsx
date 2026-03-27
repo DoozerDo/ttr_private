@@ -67,9 +67,8 @@ export default async function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <EntitlementsProvider entitlements={safeProfile}>
-      <AppShell userEmail={email} userId={userId}>
+      <AppShell userEmail={email} userId={userId} footerSlot={<BetaFeedbackCapture />}>
         {children}
-        <BetaFeedbackCapture />
       </AppShell>
     </EntitlementsProvider>
   );

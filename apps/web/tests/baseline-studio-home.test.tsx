@@ -368,7 +368,7 @@ describe("BaselineStudioHome", () => {
     expect(screen.queryByText(/Fit 82%/i)).not.toBeInTheDocument();
     expect(screen.getByText("Last role analysis: 82%")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "View baseline analysis" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Start targeting" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Start targeting" })).not.toBeInTheDocument();
   });
 
   it("does not show secondary role-fit metadata when no role analysis score exists", async () => {

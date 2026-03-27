@@ -81,11 +81,11 @@ export function BetaFeedbackCapture() {
   if (!isSupportedPage) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-30 w-[320px] max-w-[calc(100vw-2rem)]">
+    <div className="w-full max-w-[420px]">
       {!open ? (
         <button
           type="button"
-          className="w-full rounded-xl border border-white/20 bg-slate-900/90 px-3 py-2 text-sm font-semibold text-slate-100"
+          className="w-full rounded-full border border-white/10 bg-transparent px-3 py-1.5 text-xs font-medium text-slate-300 hover:border-white/30 hover:text-slate-100"
           onClick={() => setOpen(true)}
         >
           Report Beta Feedback

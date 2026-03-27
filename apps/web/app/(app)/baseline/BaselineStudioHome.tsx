@@ -959,14 +959,14 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
               </p>
               <h1 className="text-3xl font-semibold tracking-tight text-white md:text-[34px]">
                 {heroState === "ready"
-                  ? "You can start targeting roles with confidence."
+                  ? "Your baseline is ready for targeting."
                   : heroState === "in_progress"
                     ? "Your baseline needs one more step before targeting."
                     : "Upload your resume to create your baseline."}
               </h1>
               <p className="text-base leading-7 text-slate-300">
                 {heroState === "ready"
-                  ? "Your baseline analysis is complete and certified for role targeting."
+                  ? "You can now analyze roles and generate tailored materials."
                   : heroState === "in_progress"
                     ? "Complete baseline analysis to improve targeting confidence and generation quality."
                     : "Your baseline is the trusted source used to analyze fit and prepare role-specific materials."}
@@ -981,7 +981,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   href="/target"
                   className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
                 >
-                  Start targeting a role
+                  Start targeting
                 </Link>
               ) : heroState === "in_progress" && primaryBaselineId ? (
                 <FormButton
@@ -1093,14 +1093,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                             ? "View baseline analysis"
                             : "Analyze baseline"}
                       </FormButton>
-                      {canView ? (
-                        <Link
-                          href="/target"
-                          className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-indigo-300/25 bg-indigo-500/15 px-4 py-2 text-sm font-semibold text-indigo-100 transition hover:bg-indigo-500/25"
-                        >
-                          Start targeting
-                        </Link>
-                      ) : null}
                       {isEditableLibrary ? (
                         <>
                           <FormButton
