@@ -9,6 +9,7 @@ export type RouteConfig = {
   featureFlag?: string;
   subtext?: string;
   showInSidebar?: boolean;
+  comingSoon?: boolean;
 };
 
 const sidebarNavRoutes: RouteConfig[] = [
@@ -55,11 +56,12 @@ const sidebarNavRoutes: RouteConfig[] = [
   },
   {
     id: "interviewToolkit",
-    label: "INTERVIEW TOOLKIT",
+    label: "Interview Toolkit · Coming Soon",
     href: "/interview-toolkit",
     requiresAuth: true,
     requiresJob: true,
     subtext: "Prepare answers and stories",
+    comingSoon: true,
   },
 ];
 

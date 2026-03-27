@@ -180,7 +180,8 @@ export function JourneyNavV1({
 
               const route = routeLookup.get(step.id);
               const routeHref = route?.href;
-              const canNavigate = Boolean(routeHref && !isLocked);
+              const isComingSoon = Boolean(route?.comingSoon);
+              const canNavigate = Boolean(routeHref && !isLocked && !isComingSoon);
 
               const nodeClass = [
                 "journey-nav-step-button",
@@ -188,6 +189,7 @@ export function JourneyNavV1({
                 isActive ? "journey-nav-step-active" : "",
                 isCompleted ? "journey-nav-step-completed" : "",
                 isLocked ? "journey-nav-step-locked" : "",
+                isComingSoon ? "journey-nav-step-coming-soon" : "",
               ]
                 .filter(Boolean)
                 .join(" ");
@@ -238,22 +240,41 @@ export function JourneyNavV1({
               };
 
               return (
-                <button
-                  key={step.id}
-                  type="button"
-                  className={nodeClass}
-                  aria-current={isActive ? "step" : undefined}
-                  aria-disabled={isLocked}
-                  onClick={handleClick}
-                  onKeyDown={handleKeyDown}
-                  disabled={isLocked}
-                  title={isLocked ? LOCKED_TOOLTIP : undefined}
-                  role={canNavigate ? "link" : undefined}
-                  tabIndex={canNavigate ? 0 : -1}
-                  data-active={isActive ? "true" : undefined}
-                >
-                  {stepContent}
-                </button>
+                canNavigate ? (
+                  <button
+                    key={step.id}
+                    type="button"
+                    className={nodeClass}
+                    aria-current={isActive ? "step" : undefined}
+                    aria-disabled={isLocked}
+                    onClick={handleClick}
+                    onKeyDown={handleKeyDown}
+                    disabled={isLocked}
+                    title={isLocked ? LOCKED_TOOLTIP : undefined}
+                    role="link"
+                    tabIndex={0}
+                    data-active={isActive ? "true" : undefined}
+                  >
+                    {stepContent}
+                  </button>
+                ) : (
+                  <div
+                    key={step.id}
+                    className={nodeClass}
+                    aria-current={isActive ? "step" : undefined}
+                    aria-disabled="true"
+                    title={
+                      isLocked
+                        ? LOCKED_TOOLTIP
+                        : isComingSoon
+                          ? "Coming soon."
+                          : undefined
+                    }
+                    data-active={isActive ? "true" : undefined}
+                  >
+                    {stepContent}
+                  </div>
+                )
               );
             })}
           </div>
@@ -365,7 +386,6 @@ export function JourneyNavV1({
           background: transparent;
           border: none;
           display: flex;
-          cursor: pointer;
           flex: 1;
           flex-direction: column;
           align-items: center;
@@ -382,6 +402,10 @@ export function JourneyNavV1({
           z-index: 10;
         }
 
+        .journey-nav-step-button:not(.journey-nav-step-locked):not(.journey-nav-step-coming-soon) {
+          cursor: pointer;
+        }
+
         .journey-nav-step-button:focus-visible {
           outline: none;
         }
@@ -389,6 +413,21 @@ export function JourneyNavV1({
         .journey-nav-step-locked {
           color: var(--text-muted-tertiary, rgba(148, 163, 184, 0.72));
           cursor: not-allowed;
+        }
+
+        .journey-nav-step-coming-soon {
+          color: var(--text-muted-tertiary, rgba(148, 163, 184, 0.72));
+          cursor: default;
+          opacity: 0.8;
+        }
+
+        .journey-nav-step-coming-soon .journey-nav-icon-area {
+          border-color: rgba(148, 163, 184, 0.22);
+          background: rgba(15, 23, 42, 0.82);
+        }
+
+        .journey-nav-step-coming-soon .journey-nav-step-label {
+          color: var(--text-muted-secondary, rgba(148, 163, 184, 0.82));
         }
 
         .journey-nav-step-active {

@@ -1099,7 +1099,10 @@ const WATCH_FIX_CTA_DESTINATIONS: Record<
   support_operations_and_process_rigor: { label: "Generate in Resume Studio", target: "studio" },
   tooling_and_platform_experience: { label: "Open Fit Review", target: "fitReview" },
   domain_and_business_context: { label: "Open Fit Review", target: "fitReview" },
-  change_leadership_and_customer_advocacy: { label: "Open Interview Toolkit", target: "interviewToolkit" },
+  change_leadership_and_customer_advocacy: {
+    label: "Interview Toolkit (Coming Soon)",
+    target: "interviewToolkit",
+  },
 };
 
 function percentLabelForCopy(percent?: number | null): string {
