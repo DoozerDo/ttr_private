@@ -3,7 +3,9 @@ import { beforeEach, vi } from "vitest";
 
 import StudioPage from "@/app/(app)/studio/page";
 import { listBaselines } from "@/lib/baselines";
+import * as generationAuthority from "@/lib/generationAuthority";
 import { listJobs } from "@/lib/jobsClient";
+import * as studioTrustGate from "@/lib/studioTrustGate";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
 import { overrideSearchParams, setFetchImplementation } from "./setup";
 
@@ -55,6 +57,7 @@ function renderStudio() {
 
 describe("Studio execution surface", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     overrideSearchParams({
       analysisId: "analysis-1",
       jobId: "job-1",
@@ -64,13 +67,28 @@ describe("Studio execution surface", () => {
   });
 
   it("renders READY hero and unified materials flow", async () => {
+    vi.spyOn(generationAuthority, "getGenerationAuthorityState").mockReturnValue("READY");
+    vi.spyOn(studioTrustGate, "evaluateStudioTrustGate").mockReturnValue({
+      allowed: true,
+      reason: null,
+      baselineStatusLabel: "verified",
+      roleAlignmentLabel: "strong match",
+    });
+
     setFetchImplementation(async (input: RequestInfo) => {
       const url = typeof input === "string" ? input : input.url;
       if (url.includes("/api/baselines/base-1/versions")) {
         return createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]);
       }
       if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
-        return createResponse({ score: 88, jobId: "job-1", baselineId: "base-1", baselineVersionId: "base-version-1" });
+        return createResponse({
+          score: 88,
+          jobId: "job-1",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          supportingSignals: ["Owned support operations cadence"],
+          baselineEvidence: "Reduced escalations by 22% through workflow redesign.",
+        });
       }
       if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
         return createResponse({ status: "ready", reasons: [] });
@@ -96,6 +114,8 @@ describe("Studio execution surface", () => {
         screen.queryAllByRole("button", { name: "Generate Cover Letter With Limits" }).length,
     ).toBeGreaterThan(0);
     expect(screen.getByText("Your application materials")).toBeInTheDocument();
+    expect(screen.getByTestId("studio-evidence-allowed-panel")).toBeInTheDocument();
+    expect(screen.getByText("Why this output is allowed")).toBeInTheDocument();
     expect(screen.getByText("Resume")).toBeInTheDocument();
     expect(screen.getByText("Cover letter")).toBeInTheDocument();
   });
@@ -125,6 +145,8 @@ describe("Studio execution surface", () => {
     });
 
     expect(screen.getByRole("link", { name: "Resolve gaps before generating" })).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-evidence-allowed-panel")).toBeNull();
+    expect(screen.getByTestId("studio-evidence-blocked-panel")).toBeInTheDocument();
   });
 
   it("suppresses generation surfaces when fit is below threshold and routes to Resolve Gaps", async () => {

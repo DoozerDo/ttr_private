@@ -33,6 +33,7 @@ import { appendStrengtheningAddition } from "@/lib/baselines";
 import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
 import { derivePrimaryNextAction, getGenerationCompletionStorageKey } from "@/lib/nextAction";
+import { deriveEvidenceLedger } from "@/lib/evidenceLedger";
 import { useGuidedMode } from "@/hooks/useGuidedMode";
 import { type JobDto } from "@/lib/jobs";
 import {
@@ -1330,6 +1331,13 @@ export default function StudioPage() {
   );
   const studioBlockedByNextAction =
     primaryNextAction.action === "RESOLVE_GAPS" || primaryNextAction.action === "CONTINUE_ANALYSIS";
+  const evidenceLedger = useMemo(
+    () =>
+      deriveEvidenceLedger(analysis, {
+        generationAllowed: primaryNextAction.action === "GENERATE_RESUME" || primaryNextAction.action === "ADD_TO_OPPORTUNITIES",
+      }),
+    [analysis, primaryNextAction.action],
+  );
   useEffect(() => {
     if (!isGuidedActive) return;
     if (primaryNextAction.action === "GENERATE_RESUME" || primaryNextAction.action === "ADD_TO_OPPORTUNITIES") {
@@ -2739,6 +2747,36 @@ export default function StudioPage() {
           )}
         </div>
       </section>
+      {canGenerateDocuments ? (
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-4" data-testid="studio-evidence-allowed-panel">
+          <h2 className="text-base font-semibold text-slate-100">Why this output is allowed</h2>
+          <p className="mt-1 text-sm text-slate-200">This role meets the threshold for tailored output.</p>
+          {evidenceLedger.entries.length ? (
+            <ul className="mt-3 space-y-2">
+              {evidenceLedger.entries.map((entry) => (
+                <li key={entry.id} className="rounded-lg border border-white/10 bg-slate-950/35 p-2">
+                  <p className="text-sm text-slate-100">{entry.text}</p>
+                  {entry.sourceLabel ? <p className="mt-1 text-xs text-slate-400">{entry.sourceLabel}</p> : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-sm text-slate-300">No evidence details are available for this analysis yet.</p>
+          )}
+          {evidenceLedger.remainingWeakAreas.length ? (
+            <p className="mt-2 text-xs text-slate-300">
+              Some areas are still lighter than others, but the role is ready for tailored output.
+            </p>
+          ) : null}
+        </section>
+      ) : studioGenerationState === "BLOCKED" ? (
+        <section className="rounded-2xl border border-amber-300/30 bg-amber-500/10 p-4" data-testid="studio-evidence-blocked-panel">
+          <h2 className="text-base font-semibold text-amber-100">Why generation is not ready yet</h2>
+          <p className="mt-1 text-sm text-slate-100">
+            This role still needs stronger proof in a few areas before tailored output will be useful.
+          </p>
+        </section>
+      ) : null}
       {opportunityContext ? (
         <p className="text-xs text-slate-400">
           Opportunity status: {opportunityContext.status} · Updated{" "}

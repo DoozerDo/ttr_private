@@ -21,15 +21,23 @@ function buildOpportunity(overrides: Partial<Opportunity> = {}): Opportunity {
     companyName: 'Acme',
     jobTitle: 'Engineer',
     salary: null,
+    jobId: 'job-1',
+    savedJobId: 'job-1',
+    analysisId: 'analysis-1',
+    baselineId: 'base-1',
+    savedBaselineId: 'base-1',
     dateCreated: now,
     lastStatusChange: now,
     status: OpportunityStatus.SAVED,
     initialScore: 72,
+    savedFitScore: 72,
     currentScore: 72,
     initialBand: OpportunityFitBand.VIABLE,
     currentBand: OpportunityFitBand.VIABLE,
     baselineVersionUsed: null,
     dormant: false,
+    savedGenerationCompleted: false,
+    savedEvidenceSummary: null,
     ...overrides,
   };
 }
@@ -78,6 +86,36 @@ describe('OpportunitiesService', () => {
     });
 
     expect(created.status).toBe(OpportunityStatus.IN_FIT_REVIEW);
+  });
+
+  it('captures immutable snapshot fields on upsert create', async () => {
+    const repository = createRepository();
+    repository.findOne.mockResolvedValue(null);
+    const service = new OpportunitiesService(
+      repository as never,
+      new OpportunityStateMachine(),
+      new OpportunityActionsNeededService(),
+      { rescoreNearBoundariesFromOverride: jest.fn() } as never,
+    );
+
+    await service.upsertOpportunity('user-1', {
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+      baselineId: 'base-1',
+      score: 81,
+      company: 'Acme',
+      roleTitle: 'Engineer',
+      generationCompleted: true,
+      savedEvidenceSummary: ['Owned support workflows', 'Cut escalations by 22%'],
+    });
+
+    expect(repository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        savedFitScore: 81,
+        savedGenerationCompleted: true,
+        savedEvidenceSummary: ['Owned support workflows', 'Cut escalations by 22%'],
+      }),
+    );
   });
 
   it('enforces forward-only status updates unless manual reset is used', async () => {

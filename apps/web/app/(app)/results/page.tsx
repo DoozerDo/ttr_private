@@ -41,6 +41,7 @@ import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
 import { buildScoreDelta, hasBaselineUpdated } from "@/lib/reanalysis";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
 import { derivePrimaryNextAction, getGenerationCompletionStorageKey } from "@/lib/nextAction";
+import { deriveEvidenceLedger, type EvidenceLedger } from "@/lib/evidenceLedger";
 import { useGuidedMode } from "@/hooks/useGuidedMode";
 import { trackEvent } from "@/src/lib/analytics";
 import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
@@ -558,6 +559,7 @@ type OpportunityMapSectionProps = {
         description: string;
       }
     | null;
+  evidenceLedger?: EvidenceLedger;
   scoreAnalysisHref: string;
   readiness: GenerationReadiness;
   verificationCoverage: VerificationCoverage;
@@ -682,6 +684,7 @@ export function OpportunityMapSection({
   verdict,
   nextAction,
   primaryCta,
+  evidenceLedger,
   scoreAnalysisHref,
   readiness,
   verificationCoverage,
@@ -689,6 +692,11 @@ export function OpportunityMapSection({
   predictiveUnlock,
   weakFitRecovery,
 }: OpportunityMapSectionProps) {
+  const resolvedEvidenceLedger: EvidenceLedger = evidenceLedger ?? {
+    entries: [],
+    remainingWeakAreas: [],
+    generationAllowedReason: null,
+  };
   const toCanonicalLabels = (labels: string[] | null | undefined): string[] =>
     Array.isArray(labels)
       ? Array.from(
@@ -848,6 +856,23 @@ export function OpportunityMapSection({
             </p>
           ) : null}
         </div>
+        <section className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <h3 className="text-sm font-semibold text-slate-100">Evidence used for this role</h3>
+          {resolvedEvidenceLedger.entries.length ? (
+            <ul className="mt-3 space-y-2">
+              {resolvedEvidenceLedger.entries.map((entry) => (
+                <li key={entry.id} className="rounded-lg border border-white/10 bg-slate-950/35 p-2">
+                  <p className="text-sm text-slate-100">{entry.text}</p>
+                  {entry.sourceLabel ? (
+                    <p className="mt-1 text-xs text-slate-400">{entry.sourceLabel}</p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-sm text-slate-300">No evidence details are available for this analysis yet.</p>
+          )}
+        </section>
       </div>
     </section>
   );
@@ -2083,6 +2108,13 @@ export default function ResultsPage() {
     }
     return null;
   }, [canOpenStudio, latest, primaryNextAction.action, reanalysisRunning, studioHref]);
+  const evidenceLedger = useMemo(
+    () =>
+      deriveEvidenceLedger(latest, {
+        generationAllowed: primaryNextAction.action === "GENERATE_RESUME" || primaryNextAction.action === "ADD_TO_OPPORTUNITIES",
+      }),
+    [latest, primaryNextAction.action],
+  );
   const formatDriverValue = (value?: number | null) =>
     typeof value === "number" ? value.toFixed(1) : "n/a";
   const summarySnippet = typeof latest?.summary === "string" ? latest.summary.trim() : null;
@@ -2692,6 +2724,8 @@ export default function ResultsPage() {
           score: Math.round(activeScore),
           company,
           roleTitle,
+          generationCompleted,
+          savedEvidenceSummary: evidenceLedger.entries.map((entry) => entry.text).slice(0, 3),
         }),
       });
       if (response.ok) {
@@ -2703,7 +2737,7 @@ export default function ResultsPage() {
     } catch {
       // non-blocking
     }
-  }, [activeScore, completeGuidedMode, isGuidedActive, latest]);
+  }, [activeScore, completeGuidedMode, evidenceLedger.entries, generationCompleted, isGuidedActive, latest]);
 
   const rerunAnalysisForCurrentRole = useCallback(async () => {
     const targetJobId = latest?.jobId?.trim() ?? "";
@@ -2952,6 +2986,7 @@ export default function ResultsPage() {
                     nextAction={primaryNextAction}
                     advantageSignals={advantageSignals}
                     primaryCta={oneClickResultsCta}
+                    evidenceLedger={evidenceLedger}
                     scoreAnalysisHref="#advanced-insights"
                     readiness={generationReadiness}
                     verificationCoverage={verificationCoverage}

@@ -162,6 +162,30 @@ describe("Results opportunity map", () => {
     expect(screen.getByText(/Generation readiness:\s*READY/i)).toBeInTheDocument();
     expect(screen.getByText(/Verification coverage:\s*STRONG/i)).toBeInTheDocument();
     expect(screen.getByText(/3\s*\/\s*3 verified claims/i)).toBeInTheDocument();
+    expect(screen.getByText("Evidence used for this role")).toBeInTheDocument();
+  });
+
+  it("shows evidence empty state when no evidence entries exist", () => {
+    render(
+      <OpportunityMapSection
+        score={74}
+        verdict={getOpportunityVerdict(74)}
+        nextAction={buildNextAction("GENERATE_RESUME")}
+        advantageSignals={[]}
+        primaryCta={{
+          label: "Generate Resume",
+          href: "/studio",
+          description: "You've cleared the threshold. Generate tailored materials now.",
+        }}
+        scoreAnalysisHref="#advanced-insights"
+        readiness={readyReadiness}
+        verificationCoverage={strongCoverage}
+        canonicalCoverage={null}
+        predictiveUnlock={null}
+        evidenceLedger={{ entries: [], remainingWeakAreas: [], generationAllowedReason: null }}
+      />,
+    );
+    expect(screen.getByText("No evidence details are available for this analysis yet.")).toBeInTheDocument();
   });
 
   it("keeps the hero focused when no advantage signals are provided", () => {

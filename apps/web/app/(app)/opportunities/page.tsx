@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { FormButton } from "@/components/FormButton";
+import { deriveOpportunityDrift, type OpportunityDriftStatus } from "@/lib/opportunityDrift";
 
 type OpportunityItem = {
   id: string;
@@ -13,6 +14,12 @@ type OpportunityItem = {
   baselineId: string | null;
   baselineVersionId?: string | null;
   score: number;
+  savedFitScore?: number | null;
+  savedAt?: string | null;
+  savedBaselineId?: string | null;
+  savedJobId?: string | null;
+  savedGenerationCompleted?: boolean;
+  savedEvidenceSummary?: string[];
   company: string;
   roleTitle: string;
   status: "saved" | "ready_to_apply" | "applied" | "improving_fit" | "passed";
@@ -39,6 +46,7 @@ export default function OpportunitiesPage() {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [reanalysisAvailability, setReanalysisAvailability] = useState<Record<string, boolean>>({});
   const [runningReanalysisId, setRunningReanalysisId] = useState<string | null>(null);
+  const [currentFitScores, setCurrentFitScores] = useState<Record<string, number | null>>({});
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
@@ -119,6 +127,53 @@ export default function OpportunitiesPage() {
       cancelled = true;
     };
   }, [rows]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!rows.length) {
+        setCurrentFitScores({});
+        return;
+      }
+      const entries = await Promise.all(
+        rows.map(async (row): Promise<[string, number | null]> => {
+          const jobId = (row.savedJobId ?? row.jobId ?? "").trim();
+          const baselineId = (row.savedBaselineId ?? row.baselineId ?? "").trim();
+          if (!jobId || !baselineId) return [row.id, null];
+          try {
+            const response = await fetch(
+              `/api/analysis/job/${encodeURIComponent(jobId)}/baseline/${encodeURIComponent(baselineId)}/latest`,
+              { cache: "no-store" },
+            );
+            if (!response.ok) return [row.id, null];
+            const payload = (await response.json()) as { score?: number | null; overallScore?: number | null };
+            const scoreCandidate =
+              typeof payload.score === "number"
+                ? payload.score
+                : typeof payload.overallScore === "number"
+                  ? payload.overallScore
+                  : null;
+            return [row.id, scoreCandidate === null ? null : Math.round(scoreCandidate)];
+          } catch {
+            return [row.id, null];
+          }
+        }),
+      );
+      if (cancelled) return;
+      setCurrentFitScores(Object.fromEntries(entries));
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [rows]);
+
+  const driftLabel = (status: OpportunityDriftStatus) => {
+    if (status === "IMPROVED") return "Improved";
+    if (status === "DECLINED") return "Lower now";
+    if (status === "UNCHANGED") return "Unchanged";
+    return "Current fit unavailable";
+  };
 
   const updateStatus = async (id: string, status: OpportunityItem["status"]) => {
     setUpdatingId(id);
@@ -229,7 +284,9 @@ export default function OpportunitiesPage() {
                 <tr>
                   <th className="px-3 py-2">Company</th>
                   <th className="px-3 py-2">Role</th>
-                  <th className="px-3 py-2">Score</th>
+                  <th className="px-3 py-2">Saved fit</th>
+                  <th className="px-3 py-2">Current fit</th>
+                  <th className="px-3 py-2">Change</th>
                   <th className="px-3 py-2">Status</th>
                   <th className="px-3 py-2">Last updated</th>
                   <th className="px-3 py-2">Actions</th>
@@ -237,21 +294,42 @@ export default function OpportunitiesPage() {
               </thead>
               <tbody className="divide-y divide-white/10 bg-white/[0.02] text-slate-100">
                 {rows.map((row) => (
-                  <tr
-                    key={row.id}
-                    className="cursor-pointer hover:bg-white/[0.04]"
-                    onClick={() =>
-                      row.analysisId
-                        ? router.push(`/results?assessmentId=${encodeURIComponent(row.analysisId)}`)
-                        : undefined
-                    }
-                  >
-                    <td className="px-3 py-2">{row.company}</td>
-                    <td className="px-3 py-2">{row.roleTitle}</td>
-                    <td className="px-3 py-2">{row.score}</td>
-                    <td className="px-3 py-2">{row.status}</td>
-                    <td className="px-3 py-2">{new Date(row.updatedAt).toLocaleDateString()}</td>
-                    <td className="px-3 py-2">
+                  (() => {
+                    const savedFitScore =
+                      typeof row.savedFitScore === "number" ? row.savedFitScore : row.score;
+                    const currentFitScore = currentFitScores[row.id] ?? null;
+                    const generationAllowed =
+                      typeof currentFitScore === "number" &&
+                      currentFitScore >= 70 &&
+                      row.status !== "passed";
+                    const drift = deriveOpportunityDrift({
+                      savedFitScore,
+                      currentFitScore,
+                      generationAllowed,
+                    });
+
+                    return (
+                      <tr
+                        key={row.id}
+                        className="cursor-pointer hover:bg-white/[0.04]"
+                        onClick={() =>
+                          row.analysisId
+                            ? router.push(`/results?assessmentId=${encodeURIComponent(row.analysisId)}`)
+                            : undefined
+                        }
+                      >
+                        <td className="px-3 py-2">{row.company}</td>
+                        <td className="px-3 py-2">{row.roleTitle}</td>
+                        <td className="px-3 py-2">{drift.savedFitScore ?? "—"}</td>
+                        <td className="px-3 py-2">
+                          {drift.currentFitScore ?? "—"}
+                          {drift.driftStatus === "IMPROVED" ? " ↑" : null}
+                          {drift.driftStatus === "DECLINED" ? " ↓" : null}
+                        </td>
+                        <td className="px-3 py-2">{driftLabel(drift.driftStatus)}</td>
+                        <td className="px-3 py-2">{row.status}</td>
+                        <td className="px-3 py-2">{new Date(row.updatedAt).toLocaleDateString()}</td>
+                        <td className="px-3 py-2">
                       <div className="flex flex-wrap gap-2" onClick={(event) => event.stopPropagation()}>
                         <FormButton
                           variant="secondary"
@@ -298,13 +376,26 @@ export default function OpportunitiesPage() {
                             {runningReanalysisId === row.id ? "Re-analyzing..." : "Re-analyze"}
                           </FormButton>
                         ) : null}
+                        {drift.shouldShowUpdateMaterials ? (
+                          <FormButton
+                            variant="secondary"
+                            onClick={() => {
+                              if (!row.analysisId) return;
+                              router.push(`/results?assessmentId=${encodeURIComponent(row.analysisId)}`);
+                            }}
+                          >
+                            Update materials
+                          </FormButton>
+                        ) : null}
                       </div>
-                    </td>
-                  </tr>
+                        </td>
+                      </tr>
+                    );
+                  })()
                 ))}
                 {!rows.length ? (
                   <tr>
-                    <td className="px-3 py-6 text-slate-300" colSpan={6}>
+                    <td className="px-3 py-6 text-slate-300" colSpan={8}>
                       No opportunities yet.
                     </td>
                   </tr>

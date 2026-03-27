@@ -22,6 +22,7 @@ describe("Opportunities page", () => {
                 analysisId: "analysis-1",
                 baselineId: "base-1",
                 score: 82,
+                savedFitScore: 74,
                 company: "Acme",
                 roleTitle: "Support Director",
                 status: "ready_to_apply",
@@ -32,6 +33,9 @@ describe("Opportunities page", () => {
           ),
         );
       }
+      if (url.includes("/api/analysis/job/job-1/baseline/base-1/latest")) {
+        return Promise.resolve(new Response(JSON.stringify({ score: 82 }), { status: 200 }));
+      }
       return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }));
     });
     setFetchImplementation(fetchMock);
@@ -41,6 +45,12 @@ describe("Opportunities page", () => {
     await waitFor(() => {
       expect(screen.getByText("Support Director")).toBeInTheDocument();
     });
+    expect(screen.getByText("Saved fit")).toBeInTheDocument();
+    expect(screen.getByText("Current fit")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("Improved")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Update materials" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Open Results" }));
     expect(mockRouterPush).toHaveBeenCalledWith("/results?assessmentId=analysis-1");
@@ -64,6 +74,7 @@ describe("Opportunities page", () => {
                 analysisId: "analysis-1",
                 baselineId: "base-1",
                 score: 82,
+                savedFitScore: 82,
                 company: "Acme",
                 roleTitle: "Support Director",
                 status: "ready_to_apply",
@@ -73,6 +84,9 @@ describe("Opportunities page", () => {
             { status: 200 },
           ),
         );
+      }
+      if (url.includes("/api/analysis/job/job-1/baseline/base-1/latest")) {
+        return Promise.resolve(new Response(JSON.stringify({ score: 82 }), { status: 200 }));
       }
       if (url.includes("/api/opportunities/opp-1") && init?.method === "PATCH") {
         return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
@@ -110,6 +124,7 @@ describe("Opportunities page", () => {
                 analysisId: "analysis-1",
                 baselineId: "base-1",
                 score: 64,
+                savedFitScore: 64,
                 company: "Acme",
                 roleTitle: "Support Director",
                 status: "improving_fit",
@@ -124,6 +139,9 @@ describe("Opportunities page", () => {
         return Promise.resolve(
           new Response(JSON.stringify({ baselineVersionId: "base-version-1" }), { status: 200 }),
         );
+      }
+      if (url.includes("/api/analysis/job/job-1/baseline/base-1/latest")) {
+        return Promise.resolve(new Response(JSON.stringify({ score: 64 }), { status: 200 }));
       }
       if (url.includes("/api/baselines/base-1/versions")) {
         return Promise.resolve(
@@ -148,5 +166,45 @@ describe("Opportunities page", () => {
     await waitFor(() => {
       expect(mockRouterPush).toHaveBeenCalledWith("/results?assessmentId=analysis-2");
     });
+  });
+
+  it("does not show update materials when current fit is unavailable", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = resolveUrl(input);
+      if (url.includes("/api/opportunities")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify([
+              {
+                id: "opp-1",
+                jobId: "job-1",
+                analysisId: "analysis-1",
+                baselineId: "base-1",
+                score: 68,
+                savedFitScore: 68,
+                company: "Acme",
+                roleTitle: "Support Director",
+                status: "improving_fit",
+                updatedAt: new Date().toISOString(),
+              },
+            ]),
+            { status: 200 },
+          ),
+        );
+      }
+      if (url.includes("/api/analysis/job/job-1/baseline/base-1/latest")) {
+        return Promise.resolve(new Response(JSON.stringify({}), { status: 404 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+    });
+    setFetchImplementation(fetchMock);
+
+    render(<OpportunitiesPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Current fit unavailable")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole("button", { name: "Update materials" })).toBeNull();
   });
 });

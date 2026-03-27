@@ -217,13 +217,16 @@ export class OpportunitiesService {
     const created = this.opportunityRepository.create({
       userId,
       jobId: dto.jobId,
+      savedJobId: dto.jobId,
       analysisId: dto.analysisId,
       baselineId: dto.baselineId,
+      savedBaselineId: dto.baselineId,
       companyName,
       jobTitle,
       salary: null,
       status: normalizedScore >= 70 ? OpportunityStatus.SAVED : OpportunityStatus.IN_FIT_REVIEW,
       initialScore: normalizedScore,
+      savedFitScore: normalizedScore,
       currentScore: normalizedScore,
       initialBand: fitBandFromScore(normalizedScore),
       currentBand: fitBandFromScore(normalizedScore),
@@ -231,6 +234,8 @@ export class OpportunitiesService {
       lastStatusChange: new Date(),
       dormant: false,
       notes: dto.notes?.trim() || null,
+      savedGenerationCompleted: Boolean(dto.generationCompleted),
+      savedEvidenceSummary: this.toSavedEvidenceSummary(dto.savedEvidenceSummary),
     });
     if (syntheticMetadata?.isSynthetic) {
       applySyntheticMetadata(created, syntheticMetadata);
@@ -344,12 +349,15 @@ export class OpportunitiesService {
       salary: input.salary?.trim() || null,
       status,
       initialScore: score,
+      savedFitScore: score,
       currentScore: score,
       initialBand: band,
       currentBand: band,
       baselineVersionUsed: input.baselineVersionUsed?.trim() || null,
       lastStatusChange: new Date(),
       dormant: false,
+      savedGenerationCompleted: false,
+      savedEvidenceSummary: null,
     });
     if (syntheticMetadata?.isSynthetic) {
       applySyntheticMetadata(opportunity, syntheticMetadata);
@@ -443,6 +451,12 @@ export class OpportunitiesService {
       analysisId: opportunity.analysisId,
       baselineId: opportunity.baselineId,
       score: opportunity.currentScore,
+      savedFitScore: opportunity.savedFitScore ?? opportunity.initialScore ?? null,
+      savedAt: opportunity.dateCreated.toISOString(),
+      savedBaselineId: opportunity.savedBaselineId ?? opportunity.baselineId,
+      savedJobId: opportunity.savedJobId ?? opportunity.jobId,
+      savedGenerationCompleted: Boolean(opportunity.savedGenerationCompleted),
+      savedEvidenceSummary: opportunity.savedEvidenceSummary ?? [],
       company: opportunity.companyName,
       roleTitle: opportunity.jobTitle,
       status: this.toSimpleStatus(opportunity),
@@ -450,6 +464,15 @@ export class OpportunitiesService {
       createdAt: opportunity.dateCreated.toISOString(),
       updatedAt: opportunity.updatedAt.toISOString(),
     };
+  }
+
+  private toSavedEvidenceSummary(input?: string[] | null) {
+    if (!Array.isArray(input)) return null;
+    const normalized = input
+      .map((entry) => (typeof entry === 'string' ? entry.trim().replace(/\s+/g, ' ') : ''))
+      .filter((entry) => entry.length > 0)
+      .slice(0, 3);
+    return normalized.length ? normalized : null;
   }
 
   private toSimpleStatus(opportunity: Opportunity): SimpleOpportunityStatus {

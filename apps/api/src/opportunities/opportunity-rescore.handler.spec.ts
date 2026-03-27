@@ -9,15 +9,23 @@ function buildOpportunity(id: string, score: number, band: OpportunityFitBand): 
     companyName: 'Acme',
     jobTitle: 'Engineer',
     salary: null,
+    jobId: 'job-1',
+    savedJobId: 'job-1',
+    analysisId: 'analysis-1',
+    baselineId: 'base-1',
+    savedBaselineId: 'base-1',
     dateCreated: now,
     lastStatusChange: now,
     status: OpportunityStatus.SAVED,
     initialScore: score,
+    savedFitScore: score,
     currentScore: score,
     initialBand: band,
     currentBand: band,
     baselineVersionUsed: null,
     dormant: false,
+    savedGenerationCompleted: false,
+    savedEvidenceSummary: null,
   };
 }
 

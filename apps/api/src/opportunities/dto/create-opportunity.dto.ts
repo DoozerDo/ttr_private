@@ -1,4 +1,4 @@
-import { IsNumber, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsArray, IsBoolean, IsNumber, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
 export class CreateOpportunityDto {
   @IsUUID()
@@ -24,5 +24,14 @@ export class CreateOpportunityDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  generationCompleted?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  savedEvidenceSummary?: string[];
 }
 

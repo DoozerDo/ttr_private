@@ -1,5 +1,8 @@
 import { render, waitFor } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
+import { beforeEach } from "vitest";
 import ResultsPage from "@/app/(app)/results/page";
+import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
 import { overrideSearchParams, setFetchImplementation } from "@/tests/setup";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -10,6 +13,25 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe("results opportunity persistence", () => {
+  beforeEach(() => {
+    let cache: Record<string, string> = {};
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => (key in cache ? cache[key] : null),
+        setItem: (key: string, value: string) => {
+          cache[key] = value;
+        },
+        removeItem: (key: string) => {
+          delete cache[key];
+        },
+        clear: () => {
+          cache = {};
+        },
+      },
+    });
+  });
+
   it("creates an opportunity after loading analysis and assigns ready_to_apply logic by score", async () => {
     overrideSearchParams({ assessmentId: "analysis-1" });
 
@@ -43,8 +65,15 @@ describe("results opportunity persistence", () => {
       return jsonResponse({});
     });
 
+    const generationKey = getGenerationCompletionStorageKey("job-1", "base-1");
+    window.localStorage.setItem(generationKey, "true");
     setFetchImplementation(fetchMock as unknown as typeof fetch);
     render(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Add to Opportunities" })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add to Opportunities" }));
 
     await waitFor(() => {
       const postCall = fetchMock.mock.calls.find(
@@ -55,6 +84,8 @@ describe("results opportunity persistence", () => {
       expect(postCall).toBeDefined();
       const body = JSON.parse((postCall?.[1]?.body as string) ?? "{}") as Record<string, unknown>;
       expect(body.score).toBe(82);
+      expect(typeof body.generationCompleted).toBe("boolean");
+      expect(Array.isArray(body.savedEvidenceSummary)).toBe(true);
     });
   });
 

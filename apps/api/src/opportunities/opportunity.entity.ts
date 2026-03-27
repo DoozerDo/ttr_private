@@ -48,11 +48,17 @@ export class Opportunity {
   @Column({ type: 'uuid', name: 'job_id', nullable: true })
   jobId!: string | null;
 
+  @Column({ type: 'uuid', name: 'saved_job_id', nullable: true })
+  savedJobId!: string | null;
+
   @Column({ type: 'uuid', name: 'analysis_id', nullable: true })
   analysisId!: string | null;
 
   @Column({ type: 'uuid', name: 'baseline_id', nullable: true })
   baselineId!: string | null;
+
+  @Column({ type: 'uuid', name: 'saved_baseline_id', nullable: true })
+  savedBaselineId!: string | null;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   salary!: string | null;
@@ -75,6 +81,9 @@ export class Opportunity {
 
   @Column({ type: 'integer', name: 'initial_score' })
   initialScore!: number;
+
+  @Column({ type: 'integer', name: 'saved_fit_score', nullable: true })
+  savedFitScore!: number | null;
 
   @Column({ type: 'integer', name: 'current_score' })
   currentScore!: number;
@@ -101,6 +110,12 @@ export class Opportunity {
 
   @Column({ type: 'text', nullable: true })
   notes!: string | null;
+
+  @Column({ type: 'boolean', name: 'saved_generation_completed', default: false })
+  savedGenerationCompleted!: boolean;
+
+  @Column({ type: 'text', name: 'saved_evidence_summary', array: true, nullable: true })
+  savedEvidenceSummary!: string[] | null;
 
   @Column({ type: 'boolean', default: false })
   isSynthetic!: boolean;
