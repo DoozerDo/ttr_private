@@ -469,26 +469,26 @@ export function getOpportunityVerdict(score?: number | null): {
 } {
   if (typeof score !== "number") {
     return {
-      label: "Pending",
-      explanation: "Run an analysis to see how this role aligns with your baseline.",
+      label: "Not analyzed",
+      explanation: "Run Career Compatibility Analysis to see the verdict.",
     };
   }
   const band = getScoreBand(score);
   if (band === ScoreBand.TOP) {
     return {
-      label: "Prime Opportunity",
-      explanation: "You're a strong match for this role.",
+      label: "Strong match",
+      explanation: "This role is likely worth pursuing.",
     };
   }
   if (band === ScoreBand.MID) {
     return {
-      label: "Competitive Match",
-      explanation: "You're close. Focused tailoring can strengthen this application.",
+      label: "Competitive match",
+      explanation: "You can win this with focused tailoring.",
     };
   }
   return {
-    label: "Low Match",
-    explanation: "This role currently shows meaningful gaps against your baseline.",
+    label: "Below threshold",
+    explanation: "The score shows clear gaps that need work.",
   };
 }
 
@@ -602,12 +602,10 @@ function ResolveGapsBlock({
 }) {
   return (
     <section className="rounded-2xl border border-amber-300/35 bg-amber-500/10 p-4" data-testid="resolve-gaps-block">
-      <h3 className="text-lg font-semibold text-slate-100">
-        This role needs stronger proof before generation will be useful.
-      </h3>
+      <h3 className="text-lg font-semibold text-slate-100">This score needs stronger proof before generation.</h3>
       <p className="mt-2 text-sm text-slate-200">
-        You have relevant experience, but a few requirements are not well supported in your baseline. Resolve the
-        gaps below before opening the studio.
+        You have relevant experience, but a few requirements are not well supported yet. Fix the gaps below before
+        opening the studio.
       </p>
       {gapPreview.length > 0 ? (
         <ul className="mt-3 space-y-2 text-sm text-slate-100">
@@ -631,7 +629,7 @@ function ResolveGapsBlock({
             href={fullAnalysisHref}
             className="text-sm font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
           >
-            View full analysis
+            View detailed scoring breakdown
           </a>
         </div>
       </div>
@@ -732,34 +730,34 @@ export function OpportunityMapSection({
     switch (nextAction.action) {
       case "CONTINUE_ANALYSIS":
         return {
-          headline: "Run Career Compatibility Analysis to get a real score.",
-          body: "No analysis means no decision yet.",
+          headline: "Run Career Compatibility Analysis to get a score.",
+          body: "Without a score, there is no decision to make.",
         };
       case "RESOLVE_GAPS":
         return {
           headline: "This score is below the generation threshold.",
-          body: "Close the open gaps before you move into Studio.",
+          body: "Fix the gaps before you move forward.",
         };
       case "REANALYZE":
         return {
-          headline: "Your baseline changed. Reanalyze the role.",
-          body: "This will show whether the new evidence moved the score.",
+          headline: "Your baseline changed. Run the analysis again.",
+          body: "See whether the new evidence changed the outcome.",
         };
       case "GENERATE_RESUME":
         return {
-          headline: "This role cleared the threshold.",
-          body: "Open Resume + Cover Letter Studio to generate tailored materials.",
+          headline: "This score clears the generation threshold.",
+          body: "Open Resume + Cover Letter Studio now.",
         };
       case "ADD_TO_OPPORTUNITIES":
         return {
-          headline: "Your materials are ready.",
-          body: "Add this role to Opportunities to keep it in motion.",
+          headline: "This role is ready to save.",
+          body: "Add it to Opportunities to keep moving.",
         };
       case "REVIEW_RESULTS":
       default:
         return {
           headline: "This decision is complete.",
-          body: "Review the result or move to another role.",
+          body: "Review the details or move to the next role.",
         };
     }
   }, [nextAction.action]);
@@ -827,7 +825,7 @@ export function OpportunityMapSection({
           </p>
           <h3 className="text-2xl font-semibold tracking-tight text-white">{verdict.label}</h3>
           <p className="max-w-2xl text-sm leading-6 text-slate-300">{verdict.explanation}</p>
-          <p className="max-w-2xl text-xs leading-5 text-slate-400">Built from your validated baseline and the role requirements.</p>
+          <p className="max-w-2xl text-xs leading-5 text-slate-400">Based on your validated baseline and the role requirements.</p>
         </div>
         <div
           id="generation-readiness-details"
@@ -2072,12 +2070,12 @@ export default function ResultsPage() {
     }
     if (primaryNextAction.action === "REANALYZE") {
       return {
-        label: "Reanalyze Role",
+        label: "Run analysis again",
         onClick: () => {
           void rerunAnalysisForCurrentRole();
         },
         disabled: reanalysisRunning,
-        description: "Your baseline changed. Reanalyze the role.",
+        description: "Your baseline changed. Run the analysis again.",
       };
     }
     if (primaryNextAction.action === "GENERATE_RESUME") {
@@ -2095,7 +2093,7 @@ export default function ResultsPage() {
           void saveOpportunityFromResults();
         },
         disabled: false,
-        description: "Your materials are ready. Add this role to Opportunities.",
+        description: "This role is ready to save. Add it to Opportunities.",
       };
     }
     if (primaryNextAction.action === "REVIEW_RESULTS") {
@@ -2103,7 +2101,7 @@ export default function ResultsPage() {
         label: "Review Results",
         href: "#advanced-insights",
         disabled: false,
-        description: "Everything is saved. Review details or choose your next role.",
+        description: "Review the details or move to the next role.",
       };
     }
     return null;
@@ -2337,10 +2335,10 @@ export default function ResultsPage() {
 
   const latestStatusMessage = useMemo(() => {
     if (loadingLatest) return "Loading latest analysis...";
-    if (!jobId) return "Enter a job ID to load the latest analysis.";
-    if (!baselineId) return "Select a baseline to load the latest analysis.";
+    if (!jobId) return "No job selected. Go to Baseline and choose a job to continue.";
+    if (!baselineId) return "No baseline selected. Go to Baseline and choose a baseline to continue.";
     if (analysisSource === "latest" && latest) return "Latest analysis loaded.";
-    return "Load latest analysis to populate the score and clarify your next move.";
+    return "Load the latest analysis to see the score and next step.";
   }, [analysisSource, jobId, baselineId, latest, loadingLatest]);
 
   const loadAssessmentById = useCallback(
@@ -2841,7 +2839,7 @@ export default function ResultsPage() {
       return {
         headline: "Good. Now let's measure the impact.",
         body: "Run reanalysis to see whether your new evidence raised fit and readiness.",
-        ctaLabel: reanalysisRunning ? "Reanalyzing..." : "Reanalyze Role",
+        ctaLabel: reanalysisRunning ? "Reanalyzing..." : "Run analysis again",
         onCtaClick: () => {
           if (!reanalysisRunning) void rerunAnalysisForCurrentRole();
         },

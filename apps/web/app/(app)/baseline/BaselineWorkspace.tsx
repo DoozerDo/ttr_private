@@ -17,7 +17,7 @@ type BaselineWorkspaceProps = {
 };
 
 const NOTICE_MESSAGE =
-  "Previous selection no longer exists. Please select a baseline and job.";
+  "That selection is no longer available. Please pick a baseline and job to continue.";
 
 const resolveParam = (value: string | string[] | null | undefined): string | null => {
   if (Array.isArray(value)) {

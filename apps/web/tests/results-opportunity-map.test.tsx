@@ -57,7 +57,7 @@ describe("Results opportunity map", () => {
       />,
     );
 
-    expect(screen.getAllByText("This role needs stronger proof before generation will be useful.").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("This score needs stronger proof before generation.").length).toBeGreaterThan(0);
     expect(screen.queryByRole("link", { name: "Open Resume + Cover Letter Studio" })).toBeNull();
   });
 
@@ -68,7 +68,7 @@ describe("Results opportunity map", () => {
         verdict={getOpportunityVerdict(72)}
         nextAction={buildNextAction("REANALYZE")}
         advantageSignals={[]}
-        primaryCta={{ label: "Reanalyze Role", onClick: () => {}, description: "Your baseline changed. Reanalyze the role." }}
+        primaryCta={{ label: "Run analysis again", onClick: () => {}, description: "Your baseline changed. Run the analysis again." }}
         scoreAnalysisHref="#advanced-insights"
         readiness={readyReadiness}
         verificationCoverage={strongCoverage}
@@ -77,7 +77,7 @@ describe("Results opportunity map", () => {
       />,
     );
 
-    expect(screen.getAllByText("Your baseline changed. Reanalyze the role.").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Your baseline changed. Run the analysis again.").length).toBeGreaterThan(0);
   });
 
   it("renders Add to Opportunities narrative state", () => {
@@ -87,7 +87,7 @@ describe("Results opportunity map", () => {
         verdict={getOpportunityVerdict(82)}
         nextAction={buildNextAction("ADD_TO_OPPORTUNITIES")}
         advantageSignals={[]}
-        primaryCta={{ label: "Add to Opportunities", onClick: () => {}, description: "Your materials are ready. Add this role to Opportunities." }}
+        primaryCta={{ label: "Add to Opportunities", onClick: () => {}, description: "This role is ready to save. Add it to Opportunities." }}
         scoreAnalysisHref="#advanced-insights"
         readiness={readyReadiness}
         verificationCoverage={strongCoverage}
@@ -96,7 +96,7 @@ describe("Results opportunity map", () => {
       />,
     );
 
-    expect(screen.getByText("Your materials are ready.")).toBeInTheDocument();
+    expect(screen.getByText("This role is ready to save.")).toBeInTheDocument();
   });
 
   it("renders Review Results narrative without duplicate save CTA", () => {
@@ -133,7 +133,7 @@ describe("Results opportunity map", () => {
         primaryCta={{
           label: "Open Resume + Cover Letter Studio",
           href: "/studio",
-          description: "You're a strong match. Open the studio to generate tailored materials.",
+          description: "This score clears the generation threshold. Open Resume + Cover Letter Studio now.",
         }}
         scoreAnalysisHref="#advanced-insights"
         readiness={readyReadiness}
@@ -149,12 +149,12 @@ describe("Results opportunity map", () => {
         "A focused read on how strong this match is, why it holds up, and what you should do next.",
       ),
     ).toBeNull();
-    expect(screen.getByText("Competitive Match")).toBeInTheDocument();
+    expect(screen.getByText("Competitive match")).toBeInTheDocument();
     expect(screen.getByText("Decision summary")).toBeInTheDocument();
-    expect(screen.getByText("Built from your validated baseline and the role requirements.")).toBeInTheDocument();
+    expect(screen.getByText("Based on your validated baseline and the role requirements.")).toBeInTheDocument();
     expect(screen.getByText("View detailed scoring breakdown")).toBeInTheDocument();
     expect(screen.getByText("Open Resume + Cover Letter Studio")).toBeInTheDocument();
-    expect(screen.getByText("You're a strong match. Open the studio to generate tailored materials.")).toBeInTheDocument();
+    expect(screen.getByText("This score clears the generation threshold. Open Resume + Cover Letter Studio now.")).toBeInTheDocument();
     expect(screen.queryByText("Watchouts")).toBeNull();
     expect(screen.queryByText("Best next move")).toBeNull();
     expect(screen.queryByText("Fit")).toBeNull();
@@ -198,7 +198,7 @@ describe("Results opportunity map", () => {
         primaryCta={{
           label: "Open Studio",
           href: "/studio",
-          description: "You're competitive. Tighten positioning before opening the studio.",
+          description: "This score clears the generation threshold. Open Resume + Cover Letter Studio now.",
         }}
         scoreAnalysisHref="#advanced-insights"
         readiness={readyReadiness}
@@ -213,11 +213,11 @@ describe("Results opportunity map", () => {
   });
 
   it("maps score bands to the expected verdict", () => {
-    expect(getOpportunityVerdict(92)).toMatchObject({ label: "Prime Opportunity" });
-    expect(getOpportunityVerdict(75)).toMatchObject({ label: "Competitive Match" });
-    expect(getOpportunityVerdict(84)).toMatchObject({ label: "Competitive Match" });
-    expect(getOpportunityVerdict(64)).toMatchObject({ label: "Low Match" });
-    expect(getOpportunityVerdict(52)).toMatchObject({ label: "Low Match" });
+    expect(getOpportunityVerdict(92)).toMatchObject({ label: "Strong match" });
+    expect(getOpportunityVerdict(75)).toMatchObject({ label: "Competitive match" });
+    expect(getOpportunityVerdict(84)).toMatchObject({ label: "Competitive match" });
+    expect(getOpportunityVerdict(64)).toMatchObject({ label: "Below threshold" });
+    expect(getOpportunityVerdict(52)).toMatchObject({ label: "Below threshold" });
   });
 
   it("shows normal generate CTA for high score + ready readiness", () => {
@@ -230,7 +230,7 @@ describe("Results opportunity map", () => {
         primaryCta={{
           label: "Open Resume + Cover Letter Studio",
           href: "/studio",
-          description: "You're a strong match. Open the studio to generate tailored materials.",
+          description: "This score clears the generation threshold. Open Resume + Cover Letter Studio now.",
         }}
         scoreAnalysisHref="#advanced-insights"
         readiness={readyReadiness}
@@ -273,7 +273,7 @@ describe("Results opportunity map", () => {
 
     expect(screen.getByTestId("resolve-gaps-block")).toBeInTheDocument();
     expect(
-      screen.getAllByText("This role needs stronger proof before generation will be useful.")[0],
+      screen.getAllByText("This score needs stronger proof before generation.")[0],
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Resolve Gaps" })).toHaveAttribute(
       "href",
@@ -292,7 +292,7 @@ describe("Results opportunity map", () => {
         primaryCta={{
           label: "Open Studio",
           href: "/studio",
-          description: "You're competitive. Tighten positioning before opening the studio.",
+          description: "This score clears the generation threshold. Open Resume + Cover Letter Studio now.",
         }}
         scoreAnalysisHref="#advanced-insights"
         readiness={readyReadiness}
@@ -316,7 +316,7 @@ describe("Results opportunity map", () => {
         primaryCta={{
           label: "Open Studio",
           href: "/studio",
-          description: "You're competitive. Tighten positioning before opening the studio.",
+          description: "This score clears the generation threshold. Open Resume + Cover Letter Studio now.",
         }}
         scoreAnalysisHref="#advanced-insights"
         readiness={{
@@ -382,7 +382,7 @@ describe("Results opportunity map", () => {
         primaryCta={{
           label: "Open Studio",
           href: "/studio?analysisId=analysis-1#studio-auto-adjust-panel",
-          description: "You're competitive. Tighten positioning before opening the studio.",
+          description: "This score clears the generation threshold. Open Resume + Cover Letter Studio now.",
         }}
         scoreAnalysisHref="#advanced-insights"
         readiness={{
@@ -430,7 +430,7 @@ describe("Results opportunity map", () => {
         primaryCta={{
           label: "Open Studio",
           href: "/studio?analysisId=analysis-1#studio-auto-adjust-panel",
-          description: "You're competitive. Tighten positioning before opening the studio.",
+          description: "This score clears the generation threshold. Open Resume + Cover Letter Studio now.",
         }}
         scoreAnalysisHref="#advanced-insights"
         readiness={{
@@ -536,7 +536,7 @@ describe("Results opportunity map", () => {
         primaryCta={{
           label: "Remove unsupported requirements and continue",
           href: "/studio?analysisId=analysis-1&excludedRequirements=Zendesk&excludedRequirements=Five9",
-          description: "You're a strong match. Open the studio to generate tailored materials.",
+          description: "This score clears the generation threshold. Open Resume + Cover Letter Studio now.",
         }}
         scoreAnalysisHref="#advanced-insights"
         readiness={{

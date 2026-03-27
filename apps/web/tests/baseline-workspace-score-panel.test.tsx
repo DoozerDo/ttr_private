@@ -513,4 +513,5 @@ describe("BaselineWorkspace live score panel", () => {
       setTimeoutSpy.mockRestore();
     }
   });
+
 });
