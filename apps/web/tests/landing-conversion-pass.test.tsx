@@ -16,20 +16,20 @@ describe("Landing conversion pass", () => {
     render(<LandingPage isAuthenticated={false} />);
 
     expect(
-      screen.getByRole("heading", { name: "Know that you qualify before you apply." }),
+      screen.getByRole("heading", { name: "Upload your resume, paste the job description, and get your fit in seconds." }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Check your compatibility" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Check Compatibility" })).toHaveAttribute(
       "href",
       "#check-compatibility",
     );
-    expect(screen.getByRole("button", { name: "Upload your resume" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Analyze this role" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select resume" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run Career Compatibility Analysis" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Example compatibility analysis" })).toBeInTheDocument();
-    expect(screen.getByText("Example analysis. Upload your resume to generate your own.")).toBeInTheDocument();
+    expect(screen.getByText("This is a static example for format only. Your uploaded inputs produce your actual result.")).toBeInTheDocument();
     expect(screen.getByText("Try a sample role (example only):")).toBeInTheDocument();
 
-    const heroHeading = screen.getByRole("heading", { name: "Know that you qualify before you apply." });
-    const inputHeading = screen.getByRole("heading", { name: "Check your compatibility" });
+    const heroHeading = screen.getByRole("heading", { name: "Upload your resume, paste the job description, and get your fit in seconds." });
+    const inputHeading = screen.getByRole("button", { name: "Select resume" });
     const previewHeading = screen.getByRole("heading", { name: "Example compatibility analysis" });
     expect(
       heroHeading.compareDocumentPosition(inputHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -39,3 +39,7 @@ describe("Landing conversion pass", () => {
     ).toBeTruthy();
   });
 });
+
+
+
+

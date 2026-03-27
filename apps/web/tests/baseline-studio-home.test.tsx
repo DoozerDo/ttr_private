@@ -759,6 +759,15 @@ describe("BaselineStudioHome", () => {
     expect(screen.getAllByRole("button", { name: "Run Career Compatibility Analysis" }).length).toBeGreaterThan(0);
   });
 
+  it("shows a single primary upload action for empty baseline state", () => {
+    render(<BaselineStudioHome baselines={[]} />);
+
+    expect(screen.getAllByRole("button", { name: "Upload your resume" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Choose resume" })).not.toBeInTheDocument();
+    expect(screen.getByText("Upload support")).toBeInTheDocument();
+    expect(screen.getByText("Your uploaded baseline will appear here.")).toBeInTheDocument();
+  });
+
   it("uploads successfully from wrapped API payload and does not persist score history prematurely", async () => {
     let analysisScoreCalled = false;
 

@@ -952,19 +952,19 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         <section className="rounded-[28px] bg-slate-900/40 p-6 md:p-8">
           <div className="max-w-3xl space-y-5">
             <div className="space-y-2">
-              <h1 className="text-3xl font-semibold tracking-tight text-white md:text-[34px]">
-                {heroState === "ready"
-                  ? "Your baseline is ready for the next analysis."
-                  : heroState === "in_progress"
-                    ? "Analyze your baseline to get started."
-                    : "Upload your resume to create your baseline."}
-              </h1>
-              <p className="text-base leading-7 text-slate-300">
-                {heroState === "ready"
-                  ? "You can continue building or run career compatibility analysis."
-                  : heroState === "in_progress"
-                    ? "We'll evaluate your experience and unlock role targeting and generation."
-                    : "Your baseline is the trusted source used to analyze fit and prepare role-specific materials."}
+                <h1 className="text-3xl font-semibold tracking-tight text-white md:text-[34px]">
+                  {heroState === "ready"
+                    ? "Your baseline is ready for the next analysis."
+                    : heroState === "in_progress"
+                      ? "Analyze your baseline to get started."
+                    : "Create your baseline."}
+                </h1>
+                <p className="text-base leading-7 text-slate-300">
+                  {heroState === "ready"
+                    ? "You can continue building or run career compatibility analysis."
+                    : heroState === "in_progress"
+                      ? "We'll evaluate your experience and unlock role targeting and generation."
+                    : "Start by uploading your baseline source file."}
               </p>
               <p className="text-sm text-slate-400">
                 Built from your uploaded baseline and readiness checks.
@@ -1002,17 +1002,13 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             </div>
           </div>
         </section>
-        {heroState !== "in_progress" ? <BetaGuideNudge /> : null}
-
         <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
           <header className="space-y-1">
             <h2 className="text-xl font-semibold tracking-tight text-slate-100">Your baseline</h2>
-            <p className="text-sm text-slate-400">Current file, status, and next action.</p>
+            <p className="text-sm text-slate-400">Current file and status.</p>
           </header>
           {allBaselines.length === 0 ? (
-            <p className="text-sm leading-6 text-slate-300">
-              No baseline uploaded yet. Upload a resume to begin.
-            </p>
+            <p className="text-sm leading-6 text-slate-300">Your uploaded baseline will appear here.</p>
           ) : (
             <div className="space-y-3">
               {allBaselines.slice(0, 3).map((baseline) => {
@@ -1125,9 +1121,9 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         {isEditableLibrary && heroState === "no_baseline" ? (
           <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/20 p-5">
             <header className="space-y-1">
-              <h2 className="text-xl font-semibold tracking-tight text-slate-100">Upload resume</h2>
+              <h2 className="text-xl font-semibold tracking-tight text-slate-100">Upload support</h2>
               <p className="text-sm leading-6 text-slate-400">
-                Add or replace your baseline source file before targeting roles.
+                Accepted formats and storage limits for your baseline file.
               </p>
             </header>
             <div
@@ -1137,15 +1133,9 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 uploadLimitReached ? "border-white/10 bg-slate-950/25" : "border-white/20 bg-slate-950/35"
               }`}
             >
-              <p className="text-sm font-semibold text-slate-100">Drag and drop a resume, or choose a file</p>
+              <p className="text-sm font-semibold text-slate-100">Drag and drop a file or use the hero action above</p>
               <p className="mt-1 text-sm text-slate-400">Accepted formats: PDF and DOCX</p>
               <div className="mt-4 flex flex-wrap gap-3">
-                <FormButton
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isUploading || uploadLimitReached}
-                >
-                  {isUploading ? "Uploading..." : "Choose resume"}
-                </FormButton>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -1191,6 +1181,8 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             ) : null}
           </section>
         ) : null}
+
+        {isEditableLibrary && heroState !== "in_progress" ? <BetaGuideNudge /> : null}
 
         {analysisReady ? (
           <section className="space-y-3 rounded-[20px] border border-white/10 bg-slate-900/20 p-5">

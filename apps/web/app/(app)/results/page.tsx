@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
@@ -367,7 +367,7 @@ const EVIDENCE_LABEL_BY_KEY: Record<string, string> = {
 
 function trimEvidenceLine(line: string, maxLength = 80): string {
   if (line.length <= maxLength) return line;
-  return `${line.slice(0, maxLength - 1).trimEnd()}…`;
+  return `${line.slice(0, maxLength - 1).trimEnd()}...`;
 }
 
 function buildEvidenceLines(scoreBreakdown: ScoreBreakdownShape | null): string[] {
@@ -483,7 +483,7 @@ export function getOpportunityVerdict(score?: number | null): {
   if (band === ScoreBand.MID) {
     return {
       label: "Competitive Match",
-      explanation: "You’re close. Focused tailoring can strengthen this application.",
+      explanation: "You're close. Focused tailoring can strengthen this application.",
     };
   }
   return {
@@ -607,7 +607,7 @@ function ResolveGapsBlock({
       </h3>
       <p className="mt-2 text-sm text-slate-200">
         You have relevant experience, but a few requirements are not well supported in your baseline. Resolve the
-        gaps below to improve fit and strengthen output quality.
+        gaps below before opening the studio.
       </p>
       {gapPreview.length > 0 ? (
         <ul className="mt-3 space-y-2 text-sm text-slate-100">
@@ -726,40 +726,40 @@ export function OpportunityMapSection({
     readiness.status === "blocked"
       ? "Generation is currently blocked until key verification gaps are resolved."
       : readiness.status === "limited"
-        ? "Some requirements need stronger verification. You can still generate documents, and improving evidence will strengthen results."
-        : "Your evidence supports generation for this role.";
+        ? "Some requirements need stronger verification. You can still generate documents."
+        : "Your evidence supports generation.";
   const decisionNarrative = useMemo(() => {
     switch (nextAction.action) {
       case "CONTINUE_ANALYSIS":
         return {
-          headline: "Run analysis to see whether this role is truly a fit.",
-          body: "We need a completed analysis before we can recommend a reliable next step.",
+          headline: "Run Career Compatibility Analysis to get a real score.",
+          body: "No analysis means no decision yet.",
         };
       case "RESOLVE_GAPS":
         return {
-          headline: "This role needs stronger proof before generation will be useful.",
-          body: "You have relevant experience, but a few requirements are not well supported in your baseline.",
+          headline: "This score is below the generation threshold.",
+          body: "Close the open gaps before you move into Studio.",
         };
       case "REANALYZE":
         return {
-          headline: "You've added evidence. Reanalyze to measure the impact.",
-          body: "Your baseline changed. Run the role again to see whether fit improved and generation is now ready.",
+          headline: "Your baseline changed. Reanalyze the role.",
+          body: "This will show whether the new evidence moved the score.",
         };
       case "GENERATE_RESUME":
         return {
-          headline: "You've cleared the threshold. Generate tailored materials now.",
-          body: "This role is ready for tailored output based on your verified baseline.",
+          headline: "This role cleared the threshold.",
+          body: "Open Resume + Cover Letter Studio to generate tailored materials.",
         };
       case "ADD_TO_OPPORTUNITIES":
         return {
-          headline: "Your materials are ready. Track this opportunity.",
-          body: "Save this role to Opportunities to keep it in motion.",
+          headline: "Your materials are ready.",
+          body: "Add this role to Opportunities to keep it in motion.",
         };
       case "REVIEW_RESULTS":
       default:
         return {
-          headline: "Your next step is complete.",
-          body: "This role has already been generated and saved. Review the results or analyze another role.",
+          headline: "This decision is complete.",
+          body: "Review the result or move to another role.",
         };
     }
   }, [nextAction.action]);
@@ -789,7 +789,7 @@ export function OpportunityMapSection({
                     data-testid="results-hero-primary-cta"
                     className="inline-flex min-h-[52px] min-w-[300px] cursor-not-allowed items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-6 py-3 text-base font-semibold text-slate-400 md:min-w-[320px]"
                   >
-                    {primaryCta.label}
+                {primaryCta.label}
                   </span>
                 ) : primaryCta.onClick ? (
                   <button
@@ -827,7 +827,7 @@ export function OpportunityMapSection({
           </p>
           <h3 className="text-2xl font-semibold tracking-tight text-white">{verdict.label}</h3>
           <p className="max-w-2xl text-sm leading-6 text-slate-300">{verdict.explanation}</p>
-          <p className="max-w-2xl text-xs leading-5 text-slate-400">Built from your validated baseline and role requirements.</p>
+          <p className="max-w-2xl text-xs leading-5 text-slate-400">Built from your validated baseline and the role requirements.</p>
         </div>
         <div
           id="generation-readiness-details"
@@ -841,7 +841,7 @@ export function OpportunityMapSection({
             <p className="mt-1 text-xs text-slate-300">{readiness.reasons[0].message}</p>
           ) : null}
           <p className="mt-1 text-xs text-slate-400">
-            Verification coverage: {verificationCoverage.status.toUpperCase()} · {verificationCoverage.verifiedClaims} /{" "}
+            Verification coverage: {verificationCoverage.status.toUpperCase()} - {verificationCoverage.verifiedClaims} /{" "}
             {verificationCoverage.totalClaims > 0 ? verificationCoverage.totalClaims : "?"} verified claims
           </p>
           {unverifiedSignals.length > 0 ? (
@@ -870,7 +870,7 @@ export function OpportunityMapSection({
               ))}
             </ul>
           ) : (
-            <p className="mt-2 text-sm text-slate-300">No evidence details are available for this analysis yet.</p>
+            <p className="mt-2 text-sm text-slate-300">No evidence details are available yet.</p>
           )}
         </section>
       </div>
@@ -1379,7 +1379,7 @@ function extractSectionText(section: ResumeSectionLike): string {
   if (lines.length) return lines.join("\n");
 
   const bullets = stringsOnly(section.bullets);
-  if (bullets.length) return bullets.map((b) => `• ${b}`).join("\n");
+  if (bullets.length) return bullets.map((b) => `- ${b}`).join("\n");
 
   return "";
 }
@@ -2077,7 +2077,7 @@ export default function ResultsPage() {
           void rerunAnalysisForCurrentRole();
         },
         disabled: reanalysisRunning,
-        description: "You've added evidence. Reanalyze to measure the impact.",
+        description: "Your baseline changed. Reanalyze the role.",
       };
     }
     if (primaryNextAction.action === "GENERATE_RESUME") {
@@ -2085,7 +2085,7 @@ export default function ResultsPage() {
         label: "Open Resume + Cover Letter Studio",
         href: studioHref,
         disabled: !canOpenStudio,
-        description: "You’ve cleared the threshold. Open the studio to generate tailored materials now.",
+        description: "You've cleared the threshold. Open the studio to generate tailored materials now.",
       };
     }
     if (primaryNextAction.action === "ADD_TO_OPPORTUNITIES") {
@@ -2959,9 +2959,9 @@ export default function ResultsPage() {
               title="No compatibility analysis yet"
               body={
                 loadingLatest
-                  ? "Preparing compatibility report…"
+                  ? "Preparing compatibility report..."
                   : hasJobBaselineContext
-                    ? "Preparing your Compatibility Analysis automatically…"
+                    ? "Preparing your Compatibility Analysis automatically."
                     : "Load the latest Compatibility Analysis to reveal your Fit Verdict and Compatibility Score."
               }
               cta={
@@ -3020,7 +3020,7 @@ export default function ResultsPage() {
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <p className="text-sm font-semibold text-slate-100">{role.roleTitle}</p>
                               <p className="text-xs text-slate-200">
-                                {role.fitLevel} · {role.estimatedFitScore}
+                                {role.fitLevel} - {role.estimatedFitScore}
                               </p>
                             </div>
                             <p className="mt-1 text-sm text-slate-200">{role.explanation}</p>
@@ -3034,7 +3034,7 @@ export default function ResultsPage() {
                                 href={role.analyzeHref}
                                 className="inline-flex rounded-xl border border-emerald-300/45 px-3 py-1.5 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-400/15"
                               >
-                                Analyze this role
+                                Run Career Compatibility Analysis
                               </Link>
                             </div>
                           </article>
@@ -3277,5 +3277,6 @@ export default function ResultsPage() {
       </PageShell>
     );
   }
+
 
 

@@ -11,7 +11,7 @@ const ReportBugContext = createContext<ReportBugContextValue | null>(null);
 
 type ReportBugProviderProps = {
   children: ReactNode;
-  userEmail?: string | null;
+  userId?: string | null;
 };
 
 type ReportBugTriggerProps = {
@@ -19,7 +19,7 @@ type ReportBugTriggerProps = {
   label?: string;
 };
 
-export function ReportBugProvider({ children, userEmail }: ReportBugProviderProps) {
+export function ReportBugProvider({ children, userId }: ReportBugProviderProps) {
   const [isOpen, setIsOpen] = useState(false);
   const contextValue = useMemo(
     () => ({
@@ -31,7 +31,11 @@ export function ReportBugProvider({ children, userEmail }: ReportBugProviderProp
   return (
     <ReportBugContext.Provider value={contextValue}>
       {children}
-      <ReportBugModal open={isOpen} onClose={() => setIsOpen(false)} initialEmail={userEmail ?? undefined} />
+      <ReportBugModal
+        open={isOpen}
+        onClose={() => setIsOpen(false)}
+        userId={userId ?? undefined}
+      />
     </ReportBugContext.Provider>
   );
 }

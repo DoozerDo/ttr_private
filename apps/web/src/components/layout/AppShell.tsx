@@ -423,7 +423,7 @@ export function AppShell({ children, userEmail, userId, footerSlot }: AppShellPr
   );
 
   return (
-    <ReportBugProvider userEmail={userEmail}>
+    <ReportBugProvider userId={userId}>
       <div className="flex min-h-screen bg-[var(--bg-app)] text-[var(--text-primary)]">
         <div className="flex min-h-screen flex-1 flex-col">
           <main

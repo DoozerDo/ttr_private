@@ -1,10 +1,7 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { readLastAnalysis, type StoredAnalysisRecord } from "@/app/(app)/lib/session";
-
-const LAST_API_SNAPSHOT_KEY = "ttr:last-api-response-snapshot";
 
 const resolvedGitSha =
   process.env.NEXT_PUBLIC_GIT_SHA ??
@@ -15,7 +12,7 @@ const resolvedGitSha =
 type ReportBugModalProps = {
   open: boolean;
   onClose: () => void;
-  initialEmail?: string;
+  userId?: string;
 };
 
 type BugReportCreateResponse = {
@@ -23,12 +20,10 @@ type BugReportCreateResponse = {
   reportId: string;
 };
 
-export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalProps) {
+export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
   const pathname = usePathname() ?? "/";
   const [whatHappened, setWhatHappened] = useState("");
-  const [reporterEmail, setReporterEmail] = useState(initialEmail ?? "");
-  const [includeApiSnapshot, setIncludeApiSnapshot] = useState(true);
-  const [storedAnalysis, setStoredAnalysis] = useState<StoredAnalysisRecord | null>(null);
+  const [details, setDetails] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [createdReportId, setCreatedReportId] = useState<string | null>(null);
@@ -36,16 +31,11 @@ export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalPr
   useEffect(() => {
     if (!open) return;
     setWhatHappened("");
-    setReporterEmail(initialEmail ?? "");
-    setIncludeApiSnapshot(true);
+    setDetails("");
     setStatus("idle");
     setStatusMessage(null);
     setCreatedReportId(null);
-    setStoredAnalysis(readLastAnalysis());
-  }, [initialEmail, open]);
-
-  const pageUrl = useMemo(() => (typeof window !== "undefined" ? window.location.href : ""), []);
-  const userAgent = useMemo(() => (typeof navigator !== "undefined" ? navigator.userAgent : ""), []);
+  }, [open]);
 
   const isValid = whatHappened.trim().length >= 10;
 
@@ -57,78 +47,52 @@ export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalPr
       setStatus("loading");
       setStatusMessage(null);
 
-      const analysis = storedAnalysis?.analysis;
-      const assessmentId =
-        typeof analysis?.assessmentId === "string" ? analysis.assessmentId : undefined;
-      const fitScore =
-        storedAnalysis?.fitScore ??
-        (typeof analysis?.score === "number" ? analysis.score : undefined);
       const runtimeContext = {
         timestamp: new Date().toISOString(),
-        href: pageUrl || undefined,
         route: `${window.location.pathname}${window.location.search}`,
         pageLabel: document.title || undefined,
-        baselineId: storedAnalysis?.baselineId || undefined,
-        jobId: storedAnalysis?.jobId || undefined,
-        assessmentId: assessmentId || undefined,
-        fitScore: typeof fitScore === "number" ? fitScore : undefined,
-        viewport: {
-          width: window.innerWidth,
-          height: window.innerHeight,
-        },
+        userId,
         lastUserAction: window.sessionStorage.getItem("ttr:last-user-action") ?? undefined,
-        lastApiResponseSnapshot: includeApiSnapshot
-          ? (() => {
-              try {
-                const raw = window.sessionStorage.getItem(LAST_API_SNAPSHOT_KEY);
-                return raw ? JSON.parse(raw) : undefined;
-              } catch {
-                return undefined;
-              }
-            })()
-          : undefined,
       };
 
-      const formData = new FormData();
-      formData.set("whatHappened", whatHappened.trim());
-      if (reporterEmail.trim()) formData.set("reporterEmail", reporterEmail.trim());
-      formData.set("route", `${window.location.pathname}${window.location.search}`);
-      formData.set("pageLabel", document.title || pathname);
-      if (process.env.NEXT_PUBLIC_APP_VERSION) {
-        formData.set("appVersion", process.env.NEXT_PUBLIC_APP_VERSION);
-      }
-      if (resolvedGitSha) {
-        formData.set("gitSha", resolvedGitSha.slice(0, 40));
-      }
-      if (storedAnalysis?.baselineId) formData.set("baselineId", storedAnalysis.baselineId);
-      if (assessmentId) formData.set("assessmentId", assessmentId);
-      if (typeof fitScore === "number") formData.set("fitScore", String(fitScore));
-      if (userAgent) formData.set("browserInfo", userAgent);
-      formData.set("runtimeContext", JSON.stringify(runtimeContext));
+      const requestPayload = {
+        description: whatHappened.trim(),
+        details: details.trim() || undefined,
+        route: `${window.location.pathname}${window.location.search}`,
+        timestamp: runtimeContext.timestamp,
+        userId: userId ?? undefined,
+        pageLabel: document.title || pathname,
+        lastAction: runtimeContext.lastUserAction,
+        runtimeContext,
+        appVersion: process.env.NEXT_PUBLIC_APP_VERSION || undefined,
+        gitSha: resolvedGitSha ? resolvedGitSha.slice(0, 40) : undefined,
+      };
 
       try {
-        const response = await fetch("/api/bug-reports", {
+        const response = await fetch("/api/support/report-bug", {
           method: "POST",
           credentials: "include",
-          body: formData,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestPayload),
         });
 
         if (!response.ok) {
-          const payload = (await response.json().catch(() => null)) as { message?: string } | null;
-          throw new Error(payload?.message ?? "Bug report failed to send. Please try again.");
+          const errorPayload = (await response.json().catch(() => null)) as { message?: string } | null;
+          throw new Error(errorPayload?.message ?? "Bug report failed to send. Please try again.");
         }
 
-        const payload = (await response.json()) as BugReportCreateResponse;
+        const responsePayload = (await response.json()) as BugReportCreateResponse;
         setStatus("success");
-        setStatusMessage("Thanks - your report was submitted successfully.");
-        setCreatedReportId(payload.reportId);
+        setStatusMessage("Thanks. Your report was submitted successfully.");
+        setCreatedReportId(responsePayload.reportId);
         setWhatHappened("");
+        setDetails("");
       } catch (err) {
         setStatus("error");
         setStatusMessage(err instanceof Error ? err.message : "Bug report failed to send. Please try again.");
       }
     },
-    [includeApiSnapshot, isValid, pathname, pageUrl, reporterEmail, status, storedAnalysis, userAgent, whatHappened],
+    [details, isValid, pathname, status, userId, whatHappened],
   );
 
   if (!open) return null;
@@ -151,7 +115,7 @@ export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalPr
         <div className="flex items-start justify-between">
           <div>
             <h2 className="text-2xl font-semibold text-white">Report Issue</h2>
-            <p className="text-sm text-slate-400">Describe the issue. Context is attached automatically.</p>
+            <p className="text-sm text-slate-400">Short description first. Context is attached automatically.</p>
           </div>
           <button
             type="button"
@@ -171,30 +135,19 @@ export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalPr
             minLength={10}
             maxLength={4000}
             className="h-32 w-full rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white outline-none transition focus:border-amber-300/70"
-            placeholder="Describe the problem"
+            placeholder="What went wrong?"
           />
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="space-y-1 text-sm text-slate-200">
-            <span>Email (optional)</span>
-            <input
-              type="email"
-              value={reporterEmail}
-              onChange={(event) => setReporterEmail(event.target.value)}
-              maxLength={256}
-              className="w-full rounded-2xl border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white outline-none transition focus:border-amber-300/70"
-              placeholder="you@example.com"
-            />
-          </label>
-          <label className="flex items-center gap-2 pt-6 text-sm text-slate-200">
-            <input
-              type="checkbox"
-              checked={includeApiSnapshot}
-              onChange={(event) => setIncludeApiSnapshot(event.target.checked)}
-            />
-            Include recent API response snapshot
-          </label>
+        <div className="space-y-1 text-sm">
+          <label className="block text-slate-200">Additional details (optional)</label>
+          <textarea
+            value={details}
+            onChange={(event) => setDetails(event.target.value)}
+            maxLength={4000}
+            className="h-28 w-full rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white outline-none transition focus:border-amber-300/70"
+            placeholder="Steps, expected result, what you saw"
+          />
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -211,11 +164,7 @@ export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalPr
             aria-live="polite"
           >
             {statusMessage ??
-              (isValid
-                ? createdReportId
-                  ? `Report ID: ${createdReportId}`
-                  : "We only show success if your report is saved."
-                : "Please enter at least 10 characters.")}
+              (isValid ? (createdReportId ? `Report ID: ${createdReportId}` : "Ready to send.") : "Please enter at least 10 characters.")}
           </span>
         </div>
       </form>

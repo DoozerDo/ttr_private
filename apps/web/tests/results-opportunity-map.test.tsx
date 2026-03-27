@@ -68,7 +68,7 @@ describe("Results opportunity map", () => {
         verdict={getOpportunityVerdict(72)}
         nextAction={buildNextAction("REANALYZE")}
         advantageSignals={[]}
-        primaryCta={{ label: "Reanalyze Role", onClick: () => {}, description: "You've added evidence. Reanalyze to measure the impact." }}
+        primaryCta={{ label: "Reanalyze Role", onClick: () => {}, description: "Your baseline changed. Reanalyze the role." }}
         scoreAnalysisHref="#advanced-insights"
         readiness={readyReadiness}
         verificationCoverage={strongCoverage}
@@ -77,7 +77,7 @@ describe("Results opportunity map", () => {
       />,
     );
 
-    expect(screen.getAllByText("You've added evidence. Reanalyze to measure the impact.").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Your baseline changed. Reanalyze the role.").length).toBeGreaterThan(0);
   });
 
   it("renders Add to Opportunities narrative state", () => {
@@ -96,7 +96,7 @@ describe("Results opportunity map", () => {
       />,
     );
 
-    expect(screen.getByText("Your materials are ready. Track this opportunity.")).toBeInTheDocument();
+    expect(screen.getByText("Your materials are ready.")).toBeInTheDocument();
   });
 
   it("renders Review Results narrative without duplicate save CTA", () => {
@@ -115,7 +115,7 @@ describe("Results opportunity map", () => {
       />,
     );
 
-    expect(screen.getByText("Your next step is complete.")).toBeInTheDocument();
+    expect(screen.getByText("This decision is complete.")).toBeInTheDocument();
     expect(screen.queryByText("Add to Opportunities")).toBeNull();
   });
 
@@ -133,7 +133,7 @@ describe("Results opportunity map", () => {
         primaryCta={{
           label: "Open Resume + Cover Letter Studio",
           href: "/studio",
-          description: "You're a strong match. Move forward and generate tailored materials.",
+          description: "You're a strong match. Open the studio to generate tailored materials.",
         }}
         scoreAnalysisHref="#advanced-insights"
         readiness={readyReadiness}
@@ -151,10 +151,10 @@ describe("Results opportunity map", () => {
     ).toBeNull();
     expect(screen.getByText("Competitive Match")).toBeInTheDocument();
     expect(screen.getByText("Decision summary")).toBeInTheDocument();
-    expect(screen.getByText("Built from your validated baseline and role requirements.")).toBeInTheDocument();
+    expect(screen.getByText("Built from your validated baseline and the role requirements.")).toBeInTheDocument();
     expect(screen.getByText("View detailed scoring breakdown")).toBeInTheDocument();
     expect(screen.getByText("Open Resume + Cover Letter Studio")).toBeInTheDocument();
-    expect(screen.getByText("You're a strong match. Move forward and generate tailored materials.")).toBeInTheDocument();
+    expect(screen.getByText("You're a strong match. Open the studio to generate tailored materials.")).toBeInTheDocument();
     expect(screen.queryByText("Watchouts")).toBeNull();
     expect(screen.queryByText("Best next move")).toBeNull();
     expect(screen.queryByText("Fit")).toBeNull();
@@ -185,7 +185,7 @@ describe("Results opportunity map", () => {
         evidenceLedger={{ entries: [], remainingWeakAreas: [], generationAllowedReason: null }}
       />,
     );
-    expect(screen.getByText("No evidence details are available for this analysis yet.")).toBeInTheDocument();
+    expect(screen.getByText("No evidence details are available yet.")).toBeInTheDocument();
   });
 
   it("keeps the hero focused when no advantage signals are provided", () => {
@@ -198,7 +198,7 @@ describe("Results opportunity map", () => {
         primaryCta={{
           label: "Open Studio",
           href: "/studio",
-          description: "You're competitive. Tighten positioning before applying.",
+          description: "You're competitive. Tighten positioning before opening the studio.",
         }}
         scoreAnalysisHref="#advanced-insights"
         readiness={readyReadiness}
@@ -230,7 +230,7 @@ describe("Results opportunity map", () => {
         primaryCta={{
           label: "Open Resume + Cover Letter Studio",
           href: "/studio",
-          description: "You're a strong match. Move forward and generate tailored materials.",
+          description: "You're a strong match. Open the studio to generate tailored materials.",
         }}
         scoreAnalysisHref="#advanced-insights"
         readiness={readyReadiness}
@@ -292,7 +292,7 @@ describe("Results opportunity map", () => {
         primaryCta={{
           label: "Open Studio",
           href: "/studio",
-          description: "You're competitive. Tighten positioning before applying.",
+          description: "You're competitive. Tighten positioning before opening the studio.",
         }}
         scoreAnalysisHref="#advanced-insights"
         readiness={readyReadiness}
@@ -316,7 +316,7 @@ describe("Results opportunity map", () => {
         primaryCta={{
           label: "Open Studio",
           href: "/studio",
-          description: "You're competitive. Tighten positioning before applying.",
+          description: "You're competitive. Tighten positioning before opening the studio.",
         }}
         scoreAnalysisHref="#advanced-insights"
         readiness={{
@@ -359,7 +359,7 @@ describe("Results opportunity map", () => {
     expect(screen.getByText(/Generation readiness:\s*LIMITED/i)).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Some requirements need stronger verification. You can still generate documents, and improving evidence will strengthen results.",
+        "Some requirements need stronger verification. You can still generate documents.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("Needs stronger verification: Zendesk, Five9")).toBeInTheDocument();
@@ -382,7 +382,7 @@ describe("Results opportunity map", () => {
         primaryCta={{
           label: "Open Studio",
           href: "/studio?analysisId=analysis-1#studio-auto-adjust-panel",
-          description: "You're competitive. Tighten positioning before applying.",
+          description: "You're competitive. Tighten positioning before opening the studio.",
         }}
         scoreAnalysisHref="#advanced-insights"
         readiness={{
@@ -430,7 +430,7 @@ describe("Results opportunity map", () => {
         primaryCta={{
           label: "Open Studio",
           href: "/studio?analysisId=analysis-1#studio-auto-adjust-panel",
-          description: "You're competitive. Tighten positioning before applying.",
+          description: "You're competitive. Tighten positioning before opening the studio.",
         }}
         scoreAnalysisHref="#advanced-insights"
         readiness={{
@@ -536,7 +536,7 @@ describe("Results opportunity map", () => {
         primaryCta={{
           label: "Remove unsupported requirements and continue",
           href: "/studio?analysisId=analysis-1&excludedRequirements=Zendesk&excludedRequirements=Five9",
-          description: "You're a strong match. Move forward and generate tailored materials.",
+          description: "You're a strong match. Open the studio to generate tailored materials.",
         }}
         scoreAnalysisHref="#advanced-insights"
         readiness={{
@@ -600,3 +600,4 @@ describe("Results opportunity map", () => {
     expect(roles[0]?.analyzeHref).toContain("suggestedRole=");
   });
 });
+
