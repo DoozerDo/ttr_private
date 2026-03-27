@@ -952,22 +952,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           <div className="max-w-3xl space-y-5">
             <div className="space-y-2">
                 <h1 className="text-3xl font-semibold tracking-tight text-white md:text-[34px]">
-                  {heroState === "ready"
-                    ? "Your baseline is ready for the next analysis."
-                    : heroState === "in_progress"
-                      ? "Upload your baseline to get started."
-                    : "Upload your baseline to get started."}
+                  Upload your resume to get started
                 </h1>
                 <p className="text-base leading-7 text-slate-300">
-                  {heroState === "ready"
-                    ? "You can continue building or run career compatibility analysis."
-                    : heroState === "in_progress"
-                      ? "We’ll evaluate your experience and unlock the next analysis step."
-                    : "Upload one resume baseline file. We’ll turn it into your first analysis-ready baseline."}
-              </p>
-              <p className="text-sm text-slate-400">
-                Built from your uploaded baseline and readiness checks.
-              </p>
+                  We’ll analyze your experience and show how well you match a job.
+                </p>
             </div>
             <div>
               {heroState === "ready" ? (
@@ -1001,21 +990,12 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             </div>
           </div>
         </section>
-        <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
-          <header className="space-y-1">
-            <h2 className="text-xl font-semibold tracking-tight text-slate-100">Your baseline</h2>
-            <p className="text-sm text-slate-400">Current file and status.</p>
-          </header>
-          {allBaselines.length === 0 ? (
-            <div className="space-y-2">
-              <p className="text-sm leading-6 text-slate-300">
-                No baseline uploaded yet. Upload one resume file to start your first analysis.
-              </p>
-              <p className="text-sm leading-6 text-slate-400">
-                After upload, you can run Career Compatibility Analysis from the same page.
-              </p>
-            </div>
-          ) : (
+        {allBaselines.length > 0 ? (
+          <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
+            <header className="space-y-1">
+              <h2 className="text-xl font-semibold tracking-tight text-slate-100">Your resume</h2>
+              <p className="text-sm text-slate-400">Current file and status.</p>
+            </header>
             <div className="space-y-3">
               {allBaselines.slice(0, 3).map((baseline) => {
                 const isPrimary = primaryBaselineId === baseline.id;
@@ -1121,71 +1101,27 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 );
               })}
             </div>
-          )}
-        </section>
-
-        {isEditableLibrary && heroState === "no_baseline" ? (
-          <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/20 p-5">
-            <header className="space-y-1">
-              <h2 className="text-xl font-semibold tracking-tight text-slate-100">Upload support</h2>
-              <p className="text-sm leading-6 text-slate-400">
-                Accepted formats and storage limits for your baseline file.
-              </p>
-            </header>
-            <div
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={onDrop}
-              className={`rounded-[16px] border border-dashed p-5 ${
-                uploadLimitReached ? "border-white/10 bg-slate-950/25" : "border-white/20 bg-slate-950/35"
-              }`}
-            >
-              <p className="text-sm font-semibold text-slate-100">Drag and drop a file or use the hero action above</p>
-              <p className="mt-1 text-sm text-slate-400">Accepted formats: PDF and DOCX</p>
-              <div className="mt-4 flex flex-wrap gap-3">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                  className="hidden"
-                  onChange={onFileChange}
-                  disabled={isUploading || uploadLimitReached}
-                />
-                <span className="inline-flex items-center rounded-[var(--button-radius)] border border-white/10 px-3 py-2 text-sm text-slate-400">
-                  {activeBaselines.length} / {BETA_BASELINE_UPLOAD_LIMIT} resumes stored
-                </span>
-              </div>
-              {isUploading ? (
-                <p className="mt-3 text-sm text-slate-400">
-                  Uploading your resume and preparing baseline extraction...
-                </p>
-              ) : null}
-              {uploadLimitReached ? (
-                <p className="mt-2 text-sm text-slate-300">
-                  Beta accounts can store up to {BETA_BASELINE_UPLOAD_LIMIT} resumes.
-                </p>
-              ) : null}
-            </div>
-
-            {uploadSuccessId ? (
-              <Alert intent="success" title="Resume uploaded">
-                <p className="text-sm text-current">
-                  Your resume was stored successfully and is available in your baseline records.
-                </p>
-              </Alert>
-            ) : null}
-            {duplicateError ? <p className="text-sm text-slate-300">{duplicateError}</p> : null}
-            {insufficientTextError ? <InsufficientExtractedText error={insufficientTextError} /> : null}
-            {baselineUpdatedNotice ? (
-              <Alert intent="success" title="Baseline updated">
-                <p className="text-sm text-current">{baselineUpdatedNotice}</p>
-              </Alert>
-            ) : null}
-            {error ? (
-              <Alert intent="error" title="Upload issue">
-                <p className="text-sm text-current">{error}</p>
-              </Alert>
-            ) : null}
           </section>
+        ) : null}
+        {heroState === "no_baseline" && isEditableLibrary ? (
+          <div
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={onDrop}
+            className={`rounded-[16px] border border-dashed px-4 py-4 ${
+              uploadLimitReached ? "border-white/10 bg-slate-950/25" : "border-white/20 bg-slate-950/35"
+            }`}
+          >
+            <p className="text-sm font-semibold text-slate-100">Drag and drop a resume here, or use the button above</p>
+            <p className="mt-1 text-sm text-slate-400">PDF or DOCX</p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              className="hidden"
+              onChange={onFileChange}
+              disabled={isUploading || uploadLimitReached}
+            />
+          </div>
         ) : null}
 
         {analysisReady ? (

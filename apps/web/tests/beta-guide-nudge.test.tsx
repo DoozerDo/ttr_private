@@ -15,7 +15,7 @@ describe("BetaGuideNudge", () => {
     expect(screen.getByTestId("beta-guide-link")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "How this works" }));
     expect(screen.getByRole("dialog", { name: "How this works" })).toBeInTheDocument();
-    expect(screen.getByText("1. Upload a baseline resume.")).toBeInTheDocument();
+    expect(screen.getByText("1. Upload your resume to create a baseline.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View full guide" })).toHaveAttribute("href", "/beta");
   });
 

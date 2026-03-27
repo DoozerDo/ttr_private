@@ -55,10 +55,10 @@ export function BetaGuideNudge() {
             </div>
 
             <ol className="mt-4 space-y-3 text-sm text-slate-200">
-              <li>1. Upload a baseline resume.</li>
-              <li>2. Run Career Compatibility Analysis.</li>
-              <li>3. Review your score and next action.</li>
-              <li>4. Use Studio, Fit Review, or Opportunities when unlocked.</li>
+              <li>1. Upload your resume to create a baseline.</li>
+              <li>2. Keep that baseline and improve it over time.</li>
+              <li>3. Run Career Compatibility Analysis to see your score.</li>
+              <li>4. Use the score to unlock Studio and next actions.</li>
             </ol>
 
             <div className="mt-5 flex flex-wrap gap-2">
