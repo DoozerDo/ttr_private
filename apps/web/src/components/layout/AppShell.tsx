@@ -442,6 +442,7 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
               }}
             >
               <div className="absolute right-0 top-0 z-50 flex items-center gap-3">
+                <BetaGuideNudge />
                 <ReportBugTrigger
                   className="text-xs font-semibold text-slate-200 hover:text-white"
                   label="Report Issue"
@@ -451,7 +452,6 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
               <JourneyNavV1 state={journeyNavState} onStepClick={handleJourneyStepClick} />
             </div>
 
-            {!isBaseline ? <BetaGuideNudge /> : null}
             {children}
           </main>
           <footer className="border-t border-[var(--border-strong)] bg-[var(--bg-app)] px-6 py-4 text-slate-400">

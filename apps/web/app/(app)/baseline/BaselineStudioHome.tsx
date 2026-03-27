@@ -39,7 +39,6 @@ import {
 } from "@/lib/professionalSignals";
 import { publishBaselineUpdated, subscribeBaselineUpdated } from "@/src/lib/baseline-sync";
 import { BETA_BASELINE_UPLOAD_LIMIT } from "@/src/features/baseline/constants";
-import { BetaGuideNudge } from "@/src/components/layout/BetaGuideNudge";
 import { getBaselineDetailsHref } from "@/src/navigation/routes";
 import { CareerGravity } from "../results/components/CareerGravity";
 
@@ -1188,8 +1187,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             ) : null}
           </section>
         ) : null}
-
-        {isEditableLibrary && heroState !== "in_progress" ? <BetaGuideNudge /> : null}
 
         {analysisReady ? (
           <section className="space-y-3 rounded-[20px] border border-white/10 bg-slate-900/20 p-5">
