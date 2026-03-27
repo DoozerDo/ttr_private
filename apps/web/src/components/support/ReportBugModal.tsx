@@ -1,7 +1,9 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { readLastAnalysis } from "@/app/(app)/lib/session";
+import { derivePrimaryNextAction, getGenerationCompletionStorageKey } from "@/lib/nextAction";
 
 const resolvedGitSha =
   process.env.NEXT_PUBLIC_GIT_SHA ??
@@ -20,13 +22,74 @@ type BugReportCreateResponse = {
   reportId: string;
 };
 
+type StructuredBugContext = {
+  baselineId: string | null;
+  jobId: string | null;
+  assessmentId: string | null;
+  score: number | null;
+  nextAction: string | null;
+};
+
 export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
   const pathname = usePathname() ?? "/";
+  const searchParams = useSearchParams();
   const [whatHappened, setWhatHappened] = useState("");
   const [details, setDetails] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [createdReportId, setCreatedReportId] = useState<string | null>(null);
+
+  const structuredContext = useMemo<StructuredBugContext>(() => {
+    const stored = readLastAnalysis();
+    const routeBaselineId = searchParams?.get("baselineId")?.trim() || null;
+    const routeJobId = searchParams?.get("jobId")?.trim() || null;
+    const routeAssessmentId =
+      searchParams?.get("assessmentId")?.trim() || searchParams?.get("analysisId")?.trim() || null;
+
+    const baselineId = routeBaselineId || stored?.baselineId || stored?.analysis?.baselineId || null;
+    const jobId = routeJobId || stored?.jobId || stored?.analysis?.jobId || null;
+    const assessmentId =
+      routeAssessmentId ||
+      (typeof stored?.analysis?.assessmentId === "string" ? stored.analysis.assessmentId : null) ||
+      null;
+    const score =
+      typeof stored?.fitScore === "number"
+        ? stored.fitScore
+        : typeof stored?.analysis?.score === "number"
+          ? stored.analysis.score
+          : typeof stored?.analysis?.fit_score === "number"
+            ? stored.analysis.fit_score
+            : typeof stored?.analysis?.overallScore === "number"
+              ? stored.analysis.overallScore
+              : typeof stored?.analysis?.overall_score === "number"
+                ? stored.analysis.overall_score
+                : null;
+    const hasCompletedGeneration =
+      typeof window !== "undefined" && Boolean(getGenerationCompletionStorageKey(jobId, baselineId))
+        ? Boolean(window.localStorage.getItem(getGenerationCompletionStorageKey(jobId, baselineId) as string))
+        : false;
+    const opportunityAlreadySaved = Boolean(
+      stored?.analysis?.opportunityId ||
+        stored?.analysis?.opportunityAlreadySaved ||
+        stored?.analysis?.savedOpportunityId,
+    );
+    const nextAction = derivePrimaryNextAction({
+      analysisPresent: Boolean(stored || assessmentId || baselineId || jobId),
+      fitScore: score,
+      hasCompletedGeneration,
+      opportunityAlreadySaved,
+      jobId,
+      baselineId,
+    }).action;
+
+    return {
+      baselineId,
+      jobId,
+      assessmentId,
+      score,
+      nextAction,
+    };
+  }, [searchParams]);
 
   useEffect(() => {
     if (!open) return;
@@ -60,12 +123,13 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
         details: details.trim() || undefined,
         route: `${window.location.pathname}${window.location.search}`,
         timestamp: runtimeContext.timestamp,
-        userId: userId ?? undefined,
-        pageLabel: document.title || pathname,
-        lastAction: runtimeContext.lastUserAction,
+        userId: userId ?? null,
+        baselineId: structuredContext.baselineId,
+        jobId: structuredContext.jobId,
+        assessmentId: structuredContext.assessmentId,
+        score: structuredContext.score,
+        nextAction: structuredContext.nextAction,
         runtimeContext,
-        appVersion: process.env.NEXT_PUBLIC_APP_VERSION || undefined,
-        gitSha: resolvedGitSha ? resolvedGitSha.slice(0, 40) : undefined,
       };
 
       try {
@@ -92,7 +156,7 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
         setStatusMessage(err instanceof Error ? err.message : "Bug report failed to send. Please try again.");
       }
     },
-    [details, isValid, pathname, status, userId, whatHappened],
+    [details, isValid, pathname, status, structuredContext, userId, whatHappened],
   );
 
   if (!open) return null;

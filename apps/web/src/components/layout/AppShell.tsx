@@ -51,7 +51,6 @@ type AppShellProps = {
   children: ReactNode;
   userEmail?: string | null;
   userId?: string | null;
-  footerSlot?: ReactNode;
 };
 
 async function safeJson<T>(response: Response): Promise<T | null> {
@@ -105,7 +104,7 @@ const AUTO_ERROR_RECENT_LIMIT = 12;
 const AUTO_ERROR_LOCAL_DEDUPE_WINDOW_MS = 60_000;
 const LAST_API_SNAPSHOT_KEY = "ttr:last-api-response-snapshot";
 
-export function AppShell({ children, userEmail, userId, footerSlot }: AppShellProps) {
+export function AppShell({ children, userEmail, userId }: AppShellProps) {
   const router = useRouter();
   const pathname = usePathname() ?? "/";
   const isBaseline = pathname.startsWith("/baseline");
@@ -456,15 +455,7 @@ export function AppShell({ children, userEmail, userId, footerSlot }: AppShellPr
             {children}
           </main>
           <footer className="border-t border-[var(--border-strong)] bg-[var(--bg-app)] px-6 py-4 text-slate-400">
-            <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
-              <p>Need help? Report an issue and we will store raw context for investigation.</p>
-              <ReportBugTrigger
-                className="rounded-full border border-white/10 px-3 py-1 text-[0.75rem] text-white hover:border-white/40"
-                label="Report Issue"
-              />
-            </div>
-            {footerSlot ? <div className="mt-3 flex justify-center">{footerSlot}</div> : null}
-            <p className="mt-2 text-[0.65rem] text-slate-500">Build {shortBuildSha}</p>
+            <p className="text-xs">Build {shortBuildSha}</p>
           </footer>
         </div>
       </div>

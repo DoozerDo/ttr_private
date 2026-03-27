@@ -145,7 +145,7 @@ export default function SupportHistoryPage() {
         <div className="space-y-3 rounded-2xl border border-white/5 bg-slate-950/60 p-5 text-sm text-slate-300">
           <p>You have not reported any bugs yet.</p>
           <p>
-            Use the "Report a bug" action in the header or footer to send runtime context to the team.
+            Use the "Report Issue" action in the header to send runtime context to the team.
           </p>
         </div>
       ) : null}

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ReportBugModal } from "@/src/components/support/ReportBugModal";
-import { setFetchImplementation } from "@/tests/setup";
+import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
+import { overrideSearchParams, mockPathname, setFetchImplementation } from "@/tests/setup";
 
 function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   return {
@@ -66,6 +67,46 @@ describe("ReportBugModal", () => {
 
   it("submits issue context with route and user id", async () => {
     let payload: Record<string, unknown> | null = null;
+    const generationKey = getGenerationCompletionStorageKey("job-1", "baseline-1");
+    const stored: Record<string, string> = {};
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => stored[key] ?? null,
+        setItem: (key: string, value: string) => {
+          stored[key] = value;
+        },
+        clear: () => {
+          Object.keys(stored).forEach((key) => delete stored[key]);
+        },
+      },
+    });
+    mockPathname.mockReturnValue("/results");
+    window.history.pushState({}, "", "/results?baselineId=baseline-1&jobId=job-1&assessmentId=assessment-1");
+    overrideSearchParams({
+      baselineId: "baseline-1",
+      jobId: "job-1",
+      assessmentId: "assessment-1",
+    });
+    if (generationKey) {
+      localStorage.setItem(generationKey, "true");
+    }
+    localStorage.setItem(
+      "ttr.lastAnalysis.v1",
+      JSON.stringify({
+        savedAt: "2026-03-27T09:59:00.000Z",
+        analysis: {
+          score: 82,
+          baselineId: "baseline-1",
+          jobId: "job-1",
+          assessmentId: "assessment-1",
+        },
+        baselineId: "baseline-1",
+        jobId: "job-1",
+        fitScore: 82,
+        jobSource: { type: "saved" },
+      }),
+    );
     setFetchImplementation(async (input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       if (url.includes("/api/support/report-bug")) {
@@ -107,8 +148,13 @@ describe("ReportBugModal", () => {
     expect(payload).toMatchObject({
       description: "The header report button does not open on mobile.",
       details: "Opened Baseline, clicked the header button, nothing happened.",
-      route: "/",
+      route: "/results?baselineId=baseline-1&jobId=job-1&assessmentId=assessment-1",
       userId: "user-123",
+      baselineId: "baseline-1",
+      jobId: "job-1",
+      assessmentId: "assessment-1",
+      score: 82,
+      nextAction: "ADD_TO_OPPORTUNITIES",
       timestamp: "2026-03-27T10:00:00.000Z",
     });
 
