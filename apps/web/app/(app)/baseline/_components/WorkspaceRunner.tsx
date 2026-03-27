@@ -112,7 +112,7 @@ export function resolveScoreBandPresentation(score: number): ScoreBandPresentati
   if (score >= 90) {
     return {
       key: "prime",
-      label: "Prime Opportunity",
+      label: "Primary readiness",
       summary: "Strong alignment with this role.",
       accentClassName: "text-emerald-200",
       surfaceClassName: "border-emerald-300/20 bg-emerald-400/10",
@@ -144,8 +144,8 @@ export function resolveScoreBandPresentation(score: number): ScoreBandPresentati
       key: "possible",
       label: "Possible Fit",
       summary: "There is some alignment here, but the gaps are still noticeable.",
-      accentClassName: "text-amber-100",
-      surfaceClassName: "border-amber-300/20 bg-amber-400/10",
+      accentClassName: "text-cyan-100",
+      surfaceClassName: "border-cyan-300/20 bg-cyan-400/10",
     };
   }
 
@@ -665,7 +665,7 @@ export function WorkspaceRunner({
   const blockingReasons = generationReadiness.verificationIssues.slice(0, 3);
 
   const resultCardClasses = [
-    "score-summary-card space-y-3 rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.16),transparent_42%),linear-gradient(180deg,rgba(15,23,42,0.95),rgba(2,6,23,0.98))] p-4 text-[13px] text-slate-200 shadow-[0_24px_80px_rgba(2,6,23,0.45)]",
+    "score-summary-card space-y-3 rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.12),transparent_42%),linear-gradient(180deg,rgba(15,23,42,0.95),rgba(2,6,23,0.98))] p-4 text-[13px] text-slate-200 shadow-[0_24px_80px_rgba(2,6,23,0.45)]",
   ].join(" ");
   useEffect(() => {
     if (typeof score !== "number" || !latestBaselineId || !latestJobId) return;
@@ -1156,7 +1156,7 @@ export function WorkspaceRunner({
                       key={`${gap.title}-${gap.requirementEvidence ?? ""}`}
                       className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
                     >
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">
                         {resolveGapSeverityLabel(gap.severityScore)}
                       </p>
                       <p className="mt-1 text-sm text-slate-200">
@@ -1173,7 +1173,7 @@ export function WorkspaceRunner({
                   targetGenerationState === "BLOCKED"
                     ? "border-rose-300/35 bg-rose-500/10 text-rose-100"
                     : targetGenerationState === "LIMITED"
-                    ? "border-amber-300/35 bg-amber-500/10 text-amber-100"
+                    ? "border-cyan-300/35 bg-cyan-500/10 text-cyan-100"
                     : "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
                 }`}
               >
@@ -1206,16 +1206,16 @@ export function WorkspaceRunner({
               </p>
             ) : null}
             {isBlockedHighFit ? (
-              <div className="space-y-3 rounded-2xl border border-amber-300/30 bg-amber-500/10 p-4">
-                <h3 className="text-base font-semibold text-amber-100">
+              <div className="space-y-3 rounded-2xl border border-cyan-300/30 bg-cyan-500/10 p-4">
+                <h3 className="text-base font-semibold text-cyan-100">
                   Strong match, but not ready to generate
                 </h3>
-                <p className="text-sm text-amber-50/90">
+                <p className="text-sm text-cyan-50/90">
                   Your experience aligns with this role. But your baseline does not yet support compliant
                   document generation.
                 </p>
                 {blockingReasons.length ? (
-                  <ul className="space-y-2 text-sm text-amber-50/90">
+                  <ul className="space-y-2 text-sm text-cyan-50/90">
                     {blockingReasons.map((reason, index) => (
                       <li key={`${reason.code}-${index}`}>&bull; {reason.explanation}</li>
                     ))}
@@ -1250,7 +1250,7 @@ export function WorkspaceRunner({
                 className="inline-flex items-center justify-center whitespace-nowrap rounded-2xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
               >
                 {!productReadiness.canOpenStudio
-                  ? "Start Fit Review"
+                  ? "Continue Building Baseline"
                   : isLimitedHighFit
                   ? "Open Studio With Limits"
                   : "Open Studio"}

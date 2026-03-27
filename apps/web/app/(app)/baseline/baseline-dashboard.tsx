@@ -411,19 +411,17 @@ export function BaselineDashboard({
       ) : null}
 
       {activeBaselineId ? (
-        <BaselineUnlockProgress
-          progressPercent={baselineUnlockState.progressPercent}
-          milestoneLabel={
-            loadingSelectedBaselineDetails
-              ? "Resume ingested"
-              : baselineUnlockState.milestoneLabel
-          }
-          isBaselineReady={baselineUnlockState.isBaselineReady}
-          onContinue={() => {
-            if (!activeBaselineId) return;
-            router.push(getBaselineDetailsHref(activeBaselineId));
-          }}
-        />
+      <BaselineUnlockProgress
+        progressPercent={baselineUnlockState.progressPercent}
+        milestoneLabel={
+          loadingSelectedBaselineDetails ? "Resume ingested" : baselineUnlockState.milestoneLabel
+        }
+        isBaselineReady={baselineUnlockState.isBaselineReady}
+        onContinue={() => {
+          if (!activeBaselineId) return;
+          router.push(getBaselineDetailsHref(activeBaselineId));
+        }}
+      />
       ) : null}
 
       {duplicateErrorDetail ? (
@@ -457,7 +455,7 @@ export function BaselineDashboard({
             const isSelected = baseline.id === selectedBaselineId;
             const cardClasses = [
               "rounded-2xl border border-white/10 bg-slate-950/40 p-4",
-              isSelected ? "ring-2 ring-amber-400/40" : "",
+              isSelected ? "ring-2 ring-cyan-300/40" : "",
             ]
               .filter(Boolean)
               .join(" ");

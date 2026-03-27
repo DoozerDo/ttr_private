@@ -179,7 +179,7 @@ export function JobsHub({ selectedJobId, onJobMissing }: JobsHubProps) {
               const isSelected = job.id === selectedJobId;
               const cardClasses = [
                 "rounded-2xl border border-white/10 bg-slate-950/40 p-4",
-                isSelected ? "ring-2 ring-amber-400/40" : "",
+                isSelected ? "ring-2 ring-cyan-300/40" : "",
               ]
                 .filter(Boolean)
                 .join(" ");

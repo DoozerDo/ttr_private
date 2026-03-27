@@ -452,7 +452,7 @@ export function AppShell({ children, userEmail, userId, footerSlot }: AppShellPr
               <JourneyNavV1 state={journeyNavState} onStepClick={handleJourneyStepClick} />
             </div>
 
-            <BetaGuideNudge />
+            {!isBaseline ? <BetaGuideNudge /> : null}
             {children}
           </main>
           <footer className="border-t border-[var(--border-strong)] bg-[var(--bg-app)] px-6 py-4 text-slate-400">

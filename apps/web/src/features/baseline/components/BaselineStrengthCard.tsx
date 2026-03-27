@@ -49,10 +49,10 @@ export function BaselineStrengthCard({
 
       <div className="space-y-2">
         <p className="text-base font-semibold text-slate-100">
-          Your compatibility analysis is based on structured signals in your baseline.
+          Your baseline unlocks progressively as the key signals are added.
         </p>
         <p className="text-sm text-slate-400">
-          Completing more areas improves precision and opportunity discovery.
+          Completing more areas improves readiness and keeps the next step clear.
         </p>
       </div>
 
@@ -76,12 +76,7 @@ export function BaselineStrengthCard({
       </div>
 
       {canRunAnalysis && onRunAnalysis ? (
-        <div className="space-y-2 rounded-xl border border-white/20 bg-white/5 p-3">
-          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-200">
-            Baseline Ready
-          </p>
-          <FormButton onClick={onRunAnalysis}>Run Career Compatibility Analysis</FormButton>
-        </div>
+        <FormButton onClick={onRunAnalysis}>Run Career Compatibility Analysis</FormButton>
       ) : (
         <FormButton onClick={onContinue}>Continue Building Baseline</FormButton>
       )}

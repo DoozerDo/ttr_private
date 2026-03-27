@@ -12,7 +12,7 @@ function createJsonResponse(body: unknown, status = 200): Response {
 }
 
 describe("Baseline analyze entrypoint", () => {
-  it("keeps Analyze baseline in baseline UX and does not redirect to /analyze", async () => {
+  it("keeps the canonical Baseline analysis CTA in baseline UX and does not redirect to /analyze", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/analysis/history")) {
@@ -86,7 +86,7 @@ describe("Baseline analyze entrypoint", () => {
       />,
     );
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Analyze baseline" }))[0]);
+    fireEvent.click((await screen.findAllByRole("button", { name: "Run Career Compatibility Analysis" }))[0]);
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -101,7 +101,7 @@ describe("Baseline analyze entrypoint", () => {
     expect(mockRouterPush).not.toHaveBeenCalledWith(expect.stringContaining("/analyze"));
   });
 
-  it("uses baseline readiness analysis from hero Analyze baseline button", async () => {
+  it("uses baseline readiness analysis from hero canonical CTA", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/analysis/history")) {
@@ -173,7 +173,7 @@ describe("Baseline analyze entrypoint", () => {
       />,
     );
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Analyze baseline" }))[0]);
+    fireEvent.click((await screen.findAllByRole("button", { name: "Run Career Compatibility Analysis" }))[0]);
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -188,7 +188,7 @@ describe("Baseline analyze entrypoint", () => {
     expect(JSON.parse(String(runCall?.[1]?.body))).toMatchObject({ baselineId: "base-1" });
   });
 
-  it("card Analyze baseline runs baseline readiness analysis without requiring a job", async () => {
+  it("card canonical CTA runs baseline readiness analysis without requiring a job", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/analysis/history")) {
@@ -260,7 +260,7 @@ describe("Baseline analyze entrypoint", () => {
       />,
     );
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Analyze baseline" }))[0]);
+    fireEvent.click((await screen.findAllByRole("button", { name: "Run Career Compatibility Analysis" }))[0]);
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(

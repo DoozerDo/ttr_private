@@ -62,7 +62,7 @@ export function OverflowMenu({
     <div ref={containerRef} className="relative flex shrink-0">
       <button
         type="button"
-        className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-slate-900/70 text-slate-300 transition hover:text-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
+        className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-slate-900/70 text-slate-300 transition hover:text-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:opacity-40"
         aria-label={ariaLabel ?? "Overflow actions"}
         aria-expanded={isOpen}
         aria-haspopup="menu"

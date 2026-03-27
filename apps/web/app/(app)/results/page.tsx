@@ -1149,7 +1149,7 @@ function getCtaForDimension(
   },
 ) {
   if (bucket === "strong") {
-    return { label: "Polish in Resume Studio", href: paths.studioHref };
+    return { label: "Open Resume + Cover Letter Studio", href: paths.studioHref };
   }
   if (bucket === "pending") return null;
   const mapping = WATCH_FIX_CTA_DESTINATIONS[key];
@@ -2064,7 +2064,7 @@ export default function ResultsPage() {
     if (primaryNextAction.action === "RESOLVE_GAPS") return null;
     if (primaryNextAction.action === "CONTINUE_ANALYSIS") {
       return {
-        label: "Analyze Role",
+        label: "Run Career Compatibility Analysis",
         href: "/analyze",
         disabled: false,
         description: "Run analysis to get a truthful next step for this role.",
@@ -2082,10 +2082,10 @@ export default function ResultsPage() {
     }
     if (primaryNextAction.action === "GENERATE_RESUME") {
       return {
-        label: "Generate Resume",
+        label: "Open Resume + Cover Letter Studio",
         href: studioHref,
         disabled: !canOpenStudio,
-        description: "You’ve cleared the threshold. Generate tailored materials now.",
+        description: "You’ve cleared the threshold. Open the studio to generate tailored materials now.",
       };
     }
     if (primaryNextAction.action === "ADD_TO_OPPORTUNITIES") {

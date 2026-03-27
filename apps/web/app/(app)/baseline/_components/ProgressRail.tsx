@@ -140,7 +140,7 @@ export function ProgressRail<Key extends string>({
         }
 
         .progress-rail-step-row[data-highlighted="true"] .progress-rail-status-dot {
-          box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.45);
+          box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.45);
         }
 
         .progress-rail-step-main {
@@ -160,7 +160,7 @@ export function ProgressRail<Key extends string>({
 
         .progress-rail-step-row[data-processing="true"] .progress-rail-status-dot {
           animation: progress-rail-pulse 1.4s ease-out infinite;
-          box-shadow: 0 0 0 6px rgba(251, 191, 36, 0.25);
+          box-shadow: 0 0 0 6px rgba(34, 211, 238, 0.25);
         }
 
         @keyframes progress-rail-pulse {

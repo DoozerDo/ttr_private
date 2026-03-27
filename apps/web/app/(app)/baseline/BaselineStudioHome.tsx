@@ -39,6 +39,8 @@ import {
 } from "@/lib/professionalSignals";
 import { publishBaselineUpdated, subscribeBaselineUpdated } from "@/src/lib/baseline-sync";
 import { BETA_BASELINE_UPLOAD_LIMIT } from "@/src/features/baseline/constants";
+import { BetaGuideNudge } from "@/src/components/layout/BetaGuideNudge";
+import { getBaselineDetailsHref } from "@/src/navigation/routes";
 import { CareerGravity } from "../results/components/CareerGravity";
 
 type BaselineStudioHomeProps = {
@@ -178,7 +180,7 @@ function getUploadedBaselineRecord(data: unknown): BaselineDto | null {
 
 function getAssessmentSummaryStatusTone(state: BaselineReadinessState) {
   if (state === "ANALYZING") {
-    return "border-amber-300/20 bg-amber-400/[0.08] text-amber-100";
+    return "border-cyan-300/20 bg-cyan-400/[0.08] text-cyan-100";
   }
   return state === "READY"
     ? "border-emerald-300/15 bg-emerald-400/[0.08] text-emerald-100"
@@ -950,25 +952,18 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         <section className="rounded-[28px] bg-slate-900/40 p-6 md:p-8">
           <div className="max-w-3xl space-y-5">
             <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                {heroState === "ready"
-                  ? "Baseline ready"
-                  : heroState === "in_progress"
-                    ? "Baseline in progress"
-                    : "Baseline setup"}
-              </p>
               <h1 className="text-3xl font-semibold tracking-tight text-white md:text-[34px]">
                 {heroState === "ready"
-                  ? "Your baseline is ready for targeting."
+                  ? "Your baseline is ready for the next analysis."
                   : heroState === "in_progress"
-                    ? "Your baseline needs one more step before targeting."
+                    ? "Analyze your baseline to get started."
                     : "Upload your resume to create your baseline."}
               </h1>
               <p className="text-base leading-7 text-slate-300">
                 {heroState === "ready"
-                  ? "You can now analyze roles and generate tailored materials."
+                  ? "You can continue building or run career compatibility analysis."
                   : heroState === "in_progress"
-                    ? "Complete baseline analysis to improve targeting confidence and generation quality."
+                    ? "We'll evaluate your experience and unlock role targeting and generation."
                     : "Your baseline is the trusted source used to analyze fit and prepare role-specific materials."}
               </p>
               <p className="text-sm text-slate-400">
@@ -978,10 +973,10 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             <div>
               {heroState === "ready" ? (
                 <Link
-                  href="/target"
+                  href={primaryBaselineId ? getBaselineDetailsHref(primaryBaselineId) : "/baseline"}
                   className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
                 >
-                  Start targeting
+                  Run Career Compatibility Analysis
                 </Link>
               ) : heroState === "in_progress" && primaryBaselineId ? (
                 <FormButton
@@ -989,7 +984,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   disabled={!isHydrated}
                   className="bg-indigo-600 text-white hover:bg-indigo-500"
                 >
-                  Analyze baseline
+                  Run Career Compatibility Analysis
                 </FormButton>
               ) : (
                 <FormButton
@@ -1007,6 +1002,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             </div>
           </div>
         </section>
+        {heroState !== "in_progress" ? <BetaGuideNudge /> : null}
 
         <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
           <header className="space-y-1">
@@ -1036,6 +1032,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   isAnalyzing: isLoading,
                 });
                 const readinessLabel = getBaselineReadinessLabel(readinessState);
+                const shouldShowViewAction = canView && !isArchived;
 
                 return (
                   <article
@@ -1074,25 +1071,19 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                       <p className="mt-1 text-xs text-slate-500">Last role analysis: {latestRoleFitScore}%</p>
                     ) : null}
                     <div className="mt-4 flex flex-wrap gap-2">
-                      <FormButton
-                        onClick={() => {
-                          if (isArchived) return;
-                          if (canView) {
+                      {shouldShowViewAction ? (
+                        <FormButton
+                          variant="ghost"
+                          onClick={() => {
                             setPrimaryBaselineId(baseline.id);
                             setPostUploadCtaBaselineId(null);
                             scrollToAnalysis();
-                            return;
-                          }
-                          void runCanonicalBaselineAnalysis(baseline.id);
-                        }}
-                        disabled={isLoading || !isHydrated}
-                      >
-                        {isLoading
-                          ? "Analyzing"
-                          : canView
-                            ? "View baseline analysis"
-                            : "Analyze baseline"}
-                      </FormButton>
+                          }}
+                          disabled={isLoading || !isHydrated}
+                        >
+                          {isLoading ? "Analyzing" : "View baseline analysis"}
+                        </FormButton>
+                      ) : null}
                       {isEditableLibrary ? (
                         <>
                           <FormButton
@@ -1131,7 +1122,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           )}
         </section>
 
-        {isEditableLibrary && heroState !== "ready" ? (
+        {isEditableLibrary && heroState === "no_baseline" ? (
           <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/20 p-5">
             <header className="space-y-1">
               <h2 className="text-xl font-semibold tracking-tight text-slate-100">Upload resume</h2>
@@ -1179,21 +1170,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
               ) : null}
             </div>
 
-            {postUploadCtaBaselineId ? (
-              <article className="rounded-[16px] border border-cyan-300/20 bg-cyan-400/[0.06] p-4">
-                <p className="text-sm font-semibold text-slate-100">Resume uploaded. Analyze your baseline next.</p>
-                <div className="mt-3">
-                  <FormButton
-                    onClick={() => void runCanonicalBaselineAnalysis(postUploadCtaBaselineId)}
-                    disabled={!isHydrated}
-                  >
-                    Analyze baseline
-                  </FormButton>
-                </div>
-              </article>
-            ) : null}
-
-            {uploadSuccessId && !postUploadCtaBaselineId ? (
+            {uploadSuccessId ? (
               <Alert intent="success" title="Resume uploaded">
                 <p className="text-sm text-current">
                   Your resume was stored successfully and is available in your baseline records.
@@ -1215,22 +1192,24 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           </section>
         ) : null}
 
-        <section className="space-y-3 rounded-[20px] border border-white/10 bg-slate-900/20 p-5">
-          <h2 className="text-xl font-semibold tracking-tight text-slate-100">Baseline readiness</h2>
-          <p className="text-sm leading-6 text-slate-300">{certification.summary}</p>
-          <details className="rounded-[14px] border border-white/10 bg-slate-950/30 px-4 py-3">
-            <summary className="cursor-pointer text-sm font-semibold text-slate-200">
-              View readiness details
-            </summary>
-            <div className="mt-3 grid gap-2">
-              {certification.checklist.map((item) => (
-                <p key={item.label} className="text-sm text-slate-300">
-                  {item.label}: {item.value}
-                </p>
-              ))}
-            </div>
-          </details>
-        </section>
+        {analysisReady ? (
+          <section className="space-y-3 rounded-[20px] border border-white/10 bg-slate-900/20 p-5">
+            <h2 className="text-xl font-semibold tracking-tight text-slate-100">Baseline readiness</h2>
+            <p className="text-sm leading-6 text-slate-300">{certification.summary}</p>
+            <details className="rounded-[14px] border border-white/10 bg-slate-950/30 px-4 py-3">
+              <summary className="cursor-pointer text-sm font-semibold text-slate-200">
+                View readiness details
+              </summary>
+              <div className="mt-3 grid gap-2">
+                {certification.checklist.map((item) => (
+                  <p key={item.label} className="text-sm text-slate-300">
+                    {item.label}: {item.value}
+                  </p>
+                ))}
+              </div>
+            </details>
+          </section>
+        ) : null}
 
         {analysisReady ? (
           <div className="space-y-6 pt-4">

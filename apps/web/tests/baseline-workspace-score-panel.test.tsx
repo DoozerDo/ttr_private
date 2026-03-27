@@ -324,7 +324,7 @@ describe("BaselineWorkspace live score panel", () => {
       fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
 
       await waitFor(() => {
-        expect(screen.getByText("Prime Opportunity")).toBeInTheDocument();
+      expect(screen.getByText("Primary readiness")).toBeInTheDocument();
       });
 
       expect(screen.getByText("Strong match, but not ready to generate")).toBeInTheDocument();
@@ -404,10 +404,10 @@ describe("BaselineWorkspace live score panel", () => {
       fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
 
       await waitFor(() => {
-        expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Continue Building Baseline" })).toBeInTheDocument();
       });
 
-      expect(screen.getByRole("link", { name: "Start Fit Review" })).toHaveAttribute(
+      expect(screen.getByRole("link", { name: "Continue Building Baseline" })).toHaveAttribute(
         "href",
         "/results?assessmentId=assessment-4",
       );

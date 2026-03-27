@@ -58,7 +58,7 @@ describe("Results opportunity map", () => {
     );
 
     expect(screen.getAllByText("This role needs stronger proof before generation will be useful.").length).toBeGreaterThan(0);
-    expect(screen.queryByRole("link", { name: "Generate Resume" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Open Resume + Cover Letter Studio" })).toBeNull();
   });
 
   it("renders Reanalyze narrative state", () => {
@@ -131,7 +131,7 @@ describe("Results opportunity map", () => {
           "Drove cross-functional CX systems",
         ]}
         primaryCta={{
-          label: "Generate Resume & Cover Letter",
+          label: "Open Resume + Cover Letter Studio",
           href: "/studio",
           description: "You're a strong match. Move forward and generate tailored materials.",
         }}
@@ -153,7 +153,7 @@ describe("Results opportunity map", () => {
     expect(screen.getByText("Decision summary")).toBeInTheDocument();
     expect(screen.getByText("Built from your validated baseline and role requirements.")).toBeInTheDocument();
     expect(screen.getByText("View detailed scoring breakdown")).toBeInTheDocument();
-    expect(screen.getByText("Generate Resume & Cover Letter")).toBeInTheDocument();
+    expect(screen.getByText("Open Resume + Cover Letter Studio")).toBeInTheDocument();
     expect(screen.getByText("You're a strong match. Move forward and generate tailored materials.")).toBeInTheDocument();
     expect(screen.queryByText("Watchouts")).toBeNull();
     expect(screen.queryByText("Best next move")).toBeNull();
@@ -173,7 +173,7 @@ describe("Results opportunity map", () => {
         nextAction={buildNextAction("GENERATE_RESUME")}
         advantageSignals={[]}
         primaryCta={{
-          label: "Generate Resume",
+          label: "Open Resume + Cover Letter Studio",
           href: "/studio",
           description: "You've cleared the threshold. Generate tailored materials now.",
         }}
@@ -228,7 +228,7 @@ describe("Results opportunity map", () => {
         nextAction={buildNextAction("GENERATE_RESUME")}
         advantageSignals={["Led global support operations"]}
         primaryCta={{
-          label: "Generate Resume & Cover Letter",
+          label: "Open Resume + Cover Letter Studio",
           href: "/studio",
           description: "You're a strong match. Move forward and generate tailored materials.",
         }}
@@ -241,7 +241,7 @@ describe("Results opportunity map", () => {
     );
 
     expect(screen.getByText(/Generation readiness:\s*READY/i)).toBeInTheDocument();
-    const cta = screen.getByRole("link", { name: "Generate Resume & Cover Letter" });
+    const cta = screen.getByRole("link", { name: "Open Resume + Cover Letter Studio" });
     expect(cta).toBeInTheDocument();
     expect(cta).toHaveAttribute("href", "/studio");
     expect(screen.getByTestId("results-hero-primary-cta")).toBeInTheDocument();

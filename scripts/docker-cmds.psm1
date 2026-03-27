@@ -256,18 +256,21 @@ function Test-IsStrictWebPresentationPath {
     )
 
     if ($Path -match '^apps/web/app/api/') { return $false }
+    if ($Path -match '^apps/web/app/.+/route\.[jt]sx?$') { return $false }
     if ($Path -match '^apps/web/app/') { return $true }
+    if ($Path -match '^apps/web/src/components/') { return $true }
     if ($Path -match '^apps/web/components/') { return $true }
     if ($Path -match '^apps/web/tests/') { return $true }
     if ($Path -match '^apps/web/public/') { return $true }
     if ($Path -match '^apps/web/styles/') { return $true }
 
     if ($Path -match '^apps/web/lib/') {
-        # Keep this strict: only clearly presentational helpers are allowed in build-both.
-        if ($Path -match '^apps/web/lib/(ui/|theme/|styles?/|color|colors|copy|copywriting|format|formatters|classnames|classNames|icons?)(/|\.|$)') {
-            return $true
+        # Allow lib changes by default, but block anything that indicates
+        # server/runtime/backend behavior.
+        if ($Path -match '(^|/)(api|server|backend|route|routes|auth|config|settings|env|middleware|db|database|persistence|storage|cache|queue|jobs?|cron|worker|prisma|typeorm|data-source|schema|schemas|contract|contracts|secret|secrets)(/|\.|$)') {
+            return $false
         }
-        return $false
+        return $true
     }
 
     return $false
