@@ -14,6 +14,7 @@
     "lint": "npm run lint:api && npm run lint:web",
     "test:api": "npm -w apps/api run test",
     "check:beta-scope": "node scripts/check-beta-scope.js",
+    "synthetic:core-loop": "node scripts/synthetic-core-loop.mjs",
     "verify:ci": "npm run check:beta-scope && npm run lint:api && npm run lint:web && npm run test:api && npm run build:both",
     "smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1",
     "scan:routes": "npm -w apps/web run scan:routes",
