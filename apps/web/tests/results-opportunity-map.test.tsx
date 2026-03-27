@@ -5,9 +5,9 @@ import {
   buildStudioHrefWithExcludedRequirements,
   OpportunityMapSection,
   getOpportunityVerdict,
-  getPrimaryResultsCta,
 } from "@/app/(app)/results/page";
 import type { GenerationReadiness, VerificationCoverage } from "@/lib/generationReadiness";
+import type { NextAction } from "@/lib/nextAction";
 
 const readyReadiness: GenerationReadiness = {
   status: "ready",
@@ -30,85 +30,93 @@ const strongCoverage: VerificationCoverage = {
   summary: "Your baseline can fully support the claims required for this role.",
 };
 
+const buildNextAction = (action: NextAction["action"]): NextAction => ({
+  action,
+  label: "Action",
+  description: "Description",
+});
+
 describe("Results opportunity map", () => {
-  it("maps >85 scores to generate CTA routed to studio", () => {
-    const cta = getPrimaryResultsCta({
-      activeScore: 91,
-      studioHref: "/studio",
-      canOpenStudio: true,
-      canGenerate: true,
-      reasonsBlocked: [],
-      fitReviewPath: "/fit-review?jobId=job-1",
-    });
-
-    expect(cta).toMatchObject({
-      label: "Open Studio to Generate",
-      href: "/studio",
-      disabled: false,
-    });
-  });
-
-  it("maps 70-85 scores to open studio CTA", () => {
-    const cta = getPrimaryResultsCta({
-      activeScore: 74,
-      studioHref: "/studio?analysisId=analysis-1&baselineId=base-1",
-      canOpenStudio: true,
-      canGenerate: false,
-      reasonsBlocked: [],
-      fitReviewPath: "/fit-review?jobId=job-1",
-    });
-
-    expect(cta).toMatchObject({
-      label: "Open Studio",
-      href: "/studio?analysisId=analysis-1&baselineId=base-1",
-      disabled: false,
-    });
-  });
-
-  it("maps below-70 scores to fit improvement", () => {
-    const improveCta = getPrimaryResultsCta({
-      activeScore: 62,
-      studioHref: "/studio",
-      canOpenStudio: true,
-      canGenerate: false,
-      reasonsBlocked: [],
-      fitReviewPath: "/fit-review?jobId=job-1",
-    });
-    expect(improveCta).toMatchObject({
-      label: "Start Fit Improvement",
-      href: "/fit-review?jobId=job-1",
-      disabled: false,
-    });
-
-    const cta = getPrimaryResultsCta({
-      activeScore: 41,
-      studioHref: "/studio",
-      canOpenStudio: true,
-      canGenerate: false,
-      reasonsBlocked: [],
-      fitReviewPath: "/fit-review?jobId=job-1",
-    });
-
-    expect(cta).toMatchObject({
-      label: "Start Fit Improvement",
-      href: "/fit-review?jobId=job-1",
-      disabled: false,
-    });
-  });
-
-  it("keeps studio routing when analysis context is included", () => {
-    const cta = getPrimaryResultsCta({
-      activeScore: 90,
-      studioHref: "/studio?jobId=job-1&analysisId=analysis-88&baselineId=base-1&baselineVersionId=base-version-4",
-      canOpenStudio: true,
-      canGenerate: true,
-      reasonsBlocked: [],
-      fitReviewPath: "/fit-review?jobId=job-1",
-    });
-
-    expect(cta.href).toBe(
-      "/studio?jobId=job-1&analysisId=analysis-88&baselineId=base-1&baselineVersionId=base-version-4",
+  it("renders Resolve Gaps narrative for weak-fit state", () => {
+    render(
+      <OpportunityMapSection
+        score={62}
+        verdict={getOpportunityVerdict(62)}
+        nextAction={buildNextAction("RESOLVE_GAPS")}
+        advantageSignals={[]}
+        primaryCta={null}
+        scoreAnalysisHref="#advanced-insights"
+        readiness={readyReadiness}
+        verificationCoverage={strongCoverage}
+        canonicalCoverage={null}
+        predictiveUnlock={null}
+        weakFitRecovery={{
+          href: "/resolve-gaps?jobId=job-1&baselineId=base-1",
+          gapPreview: [{ requirement: "Salesforce", explanation: "Add concrete baseline evidence that proves this requirement." }],
+        }}
+      />,
     );
+
+    expect(screen.getAllByText("This role needs stronger proof before generation will be useful.").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("link", { name: "Generate Resume" })).toBeNull();
+  });
+
+  it("renders Reanalyze narrative state", () => {
+    render(
+      <OpportunityMapSection
+        score={72}
+        verdict={getOpportunityVerdict(72)}
+        nextAction={buildNextAction("REANALYZE")}
+        advantageSignals={[]}
+        primaryCta={{ label: "Reanalyze Role", onClick: () => {}, description: "You've added evidence. Reanalyze to measure the impact." }}
+        scoreAnalysisHref="#advanced-insights"
+        readiness={readyReadiness}
+        verificationCoverage={strongCoverage}
+        canonicalCoverage={null}
+        predictiveUnlock={null}
+      />,
+    );
+
+    expect(screen.getAllByText("You've added evidence. Reanalyze to measure the impact.").length).toBeGreaterThan(0);
+  });
+
+  it("renders Add to Opportunities narrative state", () => {
+    render(
+      <OpportunityMapSection
+        score={82}
+        verdict={getOpportunityVerdict(82)}
+        nextAction={buildNextAction("ADD_TO_OPPORTUNITIES")}
+        advantageSignals={[]}
+        primaryCta={{ label: "Add to Opportunities", onClick: () => {}, description: "Your materials are ready. Add this role to Opportunities." }}
+        scoreAnalysisHref="#advanced-insights"
+        readiness={readyReadiness}
+        verificationCoverage={strongCoverage}
+        canonicalCoverage={null}
+        predictiveUnlock={null}
+      />,
+    );
+
+    expect(screen.getByText("Your materials are ready. Track this opportunity.")).toBeInTheDocument();
+  });
+
+  it("renders Review Results narrative without duplicate save CTA", () => {
+    render(
+      <OpportunityMapSection
+        score={82}
+        verdict={getOpportunityVerdict(82)}
+        nextAction={buildNextAction("REVIEW_RESULTS")}
+        advantageSignals={[]}
+        primaryCta={{ label: "Review Results", href: "#advanced-insights", description: "Everything is saved. Review details or choose your next role." }}
+        scoreAnalysisHref="#advanced-insights"
+        readiness={readyReadiness}
+        verificationCoverage={strongCoverage}
+        canonicalCoverage={null}
+        predictiveUnlock={null}
+      />,
+    );
+
+    expect(screen.getByText("Your next step is complete.")).toBeInTheDocument();
+    expect(screen.queryByText("Add to Opportunities")).toBeNull();
   });
 
   it("renders the opportunity map as a concise executive summary", () => {
@@ -116,6 +124,7 @@ describe("Results opportunity map", () => {
       <OpportunityMapSection
         score={87}
         verdict={getOpportunityVerdict(87)}
+        nextAction={buildNextAction("GENERATE_RESUME")}
         advantageSignals={[
           "Led global support operations",
           "Built escalation and incident workflows",
@@ -160,6 +169,7 @@ describe("Results opportunity map", () => {
       <OpportunityMapSection
         score={74}
         verdict={getOpportunityVerdict(74)}
+        nextAction={buildNextAction("GENERATE_RESUME")}
         advantageSignals={[]}
         primaryCta={{
           label: "Open Studio",
@@ -191,6 +201,7 @@ describe("Results opportunity map", () => {
       <OpportunityMapSection
         score={94}
         verdict={getOpportunityVerdict(94)}
+        nextAction={buildNextAction("GENERATE_RESUME")}
         advantageSignals={["Led global support operations"]}
         primaryCta={{
           label: "Generate Resume & Cover Letter",
@@ -218,6 +229,7 @@ describe("Results opportunity map", () => {
       <OpportunityMapSection
         score={62}
         verdict={getOpportunityVerdict(62)}
+        nextAction={buildNextAction("RESOLVE_GAPS")}
         advantageSignals={["Led global support operations"]}
         primaryCta={null}
         scoreAnalysisHref="#advanced-insights"
@@ -237,7 +249,7 @@ describe("Results opportunity map", () => {
 
     expect(screen.getByTestId("resolve-gaps-block")).toBeInTheDocument();
     expect(
-      screen.getByText("This role needs stronger proof before generation will be useful."),
+      screen.getAllByText("This role needs stronger proof before generation will be useful.")[0],
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Resolve Gaps" })).toHaveAttribute(
       "href",
@@ -251,6 +263,7 @@ describe("Results opportunity map", () => {
       <OpportunityMapSection
         score={74}
         verdict={getOpportunityVerdict(74)}
+        nextAction={buildNextAction("GENERATE_RESUME")}
         advantageSignals={["Led global support operations"]}
         primaryCta={{
           label: "Open Studio",
@@ -274,6 +287,7 @@ describe("Results opportunity map", () => {
       <OpportunityMapSection
         score={92}
         verdict={getOpportunityVerdict(92)}
+        nextAction={buildNextAction("GENERATE_RESUME")}
         advantageSignals={["Led global support operations"]}
         primaryCta={{
           label: "Open Studio",
@@ -339,6 +353,7 @@ describe("Results opportunity map", () => {
       <OpportunityMapSection
         score={92}
         verdict={getOpportunityVerdict(92)}
+        nextAction={buildNextAction("GENERATE_RESUME")}
         advantageSignals={["Led global support operations"]}
         primaryCta={{
           label: "Open Studio",
@@ -386,6 +401,7 @@ describe("Results opportunity map", () => {
       <OpportunityMapSection
         score={92}
         verdict={getOpportunityVerdict(92)}
+        nextAction={buildNextAction("GENERATE_RESUME")}
         advantageSignals={["Led global support operations"]}
         primaryCta={{
           label: "Open Studio",
@@ -428,6 +444,7 @@ describe("Results opportunity map", () => {
       <OpportunityMapSection
         score={95}
         verdict={getOpportunityVerdict(95)}
+        nextAction={buildNextAction("GENERATE_RESUME")}
         advantageSignals={["Led global support operations"]}
         primaryCta={{
           label: "Review Gaps",
@@ -490,6 +507,7 @@ describe("Results opportunity map", () => {
       <OpportunityMapSection
         score={94}
         verdict={getOpportunityVerdict(94)}
+        nextAction={buildNextAction("GENERATE_RESUME")}
         advantageSignals={["Led global support operations"]}
         primaryCta={{
           label: "Remove unsupported requirements and continue",

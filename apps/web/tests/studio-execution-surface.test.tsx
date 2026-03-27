@@ -127,6 +127,31 @@ describe("Studio execution surface", () => {
     expect(screen.getByRole("link", { name: "Resolve gaps before generating" })).toBeInTheDocument();
   });
 
+  it("suppresses generation surfaces when fit is below threshold and routes to Resolve Gaps", async () => {
+    setFetchImplementation(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input.url;
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]);
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return createResponse({ score: 62, jobId: "job-1", baselineId: "base-1", baselineVersionId: "base-version-1" });
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return createResponse({ status: "ready", reasons: [] });
+      }
+      return createResponse({});
+    });
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByRole("link", { name: "Resolve Gaps" })).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("Your application materials")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Generate Resume" })).not.toBeInTheDocument();
+  });
+
   it("demotes advanced controls with optional labels", async () => {
     setFetchImplementation(async (input: RequestInfo) => {
       const url = typeof input === "string" ? input : input.url;

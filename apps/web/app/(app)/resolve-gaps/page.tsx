@@ -4,8 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { FormButton } from "@/components/FormButton";
+import { GuidedOverlay } from "@/components/GuidedOverlay";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
+import { useGuidedMode } from "@/hooks/useGuidedMode";
 import { getPromptsForGap } from "@/lib/gapPromptMapping";
 
 type GapStatus = "NOT_STARTED" | "RESOLVED" | "STILL_WEAK" | "SKIPPED";
@@ -85,6 +87,7 @@ export default function ResolveGapsPage() {
   const [selectedGap, setSelectedGap] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [reanalyzing, setReanalyzing] = useState(false);
+  const { isGuidedActive, advanceStep } = useGuidedMode();
   const reanalysisInFlightRef = useRef(false);
   const [savedBanner, setSavedBanner] = useState<string | null>(null);
 
@@ -149,6 +152,10 @@ export default function ResolveGapsPage() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(storageKey, JSON.stringify(gapState));
   }, [baselineId, gapState, jobId, storageKey]);
+  useEffect(() => {
+    if (!isGuidedActive) return;
+    advanceStep("RESOLVE_GAPS");
+  }, [advanceStep, isGuidedActive]);
 
   const selectedState = selectedGap ? gapState[selectedGap] : null;
   const selectedPromptSet = useMemo(
@@ -263,6 +270,9 @@ export default function ResolveGapsPage() {
         },
       }));
       setSavedBanner(status === "RESOLVED" ? "Gap marked RESOLVED." : "Gap still needs stronger proof.");
+      if (isGuidedActive) {
+        advanceStep("REANALYZE");
+      }
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Unable to submit gap response.");
     } finally {
@@ -321,6 +331,9 @@ export default function ResolveGapsPage() {
       if (typeof window !== "undefined") {
         window.localStorage.setItem(LAST_ASSESSMENT_STORAGE_KEY, assessmentId);
       }
+      if (isGuidedActive) {
+        advanceStep("GENERATE");
+      }
       router.push(`/results?jobId=${encodeURIComponent(jobId)}`);
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : "Unable to run reanalysis.");
@@ -337,6 +350,20 @@ export default function ResolveGapsPage() {
           title="Resolve Gaps"
           description="Strengthen role-specific proof before reanalyzing fit."
         />
+        {isGuidedActive ? (
+          <GuidedOverlay
+            headline="Answer this to strengthen your proof."
+            body="Complete this gap prompt with concrete ownership, systems, scope, and outcomes."
+            ctaLabel="Continue"
+            onCtaClick={() => {
+              if (selectedProcessed) {
+                moveToNextGap();
+                return;
+              }
+              void submitCurrentGap();
+            }}
+          />
+        ) : null}
 
         {loading ? <p className="text-sm text-slate-300">Loading role-scoped gaps…</p> : null}
         {error ? <p className="rounded-lg border border-rose-300/30 bg-rose-500/10 p-3 text-sm text-rose-100">{error}</p> : null}

@@ -9,6 +9,7 @@ import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel"
 import { InsufficientExtractedText } from "@/components/compliance/InsufficientExtractedText";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
+import { GuidedOverlay } from "@/components/GuidedOverlay";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { CareerAlignmentProgress } from "./components/CareerAlignmentProgress";
@@ -39,6 +40,8 @@ import { appendStrengtheningAddition } from "@/lib/baselines";
 import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
 import { buildScoreDelta, hasBaselineUpdated } from "@/lib/reanalysis";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
+import { derivePrimaryNextAction, getGenerationCompletionStorageKey } from "@/lib/nextAction";
+import { useGuidedMode } from "@/hooks/useGuidedMode";
 import { trackEvent } from "@/src/lib/analytics";
 import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
 
@@ -544,11 +547,13 @@ type OpportunityMapSectionProps = {
     label: string;
     explanation: string;
   };
+  nextAction: ReturnType<typeof derivePrimaryNextAction>;
   advantageSignals: string[];
   primaryCta:
     | {
         label: string;
-        href: string;
+        href?: string;
+        onClick?: () => void;
         disabled?: boolean;
         description: string;
       }
@@ -645,74 +650,6 @@ export function buildStudioHrefWithExcludedRequirements(
   return serialized ? `${path}?${serialized}` : path;
 }
 
-type PrimaryResultsCtaInput = {
-  activeScore: number | null;
-  studioHref: string;
-  canOpenStudio: boolean;
-  canGenerate?: boolean;
-  reasonsBlocked?: string[];
-  fitReviewPath: string;
-};
-
-type PrimaryResultsCtaOutput = {
-  label: string;
-  href: string;
-  disabled: boolean;
-  description: string;
-};
-
-export function getPrimaryResultsCta({
-  activeScore,
-  studioHref,
-  canOpenStudio,
-  canGenerate = false,
-  reasonsBlocked = [],
-  fitReviewPath,
-}: PrimaryResultsCtaInput): PrimaryResultsCtaOutput {
-  if (typeof activeScore !== "number" || activeScore < 70) {
-    return {
-      label: "Start Fit Improvement",
-      href: fitReviewPath,
-      disabled: false,
-      description: "Fit score is below 70. Complete Fit Review before Studio unlocks.",
-    };
-  }
-
-  if (activeScore < 85) {
-    return {
-      label: "Open Studio",
-      href: studioHref,
-      disabled: !canOpenStudio,
-      description: "Studio is unlocked at 70+. Generation unlocks at 85+.",
-    };
-  }
-
-  if (canGenerate) {
-    return {
-      label: "Open Studio to Generate",
-      href: studioHref,
-      disabled: !canOpenStudio,
-      description: "Generation is available for this analyzed baseline.",
-    };
-  }
-
-  if (reasonsBlocked.length > 0) {
-    return {
-      label: "Resolve Readiness in Studio",
-      href: studioHref,
-      disabled: !canOpenStudio,
-      description: "Generation is blocked until readiness checks pass.",
-    };
-  }
-
-  return {
-    label: "Start Fit Improvement",
-    href: fitReviewPath,
-    disabled: false,
-    description: "Generation remains blocked until required checks are complete.",
-  };
-}
-
 function resolveLatestBaselineVersionId(baseline: { versions?: Array<{ id: string; versionNumber: number }> } | null): string | null {
   if (!baseline?.versions?.length) return null;
   const [latestVersion] = [...baseline.versions].sort((a, b) => (b.versionNumber ?? 0) - (a.versionNumber ?? 0));
@@ -743,6 +680,7 @@ export async function getPreviousAnalysis(
 export function OpportunityMapSection({
   score,
   verdict,
+  nextAction,
   primaryCta,
   scoreAnalysisHref,
   readiness,
@@ -782,19 +720,50 @@ export function OpportunityMapSection({
       : readiness.status === "limited"
         ? "Some requirements need stronger verification. You can still generate documents, and improving evidence will strengthen results."
         : "Your evidence supports generation for this role.";
+  const decisionNarrative = useMemo(() => {
+    switch (nextAction.action) {
+      case "CONTINUE_ANALYSIS":
+        return {
+          headline: "Run analysis to see whether this role is truly a fit.",
+          body: "We need a completed analysis before we can recommend a reliable next step.",
+        };
+      case "RESOLVE_GAPS":
+        return {
+          headline: "This role needs stronger proof before generation will be useful.",
+          body: "You have relevant experience, but a few requirements are not well supported in your baseline.",
+        };
+      case "REANALYZE":
+        return {
+          headline: "You've added evidence. Reanalyze to measure the impact.",
+          body: "Your baseline changed. Run the role again to see whether fit improved and generation is now ready.",
+        };
+      case "GENERATE_RESUME":
+        return {
+          headline: "You've cleared the threshold. Generate tailored materials now.",
+          body: "This role is ready for tailored output based on your verified baseline.",
+        };
+      case "ADD_TO_OPPORTUNITIES":
+        return {
+          headline: "Your materials are ready. Track this opportunity.",
+          body: "Save this role to Opportunities to keep it in motion.",
+        };
+      case "REVIEW_RESULTS":
+      default:
+        return {
+          headline: "Your next step is complete.",
+          body: "This role has already been generated and saved. Review the results or analyze another role.",
+        };
+    }
+  }, [nextAction.action]);
   return (
     <section className="rounded-3xl bg-slate-900/65 px-6 py-9 sm:px-8 sm:py-10">
       <div className="max-w-4xl space-y-9">
         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Decision summary</p>
         <div className="space-y-5">
-          <p className="text-[86px] font-black leading-[0.95] tracking-[-0.055em] text-white md:text-[98px] xl:text-[110px] 2xl:text-[118px]">
-            {typeof score === "number" ? Math.round(score) : "--"}
-          </p>
           <h2 className="max-w-3xl text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl xl:text-5xl">
-            {verdict.label}
+            {decisionNarrative.headline}
           </h2>
-          <p className="max-w-2xl text-base leading-7 text-slate-100 md:text-lg">{verdict.explanation}</p>
-          <p className="max-w-2xl text-sm leading-6 text-slate-400">Built from your validated baseline and role requirements.</p>
+          <p className="max-w-2xl text-base leading-7 text-slate-100 md:text-lg">{decisionNarrative.body}</p>
         </div>
         {weakFitRecovery ? (
           <ResolveGapsBlock
@@ -814,10 +783,18 @@ export function OpportunityMapSection({
                   >
                     {primaryCta.label}
                   </span>
+                ) : primaryCta.onClick ? (
+                  <button
+                    data-testid="results-hero-primary-cta"
+                    onClick={primaryCta.onClick}
+                    className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500 md:min-w-[320px]"
+                  >
+                    {primaryCta.label}
+                  </button>
                 ) : (
                   <a
                     data-testid="results-hero-primary-cta"
-                    href={primaryCta.href}
+                    href={primaryCta.href ?? "#"}
                     className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500 md:min-w-[320px]"
                   >
                     {primaryCta.label}
@@ -836,6 +813,14 @@ export function OpportunityMapSection({
             </div>
           </div>
         )}
+        <div className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+          <p className="text-[56px] font-black leading-[0.95] tracking-[-0.04em] text-white md:text-[64px]">
+            {typeof score === "number" ? Math.round(score) : "--"}
+          </p>
+          <h3 className="text-2xl font-semibold tracking-tight text-white">{verdict.label}</h3>
+          <p className="max-w-2xl text-sm leading-6 text-slate-300">{verdict.explanation}</p>
+          <p className="max-w-2xl text-xs leading-5 text-slate-400">Built from your validated baseline and role requirements.</p>
+        </div>
         <div
           id="generation-readiness-details"
           className={`rounded-xl border px-4 py-3 text-sm ${readinessToneClass}`}
@@ -1430,6 +1415,7 @@ export default function ResultsPage() {
   const [dismissedSuggestionRequirements, setDismissedSuggestionRequirements] = useState<Set<string>>(new Set());
   const [applicationInsights, setApplicationInsights] = useState<ApplicationInsight[]>([]);
   const [opportunitySaved, setOpportunitySaved] = useState(false);
+  const [generationCompleted, setGenerationCompleted] = useState(false);
   const [currentBaselineVersionId, setCurrentBaselineVersionId] = useState<string | null>(null);
   const [previousAnalysis, setPreviousAnalysis] = useState<LatestAnalysis | null>(null);
   const [reanalysisRunning, setReanalysisRunning] = useState(false);
@@ -1751,6 +1737,14 @@ export default function ResultsPage() {
     if (!candidateJobId) return "/fit-review";
     return `/fit-review?jobId=${encodeURIComponent(candidateJobId)}`;
   }, [jobId, latest?.jobId]);
+  useEffect(() => {
+    const key = getGenerationCompletionStorageKey(latest?.jobId ?? null, latest?.baselineId ?? null);
+    if (!key || typeof window === "undefined") {
+      setGenerationCompleted(false);
+      return;
+    }
+    setGenerationCompleted(window.localStorage.getItem(key) === "true");
+  }, [latest?.baselineId, latest?.jobId]);
 
   const latestBaselineId = latest?.baselineId?.trim() ?? "";
   const latestBaselineVersionId = latest?.baselineVersionId?.trim() ?? "";
@@ -1986,21 +1980,31 @@ export default function ResultsPage() {
       }),
     [activeScore, applicationInsights, latest],
   );
-  const primaryResultsCta = useMemo(
+  const primaryNextAction = useMemo(
     () =>
-      typeof activeScore === "number"
-        ? getPrimaryResultsCta({
-            activeScore,
-            studioHref,
-            canOpenStudio,
-            canGenerate: productReadiness.generation_readiness.canGenerate,
-            reasonsBlocked: productReadiness.generation_readiness.reasonsBlocked,
-            fitReviewPath,
-          })
-        : null,
-    [activeScore, studioHref, canOpenStudio, fitReviewPath, productReadiness],
+      derivePrimaryNextAction({
+        analysisPresent: Boolean(latest),
+        fitScore: typeof activeScore === "number" ? activeScore : null,
+        hasCompletedGeneration: generationCompleted,
+        opportunityAlreadySaved: opportunitySaved,
+        generationAllowed: productReadiness.generation_readiness.canGenerate,
+        hasUnverifiedRequirements: canonicalUnverifiedRequirements.length > 0,
+        jobId: latest?.jobId,
+        baselineId: latest?.baselineId,
+      }),
+    [activeScore, canonicalUnverifiedRequirements.length, generationCompleted, latest, opportunitySaved, productReadiness.generation_readiness.canGenerate],
   );
   const isWeakFitScore = typeof activeScore === "number" && activeScore < 70;
+  const { isGuidedActive, syncWithNextAction, completeGuidedMode, advanceStep } = useGuidedMode();
+  useEffect(() => {
+    if (!isGuidedActive) return;
+    if (!latest) {
+      advanceStep("ANALYZE");
+      return;
+    }
+    advanceStep("RESULTS");
+    syncWithNextAction(primaryNextAction.action);
+  }, [advanceStep, isGuidedActive, latest, primaryNextAction.action, syncWithNextAction]);
   const resolveGapsHref = useMemo(() => {
     const params = new URLSearchParams();
     if (latest?.jobId?.trim()) {
@@ -2031,15 +2035,54 @@ export default function ResultsPage() {
     [isWeakFitScore, resolveGapPreview, resolveGapsHref],
   );
   const oneClickResultsCta = useMemo(() => {
-    if (isWeakFitScore) return null;
-    if (!predictiveUnlock) return primaryResultsCta;
-    return {
-      label: "Remove unsupported requirements and continue",
-      href: predictiveUnlock.removeAndContinueHref,
-      disabled: !canOpenStudio,
-      description: "You're a strong match. Move forward and generate tailored materials.",
-    };
-  }, [canOpenStudio, isWeakFitScore, predictiveUnlock, primaryResultsCta]);
+    if (!latest) return null;
+    if (primaryNextAction.action === "RESOLVE_GAPS") return null;
+    if (primaryNextAction.action === "CONTINUE_ANALYSIS") {
+      return {
+        label: "Analyze Role",
+        href: "/analyze",
+        disabled: false,
+        description: "Run analysis to get a truthful next step for this role.",
+      };
+    }
+    if (primaryNextAction.action === "REANALYZE") {
+      return {
+        label: "Reanalyze Role",
+        onClick: () => {
+          void rerunAnalysisForCurrentRole();
+        },
+        disabled: reanalysisRunning,
+        description: "You've added evidence. Reanalyze to measure the impact.",
+      };
+    }
+    if (primaryNextAction.action === "GENERATE_RESUME") {
+      return {
+        label: "Generate Resume",
+        href: studioHref,
+        disabled: !canOpenStudio,
+        description: "You’ve cleared the threshold. Generate tailored materials now.",
+      };
+    }
+    if (primaryNextAction.action === "ADD_TO_OPPORTUNITIES") {
+      return {
+        label: "Add to Opportunities",
+        onClick: () => {
+          void saveOpportunityFromResults();
+        },
+        disabled: false,
+        description: "Your materials are ready. Add this role to Opportunities.",
+      };
+    }
+    if (primaryNextAction.action === "REVIEW_RESULTS") {
+      return {
+        label: "Review Results",
+        href: "#advanced-insights",
+        disabled: false,
+        description: "Everything is saved. Review details or choose your next role.",
+      };
+    }
+    return null;
+  }, [canOpenStudio, latest, primaryNextAction.action, reanalysisRunning, studioHref]);
   const formatDriverValue = (value?: number | null) =>
     typeof value === "number" ? value.toFixed(1) : "n/a";
   const summarySnippet = typeof latest?.summary === "string" ? latest.summary.trim() : null;
@@ -2622,16 +2665,12 @@ export default function ResultsPage() {
     void hydrateLastAssessment();
   }, [runIdentifier, router, searchParams]);
 
-  useEffect(() => {
+  const saveOpportunityFromResults = useCallback(async () => {
     if (!latest || typeof activeScore !== "number") return;
     const jobIdValue = latest.jobId?.trim() ?? "";
     const analysisIdValue = latest.assessmentId?.trim() ?? "";
     const baselineIdValue = latest.baselineId?.trim() ?? "";
     if (!jobIdValue || !analysisIdValue || !baselineIdValue) return;
-
-    const saveKey = `${analysisIdValue}:${activeScore}`;
-    if (savedOpportunityKeysRef.current.has(saveKey)) return;
-    savedOpportunityKeysRef.current.add(saveKey);
 
     const company =
       (typeof latest.companyName === "string" && latest.companyName.trim()) ||
@@ -2642,28 +2681,29 @@ export default function ResultsPage() {
       (typeof latest.title === "string" && latest.title.trim()) ||
       "Untitled role";
 
-    void (async () => {
-      try {
-        const response = await fetch("/api/opportunities", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            jobId: jobIdValue,
-            analysisId: analysisIdValue,
-            baselineId: baselineIdValue,
-            score: Math.round(activeScore),
-            company,
-            roleTitle,
-          }),
-        });
-        if (response.ok) {
-          setOpportunitySaved(true);
+    try {
+      const response = await fetch("/api/opportunities", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jobId: jobIdValue,
+          analysisId: analysisIdValue,
+          baselineId: baselineIdValue,
+          score: Math.round(activeScore),
+          company,
+          roleTitle,
+        }),
+      });
+      if (response.ok) {
+        setOpportunitySaved(true);
+        if (isGuidedActive) {
+          completeGuidedMode();
         }
-      } catch {
-        // non-blocking
       }
-    })();
-  }, [activeScore, latest]);
+    } catch {
+      // non-blocking
+    }
+  }, [activeScore, completeGuidedMode, isGuidedActive, latest]);
 
   const rerunAnalysisForCurrentRole = useCallback(async () => {
     const targetJobId = latest?.jobId?.trim() ?? "";
@@ -2745,11 +2785,85 @@ export default function ResultsPage() {
       }
     })();
   }, [latest?.baselineId, latest?.jobId, reanalysisDelta.currentScore, reanalysisDelta.previousScore]);
+  const guidedOverlayConfig = useMemo(() => {
+    if (!isGuidedActive) return null;
+    if (!latest || primaryNextAction.action === "CONTINUE_ANALYSIS") {
+      return {
+        headline: "Let's see if this role is actually a fit.",
+        body: "Start with analysis and we will guide you to the best next step.",
+        ctaLabel: "Analyze a role",
+        ctaHref: "/analyze",
+      };
+    }
+    if (primaryNextAction.action === "RESOLVE_GAPS") {
+      return {
+        headline: "This is where most people get stuck.",
+        body: "You have relevant experience, but it is not proven clearly enough yet.",
+        ctaLabel: "Let's fix that",
+        ctaHref: resolveGapsHref,
+      };
+    }
+    if (primaryNextAction.action === "REANALYZE") {
+      return {
+        headline: "Good. Now let's measure the impact.",
+        body: "Run reanalysis to see whether your new evidence raised fit and readiness.",
+        ctaLabel: reanalysisRunning ? "Reanalyzing..." : "Reanalyze Role",
+        onCtaClick: () => {
+          if (!reanalysisRunning) void rerunAnalysisForCurrentRole();
+        },
+      };
+    }
+    if (primaryNextAction.action === "GENERATE_RESUME") {
+      return {
+        headline: "You're already in a strong position for this role.",
+        body: "Now generate tailored materials from verified evidence.",
+        ctaLabel: "Generate tailored materials",
+        ctaHref: studioHref,
+      };
+    }
+    if (primaryNextAction.action === "ADD_TO_OPPORTUNITIES") {
+      return {
+        headline: "You just turned your experience into a targeted application.",
+        body: "Save this opportunity so it stays in motion.",
+        ctaLabel: "Save this opportunity",
+        onCtaClick: () => {
+          void saveOpportunityFromResults();
+        },
+      };
+    }
+    return {
+      headline: "Guided mode complete.",
+      body: "You have completed the full flow once. We will stay out of your way now.",
+      ctaLabel: "Continue",
+      onCtaClick: () => {
+        completeGuidedMode();
+      },
+    };
+  }, [
+    completeGuidedMode,
+    isGuidedActive,
+    latest,
+    primaryNextAction.action,
+    reanalysisRunning,
+    rerunAnalysisForCurrentRole,
+    resolveGapsHref,
+    saveOpportunityFromResults,
+    studioHref,
+  ]);
 
   return (
     <PageShell className="results-page-theme">
       <div className="space-y-5">
         <PageHeader title="Your result" description="Review your compatibility score and next best step." />
+        {guidedOverlayConfig ? (
+          <GuidedOverlay
+            headline={guidedOverlayConfig.headline}
+            body={guidedOverlayConfig.body}
+            ctaLabel={guidedOverlayConfig.ctaLabel}
+            ctaHref={guidedOverlayConfig.ctaHref}
+            onCtaClick={guidedOverlayConfig.onCtaClick}
+          />
+        ) : null}
         {opportunitySaved ? (
           <p className="text-xs font-medium text-emerald-300">Saved to Opportunities</p>
         ) : null}
@@ -2757,13 +2871,8 @@ export default function ResultsPage() {
           <section className="rounded-2xl border border-cyan-300/30 bg-cyan-500/10 p-4">
             <p className="text-sm font-semibold text-cyan-100">Updated Baseline Detected</p>
             <p className="mt-1 text-sm text-slate-100">
-              Your baseline changed since this analysis. Re-run this same role to measure progress.
+              Your baseline changed since this analysis. Use the primary decision action above to reanalyze this role.
             </p>
-            <div className="mt-3">
-              <FormButton onClick={() => void rerunAnalysisForCurrentRole()} disabled={reanalysisRunning}>
-                {reanalysisRunning ? "Re-running..." : "Re-run Analysis"}
-              </FormButton>
-            </div>
           </section>
         ) : null}
         {previousAnalysis && typeof reanalysisDelta.delta === "number" ? (
@@ -2840,6 +2949,7 @@ export default function ResultsPage() {
                   <OpportunityMapSection
                     score={activeScore}
                     verdict={opportunityVerdict}
+                    nextAction={primaryNextAction}
                     advantageSignals={advantageSignals}
                     primaryCta={oneClickResultsCta}
                     scoreAnalysisHref="#advanced-insights"

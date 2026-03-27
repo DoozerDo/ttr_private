@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
+import { GuidedOverlay } from "@/components/GuidedOverlay";
 import { type ComplianceFlag } from "@/components/ComplianceViolationPanel";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
@@ -31,6 +32,8 @@ import { BaselineDto, BaselineVersionDto, listBaselines } from "@/lib/baselines"
 import { appendStrengtheningAddition } from "@/lib/baselines";
 import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
+import { derivePrimaryNextAction, getGenerationCompletionStorageKey } from "@/lib/nextAction";
+import { useGuidedMode } from "@/hooks/useGuidedMode";
 import { type JobDto } from "@/lib/jobs";
 import {
   buildCoverLetterParagraphs,
@@ -478,6 +481,7 @@ function resolveVerificationIssueAction(issue: GenerationReadiness["verification
 
 export default function StudioPage() {
   const isNonProduction = process.env.NODE_ENV !== "production";
+  const { isGuidedActive, currentStep: guidedStep, advanceStep, completeGuidedMode } = useGuidedMode();
   const searchParams = useSearchParams();
   const searchParamValue = searchParams.toString();
   const trackedStudioOpenRef = useRef(false);
@@ -1271,6 +1275,67 @@ export default function StudioPage() {
     [coverState.response],
   );
   const hasCoverLetterArtifact = coverPresenter.hasExportableContent;
+  const hasCompletedGeneration = hasResumeArtifact || hasCoverLetterArtifact;
+  const generationStorageKey = useMemo(
+    () => getGenerationCompletionStorageKey(effectiveJobId, effectiveBaselineId),
+    [effectiveBaselineId, effectiveJobId],
+  );
+  useEffect(() => {
+    if (typeof window === "undefined" || !generationStorageKey) return;
+    const storage = window.localStorage as
+      | { setItem?: (key: string, value: string) => void; removeItem?: (key: string) => void }
+      | undefined;
+    if (!storage?.setItem || !storage?.removeItem) return;
+    if (hasCompletedGeneration) {
+      storage.setItem(generationStorageKey, "true");
+      return;
+    }
+    storage.removeItem(generationStorageKey);
+  }, [generationStorageKey, hasCompletedGeneration]);
+  const resolveGapsHref = useMemo(() => {
+    const params = new URLSearchParams();
+    if (effectiveJobId) params.set("jobId", effectiveJobId);
+    if (effectiveBaselineId) params.set("baselineId", effectiveBaselineId);
+    const query = params.toString();
+    return query ? `/resolve-gaps?${query}` : "/resolve-gaps";
+  }, [effectiveBaselineId, effectiveJobId]);
+  const resultsHref = useMemo(() => {
+    const params = new URLSearchParams();
+    if (effectiveJobId) params.set("jobId", effectiveJobId);
+    const query = params.toString();
+    return query ? `/results?${query}` : "/results";
+  }, [effectiveJobId]);
+  const primaryNextAction = useMemo(
+    () =>
+      derivePrimaryNextAction({
+        analysisPresent: Boolean(analysis),
+        fitScore: analysisScore,
+        hasCompletedGeneration,
+        opportunityAlreadySaved: Boolean(opportunityContext),
+        generationAllowed: canGenerateDocuments,
+        hasUnverifiedRequirements: canonicalUnverifiedRequirements.length > 0,
+        jobId: effectiveJobId || null,
+        baselineId: effectiveBaselineId || null,
+      }),
+    [
+      analysis,
+      analysisScore,
+      canGenerateDocuments,
+      canonicalUnverifiedRequirements.length,
+      effectiveBaselineId,
+      effectiveJobId,
+      hasCompletedGeneration,
+      opportunityContext,
+    ],
+  );
+  const studioBlockedByNextAction =
+    primaryNextAction.action === "RESOLVE_GAPS" || primaryNextAction.action === "CONTINUE_ANALYSIS";
+  useEffect(() => {
+    if (!isGuidedActive) return;
+    if (primaryNextAction.action === "GENERATE_RESUME" || primaryNextAction.action === "ADD_TO_OPPORTUNITIES") {
+      advanceStep("GENERATE");
+    }
+  }, [advanceStep, isGuidedActive, primaryNextAction.action]);
   const canExportCover =
     canExportDocuments &&
     coverPresenter.status === "success" &&
@@ -2143,6 +2208,9 @@ export default function StudioPage() {
         source: "studio",
         analysisId: requestedAnalysisId || undefined,
       });
+      if (isGuidedActive) {
+        completeGuidedMode();
+      }
       setResumeWarningFlags(extractComplianceWarnings(validatedResult.output));
       setResumeAuditId(normalizeAuditId(validatedResult.output));
       console.info("[studio] generation_succeeded", {
@@ -2566,6 +2634,16 @@ export default function StudioPage() {
 
   return (
     <PageShell className="space-y-4 pb-4">
+      {isGuidedActive && guidedStep === "GENERATE" && !studioBlockedByNextAction ? (
+        <GuidedOverlay
+          headline="Now this role is ready for tailored output."
+          body="Generate your resume now, then save the opportunity."
+          ctaLabel="Generate Resume"
+          onCtaClick={() => {
+            void handleResumeDraft();
+          }}
+        />
+      ) : null}
       <section className="space-y-5 rounded-[28px] bg-slate-900/45 p-6 md:p-8" data-testid="studio-generation-readiness">
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
@@ -2584,12 +2662,41 @@ export default function StudioPage() {
             {authorityStateTitle}
           </h1>
           <p className="text-base leading-7 text-slate-200">{authorityStateExplanation}</p>
+          <p className="text-sm font-medium text-slate-200">{primaryNextAction.description}</p>
           <p className="text-sm text-slate-400">
             Based on your analyzed role context and verified baseline evidence.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {studioGenerationState === "BLOCKED" ? (
+          {primaryNextAction.action === "RESOLVE_GAPS" ? (
+            <Link
+              href={resolveGapsHref}
+              className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+            >
+              Resolve Gaps
+            </Link>
+          ) : primaryNextAction.action === "CONTINUE_ANALYSIS" ? (
+            <Link
+              href="/analyze"
+              className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+            >
+              Continue Analysis
+            </Link>
+          ) : primaryNextAction.action === "ADD_TO_OPPORTUNITIES" ? (
+            <Link
+              href="/job-tracker"
+              className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+            >
+              Add to Opportunities
+            </Link>
+          ) : primaryNextAction.action === "REVIEW_RESULTS" ? (
+            <Link
+              href={resultsHref}
+              className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+            >
+              Review Results
+            </Link>
+          ) : studioGenerationState === "BLOCKED" ? (
             <Link
               href={remediationHref}
               className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
@@ -2862,7 +2969,7 @@ export default function StudioPage() {
         </Alert>
       ) : null}
 
-      {studioGenerationState !== "BLOCKED" ? (
+      {studioGenerationState !== "BLOCKED" && !studioBlockedByNextAction ? (
       <>
       <section className="space-y-1 px-1">
         <h2 className="text-xl font-semibold text-slate-100">Your application materials</h2>
