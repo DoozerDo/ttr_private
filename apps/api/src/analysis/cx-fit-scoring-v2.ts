@@ -322,6 +322,10 @@ const RESPONSIBILITY_VECTORS = [
     ],
   },
   {
+    id: 'operating_model',
+    keywords: ['operating model', 'operating model design'],
+  },
+  {
     id: 'automation_workflow',
     keywords: [
       'automation',
@@ -878,15 +882,10 @@ export const scoreCxFitV2 = (
   const baselineClusterCoveragePercent =
     (sharedClusters.length / baselineClustersDenominator) * 100;
 
-  const responsibilityOverlapPercent = Math.max(
-    jobCoveragePercent,
-    jobClusterCoveragePercent,
-  );
+  const responsibilityOverlapPercent = (jobCoveragePercent + jobClusterCoveragePercent) / 2;
 
-  const baselineCoveragePercent = Math.max(
-    baselineRecallPercent,
-    baselineClusterCoveragePercent,
-  );
+  const baselineCoveragePercent =
+    (baselineRecallPercent + baselineClusterCoveragePercent) / 2;
 
   // leadership band and scope gap
   const baselineBand = inferBaselineBand(normalizedBaselineText);

@@ -38,6 +38,8 @@ describe('cx-fit-scoring-v2 denominator regression', () => {
 
     expect(result.debug.jobTextForScoring).toContain('operating model');
     expect(result.debug.strategyMatchesJob).toBeGreaterThan(3);
+    expect(result.debug.jobVectorsLength).toBeGreaterThan(7);
+    expect(result.debug.responsibilityOverlapPercent).toBeLessThan(100);
     expect(result.score).toBeLessThan(90);
   });
 });
