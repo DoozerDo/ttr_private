@@ -55,10 +55,10 @@ export function BetaGuideNudge() {
             </div>
 
             <ol className="mt-4 space-y-3 text-sm text-slate-200">
-              <li>1. Upload your resume to create a baseline.</li>
-              <li>2. Keep that baseline and improve it over time.</li>
+              <li>1. Upload your resume and we structure your experience automatically.</li>
+              <li>2. Your structured baseline becomes the source of truth for your profile.</li>
               <li>3. Run Career Compatibility Analysis to see your score.</li>
-              <li>4. Use the score to unlock Studio and next actions.</li>
+              <li>4. Use the score to unlock Studio and generate resumes and cover letters from the same source.</li>
             </ol>
 
             <div className="mt-5 flex flex-wrap gap-2">

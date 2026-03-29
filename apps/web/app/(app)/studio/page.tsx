@@ -6,11 +6,13 @@ import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
+import { ArtifactFailureState } from "@/components/ArtifactFailureState";
 import { GuidedOverlay } from "@/components/GuidedOverlay";
 import { type ComplianceFlag } from "@/components/ComplianceViolationPanel";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { PageShell } from "@/components/PageShell";
+import { StudioNextMove } from "@/components/StudioNextMove";
 import { defaultClosingTemplateKey } from "@/lib/coverLetters";
 import { formatErrorMessage, readResponsePayload } from "@/lib/compliance/parseComplianceError";
 import {
@@ -51,8 +53,10 @@ import {
   readTrackerField,
   trimToString,
   type StudioCardStatus,
+  type StudioArtifactFailurePresentation,
   type ResumeFocusOption,
 } from "@/src/lib/studio/helpers";
+import { resolveStudioNextMove } from "@/src/lib/studio/nextMove";
 import {
   evaluateStudioTrustGate,
   generateWithRetry,
@@ -173,6 +177,7 @@ type DocumentState = {
   response: unknown | null;
   error: string | null;
   tierGateError: TierGateError | null;
+  artifactFailure: StudioArtifactFailurePresentation | null;
 };
 
 type CoverLetterJobContextPayload = {
@@ -1239,7 +1244,6 @@ export default function StudioPage() {
     const query = params.toString();
     return query ? `/baseline?${query}` : "/baseline";
   }, [requestedAnalysisId, effectiveJobId, effectiveBaselineId, effectiveBaselineVersionId]);
-
   const resumePresenter = useMemo(
     () => presentResumeGeneration(resumeState.response),
     [resumeState.response],
@@ -2126,6 +2130,17 @@ export default function StudioPage() {
           return;
         }
         if (response.status === 422) {
+          const presented = presentResumeGeneration(responsePayload);
+          const failure = presented.failure;
+          if (failure) {
+            setResumeState((current) => ({
+              ...current,
+              artifactFailure: failure,
+              response: null,
+              error: null,
+            }));
+            return;
+          }
           const blockedState = parseComplianceBlockedFromPayload(responsePayload);
           if (blockedState) {
             trackEvent("resume_generation_blocked_compliance", {
@@ -2143,6 +2158,16 @@ export default function StudioPage() {
         throw new Error(formatErrorMessage(responsePayload, "Resume generation failed."));
       }
       const presenter = presentResumeGeneration(responsePayload);
+      const failure = presenter.failure;
+      if (failure) {
+        setResumeState((current) => ({
+          ...current,
+          artifactFailure: failure,
+          response: null,
+          error: null,
+        }));
+        return;
+      }
       if (presenter.status === "blocked" && presenter.display) {
         trackEvent("resume_generation_blocked_compliance", {
           source: "studio",
@@ -2211,7 +2236,12 @@ export default function StudioPage() {
         return;
       }
 
-      setResumeState((current) => ({ ...current, response: validatedResult.output }));
+      setResumeState((current) => ({
+        ...current,
+        response: validatedResult.output,
+        artifactFailure: null,
+        error: null,
+      }));
       trackEvent("resume_generation_succeeded", {
         source: "studio",
         analysisId: requestedAnalysisId || undefined,
@@ -2231,7 +2261,18 @@ export default function StudioPage() {
         reasonCode: "exception",
       });
       const message = error instanceof Error ? error.message : "Resume generation failed.";
-      setResumeState((current) => ({ ...current, error: message }));
+      setResumeState((current) => ({
+        ...current,
+        error: message,
+        artifactFailure: {
+          headline: "Generation didn’t complete",
+          explanation: message,
+          nextStep: "Review the input and try again with stronger baseline evidence.",
+          retryable: false,
+          category: "generation_failed",
+          code: "generation_failed",
+        },
+      }));
     } finally {
       setResumeGenerating(false);
     }
@@ -2423,6 +2464,17 @@ export default function StudioPage() {
           }
         }
         if (response.status === 422) {
+          const presented = presentCoverLetterGeneration(responsePayload);
+          const failure = presented.failure;
+          if (failure) {
+            setCoverState((current) => ({
+              ...current,
+              artifactFailure: failure,
+              response: null,
+              error: null,
+            }));
+            return;
+          }
           const blockedState = parseComplianceBlockedFromPayload(responsePayload);
           if (blockedState) {
             trackEvent("cover_letter_generation_blocked_compliance", {
@@ -2442,6 +2494,16 @@ export default function StudioPage() {
         throw new Error(formatErrorMessage(responsePayload, "Cover letter generation failed."));
       }
       const initialPresenter = presentCoverLetterGeneration(responsePayload);
+      const failure = initialPresenter.failure;
+      if (failure) {
+        setCoverState((current) => ({
+          ...current,
+          artifactFailure: failure,
+          response: null,
+          error: null,
+        }));
+        return;
+      }
       if (initialPresenter.status === "blocked" && initialPresenter.display) {
         trackEvent("cover_letter_generation_blocked_compliance", {
           source: "studio",
@@ -2497,7 +2559,12 @@ export default function StudioPage() {
         return;
       }
 
-      setCoverState((current) => ({ ...current, response: validatedResult.output }));
+      setCoverState((current) => ({
+        ...current,
+        response: validatedResult.output,
+        artifactFailure: null,
+        error: null,
+      }));
       trackEvent("cover_letter_generation_succeeded", {
         source: "studio",
         analysisId: requestedAnalysisId || undefined,
@@ -2515,11 +2582,79 @@ export default function StudioPage() {
       });
       console.error("Cover letter generation failed", error);
       const message = error instanceof Error ? error.message : "Cover letter generation failed.";
-      setCoverState((current) => ({ ...current, error: message }));
+      setCoverState((current) => ({
+        ...current,
+        error: message,
+        artifactFailure: {
+          headline: "Generation didn’t complete",
+          explanation: message,
+          nextStep: "Review the input and try again with stronger baseline evidence.",
+          retryable: false,
+          category: "generation_failed",
+          code: "generation_failed",
+        },
+      }));
     } finally {
       setCoverGenerating(false);
     }
   };
+
+  const activeArtifactFailure = resumeState.artifactFailure ?? coverState.artifactFailure ?? null;
+  const studioNextMove = useMemo(
+    () =>
+      resolveStudioNextMove({
+        analysisScore,
+        canGenerateDocuments,
+        studioGenerationState,
+        primaryNextAction: primaryNextAction.action,
+        artifactFailure: activeArtifactFailure,
+        actions: {
+          generateResume: () => {
+            void handleResumeDraft();
+          },
+          generateCoverLetter: () => {
+            void handleCoverDraft();
+          },
+          reviewTopGaps: () => {
+            void router.push(resolveGapsHref);
+          },
+          improveExperience: () => {
+            void router.push(improveBaselineHref);
+          },
+          analyzeAnotherRole: () => {
+            void router.push("/analyze");
+          },
+          learnSupportedInputs: () => {
+            void router.push(resultsHref);
+          },
+          retryGeneration: () => {
+            if (resumeState.artifactFailure) {
+              void handleResumeDraft();
+              return;
+            }
+            if (coverState.artifactFailure) {
+              void handleCoverDraft();
+              return;
+            }
+            void handleResumeDraft();
+          },
+        },
+      }),
+    [
+      activeArtifactFailure,
+      analysisScore,
+      canGenerateDocuments,
+      coverState.artifactFailure,
+      handleCoverDraft,
+      handleResumeDraft,
+      improveBaselineHref,
+      resolveGapsHref,
+      resultsHref,
+      router,
+      primaryNextAction.action,
+      studioGenerationState,
+    ],
+  );
 
   const handleResumeBasicDraft = async () => {
     if (!guardGenerationAction("resume")) return;
@@ -3007,6 +3142,8 @@ export default function StudioPage() {
         </Alert>
       ) : null}
 
+      <StudioNextMove move={studioNextMove} />
+
       {studioGenerationState !== "BLOCKED" && !studioBlockedByNextAction ? (
       <>
       <section className="space-y-1 px-1">
@@ -3033,44 +3170,25 @@ export default function StudioPage() {
               {renderCardStatus(resumeCardStatus, "Resume")}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {!resumeNeedsBaselineDetail ? (
-              <FormButton
-                variant="secondary"
-                onClick={handleResumeDraft}
-                disabled={!canGenerateDocuments || resumeGenerating}
-              >
-                {resumeGenerating
-                  ? "Generating..."
-                  : studioGenerationState === "LIMITED"
-                  ? "Generate Resume With Limits"
-                  : "Generate Resume"}
-              </FormButton>
-            ) : null}
-            {showResumeDownloadActions ? (
-              <>
-                <FormButton
-                  variant="secondary"
-                  onClick={() => void exportResume("docx")}
-                  disabled={
-                    isResumeDownloadLocked || !canExportResume || resumeExportFormat === "docx"
-                  }
-                >
-                  {resumeExportFormat === "docx" ? "Downloading..." : "Download DOCX"}
-                </FormButton>
-                <FormButton
-                  variant="secondary"
-                  onClick={() => void exportResume("pdf")}
-                  disabled={
-                    isResumeDownloadLocked || !canExportResume || resumeExportFormat === "pdf"
-                  }
-                >
-                  {resumeExportFormat === "pdf" ? "Downloading..." : "Download PDF"}
-                </FormButton>
-              </>
-            ) : null}
-          </div>
         </div>
+        {showResumeDownloadActions ? (
+          <div className="flex flex-wrap gap-2">
+            <FormButton
+              variant="secondary"
+              onClick={() => void exportResume("docx")}
+              disabled={isResumeDownloadLocked || !canExportResume || resumeExportFormat === "docx"}
+            >
+              {resumeExportFormat === "docx" ? "Downloading..." : "Download DOCX"}
+            </FormButton>
+            <FormButton
+              variant="secondary"
+              onClick={() => void exportResume("pdf")}
+              disabled={isResumeDownloadLocked || !canExportResume || resumeExportFormat === "pdf"}
+            >
+              {resumeExportFormat === "pdf" ? "Downloading..." : "Download PDF"}
+            </FormButton>
+          </div>
+        ) : null}
         {showResumeDownloadActions ? (
           <p className="text-xs text-slate-400">Download: DOCX | PDF</p>
         ) : null}
@@ -3131,7 +3249,13 @@ export default function StudioPage() {
           </Alert>
         ) : null}
 
-        {resumePresenter.display && resumePresenter.status !== "blocked" ? (
+        {resumeState.artifactFailure ? (
+          <ArtifactFailureState
+            failure={resumeState.artifactFailure}
+            onRetry={() => void handleResumeDraft()}
+            retryLabel="Retry resume generation"
+          />
+        ) : resumePresenter.display && resumePresenter.status !== "blocked" ? (
           <div className="space-y-2 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
             <p className="text-sm font-semibold text-slate-100">{resumePresenter.display.title}</p>
             <p className="text-sm text-slate-300">{resumePresenter.display.description}</p>
@@ -3323,7 +3447,13 @@ export default function StudioPage() {
         {coverWarningFlags.length ? null : null}
         {coverState.error && !coverLetterComplianceBlocked ? null : null}
 
-        {coverPresenter.display && !coverLetterComplianceBlocked && coverPresenter.status !== "blocked" ? (
+        {coverState.artifactFailure ? (
+          <ArtifactFailureState
+            failure={coverState.artifactFailure}
+            onRetry={() => void handleCoverDraft()}
+            retryLabel="Retry cover letter generation"
+          />
+        ) : coverPresenter.display && !coverLetterComplianceBlocked && coverPresenter.status !== "blocked" ? (
           <div className="space-y-2 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
             <p className="text-sm font-semibold text-slate-100">{coverPresenter.display.title}</p>
             <p className="text-sm text-slate-300">{coverPresenter.display.description}</p>

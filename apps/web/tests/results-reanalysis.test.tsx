@@ -64,7 +64,11 @@ describe("results re-analysis loop", () => {
     render(<ResultsPage />);
 
     expect(await screen.findByText("Updated Baseline Detected")).toBeInTheDocument();
+    expect(await screen.findByText("You've improved your fit")).toBeInTheDocument();
     expect(await screen.findByText("+12 points (68 -> 80)")).toBeInTheDocument();
+    expect(await screen.findByText("Apply moment")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply to this role" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save this opportunity" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Re-run Analysis" }));
 

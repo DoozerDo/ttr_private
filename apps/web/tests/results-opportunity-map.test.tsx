@@ -151,7 +151,7 @@ describe("Results opportunity map", () => {
     ).toBeNull();
     expect(screen.getByText("Competitive match")).toBeInTheDocument();
     expect(screen.getByText("Decision summary")).toBeInTheDocument();
-    expect(screen.getByText("Based on your validated baseline and the role requirements.")).toBeInTheDocument();
+    expect(screen.getByText("Based on your structured experience and the role requirements.")).toBeInTheDocument();
     expect(screen.getByText("View detailed scoring breakdown")).toBeInTheDocument();
     expect(screen.getByText("Open Resume + Cover Letter Studio")).toBeInTheDocument();
     expect(screen.getByText("This score clears the generation threshold. Open Resume + Cover Letter Studio now.")).toBeInTheDocument();

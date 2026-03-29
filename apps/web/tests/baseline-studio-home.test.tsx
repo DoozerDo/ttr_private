@@ -122,6 +122,23 @@ describe("BaselineStudioHome", () => {
     ).toBe(true);
   });
 
+  it("explains the upload flow as a structured source of truth for a new user", () => {
+    render(<BaselineStudioHome baselines={[]} />);
+
+    expect(screen.getByText("Start with your experience")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /structure your resume into a clear, verified baseline so every score and document stays grounded in your real work/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Most tools generate from raw text\. We generate from a structured version of your experience so nothing is invented or lost\./i,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload your resume" })).toBeInTheDocument();
+  });
+
   it("renders developing-only diagnosis area and no signal effect panel", async () => {
     setFetchImplementation(async (input: RequestInfo) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;

@@ -39,6 +39,7 @@ import { buildResultsSignalAlignment } from "@/lib/professionalSignals";
 import { appendStrengtheningAddition } from "@/lib/baselines";
 import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
 import { buildScoreDelta, hasBaselineUpdated } from "@/lib/reanalysis";
+import { buildProgressSummary } from "@/lib/progressSummary";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
 import { derivePrimaryNextAction, getGenerationCompletionStorageKey } from "@/lib/nextAction";
 import { deriveEvidenceLedger, type EvidenceLedger } from "@/lib/evidenceLedger";
@@ -740,8 +741,8 @@ export function OpportunityMapSection({
         };
       case "REANALYZE":
         return {
-          headline: "Your baseline changed. Run the analysis again.",
-          body: "See whether the new evidence changed the outcome.",
+          headline: "Your experience foundation changed. Run the analysis again.",
+          body: "See whether the updated structured experience changes the outcome.",
         };
       case "GENERATE_RESUME":
         return {
@@ -825,7 +826,9 @@ export function OpportunityMapSection({
           </p>
           <h3 className="text-2xl font-semibold tracking-tight text-white">{verdict.label}</h3>
           <p className="max-w-2xl text-sm leading-6 text-slate-300">{verdict.explanation}</p>
-          <p className="max-w-2xl text-xs leading-5 text-slate-400">Based on your validated baseline and the role requirements.</p>
+          <p className="max-w-2xl text-xs leading-5 text-slate-400">
+            Based on your structured experience and the role requirements.
+          </p>
         </div>
         <div
           id="generation-readiness-details"
@@ -1588,6 +1591,10 @@ export default function ResultsPage() {
     () => buildScoreDelta(previousAnalysis, latest),
     [previousAnalysis, latest],
   );
+  const progressSummary = useMemo(
+    () => buildProgressSummary(previousAnalysis, latest),
+    [latest, previousAnalysis],
+  );
 
   useEffect(() => {
     const baselineIdValue = latest?.baselineId?.trim() ?? "";
@@ -1840,10 +1847,10 @@ export default function ResultsPage() {
       totalClaims > 0 ? Math.round((verifiedClaims / totalClaims) * 100) : null;
     const baselineCompleteness =
       completenessPercent == null
-        ? "Baseline completeness is still being established."
+        ? "Structured experience completeness is still being established."
         : completenessPercent >= 100
-          ? "Your baseline is fully built for this role."
-          : `Baseline completeness for this role is ${completenessPercent}%.`;
+          ? "Your structured experience is fully built for this role."
+          : `Structured experience completeness for this role is ${completenessPercent}%.`;
     const scoreImproved =
       typeof reanalysisDelta.delta === "number" ? reanalysisDelta.delta > 0 : null;
     const gapsResolvable = Boolean(
@@ -2078,7 +2085,7 @@ export default function ResultsPage() {
           void rerunAnalysisForCurrentRole();
         },
         disabled: reanalysisRunning,
-        description: "Your baseline changed. Run the analysis again.",
+        description: "Your experience foundation changed. Run the analysis again.",
       };
     }
     if (primaryNextAction.action === "GENERATE_RESUME") {
@@ -2086,7 +2093,9 @@ export default function ResultsPage() {
         label: "Open Resume + Cover Letter Studio",
         href: studioHref,
         disabled: !canOpenStudio,
-        description: "You've cleared the threshold. Open the studio to generate tailored materials now.",
+        description: progressSummary.improvementDetected
+          ? "You’re getting closer. Open the studio to generate tailored materials now."
+          : "You’ve cleared the threshold. Open the studio to generate tailored materials now.",
       };
     }
     if (primaryNextAction.action === "ADD_TO_OPPORTUNITIES") {
@@ -2108,7 +2117,7 @@ export default function ResultsPage() {
       };
     }
     return null;
-  }, [canOpenStudio, latest, primaryNextAction.action, reanalysisRunning, studioHref]);
+  }, [canOpenStudio, latest, primaryNextAction.action, progressSummary.improvementDetected, reanalysisRunning, studioHref]);
   const evidenceLedger = useMemo(
     () =>
       deriveEvidenceLedger(latest, {
@@ -2734,11 +2743,29 @@ export default function ResultsPage() {
         if (isGuidedActive) {
           completeGuidedMode();
         }
+        return (await response.json()) as { id?: string; status?: string } | null;
       }
     } catch {
       // non-blocking
     }
+    return null;
   }, [activeScore, completeGuidedMode, evidenceLedger.entries, generationCompleted, isGuidedActive, latest]);
+
+  const applyOpportunityFromResults = useCallback(async () => {
+    const created = await saveOpportunityFromResults();
+    const opportunityId = created?.id?.trim() ?? "";
+    if (opportunityId) {
+      try {
+        await fetch(`/api/opportunities/${encodeURIComponent(opportunityId)}/status`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "APPLIED" }),
+        });
+      } catch {
+        // non-blocking
+      }
+    }
+  }, [saveOpportunityFromResults]);
 
   const rerunAnalysisForCurrentRole = useCallback(async () => {
     const targetJobId = latest?.jobId?.trim() ?? "";
@@ -2906,51 +2933,69 @@ export default function ResultsPage() {
           <section className="rounded-2xl border border-cyan-300/30 bg-cyan-500/10 p-4">
             <p className="text-sm font-semibold text-cyan-100">Updated Baseline Detected</p>
             <p className="mt-1 text-sm text-slate-100">
-              Your baseline changed since this analysis. Use the primary decision action above to reanalyze this role.
+              Your experience foundation changed since this analysis. Use the primary decision action above to reanalyze this role.
             </p>
           </section>
         ) : null}
         {previousAnalysis && typeof reanalysisDelta.delta === "number" ? (
           <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <h2 className="text-base font-semibold text-slate-100">Progress since last analysis</h2>
+            <h2 className="text-base font-semibold text-slate-100">
+              {progressSummary.improvementDetected ? "You’ve improved your fit" : "No meaningful change yet"}
+            </h2>
             <p
               className={`mt-2 text-sm font-medium ${
-                reanalysisDelta.delta > 0
+                progressSummary.scoreChange > 0
                   ? "text-emerald-300"
-                  : reanalysisDelta.delta < 0
+                  : progressSummary.scoreChange < 0
                     ? "text-rose-300"
                     : "text-slate-200"
               }`}
             >
-              {reanalysisDelta.delta > 0 ? "+" : ""}
-              {Math.round(reanalysisDelta.delta)} points (
+              {progressSummary.scoreChange > 0 ? "+" : ""}
+              {Math.round(progressSummary.scoreChange)} points (
               {Math.round(reanalysisDelta.previousScore ?? 0)} {"->"} {Math.round(reanalysisDelta.currentScore ?? 0)})
             </p>
-            {reanalysisDelta.newSignals.length > 0 ? (
+            {progressSummary.gapsClosed.length > 0 ? (
               <div className="mt-3">
-                <p className="text-sm font-semibold text-slate-100">New strengths identified:</p>
+                <p className="text-sm font-semibold text-slate-100">Gaps closed:</p>
                 <ul className="mt-1 space-y-1 text-sm text-slate-200">
-                  {reanalysisDelta.newSignals.map((signal) => (
-                    <li key={`new-signal-${signal}`}>- {signal}</li>
+                  {progressSummary.gapsClosed.map((signal) => (
+                    <li key={`closed-gap-${signal}`}>- {signal}</li>
                   ))}
                 </ul>
               </div>
             ) : null}
-            {reanalysisDelta.lostSignals.length > 0 ? (
+            {progressSummary.gapsNew.length > 0 ? (
               <div className="mt-3">
-                <p className="text-sm font-semibold text-slate-100">Signals no longer detected:</p>
+                <p className="text-sm font-semibold text-slate-100">New gaps introduced:</p>
                 <ul className="mt-1 space-y-1 text-sm text-slate-200">
-                  {reanalysisDelta.lostSignals.map((signal) => (
-                    <li key={`lost-signal-${signal}`}>- {signal}</li>
+                  {progressSummary.gapsNew.map((signal) => (
+                    <li key={`new-gap-${signal}`}>- {signal}</li>
                   ))}
                 </ul>
               </div>
             ) : null}
-            {reanalysisDelta.noImprovement ? (
+            {!progressSummary.improvementDetected ? (
               <p className="mt-3 text-sm text-amber-200">
-                Your updates did not add new signals relevant to this role.
+                Your updates did not add meaningful new signals for this role.
               </p>
             ) : null}
+          </section>
+        ) : null}
+        {(typeof activeScore === "number" && activeScore >= 70) || progressSummary.improvementDetected ? (
+          <section className="rounded-2xl border border-emerald-300/30 bg-emerald-500/10 p-4">
+            <h2 className="text-base font-semibold text-emerald-100">Apply moment</h2>
+            <p className="mt-1 text-sm text-slate-100">
+              This role is ready to move from preparation to action.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <FormButton onClick={() => void applyOpportunityFromResults()}>
+                Apply to this role
+              </FormButton>
+              <FormButton variant="secondary" onClick={() => void saveOpportunityFromResults()}>
+                Save this opportunity
+              </FormButton>
+            </div>
           </section>
         ) : null}
 

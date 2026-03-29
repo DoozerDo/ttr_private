@@ -129,8 +129,8 @@ export function BaselineWorkspace({
             selectedBaselineId={baselineId}
           />
           <p className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
-            Your baseline defines the experience signals used for compatibility scoring and
-            resume generation.
+            Your resume becomes a structured source of truth for compatibility scoring and
+            document generation.
           </p>
         </section>
 

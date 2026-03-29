@@ -46,6 +46,10 @@ export type StudioArtifactFailurePresentation = {
   retryable: boolean;
   category: ArtifactFailureCategory;
   code: string;
+  userAction?: {
+    title: string;
+    description: string;
+  };
   diagnostics?: ArtifactFailurePayload["diagnostics"];
   detail?: string;
 };
@@ -86,6 +90,7 @@ export function createDocumentState() {
     response: null,
     error: null,
     tierGateError: null,
+    artifactFailure: null,
   };
 }
 
@@ -335,7 +340,7 @@ function readArtifactFailurePayload(payload: unknown): ArtifactFailurePayload | 
 function presentArtifactFailure(failure: ArtifactFailurePayload): StudioArtifactFailurePresentation {
   const base: Record<ArtifactFailureCategory, { headline: string; explanation: string; nextStep: string }> = {
     unsupported_input: {
-      headline: "This input shape is not yet supported",
+      headline: "This input isn’t supported yet",
       explanation:
         failure.detail ||
         "The current input does not match the supported artifact contract for this generator.",
@@ -344,7 +349,7 @@ function presentArtifactFailure(failure: ArtifactFailurePayload): StudioArtifact
         "Review the unsupported input requirements before trying again.",
     },
     validation_failure: {
-      headline: "Generation failed validation",
+      headline: "We couldn’t generate this artifact",
       explanation:
         failure.detail ||
         "The artifact could not be completed because the generated structure did not pass validation.",
@@ -353,7 +358,7 @@ function presentArtifactFailure(failure: ArtifactFailurePayload): StudioArtifact
         "Review the structure requirements and adjust the source content.",
     },
     trace_failure: {
-      headline: "Generation could not be safely traced",
+      headline: "We couldn’t verify this safely",
       explanation:
         failure.detail ||
         "The artifact could not be verified against baseline evidence with enough confidence to return safely.",
@@ -362,7 +367,7 @@ function presentArtifactFailure(failure: ArtifactFailurePayload): StudioArtifact
         "Add or repair baseline evidence so every content line can be traced.",
     },
     generation_blocked: {
-      headline: "Generation is blocked",
+      headline: "You’re not ready to generate yet",
       explanation:
         failure.detail ||
         "A readiness or compliance gate is preventing generation right now.",
@@ -371,7 +376,7 @@ function presentArtifactFailure(failure: ArtifactFailurePayload): StudioArtifact
         "Complete the missing baseline requirements before generating again.",
     },
     generation_failed: {
-      headline: "Generation could not complete",
+      headline: "Generation didn’t complete",
       explanation:
         failure.detail ||
         "The artifact generator could not produce a valid result from the current inputs.",
@@ -389,6 +394,7 @@ function presentArtifactFailure(failure: ArtifactFailurePayload): StudioArtifact
     retryable: failure.retryable,
     category: failure.category,
     code: failure.code,
+    userAction: failure.userAction,
     diagnostics: failure.diagnostics,
     detail: failure.detail,
   };

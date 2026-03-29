@@ -952,11 +952,14 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           <div className="max-w-3xl space-y-5">
             <div className="space-y-2">
                 <h1 className="text-3xl font-semibold tracking-tight text-white md:text-[34px]">
-                  Upload your resume to get started
+                  Start with your experience
                 </h1>
                 <p className="text-base leading-7 text-slate-300">
-                  We’ll analyze your experience and show how well you match a job.
+                  We'll structure your resume into a clear, verified baseline so every score and document stays grounded in your real work.
                 </p>
+              <p className="text-sm leading-6 text-slate-400">
+                Most tools generate from raw text. We generate from a structured version of your experience so nothing is invented or lost.
+              </p>
             </div>
             <div>
               {heroState === "ready" ? (
@@ -994,7 +997,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
             <header className="space-y-1">
               <h2 className="text-xl font-semibold tracking-tight text-slate-100">Your resume</h2>
-              <p className="text-sm text-slate-400">Current file and status.</p>
+              <p className="text-sm text-slate-400">Your resume becomes the structured source for everything else.</p>
             </header>
             <div className="space-y-3">
               {allBaselines.slice(0, 3).map((baseline) => {
@@ -1379,3 +1382,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     </div>
   );
 }
+
+
+
