@@ -163,6 +163,9 @@ export type CxFitV2DebugInfo = {
   jobTextForScoring: string;
   jobTextForScoringLength: number;
   jobVectorsLength: number;
+  jobVectors: string[];
+  baselineVectors: string[];
+  sharedVectors: string[];
   baselineBand: string;
   roleBand: string;
   bandDelta: number;
@@ -326,9 +329,64 @@ const RESPONSIBILITY_VECTORS = [
     keywords: ['operating model', 'operating model design'],
   },
   {
+    id: 'product_lifecycle',
+    keywords: ['product lifecycle', 'lifecycle management', 'lifecycle programs'],
+  },
+  {
+    id: 'product_launch_readiness',
+    keywords: ['launch readiness', 'launch planning', 'release readiness'],
+  },
+  {
+    id: 'roadmap_management',
+    keywords: ['roadmap management', 'roadmap planning', 'roadmap ownership'],
+  },
+  {
+    id: 'portfolio_operations',
+    keywords: ['portfolio operations', 'portfolio management'],
+  },
+  {
+    id: 'cross_functional_product_rhythm',
+    keywords: [
+      'product review',
+      'product reviews',
+      'product operating rhythm',
+      'cross-functional product rhythm',
+    ],
+  },
+  {
+    id: 'product_health_metrics',
+    keywords: [
+      'product health',
+      'activation',
+      'retention',
+      'adoption',
+      'funnel diagnostics',
+    ],
+  },
+  {
+    id: 'data_science_partnership',
+    keywords: ['data science partnership', 'analytics partnership', 'product analytics'],
+  },
+  {
+    id: 'product_documentation_source_of_truth',
+    keywords: [
+      'product documentation source of truth',
+      'documentation source of truth',
+      'product doc source of truth',
+    ],
+  },
+  {
+    id: 'gtm_alignment',
+    keywords: ['gtm alignment', 'go to market alignment', 'field alignment'],
+  },
+  {
+    id: 'release_planning',
+    keywords: ['release planning', 'release calendar', 'launch calendar'],
+  },
+  {
     id: 'automation_workflow',
     keywords: [
-      'automation',
+      'automation workflows',
       'workflow design',
       'workflow engineering',
       'runbooks',
@@ -336,7 +394,7 @@ const RESPONSIBILITY_VECTORS = [
   },
   {
     id: 'contact_center_ops',
-    keywords: ['contact center', 'call center', 'contact center ops'],
+    keywords: ['contact center ops', 'call center ops', 'contact center'],
   },
   {
     id: 'global_coverage',
@@ -351,6 +409,8 @@ const RESPONSIBILITY_VECTORS = [
   {
     id: 'dashboards_kpis',
     keywords: [
+      'reporting dashboards',
+      'operational dashboards',
       'dashboards',
       'kpis',
       'key performance indicators',
@@ -1307,6 +1367,9 @@ export const scoreCxFitV2 = (
       jobTextForScoring,
       jobTextForScoringLength: jobTextForScoring.length,
       jobVectorsLength: jobVectors.length,
+      jobVectors,
+      baselineVectors,
+      sharedVectors,
       baselineBand: `L${baselineBand}`,
       roleBand: `L${roleBand}`,
       bandDelta,
