@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -133,6 +134,12 @@ export class OpportunitiesService {
     options?: { manualReset?: boolean; systemDormantTransition?: boolean },
   ) {
     const opportunity = await this.mustFindForUser(id, userId);
+    if (nextStatus === OpportunityStatus.APPLIED && opportunity.currentScore < 70) {
+      throw new ForbiddenException({
+        error: 'INSUFFICIENT_FIT_SCORE',
+        message: 'Fit score must be at least 70 to apply.',
+      });
+    }
     this.stateMachine.assertTransition(opportunity.status, nextStatus, options);
 
     opportunity.status = nextStatus;

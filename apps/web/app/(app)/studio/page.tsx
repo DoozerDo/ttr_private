@@ -914,6 +914,19 @@ export default function StudioPage() {
   const hasLoadedAnalysis = Boolean(
     requestedAnalysisId && !analysisLoading && !analysisError && analysisScore !== null,
   );
+  const lowFitRedirectedRef = useRef(false);
+  useEffect(() => {
+    if (analysisScore === null) return;
+    if (analysisScore >= 70) {
+      lowFitRedirectedRef.current = false;
+      return;
+    }
+    if (lowFitRedirectedRef.current) return;
+    lowFitRedirectedRef.current = true;
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("locked", "1");
+    void router.replace(`/results?${params.toString()}`);
+  }, [analysisScore, router, searchParams]);
   useEffect(() => {
     if (!requestedAnalysisId || !effectiveJobId || !effectiveBaselineId || !effectiveBaselineVersionId) {
       setGenerationReadiness(READINESS_LOADING_STATE);

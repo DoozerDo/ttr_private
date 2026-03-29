@@ -176,6 +176,47 @@ describe("Studio page UX", () => {
     });
   });
 
+  it("redirects low-fit sessions back to Results with a lock flag", async () => {
+    mockRouterReplace.mockClear();
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            score: 65,
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [] }));
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(mockRouterReplace).toHaveBeenCalledWith(
+        expect.stringContaining("/results?"),
+      );
+    });
+    expect(mockRouterReplace).toHaveBeenCalledWith(
+      expect.stringContaining("locked=1"),
+    );
+  });
+
   it("renders the same limited readiness wording used in Results context", async () => {
     const fetchMock = vi.fn((input: RequestInfo) => {
       const url = typeof input === "string" ? input : input?.url ?? "";

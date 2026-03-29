@@ -138,6 +138,26 @@ describe('OpportunitiesService', () => {
     expect(repository.save).toHaveBeenCalled();
   });
 
+  it('blocks APPLIED status when fit score is below 70', async () => {
+    const repository = createRepository();
+    repository.findOne.mockResolvedValue(buildOpportunity({ currentScore: 65 }));
+    const service = new OpportunitiesService(
+      repository as never,
+      new OpportunityStateMachine(),
+      new OpportunityActionsNeededService(),
+      { rescoreNearBoundariesFromOverride: jest.fn() } as never,
+    );
+
+    await expect(
+      service.transitionStatus('opp-1', 'user-1', OpportunityStatus.APPLIED),
+    ).rejects.toMatchObject({
+      response: {
+        error: 'INSUFFICIENT_FIT_SCORE',
+        message: 'Fit score must be at least 70 to apply.',
+      },
+    });
+  });
+
   it('sorts grouped tracker output by band priority then score then status change', async () => {
     const repository = createRepository();
     repository.find.mockResolvedValue([

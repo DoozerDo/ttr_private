@@ -595,19 +595,14 @@ const GAP_EXPLANATION_FALLBACK = "Add concrete baseline evidence that proves thi
 function ResolveGapsBlock({
   href,
   gapPreview,
-  fullAnalysisHref,
 }: {
   href: string;
   gapPreview: Array<{ requirement: string; explanation: string }>;
-  fullAnalysisHref: string;
 }) {
   return (
     <section className="rounded-2xl border border-amber-300/35 bg-amber-500/10 p-4" data-testid="resolve-gaps-block">
-      <h3 className="text-lg font-semibold text-slate-100">This score needs stronger proof before generation.</h3>
-      <p className="mt-2 text-sm text-slate-200">
-        You have relevant experience, but a few requirements are not well supported yet. Fix the gaps below before
-        opening the studio.
-      </p>
+      <h3 className="text-lg font-semibold text-slate-100">You&apos;re not ready to apply yet.</h3>
+      <p className="mt-2 text-sm text-slate-200">Strengthen your baseline before generating application materials.</p>
       {gapPreview.length > 0 ? (
         <ul className="mt-3 space-y-2 text-sm text-slate-100">
           {gapPreview.map((item) => (
@@ -623,16 +618,8 @@ function ResolveGapsBlock({
           href={href}
           className="inline-flex min-h-[44px] min-w-[240px] items-center justify-center rounded-[var(--button-radius)] bg-amber-500 px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-amber-400"
         >
-          Resolve Gaps
+          Start Fit Review
         </Link>
-        <div>
-          <a
-            href={fullAnalysisHref}
-            className="text-sm font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
-          >
-            View detailed scoring breakdown
-          </a>
-        </div>
       </div>
     </section>
   );
@@ -776,7 +763,6 @@ export function OpportunityMapSection({
           <ResolveGapsBlock
             href={weakFitRecovery.href}
             gapPreview={weakFitRecovery.gapPreview}
-            fullAnalysisHref={scoreAnalysisHref}
           />
         ) : (
           <div>
@@ -1524,6 +1510,8 @@ export default function ResultsPage() {
   const activeScore = useMemo(() => {
     return resolveDisplayedFitScore(latest);
   }, [latest]);
+  const isQualified = typeof activeScore === "number" && activeScore >= 70;
+  const studioLocked = searchParams?.get("locked") === "1";
 
   const scoreBreakdown = useMemo(() => {
     if (latest?.score_breakdown?.dimensions?.length) {
@@ -2088,7 +2076,7 @@ export default function ResultsPage() {
         description: "Your experience foundation changed. Run the analysis again.",
       };
     }
-    if (primaryNextAction.action === "GENERATE_RESUME") {
+    if (primaryNextAction.action === "GENERATE_RESUME" && isQualified) {
       return {
         label: "Open Resume + Cover Letter Studio",
         href: studioHref,
@@ -2098,7 +2086,7 @@ export default function ResultsPage() {
           : "You’ve cleared the threshold. Open the studio to generate tailored materials now.",
       };
     }
-    if (primaryNextAction.action === "ADD_TO_OPPORTUNITIES") {
+    if (primaryNextAction.action === "ADD_TO_OPPORTUNITIES" && isQualified) {
       return {
         label: "Add to Opportunities",
         onClick: () => {
@@ -2117,7 +2105,15 @@ export default function ResultsPage() {
       };
     }
     return null;
-  }, [canOpenStudio, latest, primaryNextAction.action, progressSummary.improvementDetected, reanalysisRunning, studioHref]);
+  }, [
+    canOpenStudio,
+    isQualified,
+    latest,
+    primaryNextAction.action,
+    progressSummary.improvementDetected,
+    reanalysisRunning,
+    studioHref,
+  ]);
   const evidenceLedger = useMemo(
     () =>
       deriveEvidenceLedger(latest, {
@@ -2875,7 +2871,7 @@ export default function ResultsPage() {
         },
       };
     }
-    if (primaryNextAction.action === "GENERATE_RESUME") {
+    if (primaryNextAction.action === "GENERATE_RESUME" && isQualified) {
       return {
         headline: "You're already in a strong position for this role.",
         body: "Now generate tailored materials from verified evidence.",
@@ -2883,7 +2879,7 @@ export default function ResultsPage() {
         ctaHref: studioHref,
       };
     }
-    if (primaryNextAction.action === "ADD_TO_OPPORTUNITIES") {
+    if (primaryNextAction.action === "ADD_TO_OPPORTUNITIES" && isQualified) {
       return {
         headline: "You just turned your experience into a targeted application.",
         body: "Save this opportunity so it stays in motion.",
@@ -2910,6 +2906,7 @@ export default function ResultsPage() {
     rerunAnalysisForCurrentRole,
     resolveGapsHref,
     saveOpportunityFromResults,
+    isQualified,
     studioHref,
   ]);
 
@@ -2917,6 +2914,14 @@ export default function ResultsPage() {
     <PageShell className="results-page-theme">
       <div className="space-y-5">
         <PageHeader title="Your result" description="Review your compatibility score and next best step." />
+        {studioLocked ? (
+          <section className="rounded-2xl border border-amber-300/30 bg-amber-500/10 p-4">
+            <p className="text-sm font-semibold text-amber-100">You’re not ready to apply yet.</p>
+            <p className="mt-1 text-sm text-slate-100">
+              Strengthen your baseline before generating application materials.
+            </p>
+          </section>
+        ) : null}
         {guidedOverlayConfig ? (
           <GuidedOverlay
             headline={guidedOverlayConfig.headline}
@@ -2982,7 +2987,7 @@ export default function ResultsPage() {
             ) : null}
           </section>
         ) : null}
-        {(typeof activeScore === "number" && activeScore >= 70) || progressSummary.improvementDetected ? (
+        {isQualified ? (
           <section className="rounded-2xl border border-emerald-300/30 bg-emerald-500/10 p-4">
             <h2 className="text-base font-semibold text-emerald-100">Apply moment</h2>
             <p className="mt-1 text-sm text-slate-100">
