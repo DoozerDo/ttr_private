@@ -49,13 +49,14 @@ describe('BaselineIngestionService', () => {
     expect(result.canonical.system_generated_read_only.low_confidence_extractions).toBeDefined();
   });
 
-  it('capturess experience details text via parsing helper', () => {
+  it('extracts atomic evidence units with metrics', () => {
     const context = { missingFields: [], ambiguityFlags: [], lowConfidence: [] };
-    const block = `Acme Corp - Senior Product Manager\nMay 2020 - Present\n- Led strategy\n- Improved operations`; 
+    const block = `Acme Corp | Senior Product Manager | May 2020 - Present\n- Led strategy that improved conversion by 25%\n- Drove $120,000 in savings`;
     const parsed = (service as any).parseExperienceBlock(block, context);
 
-    expect(parsed).toBeTruthy();
-    expect(parsed.details_text).toBe('May 2020 - Present\n- Led strategy\n- Improved operations');
-    expect(parsed.scope_summary).toContain('Led strategy');
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].evidence).toHaveLength(2);
+    expect(parsed[0].evidence[0].metrics.length).toBeGreaterThan(0);
+    expect(parsed[0].evidence[0].text).toContain('Led strategy');
   });
 });

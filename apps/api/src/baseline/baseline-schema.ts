@@ -2,22 +2,51 @@ import { z } from 'zod';
 
 const IdentitySchema = z.object({
   full_name: z.string().trim().min(1).nullable().default(null),
+  summary: z.string().trim().nullable().default(null),
   current_title: z.string().trim().min(1).nullable().default(null),
   current_company: z.string().trim().min(1).nullable().default(null),
   location: z.string().trim().min(1).nullable().default(null),
 });
 
+const MetricSchema = z.object({
+  type: z.enum(['percentage', 'currency', 'count']),
+  value: z.string().trim().min(1),
+});
+
+const EvidenceSchema = z.object({
+  id: z.string().trim().min(1),
+  text: z.string().trim(),
+  metrics: z.array(MetricSchema).default([]),
+  tags: z.array(z.string().trim().min(1)).default([]),
+});
+
 const ExperienceEntrySchema = z.object({
-  company_name: z.string().trim().min(1),
-  role_title: z.string().trim().min(1),
+  company: z.string().trim().min(1),
+  role: z.string().trim().min(1),
   start_date: z.string().trim().min(1).nullable().default(null),
   end_date: z.union([
     z.string().trim().min(1),
     z.literal('present'),
     z.null(),
   ]),
-  scope_summary: z.string(),
-  details_text: z.string().default(''),
+  evidence: z.array(EvidenceSchema).default([]),
+  company_name: z.string().trim().min(1).optional(),
+  role_title: z.string().trim().min(1).optional(),
+  scope_summary: z.string().optional(),
+  details_text: z.string().optional(),
+});
+
+const EducationEntrySchema = z.object({
+  school: z.string().trim().min(1),
+  degree: z.string().trim().min(1).nullable().default(null),
+  startDate: z.string().trim().min(1).nullable().default(null),
+  endDate: z.string().trim().min(1).nullable().default(null),
+  evidence: z.array(EvidenceSchema).default([]),
+});
+
+const SkillSchema = z.object({
+  name: z.string().trim().min(1),
+  category: z.string().trim().min(1).nullable().default(null),
 });
 
 const PeopleLeadershipSchema = z.object({
@@ -92,6 +121,8 @@ const SystemGeneratedSchema = z.object({
 const CanonicalBaselineSchemaCore = z.object({
   identity: IdentitySchema,
   experience: z.array(ExperienceEntrySchema),
+  education: z.array(EducationEntrySchema).default([]),
+  skills: z.array(SkillSchema).default([]),
   people_leadership: PeopleLeadershipSchema,
   operational_ownership: OperationalOwnershipSchema,
   tooling_and_platforms: ToolingPlatformsSchema,

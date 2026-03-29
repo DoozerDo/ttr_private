@@ -57,6 +57,20 @@ export type CoverLetterGenerationResult = {
   greeting: string;
   paragraphs: string[];
   closingParagraphs: string[];
+  salutation: string;
+  closing: string;
+  traceMap: Record<string, string[]>;
+  debugTrace?: {
+    passed: boolean;
+    failures: string[];
+    traceCoverage: number;
+    unusedEvidence: string[];
+    selectedEvidence: string[];
+  };
+  internalTrace?: {
+    usedEvidenceIds: string[];
+    droppedEvidenceIds: string[];
+  };
   constraintSummary?: string | null;
   paragraphEvidence?: Array<{
     paragraphKey: 'opening' | 'body_1' | 'body_2' | 'body_3' | 'closing';

@@ -285,17 +285,35 @@ describe('CoverLettersService contract', () => {
     await expect(service.generateCoverLetter('user-1', request as any)).rejects.toMatchObject({
       response: {
         code: 'generation_blocked',
-        blockers: [
-          {
-            code: 'full_block',
-            message: expect.any(String),
-          },
-        ],
+        category: 'generation_blocked',
+        retryable: false,
+        diagnostics: {
+          failureReasons: [expect.stringContaining('full_block')],
+        },
       },
       status: 422,
     });
 
     expect(coverRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('returns canonical unsupported_input for unsupported cover letter envelopes', async () => {
+    const { service } = buildService();
+    const privateService = service as unknown as {
+      buildCoverLetterDraft: (userId: string, input: typeof request) => Promise<unknown>;
+    };
+
+    try {
+      await privateService.buildCoverLetterDraft('user-1', request as any);
+      fail('expected unsupported_input rejection');
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnprocessableEntityException);
+      expect((error as UnprocessableEntityException).getResponse()).toMatchObject({
+        code: 'insufficient_extracted_text',
+        category: 'unsupported_input',
+        retryable: false,
+      });
+    }
   });
 
   it('throws generation_failed when output validation is invalid', async () => {

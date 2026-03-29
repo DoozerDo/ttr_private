@@ -14,7 +14,7 @@ import { AuthGuard } from '@nestjs/passport';
 import type { Request, Response } from 'express';
 import type { NormalizedResumeDocument } from '../documents/normalized-document.models';
 import { ResumeService } from './resume.service';
-import type { GenerateResumeRequest } from './resume.service';
+import type { GenerateResumeRequest, ResumeGenerationResponse } from './resume.service';
 import {
   Entitlements,
   FeatureKey,
@@ -52,7 +52,7 @@ export class ResumeController {
   async generateResume(
     @Body() body: ResumeRequestBody,
     @Req() request: TieredResumeRequest,
-  ) {
+  ): Promise<ResumeGenerationResponse> {
     return this.handleGenerate(body, request);
   }
 
@@ -60,7 +60,7 @@ export class ResumeController {
   async createResumeRequest(
     @Body() body: ResumeRequestBody,
     @Req() request: TieredResumeRequest,
-  ) {
+  ): Promise<ResumeGenerationResponse> {
     return this.handleGenerate(body, request);
   }
 

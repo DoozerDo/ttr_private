@@ -1,19 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { Express } from 'express';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { normalizeText } from '../scoring/fit-score/fit-score.utils';
 import { extractJobToolRequirements } from '../scoring/fit-score/tool-extractor';
-import {
-  BaselineSectionType,
-} from './baseline-section.entity';
-import {
-  BaselineSchemaCore,
-  BaselineSchemaCoreShape,
-} from './baseline-schema';
-import {
-  BaselineParserService,
-  ParsedSection,
-} from './baseline-parser.service';
+import { BaselineSectionType } from './baseline-section.entity';
+import { BaselineSchemaCore, BaselineSchemaCoreShape } from './baseline-schema';
+import { BaselineParserService, ParsedSection } from './baseline-parser.service';
 import { BaselineTextExtractor } from './baseline-text-extractor.service';
 import {
   CriticalFlowEventType,
@@ -32,12 +25,10 @@ export type BaselineIngestionResult = {
 type ParsingContext = {
   missingFields: string[];
   ambiguityFlags: string[];
-  lowConfidence: Array<{
-    path: string;
-    reason: string;
-    snippet: string;
-  }>;
+  lowConfidence: Array<{ path: string; reason: string; snippet: string }>;
 };
+
+type Metric = { type: 'percentage' | 'currency' | 'count'; value: string };
 
 @Injectable()
 export class BaselineIngestionService {
@@ -46,7 +37,7 @@ export class BaselineIngestionService {
   constructor(
     private readonly baselineParser: BaselineParserService,
     private readonly baselineTextExtractor: BaselineTextExtractor,
-    private readonly criticalFlowTrackerService: CriticalFlowTrackerService,
+    private readonly criticalFlowTrackerService?: CriticalFlowTrackerService,
   ) {}
 
   async ingest(file: Express.Multer.File): Promise<BaselineIngestionResult> {
@@ -54,25 +45,15 @@ export class BaselineIngestionService {
       const sourceFormat = this.detectFormat(file);
       const rawText = await this.baselineTextExtractor.extractText(file);
       const parsedSections = this.baselineParser.parseBaseline(rawText);
-
       const canonical = this.buildCanonical(rawText, parsedSections);
-
-      this.logger.debug(
-        `Baseline ingested (${sourceFormat}); missing_fields=${canonical.system_generated_read_only.missing_fields.length}`,
-      );
-      void this.criticalFlowTrackerService.recordCriticalFlowEvent({
+      this.logger.debug(`Baseline ingested (${sourceFormat})`);
+      void this.criticalFlowTrackerService?.recordCriticalFlowEvent({
         flow: CriticalFlowEventType.BASELINE_PARSED_SUCCESS,
         areaOrRoute: 'baseline',
       });
-
-      return {
-        rawText,
-        parsedSections,
-        canonical,
-        sourceFormat,
-      };
+      return { rawText, parsedSections, canonical, sourceFormat };
     } catch (error) {
-      void this.criticalFlowTrackerService.recordCriticalFlowEvent({
+      void this.criticalFlowTrackerService?.recordCriticalFlowEvent({
         flow: CriticalFlowEventType.BASELINE_PARSED_FAILURE,
         areaOrRoute: 'baseline',
       });
@@ -84,38 +65,16 @@ export class BaselineIngestionService {
     rawText: string,
     sourceFormat: BaselineSourceFormat,
   ): Promise<BaselineIngestionResult> {
-    try {
-      const parsedSections = this.baselineParser.parseBaseline(rawText);
-      const canonical = this.buildCanonical(rawText, parsedSections);
-      void this.criticalFlowTrackerService.recordCriticalFlowEvent({
-        flow: CriticalFlowEventType.BASELINE_PARSED_SUCCESS,
-        areaOrRoute: 'baseline',
-      });
-
-      return {
-        rawText,
-        parsedSections,
-        canonical,
-        sourceFormat,
-      };
-    } catch (error) {
-      void this.criticalFlowTrackerService.recordCriticalFlowEvent({
-        flow: CriticalFlowEventType.BASELINE_PARSED_FAILURE,
-        areaOrRoute: 'baseline',
-      });
-      throw error;
-    }
+    const parsedSections = this.baselineParser.parseBaseline(rawText);
+    const canonical = this.buildCanonical(rawText, parsedSections);
+    return { rawText, parsedSections, canonical, sourceFormat };
   }
 
   private detectFormat(file: Express.Multer.File): BaselineSourceFormat {
-    const extension =
-      path
-        .extname(file.originalname || file.path || '')
-        .toLowerCase() ?? '';
-    if (extension === '.pdf') {
-      return 'pdf';
-    }
-    return 'docx';
+    return path.extname(file.originalname || file.path || '').toLowerCase() ===
+      '.pdf'
+      ? 'pdf'
+      : 'docx';
   }
 
   private buildCanonical(
@@ -127,34 +86,27 @@ export class BaselineIngestionService {
       ambiguityFlags: [],
       lowConfidence: [],
     };
-
     const experience = this.buildExperience(parsedSections, context);
     const identity = this.buildIdentity(rawText, experience, context);
     const normalized = normalizeText(rawText);
-
     const tooling = this.buildToolingAndSkills(normalized);
-    const peopleLeadership = this.buildPeopleLeadership(normalized, context);
-    const operationalOwnership = this.buildOperationalOwnership(
-      normalized,
-      context,
-    );
-    const crossFunctional = this.buildCrossFunctional(normalized);
-    const customerAdvocacy = this.buildCustomerAdvocacy(normalized);
-    const scaleAndScope = this.buildScaleAndScope(normalized);
-    const metricsAndOutcomes = this.buildMetrics(normalized);
-    const skillsAndTools = this.buildSkillsAndTools(normalized, tooling.tools);
+    const education = this.buildEducation(parsedSections);
+    const skills = this.buildSkills(parsedSections);
 
     return BaselineSchemaCore.parse({
       identity,
+      summary: identity.summary ?? null,
       experience,
-      people_leadership: peopleLeadership,
-      operational_ownership: operationalOwnership,
+      education,
+      skills,
+      people_leadership: this.buildPeopleLeadership(normalized, context),
+      operational_ownership: this.buildOperationalOwnership(normalized),
       tooling_and_platforms: tooling,
-      cross_functional_partnership: crossFunctional,
-      customer_advocacy: customerAdvocacy,
-      scale_and_scope: scaleAndScope,
-      metrics_and_outcomes: metricsAndOutcomes,
-      skills_and_tools: skillsAndTools,
+      cross_functional_partnership: this.buildCrossFunctional(normalized),
+      customer_advocacy: this.buildCustomerAdvocacy(normalized),
+      scale_and_scope: this.buildScaleAndScope(normalized),
+      metrics_and_outcomes: this.buildMetrics(normalized),
+      skills_and_tools: this.buildSkillsAndTools(normalized, tooling.tools),
       system_generated_read_only: {
         missing_fields: context.missingFields,
         ambiguity_flags: context.ambiguityFlags,
@@ -168,370 +120,219 @@ export class BaselineIngestionService {
     experience: BaselineSchemaCoreShape['experience'],
     context: ParsingContext,
   ): BaselineSchemaCoreShape['identity'] {
-    const lines = rawText
-      .split(/\\r?\\n/)
-      .map((line) => line.trim())
-      .filter((line) => line);
-
-    const headingTokens = new Set([
-      'summary',
-      'professional summary',
-      'experience',
-      'work experience',
-      'skills',
-      'education',
-    ]);
-
-    let fullName: string | null = null;
-
-    for (const line of lines) {
-      const normalized = line.toLowerCase().replace(/[:.]+$/, '').trim();
-      if (headingTokens.has(normalized)) {
-        continue;
-      }
-      if (/^\\d+$/.test(line)) {
-        continue;
-      }
-      if (line.split(/\\s+/).length < 2) {
-        continue;
-      }
-      fullName = line;
-      context.lowConfidence.push({
-        path: 'identity.full_name',
-        reason: 'First non-heading line treated as full name',
-        snippet: line.slice(0, 120),
-      });
-      break;
-    }
-
-    if (!fullName) {
-      context.missingFields.push('identity.full_name');
-      context.lowConfidence.push({
-        path: 'identity.full_name',
-        reason: 'Unable to locate a candidate full name line',
-        snippet: lines.slice(0, 3).join(' '),
-      });
-    }
-
+    const lines = rawText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const fullName =
+      lines.find((line) => line.split(/\s+/).length >= 2 && !/^(summary|experience|skills|education)/i.test(line)) ??
+      null;
+    if (!fullName) context.missingFields.push('identity.full_name');
     const firstExperience = experience[0];
-
     return {
       full_name: fullName,
-      current_title: firstExperience?.role_title ?? null,
-      current_company: firstExperience?.company_name ?? null,
+      summary: this.extractSummary(rawText),
+      current_title: firstExperience?.role ?? firstExperience?.role_title ?? null,
+      current_company:
+        firstExperience?.company ?? firstExperience?.company_name ?? null,
       location: this.extractLocation(rawText),
     };
   }
 
+  private extractSummary(rawText: string): string | null {
+    const lines = rawText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const index = lines.findIndex((line) => /^(summary|professional summary|profile)\b/i.test(line));
+    return index >= 0 && lines[index + 1] ? this.cleanEvidenceText(lines[index + 1]) : null;
+  }
+
   private extractLocation(text: string): string | null {
-    const match = text.match(/\\b(?:based in|location[:]?\\s*)([^\\n,]+)/i);
-    if (match) {
-      return match[1].trim();
-    }
-    return null;
+    const match = text.match(/\b(?:based in|location[:]\s*)([^\n,]+)/i);
+    return match ? match[1].trim() : null;
   }
 
   private buildExperience(
     parsedSections: ParsedSection[],
     context: ParsingContext,
   ): BaselineSchemaCoreShape['experience'] {
-    const experienceSections = parsedSections.filter(
-      (section) => section.sectionType === BaselineSectionType.EXPERIENCE,
-    );
-
-    const blocks = experienceSections.flatMap((section) =>
-      section.content
-        .split(/\\n{2,}/)
-        .map((segment) => segment.trim())
-        .filter(Boolean),
-    );
-
-    if (!blocks.length) {
+    const content = parsedSections
+      .filter((section) => section.sectionType === BaselineSectionType.EXPERIENCE)
+      .map((section) => section.content)
+      .join('\n');
+    if (!content.trim()) {
       context.missingFields.push('experience');
       return [];
     }
-
-    const entries: BaselineSchemaCoreShape['experience'] = [];
-
-    for (const block of blocks) {
-      const parsed = this.parseExperienceBlock(block, context);
-      if (parsed) {
-        entries.push(parsed);
-      }
-    }
-
-    return entries;
+    const blocks = content.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
+    const experience = blocks.flatMap((block) => this.parseExperienceBlock(block, context));
+    return experience;
   }
 
-  private parseExperienceBlock(
-    block: string,
-    context: ParsingContext,
-  ): BaselineSchemaCoreShape['experience'][number] | null {
-    const lines = block
-      .split(/\\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-
-    if (!lines.length) {
-      return null;
-    }
-
+  private parseExperienceBlock(block: string, context: ParsingContext): BaselineSchemaCoreShape['experience'] {
+    const lines = block.split(/\n/).map((line) => line.trim()).filter(Boolean);
+    if (!lines.length) return [];
     const header = lines[0];
-
-    const [company, role] = this.splitCompanyAndRole(header);
-
-    if (!company || !role) {
+    const parsedHeader = this.parseExperienceHeader(header);
+    if (!parsedHeader.company || !parsedHeader.role) {
       context.missingFields.push('experience.company_or_role');
-      return null;
+      return [];
     }
-
-    const { start, end } = this.extractDates(header + ' ' + block);
-
-    if (!start) {
-      context.missingFields.push('experience.start_date');
+    const body = lines.slice(1);
+    const role = parsedHeader.role;
+    if (!role) {
+      context.missingFields.push('experience.company_or_role');
+      return [];
     }
-
-    const bodyLines = lines.slice(1);
-    const scopeSummary =
-      bodyLines
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .join(' ') || '';
-    const detailsText = bodyLines.join('\n');
-
-    return {
-      company_name: company,
-      role_title: role,
-      start_date: start ?? null,
-      end_date: end ?? null,
-      scope_summary: scopeSummary,
-      details_text: detailsText,
-    };
+    const evidence = body.flatMap((line) => this.splitIntoEvidence(line)).map((text) => ({
+      id: randomUUID(),
+      text: this.cleanEvidenceText(text),
+      metrics: this.extractMetrics(text),
+      tags: [role.toLowerCase()],
+    })).filter((unit) => unit.text.length > 0);
+    return [{
+      company: parsedHeader.company,
+      role: parsedHeader.role,
+      start_date: parsedHeader.start,
+      end_date: parsedHeader.end,
+      evidence,
+      company_name: parsedHeader.company,
+      role_title: parsedHeader.role,
+      scope_summary: evidence.map((item) => item.text).join(' '),
+      details_text: evidence.map((item) => item.text).join('\n'),
+    }];
   }
 
-  private splitCompanyAndRole(header: string): [string | null, string | null] {
-    const parts = header
-      .split(/[-–—·•|]/)
-      .map((segment) => segment.trim())
-      .filter(Boolean);
+  private parseExperienceHeader(header: string): { company: string | null; role: string | null; start: string | null; end: string | null } {
+    const normalized = this.cleanEvidenceText(header);
+    const { start, end } = this.extractDates(normalized);
+    const stripped = normalized.replace(/(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}|\d{4})\s*(?:[-–—]|to)\s*(present|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}|\d{4})/i, '');
+    const parts = stripped.split(/\s*[|@]\s*|\s+-\s+/).map((s) => s.trim()).filter(Boolean);
+    if (parts.length >= 2) return { company: parts[0], role: parts.slice(1).join(' | '), start, end };
+    return { company: null, role: null, start, end };
+  }
 
-    if (parts.length >= 2) {
-      const company = parts[0];
-      const role = parts.slice(1).join(' ');
-      return [company, role];
-    }
+  private splitIntoEvidence(text: string): string[] {
+    const cleaned = text.replace(/^[\s•·\-–—]+/, '').trim();
+    if (!cleaned) return [];
+    return cleaned.split(/(?<=[.!?])\s+(?=[A-Z0-9])/).map((s) => s.trim()).filter(Boolean);
+  }
 
-    const atMatch = header.split('@').map((segment) => segment.trim());
+  private cleanEvidenceText(text: string): string {
+    return text
+      .replace(/^[\s•·\-–—]+/, '')
+      .replace(/\b(\w+)(?:\s+\1\b)+/gi, '$1')
+      .replace(/\s+/g, ' ')
+      .replace(/\s+([,.;:!?])/g, '$1')
+      .trim();
+  }
 
-    if (atMatch.length >= 2) {
-      return [atMatch[0], atMatch.slice(1).join('@')];
-    }
+  private extractMetrics(text: string): Metric[] {
+    return [...text.matchAll(/(\$[\d,]+(?:\.\d+)?|\d+(?:\.\d+)?%|\b\d+\b)/g)].map((match) => {
+      const value = match[1];
+      return {
+        type: value.startsWith('$') ? 'currency' : value.endsWith('%') ? 'percentage' : 'count',
+        value,
+      };
+    });
+  }
 
-    return [null, null];
+  private splitEducationLines(text: string): string[] {
+    return text.split(/\n+/).map((line) => this.cleanEvidenceText(line)).filter(Boolean);
+  }
+
+  private dedupeEducationTokens(text: string): string {
+    return text.replace(/\b(\w+)(?:\s*\|\s*\1)+/gi, '$1').trim();
+  }
+
+  private buildEducation(parsedSections: ParsedSection[]): BaselineSchemaCoreShape['education'] {
+    const section = parsedSections.find((item) => item.sectionType === BaselineSectionType.EDUCATION);
+    if (!section) return [];
+    return this.splitEducationLines(section.content).map((line) => ({
+      school: this.dedupeEducationTokens(line),
+      degree: this.dedupeEducationTokens(line),
+      startDate: null,
+      endDate: null,
+      evidence: [{ id: randomUUID(), text: line, metrics: this.extractMetrics(line), tags: ['education'] }],
+    }));
+  }
+
+  private buildSkills(parsedSections: ParsedSection[]): BaselineSchemaCoreShape['skills'] {
+    const section = parsedSections.find((item) => item.sectionType === BaselineSectionType.SKILLS);
+    if (!section) return [];
+    return section.content
+      .split(/[\n,|]/)
+      .map((item) => this.cleanEvidenceText(item))
+      .filter(Boolean)
+      .map((name) => ({ name, category: null }));
   }
 
   private extractDates(section: string) {
-    const match =
-      section.match(
-        /(\\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\s+\\d{4}|\\d{4})\\s*(?:[-–—]|to)\\s*(present|\\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\s+\\d{4}|\\d{4})/i,
-      );
+    const match = section.match(/(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}|\d{4})\s*(?:[-–—]|to)\s*(present|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}|\d{4})/i);
+    if (!match) return { start: null, end: null };
+    return { start: match[1].trim(), end: match[2].toLowerCase() === 'present' ? 'present' : match[2].trim() };
+  }
 
-    if (!match) {
-      return { start: null, end: null };
-    }
-
+  private buildPeopleLeadership(text: string, context: ParsingContext): BaselineSchemaCoreShape['people_leadership'] {
+    const match = text.toLowerCase().match(/managed\s+(\d+)\s+(direct reports|people)/i);
+    if (!match) context.missingFields.push('people_leadership.direct_reports');
     return {
-      start: match[1].trim(),
-      end: match[2].toLowerCase() === 'present' ? 'present' : match[2].trim(),
+      direct_reports: match ? Number(match[1]) : null,
+      managers_led: /managed\s+managers?/.test(text.toLowerCase()) ? true : null,
+      global_teams: /global\s+teams?/.test(text.toLowerCase()) ? true : null,
     };
   }
 
-  private buildPeopleLeadership(
-    text: string,
-    context: ParsingContext,
-  ): BaselineSchemaCoreShape['people_leadership'] {
+  private buildOperationalOwnership(text: string): BaselineSchemaCoreShape['operational_ownership'] {
     const lower = text.toLowerCase();
-    const directReportsMatch = lower.match(/managed\\s+(\\d+)\\s+(direct reports|people)/i);
-
-    const directReports = directReportsMatch
-      ? Number(directReportsMatch[1])
-      : null;
-
-    if (!directReports) {
-      context.missingFields.push('people_leadership.direct_reports');
-    }
-
     return {
-      direct_reports: directReports,
-      managers_led: /managed\\s+managers?/.test(lower) ? true : null,
-      global_teams: /global\\s+teams?/.test(lower) ? true : null,
+      functions_owned: ['incident management', 'problem management', 'escalations', 'tooling', 'knowledge base', 'qa'].filter((keyword) => lower.includes(keyword)),
+      process_design: /process design/.test(lower) ? true : null,
+      process_scaling: /(process scaling|scaled processes)/.test(lower) ? true : null,
     };
   }
 
-  private buildOperationalOwnership(
-    text: string,
-    context: ParsingContext,
-  ): BaselineSchemaCoreShape['operational_ownership'] {
-    const lower = text.toLowerCase();
-    const functions = [
-      'incident management',
-      'problem management',
-      'escalations',
-      'tooling',
-      'knowledge base',
-      'qa',
-    ].filter((keyword) => lower.includes(keyword));
-
-    const processDesign = /process design/.test(lower) ? true : null;
-    const processScaling =
-      /(process scaling|scaled processes)/.test(lower) ? true : null;
-
-    return {
-      functions_owned: Array.from(new Set(functions)),
-      process_design: processDesign,
-      process_scaling: processScaling,
-    };
-  }
-
-  private buildToolingAndSkills(
-    text: string,
-  ): BaselineSchemaCoreShape['tooling_and_platforms'] {
+  private buildToolingAndSkills(text: string): BaselineSchemaCoreShape['tooling_and_platforms'] {
     const requirements = extractJobToolRequirements(text);
-    const tools = [
-      ...requirements.required,
-      ...requirements.preferred,
-    ].map((entry) => entry.toLowerCase());
-
-    const ownershipLevel = this.detectOwnershipLevel(text);
-
     return {
-      tools: Array.from(new Set(tools)),
-      ownership_level: ownershipLevel,
+      tools: Array.from(new Set([...requirements.required, ...requirements.preferred].map((entry) => entry.toLowerCase()))),
+      ownership_level: this.detectOwnershipLevel(text),
     };
   }
 
   private detectOwnershipLevel(text: string): 'used' | 'administered' | 'owned' | 'implemented' | 'unknown' {
     const lower = text.toLowerCase();
-
-    if (/(owned|owning)/.test(lower)) {
-      return 'owned';
-    }
-    if (/administered/.test(lower)) {
-      return 'administered';
-    }
-    if (/implemented/.test(lower)) {
-      return 'implemented';
-    }
+    if (/(owned|owning)/.test(lower)) return 'owned';
+    if (/administered/.test(lower)) return 'administered';
+    if (/implemented/.test(lower)) return 'implemented';
     return 'unknown';
   }
 
-  private buildCrossFunctional(
-    text: string,
-  ): BaselineSchemaCoreShape['cross_functional_partnership'] {
+  private buildCrossFunctional(text: string): BaselineSchemaCoreShape['cross_functional_partnership'] {
     const lower = text.toLowerCase();
-    return {
-      product: /product/.test(lower) ? true : null,
-      engineering: /engineering/.test(lower) ? true : null,
-      sales_cs:
-        /(sales|customer success|cs)/.test(lower) ? true : null,
-      executive: /(executive|c-level|c level)/.test(lower) ? true : null,
-    };
+    return { product: /product/.test(lower) ? true : null, engineering: /engineering/.test(lower) ? true : null, sales_cs: /(sales|customer success|cs)/.test(lower) ? true : null, executive: /(executive|c-level|c level)/.test(lower) ? true : null };
   }
 
-  private buildCustomerAdvocacy(
-    text: string,
-  ): BaselineSchemaCoreShape['customer_advocacy'] {
+  private buildCustomerAdvocacy(text: string): BaselineSchemaCoreShape['customer_advocacy'] {
     const lower = text.toLowerCase();
-    return {
-      executive_escalations: /executive escalation/.test(lower)
-        ? true
-        : null,
-      voice_of_customer: /voice of the customer|voc/.test(lower)
-        ? true
-        : null,
-      post_incident_rca: /\b(rca|root cause analysis|post incident rca)\b/.test(lower)
-        ? true
-        : null,
-    };
+    return { executive_escalations: /executive escalation/.test(lower) ? true : null, voice_of_customer: /voice of the customer|voc/.test(lower) ? true : null, post_incident_rca: /\b(rca|root cause analysis|post incident rca)\b/.test(lower) ? true : null };
   }
 
-  private buildScaleAndScope(
-    text: string,
-  ): BaselineSchemaCoreShape['scale_and_scope'] {
+  private buildScaleAndScope(text: string): BaselineSchemaCoreShape['scale_and_scope'] {
     const lower = text.toLowerCase();
-    const customerSegment = lower.includes('smb')
-      ? 'smb'
-      : lower.includes('mid market') || lower.includes('mid-market')
-      ? 'mid_market'
-      : lower.includes('enterprise')
-      ? 'enterprise'
-      : 'unknown';
-    const geoScope = lower.includes('global')
-      ? 'global'
-      : lower.includes('regional')
-      ? 'regional'
-      : 'unknown';
-    const orgStage = lower.includes('public')
-      ? 'public'
-      : lower.includes('growth')
-      ? 'growth'
-      : lower.includes('early')
-      ? 'early'
-      : 'unknown';
-
     return {
-      customer_segment: customerSegment,
-      geo_scope: geoScope,
-      org_stage: orgStage,
+      customer_segment: lower.includes('smb') ? 'smb' : lower.includes('mid market') || lower.includes('mid-market') ? 'mid_market' : lower.includes('enterprise') ? 'enterprise' : 'unknown',
+      geo_scope: lower.includes('global') ? 'global' : lower.includes('regional') ? 'regional' : 'unknown',
+      org_stage: lower.includes('public') ? 'public' : lower.includes('growth') ? 'growth' : lower.includes('early') ? 'early' : 'unknown',
     };
   }
 
   private buildMetrics(text: string): BaselineSchemaCoreShape['metrics_and_outcomes'] {
-    const lines = text.split(/\\n/);
-    const metrics: string[] = [];
-
-    for (const line of lines) {
-      if (/\\d+/.test(line) && /(increase|improve|growth|revenue|percent|%)/i.test(line)) {
-        metrics.push(line.trim());
-      }
-    }
-
-    return {
-      metrics_present: metrics.length > 0,
-      metrics,
-    };
+    const metrics = text.split(/\n/).filter((line) => /\d+/.test(line) && /(increase|improve|growth|revenue|percent|%)/i.test(line)).map((line) => line.trim());
+    return { metrics_present: metrics.length > 0, metrics };
   }
 
-  private buildSkillsAndTools(
-    text: string,
-    toolingTools: string[],
-  ): BaselineSchemaCoreShape['skills_and_tools'] {
+  private buildSkillsAndTools(text: string, toolingTools: string[]): BaselineSchemaCoreShape['skills_and_tools'] {
     const lower = text.toLowerCase();
-    const methodologies = [
-      'agile',
-      'scrum',
-      'kanban',
-      'itil',
-      'devops',
-      'waterfall',
-      'lean',
-    ].filter((keyword) => lower.includes(keyword));
-
-    const domainCandidates = [
-      { label: 'SaaS', pattern: /saas/ },
-      { label: 'Enterprise IT', pattern: /enterprise it/ },
-      { label: 'MSP', pattern: /msp/ },
-      { label: 'Regulated', pattern: /regulated/ },
-      { label: 'Internal Delivery', pattern: /internal delivery/ },
-      { label: 'External Delivery', pattern: /external delivery/ },
-    ]
-      .filter((entry) => entry.pattern.test(lower))
-      .map((entry) => entry.label);
-
     return {
       tools: Array.from(new Set(toolingTools)),
-      methodologies: Array.from(new Set(methodologies)),
-      domains: Array.from(new Set(domainCandidates)),
+      methodologies: ['agile', 'scrum', 'kanban', 'itil', 'devops', 'waterfall', 'lean'].filter((keyword) => lower.includes(keyword)),
+      domains: ['SaaS', 'Enterprise IT', 'MSP', 'Regulated', 'Internal Delivery', 'External Delivery'].filter((label) => lower.includes(label.toLowerCase())),
     };
   }
 }

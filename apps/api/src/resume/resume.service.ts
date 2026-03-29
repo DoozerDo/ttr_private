@@ -27,6 +27,7 @@ import { validateComplianceWithFallback } from '../compliance/compliance-error.u
 import { shapeComplianceForUi } from '../compliance/compliance-ui-shaping';
 import {
   ComplianceAction,
+  ComplianceFlag,
   ComplianceTextSection,
   GeneratedTextSourceType,
 } from '../compliance/compliance.types';
@@ -72,6 +73,9 @@ import {
 } from './claim-risk';
 import { validateAnalysisContext } from '../common/analysis-context-binding';
 import { filterComplianceFlagsByCanonicalClaims } from '../common/readiness-claim-truth';
+import { validateGenerationTrace } from '../generation/generation-validation';
+import type { ArtifactTraceAudit } from '../generation/artifact-trace-audit';
+import { buildArtifactFailurePayload } from '../generation/artifact-failure';
 import type {
   DocumentGenerationExports,
   NormalizedResumeDocument,
@@ -103,6 +107,39 @@ export type ResumePreExportSnapshot = {
   sectionFragments: Array<{ title: string | null; content: string }>;
   docxModel: ResumeDocxModel;
   normalizedDocument: NormalizedResumeDocument;
+};
+
+export type ResumeGenerationResponse = {
+  ok: true;
+  status: 'success';
+  generationStatus: 'success';
+  exportReady: boolean;
+  blocked: false;
+  baselineId: string;
+  baselineVersionId: string;
+  jobId: string | null;
+  sections: ResumeExportSection[];
+  compliance_flags: ComplianceFlag[];
+  compliance_blocked: boolean;
+  audit_id: string;
+  auditId: string;
+  baseline_version_hash: string | null;
+  quality: 'optimized' | 'draft';
+  traceMap: ArtifactTraceAudit['traceMap'];
+  debugTrace: ArtifactTraceAudit['debugTrace'];
+  exports: DocumentGenerationExports;
+  preview: {
+    resume: NormalizedResumeDocument | null;
+  };
+  trackerEntryId: string | null;
+  trackerStatus: string | null;
+  opportunityId: string | null;
+  claimRiskSummary: unknown;
+  gapAnalysis: unknown;
+  gapGuidance: unknown;
+  display: UserSafeDisplayPayload;
+  safeDisplay: UserSafeDisplayPayload;
+  internal: Record<string, unknown>;
 };
 
 type ResumeExperiencePipelineDiagnostics = {
@@ -385,6 +422,121 @@ export class ResumeService {
     };
   }
 
+  private buildResumeTraceAudit(
+    sections: ResumeExportSection[],
+    resumeInputSections: BaselineSection[],
+  ): ArtifactTraceAudit {
+    const availableEvidenceIds = resumeInputSections.flatMap((section) => {
+      const logicalUnits = reconstructLogicalTextUnits(section.content ?? '');
+      return extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits).map((unit) => unit.id);
+    });
+
+    const traceMap: Record<string, string[]> = {};
+    const tracedLines: Array<{ id: string; text: string; sourceEvidenceIds?: string[] }> = [];
+    const debugLines: Array<{
+      lineId: string;
+      text: string;
+      sectionType: string;
+      classification: 'required_content' | 'structural';
+      traceMapEntry: string[];
+      sourceEvidenceIdsBeforeAudit: string[];
+      failureReason?: string;
+    }> = [];
+
+    sections.forEach((section, sectionIndex) => {
+      const upperType = String(section.type ?? '').toUpperCase();
+      const pushLine = (
+        lineId: string,
+        text: string,
+        ids: string[],
+        classification: 'required_content' | 'structural',
+      ) => {
+        traceMap[lineId] = ids;
+        tracedLines.push({ id: lineId, text, sourceEvidenceIds: ids });
+        debugLines.push({
+          lineId,
+          text,
+          sectionType: upperType,
+          classification,
+          traceMapEntry: ids,
+          sourceEvidenceIdsBeforeAudit: ids,
+        });
+      };
+
+      const sectionBullets = Array.isArray(section.bullets) ? section.bullets : [];
+      const shouldTraceEmptyIds =
+        upperType === 'EXPERIENCE';
+      if (upperType === 'SUMMARY') {
+        sectionBullets.forEach((bullet, bulletIndex) => {
+          const source = bullet as { source?: { sourceEvidenceIds?: string[] } };
+          const ids = (source.source?.sourceEvidenceIds ?? []).filter(Boolean);
+          if (!ids.length && !shouldTraceEmptyIds) return;
+          pushLine(`summary:${sectionIndex}:${bulletIndex}`, bullet.text ?? '', ids, 'required_content');
+        });
+        return;
+      }
+      if (upperType === 'SKILLS') {
+        sectionBullets.forEach((bullet, bulletIndex) => {
+          const source = bullet as { source?: { sourceEvidenceIds?: string[] } };
+          const ids = (source.source?.sourceEvidenceIds ?? []).filter(Boolean);
+          if (!ids.length && !shouldTraceEmptyIds) return;
+          pushLine(`skills:${sectionIndex}:${bulletIndex}`, bullet.text ?? '', ids, 'required_content');
+        });
+        return;
+      }
+      if (upperType === 'EDUCATION') {
+        sectionBullets.forEach((bullet, bulletIndex) => {
+          const source = bullet as { source?: { sourceEvidenceIds?: string[] } };
+          const ids = (source.source?.sourceEvidenceIds ?? []).filter(Boolean);
+          if (!ids.length && !shouldTraceEmptyIds) return;
+          pushLine(`education:${sectionIndex}:${bulletIndex}`, bullet.text ?? '', ids, 'required_content');
+        });
+        return;
+      }
+      if (upperType !== 'EXPERIENCE') {
+        return;
+      }
+      sectionBullets.forEach((bullet, bulletIndex) => {
+        const source = bullet as { source?: { sourceEvidenceIds?: string[] } };
+        const ids = (source.source?.sourceEvidenceIds ?? []).filter(Boolean);
+        if (!ids.length) return;
+        pushLine(`experience:${sectionIndex}:${bulletIndex}`, bullet.text ?? '', ids, 'required_content');
+      });
+    });
+
+    const validation = validateGenerationTrace(tracedLines, availableEvidenceIds);
+    if (!validation.passed) {
+      const failureReasonByLineId = new Map<string, string>();
+      validation.failures.forEach((failure) => {
+        const match = failure.match(/^Line ([^ ]+) /i);
+        if (match?.[1]) {
+          failureReasonByLineId.set(match[1], failure);
+        }
+      });
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'generation_failed',
+          message: 'Resume generation failed validation.',
+          details: {
+            failures: validation.failures,
+            traceCoverage: validation.traceCoverage,
+            unusedEvidence: validation.unusedEvidence,
+            selectedEvidence: validation.selectedEvidence,
+            debugLines: debugLines.map((line) => ({
+              ...line,
+              failureReason: failureReasonByLineId.get(line.lineId),
+            })),
+          },
+        },
+      });
+    }
+
+    return {
+      traceMap,
+      debugTrace: validation,
+    };
+  }
+
   private sanitizeGapGuidance(gapInsights: ReturnType<GapAnalysisService['analyze']> | null) {
     if (!gapInsights) return null;
 
@@ -427,36 +579,84 @@ export class ResumeService {
   }
 
   private throwGenerationBlockedError(blockers: Array<{ code: string; message: string }>): never {
-    throw new UnprocessableEntityException({
+    throw new UnprocessableEntityException(buildArtifactFailurePayload({
       code: 'generation_blocked',
+      category: 'generation_blocked',
       message:
         'Generation is not available for this role due to insufficient verified evidence.',
-      blockers: blockers.slice(0, 3),
-      error: {
-        code: 'generation_blocked',
-        message:
-          'Generation is not available for this role due to insufficient verified evidence.',
-        details: {
-          blockers: blockers.slice(0, 3),
-        },
+      detail: 'Readiness or compliance gates blocked generation.',
+      retryable: false,
+      userAction: {
+        title: 'Review baseline readiness',
+        description: 'Complete the missing verified requirements before generating again.',
       },
-    });
+      diagnostics: {
+        failureReasons: blockers.slice(0, 3).map((blocker) => `${blocker.code}: ${blocker.message}`),
+        missingRequirements: blockers.slice(0, 3).map((blocker) => blocker.message),
+      },
+    }));
   }
 
   private throwGenerationFailedError(
     message: string,
     details?: Record<string, unknown>,
   ): never {
-    throw new UnprocessableEntityException({
+    const failureReasons =
+      (details?.blockers as string[] | undefined) ??
+      (details?.reasons as string[] | undefined) ??
+      [];
+    const category =
+      /unsupported|insufficient_verified_content|resume_structure_empty|paragraph_only/i.test(message) ||
+      /unsupported/i.test(String(details?.reason ?? ''))
+        ? 'unsupported_input'
+        : /trace/i.test(String(details?.stage ?? ''))
+          ? 'trace_failure'
+          : 'validation_failure';
+    throw new UnprocessableEntityException(buildArtifactFailurePayload({
       code: 'generation_failed',
+      category,
       message,
-      ...(details ? { details } : {}),
-      error: {
-        code: 'generation_failed',
-        message,
-        ...(details ? { details } : {}),
+      detail: typeof details?.message === 'string' ? details.message : undefined,
+      retryable: category !== 'unsupported_input',
+      userAction:
+        category === 'unsupported_input'
+          ? {
+              title: 'Add more supported baseline content',
+              description: 'Include clearer accomplishment bullets and complete baseline sections before generating again.',
+            }
+          : category === 'trace_failure'
+            ? {
+                title: 'Repair traceable baseline evidence',
+                description: 'Make sure every content line has source evidence before retrying.',
+              }
+            : {
+                title: 'Review the generated structure',
+                description: 'Check the baseline text for malformed or incomplete sections.',
+              },
+      diagnostics: {
+        failureReasons,
+        unsupportedEnvelope:
+          category === 'unsupported_input' ? String(details?.reason ?? '') : undefined,
+        traceCoverage: typeof details?.traceCoverage === 'number' ? details.traceCoverage : undefined,
       },
-    });
+    }));
+  }
+
+  private throwUnsupportedResumeInput(message: string, unsupportedEnvelope: string): never {
+    throw new UnprocessableEntityException(buildArtifactFailurePayload({
+      code: 'unsupported_input',
+      category: 'unsupported_input',
+      message,
+      detail: unsupportedEnvelope,
+      retryable: false,
+      userAction: {
+        title: 'Add more bullet-style accomplishments',
+        description: 'The current resume input needs clearer bullet or section structure before generating.',
+      },
+      diagnostics: {
+        unsupportedEnvelope,
+      },
+    }));
   }
 
   private sanitizeDraftSectionText(value?: string | null): string {
@@ -475,8 +675,21 @@ export class ResumeService {
         .map((bullet) => ({
           ...bullet,
           text: this.sanitizeDraftSectionText(bullet.text),
+          source: bullet.source,
         }))
         .filter((bullet) => bullet.text.length > 0),
+    }));
+  }
+
+  private cloneDraftSections(sections: ResumeDraftSection[]): ResumeDraftSection[] {
+    return sections.map((section) => ({
+      ...section,
+      bullets: (section.bullets ?? []).map((bullet) => ({
+        ...bullet,
+        source: bullet.source ? { ...bullet.source } : bullet.source,
+        relevance: bullet.relevance ? { ...bullet.relevance } : bullet.relevance,
+        claimRisk: bullet.claimRisk ? { ...bullet.claimRisk } : bullet.claimRisk,
+      })),
     }));
   }
 
@@ -1027,7 +1240,7 @@ export class ResumeService {
     request: GenerateResumeRequest,
     options?: GenerateResumeOptions,
     syntheticMetadata?: SyntheticMetadataInput,
-  ) {
+  ): Promise<ResumeGenerationResponse> {
     const recordResumeEvent = (success: boolean) => {
       void this.criticalFlowTrackerService?.recordCriticalFlowEvent({
         flow: success
@@ -1233,6 +1446,7 @@ export class ResumeService {
         ]);
       }
     }
+    const traceSourceSections = this.cloneDraftSections(sections as ResumeDraftSection[]);
     const claimRiskSummary = summarizeClaimRisk(
       sections.flatMap((section) => section.bullets.map((bullet) => bullet.claimRisk)),
     );
@@ -1326,11 +1540,18 @@ export class ResumeService {
         reasons.unshift(experienceDiagnostics.stageFailureReason);
       }
       if (!preflightOnly) {
+        const reason = experienceDiagnostics.resumeGenerationReason ?? 'resume_structure_empty';
+        if (reason === 'resume_structure_empty') {
+          this.throwUnsupportedResumeInput(
+            this.mapResumeFailureDescription(reason),
+            reason,
+          );
+        }
         this.throwGenerationFailedError(
-          this.mapResumeFailureDescription(experienceDiagnostics.resumeGenerationReason),
+          this.mapResumeFailureDescription(reason),
           {
             stage: experienceDiagnostics.resumeGenerationStage ?? 'resume_structure_assembly',
-            reason: experienceDiagnostics.resumeGenerationReason ?? 'resume_structure_empty',
+            reason,
             blockers: reasons.slice(0, 4),
           },
         );
@@ -1418,6 +1639,11 @@ export class ResumeService {
       resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
     };
 
+    const resumeTraceAudit = this.buildResumeTraceAudit(
+      traceSourceSections as unknown as ResumeExportSection[],
+      resumeInputSections,
+    );
+
     if (preflightOnly) {
       return {
         ok: true,
@@ -1439,6 +1665,8 @@ export class ResumeService {
           latestAssessment.overallScore >= AUTO_GENERATE_THRESHOLD
             ? 'optimized'
             : 'draft',
+        traceMap: resumeTraceAudit.traceMap,
+        debugTrace: resumeTraceAudit.debugTrace,
         exports: { docx: false, pdf: false } as DocumentGenerationExports,
         preview: {
           resume: null,
@@ -1512,6 +1740,8 @@ export class ResumeService {
       auditId: audit.id,
       baseline_version_hash: audit.baselineVersionHash,
       quality,
+      traceMap: resumeTraceAudit.traceMap,
+      debugTrace: resumeTraceAudit.debugTrace,
       exports,
       preview: {
         resume: normalizedDocument,
@@ -1623,8 +1853,8 @@ export class ResumeService {
     }
 
     const sectionFragments = generation.sections.map((section) => ({
-      title: section.title,
-      content: section.content,
+      title: section.title ?? null,
+      content: section.content ?? '',
     }));
 
     const docxModel = await this.buildDocxModelFromGeneration({

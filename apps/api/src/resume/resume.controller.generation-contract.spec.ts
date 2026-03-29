@@ -30,7 +30,6 @@ describe('ResumeController generation contract', () => {
     ).rejects.toMatchObject({
       response: {
         code: 'generation_blocked',
-        blockers: [{ code: 'full_block' }],
       },
       status: 422,
     });

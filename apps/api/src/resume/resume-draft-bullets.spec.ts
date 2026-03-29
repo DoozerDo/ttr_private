@@ -396,6 +396,56 @@ describe('resume draft bullets', () => {
     expect(seniorBulletIndex).toBeGreaterThan(seniorHeaderIndex);
   });
 
+  it('limits experience bullets per role to the configured maximum', () => {
+    const draft = buildResumeDraftSections(
+      [
+        {
+          id: 'section-bullet-limit',
+          sectionType: BaselineSectionType.EXPERIENCE,
+          order: 0,
+          title: 'Experience',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          content: [
+            'Manager | Example Co | 2020 - 2024',
+            '- Bullet 1',
+            '- Bullet 2',
+            '- Bullet 3',
+            '- Bullet 4',
+            '- Bullet 5',
+            '- Bullet 6',
+            '- Bullet 7',
+          ].join('\n'),
+        } as never,
+      ],
+      { jobText: 'bullet' },
+    );
+
+    expect(draft[0].bullets).toHaveLength(6);
+  });
+
+  it('produces stable output across runs for the same baseline and job text', () => {
+    const sections = [
+      {
+        id: 'section-stable',
+        sectionType: BaselineSectionType.EXPERIENCE,
+        order: 0,
+        title: 'Experience',
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        content: [
+          'Director | Example Co | 2020 - Present',
+          '- Led support operations and incident response',
+          '- Built automation for recurring workflows',
+        ].join('\n'),
+      } as never,
+    ];
+
+    const request = { jobText: 'support operations automation leadership' };
+    const first = buildResumeDraftSections(sections, request);
+    const second = buildResumeDraftSections(sections, request);
+
+    expect(second).toEqual(first);
+  });
+
   it('retains experience sections when bullet extraction yields none but raw experience content exists', () => {
     const draft = buildResumeDraftSections(
       [

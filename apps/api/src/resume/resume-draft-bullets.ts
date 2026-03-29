@@ -164,6 +164,7 @@ const TRAILING_FRAGMENT_PATTERN =
 const SENTENCE_SPAN_PATTERN = /[^.!?]+[.!?]/g;
 const MIN_NON_BULLET_TOKENS = 5;
 const MIN_SENTENCE_TOKENS = 6;
+const MAX_EXPERIENCE_BULLETS_PER_ROLE = 6;
 const KNOWN_SENTENCE_START_PATTERN =
   /^(?:[A-Z]|I\b|We\b|My\b|Our\b|He\b|She\b|They\b|It\b|This\b|That\b|These\b|Those\b)/;
 const LEADING_PUNCTUATION_ARTIFACT_PATTERN = /^[,;:)\]}]+/;
@@ -822,6 +823,7 @@ function parseExperienceEntries(
 ): ExperienceEntry[] {
   const logicalUnits = reconstructLogicalTextUnits(content);
   if (!logicalUnits.length) return [];
+  const sectionEvidenceUnits = extractEvidenceUnitsFromLogicalUnits(sectionId, logicalUnits);
 
   const entries: ExperienceEntry[] = [];
   let active: ExperienceEntry = { entryIndex: 0, headerLines: [], bullets: [] };
@@ -853,9 +855,10 @@ function parseExperienceEntries(
       return;
     }
 
-    const evidenceUnits = extractEvidenceUnitsFromLogicalUnits(
-      `${sectionId}:entry:${active.entryIndex}`,
-      [unit],
+    const evidenceUnits = sectionEvidenceUnits.filter(
+      (evidence) =>
+        evidence.sourceSpan.startLine >= unit.startLine &&
+        evidence.sourceSpan.endLine <= unit.endLine,
     );
     if (evidenceUnits.length) {
       evidenceUnits.forEach((evidence) => {
@@ -1120,7 +1123,10 @@ export function buildDraftBulletsForSection(
           stableCounter += 1;
           return scored as ScoredDraftBullet;
         }).filter((entry): entry is ScoredDraftBullet => Boolean(entry));
-        return orderBulletsByRelevance(withScores, shouldRank);
+        return orderBulletsByRelevance(withScores, shouldRank).slice(
+          0,
+          MAX_EXPERIENCE_BULLETS_PER_ROLE,
+        );
       });
       return ordered.map(({ relevanceScore: _relevanceScore, stableIndex: _stableIndex, ...bullet }) => bullet);
     }

@@ -14,6 +14,42 @@ export type StudioCardStatus =
   | "needs_more_baseline_detail"
   | "failed_due_to_system_error";
 
+export type ArtifactFailureCategory =
+  | "unsupported_input"
+  | "validation_failure"
+  | "trace_failure"
+  | "generation_blocked"
+  | "generation_failed";
+
+export type ArtifactFailurePayload = {
+  code: string;
+  category: ArtifactFailureCategory;
+  message: string;
+  detail?: string;
+  retryable: boolean;
+  userAction?: {
+    title: string;
+    description: string;
+  };
+  diagnostics?: {
+    failureReasons?: string[];
+    unsupportedEnvelope?: string;
+    traceCoverage?: number;
+    missingRequirements?: string[];
+  };
+};
+
+export type StudioArtifactFailurePresentation = {
+  headline: string;
+  explanation: string;
+  nextStep: string;
+  retryable: boolean;
+  category: ArtifactFailureCategory;
+  code: string;
+  diagnostics?: ArtifactFailurePayload["diagnostics"];
+  detail?: string;
+};
+
 type SafeDisplayPayload = {
   title?: string;
   description?: string;
@@ -36,6 +72,7 @@ export type StudioGenerationPresenter = {
       href: string;
     };
   } | null;
+  failure?: StudioArtifactFailurePresentation | null;
 };
 
 export function trimToString(value: unknown): string {
@@ -219,6 +256,144 @@ function mapSafeDisplay(
   };
 }
 
+function trimMessage(value: unknown): string {
+  return trimToString(value).replace(/\s+/g, " ").trim();
+}
+
+function readArtifactFailurePayload(payload: unknown): ArtifactFailurePayload | null {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  const candidate =
+    record.response && typeof record.response === "object"
+      ? (record.response as Record<string, unknown>)
+      : record.error && typeof record.error === "object"
+        ? (record.error as Record<string, unknown>)
+        : record;
+
+  const code = trimToString(candidate.code);
+  const category = trimToString(candidate.category) as ArtifactFailureCategory;
+  const message = trimMessage(candidate.message);
+  const retryable =
+    candidate.retryable === true ||
+    trimToString(candidate.retryable).toLowerCase() === "true";
+
+  const validCategories: ArtifactFailureCategory[] = [
+    "unsupported_input",
+    "validation_failure",
+    "trace_failure",
+    "generation_blocked",
+    "generation_failed",
+  ];
+  if (!code || !message || !validCategories.includes(category)) return null;
+
+  const userActionRaw = candidate.userAction;
+  const userAction =
+    userActionRaw && typeof userActionRaw === "object"
+      ? {
+          title: trimToString((userActionRaw as Record<string, unknown>).title),
+          description: trimToString((userActionRaw as Record<string, unknown>).description),
+        }
+      : undefined;
+
+  const diagnosticsRaw = candidate.diagnostics;
+  const diagnostics =
+    diagnosticsRaw && typeof diagnosticsRaw === "object"
+      ? {
+          failureReasons: Array.isArray((diagnosticsRaw as Record<string, unknown>).failureReasons)
+            ? ((diagnosticsRaw as Record<string, unknown>).failureReasons as unknown[])
+                .map((value) => trimToString(value))
+                .filter(Boolean)
+            : undefined,
+          unsupportedEnvelope: trimToString(
+            (diagnosticsRaw as Record<string, unknown>).unsupportedEnvelope,
+          ),
+          traceCoverage:
+            typeof (diagnosticsRaw as Record<string, unknown>).traceCoverage === "number"
+              ? ((diagnosticsRaw as Record<string, unknown>).traceCoverage as number)
+              : undefined,
+          missingRequirements: Array.isArray(
+            (diagnosticsRaw as Record<string, unknown>).missingRequirements,
+          )
+            ? ((diagnosticsRaw as Record<string, unknown>).missingRequirements as unknown[])
+                .map((value) => trimToString(value))
+                .filter(Boolean)
+            : undefined,
+        }
+      : undefined;
+
+  return {
+    code,
+    category,
+    message,
+    detail: trimMessage(candidate.detail) || undefined,
+    retryable,
+    userAction: userAction?.title || userAction?.description ? userAction : undefined,
+    diagnostics,
+  };
+}
+
+function presentArtifactFailure(failure: ArtifactFailurePayload): StudioArtifactFailurePresentation {
+  const base: Record<ArtifactFailureCategory, { headline: string; explanation: string; nextStep: string }> = {
+    unsupported_input: {
+      headline: "This input shape is not yet supported",
+      explanation:
+        failure.detail ||
+        "The current input does not match the supported artifact contract for this generator.",
+      nextStep:
+        failure.userAction?.title ||
+        "Review the unsupported input requirements before trying again.",
+    },
+    validation_failure: {
+      headline: "Generation failed validation",
+      explanation:
+        failure.detail ||
+        "The artifact could not be completed because the generated structure did not pass validation.",
+      nextStep:
+        failure.userAction?.title ||
+        "Review the structure requirements and adjust the source content.",
+    },
+    trace_failure: {
+      headline: "Generation could not be safely traced",
+      explanation:
+        failure.detail ||
+        "The artifact could not be verified against baseline evidence with enough confidence to return safely.",
+      nextStep:
+        failure.userAction?.title ||
+        "Add or repair baseline evidence so every content line can be traced.",
+    },
+    generation_blocked: {
+      headline: "Generation is blocked",
+      explanation:
+        failure.detail ||
+        "A readiness or compliance gate is preventing generation right now.",
+      nextStep:
+        failure.userAction?.title ||
+        "Complete the missing baseline requirements before generating again.",
+    },
+    generation_failed: {
+      headline: "Generation could not complete",
+      explanation:
+        failure.detail ||
+        "The artifact generator could not produce a valid result from the current inputs.",
+      nextStep:
+        failure.userAction?.title ||
+        "Review the input and try again with stronger baseline evidence.",
+    },
+  };
+
+  const copy = base[failure.category];
+  return {
+    headline: copy.headline,
+    explanation: failure.message || copy.explanation,
+    nextStep: failure.userAction?.description || copy.nextStep,
+    retryable: failure.retryable,
+    category: failure.category,
+    code: failure.code,
+    diagnostics: failure.diagnostics,
+    detail: failure.detail,
+  };
+}
+
 function isBlockedPayload(payload: Record<string, unknown>): boolean {
   const generationStatus = trimToString(payload.generationStatus).toLowerCase();
   const status = trimToString(payload.status).toLowerCase();
@@ -261,6 +436,15 @@ export function presentResumeGeneration(payload: unknown): StudioGenerationPrese
     return { status: "unknown", hasExportableContent: false, display: null };
   }
   const record = payload as Record<string, unknown>;
+  const artifactFailure = readArtifactFailurePayload(payload);
+  if (artifactFailure) {
+    return {
+      status: artifactFailure.category === "generation_blocked" ? "blocked" : "error",
+      hasExportableContent: false,
+      display: null,
+      failure: presentArtifactFailure(artifactFailure),
+    };
+  }
   const blocked = isBlockedPayload(record);
   const success = isSuccessPayload(record);
   const previewResume =
@@ -278,6 +462,7 @@ export function presentResumeGeneration(payload: unknown): StudioGenerationPrese
           "Some generated statements could not be verified against your baseline.",
         reasons: ["Review flagged items in Results and adjust baseline evidence."],
       }),
+      failure: null,
     };
   }
 
@@ -291,6 +476,7 @@ export function presentResumeGeneration(payload: unknown): StudioGenerationPrese
           "We could not assemble strong role specific bullets from your baseline. You can still generate a draft using your existing verified experience.",
         reasons: ["Add or promote baseline evidence, then regenerate."],
       }),
+      failure: null,
     };
   }
 
@@ -303,6 +489,7 @@ export function presentResumeGeneration(payload: unknown): StudioGenerationPrese
         description: "Verified baseline evidence was assembled into a draft.",
         reasons: ["Review the draft and export DOCX or PDF."],
       }),
+      failure: null,
     };
   }
 
@@ -317,10 +504,11 @@ export function presentResumeGeneration(payload: unknown): StudioGenerationPrese
         description: "We could not generate a resume from your current inputs.",
         reasons: ["Retry after confirming baseline and role targeting inputs."],
       }),
+      failure: null,
     };
   }
 
-  return { status: "unknown", hasExportableContent: false, display: null };
+  return { status: "unknown", hasExportableContent: false, display: null, failure: null };
 }
 
 export function presentCoverLetterGeneration(payload: unknown): StudioGenerationPresenter {
@@ -328,6 +516,15 @@ export function presentCoverLetterGeneration(payload: unknown): StudioGeneration
     return { status: "unknown", hasExportableContent: false, display: null };
   }
   const record = payload as Record<string, unknown>;
+  const artifactFailure = readArtifactFailurePayload(payload);
+  if (artifactFailure) {
+    return {
+      status: artifactFailure.category === "generation_blocked" ? "blocked" : "error",
+      hasExportableContent: false,
+      display: null,
+      failure: presentArtifactFailure(artifactFailure),
+    };
+  }
   const blocked = isBlockedPayload(record);
   const success = isSuccessPayload(record);
   const coverParagraphs = buildCoverLetterParagraphs(payload);
@@ -347,6 +544,7 @@ export function presentCoverLetterGeneration(payload: unknown): StudioGeneration
           "Some generated statements could not be verified against your baseline.",
         reasons: ["Review flagged items in Results and adjust baseline evidence."],
       }),
+      failure: null,
     };
   }
 
@@ -359,6 +557,7 @@ export function presentCoverLetterGeneration(payload: unknown): StudioGeneration
         description: "Cover letter generation needs more verified baseline evidence.",
         reasons: ["Add or promote baseline evidence, then regenerate."],
       }),
+      failure: null,
     };
   }
 
@@ -377,6 +576,7 @@ export function presentCoverLetterGeneration(payload: unknown): StudioGeneration
         description: defaultDescription,
         reasons: [defaultReason],
       }),
+      failure: null,
     };
   }
 
@@ -391,10 +591,11 @@ export function presentCoverLetterGeneration(payload: unknown): StudioGeneration
         description: "We could not generate a cover letter from your current inputs.",
         reasons: ["Retry after confirming baseline and role targeting inputs."],
       }),
+      failure: null,
     };
   }
 
-  return { status: "unknown", hasExportableContent: false, display: null };
+  return { status: "unknown", hasExportableContent: false, display: null, failure: null };
 }
 
 export function readDuplicateCoverLetterId(payload: unknown): string | undefined {

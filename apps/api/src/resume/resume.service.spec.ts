@@ -13,6 +13,8 @@ import { ApplicationsService } from '../applications/applications.service';
 import { OpportunitiesService } from '../opportunities/opportunities.service';
 import { GapAnalysisService } from '../analysis/gap-analysis.service';
 import { CriticalFlowTrackerService } from '../support/critical-flow-tracker.service';
+import { BaselineSectionType } from '../baseline/baseline-section.entity';
+import { extractEvidenceUnitsFromLogicalUnits, reconstructLogicalTextUnits } from './resume-draft-bullets';
 
 type MockRepo<T> = Partial<Record<keyof Repository<T>, jest.Mock>> & {
   findOne: jest.Mock;
@@ -203,14 +205,16 @@ describe('ResumeService contract', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('returns readiness ready and allows generation in READY state', async () => {
+  it('returns canonical unsupported_input when the resume fixture lacks supported structure', async () => {
     const { service } = buildService();
     const readiness = await service.getGenerationReadiness('user-1', baseRequest);
     expect(readiness.status).toBe('ready');
 
     await expect(service.generateResume('user-1', baseRequest)).rejects.toMatchObject({
       response: {
-        code: 'generation_failed',
+        code: 'unsupported_input',
+        category: 'unsupported_input',
+        retryable: false,
       },
       status: 422,
     });
@@ -236,6 +240,8 @@ describe('ResumeService contract', () => {
         code: 'generation_blocked',
         message:
           'Generation is not available for this role due to insufficient verified evidence.',
+        category: 'generation_blocked',
+        retryable: false,
       },
       status: 422,
     });
@@ -256,17 +262,198 @@ describe('ResumeService contract', () => {
     await expect(service.generateResume('user-1', baseRequest)).rejects.toMatchObject({
       response: {
         code: 'generation_blocked',
-        blockers: [
-          {
-            code: 'full_block',
-            message: 'Missing verified evidence for core responsibilities.',
-          },
-        ],
+        category: 'generation_blocked',
+        retryable: false,
+        diagnostics: {
+          failureReasons: [expect.stringContaining('full_block')],
+        },
       },
       status: 422,
     });
 
     expect(applicationsService.upsertPreparedFromResumeGeneration).not.toHaveBeenCalled();
     expect(opportunitiesService.createFromResumeStudio).not.toHaveBeenCalled();
+  });
+
+  it('returns canonical unsupported_input when resume structure is missing', () => {
+    const { service } = buildService();
+    const privateService = service as unknown as {
+      throwUnsupportedResumeInput: (message: string, unsupportedEnvelope: string) => never;
+    };
+
+    expect(() => privateService.throwUnsupportedResumeInput('Resume could not be generated.', 'resume_structure_empty'))
+      .toThrow(UnprocessableEntityException);
+
+    try {
+      privateService.throwUnsupportedResumeInput('Resume could not be generated.', 'resume_structure_empty');
+    } catch (error) {
+      expect((error as UnprocessableEntityException).getResponse()).toMatchObject({
+        code: 'unsupported_input',
+        category: 'unsupported_input',
+        retryable: false,
+      });
+    }
+  });
+
+  it('returns trace audit with selected and unused evidence', () => {
+    const { service } = buildService();
+    const baselineSection = {
+      id: 'trace-section',
+      baselineId: 'baseline-1',
+      sectionType: BaselineSectionType.EXPERIENCE,
+      title: 'Experience',
+      content: '- Led support operations.\n- Built automation.',
+      includePolicy: BaselineIncludePolicy.ALWAYS,
+      order: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as BaselineSection;
+    const evidenceIds = extractEvidenceUnitsFromLogicalUnits(
+      baselineSection.id,
+      reconstructLogicalTextUnits(baselineSection.content),
+    ).map((entry) => entry.id);
+
+    const audit = (service as any).buildResumeTraceAudit(
+      [
+        {
+          id: 'section-1',
+          type: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          order: 0,
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          source: 'baseline',
+          content: 'Lead support operations',
+          bullets: [
+            {
+              id: 'bullet-1',
+              text: 'Led support operations.',
+              confidence: 'High',
+              claimRisk: { level: 'None', flaggedTerms: [] },
+              source: {
+                baselineSectionId: baselineSection.id,
+                baselineSectionType: BaselineSectionType.EXPERIENCE,
+                baselineSectionOrder: 0,
+                bulletIndex: 0,
+                sourceEvidenceIds: [evidenceIds[0]],
+                anchorText: 'Led support operations.',
+                anchorKind: 'bullet_line',
+                exactBaselineBullet: true,
+              },
+            },
+          ],
+        },
+      ],
+      [baselineSection],
+    );
+
+    expect(audit.debugTrace.passed).toBe(true);
+    expect(audit.debugTrace.selectedEvidence).toEqual([evidenceIds[0]]);
+    expect(audit.debugTrace.unusedEvidence).toContain(evidenceIds[1]);
+    expect(audit.traceMap['experience:0:0']).toEqual([evidenceIds[0]]);
+  });
+
+  it('fails trace audit when a rendered resume bullet has no trace mapping', () => {
+    const { service } = buildService();
+
+    expect(() =>
+      (service as any).buildResumeTraceAudit(
+        [
+          {
+            id: 'section-1',
+            type: BaselineSectionType.EXPERIENCE,
+            title: 'Experience',
+          order: 0,
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+            source: 'baseline',
+            content: 'Lead support operations',
+            bullets: [
+              {
+                id: 'bullet-1',
+                text: 'Led support operations.',
+                confidence: 'High',
+                claimRisk: { level: 'None', flaggedTerms: [] },
+                source: {
+                  baselineSectionId: 'trace-section',
+                  baselineSectionType: BaselineSectionType.EXPERIENCE,
+                  baselineSectionOrder: 0,
+                  bulletIndex: 0,
+                  sourceEvidenceIds: ['missing-evidence-id'],
+                  anchorText: 'Led support operations.',
+                  anchorKind: 'bullet_line',
+                  exactBaselineBullet: true,
+                },
+              },
+            ],
+          },
+        ],
+        [
+          {
+            id: 'trace-section',
+            baselineId: 'baseline-1',
+            sectionType: BaselineSectionType.EXPERIENCE,
+            title: 'Experience',
+            content: '- Led support operations.',
+            includePolicy: BaselineIncludePolicy.ALWAYS,
+            order: 0,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          } as BaselineSection,
+        ],
+      ),
+    ).toThrow(UnprocessableEntityException);
+  });
+
+  it('produces deterministic trace maps across repeated runs', () => {
+    const { service } = buildService();
+    const baselineSection = {
+      id: 'trace-section',
+      baselineId: 'baseline-1',
+      sectionType: BaselineSectionType.EXPERIENCE,
+      title: 'Experience',
+      content: '- Led support operations.\n- Built automation.',
+      includePolicy: BaselineIncludePolicy.ALWAYS,
+      order: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as BaselineSection;
+    const evidenceIds = extractEvidenceUnitsFromLogicalUnits(
+      baselineSection.id,
+      reconstructLogicalTextUnits(baselineSection.content),
+    ).map((entry) => entry.id);
+
+    const input = [
+      {
+        id: 'section-1',
+        type: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        order: 0,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        source: 'baseline',
+        content: 'Lead support operations',
+        bullets: [
+          {
+            id: 'bullet-1',
+            text: 'Led support operations.',
+            confidence: 'High',
+            claimRisk: { level: 'None', flaggedTerms: [] },
+            source: {
+              baselineSectionId: baselineSection.id,
+              baselineSectionType: BaselineSectionType.EXPERIENCE,
+              baselineSectionOrder: 0,
+              bulletIndex: 0,
+              sourceEvidenceIds: [evidenceIds[0]],
+              anchorText: 'Led support operations.',
+              anchorKind: 'bullet_line',
+              exactBaselineBullet: true,
+            },
+          },
+        ],
+      },
+    ];
+
+    const first = (service as any).buildResumeTraceAudit(input, [baselineSection]);
+    const second = (service as any).buildResumeTraceAudit(input, [baselineSection]);
+    expect(second.traceMap).toEqual(first.traceMap);
+    expect(second.debugTrace).toEqual(first.debugTrace);
   });
 });

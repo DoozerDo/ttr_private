@@ -88,8 +88,44 @@ describe('ResumeController tier gating', () => {
 
   it('allows FREE tier resume generation', async () => {
     const request = buildRequest(SubscriptionTier.FREE);
+    resumeService.generateResume.mockResolvedValue({
+      ok: true,
+      status: 'success',
+      generationStatus: 'success',
+      exportReady: true,
+      blocked: false,
+      baselineId: 'baseline-1',
+      baselineVersionId: 'version-1',
+      jobId: 'job-1',
+      sections: [],
+      compliance_flags: [],
+      compliance_blocked: false,
+      audit_id: 'audit-1',
+      auditId: 'audit-1',
+      baseline_version_hash: 'hash-1',
+      quality: 'draft',
+      traceMap: { opening: ['e1'] },
+      debugTrace: {
+        passed: true,
+        failures: [],
+        traceCoverage: 100,
+        unusedEvidence: [],
+        selectedEvidence: ['e1'],
+      },
+      exports: { docx: false, pdf: false },
+      preview: { resume: null },
+      trackerEntryId: null,
+      trackerStatus: null,
+      opportunityId: null,
+      claimRiskSummary: null,
+      gapAnalysis: null,
+      gapGuidance: null,
+      display: { title: '', description: '', reasons: [], cta: { label: '', href: '' } },
+      safeDisplay: { title: '', description: '', reasons: [], cta: { label: '', href: '' } },
+      internal: {},
+    });
 
-    await controller.generateResume(
+    const result = await controller.generateResume(
       {
         baselineId: 'baseline-1',
         baselineVersionId: 'version-1',
@@ -100,6 +136,8 @@ describe('ResumeController tier gating', () => {
     );
 
     expect(resumeService.generateResume).toHaveBeenCalled();
+    expect(result.traceMap).toEqual({ opening: ['e1'] });
+    expect(result.debugTrace.selectedEvidence).toEqual(['e1']);
   });
 
   it('blocks FREE tier resume export with TIER_REQUIRED', async () => {

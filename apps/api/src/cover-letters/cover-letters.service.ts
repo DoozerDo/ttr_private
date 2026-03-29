@@ -87,6 +87,8 @@ import { validateAnalysisContext } from '../common/analysis-context-binding';
 import { filterComplianceFlagsByCanonicalClaims } from '../common/readiness-claim-truth';
 import { SyntheticMetadataInput } from '../synthetic/synthetic-metadata.types';
 import { applySyntheticMetadata } from '../synthetic/synthetic-metadata.util';
+import type { ArtifactTraceAudit } from '../generation/artifact-trace-audit';
+import { buildArtifactFailurePayload } from '../generation/artifact-failure';
 
 type CoverLetterDraft = {
   baseline: Baseline;
@@ -127,6 +129,38 @@ type CoverLetterQualityResult = {
   flags: string[];
 };
 
+export type CoverLetterGenerationResponse = {
+} & CoverLetter & {
+  status: 'success';
+  generationStatus: 'success';
+  exportReady: boolean;
+  baselineId: string;
+  baselineVersionId: string;
+  jobId: string;
+  content: string;
+  generatorType: string;
+  generatorVersion: string;
+  closingTemplateKey: string;
+  generationInputsHash: string | null;
+  preview: {
+    coverLetter: CoverLetterGenerationResult['document'];
+  };
+  compliance_flags: ComplianceFlag[];
+  audit_id: string;
+  auditId: string;
+  baseline_version_hash: string | null;
+  exports: DocumentGenerationExports;
+  display: UserSafeDisplayPayload;
+  safeDisplay: UserSafeDisplayPayload;
+  traceMap: ArtifactTraceAudit['traceMap'];
+  debugTrace: ArtifactTraceAudit['debugTrace'];
+  internal: {
+    auditId: string;
+    baselineVersionHash: string | null;
+    complianceFlags: ComplianceFlag[];
+  };
+};
+
 @Injectable()
 export class CoverLettersService {
   private readonly coverLetterRepository: Repository<CoverLetter>;
@@ -154,28 +188,45 @@ export class CoverLettersService {
   }
 
   private throwGenerationBlockedError(blockers: Array<{ code: string; message: string }>): never {
-    throw new UnprocessableEntityException({
+    throw new UnprocessableEntityException(buildArtifactFailurePayload({
       code: 'generation_blocked',
+      category: 'generation_blocked',
       message:
         'Generation is not available for this role due to insufficient verified evidence.',
-      blockers: blockers.slice(0, 3),
-      error: {
-        code: 'generation_blocked',
-        message:
-          'Generation is not available for this role due to insufficient verified evidence.',
-        details: {
-          blockers: blockers.slice(0, 3),
-        },
+      detail: 'Readiness or compliance gates blocked generation.',
+      retryable: false,
+      userAction: {
+        title: 'Review baseline readiness',
+        description: 'Complete the missing verified requirements before generating again.',
       },
-    });
+      diagnostics: {
+        failureReasons: blockers.slice(0, 3).map((blocker) => `${blocker.code}: ${blocker.message}`),
+        missingRequirements: blockers.slice(0, 3).map((blocker) => blocker.message),
+      },
+    }));
   }
 
   async generateCoverLetter(
     userId: string,
     input: GenerateCoverLetterDto,
     syntheticMetadata?: SyntheticMetadataInput,
-  ) {
-    const draft = await this.buildCoverLetterDraft(userId, input);
+  ): Promise<CoverLetterGenerationResponse> {
+    let draft: CoverLetterDraft;
+    try {
+      draft = await this.buildCoverLetterDraft(userId, input);
+    } catch (error) {
+      if (error instanceof Error) {
+        try {
+          const parsed = JSON.parse(error.message) as { category?: string; message?: string; detail?: string };
+          if (parsed?.category === 'unsupported_input') {
+            throw new UnprocessableEntityException(parsed);
+          }
+        } catch {
+          // fall through to original error
+        }
+      }
+      throw error;
+    }
     const readiness = this.buildReadinessFromFlags(
       filterComplianceFlagsByCanonicalClaims(
         draft.complianceResult.complianceFlags ?? [],
@@ -232,6 +283,7 @@ export class CoverLettersService {
       generationStatus: 'success',
       exportReady: true,
       ...savedCoverLetter,
+      baselineVersionId: draft.baselineVersion.id,
       exports,
       preview: {
         coverLetter: draft.generation.document,
@@ -240,6 +292,14 @@ export class CoverLettersService {
       audit_id: draft.complianceResult.audit.id,
       auditId: draft.complianceResult.audit.id,
       baseline_version_hash: draft.complianceResult.audit.baselineVersionHash,
+      traceMap: draft.generation.traceMap,
+      debugTrace: draft.generation.debugTrace ?? {
+        passed: true,
+        failures: [],
+        traceCoverage: 100,
+        unusedEvidence: [],
+        selectedEvidence: [],
+      },
       display,
       safeDisplay: display,
       internal: {
@@ -483,18 +543,21 @@ export class CoverLettersService {
     const insufficientBaselineDetails =
       getInsufficientExtractedTextDetails(baselineText);
     if (insufficientBaselineDetails) {
-      const payload = {
-        errorCode: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+      throw new UnprocessableEntityException(buildArtifactFailurePayload({
         code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+        category: 'unsupported_input',
         message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
-        details: insufficientBaselineDetails,
-        error: {
-          code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
-          message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
-          details: insufficientBaselineDetails,
+        detail: 'The current cover letter input cannot be grounded into a supported artifact.',
+        retryable: false,
+        userAction: {
+          title: 'Add stronger baseline evidence',
+          description: 'Include clearer accomplishment bullets and fuller role details before generating again.',
         },
-      };
-      throw new UnprocessableEntityException(payload);
+        diagnostics: {
+          unsupportedEnvelope: 'insufficient_extracted_text',
+          missingRequirements: insufficientBaselineDetails.tips,
+        },
+      }));
     }
 
     const allowedBlocks = this.mapToAllowedBlocks(allowedSections);
@@ -539,22 +602,60 @@ export class CoverLettersService {
         latestAssessment?.scoringV2?.rubric?.dimensionPercents ?? undefined,
     });
 
-    let generation = this.generator.generate({
-      baselineId: baseline.id,
-      jobId: job.id,
-      allowedBaselineBlocks: allowedBlocks,
-      job: jobContext,
-      candidateName,
-      closingTemplate,
-      maxWords: input.maxWords,
-      tone: input.tone,
-      safeMode: requestSafeMode,
-      complianceConstraints,
-      gapAnalysis: {
-        strengths: gapInsights.strengths,
-        criticalGaps: gapInsights.criticalGaps,
-      },
-    });
+    let generation: CoverLetterGenerationResult;
+    try {
+      generation = this.generator.generate({
+        baselineId: baseline.id,
+        jobId: job.id,
+        allowedBaselineBlocks: allowedBlocks,
+        job: jobContext,
+        candidateName,
+        closingTemplate,
+        maxWords: input.maxWords,
+        tone: input.tone,
+        safeMode: requestSafeMode,
+        complianceConstraints,
+        gapAnalysis: {
+          strengths: gapInsights.strengths,
+          criticalGaps: gapInsights.criticalGaps,
+        },
+      });
+    } catch (error) {
+      if (error instanceof Error) {
+        try {
+          const parsed = JSON.parse(error.message) as { category?: string; message?: string; detail?: string };
+          if (parsed?.category === 'unsupported_input') {
+            throw new UnprocessableEntityException(parsed);
+          }
+        } catch {
+          if (
+            /Cover letter generation failed validation: insufficient baseline evidence\./i.test(
+              error.message,
+            )
+          ) {
+            throw new UnprocessableEntityException(
+              buildArtifactFailurePayload({
+                code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+                category: 'unsupported_input',
+                message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
+                detail:
+                  'The current cover letter input cannot be grounded into a supported artifact.',
+                retryable: false,
+                userAction: {
+                  title: 'Add stronger baseline evidence',
+                  description:
+                    'Include clearer accomplishment bullets and fuller role details before generating again.',
+                },
+                diagnostics: {
+                  unsupportedEnvelope: 'insufficient_extracted_text',
+                },
+              }),
+            );
+          }
+        }
+      }
+      throw error;
+    }
 
     let qualityResult = this.applyCoverLetterPostProcessing(
       generation,

@@ -21,6 +21,8 @@ describe('TemplateCoverLetterGenerator', () => {
     expect(output.content).toContain('Northline Interactive');
     expect(output.content).toContain('Senior Game Designer');
     expect(output.content).toContain('\n\nSincerely,\n\nAlex Rivera');
+    expect(output.salutation).toBe('Dear Hiring Team,');
+    expect(output.closing).toBeTruthy();
     expect(output.paragraphEvidence?.length ?? 0).toBeGreaterThanOrEqual(3);
     expect(
       output.paragraphEvidence?.every(

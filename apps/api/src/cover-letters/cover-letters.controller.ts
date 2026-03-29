@@ -15,6 +15,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import type { Request, Response } from 'express';
 import { CoverLettersService } from './cover-letters.service';
+import type { CoverLetterGenerationResponse } from './cover-letters.service';
 import { GenerateCoverLetterDto } from './dto/generate-cover-letter.dto';
 import {
   Entitlements,
@@ -44,7 +45,7 @@ export class CoverLettersController {
   async generate(
     @Body() body: GenerateCoverLetterDto,
     @Req() request: TieredRequest,
-  ) {
+  ): Promise<CoverLetterGenerationResponse> {
     const userId = this.requireUserId(request);
 
     const entitlements = resolveEntitlementsFromUser(request.user);
