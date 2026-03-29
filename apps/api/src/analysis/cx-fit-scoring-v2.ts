@@ -166,6 +166,15 @@ export type CxFitV2DebugInfo = {
   jobVectors: string[];
   baselineVectors: string[];
   sharedVectors: string[];
+  transferableMatches: {
+    jobVector: string;
+    matchedVia: string;
+    weight: number;
+  }[];
+  transferableCoveragePercent: number;
+  transferableVectors: string[];
+  unmatchedVectors: string[];
+  adjustedResponsibilityOverlapPercent: number;
   baselineBand: string;
   roleBand: string;
   bandDelta: number;
@@ -418,6 +427,71 @@ const RESPONSIBILITY_VECTORS = [
     ],
   },
 ] as const;
+
+const TRANSFER_WEIGHT = 0.4;
+
+const TRANSFERABLE_SIGNAL_MAP: Record<string, string[]> = {
+  incident_management: ['product_launch_readiness'],
+  escalation_governance: ['cross_functional_product_rhythm'],
+  service_delivery: ['product_lifecycle'],
+  service_reliability: ['product_health_metrics'],
+  dashboards_kpis: ['product_health_metrics'],
+  automation_workflow: ['release_planning'],
+  contact_center_ops: ['gtm_alignment'],
+  itsm_process_maturity: ['operating_model'],
+  process_improvement: ['roadmap_management'],
+};
+
+const buildTransferableMatches = (
+  jobVectors: string[],
+  baselineVectors: string[],
+) => {
+  const directVectorSet = new Set(jobVectors.filter((vector) => baselineVectors.includes(vector)));
+  const transferableMatches: {
+    jobVector: string;
+    matchedVia: string;
+    weight: number;
+  }[] = [];
+  const transferableVectors = new Set<string>();
+
+  for (const jobVector of jobVectors) {
+    if (directVectorSet.has(jobVector)) continue;
+
+    for (const baselineVector of baselineVectors) {
+      const mappedVectors = TRANSFERABLE_SIGNAL_MAP[baselineVector];
+      if (!mappedVectors?.includes(jobVector)) continue;
+
+      transferableMatches.push({
+        jobVector,
+        matchedVia: baselineVector,
+        weight: TRANSFER_WEIGHT,
+      });
+      transferableVectors.add(jobVector);
+      break;
+    }
+  }
+
+  const transferableCoveragePercent =
+    jobVectors.length === 0
+      ? 0
+      : clamp(
+          Math.round(
+            ((directVectorSet.size +
+              transferableMatches.length * TRANSFER_WEIGHT) /
+              jobVectors.length) *
+              100,
+          ),
+        );
+
+  return {
+    transferableMatches,
+    transferableCoveragePercent,
+    transferableVectors: [...transferableVectors],
+    unmatchedVectors: jobVectors.filter(
+      (jobVector) => !directVectorSet.has(jobVector) && !transferableVectors.has(jobVector),
+    ),
+  };
+};
 
 const STRATEGY_PATTERNS: RegExp[] = [
   /operating model/,
@@ -929,6 +1003,7 @@ export const scoreCxFitV2 = (
   const jobVectors = detectVectors(normalizedJobText);
   const baselineVectors = detectVectors(normalizedBaselineText);
   const sharedVectors = jobVectors.filter((vector) => baselineVectors.includes(vector));
+  const transferableSignalTrace = buildTransferableMatches(jobVectors, baselineVectors);
 
   const jobCoveragePercent =
     jobVectors.length === 0 ? 0 : (sharedVectors.length / jobVectors.length) * 100;
@@ -943,6 +1018,11 @@ export const scoreCxFitV2 = (
     (sharedClusters.length / baselineClustersDenominator) * 100;
 
   const responsibilityOverlapPercent = (jobCoveragePercent + jobClusterCoveragePercent) / 2;
+  const transferableLiftPercent = transferableSignalTrace.transferableCoveragePercent * 0.5;
+  const adjustedResponsibilityOverlapPercent =
+    responsibilityOverlapPercent >= 80
+      ? Math.min(responsibilityOverlapPercent, responsibilityOverlapPercent + transferableLiftPercent)
+      : Math.min(80, responsibilityOverlapPercent + transferableLiftPercent);
 
   const baselineCoveragePercent =
     (baselineRecallPercent + baselineClusterCoveragePercent) / 2;
@@ -1089,6 +1169,7 @@ export const scoreCxFitV2 = (
     bandGap <= 1 ? 100 : bandGap === 2 ? 75 : bandGap === 3 ? 55 : 40;
 
   let scopeVectorPercent = clamp(Math.round(responsibilityOverlapPercent));
+  scopeVectorPercent = clamp(Math.round(adjustedResponsibilityOverlapPercent));
   if (scopeVectorPercent < 50 && baselineRecallPercent >= 70) {
     scopeVectorPercent = 60;
   }
@@ -1307,6 +1388,11 @@ export const scoreCxFitV2 = (
           sharedVectors,
           jobVectors,
           baselineVectors,
+          transferableMatches: transferableSignalTrace.transferableMatches,
+          transferableCoveragePercent: transferableSignalTrace.transferableCoveragePercent,
+          transferableVectors: transferableSignalTrace.transferableVectors,
+          unmatchedVectors: transferableSignalTrace.unmatchedVectors,
+          adjustedResponsibilityOverlapPercent,
           responsibilityOverlapPercent,
           baselineCoveragePercent,
           jobCoveragePercent,
@@ -1370,6 +1456,11 @@ export const scoreCxFitV2 = (
       jobVectors,
       baselineVectors,
       sharedVectors,
+      transferableMatches: transferableSignalTrace.transferableMatches,
+      transferableCoveragePercent: transferableSignalTrace.transferableCoveragePercent,
+      transferableVectors: transferableSignalTrace.transferableVectors,
+      unmatchedVectors: transferableSignalTrace.unmatchedVectors,
+      adjustedResponsibilityOverlapPercent,
       baselineBand: `L${baselineBand}`,
       roleBand: `L${roleBand}`,
       bandDelta,
@@ -1441,6 +1532,15 @@ type BuildFitScoreDebugBundleParams = {
   sharedVectors: string[];
   jobVectors: string[];
   baselineVectors: string[];
+  transferableMatches: {
+    jobVector: string;
+    matchedVia: string;
+    weight: number;
+  }[];
+  transferableCoveragePercent: number;
+  transferableVectors: string[];
+  unmatchedVectors: string[];
+  adjustedResponsibilityOverlapPercent: number;
   responsibilityOverlapPercent: number;
   baselineCoveragePercent: number;
   dimensionPercents: Record<ScoringContractV1DimensionKey, number>;
@@ -1502,6 +1602,11 @@ const buildFitScoreDebugBundle = (
     sharedVectors,
     jobVectors,
     baselineVectors,
+    transferableMatches,
+    transferableCoveragePercent,
+    transferableVectors,
+    unmatchedVectors,
+    adjustedResponsibilityOverlapPercent,
     responsibilityOverlapPercent,
     baselineCoveragePercent,
     dimensionPercents,
