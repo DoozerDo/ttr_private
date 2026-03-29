@@ -160,6 +160,9 @@ export type ScoringContractV1Penalty = {
 
 export type CxFitV2DebugInfo = {
   jobScoringTextSource: 'normalized' | 'raw';
+  jobTextForScoring: string;
+  jobTextForScoringLength: number;
+  jobVectorsLength: number;
   baselineBand: string;
   roleBand: string;
   bandDelta: number;
@@ -169,6 +172,7 @@ export type CxFitV2DebugInfo = {
   roleImpliedStrategyFloorApplied: boolean;
   originalStrategyRatioPercent: number;
   flooredStrategyRatioPercent: number;
+  strategyMatchesJob: number;
   originalAdvocacyRatioPercent: number;
   flooredAdvocacyRatioPercent: number;
   changeLeadershipEligibility: 'eligible' | 'ineligible_ic_role';
@@ -819,7 +823,9 @@ export const scoreCxFitV2 = (
     .join('\n\n');
 
   const jobTextForScoring =
-    normalizedJobSummary.length > 0 ? normalizedJobSummary : jobText;
+    normalizedJobSummary.length > 0
+      ? `${jobText} ${normalizedJobSummary}`
+      : jobText;
 
   const jobScoringTextSource = normalizedJobSummary.length > 0 ? 'normalized' : 'raw';
 
@@ -1299,6 +1305,9 @@ export const scoreCxFitV2 = (
     },
     debug: {
       jobScoringTextSource,
+      jobTextForScoring,
+      jobTextForScoringLength: jobTextForScoring.length,
+      jobVectorsLength: jobVectors.length,
       baselineBand: `L${baselineBand}`,
       roleBand: `L${roleBand}`,
       bandDelta,
@@ -1312,6 +1321,7 @@ export const scoreCxFitV2 = (
       roleImpliedStrategyFloorApplied,
       originalStrategyRatioPercent: clamp(Math.round(originalStrategyRatioPercent)),
       flooredStrategyRatioPercent: clamp(Math.round(flooredStrategyRatioPercent)),
+      strategyMatchesJob,
       originalAdvocacyRatioPercent: clamp(Math.round(originalAdvocacyRatioPercent)),
       flooredAdvocacyRatioPercent: clamp(Math.round(flooredAdvocacyRatioPercent)),
       jobClusters: jobClustersList,
