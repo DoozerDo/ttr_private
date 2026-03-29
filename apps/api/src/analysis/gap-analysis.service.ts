@@ -10,6 +10,33 @@ export type CriticalGap = {
   reasoning: string;
 };
 
+export type GapDebugCandidate = {
+  text: string;
+  normalized: string;
+  categories: string[];
+  score: number;
+  decision: 'accepted' | 'rejected' | 'weak';
+  rejectionReason?: string;
+};
+
+export type GapDebugTrace = {
+  gapLabel: string;
+  sourceRequirementText: string;
+  normalizedRequirement: string;
+  keywords: string[];
+  assignedCategory: string | null;
+  matchedEvidence: GapDebugCandidate[];
+  rejectedEvidence: GapDebugCandidate[];
+  suppressionReason?: string;
+  finalDecision: 'gap' | 'matched' | 'weak_match';
+  evidenceCategoryTrace: Array<{
+    originalText: string;
+    normalizedText: string;
+    categories: string[];
+    eligibleForMatching: boolean;
+  }>;
+};
+
 export type InterviewRisk = {
   riskId: string;
   topic: string;
@@ -24,6 +51,23 @@ export type GapAnalysisResult = {
   recommendedActions: string[];
   positioningSuggestions: string[];
   interviewRisks: InterviewRisk[];
+  debug?: {
+    enabled: boolean;
+    appliedRules: string[];
+    gapTraces: GapDebugTrace[];
+    baselineSignalTrace: Array<{
+      originalText: string;
+      normalizedText: string;
+      categories: string[];
+      eligibleForMatching: boolean;
+    }>;
+    requirementTrace: Array<{
+      originalText: string;
+      normalizedText: string;
+      keywords: string[];
+      assignedCategory: string | null;
+    }>;
+  };
 };
 
 type AnalyzeGapInput = {
@@ -32,6 +76,7 @@ type AnalyzeGapInput = {
   jobResponsibilities?: string[] | null;
   dimensionPercents?: Record<string, number | undefined> | null;
   maxGaps?: number;
+  debugMatching?: boolean;
 };
 
 type RequirementCandidate = {
@@ -48,6 +93,8 @@ type RequirementAssessment = {
   severity: number;
   importance: number;
   reasoning: string;
+  finalDecision: 'gap' | 'matched' | 'weak_match';
+  debug?: GapDebugTrace;
 };
 
 const STOP_WORDS = new Set([
@@ -221,6 +268,52 @@ const PROPER_CASE_WORDS: Record<string, string> = {
   salesforce: 'Salesforce',
 };
 
+const GAP_CATEGORY_KEYWORDS: Array<{
+  category: string;
+  patterns: RegExp[];
+}> = [
+  {
+    category: 'incident_management',
+    patterns: [/\bincident\b/i, /\bmajor incident\b/i, /\bincident management\b/i],
+  },
+  {
+    category: 'escalation_management',
+    patterns: [/\bescalation\b/i, /\bescalation management\b/i],
+  },
+  {
+    category: 'scope_scale',
+    patterns: [/\bscope\b/i, /\bglobal\b/i, /\benterprise\b/i, /\bscale\b/i],
+  },
+  {
+    category: 'leadership',
+    patterns: [/\blead\b/i, /\bleadership\b/i, /\bmanager\b/i, /\bdirector\b/i],
+  },
+  {
+    category: 'operations',
+    patterns: [/\boperation\b/i, /\boperations\b/i, /\boperational\b/i],
+  },
+  {
+    category: 'sla_kpi',
+    patterns: [/\bsla\b/i, /\bkpi\b/i, /\bmetric\b/i, /\bmetrics\b/i],
+  },
+  {
+    category: 'billing_ops',
+    patterns: [/\bbilling\b/i, /\binvoice\b/i, /\brevenue\b/i, /\bcollections\b/i],
+  },
+  {
+    category: 'automation',
+    patterns: [/\bautomation\b/i, /\bautomate\b/i, /\bworkflow\b/i],
+  },
+  {
+    category: 'tooling',
+    patterns: [/\btooling\b/i, /\bplatform\b/i, /\bsystem\b/i, /\bsystems\b/i],
+  },
+  {
+    category: 'support_routing',
+    patterns: [/\bsupport\b/i, /\brouting\b/i, /\btriage\b/i, /\bqueue\b/i],
+  },
+];
+
 @Injectable()
 export class GapAnalysisService {
   analyze(input: AnalyzeGapInput): GapAnalysisResult {
@@ -232,10 +325,33 @@ export class GapAnalysisService {
         recommendedActions: [],
         positioningSuggestions: [],
         interviewRisks: [],
+        ...(input.debugMatching
+          ? {
+              debug: {
+                enabled: true,
+                appliedRules: [],
+                gapTraces: [],
+                baselineSignalTrace: [],
+                requirementTrace: [],
+              },
+            }
+          : {}),
       };
     }
 
     const baselineLines = this.collectBaselineLines(input.baselineSections ?? []);
+    const baselineSignalTrace = baselineLines.map((line) => ({
+      originalText: line,
+      normalizedText: this.normalizeSignalKey(line),
+      categories: this.assignCategories(line),
+      eligibleForMatching: this.isDisplayableBaselineEvidence(line),
+    }));
+    const requirementTrace = requirements.map((candidate) => ({
+      originalText: candidate.text,
+      normalizedText: this.normalizeSignalKey(candidate.text),
+      keywords: this.tokenize(candidate.text),
+      assignedCategory: this.assignCategory(candidate.text),
+    }));
     const baselineText = baselineLines.join('\n').toLowerCase();
     const evaluated = requirements
       .map((item) =>
@@ -248,7 +364,9 @@ export class GapAnalysisService {
       )
       .filter((entry): entry is RequirementAssessment => Boolean(entry));
     const dedupedEvaluated = this.dedupeAssessments(evaluated);
-
+    const requirementDecisionMap = new Map(
+      dedupedEvaluated.map((entry) => [this.buildRequirementDecisionKey(entry), entry.finalDecision]),
+    );
     const uniqueStrengths = this.selectStrengthSignals(evaluated, 3);
     const normalizedStrengthSignals = new Set(
       uniqueStrengths.map((value) => this.normalizeSignalKey(value)),
@@ -258,6 +376,9 @@ export class GapAnalysisService {
     const criticalGaps = [...dedupedEvaluated]
       .sort((a, b) => b.severity - a.severity)
       .filter((entry) => {
+        if (entry.finalDecision === 'matched') {
+          return false;
+        }
         const normalizedTitle = this.normalizeSignalKey(entry.title);
         const normalizedRequirement = this.normalizeSignalKey(entry.requirementEvidence);
         if (!normalizedTitle && !normalizedRequirement) return false;
@@ -308,6 +429,49 @@ export class GapAnalysisService {
       recommendedActions,
       positioningSuggestions,
       interviewRisks,
+      ...(input.debugMatching
+        ? {
+            debug: {
+              enabled: true,
+              appliedRules: [
+                'requirement_normalization',
+                'baseline_signal_assignment',
+                'semantic_matching',
+                'gap_selection',
+              ],
+              gapTraces: evaluated
+                .filter((entry) => Boolean(entry.debug))
+                .map((entry) => {
+                  const debug = entry.debug as GapDebugTrace;
+                  const promotedToStrength =
+                    normalizedStrengthSignals.has(
+                      this.normalizeSignalKey(entry.title),
+                    ) ||
+                    normalizedStrengthSignals.has(
+                      this.normalizeSignalKey(entry.requirementEvidence),
+                    );
+                  return {
+                    ...debug,
+                    promotedToStrength,
+                    gapEligible: entry.finalDecision !== 'matched',
+                    suppressionReason:
+                      entry.finalDecision === 'matched'
+                        ? 'matched_requirement'
+                        : debug.suppressionReason,
+                    requirementDecision:
+                      requirementDecisionMap.get(this.buildRequirementDecisionKey(entry)) ??
+                      entry.finalDecision,
+                  } as GapDebugTrace & {
+                    promotedToStrength: boolean;
+                    gapEligible: boolean;
+                    requirementDecision: 'gap' | 'matched' | 'weak_match';
+                  };
+                }),
+              baselineSignalTrace,
+              requirementTrace,
+            },
+          }
+        : {}),
     };
   }
 
@@ -401,6 +565,7 @@ export class GapAnalysisService {
     const candidates = assessments
       .filter(
         (entry) =>
+          entry.finalDecision === 'matched' &&
           entry.evidenceScore >= 0.5 &&
           entry.importance >= 0.45 &&
           typeof entry.baselineEvidence === 'string' &&
@@ -436,12 +601,21 @@ export class GapAnalysisService {
     if (this.isCompensationText(req)) return null;
     const tokens = this.tokenize(req).slice(0, 20);
     if (!tokens.length) return null;
+    const assignedCategory = this.assignCategory(req);
+    const requirementKeywords = tokens;
 
     const matchedTokens = tokens.filter((token) =>
       baselineText.includes(token),
     );
     const tokenCoverage = matchedTokens.length / tokens.length;
-    const baselineEvidence = this.findBestEvidence(tokens, baselineLines);
+    const baselineCandidates = this.buildBaselineCandidates(
+      tokens,
+      baselineLines,
+      assignedCategory,
+    );
+    const baselineEvidence =
+      baselineCandidates.find((candidate) => candidate.decision === 'accepted')
+        ?.text ?? this.findBestEvidence(tokens, baselineLines);
     const evidenceScore = this.estimateEvidenceScore(tokenCoverage, baselineEvidence);
     const dimensionKey = this.inferDimensionKey(req);
 
@@ -467,12 +641,54 @@ export class GapAnalysisService {
     const compactBaselineEvidence = baselineEvidence
       ? this.toCompactEvidence(baselineEvidence, MAX_EVIDENCE_LENGTH)
       : null;
+    const finalDecision: RequirementAssessment['finalDecision'] =
+      evidenceScore >= 0.5
+        ? 'matched'
+        : evidenceScore >= 0.35
+          ? 'weak_match'
+          : 'gap';
     const reasoning = compactBaselineEvidence
       ? `The requirement is important for this role, but baseline evidence is partial. Closest evidence: "${this.shorten(
           compactBaselineEvidence,
           120,
         )}".`
       : 'The requirement is emphasized by the role but no direct baseline evidence was found.';
+
+    const debug: GapDebugTrace | undefined = baselineCandidates.length
+      ? {
+          gapLabel: title,
+          sourceRequirementText: req,
+          normalizedRequirement: this.normalizeSignalKey(req),
+          keywords: requirementKeywords,
+          assignedCategory,
+          matchedEvidence: baselineCandidates.filter(
+            (candidate) => candidate.decision === 'accepted',
+          ),
+          rejectedEvidence: baselineCandidates.filter(
+            (candidate) => candidate.decision !== 'accepted',
+          ),
+          suppressionReason: baselineCandidates.find(
+            (candidate) => candidate.decision !== 'accepted',
+          )?.rejectionReason,
+          finalDecision,
+          evidenceCategoryTrace: baselineCandidates.map((candidate) => ({
+            originalText: candidate.text,
+            normalizedText: candidate.normalized,
+            categories: candidate.categories,
+            eligibleForMatching: candidate.decision === 'accepted',
+          })),
+        }
+      : {
+          gapLabel: title,
+          sourceRequirementText: req,
+          normalizedRequirement: this.normalizeSignalKey(req),
+          keywords: requirementKeywords,
+          assignedCategory,
+          matchedEvidence: [],
+          rejectedEvidence: [],
+          finalDecision,
+          evidenceCategoryTrace: [],
+        };
 
     return {
       title,
@@ -483,6 +699,8 @@ export class GapAnalysisService {
       severity,
       importance,
       reasoning,
+      finalDecision,
+      debug,
     };
   }
 
@@ -557,6 +775,73 @@ export class GapAnalysisService {
       return phraseTitle;
     }
     return this.toTitleFromRequirement(requirement);
+  }
+
+  private assignCategory(text: string): string | null {
+    const normalized = this.clean(text).toLowerCase();
+    if (!normalized) return null;
+    for (const group of GAP_CATEGORY_KEYWORDS) {
+      if (group.patterns.some((pattern) => pattern.test(normalized))) {
+        return group.category;
+      }
+    }
+    return null;
+  }
+
+  private assignCategories(text: string): string[] {
+    const normalized = this.clean(text).toLowerCase();
+    if (!normalized) return [];
+    return GAP_CATEGORY_KEYWORDS.filter((group) =>
+      group.patterns.some((pattern) => pattern.test(normalized)),
+    ).map((group) => group.category);
+  }
+
+  private buildBaselineCandidates(
+    tokens: string[],
+    baselineLines: string[],
+    assignedCategory: string | null,
+  ): GapDebugCandidate[] {
+    const results: GapDebugCandidate[] = [];
+    for (const line of baselineLines) {
+      const normalized = this.normalizeSignalKey(line);
+      const categories = this.assignCategories(line);
+      const overlap = tokens.filter((token) => normalized.includes(token)).length;
+      const score = tokens.length ? overlap / tokens.length : 0;
+      const categoryOverlap =
+        assignedCategory && categories.includes(assignedCategory);
+      const hasCategorySupport = categories.length > 0;
+      const eligibleForMatching = this.isDisplayableBaselineEvidence(line);
+
+      let decision: GapDebugCandidate['decision'] = 'rejected';
+      let rejectionReason: string | undefined = 'low lexical overlap';
+      if (!eligibleForMatching) {
+        rejectionReason = 'noisy evidence';
+      } else if (score >= 0.7 || (score >= 0.5 && categoryOverlap)) {
+        decision = 'accepted';
+        rejectionReason = undefined;
+      } else if (score >= 0.35 || categoryOverlap || hasCategorySupport) {
+        decision = 'weak';
+        rejectionReason =
+          score >= 0.35 ? 'score below cutoff' : 'below semantic threshold';
+      } else if (!categories.length) {
+        rejectionReason = 'heading_only';
+      } else if (!overlap) {
+        rejectionReason = 'duplicate concept';
+      }
+
+      results.push({
+        text: line,
+        normalized,
+        categories,
+        score: Number(score.toFixed(3)),
+        decision,
+        rejectionReason,
+      });
+    }
+
+    return results
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 5);
   }
 
   private extractRequirementSignal(text: string): string {
@@ -739,6 +1024,14 @@ export class GapAnalysisService {
     return GENERIC_COMPANY_BOILERPLATE_PATTERNS.some((pattern) =>
       pattern.test(text),
     );
+  }
+
+  private buildRequirementDecisionKey(entry: RequirementAssessment): string {
+    return [
+      this.normalizeSignalKey(entry.title),
+      this.normalizeSignalKey(entry.requirementEvidence),
+      this.normalizeSignalKey(entry.baselineEvidence ?? ''),
+    ].join('|');
   }
 
   private isLegalOrApplicationBoilerplate(value: string): boolean {

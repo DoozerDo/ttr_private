@@ -18,7 +18,10 @@ export type ClaimUnit = {
   text: string;
   claim: StructuredClaim;
   sourceType: GeneratedTextSourceType;
+  sectionType?: string | null;
   sectionTitle?: string | null;
+  sectionIndex?: number;
+  candidateIndex?: number;
   integrityValid: boolean;
   integrityReason?: string;
   lineType: ResumeLineType;
@@ -130,7 +133,7 @@ export function extractClaimUnitsFromSections(
   const includeSkillStacks = options?.includeSkillStacks ?? false;
   const units: ClaimUnit[] = [];
 
-  for (const section of sections ?? []) {
+  for (const [sectionIndex, section] of (sections ?? []).entries()) {
     const sectionSourceType =
       section.sourceType ?? GeneratedTextSourceType.CONNECTIVE_LANGUAGE;
     const sentenceSources = Array.isArray(section.sentenceSources)
@@ -164,7 +167,7 @@ export function extractClaimUnitsFromSections(
             })),
           ];
 
-    for (const candidate of candidates) {
+    for (const [candidateIndex, candidate] of candidates.entries()) {
       if (baselineOnly && candidate.sourceType !== GeneratedTextSourceType.BASELINE_EVIDENCE) {
         continue;
       }
@@ -228,7 +231,10 @@ export function extractClaimUnitsFromSections(
             : classifyClaimEntityType(normalized),
         },
         sourceType: candidate.sourceType,
+        sectionType: section.sectionType ?? null,
         sectionTitle: section.title,
+        sectionIndex,
+        candidateIndex,
         integrityValid,
         integrityReason,
         lineType,

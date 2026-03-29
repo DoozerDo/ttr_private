@@ -3,6 +3,7 @@ import {
   ComplianceFlag,
   ComplianceFlagCode,
   ComplianceFlagSeverity,
+  ComplianceDebugTrace,
   DocumentType,
   JobApplicationContext,
   GeneratedTextSourceType,
@@ -22,6 +23,10 @@ type ScopeEvidence = {
   normalized: string;
   snippet: string;
   hasExtremeScale: boolean;
+  sectionType?: string | null;
+  sectionTitle?: string | null;
+  sectionIndex?: number;
+  candidateIndex?: number;
 };
 
 type ScopeClaim = {
@@ -29,6 +34,10 @@ type ScopeClaim = {
   normalized: string;
   snippet: string;
   hasExtremeScale: boolean;
+  sectionType?: string | null;
+  sectionTitle?: string | null;
+  sectionIndex?: number;
+  candidateIndex?: number;
 };
 
 type ScopeViolation = {
@@ -53,6 +62,7 @@ type BaselineFragmentSignalClass =
 type DetectorOptions = {
   embeddingProvider?: (text: string) => Promise<number[] | null>;
   similarityThreshold?: number;
+  debugTrace?: ComplianceDebugTrace;
 };
 
 const DEFAULT_SIMILARITY_THRESHOLD = 0.75;
@@ -116,6 +126,22 @@ const TECH_STACK_REFERENCE_PATTERN =
   /\b(?:stack|azure|aws|gcp|kubernetes|docker|windows|linux|terraform|ansible|ci\/cd|python|java|sql)\b/i;
 const DOMAIN_NOUN_PATTERN =
   /\b(?:platform|infrastructure|environment|network|lab|system|systems)\b/i;
+
+function resolveScopeLocation(
+  sectionType?: string | null,
+  sectionTitle?: string | null,
+): 'experience' | 'education' | 'summary' {
+  const combined = `${String(sectionType ?? '')} ${String(sectionTitle ?? '')}`.toLowerCase();
+  if (combined.includes('education')) return 'education';
+  if (combined.includes('summary')) return 'summary';
+  return 'experience';
+}
+
+function buildTraceConditions(values: Array<string | null | undefined>): string[] {
+  return values
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean);
+}
 
 export class ScopeInflationDetector {
   private normalize(text: string): string {
@@ -251,6 +277,10 @@ export class ScopeInflationDetector {
         normalized,
         snippet: this.extractSnippet(statement),
         hasExtremeScale: this.hasExtremeScaleSignal(normalized),
+        sectionType: unit.sectionType ?? null,
+        sectionTitle: unit.sectionTitle ?? null,
+        sectionIndex: unit.sectionIndex,
+        candidateIndex: unit.candidateIndex,
       });
     }
 
@@ -289,6 +319,10 @@ export class ScopeInflationDetector {
         normalized,
         snippet: this.extractSnippet(statement),
         hasExtremeScale: this.hasExtremeScaleSignal(normalized),
+        sectionType: unit.sectionType ?? null,
+        sectionTitle: unit.sectionTitle ?? null,
+        sectionIndex: unit.sectionIndex,
+        candidateIndex: unit.candidateIndex,
       });
     }
     return claims;
@@ -340,6 +374,41 @@ export class ScopeInflationDetector {
       );
       const similaritySupported =
         similarityMatch.bestSimilarity >= similarityThreshold;
+      if (options?.debugTrace?.enabled) {
+        options.debugTrace.appliedRules.push({
+          rule: 'SCOPE_INFLATION_SEMANTIC_MATCH',
+          reason: 'Evaluates scope claims against baseline evidence by semantic similarity.',
+          conditions: [
+            `similarityThreshold=${similarityThreshold.toFixed(2)}`,
+            `claim=${claim.snippet}`,
+          ],
+        });
+        options.debugTrace.evaluatedLines.push({
+          sourceText: claim.text,
+          section: resolveScopeLocation(claim.sectionType, claim.sectionTitle),
+          role: claim.sectionTitle?.trim() || undefined,
+          index:
+            typeof claim.candidateIndex === 'number'
+              ? claim.candidateIndex
+              : typeof claim.sectionIndex === 'number'
+                ? claim.sectionIndex
+                : undefined,
+          lineType: 'SCOPE_CLAIM',
+          rules: [
+            {
+              rule: 'SCOPE_INFLATION_SEMANTIC_MATCH',
+              reason: similaritySupported
+                ? 'Semantic similarity met the configured threshold.'
+                : 'Semantic similarity did not meet the configured threshold.',
+              conditions: [
+                `bestSimilarity=${similarityMatch.bestSimilarity.toFixed(3)}`,
+                `threshold=${similarityThreshold.toFixed(3)}`,
+              ],
+            },
+          ],
+          flagged: !similaritySupported,
+        });
+      }
       if (process.env.COMPLIANCE_TRACE === 'true') {
         console.debug(
           '[scope-inflation-trace]',
@@ -389,18 +458,55 @@ export class ScopeInflationDetector {
       reason: violation.reason,
     }));
 
-    return [
-      {
-        code: ComplianceFlagCode.SCOPE_INFLATION,
-        severity: hasBlocking
-          ? ComplianceFlagSeverity.BLOCK
-          : ComplianceFlagSeverity.WARN,
-        message: hasBlocking
-          ? 'Potential scope inflation exceeds baseline scope.'
-          : 'Potential scope inflation cues need review against baseline.',
-        evidence,
-        confidence: hasBlocking ? 0.9 : 0.58,
+    const flag: ComplianceFlag = {
+      code: ComplianceFlagCode.SCOPE_INFLATION,
+      severity: hasBlocking
+        ? ComplianceFlagSeverity.BLOCK
+        : ComplianceFlagSeverity.WARN,
+      message: hasBlocking
+        ? 'Potential scope inflation exceeds baseline scope.'
+        : 'Potential scope inflation cues need review against baseline.',
+      evidence,
+      confidence: hasBlocking ? 0.9 : 0.58,
+      type: 'SCOPE_INFLATION',
+      sourceText: violations[0]?.generated ?? '',
+      location: {
+        section: 'experience',
+        index: 0,
       },
-    ];
+      rule: 'SCOPE_INFLATION_SEMANTIC_MATCH',
+      reason: hasBlocking
+        ? 'Scope claim exceeded baseline support.'
+        : 'Scope cue required review against baseline support.',
+      conditions: buildTraceConditions([
+        `hasBlocking=${String(hasBlocking)}`,
+        `violationCount=${violations.length}`,
+      ]),
+    };
+
+    if (options?.debugTrace?.enabled) {
+      options.debugTrace.evaluatedLines.push({
+        sourceText: violations[0]?.generated ?? '',
+        section: 'experience',
+        index: 0,
+        lineType: 'SCOPE_CLAIM',
+        rules: [
+          {
+            rule: 'SCOPE_INFLATION_SEMANTIC_MATCH',
+            reason: hasBlocking
+              ? 'Semantic similarity did not meet the configured threshold.'
+              : 'Semantic similarity met the configured threshold.',
+            conditions: [
+              `hasBlocking=${String(hasBlocking)}`,
+              `violationCount=${violations.length}`,
+            ],
+          },
+        ],
+        flagged: true,
+        flags: [flag],
+      });
+    }
+
+    return [flag];
   }
 }

@@ -2,6 +2,8 @@ import {
   ComplianceFlag,
   ComplianceFlagCode,
   ComplianceFlagSeverity,
+  ComplianceDebugTrace,
+  ComplianceFlagLocationSection,
   ComplianceTextSection,
   DocumentType,
   GeneratedTextSourceType,
@@ -26,6 +28,7 @@ type DetectorPayload = {
   baselineAllowlist?: BaselineAllowlistSnapshot | null;
   jobContext?: JobApplicationContext | null;
   documentType?: DocumentType;
+  debugTrace?: ComplianceDebugTrace;
 };
 
 type DetectorTraceRecord = {
@@ -38,10 +41,95 @@ type DetectorTraceRecord = {
   assertionPattern?: string | null;
 };
 
+function resolveComplianceLocation(
+  sectionType?: string | null,
+  sectionTitle?: string | null,
+  lineType?: ResumeLineType,
+): ComplianceFlagLocationSection {
+  const combined = `${String(sectionType ?? '')} ${String(sectionTitle ?? '')}`.toLowerCase();
+  if (combined.includes('education')) return 'education';
+  if (combined.includes('summary')) return 'summary';
+  if (combined.includes('experience')) return 'experience';
+  if (lineType === ResumeLineType.ROLE_HEADER || lineType === ResumeLineType.BULLET_CLAIM) {
+    return 'experience';
+  }
+  return 'summary';
+}
+
+function buildTraceConditions(values: Array<string | null | undefined>): string[] {
+  return values
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean);
+}
+
 function emitDetectorTrace(record: DetectorTraceRecord): void {
   if (process.env.COMPLIANCE_TRACE !== 'true') return;
   // Debug-safe server-side trace for compliance tuning. Not exposed to UI payloads.
   console.debug(`[compliance-trace] ${JSON.stringify(record)}`);
+}
+
+function addComplianceDebugLine(
+  debugTrace: ComplianceDebugTrace | undefined,
+  line: {
+    sourceText: string;
+    sectionType?: string | null;
+    sectionTitle?: string | null;
+    sectionIndex?: number;
+    candidateIndex?: number;
+    lineType?: ResumeLineType;
+    rule: string;
+    reason: string;
+    conditions?: string[];
+    flagged: boolean;
+    flag?: ComplianceFlag;
+  },
+): void {
+  if (!debugTrace?.enabled) return;
+
+  const section = resolveComplianceLocation(
+    line.sectionType,
+    line.sectionTitle,
+    line.lineType,
+  );
+  const role = line.sectionTitle?.trim() || undefined;
+  const index =
+    typeof line.candidateIndex === 'number'
+      ? line.candidateIndex
+      : typeof line.sectionIndex === 'number'
+        ? line.sectionIndex
+        : undefined;
+  const existing = debugTrace.evaluatedLines.find(
+    (entry) =>
+      entry.sourceText === line.sourceText &&
+      entry.section === section &&
+      entry.index === index &&
+      entry.role === role,
+  );
+  const traceRule = {
+    rule: line.rule,
+    reason: line.reason,
+    conditions: line.conditions?.filter(Boolean),
+  };
+
+  if (existing) {
+    existing.rules.push(traceRule);
+    if (line.flagged && line.flag) {
+      existing.flagged = true;
+      existing.flags = [...(existing.flags ?? []), line.flag];
+    }
+    return;
+  }
+
+  debugTrace.evaluatedLines.push({
+    sourceText: line.sourceText,
+    section,
+    role,
+    index,
+    lineType: line.lineType,
+    rules: [traceRule],
+    flagged: line.flagged,
+    flags: line.flagged && line.flag ? [line.flag] : undefined,
+  });
 }
 
 const COMPANY_CONTEXT_PATTERN =
@@ -487,12 +575,22 @@ type SourcedCandidate = {
   original: string;
   sourceType?: GeneratedTextSourceType | null;
   sourceText?: string;
+  sectionType?: string | null;
+  sectionTitle?: string | null;
+  sectionIndex?: number;
+  candidateIndex?: number;
+  lineType?: ResumeLineType;
 };
 
 type SourcedTextSpan = {
   text: string;
   claim: { text: string; type: EntityType };
   sourceType?: GeneratedTextSourceType | null;
+  sectionType?: string | null;
+  sectionTitle?: string | null;
+  sectionIndex?: number;
+  candidateIndex?: number;
+  lineType?: ResumeLineType;
 };
 
 function isBaselineEvidenceSourceType(
@@ -525,6 +623,11 @@ function collectSourcedTextSpans(
       text: unit.text,
       claim: unit.claim,
       sourceType: unit.sourceType,
+      sectionType: unit.sectionType ?? null,
+      sectionTitle: unit.sectionTitle ?? null,
+      sectionIndex: unit.sectionIndex,
+      candidateIndex: unit.candidateIndex,
+      lineType: unit.lineType,
     }));
 }
 
@@ -933,6 +1036,10 @@ type MetricCandidate = {
   context: string;
   sourceType?: GeneratedTextSourceType | null;
   sourceText?: string;
+  sectionType?: string | null;
+  sectionTitle?: string | null;
+  sectionIndex?: number;
+  candidateIndex?: number;
 };
 
 function normalizeMetricToken(value: string): string {
@@ -989,7 +1096,7 @@ export function collectMetricCandidatesFromSections(
 ): MetricCandidate[] {
   const candidates: MetricCandidate[] = [];
 
-  for (const span of collectSourcedTextSpans(sections)) {
+  for (const [sectionIndex, span] of collectSourcedTextSpans(sections).entries()) {
     const text = span.text;
     if (!text) continue;
 
@@ -1014,6 +1121,10 @@ export function collectMetricCandidatesFromSections(
         context,
         sourceType: span.sourceType,
         sourceText: text,
+        sectionType: span.sectionType ?? null,
+        sectionTitle: span.sectionTitle ?? null,
+        sectionIndex: span.sectionIndex ?? sectionIndex,
+        candidateIndex: candidates.length,
       });
     }
 
@@ -1058,6 +1169,10 @@ export function collectMetricCandidatesFromSections(
         context,
         sourceType: span.sourceType,
         sourceText: text,
+        sectionType: span.sectionType ?? null,
+        sectionTitle: span.sectionTitle ?? null,
+        sectionIndex: span.sectionIndex ?? sectionIndex,
+        candidateIndex: candidates.length,
       });
     }
   }
@@ -1104,18 +1219,126 @@ export function detectInventedMetric(
   const flags: ComplianceFlag[] = [];
 
   for (const candidate of generatedCandidates) {
-    if (!isBaselineEvidenceSourceType(candidate.sourceType)) continue;
-    if (baselineSet.has(candidate.normalized)) continue;
+    if (!isBaselineEvidenceSourceType(candidate.sourceType)) {
+      addComplianceDebugLine(payload.debugTrace, {
+        sourceText: candidate.sourceText ?? candidate.original,
+        sectionType: candidate.sectionType,
+        sectionTitle: candidate.sectionTitle,
+        sectionIndex: candidate.sectionIndex,
+        candidateIndex: candidate.candidateIndex,
+        lineType: ResumeLineType.BULLET_CLAIM,
+        rule: 'METRIC_CONTEXT_VALIDATION',
+        reason: 'Skipped because sourceType was not BASELINE_EVIDENCE.',
+        conditions: buildTraceConditions([
+          `sourceType=${String(candidate.sourceType ?? 'UNSPECIFIED')}`,
+          'sourceGuard=baseline-evidence',
+        ]),
+        flagged: false,
+      });
+      continue;
+    }
+    if (baselineSet.has(candidate.normalized)) {
+      addComplianceDebugLine(payload.debugTrace, {
+        sourceText: candidate.sourceText ?? candidate.original,
+        sectionType: candidate.sectionType,
+        sectionTitle: candidate.sectionTitle,
+        sectionIndex: candidate.sectionIndex,
+        candidateIndex: candidate.candidateIndex,
+        lineType: ResumeLineType.BULLET_CLAIM,
+        rule: 'METRIC_CONTEXT_VALIDATION',
+        reason: 'Skipped because metric token exists in baseline allowlist.',
+        conditions: buildTraceConditions([
+          `normalized=${candidate.normalized}`,
+          'baselineTokenPresent=true',
+        ]),
+        flagged: false,
+      });
+      continue;
+    }
     if (flagged.has(candidate.normalized)) continue;
-    if (!hasMetricContext(candidate.context)) continue;
-    if (isIgnoredMetricCandidate(candidate)) continue;
+    if (!hasMetricContext(candidate.context)) {
+      addComplianceDebugLine(payload.debugTrace, {
+        sourceText: candidate.sourceText ?? candidate.original,
+        sectionType: candidate.sectionType,
+        sectionTitle: candidate.sectionTitle,
+        sectionIndex: candidate.sectionIndex,
+        candidateIndex: candidate.candidateIndex,
+        lineType: ResumeLineType.BULLET_CLAIM,
+        rule: 'METRIC_CONTEXT_VALIDATION',
+        reason: 'Skipped because metric context was not present.',
+        conditions: buildTraceConditions([
+          `normalized=${candidate.normalized}`,
+          'metricContext=false',
+        ]),
+        flagged: false,
+      });
+      continue;
+    }
+    if (isIgnoredMetricCandidate(candidate)) {
+      addComplianceDebugLine(payload.debugTrace, {
+        sourceText: candidate.sourceText ?? candidate.original,
+        sectionType: candidate.sectionType,
+        sectionTitle: candidate.sectionTitle,
+        sectionIndex: candidate.sectionIndex,
+        candidateIndex: candidate.candidateIndex,
+        lineType: ResumeLineType.BULLET_CLAIM,
+        rule: 'METRIC_CONTEXT_VALIDATION',
+        reason: 'Skipped by ignored metric candidate patterns.',
+        conditions: buildTraceConditions([
+          `normalized=${candidate.normalized}`,
+          'ignoredMetricPattern=true',
+        ]),
+        flagged: false,
+      });
+      continue;
+    }
 
     flagged.add(candidate.normalized);
-    flags.push({
+    const flag: ComplianceFlag = {
       code: ComplianceFlagCode.INVENTED_METRIC,
       severity: ComplianceFlagSeverity.BLOCK,
       message: `Detected invented metric "${candidate.original}". Only mention measurable outcomes you can trace back to your verified baseline or scoped job context.`,
       confidence: 0.96,
+      type: 'INVENTED_METRIC',
+      sourceText: candidate.sourceText ?? candidate.original,
+      location: {
+        section: resolveComplianceLocation(
+          candidate.sectionType,
+          candidate.sectionTitle,
+          ResumeLineType.BULLET_CLAIM,
+        ),
+        role: candidate.sectionTitle?.trim() || undefined,
+        index:
+          typeof candidate.candidateIndex === 'number'
+            ? candidate.candidateIndex
+            : typeof candidate.sectionIndex === 'number'
+              ? candidate.sectionIndex
+              : undefined,
+      },
+      rule: 'METRIC_CONTEXT_VALIDATION',
+      reason: 'Metric candidate matched metric-context checks and was not supported by baseline tokens.',
+      conditions: buildTraceConditions([
+        `normalized=${candidate.normalized}`,
+        `context=${candidate.context}`,
+        'baselineTokenMissing=true',
+      ]),
+    };
+    flags.push(flag);
+    addComplianceDebugLine(payload.debugTrace, {
+      sourceText: candidate.sourceText ?? candidate.original,
+      sectionType: candidate.sectionType,
+      sectionTitle: candidate.sectionTitle,
+      sectionIndex: candidate.sectionIndex,
+      candidateIndex: candidate.candidateIndex,
+      lineType: ResumeLineType.BULLET_CLAIM,
+      rule: 'METRIC_CONTEXT_VALIDATION',
+      reason: 'Metric candidate matched metric-context checks and emitted a compliance flag.',
+      conditions: buildTraceConditions([
+        `normalized=${candidate.normalized}`,
+        `context=${candidate.context}`,
+      ]),
+      flagged: true,
+      flag,
     });
     console.warn(
       'inventedMetric detector blocked span',
@@ -1582,6 +1805,8 @@ function detectInventedEntity(options: {
   sourceTypeGuard?: (
     sourceType: GeneratedTextSourceType | null | undefined,
   ) => boolean;
+  ruleName?: string;
+  debugTrace?: ComplianceDebugTrace;
   candidateSkip?: (candidate: {
     normalized: string;
     original: string;
@@ -1679,6 +1904,17 @@ function detectInventedEntity(options: {
 
   const flags: ComplianceFlag[] = [];
   const detectorName = String(options.code);
+  const ruleName = options.ruleName ?? `${detectorName.toUpperCase()}_VALIDATION`;
+  if (options.debugTrace?.enabled) {
+    options.debugTrace.appliedRules.push({
+      rule: ruleName,
+      reason: `Evaluates baseline evidence candidates for ${detectorName}.`,
+      conditions: buildTraceConditions([
+        'sourceType=BASELINE_EVIDENCE',
+        `documentType=${String(options.documentType ?? DocumentType.UNKNOWN)}`,
+      ]),
+    });
+  }
 
   for (const candidate of generated) {
     const { normalized, original, sourceType } = candidate;
@@ -1693,6 +1929,21 @@ function detectInventedEntity(options: {
         evaluated: false,
         skipReason: 'skipped_non_baseline_source',
       });
+      addComplianceDebugLine(options.debugTrace, {
+        sourceText: candidate.sourceText ?? original,
+        sectionType: candidate.sectionType,
+        sectionTitle: candidate.sectionTitle,
+        sectionIndex: candidate.sectionIndex,
+        candidateIndex: candidate.candidateIndex,
+        lineType: candidate.lineType,
+        rule: ruleName,
+        reason: 'Skipped because sourceType was not BASELINE_EVIDENCE.',
+        conditions: buildTraceConditions([
+          `sourceType=${String(sourceType ?? 'UNSPECIFIED')}`,
+          'sourceGuard=baseline-evidence',
+        ]),
+        flagged: false,
+      });
       continue;
     }
     if (
@@ -1705,6 +1956,21 @@ function detectInventedEntity(options: {
         sourceText: candidate.sourceText,
       })
     ) {
+      addComplianceDebugLine(options.debugTrace, {
+        sourceText: candidate.sourceText ?? original,
+        sectionType: candidate.sectionType,
+        sectionTitle: candidate.sectionTitle,
+        sectionIndex: candidate.sectionIndex,
+        candidateIndex: candidate.candidateIndex,
+        lineType: candidate.lineType,
+        rule: ruleName,
+        reason: 'Skipped by candidateSkip gate.',
+        conditions: buildTraceConditions([
+          `sourceType=${String(sourceType ?? 'UNSPECIFIED')}`,
+          'candidateSkip=true',
+        ]),
+        flagged: false,
+      });
       continue;
     }
     if (allowedNormalized.has(normalized)) {
@@ -1716,12 +1982,42 @@ function detectInventedEntity(options: {
         evaluated: false,
         skipReason: 'skipped_allowlisted',
       });
+      addComplianceDebugLine(options.debugTrace, {
+        sourceText: candidate.sourceText ?? original,
+        sectionType: candidate.sectionType,
+        sectionTitle: candidate.sectionTitle,
+        sectionIndex: candidate.sectionIndex,
+        candidateIndex: candidate.candidateIndex,
+        lineType: candidate.lineType,
+        rule: ruleName,
+        reason: 'Skipped because the candidate was allowlisted.',
+        conditions: buildTraceConditions([
+          `normalized=${normalized}`,
+          'allowlisted=true',
+        ]),
+        flagged: false,
+      });
       continue;
     }
     if (
       baselineSuffixSet &&
       matchesBaselineAllowlistSuffix(normalized, baselineSuffixSet)
     ) {
+      addComplianceDebugLine(options.debugTrace, {
+        sourceText: candidate.sourceText ?? original,
+        sectionType: candidate.sectionType,
+        sectionTitle: candidate.sectionTitle,
+        sectionIndex: candidate.sectionIndex,
+        candidateIndex: candidate.candidateIndex,
+        lineType: candidate.lineType,
+        rule: ruleName,
+        reason: 'Skipped by baseline suffix allowlist.',
+        conditions: buildTraceConditions([
+          `normalized=${normalized}`,
+          'baselineSuffixAllowlist=true',
+        ]),
+        flagged: false,
+      });
       continue;
     }
     if (options.allowlist(normalized, original)) {
@@ -1733,6 +2029,21 @@ function detectInventedEntity(options: {
         evaluated: false,
         skipReason: 'skipped_allowlist_rule',
       });
+      addComplianceDebugLine(options.debugTrace, {
+        sourceText: candidate.sourceText ?? original,
+        sectionType: candidate.sectionType,
+        sectionTitle: candidate.sectionTitle,
+        sectionIndex: candidate.sectionIndex,
+        candidateIndex: candidate.candidateIndex,
+        lineType: candidate.lineType,
+        rule: ruleName,
+        reason: 'Skipped by explicit allowlist rule.',
+        conditions: buildTraceConditions([
+          `normalized=${normalized}`,
+          'allowlistRule=true',
+        ]),
+        flagged: false,
+      });
       continue;
     }
 
@@ -1742,6 +2053,21 @@ function detectInventedEntity(options: {
       matchesJobContextValue(normalized, jobContextSet) &&
       options.contextualSkip(normalized, normalizedGeneratedText)
     ) {
+      addComplianceDebugLine(options.debugTrace, {
+        sourceText: candidate.sourceText ?? original,
+        sectionType: candidate.sectionType,
+        sectionTitle: candidate.sectionTitle,
+        sectionIndex: candidate.sectionIndex,
+        candidateIndex: candidate.candidateIndex,
+        lineType: candidate.lineType,
+        rule: ruleName,
+        reason: 'Skipped by contextualSkip gate.',
+        conditions: buildTraceConditions([
+          `sourceType=${String(sourceType ?? 'UNSPECIFIED')}`,
+          'contextualSkip=true',
+        ]),
+        flagged: false,
+      });
       continue;
     }
 
@@ -1750,6 +2076,21 @@ function detectInventedEntity(options: {
       options.jobContextField &&
       containsJobContextSubstring(normalized, jobContextSet)
     ) {
+      addComplianceDebugLine(options.debugTrace, {
+        sourceText: candidate.sourceText ?? original,
+        sectionType: candidate.sectionType,
+        sectionTitle: candidate.sectionTitle,
+        sectionIndex: candidate.sectionIndex,
+        candidateIndex: candidate.candidateIndex,
+        lineType: candidate.lineType,
+        rule: ruleName,
+        reason: 'Skipped because candidate matched job context substring.',
+        conditions: buildTraceConditions([
+          `sourceType=${String(sourceType ?? 'UNSPECIFIED')}`,
+          'jobContextSubstring=true',
+        ]),
+        flagged: false,
+      });
       continue;
     }
 
@@ -1758,6 +2099,21 @@ function detectInventedEntity(options: {
       options.jobContextField === 'allowedRoleTitles' &&
       isCoverLetterAboutPhrase(normalized)
     ) {
+      addComplianceDebugLine(options.debugTrace, {
+        sourceText: candidate.sourceText ?? original,
+        sectionType: candidate.sectionType,
+        sectionTitle: candidate.sectionTitle,
+        sectionIndex: candidate.sectionIndex,
+        candidateIndex: candidate.candidateIndex,
+        lineType: candidate.lineType,
+        rule: ruleName,
+        reason: 'Skipped because the line is a cover-letter about phrase.',
+        conditions: buildTraceConditions([
+          `sourceType=${String(sourceType ?? 'UNSPECIFIED')}`,
+          'coverLetterAboutPhrase=true',
+        ]),
+        flagged: false,
+      });
       continue;
     }
 
@@ -1767,6 +2123,21 @@ function detectInventedEntity(options: {
       jobContextSet.size &&
       !/[A-Z]/.test(original)
     ) {
+      addComplianceDebugLine(options.debugTrace, {
+        sourceText: candidate.sourceText ?? original,
+        sectionType: candidate.sectionType,
+        sectionTitle: candidate.sectionTitle,
+        sectionIndex: candidate.sectionIndex,
+        candidateIndex: candidate.candidateIndex,
+        lineType: candidate.lineType,
+        rule: ruleName,
+        reason: 'Skipped because candidate did not meet job-context casing gate.',
+        conditions: buildTraceConditions([
+          `sourceType=${String(sourceType ?? 'UNSPECIFIED')}`,
+          'uppercaseRequirement=false',
+        ]),
+        flagged: false,
+      });
       continue;
     }
 
@@ -1781,6 +2152,21 @@ function detectInventedEntity(options: {
         normalizedJobTitles,
       })
     ) {
+      addComplianceDebugLine(options.debugTrace, {
+        sourceText: candidate.sourceText ?? original,
+        sectionType: candidate.sectionType,
+        sectionTitle: candidate.sectionTitle,
+        sectionIndex: candidate.sectionIndex,
+        candidateIndex: candidate.candidateIndex,
+        lineType: candidate.lineType,
+        rule: ruleName,
+        reason: 'Skipped by cover-letter role suppression.',
+        conditions: buildTraceConditions([
+          `sourceType=${String(sourceType ?? 'UNSPECIFIED')}`,
+          'roleSuppression=true',
+        ]),
+        flagged: false,
+      });
       continue;
     }
 
@@ -1790,13 +2176,6 @@ function detectInventedEntity(options: {
         : options.confidenceFactory
           ? options.confidenceFactory(original)
           : 0.92;
-
-    flags.push({
-      code: options.code,
-      severity: ComplianceFlagSeverity.BLOCK,
-      message: options.message(original),
-      confidence,
-    });
     const assertionPattern = options.assertionPatternResolver
       ? options.assertionPatternResolver({
           normalized,
@@ -1806,18 +2185,78 @@ function detectInventedEntity(options: {
           sourceText: candidate.sourceText,
         })
       : null;
+    const sourceText = candidate.sourceText ?? original;
+    const flag: ComplianceFlag = {
+      code: options.code,
+      severity: ComplianceFlagSeverity.BLOCK,
+      message: options.message(original),
+      confidence,
+      type:
+        options.code === ComplianceFlagCode.INVENTED_COMPANY
+          ? 'INVENTED_COMPANY'
+          : options.code === ComplianceFlagCode.INVENTED_ROLE
+            ? 'INVENTED_ROLE'
+            : options.code === ComplianceFlagCode.SCOPE_INFLATION
+              ? 'SCOPE_INFLATION'
+              : options.code === ComplianceFlagCode.MISSING_BASELINE_HASH
+                ? 'MISSING_BASELINE_HASH'
+                : options.code === ComplianceFlagCode.MISSING_BASELINE_VERSION
+                  ? 'MISSING_BASELINE_VERSION'
+                  : options.code === ComplianceFlagCode.STYLIZED_PUNCTUATION
+                    ? 'STYLIZED_PUNCTUATION'
+                    : 'INVALID_ASSERTION',
+      sourceText,
+      location: {
+        section: resolveComplianceLocation(
+          candidate.sectionType,
+          candidate.sectionTitle,
+          candidate.lineType,
+        ),
+        role: candidate.sectionTitle?.trim() || undefined,
+        index:
+          typeof candidate.candidateIndex === 'number'
+            ? candidate.candidateIndex
+            : typeof candidate.sectionIndex === 'number'
+              ? candidate.sectionIndex
+              : undefined,
+      },
+      rule: ruleName,
+      reason: 'Candidate matched the detector and failed the allowlist checks.',
+      conditions: buildTraceConditions([
+        `sourceType=${String(sourceType ?? 'UNSPECIFIED')}`,
+        `normalized=${normalized}`,
+        'allowlisted=false',
+      ]),
+    };
+    flags.push(flag);
     emitDetectorTrace({
       detector: detectorName,
-      text: candidate.sourceText ?? original,
+      text: sourceText,
       normalized,
       sourceType: String(sourceType ?? 'UNSPECIFIED'),
       evaluated: true,
       skipReason: null,
       assertionPattern,
     });
+    addComplianceDebugLine(options.debugTrace, {
+      sourceText,
+      sectionType: candidate.sectionType,
+      sectionTitle: candidate.sectionTitle,
+      sectionIndex: candidate.sectionIndex,
+      candidateIndex: candidate.candidateIndex,
+      lineType: candidate.lineType,
+      rule: ruleName,
+      reason: 'Detector matched and emitted a compliance flag.',
+      conditions: buildTraceConditions([
+        `sourceType=${String(sourceType ?? 'UNSPECIFIED')}`,
+        `assertionPattern=${assertionPattern ?? 'none'}`,
+      ]),
+      flagged: true,
+      flag,
+    });
     console.warn(
       `${detectorName} detector blocked span`,
-      `text="${candidate.sourceText ?? original}" sourceType=${String(
+      `text="${sourceText}" sourceType=${String(
         sourceType ?? 'UNSPECIFIED',
       )} detector=${detectorName} assertionPattern="${assertionPattern ?? 'none'}"`,
     );
@@ -1857,6 +2296,8 @@ export function detectInventedCompany(
     baselineAllowlist: payload.baselineAllowlist?.allowedCompanies ?? [],
     confidence: 0.95,
     documentType: payload.documentType,
+    ruleName: 'COMPANY_ASSERTION_VALIDATION',
+    debugTrace: payload.debugTrace,
     sourceTypeGuard: (sourceType) =>
       sourceType === GeneratedTextSourceType.BASELINE_EVIDENCE,
     candidateSkip: ({ normalized, original, normalizedGeneratedText, sourceText }) =>
@@ -1897,6 +2338,8 @@ export function detectInventedRole(payload: DetectorPayload): ComplianceFlag[] {
     baselineSuffixAllowlist: true,
     confidence: 0.95,
     documentType: payload.documentType,
+    ruleName: 'ROLE_ASSERTION_VALIDATION',
+    debugTrace: payload.debugTrace,
     sourceTypeGuard: (sourceType) =>
       sourceType === GeneratedTextSourceType.BASELINE_EVIDENCE,
     candidateSkip: ({ original, sourceText, sourceType }) => {
@@ -2173,11 +2616,31 @@ export function collectTechnologyClaimsFromSections(
   options?: {
     resolveEntity?: (token: string) => { text: string; type: EntityType };
   },
-): Map<string, { text: string; type: EntityType }> {
+): Map<
+  string,
+  {
+    text: string;
+    type: EntityType;
+    sectionType?: string | null;
+    sectionTitle?: string | null;
+    sectionIndex?: number;
+    candidateIndex?: number;
+  }
+> {
   const tokens = new Map<string, string>();
-  const claims = new Map<string, { text: string; type: EntityType }>();
+  const claims = new Map<
+    string,
+    {
+      text: string;
+      type: EntityType;
+      sectionType?: string | null;
+      sectionTitle?: string | null;
+      sectionIndex?: number;
+      candidateIndex?: number;
+    }
+  >();
 
-  for (const span of collectSourcedTextSpans(sections, {
+  for (const [sectionIndex, span] of collectSourcedTextSpans(sections, {
     includeSkillStacks: true,
     includeBaselineEvidenceFragments: true,
     allowedLineTypes: [
@@ -2186,7 +2649,7 @@ export function collectTechnologyClaimsFromSections(
       ResumeLineType.BULLET_EVIDENCE_FRAGMENT,
       ResumeLineType.SKILL_STACK,
     ],
-  })) {
+  }).entries()) {
     if (!isBaselineEvidenceSourceType(span.sourceType)) continue;
     if (
       isLikelyFragmentSpan(span.text, {
@@ -2216,6 +2679,10 @@ export function collectTechnologyClaimsFromSections(
       claims.set(normalized, {
         text: resolved.text || candidate,
         type: resolved.type,
+        sectionType: span.sectionType ?? null,
+        sectionTitle: span.sectionTitle ?? null,
+        sectionIndex: span.sectionIndex ?? sectionIndex,
+        candidateIndex: span.candidateIndex,
       });
     }
   }
@@ -2283,11 +2750,33 @@ export function detectFictionalTechnology(
       if (supported) {
         continue;
       }
-      flags.push({
+      const flag: ComplianceFlag = {
         code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
         severity: ComplianceFlagSeverity.WARN,
         message: `Conceptual claim "${original}" has limited direct baseline support.`,
         confidence: 0.6,
+        type: 'INVALID_ASSERTION',
+        sourceText: original,
+        location: {
+          section: resolveComplianceLocation(
+            claim.sectionType,
+            claim.sectionTitle,
+            ResumeLineType.BULLET_CLAIM,
+          ),
+          role: claim.sectionTitle?.trim() || undefined,
+          index:
+            typeof claim.candidateIndex === 'number'
+              ? claim.candidateIndex
+              : typeof claim.sectionIndex === 'number'
+                ? claim.sectionIndex
+                : undefined,
+        },
+        rule: 'TECHNOLOGY_ASSERTION_VALIDATION',
+        reason: 'Conceptual technology claim lacked direct baseline support.',
+        conditions: buildTraceConditions([
+          `normalized=${normalized}`,
+          'support=derived-only',
+        ]),
         evidence: [
           {
             baseline: '',
@@ -2295,17 +2784,40 @@ export function detectFictionalTechnology(
             generatedClaim: claim,
           },
         ],
-      });
+      };
+      flags.push(flag);
       continue;
     }
     const tokenForConfidence = original ?? normalized;
     const confidence = computeTechnologyConfidence(tokenForConfidence);
     if (hasEquivalentCapability(original, payload.baselineSections)) {
-      flags.push({
+      const flag: ComplianceFlag = {
         code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
         severity: ComplianceFlagSeverity.WARN,
         message: `Technology "${original}" is not explicitly listed, but equivalent baseline capability was detected.`,
         confidence: Math.max(0.55, confidence - 0.2),
+        type: 'INVALID_ASSERTION',
+        sourceText: original,
+        location: {
+          section: resolveComplianceLocation(
+            claim.sectionType,
+            claim.sectionTitle,
+            ResumeLineType.BULLET_CLAIM,
+          ),
+          role: claim.sectionTitle?.trim() || undefined,
+          index:
+            typeof claim.candidateIndex === 'number'
+              ? claim.candidateIndex
+              : typeof claim.sectionIndex === 'number'
+                ? claim.sectionIndex
+                : undefined,
+        },
+        rule: 'TECHNOLOGY_ASSERTION_VALIDATION',
+        reason: 'Technology claim mapped to an equivalent capability but was not explicitly listed.',
+        conditions: buildTraceConditions([
+          `normalized=${normalized}`,
+          'equivalentCapability=true',
+        ]),
         evidence: [
           {
             baseline: '',
@@ -2313,15 +2825,38 @@ export function detectFictionalTechnology(
             generatedClaim: claim,
           },
         ],
-      });
+      };
+      flags.push(flag);
       continue;
     }
 
-    flags.push({
+    const flag: ComplianceFlag = {
       code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
       severity: ComplianceFlagSeverity.BLOCK,
       message: `Technology "${original}" not found in baseline.`,
       confidence,
+      type: 'INVALID_ASSERTION',
+      sourceText: original,
+      location: {
+        section: resolveComplianceLocation(
+          claim.sectionType,
+          claim.sectionTitle,
+          ResumeLineType.BULLET_CLAIM,
+        ),
+        role: claim.sectionTitle?.trim() || undefined,
+        index:
+          typeof claim.candidateIndex === 'number'
+            ? claim.candidateIndex
+            : typeof claim.sectionIndex === 'number'
+              ? claim.sectionIndex
+              : undefined,
+      },
+      rule: 'TECHNOLOGY_ASSERTION_VALIDATION',
+      reason: 'Technology claim was not found in the verified baseline.',
+      conditions: buildTraceConditions([
+        `normalized=${normalized}`,
+        'baselineTokenMissing=true',
+      ]),
       evidence: [
         {
           baseline: '',
@@ -2329,7 +2864,8 @@ export function detectFictionalTechnology(
           generatedClaim: claim,
         },
       ],
-    });
+    };
+    flags.push(flag);
     console.warn(
       'inventedTechnology detector blocked span',
       `text="${original}" sourceType=${GeneratedTextSourceType.BASELINE_EVIDENCE} detector=inventedTechnology`,

@@ -117,6 +117,48 @@ describe('ComplianceService', () => {
     );
   });
 
+  it('returns structured compliance trace details when debugCompliance is enabled', async () => {
+    const result = await service.validateAndAudit({
+      action: ComplianceAction.RESUME_GENERATION,
+      actorId: 'user-debug',
+      baselineVersion: baselineVersionWithHash,
+      outputHash: 'out-debug',
+      debugCompliance: true,
+      baselineSections: [
+        {
+          title: 'Professional Experience',
+          content: 'Senior Support Manager at Acme\nLed support operations.',
+          sectionType: BaselineSectionType.EXPERIENCE,
+          sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+        },
+      ],
+      generatedSections: [
+        {
+          title: 'Chief Moonshot Officer',
+          content: 'My role was Chief Moonshot Officer at Acme.',
+          sectionType: BaselineSectionType.EXPERIENCE,
+          sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+          sentenceSources: [
+            {
+              text: 'Chief Moonshot Officer',
+              sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+            },
+            {
+              text: 'My role was Chief Moonshot Officer at Acme.',
+              sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result.debugTrace?.enabled).toBe(true);
+    expect(result.debugTrace?.appliedRules.length).toBeGreaterThan(0);
+    expect(result.debugTrace?.evaluatedLines.some((line) =>
+      line.sourceText.includes('Chief Moonshot Officer'),
+    )).toBe(true);
+  });
+
   describe('policy map enforcement', () => {
     it('downgrades technology flags below block threshold', async () => {
       const result = await service.validateAndAudit({

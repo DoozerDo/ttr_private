@@ -36,6 +36,8 @@ export class AnalysisController {
   async analyze(
     @Body() body: AnalysisRequest,
     @Req() request: Request & { user?: { id?: string } },
+    @Query('debugCompliance') debugCompliance?: string,
+    @Query('debugMatching') debugMatching?: string,
   ) {
     const userId = request.user?.id;
 
@@ -43,7 +45,13 @@ export class AnalysisController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.analysisService.analyzeForUser(userId, body);
+    return this.analysisService.analyzeForUser(userId, {
+      ...body,
+      debugCompliance:
+        debugCompliance === '1' || debugCompliance === 'true' || Boolean(body.debugCompliance),
+      debugMatching:
+        debugMatching === '1' || debugMatching === 'true' || Boolean(body.debugMatching),
+    });
   }
 
   @Post('run')
@@ -51,6 +59,8 @@ export class AnalysisController {
     @Body() body: RunFitAssessmentDto,
     @Req() request: Request & { user?: { id?: string } },
     @Query('debug') debug?: string,
+    @Query('debugCompliance') debugCompliance?: string,
+    @Query('debugMatching') debugMatching?: string,
   ) {
     const userId = request.user?.id;
 
@@ -62,8 +72,21 @@ export class AnalysisController {
       debug === '1' ||
       debug === 'true' ||
       Boolean(body.debug);
+    const debugComplianceEnabled =
+      debugCompliance === '1' ||
+      debugCompliance === 'true' ||
+      Boolean((body as { debugCompliance?: boolean }).debugCompliance);
+    const debugMatchingEnabled =
+      debugMatching === '1' ||
+      debugMatching === 'true' ||
+      Boolean((body as { debugMatching?: boolean }).debugMatching);
 
-    const payload = { ...body, debug: debugEnabled };
+    const payload = {
+      ...body,
+      debug: debugEnabled,
+      debugCompliance: debugComplianceEnabled,
+      debugMatching: debugMatchingEnabled,
+    };
 
     if (process.env.NODE_ENV !== 'production') {
       const baselineId = payload.baselineId;

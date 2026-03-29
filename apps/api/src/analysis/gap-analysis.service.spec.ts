@@ -295,5 +295,107 @@ describe('GapAnalysisService', () => {
     expect(gapTitles).not.toContain('candidate');
     expect(gapTitles.some((title) => title.includes('embedded systems development'))).toBe(true);
   });
+
+  it('returns a matching debug trace for obvious support scope signals', () => {
+    const result = service.analyze({
+      baselineSections: [
+        {
+          content:
+            'Led incident management and escalation workflows across enterprise support teams while owning scope governance.',
+        },
+      ],
+      jobRequirements: ['Own incident management and scope governance.'],
+      jobResponsibilities: [],
+      debugMatching: true,
+    });
+
+    expect(result.debug?.enabled).toBe(true);
+    expect(
+      result.debug?.baselineSignalTrace.some((entry) =>
+        entry.normalizedText.includes('incident management'),
+      ),
+    ).toBe(true);
+    expect(
+      result.debug?.requirementTrace.some((entry) =>
+        entry.normalizedText.includes('incident management'),
+      ),
+    ).toBe(true);
+
+    const trace = result.debug?.gapTraces.find((entry) =>
+      entry.sourceRequirementText.toLowerCase().includes('incident management'),
+    );
+    expect(trace).toEqual(
+      expect.objectContaining({
+        gapLabel: expect.any(String),
+        finalDecision: expect.stringMatching(/gap|matched|weak_match/),
+      }),
+    );
+  });
+
+  it('does not emit matched incident management and scope requirements as gaps', () => {
+    const result = service.analyze({
+      baselineSections: [
+        {
+          content:
+            'organizational_scale: Led support ops at enterprise scale (teamSize=50+, customerCount=10000+, isEstimate=true)\nSenior Director of Customer Operations who led incident management, service delivery, escalation governance, and service reliability.\nOwned ITSM process maturity, automation and workflow design, runbooks, dashboards, and KPIs while directing global coverage.\nManaged managers across contact center ops, chaired governance forums, and reported to the executive committee for SaaS and enterprise IT customers.',
+        },
+      ],
+      jobRequirements: [
+        'Own incident management and scope governance.',
+        'Lead incident management and scope across enterprise teams.',
+      ],
+      jobResponsibilities: [],
+      debugMatching: true,
+    });
+
+    const gapTitles = result.criticalGaps.map((gap) => gap.title.toLowerCase());
+    expect(gapTitles).not.toContain('incident management and scope governance.');
+    expect(gapTitles).not.toContain('incident management and scope');
+    expect(
+      result.debug?.gapTraces.some(
+        (trace) =>
+          trace.sourceRequirementText.toLowerCase().includes('incident management') &&
+          trace.finalDecision === 'matched',
+      ),
+    ).toBe(true);
+  });
+
+  it('keeps weak matches eligible for gaps when they are not promoted to strengths', () => {
+    const weakAssessment = {
+      title: 'Direct automation and workflow design',
+      requirementEvidence: 'Direct automation and workflow design for dashboards.',
+      baselineEvidence:
+        'Owned ITSM process maturity, automation and workflow design, runbooks, dashboards, and KPIs while directing global coverage.',
+      evidenceScore: 0.4,
+      relevanceScore: 0.44,
+      severity: 0.18,
+      importance: 0.7,
+      reasoning: 'mocked',
+      finalDecision: 'weak_match',
+    };
+
+    expect((service as any).selectStrengthSignals([weakAssessment], 3)).toEqual([]);
+  });
+
+  it('prevents the incident management and scope benchmark from surfacing as gaps when it is matched', () => {
+    const result = service.analyze({
+      baselineSections: [
+        {
+          content:
+            'organizational_scale: Led support ops at enterprise scale (teamSize=50+, customerCount=10000+, isEstimate=true)\nSenior Director of Customer Operations who led incident management, service delivery, escalation governance, and service reliability.\nOwned ITSM process maturity, automation and workflow design, runbooks, dashboards, and KPIs while directing global coverage.\nManaged managers across contact center ops, chaired governance forums, and reported to the executive committee for SaaS and enterprise IT customers.',
+        },
+      ],
+      jobRequirements: [
+        'Own incident management and scope governance.',
+        'Lead incident management and scope across enterprise teams.',
+      ],
+      jobResponsibilities: [],
+      debugMatching: true,
+    });
+
+    const titles = result.criticalGaps.map((gap) => gap.title.toLowerCase());
+    expect(titles).not.toContain('incident management and scope governance.');
+    expect(titles).not.toContain('incident management and scope');
+  });
 });
 

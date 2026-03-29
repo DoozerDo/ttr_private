@@ -29,6 +29,34 @@ export enum ComplianceFlagSeverity {
   WARN = 'warn',
 }
 
+export type ComplianceFlagLocationSection =
+  | 'experience'
+  | 'education'
+  | 'summary';
+
+export type ComplianceFlagLocation = {
+  section: ComplianceFlagLocationSection;
+  role?: string;
+  index?: number;
+};
+
+export type ComplianceRuleTrace = {
+  rule: string;
+  reason: string;
+  conditions?: string[];
+};
+
+export type ComplianceFlagType =
+  | 'INVENTED_ROLE'
+  | 'INVENTED_COMPANY'
+  | 'SCOPE_INFLATION'
+  | 'INVALID_ASSERTION'
+  | 'INVENTED_METRIC'
+  | 'FICTIONAL_TECHNOLOGY'
+  | 'STYLIZED_PUNCTUATION'
+  | 'MISSING_BASELINE_HASH'
+  | 'MISSING_BASELINE_VERSION';
+
 export enum GeneratedTextSourceType {
   BASELINE_EVIDENCE = 'BASELINE_EVIDENCE',
   JD_REFERENCE = 'JD_REFERENCE',
@@ -39,6 +67,12 @@ export type ComplianceFlag = {
   code: ComplianceFlagCode;
   severity: ComplianceFlagSeverity;
   message: string;
+  type?: ComplianceFlagType;
+  sourceText?: string;
+  location?: ComplianceFlagLocation;
+  rule?: string;
+  reason?: string;
+  conditions?: string[];
   confidence?: number;
   evidence?: Array<{
     baseline: string;
@@ -50,6 +84,23 @@ export type ComplianceFlag = {
       type: 'company' | 'technology' | 'concept' | 'derived' | 'operational_descriptor';
     };
   }>;
+};
+
+export type ComplianceDebugTraceLine = {
+  sourceText: string;
+  section: ComplianceFlagLocationSection;
+  role?: string;
+  index?: number;
+  lineType?: string;
+  rules: ComplianceRuleTrace[];
+  flagged: boolean;
+  flags?: ComplianceFlag[];
+};
+
+export type ComplianceDebugTrace = {
+  enabled: boolean;
+  appliedRules: ComplianceRuleTrace[];
+  evaluatedLines: ComplianceDebugTraceLine[];
 };
 
 export type ComplianceTextSection = {

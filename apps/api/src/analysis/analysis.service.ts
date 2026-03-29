@@ -25,6 +25,7 @@ import {
   ComplianceAction,
   ComplianceFlag,
   ComplianceFlagSeverity,
+  ComplianceDebugTrace,
 } from '../compliance/compliance.types';
 import {
   getInsufficientExtractedTextDetails,
@@ -91,6 +92,8 @@ export type AnalysisRequest = {
   baselineId: string;
   jobId?: string;
   jobDescription?: string;
+  debugCompliance?: boolean;
+  debugMatching?: boolean;
 };
 
 export type AnalysisResult = {
@@ -101,6 +104,7 @@ export type AnalysisResult = {
   gaps: string[];
   summary: string;
   compliance_flags?: Array<{ code: string; message?: string }>;
+  compliance_debug?: ComplianceDebugTrace;
   audit_id?: string | null;
   auditId?: string | null;
   baseline_version_hash?: string | null;
@@ -122,6 +126,7 @@ export type FitScoreRequest = {
   job?: FitScoreJobInput;
   baseline_version_id?: string;
   debug?: boolean;
+  debugCompliance?: boolean;
   debugSource?: DebugSource;
   selected_block_ids?: string[];
 };
@@ -272,6 +277,7 @@ type FitScoreResponse = {
   overallScore?: number;
   dimensionScores?: FitAssessment['dimensionScores'];
   complianceFlags?: FitAssessment['complianceFlags'];
+  compliance_debug?: ComplianceDebugTrace;
   summary?: string;
   fit_score_debug?: FitScoreDebugBundle;
   debug?: CompatibilityRunDebugPayload;
@@ -347,6 +353,7 @@ type RunFitAssessmentComplianceBlockedResponse = {
     message: string;
   };
   complianceFlags?: ComplianceFlag[];
+  compliance_debug?: ComplianceDebugTrace;
   compliance_flags?: Array<{ code: string; message?: string }>;
   audit_id?: string | null;
   auditId?: string | null;
@@ -369,6 +376,8 @@ type RunFitAssessmentPayload = RunFitAssessmentDto & {
   job_id?: string;
   baseline_id?: string;
   baseline_version_id?: number | string;
+  debugCompliance?: boolean;
+  debugMatching?: boolean;
 };
 
 @Injectable()
@@ -721,6 +730,7 @@ export class AnalysisService {
       jobRequirements: job.normalizedRequirements ?? [],
       jobResponsibilities: job.normalizedResponsibilities ?? [],
       dimensionPercents: this.mapAssessmentDimensionPercents(assessment),
+      debugMatching: false,
     });
   }
 
@@ -1865,6 +1875,7 @@ export class AnalysisService {
       jobRequirements: normalizedJobRequirements,
       jobResponsibilities: normalizedJobResponsibilities,
       dimensionPercents: scoringV2.rubric.dimensionPercents,
+      debugMatching: false,
     });
     const strengths = gapInsights.strengths;
     const gaps = gapInsights.criticalGaps.map((gap) => gap.title);
@@ -1883,6 +1894,7 @@ export class AnalysisService {
       outputHash: inputsHash,
       baselineSections: complianceBaselineSections,
       generatedSections: generatedSectionsForCompliance,
+      debugCompliance: Boolean(payload.debugCompliance),
       extraFlags: scoring
         ? this.mapComplianceStringsToFlags(scoring.complianceFlags)
         : undefined,
@@ -1994,6 +2006,7 @@ export class AnalysisService {
       criticalGaps: gapInsights.criticalGaps,
       recommendedActions: gapInsights.recommendedActions,
       compliance_flags: this.coerceComplianceFlags(compliance.complianceFlags),
+      ...(compliance.debugTrace ? { compliance_debug: compliance.debugTrace } : {}),
       audit_id: compliance.audit.id,
       auditId: compliance.audit.id,
       assessmentId: savedAssessment?.id,
@@ -2147,6 +2160,7 @@ export class AnalysisService {
         outputHash,
         baselineSections: complianceBaselineSections,
         generatedSections: generatedSectionsForCompliance,
+        debugCompliance: Boolean(payload.debugCompliance),
       });
 
       if (compliance.blocked) {
@@ -2167,6 +2181,7 @@ export class AnalysisService {
         gaps: gapList,
         summary,
         compliance_flags: this.coerceComplianceFlags(compliance.complianceFlags),
+        ...(compliance.debugTrace ? { compliance_debug: compliance.debugTrace } : {}),
         audit_id: compliance.audit.id,
         auditId: compliance.audit.id,
         baseline_version_hash:
@@ -2408,6 +2423,9 @@ export class AnalysisService {
         jobRequirements: normalizedJobRequirements,
         jobResponsibilities: normalizedJobResponsibilities,
         dimensionPercents: scoringV2.rubric.dimensionPercents,
+        debugMatching: Boolean(
+          (normalizedPayload as RunFitAssessmentPayload).debugMatching,
+        ),
       });
       const strengths = gapInsights.strengths;
       const gaps = gapInsights.criticalGaps.map((gap) => gap.title);
@@ -2492,6 +2510,7 @@ export class AnalysisService {
         outputHash: inputsHash,
         baselineSections: complianceBaselineSections,
         generatedSections: generatedSectionsForCompliance,
+        debugCompliance: Boolean(normalizedPayload.debugCompliance),
         extraFlags: debugScoring
           ? this.mapComplianceStringsToFlags(debugScoring.complianceFlags)
           : undefined,
@@ -2530,6 +2549,7 @@ export class AnalysisService {
           this.buildSummaryFromTerms(strengths, gaps),
         confidenceScore: confidenceResult.confidenceScore,
         confidenceReasons: confidenceResult.confidenceReasons,
+        ...(compliance.debugTrace ? { compliance_debug: compliance.debugTrace } : {}),
         compliance: {
           blocked: true,
           flags: normalizedFlags,
@@ -2803,6 +2823,7 @@ export class AnalysisService {
       outputHash: inputsHash,
       baselineSections: complianceBaselineSections,
       generatedSections: generatedSectionsForCompliance,
+      debugCompliance: false,
       extraFlags: this.mapComplianceStringsToFlags(scoring.complianceFlags),
     });
 

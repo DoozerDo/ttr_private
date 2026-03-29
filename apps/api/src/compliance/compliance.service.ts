@@ -9,6 +9,7 @@ import {
   ComplianceFlagCode,
   ComplianceFlag,
   ComplianceFlagSeverity,
+  ComplianceDebugTrace,
   ComplianceTextSection,
   DocumentType,
   GeneratedTextSourceType,
@@ -40,6 +41,7 @@ export type ValidateAndAuditRequest = {
   generatedSections?: ComplianceTextSection[] | null;
   baselineAllowlist?: BaselineAllowlistSnapshot | null;
   documentType?: DocumentType;
+  debugCompliance?: boolean;
 
   outputHash: string;
 
@@ -54,6 +56,7 @@ export type ValidateAndAuditRequest = {
 export type ValidateAndAuditResult = {
   blocked: boolean;
   complianceFlags: ComplianceFlag[];
+  debugTrace?: ComplianceDebugTrace;
   audit: {
     id: string;
     baselineVersionId: string | null;
@@ -150,6 +153,7 @@ export class ComplianceService {
     generatedSections?: ComplianceTextSection[] | null;
     jobContext?: JobApplicationContext | null;
     documentType?: DocumentType;
+    debugTrace?: ComplianceDebugTrace;
   }): Promise<ComplianceFlag[]> {
     const baselineSections = payload.baselineSections ?? [];
     const generatedSections = this.selectBaselineClaimSections(
@@ -163,6 +167,7 @@ export class ComplianceService {
       {
         embeddingProvider: (text: string) =>
           this.embeddingService.embed(text),
+        debugTrace: payload.debugTrace,
       },
     );
   }
@@ -186,6 +191,13 @@ export class ComplianceService {
   ): Promise<ValidateAndAuditResult> {
     const rawFlags: ComplianceFlag[] = [];
     const baselineVersion = payload.baselineVersion;
+    const debugTrace: ComplianceDebugTrace | undefined = payload.debugCompliance
+      ? {
+          enabled: true,
+          appliedRules: [],
+          evaluatedLines: [],
+        }
+      : undefined;
 
     const needsFallback =
       !baselineVersion?.allowedCompanies?.length ||
@@ -309,6 +321,7 @@ export class ComplianceService {
         baselineAllowlist,
         jobContext: payload.jobContext,
         documentType: payload.documentType,
+        debugTrace,
       });
       rawFlags.push(...inventedFlags);
     }
@@ -339,6 +352,7 @@ export class ComplianceService {
     return {
       blocked,
       complianceFlags: finalFlags,
+      ...(debugTrace ? { debugTrace } : {}),
       audit: {
         id: savedAudit.id,
         outputHash: savedAudit.outputHash ?? '',
@@ -359,6 +373,7 @@ export class ComplianceService {
     baselineAllowlist?: BaselineAllowlistSnapshot | null;
     jobContext?: JobApplicationContext;
     documentType?: DocumentType;
+    debugTrace?: ComplianceDebugTrace;
   }): ComplianceFlag[] {
     const generatedClaimSections = this.normalizeGeneratedSectionsForClaimValidation(
       payload.generatedSections ?? [],
@@ -369,13 +384,14 @@ export class ComplianceService {
 
     return [
       ...detectInventedCompany({
-        baselineSections: payload.baselineSections,
-        generatedSections: generatedClaimSections,
-        job: payload.job,
-        baselineAllowlist: payload.baselineAllowlist,
-        jobContext: payload.jobContext,
-        documentType: payload.documentType,
-      }),
+      baselineSections: payload.baselineSections,
+      generatedSections: generatedClaimSections,
+      job: payload.job,
+      baselineAllowlist: payload.baselineAllowlist,
+      jobContext: payload.jobContext,
+      documentType: payload.documentType,
+      debugTrace: payload.debugTrace,
+    }),
       ...detectInventedRole({
         baselineSections: payload.baselineSections,
         generatedSections: generatedClaimSections,
@@ -383,12 +399,14 @@ export class ComplianceService {
         baselineAllowlist: payload.baselineAllowlist,
         jobContext: payload.jobContext,
         documentType: payload.documentType,
+        debugTrace: payload.debugTrace,
       }),
       ...detectInventedMetric({
         baselineSections: payload.baselineSections,
         generatedSections: generatedClaimSections,
         job: payload.job,
         baselineAllowlist: payload.baselineAllowlist,
+        debugTrace: payload.debugTrace,
       }),
       ...detectFictionalTechnology({
         baselineSections: payload.baselineSections,
@@ -396,6 +414,7 @@ export class ComplianceService {
         job: payload.job,
         baselineAllowlist: payload.baselineAllowlist,
         jobContext: payload.jobContext,
+        debugTrace: payload.debugTrace,
       }),
     ];
   }
@@ -431,7 +450,35 @@ export class ComplianceService {
     severity: ComplianceFlagSeverity,
     confidence?: number,
   ): ComplianceFlag {
-    const flag: ComplianceFlag = { code: code as any, message, severity };
+    const normalizedCode = String(code ?? '').toUpperCase();
+    const flag: ComplianceFlag = {
+      code: code as any,
+      message,
+      severity,
+      type:
+        normalizedCode === 'SCOPE_INFLATION'
+          ? 'SCOPE_INFLATION'
+          : normalizedCode === 'MISSING_BASELINE_HASH'
+            ? 'MISSING_BASELINE_HASH'
+            : normalizedCode === 'MISSING_BASELINE_VERSION'
+              ? 'MISSING_BASELINE_VERSION'
+              : normalizedCode === 'INVENTED_COMPANY'
+                ? 'INVENTED_COMPANY'
+                : normalizedCode === 'INVENTED_ROLE'
+                  ? 'INVENTED_ROLE'
+                  : normalizedCode === 'INVENTED_METRIC'
+                    ? 'INVENTED_METRIC'
+                    : normalizedCode === 'FICTIONAL_TECHNOLOGY'
+                      ? 'INVALID_ASSERTION'
+                      : normalizedCode === 'STYLIZED_PUNCTUATION'
+                        ? 'INVALID_ASSERTION'
+                        : 'INVALID_ASSERTION',
+      sourceText: message,
+      location: { section: 'summary' },
+      rule: normalizedCode || 'SYSTEM_VALIDATION',
+      reason: message,
+      conditions: [normalizedCode || 'system_validation'],
+    };
     if (confidence !== undefined) {
       flag.confidence = confidence;
     }

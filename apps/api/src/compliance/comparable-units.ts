@@ -10,7 +10,10 @@ export type ComparableComplianceUnit = {
   claim: { text: string; type: EntityType };
   normalized: string;
   sourceType: GeneratedTextSourceType;
+  sectionType?: string | null;
   sectionTitle?: string | null;
+  sectionIndex?: number;
+  candidateIndex?: number;
   integrityValid: boolean;
   integrityReason?: string;
   lineType: ResumeLineType;
@@ -65,7 +68,10 @@ export function buildComparableComplianceUnits(
       claim: unit.claim,
       normalized,
       sourceType: unit.sourceType,
+      sectionType: unit.sectionType ?? null,
       sectionTitle: unit.sectionTitle,
+      sectionIndex: unit.sectionIndex,
+      candidateIndex: unit.candidateIndex,
       integrityValid: unit.integrityValid,
       integrityReason: unit.integrityReason,
       lineType: unit.lineType,

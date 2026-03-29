@@ -18,6 +18,7 @@ import {
   archiveBaseline,
   deleteBaseline,
   isBaselineAnalyzedFromSummary,
+  getLatestRoleAnalysisFitScore,
   type BaselineAssessmentSummaryDto,
   type BaselineDto,
 } from "@/lib/baselines";
@@ -392,11 +393,27 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     return "ready";
   }, [activeBaselines.length, primaryAnalysisStatus, primaryBaselineId, primaryBaseline]);
   const analysisReady = baselineStrengthState === "ready";
-  const heroState: "no_baseline" | "in_progress" | "ready" = useMemo(() => {
-    if (activeBaselines.length === 0) return "no_baseline";
-    if (analysisReady && certification.isCertified) return "ready";
-    return "in_progress";
-  }, [activeBaselines.length, analysisReady, certification.isCertified]);
+  const latestAssessmentSummary = primaryBaseline?.latestAssessmentSummary ?? null;
+  const hasBaseline = activeBaselines.length > 0;
+  const hasCompletedAnalysis = isBaselineAnalyzedFromSummary(latestAssessmentSummary);
+  const latestFitScore = getLatestRoleAnalysisFitScore(latestAssessmentSummary);
+  const latestAssessmentId = latestAssessmentSummary?.latestAssessmentId?.trim() ?? null;
+  const latestAssessmentCreatedAt = latestAssessmentSummary?.latestAssessmentCreatedAt?.trim() ?? null;
+  const latestResultsHref = latestAssessmentId
+    ? `/results?assessmentId=${encodeURIComponent(latestAssessmentId)}`
+    : null;
+  const studioHref = latestAssessmentId
+    ? `/studio?assessmentId=${encodeURIComponent(latestAssessmentId)}&analysisId=${encodeURIComponent(latestAssessmentId)}${
+        primaryBaselineId ? `&baselineId=${encodeURIComponent(primaryBaselineId)}` : ""
+      }`
+    : null;
+  const fitReviewHref = latestResultsHref ? `${latestResultsHref}&locked=1` : "/fit-review";
+  const targetHref = primaryBaselineId ? `/target?baselineId=${encodeURIComponent(primaryBaselineId)}` : "/target";
+  const heroState: "no_baseline" | "no_analysis" | "analysis_exists" = useMemo(() => {
+    if (!hasBaseline) return "no_baseline";
+    if (!hasCompletedAnalysis) return "no_analysis";
+    return "analysis_exists";
+  }, [hasBaseline, hasCompletedAnalysis]);
   const careerGravity = useMemo(
     () => buildCareerGravityUnlock(completedRoleAnalyses),
     [completedRoleAnalyses],
@@ -951,53 +968,116 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         <section className="rounded-[28px] bg-slate-900/40 p-6 md:p-8">
           <div className="max-w-3xl space-y-5">
             <div className="space-y-2">
-                <h1 className="text-3xl font-semibold tracking-tight text-white md:text-[34px]">
-                  Start with your experience
-                </h1>
-                <p className="text-base leading-7 text-slate-300">
-                  We'll structure your resume into a clear, verified baseline so every score and document stays grounded in your real work.
-                </p>
-              <p className="text-sm leading-6 text-slate-400">
-                Most tools generate from raw text. We generate from a structured version of your experience so nothing is invented or lost.
+              <h1 className="text-3xl font-semibold tracking-tight text-white md:text-[34px]">
+                {heroState === "no_baseline"
+                  ? "Build your baseline library"
+                  : heroState === "no_analysis"
+                    ? "Build your baseline library"
+                    : "Your baseline is active"}
+              </h1>
+              <p className="text-base leading-7 text-slate-300">
+                {heroState === "no_baseline"
+                  ? "Upload the resumes you want to work from. Each file is converted into a baseline that can be used for scoring and document generation. Choose one active baseline for downstream analysis."
+                  : heroState === "no_analysis"
+                    ? "Upload the resumes you want to work from. Each file is converted into a baseline that can be used for scoring and document generation. Choose one active baseline for downstream analysis."
+                    : "Your baseline is the verified version of your experience used across scoring and document generation."}
               </p>
+              <p className="text-sm leading-6 text-slate-400">
+                A baseline is the verified version of your resume that this app uses for scoring and document generation.
+              </p>
+              <p className="text-sm font-medium text-slate-200">Your baseline is not your resume.</p>
             </div>
-            <div>
-              {heroState === "ready" ? (
+            <div className="space-y-3">
+              <FormButton
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading || uploadLimitReached || !isEditableLibrary}
+                className="bg-indigo-600 text-white hover:bg-indigo-500"
+              >
+                {isEditableLibrary
+                  ? isUploading
+                    ? "Uploading..."
+                    : "Upload resume"
+                  : "Upload unavailable"}
+              </FormButton>
+              <p className="text-sm text-slate-400">Accepted file types: PDF and DOCX</p>
+            </div>
+            {heroState !== "no_baseline" ? (
+              <div className="flex flex-wrap gap-2">
+                {heroState === "no_analysis" ? (
+                  <FormButton
+                    onClick={() => {
+                      if (primaryBaselineId) void runCanonicalBaselineAnalysis(primaryBaselineId);
+                    }}
+                    disabled={!isHydrated || !primaryBaselineId}
+                  >
+                    Run Career Compatibility Analysis
+                  </FormButton>
+                ) : (
+                  <Link
+                    href={latestResultsHref ?? "/results"}
+                    className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                  >
+                    View latest results
+                  </Link>
+                )}
                 <Link
-                  href={primaryBaselineId ? getBaselineDetailsHref(primaryBaselineId) : "/baseline"}
-                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                  href={targetHref}
+                  className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-5 py-2.5 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
                 >
-                  Run Career Compatibility Analysis
+                  Analyze a job description
                 </Link>
-              ) : heroState === "in_progress" && primaryBaselineId ? (
-                <FormButton
-                  onClick={() => void runCanonicalBaselineAnalysis(primaryBaselineId)}
-                  disabled={!isHydrated}
-                  className="bg-indigo-600 text-white hover:bg-indigo-500"
-                >
-                  Run Career Compatibility Analysis
-                </FormButton>
-              ) : (
-                <FormButton
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isUploading || uploadLimitReached || !isEditableLibrary}
-                  className="bg-indigo-600 text-white hover:bg-indigo-500"
-                >
-                  {isEditableLibrary
-                    ? isUploading
-                      ? "Uploading..."
-                      : "Upload your resume"
-                    : "Upload unavailable"}
-                </FormButton>
-              )}
-            </div>
+              </div>
+            ) : null}
           </div>
         </section>
+        <section className="rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
+          <h2 className="text-lg font-semibold text-slate-100">Why this matters</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-300">
+            Upload the resume you already have. We turn it into a verified baseline, which is the working version
+            used for scoring and document generation. That keeps every result grounded in your real experience.
+          </p>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <div className="rounded-xl border border-white/10 bg-slate-950/30 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Step 1</p>
+              <p className="mt-2 text-sm font-medium text-slate-100">Upload your resume</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-slate-950/30 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Step 2</p>
+              <p className="mt-2 text-sm font-medium text-slate-100">We verify and structure your experience</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-slate-950/30 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Step 3</p>
+              <p className="mt-2 text-sm font-medium text-slate-100">
+                Use that baseline to score roles and generate documents
+              </p>
+            </div>
+          </div>
+          <details className="mt-4 rounded-xl border border-white/10 bg-slate-950/30 p-4">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+              Why not use my resume as-is?
+            </summary>
+            <p className="mt-2 text-sm leading-6 text-slate-300">
+              Because resumes are written for people, not systems. TTR first turns your resume into a verified
+              working version so scores and generated documents stay consistent, traceable, and grounded in what
+              you have actually done.
+            </p>
+          </details>
+        </section>
+        {hasCompletedAnalysis ? (
+          <section className="rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Active baseline</p>
+            <p className="mt-2 text-sm text-slate-300">
+              Your active baseline is the one used when you analyze a job description or generate application materials.
+            </p>
+          </section>
+        ) : null}
         {allBaselines.length > 0 ? (
           <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
             <header className="space-y-1">
-              <h2 className="text-xl font-semibold tracking-tight text-slate-100">Your resume</h2>
-              <p className="text-sm text-slate-400">Your resume becomes the structured source for everything else.</p>
+              <h2 className="text-xl font-semibold tracking-tight text-slate-100">Baseline library</h2>
+              <p className="text-sm text-slate-400">
+                Your active baseline is the one used when you analyze a job description or generate application materials.
+              </p>
             </header>
             <div className="space-y-3">
               {allBaselines.slice(0, 3).map((baseline) => {
@@ -1005,7 +1085,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 const isArchived = baseline.status === "ARCHIVED";
                 const assessmentSummary = baseline.latestAssessmentSummary;
                 const hasCompletedAssessment = isBaselineAnalyzedFromSummary(assessmentSummary);
-                const canView = hasCompletedAssessment;
                 const isLoading = loadingBaselineId === baseline.id;
                 const latestAssessmentTimestamp = assessmentSummary?.latestAssessmentCreatedAt;
                 const latestRoleFitScore =
@@ -1017,7 +1096,12 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   isAnalyzing: isLoading,
                 });
                 const readinessLabel = getBaselineReadinessLabel(readinessState);
-                const shouldShowViewAction = canView && !isArchived;
+                const setActiveDisabled = isLoading || isPrimary || isArchived || !isHydrated;
+                const baselineDetailsHref = getBaselineDetailsHref(baseline.id);
+                const latestResultsForBaselineHref = assessmentSummary?.latestAssessmentId
+                  ? `/results?assessmentId=${encodeURIComponent(assessmentSummary.latestAssessmentId)}`
+                  : null;
+                const canOpenStudio = latestRoleFitScore !== null && latestRoleFitScore >= 70;
 
                 return (
                   <article
@@ -1032,21 +1116,18 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                       <p className="text-sm font-semibold text-slate-100">{baseline.originalFilename}</p>
                       {isPrimary ? (
                         <span className="rounded-full border border-cyan-300/15 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-cyan-100">
-                          Primary
+                          Active
                         </span>
                       ) : null}
-                      <span
-                        className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] ${getAssessmentSummaryStatusTone(
-                          readinessState,
-                        )}`}
-                      >
-                        {readinessLabel}
+                      <span className="rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-300">
+                        {isArchived ? "archived" : readinessLabel.toLowerCase()}
                       </span>
                     </div>
                     <p className="mt-2 text-xs text-slate-400">Uploaded {formatDateTime(baseline.createdAt)}</p>
+                    <p className="mt-1 text-xs text-slate-400">Baseline name: {baseline.originalFilename}</p>
                     {hasCompletedAssessment ? (
                       <p className="mt-1 text-xs text-slate-400">
-                        Last baseline check{" "}
+                        Last analyzed{" "}
                         {latestAssessmentTimestamp
                           ? formatDateTime(latestAssessmentTimestamp)
                           : "recently"}
@@ -1055,49 +1136,77 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                     {latestRoleFitScore !== null ? (
                       <p className="mt-1 text-xs text-slate-500">Last role analysis: {latestRoleFitScore}%</p>
                     ) : null}
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {shouldShowViewAction ? (
+                    <div className="mt-4 space-y-3">
+                      <div className="flex flex-wrap gap-2">
+                        {!isPrimary ? (
+                          <FormButton variant="ghost" onClick={() => setPrimaryBaselineId(baseline.id)} disabled={setActiveDisabled}>
+                            Set Active
+                          </FormButton>
+                        ) : null}
+                        <Link
+                          href={baselineDetailsHref}
+                          className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+                        >
+                          View Baseline Details
+                        </Link>
                         <FormButton
                           variant="ghost"
-                          onClick={() => {
-                            setPrimaryBaselineId(baseline.id);
-                            setPostUploadCtaBaselineId(null);
-                            scrollToAnalysis();
-                          }}
-                          disabled={isLoading || !isHydrated}
+                          onClick={() => void runCanonicalBaselineAnalysis(baseline.id)}
+                          disabled={isLoading || !isEditableLibrary}
                         >
-                          {isLoading ? "Analyzing" : "View baseline analysis"}
+                          {hasCompletedAssessment ? "Run Analysis" : isLoading ? "Analyzing..." : "Run Analysis"}
                         </FormButton>
-                      ) : null}
-                      {isEditableLibrary ? (
-                        <>
-                          <FormButton
-                            variant="ghost"
-                            onClick={() => void handleArchiveBaseline(baseline.id)}
-                            disabled={archivingBaselineId === baseline.id || isArchived}
-                          >
-                            {isArchived
-                              ? "Archived"
-                              : archivingBaselineId === baseline.id
-                                ? "Archiving..."
-                                : "Archive"}
-                          </FormButton>
-                          <FormButton
-                            variant="ghost"
-                            onClick={() => void handleDeleteBaseline(baseline.id)}
-                            disabled={deletingBaselineId === baseline.id}
-                          >
-                            {deletingBaselineId === baseline.id ? "Deleting..." : "Delete"}
-                          </FormButton>
-                          {debugEnabled ? (
+                        {isEditableLibrary ? (
+                          <>
                             <FormButton
                               variant="ghost"
-                              onClick={() => void handleDebugBaselineTrace(baseline.id)}
+                              onClick={() => void handleArchiveBaseline(baseline.id)}
+                              disabled={archivingBaselineId === baseline.id || isArchived}
                             >
-                              Debug baseline
+                              {isArchived ? "Archived" : archivingBaselineId === baseline.id ? "Archiving..." : "Archive"}
                             </FormButton>
-                          ) : null}
-                        </>
+                            <FormButton
+                              variant="ghost"
+                              onClick={() => void handleDeleteBaseline(baseline.id)}
+                              disabled={deletingBaselineId === baseline.id}
+                            >
+                              {deletingBaselineId === baseline.id ? "Deleting..." : "Delete"}
+                            </FormButton>
+                            {debugEnabled ? (
+                              <FormButton
+                                variant="ghost"
+                                onClick={() => void handleDebugBaselineTrace(baseline.id)}
+                              >
+                                Debug baseline
+                              </FormButton>
+                            ) : null}
+                          </>
+                        ) : null}
+                      </div>
+                      {latestResultsForBaselineHref ? (
+                        <div className="flex flex-wrap gap-2 text-sm">
+                          <Link
+                            href={latestResultsForBaselineHref}
+                            className="text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
+                          >
+                            View Latest Results
+                          </Link>
+                          {canOpenStudio ? (
+                            <Link
+                              href={studioHref ?? "/studio"}
+                              className="text-cyan-100 underline decoration-cyan-300/25 underline-offset-4 transition hover:text-cyan-50 hover:decoration-cyan-200/60"
+                            >
+                              Open Resume Studio
+                            </Link>
+                          ) : (
+                            <Link
+                              href={fitReviewHref}
+                              className="text-amber-100 underline decoration-amber-300/25 underline-offset-4 transition hover:text-amber-50 hover:decoration-amber-200/60"
+                            >
+                              Start Fit Review
+                            </Link>
+                          )}
+                        </div>
                       ) : null}
                     </div>
                   </article>

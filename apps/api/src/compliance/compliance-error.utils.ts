@@ -1,5 +1,11 @@
 import { HttpException } from '@nestjs/common';
-import { ComplianceFlag, ComplianceFlagCode, ComplianceFlagSeverity } from './compliance.types';
+import {
+  ComplianceFlag,
+  ComplianceFlagCode,
+  ComplianceFlagLocation,
+  ComplianceFlagSeverity,
+  ComplianceFlagType,
+} from './compliance.types';
 import type {
   ComplianceService,
   ValidateAndAuditRequest,
@@ -128,10 +134,35 @@ function normalizeComplianceFlags(source: unknown): ComplianceFlag[] {
       code: (rawCode as ComplianceFlagCode) ?? codeFallback,
       severity: (rawSeverity as ComplianceFlagSeverity) ?? severityFallback,
       message,
+      type: readStringFromPaths(record, [['type']]) as ComplianceFlagType | undefined,
+      sourceText: readStringFromPaths(record, [['sourceText'], ['source_text']]),
+      rule: readStringFromPaths(record, [['rule']]),
+      reason: readStringFromPaths(record, [['reason']]),
+      conditions: Array.isArray(record.conditions)
+        ? record.conditions.filter((value): value is string => typeof value === 'string')
+        : undefined,
+      location: normalizeLocation(record.location),
     });
   }
 
   return normalized;
+}
+
+function normalizeLocation(value: unknown): ComplianceFlagLocation | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  const section = readStringFromPaths(record, [['section']]);
+  if (!section) return undefined;
+  const location: ComplianceFlagLocation = {
+    section: section as ComplianceFlagLocation['section'],
+  };
+  const role = readStringFromPaths(record, [['role']]);
+  if (role) location.role = role;
+  const indexValue = record.index;
+  if (typeof indexValue === 'number' && Number.isFinite(indexValue)) {
+    location.index = indexValue;
+  }
+  return location;
 }
 
 function normalizeSeverity(value: string | undefined): string | null {
