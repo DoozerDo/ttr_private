@@ -41,7 +41,7 @@ import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
 import { buildScoreDelta, hasBaselineUpdated } from "@/lib/reanalysis";
 import { buildProgressSummary } from "@/lib/progressSummary";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
-import { derivePrimaryNextAction, getGenerationCompletionStorageKey } from "@/lib/nextAction";
+import { getCanonicalNextAction, getGenerationCompletionStorageKey } from "@/lib/nextAction";
 import { deriveEvidenceLedger, type EvidenceLedger } from "@/lib/evidenceLedger";
 import { useGuidedMode } from "@/hooks/useGuidedMode";
 import { trackEvent } from "@/src/lib/analytics";
@@ -452,8 +452,8 @@ const READINESS_LOADING_STATE: GenerationReadiness = {
       message: "Verifying generation readiness against compliance rules for this analyzed context.",
     },
   ],
-  badgeLabel: "LIMITED",
-  summary: "Fit score and generation readiness are separate. Tailored generation is currently limited.",
+  badgeLabel: "BLOCKED",
+  summary: "Fit score and generation readiness are resolved before Studio is entered.",
   verificationIssues: [],
 };
 
@@ -549,7 +549,7 @@ type OpportunityMapSectionProps = {
     label: string;
     explanation: string;
   };
-  nextAction: ReturnType<typeof derivePrimaryNextAction>;
+  nextAction: ReturnType<typeof getCanonicalNextAction>;
   advantageSignals: string[];
   primaryCta:
     | {
@@ -715,44 +715,28 @@ export function OpportunityMapSection({
         ? "Some requirements need stronger verification. You can still generate documents."
         : "Your evidence supports generation.";
   const decisionNarrative = useMemo(() => {
-    switch (nextAction.action) {
-      case "CONTINUE_ANALYSIS":
-        return {
-          headline: "Run Career Compatibility Analysis to get a score.",
-          body: "Without a score, there is no decision to make.",
-        };
-      case "RESOLVE_GAPS":
-        return {
-          headline: "This score is below the generation threshold.",
-          body: "Fix the gaps before you move forward.",
-        };
-      case "REANALYZE":
-        return {
-          headline: "Your experience foundation changed. Run the analysis again.",
-          body: "See whether the updated structured experience changes the outcome.",
-        };
-      case "GENERATE_RESUME":
-        return {
-          headline: "This score clears the generation threshold.",
-          body: "Open Resume + Cover Letter Studio now.",
-        };
-      case "ADD_TO_OPPORTUNITIES":
-        return {
-          headline: "This role is ready to save.",
-          body: "Add it to Opportunities to keep moving.",
-        };
-      case "REVIEW_RESULTS":
-      default:
-        return {
-          headline: "This decision is complete.",
-          body: "Review the details or move to the next role.",
-        };
+    if (nextAction.type === "fit_review") {
+      return { headline: "This score needs a fit review.", body: "Use the primary action to strengthen the baseline." };
     }
-  }, [nextAction.action]);
+    if (nextAction.type === "studio") {
+      return { headline: "This score is ready for Studio.", body: "Open Resume & Cover Letter Studio next." };
+    }
+    return { headline: "This score is ready to generate and save.", body: "Generate your resume, then save the role to Opportunities." };
+  }, [nextAction.type]);
   return (
     <section className="rounded-3xl bg-slate-900/65 px-6 py-9 sm:px-8 sm:py-10">
       <div className="max-w-4xl space-y-9">
         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Decision summary</p>
+        <div className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+          <p className="text-[56px] font-black leading-[0.95] tracking-[-0.04em] text-white md:text-[64px]">
+            {typeof score === "number" ? Math.round(score) : "--"}
+          </p>
+          <h3 className="text-2xl font-semibold tracking-tight text-white">{verdict.label}</h3>
+          <p className="max-w-2xl text-sm leading-6 text-slate-300">{verdict.explanation}</p>
+          <p className="max-w-2xl text-xs leading-5 text-slate-400">
+            This score reflects how closely your verified experience aligns with this role. It does not guarantee hiring outcomes.
+          </p>
+        </div>
         <div className="space-y-5">
           <h2 className="max-w-3xl text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl xl:text-5xl">
             {decisionNarrative.headline}
@@ -760,13 +744,9 @@ export function OpportunityMapSection({
           <p className="max-w-2xl text-base leading-7 text-slate-100 md:text-lg">{decisionNarrative.body}</p>
         </div>
         {weakFitRecovery ? (
-          <ResolveGapsBlock
-            href={weakFitRecovery.href}
-            gapPreview={weakFitRecovery.gapPreview}
-          />
+          <ResolveGapsBlock href={weakFitRecovery.href} gapPreview={weakFitRecovery.gapPreview} />
         ) : (
           <div>
-            <p className="max-w-2xl text-sm text-slate-300">{primaryCta?.description}</p>
             <div className="space-y-4">
               {primaryCta ? (
                 primaryCta.disabled ? (
@@ -774,7 +754,7 @@ export function OpportunityMapSection({
                     data-testid="results-hero-primary-cta"
                     className="inline-flex min-h-[52px] min-w-[300px] cursor-not-allowed items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-6 py-3 text-base font-semibold text-slate-400 md:min-w-[320px]"
                   >
-                {primaryCta.label}
+                    {primaryCta.label}
                   </span>
                 ) : primaryCta.onClick ? (
                   <button
@@ -794,28 +774,26 @@ export function OpportunityMapSection({
                   </a>
                 )
               ) : null}
-              <div>
+              <div className="flex flex-wrap gap-4 text-sm">
                 <a
                   data-testid="results-hero-secondary-action"
                   href={scoreAnalysisHref}
-                  className="text-sm font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
+                  className="font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
                 >
-                  View detailed scoring breakdown
+                  View top drivers
                 </a>
+                {nextAction.type === "studio_with_save" ? (
+                  <a
+                    href="#opportunity-save"
+                    className="font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
+                  >
+                    Save to Opportunities
+                  </a>
+                ) : null}
               </div>
             </div>
           </div>
         )}
-        <div className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-4">
-          <p className="text-[56px] font-black leading-[0.95] tracking-[-0.04em] text-white md:text-[64px]">
-            {typeof score === "number" ? Math.round(score) : "--"}
-          </p>
-          <h3 className="text-2xl font-semibold tracking-tight text-white">{verdict.label}</h3>
-          <p className="max-w-2xl text-sm leading-6 text-slate-300">{verdict.explanation}</p>
-          <p className="max-w-2xl text-xs leading-5 text-slate-400">
-            Based on your structured experience and the role requirements.
-          </p>
-        </div>
         <div
           id="generation-readiness-details"
           className={`rounded-xl border px-4 py-3 text-sm ${readinessToneClass}`}
@@ -1745,19 +1723,12 @@ export default function ResultsPage() {
     ],
   );
   const opportunityVerdict = useMemo(() => getOpportunityVerdict(activeScore), [activeScore]);
-  const interviewToolkitHref = useMemo(() => {
-    const params = new URLSearchParams({ source: "results" });
-    if (resultsAssessmentId) {
-      params.set("assessmentId", resultsAssessmentId);
-    }
-    return `${INTERVIEW_TOOLKIT_PATH}?${params.toString()}`;
-  }, [resultsAssessmentId]);
-
   const fitReviewPath = useMemo(() => {
     const candidateJobId = (latest?.jobId || jobId || "").trim();
     if (!candidateJobId) return "/fit-review";
     return `/fit-review?jobId=${encodeURIComponent(candidateJobId)}`;
   }, [jobId, latest?.jobId]);
+  const interviewToolkitHref = INTERVIEW_TOOLKIT_PATH;
   useEffect(() => {
     const key = getGenerationCompletionStorageKey(latest?.jobId ?? null, latest?.baselineId ?? null);
     if (!key || typeof window === "undefined") {
@@ -2003,18 +1974,30 @@ export default function ResultsPage() {
   );
   const primaryNextAction = useMemo(
     () =>
-      derivePrimaryNextAction({
-        analysisPresent: Boolean(latest),
+      getCanonicalNextAction({
         fitScore: typeof activeScore === "number" ? activeScore : null,
-        hasCompletedGeneration: generationCompleted,
-        opportunityAlreadySaved: opportunitySaved,
-        generationAllowed: productReadiness.generation_readiness.canGenerate,
-        hasUnverifiedRequirements: canonicalUnverifiedRequirements.length > 0,
-        jobId: latest?.jobId,
-        baselineId: latest?.baselineId,
+        generationReady: generationReadiness.status === "ready" && !generationReadiness.blocked,
+        trustGateAllowed: true,
       }),
-    [activeScore, canonicalUnverifiedRequirements.length, generationCompleted, latest, opportunitySaved, productReadiness.generation_readiness.canGenerate],
+    [activeScore, generationReadiness.blocked, generationReadiness.status],
   );
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    if (!latest) return;
+    const canonicalGenerationRouteDebug = {
+      analysisId: latest.assessmentId ?? null,
+      jobId: latest.jobId ?? null,
+      baselineId: latest.baselineId ?? null,
+      score: typeof activeScore === "number" ? activeScore : null,
+      readinessStatus: generationReadiness.status,
+      trustGateAllowed: true,
+      finalAction: primaryNextAction.type,
+      reason: primaryNextAction.reason,
+    };
+    (window as typeof window & { canonicalGenerationRouteDebug?: unknown }).canonicalGenerationRouteDebug =
+      canonicalGenerationRouteDebug;
+    console.info("canonicalGenerationRouteDebug", canonicalGenerationRouteDebug);
+  }, [activeScore, generationReadiness.status, latest, primaryNextAction.reason, primaryNextAction.type]);
   const isWeakFitScore = typeof activeScore === "number" && activeScore < 70;
   const { isGuidedActive, syncWithNextAction, completeGuidedMode, advanceStep } = useGuidedMode();
   useEffect(() => {
@@ -2024,8 +2007,8 @@ export default function ResultsPage() {
       return;
     }
     advanceStep("RESULTS");
-    syncWithNextAction(primaryNextAction.action);
-  }, [advanceStep, isGuidedActive, latest, primaryNextAction.action, syncWithNextAction]);
+    syncWithNextAction(primaryNextAction.type);
+  }, [advanceStep, isGuidedActive, latest, primaryNextAction.type, syncWithNextAction]);
   const resolveGapsHref = useMemo(() => {
     const params = new URLSearchParams();
     if (latest?.jobId?.trim()) {
@@ -2057,69 +2040,35 @@ export default function ResultsPage() {
   );
   const oneClickResultsCta = useMemo(() => {
     if (!latest) return null;
-    if (primaryNextAction.action === "RESOLVE_GAPS") return null;
-    if (primaryNextAction.action === "CONTINUE_ANALYSIS") {
+    if (primaryNextAction.type === "fit_review") {
       return {
-        label: "Run Career Compatibility Analysis",
-        href: "/analyze",
+        label: "Start Fit Review",
+        href: fitReviewPath,
         disabled: false,
-        description: "Run analysis to get a truthful next step for this role.",
+        description: "Use Fit Review to strengthen the baseline for this role.",
       };
     }
-    if (primaryNextAction.action === "REANALYZE") {
+    if (primaryNextAction.type === "studio") {
       return {
-        label: "Run analysis again",
-        onClick: () => {
-          void rerunAnalysisForCurrentRole();
-        },
-        disabled: reanalysisRunning,
-        description: "Your experience foundation changed. Run the analysis again.",
-      };
-    }
-    if (primaryNextAction.action === "GENERATE_RESUME" && isQualified) {
-      return {
-        label: "Open Resume + Cover Letter Studio",
+        label: "Open Resume & Cover Letter Studio",
         href: studioHref,
         disabled: !canOpenStudio,
-        description: progressSummary.improvementDetected
-          ? "You’re getting closer. Open the studio to generate tailored materials now."
-          : "You’ve cleared the threshold. Open the studio to generate tailored materials now.",
+        description: "Open the studio to generate tailored materials now.",
       };
     }
-    if (primaryNextAction.action === "ADD_TO_OPPORTUNITIES" && isQualified) {
-      return {
-        label: "Add to Opportunities",
-        onClick: () => {
-          void saveOpportunityFromResults();
-        },
-        disabled: false,
-        description: "This role is ready to save. Add it to Opportunities.",
-      };
-    }
-    if (primaryNextAction.action === "REVIEW_RESULTS") {
-      return {
-        label: "Review Results",
-        href: "#advanced-insights",
-        disabled: false,
-        description: "Review the details or move to the next role.",
-      };
-    }
-    return null;
-  }, [
-    canOpenStudio,
-    isQualified,
-    latest,
-    primaryNextAction.action,
-    progressSummary.improvementDetected,
-    reanalysisRunning,
-    studioHref,
-  ]);
+    return {
+      label: "Generate Resume",
+      href: studioHref,
+      disabled: !canOpenStudio,
+      description: "Generate your resume first, then save the role to Opportunities.",
+    };
+  }, [canOpenStudio, fitReviewPath, latest, primaryNextAction.type, studioHref]);
   const evidenceLedger = useMemo(
     () =>
       deriveEvidenceLedger(latest, {
-        generationAllowed: primaryNextAction.action === "GENERATE_RESUME" || primaryNextAction.action === "ADD_TO_OPPORTUNITIES",
-      }),
-    [latest, primaryNextAction.action],
+      generationAllowed: primaryNextAction.type !== "fit_review",
+    }),
+    [latest, primaryNextAction.type],
   );
   const formatDriverValue = (value?: number | null) =>
     typeof value === "number" ? value.toFixed(1) : "n/a";
@@ -2845,7 +2794,7 @@ export default function ResultsPage() {
   }, [latest?.baselineId, latest?.jobId, reanalysisDelta.currentScore, reanalysisDelta.previousScore]);
   const guidedOverlayConfig = useMemo(() => {
     if (!isGuidedActive) return null;
-    if (!latest || primaryNextAction.action === "CONTINUE_ANALYSIS") {
+    if (!latest) {
       return {
         headline: "Let's see if this role is actually a fit.",
         body: "Start with analysis and we will guide you to the best next step.",
@@ -2853,60 +2802,37 @@ export default function ResultsPage() {
         ctaHref: "/analyze",
       };
     }
-    if (primaryNextAction.action === "RESOLVE_GAPS") {
+    if (primaryNextAction.type === "fit_review") {
       return {
-        headline: "This is where most people get stuck.",
-        body: "You have relevant experience, but it is not proven clearly enough yet.",
-        ctaLabel: "Let's fix that",
-        ctaHref: resolveGapsHref,
+        headline: "This score points to Fit Review.",
+        body: "Use the canonical next step to strengthen the baseline before generating materials.",
+        ctaLabel: "Start Fit Review",
+        ctaHref: fitReviewPath,
       };
     }
-    if (primaryNextAction.action === "REANALYZE") {
+    if (primaryNextAction.type === "studio") {
       return {
-        headline: "Good. Now let's measure the impact.",
-        body: "Run reanalysis to see whether your new evidence raised fit and readiness.",
-        ctaLabel: reanalysisRunning ? "Reanalyzing..." : "Run analysis again",
-        onCtaClick: () => {
-          if (!reanalysisRunning) void rerunAnalysisForCurrentRole();
-        },
-      };
-    }
-    if (primaryNextAction.action === "GENERATE_RESUME" && isQualified) {
-      return {
-        headline: "You're already in a strong position for this role.",
-        body: "Now generate tailored materials from verified evidence.",
-        ctaLabel: "Generate tailored materials",
+        headline: "This score is ready for Studio.",
+        body: "Open Resume & Cover Letter Studio to generate tailored materials from verified evidence.",
+        ctaLabel: "Open Studio",
         ctaHref: studioHref,
       };
     }
-    if (primaryNextAction.action === "ADD_TO_OPPORTUNITIES" && isQualified) {
-      return {
-        headline: "You just turned your experience into a targeted application.",
-        body: "Save this opportunity so it stays in motion.",
-        ctaLabel: "Save this opportunity",
-        onCtaClick: () => {
-          void saveOpportunityFromResults();
-        },
-      };
-    }
     return {
-      headline: "Guided mode complete.",
-      body: "You have completed the full flow once. We will stay out of your way now.",
-      ctaLabel: "Continue",
+      headline: "This score is ready to generate and save.",
+      body: "Generate your resume first, then save the role to Opportunities as a secondary outcome.",
+      ctaLabel: "Generate Resume",
+      ctaHref: studioHref,
       onCtaClick: () => {
-        completeGuidedMode();
+        void saveOpportunityFromResults();
       },
     };
   }, [
-    completeGuidedMode,
+    fitReviewPath,
     isGuidedActive,
     latest,
-    primaryNextAction.action,
-    reanalysisRunning,
-    rerunAnalysisForCurrentRole,
-    resolveGapsHref,
+    primaryNextAction.type,
     saveOpportunityFromResults,
-    isQualified,
     studioHref,
   ]);
 
@@ -3328,6 +3254,9 @@ export default function ResultsPage() {
       </PageShell>
     );
   }
+
+
+
 
 
 

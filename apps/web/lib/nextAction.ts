@@ -1,76 +1,79 @@
 export type NextActionType =
-  | "RESOLVE_GAPS"
-  | "REANALYZE"
-  | "GENERATE_RESUME"
-  | "ADD_TO_OPPORTUNITIES"
-  | "REVIEW_RESULTS"
-  | "CONTINUE_ANALYSIS"
-  | "NONE";
+  | "fit_review"
+  | "studio"
+  | "studio_with_save";
 
 export type NextActionInput = {
-  analysisPresent: boolean;
   fitScore: number | null;
-  reanalysisNeeded?: boolean;
-  hasCompletedGeneration: boolean;
-  opportunityAlreadySaved: boolean;
-  generationAllowed?: boolean;
-  hasUnverifiedRequirements?: boolean;
-  jobId?: string | null;
-  baselineId?: string | null;
+  generationReady: boolean;
+  trustGateAllowed: boolean;
+  opportunityAlreadySaved?: boolean;
 };
 
 export type NextAction = {
-  action: NextActionType;
+  type: NextActionType;
   label: string;
-  description: string;
+  route: string;
+  reason: string;
 };
 
-export function derivePrimaryNextAction(input: NextActionInput): NextAction {
-  if (!input.analysisPresent) {
+function buildAction(type: NextActionType, reason: string): NextAction {
+  if (type === "fit_review") {
     return {
-      action: "CONTINUE_ANALYSIS",
-      label: "Continue Analysis",
-      description: "Analyze this role to get a verified decision path.",
+      type,
+      label: "Start Fit Review",
+      route: "/fit-review",
+      reason,
     };
   }
-
-  if (input.reanalysisNeeded) {
+  if (type === "studio") {
     return {
-      action: "REANALYZE",
-      label: "Reanalyze Role",
-      description: "You've added evidence. Reanalyze to measure the impact.",
+      type,
+      label: "Open Resume & Cover Letter Studio",
+      route: "/studio",
+      reason,
     };
   }
-
-  if (typeof input.fitScore === "number" && input.fitScore < 70) {
-    return {
-      action: "RESOLVE_GAPS",
-      label: "Resolve Gaps",
-      description: "This role needs stronger proof before generation will be useful.",
-    };
-  }
-
-  if (!input.hasCompletedGeneration) {
-    return {
-      action: "GENERATE_RESUME",
-      label: "Generate Resume",
-      description: "You've cleared the threshold. Generate tailored materials now.",
-    };
-  }
-
-  if (!input.opportunityAlreadySaved) {
-    return {
-      action: "ADD_TO_OPPORTUNITIES",
-      label: "Add to Opportunities",
-      description: "Your materials are ready. Add this role to Opportunities.",
-    };
-  }
-
   return {
-    action: "REVIEW_RESULTS",
-    label: "Review Results",
-    description: "Everything is saved. Review details or choose your next role.",
+    type,
+    label: "Generate Resume",
+    route: "/studio",
+    reason,
   };
+}
+
+export function getCanonicalNextAction(input: NextActionInput): NextAction {
+  const score = typeof input.fitScore === "number" ? input.fitScore : 0;
+  if (score < 70) {
+    return buildAction("fit_review", "score below 70");
+  }
+  if (!input.generationReady || !input.trustGateAllowed) {
+    return buildAction(
+      "fit_review",
+      !input.generationReady
+        ? "score >= 70 but readiness not ready"
+        : "score >= 70 but trust gate blocked generation",
+    );
+  }
+  if (score >= 85) {
+    return buildAction("studio_with_save", "score >= 85 and readiness ready");
+  }
+  return buildAction("studio", "score >= 70 and readiness ready");
+}
+
+export function getPrimaryAction(input: NextActionInput | number): NextAction {
+  if (typeof input === "number") {
+    return getCanonicalNextAction({
+      fitScore: input,
+      generationReady: true,
+      trustGateAllowed: true,
+    });
+  }
+  return getCanonicalNextAction(input);
+}
+
+export function derivePrimaryNextAction(input: NextActionInput): NextAction {
+  return getCanonicalNextAction(input);
 }
 
 export function getGenerationCompletionStorageKey(jobId?: string | null, baselineId?: string | null): string | null {

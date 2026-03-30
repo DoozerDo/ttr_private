@@ -1,6 +1,6 @@
 const steps = [
   {
-    title: "Upload your resume baseline",
+    title: "Upload your resume (we use this as your baseline)",
     body: "Your verified background becomes the evidence foundation for analysis.",
   },
   {

@@ -17,7 +17,7 @@ export function LandingHero() {
       <div className="relative mx-auto w-full max-w-[1200px] px-4 pb-6 pt-10 md:px-10 md:pb-8 md:pt-12 lg:px-16">
         <div className="mx-auto max-w-4xl">
           <h1 className="text-3xl font-semibold leading-tight text-white md:text-4xl lg:text-[38px]">
-            Upload your resume, paste the job description, and run your first analysis.
+            Upload your resume, paste the job description, and preview how your experience aligns with a role.
           </h1>
           <p className="mt-2.5 max-w-[760px] text-base leading-relaxed text-slate-300 lg:text-lg">
             Upload your resume, run career compatibility analysis, and get a clear next step.

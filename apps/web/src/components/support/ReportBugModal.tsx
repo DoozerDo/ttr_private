@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { readLastAnalysis } from "@/app/(app)/lib/session";
-import { derivePrimaryNextAction, getGenerationCompletionStorageKey } from "@/lib/nextAction";
+import { getCanonicalNextAction, getGenerationCompletionStorageKey } from "@/lib/nextAction";
 
 const resolvedGitSha =
   process.env.NEXT_PUBLIC_GIT_SHA ??
@@ -78,14 +78,12 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
         stored?.analysis?.opportunityAlreadySaved ||
         stored?.analysis?.savedOpportunityId,
     );
-    const nextAction = derivePrimaryNextAction({
-      analysisPresent: Boolean(stored || assessmentId || baselineId || jobId),
+    const nextAction = getCanonicalNextAction({
       fitScore: score,
-      hasCompletedGeneration,
+      generationReady: hasCompletedGeneration,
+      trustGateAllowed: !opportunityAlreadySaved,
       opportunityAlreadySaved,
-      jobId,
-      baselineId,
-    }).action;
+    }).type;
 
     return {
       baselineId,

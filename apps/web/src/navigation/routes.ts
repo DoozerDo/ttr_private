@@ -54,15 +54,6 @@ const sidebarNavRoutes: RouteConfig[] = [
     requiresAuth: true,
     subtext: "Manage active roles in one place",
   },
-  {
-    id: "interviewToolkit",
-    label: "Interview Toolkit · Coming Soon",
-    href: "/interview-toolkit",
-    requiresAuth: true,
-    requiresJob: true,
-    subtext: "Prepare answers and stories",
-    comingSoon: true,
-  },
 ];
 
 const hiddenRoutes: RouteConfig[] = [

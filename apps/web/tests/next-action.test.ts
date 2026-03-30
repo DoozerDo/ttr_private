@@ -1,71 +1,42 @@
 import { describe, expect, it } from "vitest";
 
-import { derivePrimaryNextAction } from "@/lib/nextAction";
+import { getCanonicalNextAction } from "@/lib/nextAction";
 
-describe("derivePrimaryNextAction", () => {
-  it("returns Continue Analysis when no analysis is present", () => {
-    const action = derivePrimaryNextAction({
-      analysisPresent: false,
-      fitScore: null,
-      reanalysisNeeded: false,
-      hasCompletedGeneration: false,
-      opportunityAlreadySaved: false,
-    });
-    expect(action.action).toBe("CONTINUE_ANALYSIS");
-  });
-
-  it("returns Resolve Gaps when fit score is below 70", () => {
-    const action = derivePrimaryNextAction({
-      analysisPresent: true,
+describe("getCanonicalNextAction", () => {
+  it("routes to fit review below 70", () => {
+    const action = getCanonicalNextAction({
       fitScore: 62,
-      reanalysisNeeded: false,
-      hasCompletedGeneration: false,
-      opportunityAlreadySaved: false,
+      generationReady: true,
+      trustGateAllowed: true,
     });
-    expect(action.action).toBe("RESOLVE_GAPS");
+    expect(action.type).toBe("fit_review");
   });
 
-  it("returns Reanalyze when reanalysis is explicitly needed", () => {
-    const action = derivePrimaryNextAction({
-      analysisPresent: true,
-      fitScore: 62,
-      reanalysisNeeded: true,
-      hasCompletedGeneration: false,
-      opportunityAlreadySaved: false,
+  it("routes to fit review when readiness is not ready", () => {
+    const action = getCanonicalNextAction({
+      fitScore: 76,
+      generationReady: false,
+      trustGateAllowed: true,
     });
-    expect(action.action).toBe("REANALYZE");
+    expect(action.type).toBe("fit_review");
+    expect(action.reason).toContain("readiness not ready");
   });
 
-  it("returns Generate Resume when fit is 70+ and generation is not complete", () => {
-    const action = derivePrimaryNextAction({
-      analysisPresent: true,
-      fitScore: 74,
-      reanalysisNeeded: false,
-      hasCompletedGeneration: false,
-      opportunityAlreadySaved: false,
+  it("routes to studio for 70 to 84 when ready", () => {
+    const action = getCanonicalNextAction({
+      fitScore: 76,
+      generationReady: true,
+      trustGateAllowed: true,
     });
-    expect(action.action).toBe("GENERATE_RESUME");
+    expect(action.type).toBe("studio");
   });
 
-  it("returns Add to Opportunities when generation is complete and opportunity is not saved", () => {
-    const action = derivePrimaryNextAction({
-      analysisPresent: true,
-      fitScore: 82,
-      reanalysisNeeded: false,
-      hasCompletedGeneration: true,
-      opportunityAlreadySaved: false,
+  it("routes to studio_with_save for 85+ when ready", () => {
+    const action = getCanonicalNextAction({
+      fitScore: 90,
+      generationReady: true,
+      trustGateAllowed: true,
     });
-    expect(action.action).toBe("ADD_TO_OPPORTUNITIES");
-  });
-
-  it("returns Review Results when opportunity is already saved", () => {
-    const action = derivePrimaryNextAction({
-      analysisPresent: true,
-      fitScore: 82,
-      reanalysisNeeded: false,
-      hasCompletedGeneration: true,
-      opportunityAlreadySaved: true,
-    });
-    expect(action.action).toBe("REVIEW_RESULTS");
+    expect(action.type).toBe("studio_with_save");
   });
 });

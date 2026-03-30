@@ -34,7 +34,7 @@ import { BaselineDto, BaselineVersionDto, listBaselines } from "@/lib/baselines"
 import { appendStrengtheningAddition } from "@/lib/baselines";
 import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
-import { derivePrimaryNextAction, getGenerationCompletionStorageKey } from "@/lib/nextAction";
+import { getCanonicalNextAction, getGenerationCompletionStorageKey } from "@/lib/nextAction";
 import { deriveEvidenceLedger } from "@/lib/evidenceLedger";
 import { useGuidedMode } from "@/hooks/useGuidedMode";
 import { type JobDto } from "@/lib/jobs";
@@ -169,8 +169,8 @@ const READINESS_LOADING_STATE: GenerationReadiness = {
       message: "Verifying generation readiness against compliance rules for this analyzed context.",
     },
   ],
-  badgeLabel: "LIMITED",
-  summary: "Fit score and generation readiness are separate. Tailored generation is currently limited.",
+  badgeLabel: "BLOCKED",
+  summary: "Fit score and generation readiness are resolved upstream before Studio opens.",
   verificationIssues: [],
 };
 
@@ -1228,6 +1228,98 @@ export default function StudioPage() {
   const canGenerateDocuments = productReadiness.generation_readiness.canGenerate && trustGateDecision.allowed;
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
+    if (!analysis || !requestedAnalysisId) return;
+
+    const backendCoverage = analysis.verification_coverage as
+      | {
+          totalClaims?: number | null;
+          verifiedClaims?: number | null;
+          inferredClaims?: number | null;
+          unverifiedClaims?: number | null;
+          supportedClaims?: number | null;
+        }
+      | null;
+    const requirementTotal =
+      Number(backendCoverage?.totalClaims ?? NaN) ||
+      activeClaimVerifications.length ||
+      activeGenerationReadiness.verificationIssues.length;
+    const matchedPreFilter =
+      Number(backendCoverage?.verifiedClaims ?? NaN) + Number(backendCoverage?.inferredClaims ?? NaN) ||
+      claimVerifications.filter((claim) => claim.status !== "UNVERIFIED").length;
+    const matchedPostFilter = activeClaimVerifications.filter((claim) => claim.status !== "UNVERIFIED").length;
+    const unmatched =
+      Number(backendCoverage?.unverifiedClaims ?? NaN) ||
+      Math.max(requirementTotal - matchedPostFilter, 0);
+    const studioGenerationGateDebug = {
+      analysisId: requestedAnalysisId,
+      jobId: effectiveJobId || null,
+      baselineId: effectiveBaselineId || null,
+      score: analysisScore,
+      scoreBreakdown: (analysis as { score_breakdown?: unknown }).score_breakdown ?? null,
+      requirements: {
+        total: Number.isFinite(requirementTotal) ? requirementTotal : null,
+        matchedPreFilter: Number.isFinite(matchedPreFilter) ? matchedPreFilter : null,
+        matchedPostFilter: Number.isFinite(matchedPostFilter) ? matchedPostFilter : null,
+        unmatched: Number.isFinite(unmatched) ? unmatched : null,
+      },
+      coverage: {
+        verificationPassed: trustGateDecision.allowed,
+        coveragePercent: backendCoverage
+          ? {
+              verifiedClaims: backendCoverage.verifiedClaims ?? null,
+              inferredClaims: backendCoverage.inferredClaims ?? null,
+              unverifiedClaims: backendCoverage.unverifiedClaims ?? null,
+              supportedClaims: backendCoverage.supportedClaims ?? null,
+              totalClaims: backendCoverage.totalClaims ?? null,
+            }
+          : null,
+        threshold: 70,
+        failureReasons: activeGenerationReadiness.reasons.map((reason) => reason.code),
+      },
+      filters: {
+        complianceFlags: activeGenerationReadiness.verificationIssues.map((issue) => issue.code),
+        evidenceDrops: excludedTargetingLabels.size ? Array.from(excludedTargetingLabels) : [],
+        fragmentDrops: canonicalCoverageIssues.map((issue) => issue.claim ?? issue.explanation),
+        otherExclusions: lastRemovedTargetingLabels,
+      },
+      studioGate: {
+        allowed: canGenerateDocuments,
+        mode: studioGenerationState.toLowerCase(),
+        reason:
+          !trustGateDecision.allowed
+            ? trustGateDecision.reason
+            : !productReadiness.generation_readiness.canGenerate
+              ? productReadiness.generation_readiness.reasonsBlocked.join(", ")
+              : activeGenerationReadiness.reasons[0]?.message ?? null,
+      },
+      routing: {
+        targetDecision: document.referrer?.includes("/results") ? "sent_to_studio" : "direct_or_unknown",
+        expectedDecisionByProductRule: analysisScore !== null && analysisScore >= 70 ? "fit_review" : "studio",
+      },
+    };
+    (window as typeof window & { studioGenerationGateDebug?: unknown }).studioGenerationGateDebug =
+      studioGenerationGateDebug;
+    console.info("studioGenerationGateDebug", studioGenerationGateDebug);
+  }, [
+    activeClaimVerifications.length,
+    activeGenerationReadiness.reasons,
+    activeGenerationReadiness.verificationIssues,
+    analysis,
+    analysisScore,
+    canGenerateDocuments,
+    canonicalCoverageIssues,
+    excludedTargetingLabels,
+    effectiveBaselineId,
+    effectiveJobId,
+    lastRemovedTargetingLabels,
+    productReadiness.generation_readiness.canGenerate,
+    requestedAnalysisId,
+    studioGenerationState,
+    trustGateDecision.allowed,
+    trustGateDecision.reason,
+  ]);
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
     if (!effectiveBaselineId || !requestedAnalysisId) return;
     console.info("[studio] assessment_truth_snapshot", {
       baselineId: effectiveBaselineId,
@@ -1322,42 +1414,71 @@ export default function StudioPage() {
   }, [effectiveJobId]);
   const primaryNextAction = useMemo(
     () =>
-      derivePrimaryNextAction({
-        analysisPresent: Boolean(analysis),
+      getCanonicalNextAction({
         fitScore: analysisScore,
-        hasCompletedGeneration,
-        opportunityAlreadySaved: Boolean(opportunityContext),
-        generationAllowed: canGenerateDocuments,
-        hasUnverifiedRequirements: canonicalUnverifiedRequirements.length > 0,
-        jobId: effectiveJobId || null,
-        baselineId: effectiveBaselineId || null,
+        generationReady:
+          activeGenerationReadiness.status === "ready" &&
+          !activeGenerationReadiness.blocked &&
+          studioGenerationState === "READY" &&
+          productReadiness.generation_readiness.canGenerate,
+        trustGateAllowed: trustGateDecision.allowed,
       }),
     [
-      analysis,
+      activeGenerationReadiness.blocked,
+      activeGenerationReadiness.status,
       analysisScore,
-      canGenerateDocuments,
-      canonicalUnverifiedRequirements.length,
-      effectiveBaselineId,
-      effectiveJobId,
-      hasCompletedGeneration,
-      opportunityContext,
+      productReadiness.generation_readiness.canGenerate,
+      studioGenerationState,
+      trustGateDecision.allowed,
     ],
   );
-  const studioBlockedByNextAction =
-    primaryNextAction.action === "RESOLVE_GAPS" || primaryNextAction.action === "CONTINUE_ANALYSIS";
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    if (!analysis || !requestedAnalysisId) return;
+    const canonicalGenerationRouteDebug = {
+      analysisId: requestedAnalysisId,
+      jobId: effectiveJobId || null,
+      baselineId: effectiveBaselineId || null,
+      score: analysisScore,
+      readinessStatus: activeGenerationReadiness.status,
+      trustGateAllowed: trustGateDecision.allowed,
+      finalAction: primaryNextAction.type,
+      reason: primaryNextAction.reason,
+    };
+    (window as typeof window & { canonicalGenerationRouteDebug?: unknown }).canonicalGenerationRouteDebug =
+      canonicalGenerationRouteDebug;
+    console.info("canonicalGenerationRouteDebug", canonicalGenerationRouteDebug);
+  }, [
+    activeGenerationReadiness.status,
+    analysis,
+    analysisScore,
+    effectiveBaselineId,
+    effectiveJobId,
+    primaryNextAction.reason,
+    primaryNextAction.type,
+    requestedAnalysisId,
+    trustGateDecision.allowed,
+  ]);
+  const studioBlockedByNextAction = primaryNextAction.type === "fit_review";
+  const studioUiState = canGenerateDocuments ? "READY" : "BLOCKED";
+  useEffect(() => {
+    if (studioBlockedByNextAction && requestedAnalysisId) {
+      void router.replace(remediationHref);
+    }
+  }, [requestedAnalysisId, remediationHref, router, studioBlockedByNextAction]);
   const evidenceLedger = useMemo(
     () =>
       deriveEvidenceLedger(analysis, {
-        generationAllowed: primaryNextAction.action === "GENERATE_RESUME" || primaryNextAction.action === "ADD_TO_OPPORTUNITIES",
+        generationAllowed: primaryNextAction.type !== "fit_review",
       }),
-    [analysis, primaryNextAction.action],
+    [analysis, primaryNextAction.type],
   );
   useEffect(() => {
     if (!isGuidedActive) return;
-    if (primaryNextAction.action === "GENERATE_RESUME" || primaryNextAction.action === "ADD_TO_OPPORTUNITIES") {
+    if (primaryNextAction.type !== "fit_review") {
       advanceStep("GENERATE");
     }
-  }, [advanceStep, isGuidedActive, primaryNextAction.action]);
+  }, [advanceStep, isGuidedActive, primaryNextAction.type]);
   const canExportCover =
     canExportDocuments &&
     coverPresenter.status === "success" &&
@@ -1399,12 +1520,6 @@ export default function StudioPage() {
         "This role scored strongly, but your current baseline does not support compliant generation yet."
       );
     }
-    if (studioGenerationState === "LIMITED") {
-      return (
-        activeGenerationReadiness.reasons[0]?.message ??
-        "This role scored strongly, but generation is constrained by verification limits."
-      );
-    }
     if (!effectiveBaselineVersionId) {
       return "Resume snapshot is still loading for this analysis.";
     }
@@ -1417,22 +1532,14 @@ export default function StudioPage() {
     analysisScore,
     effectiveBaselineVersionId,
     activeGenerationReadiness.reasons,
-    studioGenerationState,
     requestedAnalysisId,
     trustGateDecision.allowed,
     trustGateDecision.reason,
   ]);
-  const authorityStateTitle =
-    studioGenerationState === "BLOCKED"
-      ? "Generation blocked"
-      : studioGenerationState === "LIMITED"
-      ? "Generation limited"
-      : "Ready to generate";
+  const authorityStateTitle = studioUiState === "BLOCKED" ? "Generation blocked" : "Ready to generate";
   const authorityStateExplanation =
-    studioGenerationState === "BLOCKED"
-      ? "This role scored well, but your current baseline does not support compliant document generation yet."
-      : studioGenerationState === "LIMITED"
-      ? "This role scored strongly, but generation is constrained by verification limits."
+    studioUiState === "BLOCKED"
+      ? "This role is not eligible for Studio yet. Return to Fit Review to strengthen verification."
       : "Your role analysis and verification support generation. You can generate tailored materials now.";
   const authorityReasons = useMemo(() => {
     const reasons: string[] = [];
@@ -1450,7 +1557,7 @@ export default function StudioPage() {
   }, [activeGenerationReadiness.reasons, activeGenerationReadiness.verificationIssues]);
   const guardGenerationAction = useCallback(
     (documentType: "resume" | "cover_letter" | "application") => {
-      if (studioGenerationState === "BLOCKED") {
+      if (studioUiState === "BLOCKED") {
         trackEvent("studio_generate_blocked", {
           score: analysisScore,
           blockerCodes: generationBlockerCodes,
@@ -1459,16 +1566,9 @@ export default function StudioPage() {
         void router.push(remediationHref);
         return false;
       }
-      if (studioGenerationState === "LIMITED") {
-        trackEvent("studio_generate_limited", {
-          score: analysisScore,
-          blockerCodes: generationBlockerCodes,
-          documentType,
-        });
-      }
       return true;
     },
-    [analysisScore, generationBlockerCodes, router, studioGenerationState],
+    [analysisScore, generationBlockerCodes, router, studioUiState],
   );
   const recommendedResumeFocus: ResumeFocusOption = "Operational Leadership";
   const resumeFocusDefinitions: Array<{ value: ResumeFocusOption; label: string; definition: string }> = useMemo(
@@ -2275,7 +2375,7 @@ export default function StudioPage() {
         ...current,
         error: message,
         artifactFailure: {
-          headline: "Generation didn’t complete",
+          headline: "Generation didn�t complete",
           explanation: message,
           nextStep: "Review the input and try again with stronger baseline evidence.",
           retryable: false,
@@ -2596,7 +2696,7 @@ export default function StudioPage() {
         ...current,
         error: message,
         artifactFailure: {
-          headline: "Generation didn’t complete",
+          headline: "Generation didn�t complete",
           explanation: message,
           nextStep: "Review the input and try again with stronger baseline evidence.",
           retryable: false,
@@ -2616,7 +2716,7 @@ export default function StudioPage() {
         analysisScore,
         canGenerateDocuments,
         studioGenerationState,
-        primaryNextAction: primaryNextAction.action,
+        primaryNextAction: primaryNextAction.type,
         artifactFailure: activeArtifactFailure,
         actions: {
           generateResume: () => {
@@ -2661,7 +2761,7 @@ export default function StudioPage() {
       resolveGapsHref,
       resultsHref,
       router,
-      primaryNextAction.action,
+      primaryNextAction.type,
       studioGenerationState,
     ],
   );
@@ -2800,14 +2900,10 @@ export default function StudioPage() {
       <section className="space-y-5 rounded-[28px] bg-slate-900/45 p-6 md:p-8" data-testid="studio-generation-readiness">
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-            {studioGenerationState === "READY"
-              ? "Ready"
-              : studioGenerationState === "LIMITED"
-              ? "Limited"
-              : "Blocked"}
+            {studioUiState === "READY" ? "Ready" : "Blocked"}
           </p>
           <p className="text-sm text-slate-300">
-            {typeof analysisScore === "number" ? `Fit score ${Math.round(analysisScore)} · ` : "Fit score unavailable · "}
+            {typeof analysisScore === "number" ? `Fit score ${Math.round(analysisScore)} � ` : "Fit score unavailable � "}
             {(selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company")} -{" "}
             {(selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Unknown role")}
           </p>
@@ -2815,41 +2911,34 @@ export default function StudioPage() {
             {authorityStateTitle}
           </h1>
           <p className="text-base leading-7 text-slate-200">{authorityStateExplanation}</p>
-          <p className="text-sm font-medium text-slate-200">{primaryNextAction.description}</p>
+          <p className="text-sm font-medium text-slate-200">{primaryNextAction.label}</p>
           <p className="text-sm text-slate-400">
             Based on your analyzed role context and verified baseline evidence.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {primaryNextAction.action === "RESOLVE_GAPS" ? (
+          {primaryNextAction.type === "fit_review" ? (
             <Link
               href={resolveGapsHref}
               className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
             >
-              Resolve Gaps
+              Start Fit Review
             </Link>
-          ) : primaryNextAction.action === "CONTINUE_ANALYSIS" ? (
-            <Link
-              href="/analyze"
-              className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
-            >
-              Continue Analysis
-            </Link>
-          ) : primaryNextAction.action === "ADD_TO_OPPORTUNITIES" ? (
-            <Link
-              href="/job-tracker"
-              className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
-            >
-              Add to Opportunities
-            </Link>
-          ) : primaryNextAction.action === "REVIEW_RESULTS" ? (
+          ) : primaryNextAction.type === "studio" ? (
             <Link
               href={resultsHref}
               className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
             >
               Review Results
             </Link>
-          ) : studioGenerationState === "BLOCKED" ? (
+          ) : primaryNextAction.type === "studio_with_save" ? (
+            <Link
+              href="/job-tracker"
+              className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+            >
+              Add to Opportunities
+            </Link>
+          ) : studioUiState === "BLOCKED" ? (
             <Link
               href={remediationHref}
               className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
@@ -2865,8 +2954,6 @@ export default function StudioPage() {
               >
                 {resumeGenerating
                   ? "Generating..."
-                  : studioGenerationState === "LIMITED"
-                  ? "Generate Resume With Limits"
                   : "Generate Resume"}
               </FormButton>
               <FormButton
@@ -2876,18 +2963,8 @@ export default function StudioPage() {
               >
                 {coverGenerating
                   ? "Generating..."
-                  : studioGenerationState === "LIMITED"
-                  ? "Generate Cover Letter With Limits"
                   : "Generate Cover Letter"}
               </FormButton>
-              {studioGenerationState === "LIMITED" ? (
-                <Link
-                  href={remediationHref}
-                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/20 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
-                >
-                  Resolve gaps
-                </Link>
-              ) : null}
             </>
           )}
         </div>
@@ -2924,7 +3001,7 @@ export default function StudioPage() {
       ) : null}
       {opportunityContext ? (
         <p className="text-xs text-slate-400">
-          Opportunity status: {opportunityContext.status} · Updated{" "}
+          Opportunity status: {opportunityContext.status} � Updated{" "}
           {new Date(opportunityContext.updatedAt).toLocaleDateString()}
         </p>
       ) : null}
@@ -3154,18 +3231,13 @@ export default function StudioPage() {
 
       <StudioNextMove move={studioNextMove} />
 
-      {studioGenerationState !== "BLOCKED" && !studioBlockedByNextAction ? (
+      {studioUiState !== "BLOCKED" && !studioBlockedByNextAction ? (
       <>
       <section className="space-y-1 px-1">
         <h2 className="text-xl font-semibold text-slate-100">Your application materials</h2>
         <p className="text-sm text-slate-300">
           Generate, preview, and export your resume and cover letter.
         </p>
-        {studioGenerationState === "LIMITED" ? (
-          <p className="text-sm text-slate-300">
-            Generation is available, with constraints from current verification coverage.
-          </p>
-        ) : null}
       </section>
       <section
         ref={(node) => {
@@ -3383,8 +3455,6 @@ export default function StudioPage() {
             >
               {coverGenerating
                 ? "Generating..."
-                : studioGenerationState === "LIMITED"
-                ? "Generate Cover Letter With Limits"
                 : "Generate Cover Letter"}
             </FormButton>
             {showCoverDownloadActions ? (
@@ -3560,7 +3630,7 @@ export default function StudioPage() {
         <div className="mt-3 space-y-3">
           <p className="text-sm text-slate-300">
             <span className="font-semibold text-slate-100">
-              {(selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company")} — {(selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Unknown role")}
+              {(selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company")} � {(selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Unknown role")}
             </span>
           </p>
           <p className="text-sm text-slate-300">
@@ -3577,7 +3647,7 @@ export default function StudioPage() {
             {evidenceSummaryBullets.length ? (
               <ul className="space-y-1 text-sm text-slate-200">
                 {evidenceSummaryBullets.map((bullet) => (
-                  <li key={`evidence-summary-${bullet}`}>• {bullet}</li>
+                  <li key={`evidence-summary-${bullet}`}>� {bullet}</li>
                 ))}
               </ul>
             ) : (
@@ -3648,6 +3718,9 @@ export default function StudioPage() {
     </PageShell>
   );
 }
+
+
+
 
 
 

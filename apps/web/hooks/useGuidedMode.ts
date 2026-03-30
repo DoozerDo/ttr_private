@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import type { NextActionType } from "@/lib/nextAction";
 
 export type GuidedModeStatus = "active" | "completed";
 export type GuidedStep = "START" | "ANALYZE" | "RESULTS" | "RESOLVE_GAPS" | "REANALYZE" | "GENERATE" | "COMPLETE";
-export type NextActionLike = "RESOLVE_GAPS" | "REANALYZE" | "GENERATE_RESUME" | "ADD_TO_OPPORTUNITIES" | "REVIEW_RESULTS" | "CONTINUE_ANALYSIS" | "NONE";
 
 export const GUIDED_MODE_KEY = "ttr-guided-mode";
 export const GUIDED_STEP_KEY = "ttr-guided-step";
@@ -21,11 +21,10 @@ function readStorage(): Storage | null {
   return storage;
 }
 
-export function deriveGuidedStepFromNextAction(action: NextActionLike): GuidedStep {
-  if (action === "CONTINUE_ANALYSIS" || action === "NONE") return "ANALYZE";
-  if (action === "RESOLVE_GAPS") return "RESOLVE_GAPS";
-  if (action === "REANALYZE") return "REANALYZE";
-  if (action === "GENERATE_RESUME" || action === "ADD_TO_OPPORTUNITIES") return "GENERATE";
+export function deriveGuidedStepFromNextAction(action: NextActionType): GuidedStep {
+  if (action === "fit_review") return "RESOLVE_GAPS";
+  if (action === "studio") return "GENERATE";
+  if (action === "studio_with_save") return "GENERATE";
   return "COMPLETE";
 }
 
@@ -101,7 +100,7 @@ export function useGuidedMode() {
     setStep(target);
   }, [currentStep, isGuidedActive, setStep]);
 
-  const syncWithNextAction = useCallback((action: NextActionLike) => {
+  const syncWithNextAction = useCallback((action: NextActionType) => {
     if (!isGuidedActive) return;
     const derivedStep = deriveGuidedStepFromNextAction(action);
     if (derivedStep === "COMPLETE") {

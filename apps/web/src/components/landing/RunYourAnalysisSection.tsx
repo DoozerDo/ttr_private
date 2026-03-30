@@ -97,6 +97,9 @@ export function RunYourAnalysisSection({
                   {resumeFilename ? `Ready: ${resumeFilename}` : "PDF or DOCX"}
                 </p>
               </div>
+              <p className="mt-2 text-xs text-slate-400">
+                Upload a PDF or DOCX. We automatically extract and analyze your experience.
+              </p>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -158,7 +161,9 @@ export function RunYourAnalysisSection({
               </p>
             </div>
           </div>
-          {previewError ? <p className="mt-3 text-xs text-rose-300">{previewError}</p> : null}
+          <div className="mt-3 min-h-5">
+            {previewError ? <p className="text-xs text-rose-300">{previewError}</p> : <p className="text-xs text-slate-500"> </p>}
+          </div>
         </div>
       </div>
       </section>

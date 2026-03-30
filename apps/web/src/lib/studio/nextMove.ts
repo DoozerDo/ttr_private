@@ -190,7 +190,7 @@ export function resolveStudioNextMove(input: StudioNextMoveInput): StudioNextMov
     return moderateFitMove(input);
   }
 
-  if (input.canGenerateDocuments || input.primaryNextAction === "GENERATE_RESUME") {
+  if (input.canGenerateDocuments || input.primaryNextAction === "studio" || input.primaryNextAction === "studio_with_save") {
     return strongFitMove(input);
   }
 

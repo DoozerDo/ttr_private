@@ -35,7 +35,6 @@ export const getJourneyStepIconKey = (stepId: JourneyStepId): string => {
   if (stepId === "results") return "score";
   if (stepId === "studio") return "generator";
   if (stepId === "jobTracker") return "opportunities";
-  if (stepId === "interviewToolkit") return "interview";
   return "default";
 };
 
@@ -87,22 +86,6 @@ const renderStepIcon = (stepId: JourneyStepId, isActive: boolean): ReactElement 
   if (stepId === "jobTracker") {
     return (
       <JourneyProgressIcon stage={4} active={isActive} className="h-full w-full" />
-    );
-  }
-
-  if (stepId === "interviewToolkit") {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        role="presentation"
-        strokeWidth="1.6"
-        stroke="currentColor"
-        fill="none"
-      >
-        <path d="M5 8h14v8H9l-4 4z" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M7 10h10" strokeLinecap="round" />
-        <path d="M7 14h6" strokeLinecap="round" />
-      </svg>
     );
   }
 
