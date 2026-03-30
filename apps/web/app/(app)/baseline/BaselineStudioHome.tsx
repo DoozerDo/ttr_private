@@ -414,6 +414,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     if (!hasCompletedAnalysis) return "no_analysis";
     return "analysis_exists";
   }, [hasBaseline, hasCompletedAnalysis]);
+  const hasUsableBaseline = hasBaseline;
   const careerGravity = useMemo(
     () => buildCareerGravityUnlock(completedRoleAnalyses),
     [completedRoleAnalyses],
@@ -970,22 +971,22 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             <div className="space-y-2">
               <h1 className="text-3xl font-semibold tracking-tight text-white md:text-[34px]">
                 {heroState === "no_baseline"
-                  ? "Build your baseline library"
+                  ? "Build your verified baseline"
                   : heroState === "no_analysis"
-                    ? "Build your baseline library"
-                    : "Your baseline is active"}
+                    ? "Build your verified baseline"
+                    : "Your verified baseline is ready"}
               </h1>
               <p className="text-base leading-7 text-slate-300">
                 {heroState === "no_baseline"
-                  ? "Upload the resumes you want to work from. Each file is converted into a baseline that can be used for scoring and document generation. Choose one active baseline for downstream analysis."
+                  ? "Upload the resume you want to work from. We turn it into the verified baseline used for scoring and document generation. Complete your baseline to unlock analysis."
                   : heroState === "no_analysis"
-                    ? "Upload the resumes you want to work from. Each file is converted into a baseline that can be used for scoring and document generation. Choose one active baseline for downstream analysis."
-                    : "Your baseline is the verified version of your experience used across scoring and document generation."}
+                    ? "Your baseline is the verified version of your experience used for scoring and document generation. Complete your baseline to unlock analysis."
+                    : "Your baseline is the verified version of your experience used for scoring and document generation. Every downstream result depends on it."}
               </p>
               <p className="text-sm leading-6 text-slate-400">
                 A baseline is the verified version of your resume that this app uses for scoring and document generation.
               </p>
-              <p className="text-sm font-medium text-slate-200">Your baseline is not your resume.</p>
+              <p className="text-sm font-medium text-slate-200">Complete your baseline to unlock analysis.</p>
             </div>
             <div className="space-y-3">
               <FormButton
@@ -996,59 +997,52 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 {isEditableLibrary
                   ? isUploading
                     ? "Uploading..."
-                    : "Upload resume"
+                    : heroState === "no_baseline"
+                      ? "Upload resume"
+                      : "Update baseline"
                   : "Upload unavailable"}
               </FormButton>
               <p className="text-sm text-slate-400">Accepted file types: PDF and DOCX</p>
             </div>
-            {heroState !== "no_baseline" ? (
+            {hasUsableBaseline ? (
               <div className="flex flex-wrap gap-2">
-                {heroState === "no_analysis" ? (
-                  <FormButton
-                    onClick={() => {
-                      if (primaryBaselineId) void runCanonicalBaselineAnalysis(primaryBaselineId);
-                    }}
-                    disabled={!isHydrated || !primaryBaselineId}
-                  >
-                    Run Career Compatibility Analysis
-                  </FormButton>
-                ) : (
-                  <Link
-                    href={latestResultsHref ?? "/results"}
-                    className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
-                  >
-                    View latest results
-                  </Link>
-                )}
                 <Link
                   href={targetHref}
-                  className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-5 py-2.5 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+                  className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
                 >
                   Analyze a job description
                 </Link>
+                {latestResultsHref ? (
+                  <Link
+                    href={latestResultsHref}
+                    className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-5 py-2.5 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+                  >
+                    View latest results
+                  </Link>
+                ) : null}
               </div>
             ) : null}
           </div>
         </section>
         <section className="rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
-          <h2 className="text-lg font-semibold text-slate-100">Why this matters</h2>
+          <h2 className="text-lg font-semibold text-slate-100">How this works</h2>
           <p className="mt-2 text-sm leading-6 text-slate-300">
-            Upload the resume you already have. We turn it into a verified baseline, which is the working version
-            used for scoring and document generation. That keeps every result grounded in your real experience.
+            Your baseline is the system of record for scoring and document generation. It keeps every downstream
+            result grounded in your verified experience.
           </p>
           <div className="mt-4 grid gap-3 md:grid-cols-3">
             <div className="rounded-xl border border-white/10 bg-slate-950/30 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Step 1</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Upload</p>
               <p className="mt-2 text-sm font-medium text-slate-100">Upload your resume</p>
             </div>
             <div className="rounded-xl border border-white/10 bg-slate-950/30 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Step 2</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Verify</p>
               <p className="mt-2 text-sm font-medium text-slate-100">We verify and structure your experience</p>
             </div>
             <div className="rounded-xl border border-white/10 bg-slate-950/30 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Step 3</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Unlock</p>
               <p className="mt-2 text-sm font-medium text-slate-100">
-                Use that baseline to score roles and generate documents
+                Complete your baseline to unlock analysis and document generation
               </p>
             </div>
           </div>
@@ -1058,16 +1052,16 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             </summary>
             <p className="mt-2 text-sm leading-6 text-slate-300">
               Because resumes are written for people, not systems. TTR first turns your resume into a verified
-              working version so scores and generated documents stay consistent, traceable, and grounded in what
+              working baseline so scores and generated documents stay consistent, traceable, and grounded in what
               you have actually done.
             </p>
           </details>
         </section>
         {hasCompletedAnalysis ? (
           <section className="rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Active baseline</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Verified baseline</p>
             <p className="mt-2 text-sm text-slate-300">
-              Your active baseline is the one used when you analyze a job description or generate application materials.
+              Your verified baseline is the one used when you analyze a job description or generate application materials.
             </p>
           </section>
         ) : null}
@@ -1076,7 +1070,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             <header className="space-y-1">
               <h2 className="text-xl font-semibold tracking-tight text-slate-100">Baseline library</h2>
               <p className="text-sm text-slate-400">
-                Your active baseline is the one used when you analyze a job description or generate application materials.
+                Your verified baseline is the one used when you analyze a job description or generate application materials.
               </p>
             </header>
             <div className="space-y-3">

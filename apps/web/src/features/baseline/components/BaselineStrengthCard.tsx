@@ -49,10 +49,10 @@ export function BaselineStrengthCard({
 
       <div className="space-y-2">
         <p className="text-base font-semibold text-slate-100">
-          Your baseline unlocks progressively as the key signals are added.
+          Your baseline is the foundation used for scoring and downstream generation.
         </p>
         <p className="text-sm text-slate-400">
-          Completing more areas improves readiness and keeps the next step clear.
+          Completing more areas improves readiness and unlocks analysis.
         </p>
       </div>
 
