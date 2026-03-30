@@ -16,7 +16,7 @@ describe("generation product readiness contract", () => {
     expect(readiness.tier).toBe("fit_review_only");
   });
 
-  it("unlocks studio at 70+ but keeps generation blocked below 85", () => {
+  it("unlocks studio and generation at 70+ when readiness is ready", () => {
     const readiness = buildGenerationProductReadiness({
       score: 72,
       authorityState: "READY",
@@ -26,34 +26,34 @@ describe("generation product readiness contract", () => {
     });
 
     expect(readiness.canOpenStudio).toBe(true);
-    expect(readiness.generation_readiness.canGenerate).toBe(false);
-    expect(readiness.generation_readiness.canExport).toBe(false);
-    expect(readiness.tier).toBe("studio_unlocked");
+    expect(readiness.generation_readiness.canGenerate).toBe(true);
+    expect(readiness.generation_readiness.canExport).toBe(true);
+    expect(readiness.tier).toBe("generation_export_allowed");
   });
 
-  it("allows generation at 85+ and export at 92+ for pro", () => {
-    const score85 = buildGenerationProductReadiness({
-      score: 85,
+  it("allows generation at 70+ when readiness is ready and export for pro", () => {
+    const score76 = buildGenerationProductReadiness({
+      score: 76,
       authorityState: "READY",
       hasCanonicalAssessment: true,
       hasRequiredContext: true,
       isPro: true,
     });
-    const score92 = buildGenerationProductReadiness({
-      score: 92,
+    const score76NonPro = buildGenerationProductReadiness({
+      score: 76,
       authorityState: "READY",
       hasCanonicalAssessment: true,
       hasRequiredContext: true,
-      isPro: true,
+      isPro: false,
     });
 
-    expect(score85.generation_readiness.canGenerate).toBe(true);
-    expect(score85.generation_readiness.canExport).toBe(false);
-    expect(score85.tier).toBe("generation_allowed");
+    expect(score76.generation_readiness.canGenerate).toBe(true);
+    expect(score76.generation_readiness.canExport).toBe(true);
+    expect(score76.tier).toBe("generation_export_allowed");
 
-    expect(score92.generation_readiness.canGenerate).toBe(true);
-    expect(score92.generation_readiness.canExport).toBe(true);
-    expect(score92.tier).toBe("generation_export_allowed");
+    expect(score76NonPro.generation_readiness.canGenerate).toBe(true);
+    expect(score76NonPro.generation_readiness.canExport).toBe(false);
+    expect(score76NonPro.tier).toBe("generation_allowed");
   });
 
   it("fails closed when canonical assessment is missing", () => {

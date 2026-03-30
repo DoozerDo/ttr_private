@@ -46,29 +46,22 @@ export function buildGenerationProductReadiness(
 
   const score = typeof input.score === "number" ? input.score : null;
   const scoreEligibleForStudio = score !== null && score >= 70;
-  const scoreEligibleForGeneration = score !== null && score >= 85;
-  const scoreEligibleForExport = score !== null && score >= 92;
 
   if (!scoreEligibleForStudio) {
-    reasonsBlocked.push("score_below_studio_threshold");
-  }
-  if (!scoreEligibleForGeneration) {
-    reasonsBlocked.push("score_below_generation_threshold");
-  }
-  if (!scoreEligibleForExport) {
-    reasonsBlocked.push("score_below_export_threshold");
+    reasonsBlocked.push("score_below_unlock_floor");
   }
 
   const canOpenStudio =
     scoreEligibleForStudio &&
-    input.hasCanonicalAssessment &&
-    input.hasRequiredContext;
-  const canGenerate =
-    scoreEligibleForGeneration &&
     input.authorityState === "READY" &&
     input.hasCanonicalAssessment &&
     input.hasRequiredContext;
-  const canExport = canGenerate && scoreEligibleForExport && input.isPro;
+  const canGenerate =
+    scoreEligibleForStudio &&
+    input.authorityState === "READY" &&
+    input.hasCanonicalAssessment &&
+    input.hasRequiredContext;
+  const canExport = canGenerate && input.isPro;
 
   if (!input.isPro) {
     reasonsBlocked.push("pro_required_for_export");

@@ -415,6 +415,28 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     return "analysis_exists";
   }, [hasBaseline, hasCompletedAnalysis]);
   const hasUsableBaseline = hasBaseline;
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    if (!primaryBaseline) return;
+    const baselineRuntimeDebug = {
+      baseline: {
+        id: primaryBaseline.id,
+        fileName: primaryBaseline.originalFilename,
+        isExpectedBaseline: true,
+        selectedAtRuntime: Boolean(primaryBaselineId),
+      },
+      analysis: {
+        id: latestAssessmentId,
+        score: latestFitScore,
+      },
+      decision: {
+        finalAction: latestAssessmentId ? "analysis" : "baseline",
+        why: latestAssessmentId ? "baseline has a completed analysis" : "baseline still needs analysis",
+      },
+    };
+    console.debug("baselineRuntimeDebug", baselineRuntimeDebug);
+  }, [latestAssessmentId, latestFitScore, primaryBaseline, primaryBaselineId]);
   const careerGravity = useMemo(
     () => buildCareerGravityUnlock(completedRoleAnalyses),
     [completedRoleAnalyses],

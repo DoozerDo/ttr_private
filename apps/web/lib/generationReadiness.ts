@@ -674,6 +674,11 @@ function addIssueFallbackFromReason(
   });
 }
 
+function debugReadinessPayload(label: string, payload: Record<string, unknown>) {
+  if (process.env.NODE_ENV === "production") return;
+  console.debug(label, payload);
+}
+
 export function getGenerationReadiness(
   result: unknown,
   runState: "ok" | "compliance_blocked" | null,
@@ -735,7 +740,7 @@ export function getGenerationReadiness(
       addUniqueReason(reasons, {
         code: "personalization_limitation",
         message:
-          "This role scored highly, but document generation is currently limited by verification constraints.",
+          "This role scored highly, but document generation needs more verified evidence.",
       });
     }
 
@@ -780,7 +785,7 @@ export function getGenerationReadiness(
       addUniqueReason(reasons, {
         code: "personalization_limitation",
         message:
-          "Tailored generation may be limited until verification constraints are resolved.",
+          "Tailored generation needs more verified evidence before it is fully ready.",
       });
     }
   }
@@ -798,8 +803,18 @@ export function getGenerationReadiness(
     status === "blocked"
       ? "Strong fit can still be blocked for generation when verification requirements are not met."
       : status === "limited"
-        ? "Fit score and generation readiness are separate. Tailored generation is currently limited."
+        ? "Your baseline needs more verified evidence before generation is fully ready."
         : "Generation is ready for this scored analysis context.";
+
+  if (process.env.NODE_ENV !== "production") {
+    console.debug("readinessDebug.reconcile", {
+      inputStatus: status,
+      inputReasons: reasons,
+      status,
+      blocked,
+      summary,
+    });
+  }
 
   return {
     status,
@@ -878,6 +893,16 @@ export function combineGenerationReadinessFromServer(
     }
   }
 
+  if (process.env.NODE_ENV !== "production") {
+    console.debug("readinessDebug.combine", {
+      resumeReadiness,
+      coverReadiness,
+      status,
+      reasons,
+      verificationIssues,
+    });
+  }
+
   return {
     status,
     blocked: status === "blocked",
@@ -891,7 +916,7 @@ export function combineGenerationReadinessFromServer(
       status === "blocked"
         ? "Strong fit can still be blocked for generation when verification requirements are not met."
         : status === "limited"
-          ? "Fit score and generation readiness are separate. Tailored generation is currently limited."
+          ? "Your baseline needs more verified evidence before generation is fully ready."
           : "Generation is ready for this scored analysis context.",
     verificationIssues,
   };
@@ -1034,7 +1059,7 @@ export function reconcileReadinessWithClaimVerifications(
     status === "blocked"
       ? "Strong fit can still be blocked for generation when verification requirements are not met."
       : status === "limited"
-        ? "Fit score and generation readiness are separate. Tailored generation is currently limited."
+        ? "Your baseline needs more verified evidence before generation is fully ready."
         : "Generation is ready for this scored analysis context.";
 
   return {
@@ -1088,6 +1113,17 @@ export function applyTargetingExclusionsToReadiness(
       : status === "limited"
         ? "Targeting was narrowed to supported requirements, but some limitations still remain."
         : "Targeting was narrowed to verified experience and generation is now ready.";
+
+  if (process.env.NODE_ENV !== "production") {
+    console.debug("readinessDebug.applyExclusions", {
+      inputStatus: readiness.status,
+      excludedLabels: Array.from(excludedLabels),
+      removedClaims: Array.from(new Set(removedClaims)),
+      nextIssues,
+      status,
+      summary,
+    });
+  }
 
   return {
     removedClaims: Array.from(new Set(removedClaims)),

@@ -40,7 +40,7 @@ describe("generation readiness model", () => {
     expect(readiness.badgeLabel).toBe("LIMITED");
     expect(readiness.reasons[0]?.code).toBe("personalization_limitation");
     expect(readiness.reasons[0]?.message).toBe(
-      "This role scored highly, but document generation is currently limited by verification constraints.",
+      "This role scored highly, but document generation needs more verified evidence.",
     );
     expect(readiness.summary.toLowerCase()).not.toContain("baseline issue");
   });
@@ -74,8 +74,7 @@ describe("generation readiness model", () => {
         reasons: [
           {
             code: "personalization_limitation",
-            message:
-              "This role scored highly, but document generation is currently limited by verification constraints.",
+            message: "This role scored highly, but document generation needs more verified evidence.",
           },
         ],
       },
@@ -173,8 +172,7 @@ describe("generation readiness model", () => {
         reasons: [
           {
             code: "personalization_limitation",
-            message:
-              "This role scored highly, but document generation is currently limited by verification constraints.",
+            message: "This role scored highly, but document generation needs more verified evidence.",
           },
         ],
         compliance_flags: [{ code: "limited_personalization", severity: "warn" }],
