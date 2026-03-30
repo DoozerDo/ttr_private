@@ -15,7 +15,6 @@ import {
   readLastAnalysis as readStoredAnalysis,
   saveLastAnalysis,
 } from "../lib/session";
-import { markJourneyStepCompleted } from "@/src/lib/journeyNavStore";
 import { publishBaselineUpdated } from "@/src/lib/baseline-sync";
 
 const GENERATION_SCORE_THRESHOLD = 70;
@@ -755,7 +754,6 @@ export default function AnalyzePage() {
 
       setResult(data);
       setRestoredAt(null);
-      markJourneyStepCompleted("analyze");
       publishBaselineUpdated({ baselineId, source: "analysis" });
 
       const storedAt = new Date().toISOString();

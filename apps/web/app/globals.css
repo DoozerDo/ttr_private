@@ -244,15 +244,6 @@ html {
   color: var(--text-primary);
 }
 
-.ttr-nav-item .journey-nav-step-label {
-  color: inherit;
-}
-
-.ttr-nav-item .journey-nav-icon-target svg {
-  stroke: currentColor;
-  color: inherit;
-}
-
 .ttr-btn-primary {
   display: inline-flex;
   align-items: center;

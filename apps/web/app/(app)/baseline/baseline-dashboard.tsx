@@ -16,7 +16,6 @@ import {
   archiveBaseline,
   listBaselines,
 } from "@/lib/baselines";
-import { markJourneyStepCompleted } from "@/src/lib/journeyNavStore";
 import { formatDateTime } from "@/lib/format-date";
 import { getBaselineDetailsHref } from "@/src/navigation/routes";
 import { ttrComponents } from "@/app/(app)/ui/ttrStyles";
@@ -340,7 +339,6 @@ export function BaselineDashboard({
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
-      markJourneyStepCompleted("baselines");
     } catch (uploadError) {
       console.error("Upload failed", uploadError);
       setError("Unable to upload resume right now.");

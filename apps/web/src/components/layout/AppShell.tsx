@@ -1,13 +1,11 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
-import { JourneyNavV1 } from "./JourneyNavV1";
 import { TopNavAccountArea } from "./TopNavAccountArea";
 import { BetaGuideNudge } from "./BetaGuideNudge";
-import { JourneyNavState } from "@/src/lib/journeyNav";
-import { resolveJourneyNavStateFromAppState, useJourneyNavAppState } from "@/src/lib/journeyNavStore";
+import { UnlockPathBar } from "./UnlockPathBar";
 import { readLastAnalysis, type StoredAnalysisRecord } from "@/app/(app)/lib/session";
 import { subscribeBaselineUpdated } from "@/src/lib/baseline-sync";
 import {
@@ -61,27 +59,6 @@ async function safeJson<T>(response: Response): Promise<T | null> {
   }
 }
 
-export function filterJourneyNavStateForPath(
-  _pathname: string,
-  state: JourneyNavState,
-): JourneyNavState {
-  // Beta scope removes this journey step per spec Section 7.
-  return state;
-}
-
-function isStepCompleted(state: unknown): boolean {
-  if (typeof state === "string") {
-    return state.toLowerCase() === "completed";
-  }
-  if (typeof state === "number") {
-    // If state is a numeric enum, we do not have the enum value in scope here.
-    // Conservatively treat non-zero as "not safe" unless it is a common "completed" value.
-    // If your enum differs, import the enum and replace this logic.
-    return state === 2;
-  }
-  return false;
-}
-
 type AutoErrorType = "runtime" | "promise" | "api";
 
 type AutoErrorPayload = {
@@ -111,8 +88,6 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
   const [, setHasBaseline] = useState(false);
   const [, setHasJob] = useState(false);
   const lastPath = useRef(pathname);
-
-  const journeyAppState = useJourneyNavAppState();
 
   const refreshContext = useCallback(async () => {
     if (typeof window === "undefined") return;
@@ -402,24 +377,34 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
     console.info(`WEB_BUILD_ID=${shortBuildSha}`);
   }, []);
 
-  const journeyNavState = useMemo(() => {
-    const baseState = resolveJourneyNavStateFromAppState(pathname, journeyAppState);
-    return filterJourneyNavStateForPath(pathname, baseState);
-  }, [pathname, journeyAppState]);
-
-  type JourneyStepId = JourneyNavState["steps"][number]["id"];
-
-  const handleJourneyStepClick = useCallback(
-    (stepId: JourneyStepId) => {
-      const step = journeyNavState.steps.find((s) => s.id === stepId);
-      if (!step) return;
-
-      if (!isStepCompleted(step.state)) return;
-
-      journeyAppState.setActiveOverride(stepId);
-    },
-    [journeyNavState.steps, journeyAppState],
-  );
+  const storedContext = getStoredContext();
+  const lastAnalysis = storedContext.lastAnalysis;
+  const analysisPayload = lastAnalysis?.analysis as
+    | {
+        scoring_v2?: {
+          score?: number | null;
+          readiness?: { status?: "ready" | "limited" | "blocked" | null };
+          generation_readiness?: { status?: "ready" | "limited" | "blocked" | null };
+        } | null;
+        readiness?: { status?: "ready" | "limited" | "blocked" | null };
+        readinessStatus?: "ready" | "limited" | "blocked" | null;
+        generation_readiness?: { status?: "ready" | "limited" | "blocked" | null };
+        generatedDocuments?: unknown[];
+        generated_documents?: unknown[];
+        studio?: { generatedDocuments?: unknown[] };
+      }
+    | undefined;
+  const readinessStatus =
+    analysisPayload?.scoring_v2?.generation_readiness?.status ??
+    analysisPayload?.scoring_v2?.readiness?.status ??
+    analysisPayload?.generation_readiness?.status ??
+    analysisPayload?.readiness?.status ??
+    analysisPayload?.readinessStatus ??
+    null;
+  const hasGeneratedDocuments =
+    Array.isArray(analysisPayload?.generatedDocuments) ||
+    Array.isArray(analysisPayload?.generated_documents) ||
+    Array.isArray(analysisPayload?.studio?.generatedDocuments);
 
   return (
     <ReportBugProvider userId={userId}>
@@ -432,7 +417,7 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
           >
             <div
               className="sticky top-0 z-40 mb-6 border-b border-[var(--border-strong)] bg-[var(--bg-app)] py-2 pr-24 md:pr-28 relative"
-              data-testid="journey-nav"
+              data-testid="unlock-path-bar"
               style={{
                 backgroundColor: "var(--bg-app)",
                 backgroundImage: "none",
@@ -449,7 +434,15 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
                 />
                 <TopNavAccountArea initialEmail={userEmail} />
               </div>
-              <JourneyNavV1 state={journeyNavState} onStepClick={handleJourneyStepClick} />
+              <UnlockPathBar
+                currentPathname={pathname}
+                baselineReady={storedContext.hasBaseline}
+                analysisExists={Boolean(lastAnalysis)}
+                score={lastAnalysis?.fitScore ?? null}
+                readinessStatus={readinessStatus}
+                hasGeneratedDocuments={hasGeneratedDocuments}
+                hasSavedOpportunity={pathname.startsWith("/job-tracker")}
+              />
             </div>
 
             {children}

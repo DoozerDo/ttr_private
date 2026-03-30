@@ -19,8 +19,6 @@ import { buildGenerationProductReadiness } from "@/lib/generationProductReadines
 import { sanitizeScoreExplanationLine, sanitizeScoreExplanationList } from "@/lib/scoreExplanationCopy";
 import { trackEvent } from "@/src/lib/analytics";
 import { SetupModuleCard } from "./SetupModuleCard";
-import { JourneyStepId } from "@/src/lib/journeyNav";
-import { useJourneyNavAppState } from "@/src/lib/journeyNavStore";
 
 type ProgressState = {
   isScoring: boolean;
@@ -500,7 +498,6 @@ const parseAnalysisRunResponse = async (
   throw new Error("Unable to run compatibility scoring right now.");
 };
 
-const BASELINE_STEP_ID: JourneyStepId = "baselines";
 export function WorkspaceRunner({
   baselineId,
   jobId,
@@ -525,7 +522,6 @@ export function WorkspaceRunner({
   const [isRevealAnalyzing, setIsRevealAnalyzing] = useState(false);
   const [revealMessageIndex, setRevealMessageIndex] = useState(0);
   const [revealedScoreValue, setRevealedScoreValue] = useState<number | null>(null);
-  const journeyNavAppState = useJourneyNavAppState();
   const autoRunCombinationRef = useRef<string | null>(null);
   const autoRunCompletionTimerRef = useRef<number | null>(null);
   const autoRunInitiatedRef = useRef(false);
@@ -949,9 +945,8 @@ export function WorkspaceRunner({
       isComplianceBlocked: false,
       isPreparingMatch: false,
     });
-    journeyNavAppState.setActiveOverride(BASELINE_STEP_ID);
     onAutoRunComplete?.();
-  }, [journeyNavAppState, onAutoRunComplete, reportProgressState]);
+  }, [onAutoRunComplete, reportProgressState]);
 
   useEffect(() => {
     if (autoRunTriggerTimerRef.current !== null) {

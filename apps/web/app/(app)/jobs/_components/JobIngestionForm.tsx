@@ -6,7 +6,6 @@ import type { CSSProperties, FormEvent } from "react";
 import { Alert } from "@/components/Alert";
 import type { JobDto, JobWarning } from "@/lib/jobs";
 import { ttrComponents, ttrTypography } from "@/app/(app)/ui/ttrStyles";
-import { markJourneyStepCompleted } from "@/src/lib/journeyNavStore";
 
 const fieldStyle: CSSProperties = {
   display: "flex",
@@ -259,7 +258,6 @@ export function JobIngestionForm({ onResolved, onCancel }: JobIngestionFormProps
       setWarning(jobData.warning ?? null);
       resetForm();
       setSuccess("Job description saved. Ready to analyze fit.");
-      markJourneyStepCompleted("jobs");
       onResolved(jobData.id);
     } catch {
       setError(createClientError("Unable to save job right now.", "submit_error"));
