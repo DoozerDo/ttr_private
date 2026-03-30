@@ -36,7 +36,11 @@ export function resolveUnlockPathState(input: UnlockPathInput): UnlockPathResolv
   const score = typeof input.score === "number" ? input.score : null;
   const readinessReady = input.readinessStatus === "ready";
   const studioEligible = score !== null && score >= 70 && readinessReady;
-  const fitReviewCurrent = score !== null && score >= 70 && !readinessReady;
+  const hasActiveBaseline = input.baselineReady;
+  const fitReviewRelevant = score !== null;
+  const fitReviewCurrent =
+    hasActiveBaseline && fitReviewRelevant && (score < 70 || (score >= 70 && !readinessReady));
+  const fitReviewComplete = hasActiveBaseline && fitReviewRelevant && score >= 70 && readinessReady;
 
   const baseline: UnlockPathModuleState =
     isBaselineRoute ? "CURRENT" : input.baselineReady ? "COMPLETE" : "CURRENT";
@@ -50,7 +54,13 @@ export function resolveUnlockPathState(input: UnlockPathInput): UnlockPathResolv
           ? "COMPLETE"
           : "UNLOCKED";
 
-  const fitReview: UnlockPathModuleState = fitReviewCurrent ? "CURRENT" : "COMPLETE";
+  const fitReview: UnlockPathModuleState = !hasActiveBaseline
+    ? "LOCKED"
+    : fitReviewCurrent
+      ? "CURRENT"
+      : fitReviewComplete
+        ? "COMPLETE"
+        : "LOCKED";
 
   const studio: UnlockPathModuleState =
     !studioEligible

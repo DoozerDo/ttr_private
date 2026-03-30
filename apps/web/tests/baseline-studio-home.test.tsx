@@ -104,7 +104,7 @@ describe("BaselineStudioHome", () => {
     setFetchImplementation(fetchMock);
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Run Analysis" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "ANALYZE" })[0]);
 
     await waitFor(() => {
       expect(screen.getByText("Baseline readiness")).toBeInTheDocument();
@@ -123,20 +123,25 @@ describe("BaselineStudioHome", () => {
   });
 
   it("shows the upload setup CTA when no baseline exists", () => {
-    render(<BaselineStudioHome baselines={[]} />);
+    const { container } = render(<BaselineStudioHome baselines={[]} />);
 
     expect(screen.getByText("Build your verified baseline")).toBeInTheDocument();
     expect(screen.getByText(/Upload the resume you want to work from/i)).toBeInTheDocument();
     expect(screen.getByText("Upload your resume")).toBeInTheDocument();
+    expect(screen.getByTestId("baseline-upload-surface")).toBeInTheDocument();
+    expect(screen.getByText("Upload resume or drag and drop a PDF or DOCX here.")).toBeInTheDocument();
+    expect(screen.getByText("Accepted file types: PDF and DOCX")).toBeInTheDocument();
     expect(screen.getByText("We verify and structure your experience")).toBeInTheDocument();
     expect(screen.getByText("Complete your baseline to unlock analysis and document generation")).toBeInTheDocument();
     expect(screen.getByText("Why not use my resume as-is?")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Upload resume" })).toBeInTheDocument();
     expect(screen.getByText("0 of 3 active resumes")).toBeInTheDocument();
     expect(screen.queryByText("Selected:")).toBeNull();
+    expect(screen.queryByText(/Drag and drop a resume here, or use the button above/i)).toBeNull();
+    expect(container.querySelectorAll('input[type="file"]').length).toBe(1);
   });
 
-  it("shows the run-analysis CTA when a baseline exists but no analysis is complete", () => {
+  it("shows the per-card targeting CTA when a baseline exists but no analysis is complete", () => {
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
 
     expect(screen.getByText("Build your verified baseline")).toBeInTheDocument();
@@ -146,30 +151,42 @@ describe("BaselineStudioHome", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update baseline" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Run Analysis" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Analyze a job description" })).toHaveAttribute(
-      "href",
-      "/target?baselineId=base-1",
-    );
-    expect(screen.queryByRole("link", { name: "View latest results" })).toBeNull();
+    expect(screen.getByRole("button", { name: "ANALYZE" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "VIEW LATEST RESULTS" })).toBeNull();
   });
 
-  it("shows the launch point for a qualified analyzed baseline", () => {
+  it("shows the launch point for a qualified analyzed baseline", async () => {
+    setFetchImplementation(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([
+          { status: "complete", score: 81 },
+          { status: "complete", score: 78 },
+          { status: "complete", score: 84 },
+        ]);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
     render(<BaselineStudioHome baselines={[createAnalyzedBaseline("base-1", "resume-1.pdf", 82)]} />);
 
     expect(screen.getByText("Your verified baseline is ready")).toBeInTheDocument();
     expect(screen.getByText("Baseline library")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update baseline" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View Baseline Details" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Run Analysis" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View Latest Results" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Analyze a job description" })).toHaveAttribute(
-      "href",
-      "/target?baselineId=base-1",
-    );
-    expect(screen.getByRole("link", { name: "Open Resume Studio" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
+    expect(screen.getByRole("link", { name: "VIEW BASELINE DETAILS" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "ANALYZE" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("link", { name: "ADD JOB" })).toHaveAttribute(
+        "href",
+        "/target?baselineId=base-1",
+      );
+    });
+    expect(screen.getByRole("link", { name: "VIEW LATEST RESULTS" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "OPEN RESUME STUDIO" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "START FIT REVIEW" })).toBeNull();
     expect(screen.getByText("1 of 3 active resumes")).toBeInTheDocument();
+    expect(screen.queryByText("Verified baseline")).toBeNull();
+    expect(screen.getByText("Why not use my resume as-is?")).toBeVisible();
   });
 
   it("renders multiple resumes and blocks upload at the library cap", () => {
@@ -190,6 +207,24 @@ describe("BaselineStudioHome", () => {
     expect(screen.getByText("resume-3.pdf")).toBeInTheDocument();
   });
 
+  it("hides the targeting CTA for archived resumes", () => {
+    render(
+      <BaselineStudioHome
+        baselines={[
+          {
+            ...createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf"),
+            status: "ARCHIVED" as const,
+            archivedAt: "2026-03-01T00:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Baseline library")).toBeInTheDocument();
+    expect(screen.getByText("resume-1.pdf")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "ANALYZE" })).toBeNull();
+  });
+
   it("shows the fit-review launch point for a low-fit analyzed baseline", () => {
     render(<BaselineStudioHome baselines={[createAnalyzedBaseline("base-1", "resume-1.pdf", 55)]} />);
 
@@ -197,15 +232,11 @@ describe("BaselineStudioHome", () => {
     expect(screen.getByText("Baseline library")).toBeInTheDocument();
     expect(screen.getByText("Last role analysis: 55%")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update baseline" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View Baseline Details" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Run Analysis" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View Latest Results" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Analyze a job description" })).toHaveAttribute(
-      "href",
-      "/target?baselineId=base-1",
-    );
-    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Open Resume Studio" })).toBeNull();
+    expect(screen.getByRole("link", { name: "VIEW BASELINE DETAILS" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "ANALYZE" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "VIEW LATEST RESULTS" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "START FIT REVIEW" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "OPEN RESUME STUDIO" })).toBeNull();
   });
 
   it("explains the upload flow as a structured source of truth for a new user", () => {
@@ -239,7 +270,7 @@ describe("BaselineStudioHome", () => {
     });
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Run Analysis" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "ANALYZE" })[0]);
 
     await waitFor(() => {
       expect(screen.getByText("Professional Signals Diagnosis")).toBeInTheDocument();
@@ -258,13 +289,19 @@ describe("BaselineStudioHome", () => {
         return createJsonResponse([]);
       }
       if (url.includes("/api/baselines?includeArchived=true")) {
-        return createJsonResponse([createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]);
+        return createJsonResponse([
+          {
+            ...createAnalyzedBaseline("base-1", "resume-1.pdf", 82),
+            originalBaselineScore: 79,
+            latestBaselineScore: 79,
+          },
+        ]);
       }
       if (url.includes("/api/baselines/base-1/strengthening-additions") && init?.method === "PATCH") {
         return createJsonResponse({
-          ...createAnalyzedBaseline("base-1", "resume-1.pdf"),
+          ...createAnalyzedBaseline("base-1", "resume-1.pdf", 82),
           sections: [
-            ...(createAnalyzedBaseline("base-1", "resume-1.pdf").sections ?? []),
+            ...(createAnalyzedBaseline("base-1", "resume-1.pdf", 82).sections ?? []),
             {
               id: "section-strengthening-1",
               baselineId: "base-1",
@@ -277,27 +314,40 @@ describe("BaselineStudioHome", () => {
               updatedAt: "2026-01-01T00:00:00.000Z",
             },
           ],
-        });
-      }
-      if (url.includes("/api/baselines/base-1/analysis-score") && init?.method === "PATCH") {
-        return createJsonResponse({
-          ...createAnalyzedBaseline("base-1", "resume-1.pdf"),
           originalBaselineScore: 79,
-          latestBaselineScore: 81,
+          latestBaselineScore: 82,
+          impactType: "new_match",
+          scoreDelta: 3,
+          explanation: "This addition matched a previously unmet requirement.",
+          matchedRequirement: "reduce incident resolution time",
         });
       }
       if (url.includes("/api/baselines/base-1")) {
-        return createJsonResponse(createAnalyzedBaseline("base-1", "resume-1.pdf"));
+        return createJsonResponse({
+          ...createAnalyzedBaseline("base-1", "resume-1.pdf", 82),
+          originalBaselineScore: 79,
+          latestBaselineScore: 79,
+        });
       }
       throw new Error(`Unexpected fetch: ${url}`);
     });
     setFetchImplementation(fetchMock);
 
-    render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Run Analysis" })[0]);
+    render(
+      <BaselineStudioHome
+        baselines={[
+          {
+            ...createAnalyzedBaseline("base-1", "resume-1.pdf", 82),
+            originalBaselineScore: 79,
+            latestBaselineScore: 79,
+          },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: "ANALYZE" })[0]);
 
     await waitFor(() => {
-      expect(screen.getByText("Baseline Strengthening")).toBeInTheDocument();
+      expect(screen.getByText("Professional Signals Diagnosis")).toBeInTheDocument();
     });
 
     const developingSignalButtons = screen.getAllByRole("button", { name: "Strengthen This Signal" });
@@ -335,6 +385,227 @@ describe("BaselineStudioHome", () => {
     expect(typeof patchBody?.signalType).toBe("string");
     expect(typeof patchBody?.rawText).toBe("string");
     expect(String(patchBody?.rawText ?? "")).toContain("reduced incident resolution time by 18%");
+    expect(
+      screen.getByText(/Previous score 79%\. New score 82%\. Delta \+3%/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/This addition matched a previously unmet requirement/i)).toBeInTheDocument();
+    expect(screen.getByText(/Added signal: Approved signal refinements/i)).toBeInTheDocument();
+  });
+
+  it("recomputes the score immediately after accepting a strengthening addition and shows the delta", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return createJsonResponse([
+          {
+            ...createAnalyzedBaseline("base-1", "resume-1.pdf", 82),
+            originalBaselineScore: 79,
+            latestBaselineScore: 79,
+          },
+        ]);
+      }
+      if (url.includes("/api/baselines/base-1/strengthening-additions") && init?.method === "PATCH") {
+        return createJsonResponse({
+          ...createAnalyzedBaseline("base-1", "resume-1.pdf", 82),
+          originalBaselineScore: 79,
+          latestBaselineScore: 82,
+          sections: [
+            ...(createAnalyzedBaseline("base-1", "resume-1.pdf", 82).sections ?? []),
+            {
+              id: "section-strengthening-1",
+              baselineId: "base-1",
+              sectionType: "OTHER" as const,
+              title: "Approved signal refinements",
+              content: "I led the escalation process redesign and reduced incident resolution time by 18%.",
+              includePolicy: "always" as const,
+              order: 10,
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+          impactType: "new_match",
+          scoreDelta: 3,
+          explanation: "This addition matched a previously unmet requirement.",
+          matchedRequirement: "reduce incident resolution time",
+        });
+      }
+      if (url.includes("/api/baselines/base-1")) {
+        return createJsonResponse({
+          ...createAnalyzedBaseline("base-1", "resume-1.pdf", 82),
+          originalBaselineScore: 79,
+          latestBaselineScore: 79,
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    setFetchImplementation(fetchMock);
+
+    render(
+      <BaselineStudioHome
+        baselines={[
+          {
+            ...createAnalyzedBaseline("base-1", "resume-1.pdf", 82),
+            originalBaselineScore: 79,
+            latestBaselineScore: 79,
+          },
+        ]}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Professional Signals Diagnosis")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Strengthen This Signal" })[0]);
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Strengthen Signal" })).toBeInTheDocument();
+    });
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "I led the escalation process redesign and reduced incident resolution time by 18%." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Generate Proposed Update" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve and Apply" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Signal strengthened")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Previous score 79%/i)).toBeInTheDocument();
+    expect(screen.getByText(/New score 82%/i)).toBeInTheDocument();
+    expect(screen.getByText(/Delta \+3%/i)).toBeInTheDocument();
+    expect(screen.getByText(/Added signal: Approved signal refinements/i)).toBeInTheDocument();
+  });
+
+  it("shows an explicit no-change message when strengthening does not change the score", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return createJsonResponse([
+          {
+            ...createAnalyzedBaseline("base-1", "resume-1.pdf", 80),
+            originalBaselineScore: 80,
+            latestBaselineScore: 80,
+          },
+        ]);
+      }
+      if (url.includes("/api/baselines/base-1/strengthening-additions") && init?.method === "PATCH") {
+        return createJsonResponse({
+          ...createAnalyzedBaseline("base-1", "resume-1.pdf", 80),
+          originalBaselineScore: 80,
+          latestBaselineScore: 80,
+          impactType: "no_match",
+          scoreDelta: 0,
+          explanation: "This addition was saved, but it did not map to an unmet job requirement yet.",
+          matchedRequirement: null,
+        });
+      }
+      if (url.includes("/api/baselines/base-1")) {
+        return createJsonResponse({
+          ...createAnalyzedBaseline("base-1", "resume-1.pdf", 80),
+          originalBaselineScore: 80,
+          latestBaselineScore: 80,
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    setFetchImplementation(fetchMock);
+
+    render(
+      <BaselineStudioHome
+        baselines={[
+          {
+            ...createAnalyzedBaseline("base-1", "resume-1.pdf", 80),
+            originalBaselineScore: 80,
+            latestBaselineScore: 80,
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "ANALYZE" }));
+    await waitFor(() => {
+      expect(screen.getByText("Professional Signals Diagnosis")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Strengthen This Signal" })[0]);
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "I led the escalation process redesign and reduced incident resolution time by 18%." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Generate Proposed Update" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve and Apply" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Signal strengthened")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText(/This addition was saved, but it did not map to an unmet job requirement yet/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Impact: no match/i)).toBeInTheDocument();
+  });
+
+  it("shows an error when strengthening recompute fails", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return createJsonResponse([
+          {
+            ...createAnalyzedBaseline("base-1", "resume-1.pdf", 79),
+            originalBaselineScore: 79,
+            latestBaselineScore: 79,
+          },
+        ]);
+      }
+      if (url.includes("/api/baselines/base-1/strengthening-additions") && init?.method === "PATCH") {
+        return createJsonResponse(
+          { message: "Unable to save this baseline update right now." },
+          false,
+          500,
+        );
+      }
+      if (url.includes("/api/baselines/base-1")) {
+        return createJsonResponse({
+          ...createAnalyzedBaseline("base-1", "resume-1.pdf", 79),
+          originalBaselineScore: 79,
+          latestBaselineScore: 79,
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    setFetchImplementation(fetchMock);
+
+    render(
+      <BaselineStudioHome
+        baselines={[
+          {
+            ...createAnalyzedBaseline("base-1", "resume-1.pdf", 79),
+            originalBaselineScore: 79,
+            latestBaselineScore: 79,
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "ANALYZE" }));
+    await waitFor(() => {
+      expect(screen.getByText("Professional Signals Diagnosis")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Strengthen This Signal" })[0]);
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "I led the escalation process redesign and reduced incident resolution time by 18%." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Generate Proposed Update" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve and Apply" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Unable to save update")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Unable to save this baseline update right now.")).toBeInTheDocument();
   });
 
   it("opens the matching strengthening flow when clicking a developing signal chip", async () => {
@@ -350,7 +621,7 @@ describe("BaselineStudioHome", () => {
     });
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Run Analysis" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "ANALYZE" })[0]);
 
     await waitFor(() => {
       expect(screen.getByText("Professional Signals Diagnosis")).toBeInTheDocument();
@@ -380,7 +651,7 @@ describe("BaselineStudioHome", () => {
     });
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Run Analysis" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "ANALYZE" })[0]);
 
     await waitFor(() => {
       expect(screen.getByText("Career Gravity is locked")).toBeInTheDocument();
@@ -405,7 +676,7 @@ describe("BaselineStudioHome", () => {
     });
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Run Analysis" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "ANALYZE" })[0]);
 
     await waitFor(() => {
       expect(screen.queryByText("Career Gravity is locked")).not.toBeInTheDocument();
@@ -420,7 +691,7 @@ describe("BaselineStudioHome", () => {
       if (url.includes("/api/analysis/history")) {
         return createJsonResponse([]);
       }
-      if (url.includes("/api/baselines/base-1/analysis-score")) {
+      if (url.includes("/api/baselines/analyze")) {
         return createJsonResponse({
           ...createAnalyzedBaseline("base-1", "resume-1.pdf"),
           originalBaselineScore: 72,
@@ -436,7 +707,7 @@ describe("BaselineStudioHome", () => {
     });
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Run Analysis" }));
+    fireEvent.click(screen.getByRole("button", { name: "ANALYZE" }));
 
     await waitFor(() => {
       expect(screen.getByText("Professional Signals Diagnosis")).toBeInTheDocument();
@@ -471,8 +742,8 @@ describe("BaselineStudioHome", () => {
     expect(screen.getByText(/Last analyzed/i)).toBeInTheDocument();
     expect(screen.queryByText(/Fit 82%/i)).not.toBeInTheDocument();
     expect(screen.getByText("Last role analysis: 82%")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View Latest Results" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Run Analysis" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "VIEW LATEST RESULTS" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "ANALYZE" })).not.toBeInTheDocument();
   });
 
   it("does not show secondary role-fit metadata when no role analysis score exists", async () => {
@@ -524,7 +795,7 @@ describe("BaselineStudioHome", () => {
     );
 
     expect(screen.getByText(/not analyzed/i)).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Run Analysis" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "ANALYZE" }).length).toBeGreaterThan(0);
     expect(screen.getByText("Last role analysis: 67%")).toBeInTheDocument();
     expect(screen.queryByText(/your verified baseline is ready/i)).not.toBeInTheDocument();
   });
@@ -571,7 +842,7 @@ describe("BaselineStudioHome", () => {
     const baselineArticle = within(screen.getByText("resume-1.pdf").closest("article") as HTMLElement);
     expect(baselineArticle.getByText(/not analyzed/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Run Analysis" }));
+    fireEvent.click(screen.getByRole("button", { name: "ANALYZE" }));
 
     await waitFor(() => {
       expect(baselineArticle.getByText(/ready for targeting/i)).toBeInTheDocument();
@@ -704,14 +975,14 @@ describe("BaselineStudioHome", () => {
       />,
     );
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Run Analysis" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "ANALYZE" })[0]);
 
     await waitFor(() => {
       expect(screen.getByText("Your verified baseline is ready")).toBeInTheDocument();
     });
 
     expect(screen.getByText("Complete your baseline to unlock analysis.")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Run Analysis" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "ANALYZE" })).toHaveLength(1);
   });
 
   it("persists submitted detail, renders it back, and confirms unchanged score when recompute is flat", async () => {
@@ -770,7 +1041,7 @@ describe("BaselineStudioHome", () => {
       />,
     );
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Run Analysis" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "ANALYZE" })[0]);
     await waitFor(() => {
       expect(screen.getByText("Baseline Strengthening")).toBeInTheDocument();
     });
@@ -859,8 +1130,7 @@ describe("BaselineStudioHome", () => {
 
     expect(screen.queryByText("UPLOAD YOUR RESUME")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Run Analysis" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "ANALYZE" }).length).toBeGreaterThan(0);
   });
 
   it("shows a single primary upload action for empty baseline state", () => {
@@ -911,3 +1181,6 @@ describe("BaselineStudioHome", () => {
     expect(analysisScoreCalled).toBe(false);
   });
 });
+
+
+

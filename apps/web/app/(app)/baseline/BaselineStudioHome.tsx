@@ -16,7 +16,6 @@ import { FormButton } from "@/components/FormButton";
 import { InsufficientExtractedText } from "@/components/compliance/InsufficientExtractedText";
 import {
   archiveBaseline,
-  deleteBaseline,
   isBaselineAnalyzedFromSummary,
   getLatestRoleAnalysisFitScore,
   type BaselineAssessmentSummaryDto,
@@ -231,6 +230,10 @@ function createBaselineUpdateProposal(signalLabel: string, answer: string) {
   return `${signalLabel}: ${answer.trim()}`;
 }
 
+function formatCardActionLabel(label: string) {
+  return label.toUpperCase();
+}
+
 function extractApprovedSignalAdditions(baseline: BaselineDto | null): string[] {
   if (!baseline?.sections?.length) return [];
   const refinementSections = baseline.sections
@@ -265,6 +268,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   );
   const [savingStrengtheningProposal, setSavingStrengtheningProposal] = useState(false);
   const [strengtheningSaveError, setStrengtheningSaveError] = useState<string | null>(null);
+  const [strengtheningSuccessMessage, setStrengtheningSuccessMessage] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadSuccessId, setUploadSuccessId] = useState<string | null>(null);
   const [highlightedBaselineId, setHighlightedBaselineId] = useState<string | null>(null);
@@ -275,7 +279,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   const [insufficientTextError, setInsufficientTextError] =
     useState<ParsedInsufficientExtractedTextError | null>(null);
   const [archivingBaselineId, setArchivingBaselineId] = useState<string | null>(null);
-  const [deletingBaselineId, setDeletingBaselineId] = useState<string | null>(null);
   const [loadingBaselineId, setLoadingBaselineId] = useState<string | null>(null);
   const [analysisRunsByBaselineId, setAnalysisRunsByBaselineId] = useState<Record<string, number>>({});
   const [completedRoleAnalyses, setCompletedRoleAnalyses] = useState(0);
@@ -408,13 +411,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
       }`
     : null;
   const fitReviewHref = latestResultsHref ? `${latestResultsHref}&locked=1` : "/fit-review";
-  const targetHref = primaryBaselineId ? `/target?baselineId=${encodeURIComponent(primaryBaselineId)}` : "/target";
   const heroState: "no_baseline" | "no_analysis" | "analysis_exists" = useMemo(() => {
     if (!hasBaseline) return "no_baseline";
     if (!hasCompletedAnalysis) return "no_analysis";
     return "analysis_exists";
   }, [hasBaseline, hasCompletedAnalysis]);
-  const hasUsableBaseline = hasBaseline;
 
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
@@ -556,6 +557,8 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     if (!trimmed) {
       return;
     }
+    setStrengtheningSaveError(null);
+    setStrengtheningSuccessMessage(null);
     setPendingStrengtheningProposal(createBaselineUpdateProposal(activeStrengtheningSignal.label, trimmed));
   }, [activeStrengtheningSignal, strengtheningAnswer]);
 
@@ -668,8 +671,14 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     }
     setSavingStrengtheningProposal(true);
     setStrengtheningSaveError(null);
+    setStrengtheningSuccessMessage(null);
 
     try {
+      const beforeBaseline =
+        baselineDetails[primaryBaselineId] ??
+        baselineList.find((item) => item.id === primaryBaselineId) ??
+        null;
+      const previousScore = beforeBaseline?.latestBaselineScore ?? null;
       const response = await fetch(
         `/api/baselines/${encodeURIComponent(primaryBaselineId)}/strengthening-additions`,
         {
@@ -695,19 +704,52 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
       }
 
       const persistedBaseline = payload as BaselineDto;
+      const impactType =
+        typeof (payload as { impactType?: unknown }).impactType === "string"
+          ? ((payload as { impactType?: string }).impactType as string)
+          : "no_match";
+      const scoreDelta =
+        typeof (payload as { scoreDelta?: unknown }).scoreDelta === "number"
+          ? ((payload as { scoreDelta?: number }).scoreDelta as number)
+          : 0;
+      const explanation =
+        typeof (payload as { explanation?: unknown }).explanation === "string"
+          ? ((payload as { explanation?: string }).explanation as string)
+          : scoreDelta === 0
+            ? "This addition was saved, but it did not change the score."
+            : "Baseline update applied.";
+      const matchedRequirement =
+        typeof (payload as { matchedRequirement?: unknown }).matchedRequirement === "string"
+          ? ((payload as { matchedRequirement?: string }).matchedRequirement as string)
+          : null;
       setBaselineDetails((current) => ({ ...current, [primaryBaselineId]: persistedBaseline }));
       setBaselineList((current) =>
         current.map((item) => (item.id === primaryBaselineId ? { ...item, ...persistedBaseline } : item)),
       );
 
       publishBaselineUpdated({ baselineId: primaryBaselineId, source: "baseline" });
-      closeStrengtheningModal();
+      const nextScore = persistedBaseline.latestBaselineScore ?? null;
+      const delta = previousScore !== null && nextScore !== null ? nextScore - previousScore : null;
+      const deltaLabel =
+        delta === null
+          ? "No change"
+          : delta > 0
+            ? `+${delta}%`
+            : delta < 0
+              ? `${delta}%`
+              : "No change";
+      const changeSummary =
+        (persistedBaseline.sections ?? [])
+          .slice(-1)[0]?.title ??
+        activeStrengtheningSignal?.label ??
+        "Signal strengthened";
 
-      try {
-        await fetchBaselineDetails(primaryBaselineId);
-      } catch {
-        setBaselineUpdatedNotice("Baseline updated. Saved successfully. Recompute unavailable right now.");
-      }
+      setStrengtheningSuccessMessage(
+        scoreDelta === 0
+          ? `${explanation} Impact: ${impactType.replace("_", " ")}. Added signal: ${changeSummary}${matchedRequirement ? ` (${matchedRequirement})` : ""}.`
+          : `Previous score ${previousScore ?? "--"}%. New score ${nextScore ?? "--"}%. Delta ${deltaLabel}. ${explanation} Impact: ${impactType.replace("_", " ")}. Added signal: ${changeSummary}${matchedRequirement ? ` (${matchedRequirement})` : ""}.`,
+      );
+      closeStrengtheningModal();
     } catch (saveError) {
       const message =
         saveError instanceof Error ? saveError.message : "Unable to save this baseline update right now.";
@@ -717,8 +759,9 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     }
   }, [
     activeStrengtheningSignal?.id,
+    baselineDetails,
+    baselineList,
     closeStrengtheningModal,
-    fetchBaselineDetails,
     pendingStrengtheningProposal,
     primaryBaselineId,
     strengtheningAnswer,
@@ -862,42 +905,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     [activeBaselines, archivingBaselineId, primaryBaselineId],
   );
 
-  const handleDeleteBaseline = useCallback(
-    async (baselineId: string) => {
-      if (deletingBaselineId === baselineId) return;
-      setDeletingBaselineId(baselineId);
-      setError(null);
-
-      try {
-        await deleteBaseline(baselineId);
-
-        const remainingBaselines = activeBaselines.filter((item) => item.id !== baselineId);
-        const nextPrimaryId =
-          primaryBaselineId === baselineId ? remainingBaselines[0]?.id ?? null : primaryBaselineId;
-
-        setBaselineList((current) => current.filter((item) => item.id !== baselineId));
-        setBaselineDetails((current) => {
-          const next = { ...current };
-          delete next[baselineId];
-          return next;
-        });
-        setPostUploadCtaBaselineId((current) => (current === baselineId ? null : current));
-        setUploadSuccessId((current) => (current === baselineId ? null : current));
-        setPrimaryBaselineId(nextPrimaryId);
-      } catch (deleteError) {
-        console.error("Unable to permanently delete baseline", deleteError);
-        setError(
-          deleteError instanceof Error
-            ? deleteError.message
-            : "Unable to delete this baseline right now.",
-        );
-      } finally {
-        setDeletingBaselineId(null);
-      }
-    },
-    [activeBaselines, deletingBaselineId, primaryBaselineId],
-  );
-
   const onDrop = useCallback(
     async (event: DragEvent<HTMLDivElement>) => {
       event.preventDefault();
@@ -968,23 +975,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     return () => window.clearTimeout(timer);
   }, [baselineUpdatedNotice]);
 
-  const debugEnabled = process.env.NODE_ENV !== "production";
-  const handleDebugBaselineTrace = useCallback(async (baselineId: string) => {
-    try {
-      const response = await fetch(
-        `/api/debug/baseline-analysis-trace?baselineId=${encodeURIComponent(baselineId)}`,
-        {
-          cache: "no-store",
-          credentials: "include",
-        },
-      );
-      const payload = await response.json();
-      console.log("[Baseline debug trace]", payload);
-    } catch (traceError) {
-      console.error("Unable to load baseline debug trace", traceError);
-    }
-  }, []);
-
   return (
     <div className="mx-auto w-full max-w-6xl px-6 2xl:px-8">
       <div className="space-y-8">
@@ -1010,43 +1000,52 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
               </p>
               <p className="text-sm font-medium text-slate-200">Complete your baseline to unlock analysis.</p>
             </div>
-            <div className="space-y-3">
-              <FormButton
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isUploading || uploadLimitReached || !isEditableLibrary}
-                className="bg-indigo-600 text-white hover:bg-indigo-500"
-              >
-                {isEditableLibrary
-                  ? isUploading
-                    ? "Uploading..."
-                    : heroState === "no_baseline"
-                      ? "Upload resume"
-                      : "Update baseline"
-                  : "Upload unavailable"}
-              </FormButton>
-              <p className="text-sm text-slate-400">Accepted file types: PDF and DOCX</p>
-            <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
-              {activeBaselines.length} of {BETA_BASELINE_UPLOAD_LIMIT} active resumes
-            </p>
-            </div>
-            {hasUsableBaseline ? (
-              <div className="flex flex-wrap gap-2">
-                <Link
-                  href={targetHref}
-                  className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+            <div
+              className={`rounded-[18px] border px-4 py-4 transition ${
+                uploadLimitReached
+                  ? "border-white/10 bg-slate-950/25"
+                  : "border-dashed border-white/20 bg-slate-950/35"
+              }`}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={onDrop}
+              data-testid="baseline-upload-surface"
+            >
+              <div className="space-y-3">
+                <FormButton
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading || uploadLimitReached || !isEditableLibrary}
+                  className="bg-indigo-600 text-white hover:bg-indigo-500"
                 >
-                  Analyze a job description
-                </Link>
-                {latestResultsHref ? (
-                  <Link
-                    href={latestResultsHref}
-                    className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-5 py-2.5 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
-                  >
-                    View latest results
-                  </Link>
+                  {isEditableLibrary
+                    ? isUploading
+                      ? "Uploading..."
+                      : heroState === "no_baseline"
+                        ? "Upload resume"
+                        : "Update baseline"
+                    : "Upload unavailable"}
+                </FormButton>
+                <p className="text-sm text-slate-300">
+                  Upload resume or drag and drop a PDF or DOCX here.
+                </p>
+                <p className="text-sm text-slate-400">Accepted file types: PDF and DOCX</p>
+                <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
+                  {activeBaselines.length} of {BETA_BASELINE_UPLOAD_LIMIT} active resumes
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  className="hidden"
+                  onChange={onFileChange}
+                  disabled={isUploading || uploadLimitReached}
+                />
+                {uploadLimitReached ? (
+                  <p className="text-sm text-slate-300">
+                    Maximum of {BETA_BASELINE_UPLOAD_LIMIT} active resumes reached.
+                  </p>
                 ) : null}
               </div>
-            ) : null}
+            </div>
           </div>
         </section>
         <section className="rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
@@ -1071,7 +1070,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
               </p>
             </div>
           </div>
-          <details className="mt-4 rounded-xl border border-white/10 bg-slate-950/30 p-4">
+          <details className="mt-4 rounded-xl border border-white/10 bg-slate-950/30 p-4" open>
             <summary className="cursor-pointer text-sm font-semibold text-slate-100">
               Why not use my resume as-is?
             </summary>
@@ -1082,14 +1081,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             </p>
           </details>
         </section>
-        {hasCompletedAnalysis ? (
-          <section className="rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Verified baseline</p>
-            <p className="mt-2 text-sm text-slate-300">
-              Your verified baseline is the one used when you analyze a job description or generate application materials.
-            </p>
-          </section>
-        ) : null}
         {allBaselines.length > 0 ? (
           <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
             <header className="space-y-1">
@@ -1158,47 +1149,52 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                     <div className="mt-4 space-y-3">
                       <div className="flex flex-wrap gap-2">
                         {!isPrimary ? (
-                          <FormButton variant="ghost" onClick={() => setPrimaryBaselineId(baseline.id)} disabled={setActiveDisabled}>
-                            Set Active
+                          <FormButton
+                            variant="ghost"
+                            onClick={() => setPrimaryBaselineId(baseline.id)}
+                            disabled={setActiveDisabled}
+                            className="uppercase"
+                          >
+                            {formatCardActionLabel("Set Active")}
                           </FormButton>
                         ) : null}
                         <Link
                           href={baselineDetailsHref}
-                          className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+                          className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold uppercase text-slate-100 transition hover:bg-white/10"
                         >
-                          View Baseline Details
+                          {formatCardActionLabel("View Baseline Details")}
                         </Link>
-                        <FormButton
-                          variant="ghost"
-                          onClick={() => void runCanonicalBaselineAnalysis(baseline.id)}
-                          disabled={isLoading || !isEditableLibrary}
-                        >
-                          {hasCompletedAssessment ? "Run Analysis" : isLoading ? "Analyzing..." : "Run Analysis"}
-                        </FormButton>
+                        {isArchived ? null : (
+                          <FormButton
+                            onClick={() => void runCanonicalBaselineAnalysis(baseline.id)}
+                            disabled={isLoading || !isEditableLibrary}
+                            className="bg-indigo-600 uppercase text-white hover:bg-indigo-500"
+                          >
+                            {isLoading ? formatCardActionLabel("Targeting...") : formatCardActionLabel("Analyze")}
+                          </FormButton>
+                        )}
+                        {!isArchived && careerGravity.unlocked ? (
+                          <Link
+                            href={`/target?baselineId=${encodeURIComponent(baseline.id)}`}
+                            className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-cyan-300/20 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold uppercase text-cyan-50 transition hover:bg-cyan-400/15"
+                          >
+                            {formatCardActionLabel("Add Job")}
+                          </Link>
+                        ) : null}
                         {isEditableLibrary ? (
                           <>
                             <FormButton
                               variant="ghost"
                               onClick={() => void handleArchiveBaseline(baseline.id)}
                               disabled={archivingBaselineId === baseline.id || isArchived}
+                              className="uppercase"
                             >
-                              {isArchived ? "Archived" : archivingBaselineId === baseline.id ? "Archiving..." : "Archive"}
+                              {isArchived
+                                ? formatCardActionLabel("Archived")
+                                : archivingBaselineId === baseline.id
+                                  ? formatCardActionLabel("Archiving...")
+                                  : formatCardActionLabel("Archive")}
                             </FormButton>
-                            <FormButton
-                              variant="ghost"
-                              onClick={() => void handleDeleteBaseline(baseline.id)}
-                              disabled={deletingBaselineId === baseline.id}
-                            >
-                              {deletingBaselineId === baseline.id ? "Deleting..." : "Delete"}
-                            </FormButton>
-                            {debugEnabled ? (
-                              <FormButton
-                                variant="ghost"
-                                onClick={() => void handleDebugBaselineTrace(baseline.id)}
-                              >
-                                Debug baseline
-                              </FormButton>
-                            ) : null}
                           </>
                         ) : null}
                       </div>
@@ -1208,21 +1204,21 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                             href={latestResultsForBaselineHref}
                             className="text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
                           >
-                            View Latest Results
+                            {formatCardActionLabel("View Latest Results")}
                           </Link>
                           {canOpenStudio ? (
                             <Link
                               href={studioHref ?? "/studio"}
                               className="text-cyan-100 underline decoration-cyan-300/25 underline-offset-4 transition hover:text-cyan-50 hover:decoration-cyan-200/60"
                             >
-                              Open Resume Studio
+                              {formatCardActionLabel("Open Resume Studio")}
                             </Link>
                           ) : (
                             <Link
                               href={fitReviewHref}
                               className="text-amber-100 underline decoration-amber-300/25 underline-offset-4 transition hover:text-amber-50 hover:decoration-amber-200/60"
                             >
-                              Start Fit Review
+                              {formatCardActionLabel("Start Fit Review")}
                             </Link>
                           )}
                         </div>
@@ -1234,37 +1230,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             </div>
           </section>
         ) : null}
-        {heroState === "no_baseline" && isEditableLibrary ? (
-          <div
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={onDrop}
-            className={`rounded-[16px] border border-dashed px-4 py-4 ${
-              uploadLimitReached ? "border-white/10 bg-slate-950/25" : "border-white/20 bg-slate-950/35"
-            }`}
-          >
-            <p className="text-sm font-semibold text-slate-100">Drag and drop a resume here, or use the button above</p>
-            <p className="mt-1 text-sm text-slate-400">PDF or DOCX</p>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-              className="hidden"
-              onChange={onFileChange}
-              disabled={isUploading || uploadLimitReached}
-            />
-            {uploadLimitReached ? (
-              <p className="mt-3 text-sm text-slate-300">
-                Maximum of {BETA_BASELINE_UPLOAD_LIMIT} active resumes reached.
-              </p>
-            ) : null}
-          </div>
-        ) : null}
-
         {analysisReady ? (
           <section className="space-y-3 rounded-[20px] border border-white/10 bg-slate-900/20 p-5">
             <h2 className="text-xl font-semibold tracking-tight text-slate-100">Baseline readiness</h2>
             <p className="text-sm leading-6 text-slate-300">{certification.summary}</p>
-            <details className="rounded-[14px] border border-white/10 bg-slate-950/30 px-4 py-3">
+            <details className="rounded-[14px] border border-white/10 bg-slate-950/30 px-4 py-3" open>
               <summary className="cursor-pointer text-sm font-semibold text-slate-200">
                 View readiness details
               </summary>
@@ -1276,6 +1246,15 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 ))}
               </div>
             </details>
+          </section>
+        ) : null}
+
+        {strengtheningSuccessMessage ? (
+          <section className="rounded-[20px] border border-emerald-300/15 bg-emerald-400/[0.06] p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-100/80">
+              Signal strengthened
+            </p>
+            <p className="mt-2 text-sm leading-6 text-emerald-50">{strengtheningSuccessMessage}</p>
           </section>
         ) : null}
 
@@ -1515,6 +1494,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     </div>
   );
 }
+
 
 
 

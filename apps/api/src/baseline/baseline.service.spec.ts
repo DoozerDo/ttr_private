@@ -152,6 +152,38 @@ const ingestionResult = {
   };
 
   beforeEach(async () => {
+    fitAssessmentRepository = {
+      createQueryBuilder: jest.fn(() => ({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      })),
+      findOne: jest.fn().mockResolvedValue({
+        id: 'assessment-1',
+        userId: 'user-1',
+        baselineId: 'b-1',
+        overallScore: 80,
+        scoringV2: {
+          debug: {
+            bundle: {
+              inputs: {
+                normalizedJob: {
+                  requirements: [
+                    { snippet: 'reduce incident resolution time' },
+                    { snippet: 'improve team coordination' },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      }),
+    };
+
     baselineRepository = {
       findOne: jest.fn(({ where }: any) =>
         where.userId === baseline.userId && where.id === baseline.id
@@ -180,17 +212,6 @@ const ingestionResult = {
 
     baselineBlockPolicyRepository = {
       find: jest.fn().mockResolvedValue([]),
-    };
-    fitAssessmentRepository = {
-      createQueryBuilder: jest.fn(() => ({
-        select: jest.fn().mockReturnThis(),
-        addSelect: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        addOrderBy: jest.fn().mockReturnThis(),
-        getRawMany: jest.fn().mockResolvedValue([]),
-      })),
     };
 
     const module = await Test.createTestingModule({
@@ -480,6 +501,7 @@ describe('BaselineService - library capacity', () => {
         {
           provide: EmbeddingService,
           useValue: {
+            embed: jest.fn().mockResolvedValue([]),
             embedText: jest.fn().mockResolvedValue([]),
             embedTexts: jest.fn().mockResolvedValue([]),
           },
@@ -904,6 +926,7 @@ describe('BaselineService - strengthening additions', () => {
   let service: BaselineService;
   let baselineRepository: any;
   let baselineSectionRepository: any;
+  let fitAssessmentRepository: any;
 
   beforeEach(async () => {
     baselineRepository = {
@@ -928,6 +951,38 @@ describe('BaselineService - strengthening additions', () => {
       create: jest.fn((payload: any) => payload),
     };
 
+    fitAssessmentRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'assessment-1',
+        userId: 'user-1',
+        baselineId: 'b-1',
+        overallScore: 80,
+        scoringV2: {
+          debug: {
+            bundle: {
+              inputs: {
+                normalizedJob: {
+                  requirements: [
+                    { snippet: 'reduce incident resolution time' },
+                    { snippet: 'improve team coordination' },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      }),
+      createQueryBuilder: jest.fn(() => ({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      })),
+    };
+
     const module = await Test.createTestingModule({
       providers: [
         BaselineService,
@@ -936,20 +991,7 @@ describe('BaselineService - strengthening additions', () => {
         { provide: getRepositoryToken(BaselineVersion), useValue: { findOne: jest.fn(), find: jest.fn() } },
         { provide: getRepositoryToken(BaselineBlockPolicy), useValue: { find: jest.fn() } },
         { provide: getRepositoryToken(BaselineParsed), useValue: { findOne: jest.fn() } },
-        {
-          provide: getRepositoryToken(FitAssessment),
-          useValue: {
-            createQueryBuilder: jest.fn(() => ({
-              select: jest.fn().mockReturnThis(),
-              addSelect: jest.fn().mockReturnThis(),
-              where: jest.fn().mockReturnThis(),
-              andWhere: jest.fn().mockReturnThis(),
-              orderBy: jest.fn().mockReturnThis(),
-              addOrderBy: jest.fn().mockReturnThis(),
-              getRawMany: jest.fn().mockResolvedValue([]),
-            })),
-          },
-        },
+        { provide: getRepositoryToken(FitAssessment), useValue: fitAssessmentRepository },
         {
           provide: BaselineIngestionService,
           useValue: {
@@ -960,6 +1002,7 @@ describe('BaselineService - strengthening additions', () => {
         {
           provide: EmbeddingService,
           useValue: {
+            embed: jest.fn().mockResolvedValue([]),
             embedText: jest.fn().mockResolvedValue([]),
             embedTexts: jest.fn().mockResolvedValue([]),
           },
@@ -989,11 +1032,30 @@ describe('BaselineService - strengthening additions', () => {
       ],
     });
 
-    jest.spyOn(service, 'getBaselineByIdForUser').mockResolvedValue({ id: 'b-1' } as Baseline);
+    jest.spyOn(service, 'getBaselineByIdForUser').mockResolvedValue({
+      id: 'b-1',
+      latestBaselineScore: 80,
+      sections: [
+        {
+          id: 'section-1',
+          baselineId: 'b-1',
+          sectionType: BaselineSectionType.OTHER,
+          title: 'Approved signal refinements',
+          content: null,
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 1,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+    } as Baseline);
 
     await expect(
       service.appendStrengtheningAddition('user-1', 'b-1', 'Added leadership evidence'),
-    ).resolves.toBeDefined();
+    ).resolves.toMatchObject({
+      impactType: 'low_quality',
+      scoreDelta: 0,
+    });
 
     expect(baselineSectionRepository.update).toHaveBeenCalledWith(
       { id: 'section-1', baselineId: 'b-1' },
@@ -1002,5 +1064,125 @@ describe('BaselineService - strengthening additions', () => {
         updatedAt: expect.any(Date),
       }),
     );
+  });
+
+  it('returns duplicate impact for redundant evidence and does not change score', async () => {
+    baselineRepository.findOne.mockResolvedValue({
+      id: 'b-1',
+      userId: 'user-1',
+      latestBaselineScore: 80,
+      sections: [
+        {
+          id: 'section-1',
+          baselineId: 'b-1',
+          sectionType: BaselineSectionType.OTHER,
+          title: 'Approved signal refinements',
+          content: 'I reduced incident resolution time by 18% across the support team.',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 1,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+    });
+    jest.spyOn(service, 'getBaselineByIdForUser').mockResolvedValue({
+      id: 'b-1',
+      latestBaselineScore: 80,
+      sections: [
+        {
+          id: 'section-1',
+          baselineId: 'b-1',
+          sectionType: BaselineSectionType.OTHER,
+          title: 'Approved signal refinements',
+          content: 'I reduced incident resolution time by 18% across the support team.',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 1,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+    } as Baseline);
+
+    await expect(
+      service.appendStrengtheningAddition(
+        'user-1',
+        'b-1',
+        'I reduced incident resolution time by 18% across the support team.',
+      ),
+    ).resolves.toMatchObject({
+      impactType: 'duplicate',
+      scoreDelta: 0,
+    });
+  });
+
+  it('returns a new match impact and increases score for unmet requirement evidence', async () => {
+    baselineRepository.findOne.mockResolvedValue({
+      id: 'b-1',
+      userId: 'user-1',
+      latestBaselineScore: 80,
+      sections: [
+        {
+          id: 'section-1',
+          baselineId: 'b-1',
+          sectionType: BaselineSectionType.OTHER,
+          title: 'Approved signal refinements',
+          content: 'Led support operations across the customer success team.',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 1,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+    });
+    jest.spyOn(service, 'getBaselineByIdForUser').mockResolvedValue({
+      id: 'b-1',
+      latestBaselineScore: 80,
+      sections: [
+        {
+          id: 'section-1',
+          baselineId: 'b-1',
+          sectionType: BaselineSectionType.OTHER,
+          title: 'Approved signal refinements',
+          content: 'Led support operations across the customer success team.',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 1,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+    } as Baseline);
+
+    await expect(
+      service.appendStrengtheningAddition(
+        'user-1',
+        'b-1',
+        'Reduced incident resolution time by 18% by redesigning the escalation workflow.',
+      ),
+    ).resolves.toMatchObject({
+      impactType: 'new_match',
+      scoreDelta: 3,
+      matchedRequirement: 'reduce incident resolution time',
+    });
+  });
+
+  it('returns low quality impact for vague evidence and keeps score flat', async () => {
+    baselineRepository.findOne.mockResolvedValue({
+      id: 'b-1',
+      userId: 'user-1',
+      latestBaselineScore: 80,
+      sections: [],
+    });
+    jest.spyOn(service, 'getBaselineByIdForUser').mockResolvedValue({
+      id: 'b-1',
+      latestBaselineScore: 80,
+      sections: [],
+    } as Baseline);
+
+    await expect(
+      service.appendStrengtheningAddition('user-1', 'b-1', 'Worked on things and helped out.'),
+    ).resolves.toMatchObject({
+      impactType: 'low_quality',
+      scoreDelta: 0,
+    });
   });
 });

@@ -391,15 +391,21 @@ export class BaselineController {
     );
 
     try {
-      const baseline = await this.baselineService.appendStrengtheningAddition(
+      const result = await this.baselineService.appendStrengtheningAddition(
         userId,
         id,
         trimmedDetail,
       );
       this.logger.log(
-        `PATCH /baselines/${id}/strengthening-additions succeeded baselineId=${baseline.id}`,
+        `PATCH /baselines/${id}/strengthening-additions succeeded baselineId=${result.baseline.id} impactType=${result.impactType} scoreDelta=${result.scoreDelta}`,
       );
-      return stripBaselineVersioning(baseline as unknown as Record<string, unknown>);
+      return stripBaselineVersioning({
+        ...((result.baseline as unknown as Record<string, unknown>) ?? {}),
+        impactType: result.impactType,
+        scoreDelta: result.scoreDelta,
+        explanation: result.explanation,
+        matchedRequirement: result.matchedRequirement,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const stack = error instanceof Error ? error.stack : undefined;

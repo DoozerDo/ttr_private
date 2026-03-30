@@ -416,7 +416,7 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
             }`}
           >
             <div
-              className="sticky top-0 z-40 mb-6 border-b border-[var(--border-strong)] bg-[var(--bg-app)] py-2 pr-24 md:pr-28 relative"
+              className="sticky top-0 z-40 mb-6 border-b border-[var(--border-strong)] bg-[var(--bg-app)] py-2"
               data-testid="unlock-path-bar"
               style={{
                 backgroundColor: "var(--bg-app)",
@@ -426,23 +426,27 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
                 backdropFilter: "none",
               }}
             >
-              <div className="absolute right-0 top-0 z-50 flex items-center gap-3">
-                <BetaGuideNudge />
-                <ReportBugTrigger
-                  className="text-xs font-semibold text-slate-200 hover:text-white"
-                  label="Report Issue"
-                />
-                <TopNavAccountArea initialEmail={userEmail} />
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between xl:gap-6">
+                <div className="min-w-0 flex-1">
+                  <UnlockPathBar
+                    currentPathname={pathname}
+                    baselineReady={storedContext.hasBaseline}
+                    analysisExists={Boolean(lastAnalysis)}
+                    score={lastAnalysis?.fitScore ?? null}
+                    readinessStatus={readinessStatus}
+                    hasGeneratedDocuments={hasGeneratedDocuments}
+                    hasSavedOpportunity={pathname.startsWith("/job-tracker")}
+                  />
+                </div>
+                <div className="flex shrink-0 items-center gap-3 self-start xl:pt-1">
+                  <BetaGuideNudge />
+                  <ReportBugTrigger
+                    className="text-xs font-semibold text-slate-200 hover:text-white"
+                    label="Report Issue"
+                  />
+                  <TopNavAccountArea initialEmail={userEmail} />
+                </div>
               </div>
-              <UnlockPathBar
-                currentPathname={pathname}
-                baselineReady={storedContext.hasBaseline}
-                analysisExists={Boolean(lastAnalysis)}
-                score={lastAnalysis?.fitScore ?? null}
-                readinessStatus={readinessStatus}
-                hasGeneratedDocuments={hasGeneratedDocuments}
-                hasSavedOpportunity={pathname.startsWith("/job-tracker")}
-              />
             </div>
 
             {children}

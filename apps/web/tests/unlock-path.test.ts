@@ -13,6 +13,24 @@ describe("unlock path state", () => {
     });
 
     expect(state.analysis).toBe("LOCKED");
+    expect(state.fitReview).toBe("LOCKED");
+    expect(state.studio).toBe("LOCKED");
+    expect(state.opportunities).toBe("LOCKED");
+  });
+
+  it("keeps fit review locked when no active baseline exists", () => {
+    const state = resolveUnlockPathState({
+      currentPathname: "/baseline",
+      baselineReady: false,
+      analysisExists: false,
+      score: null,
+      readinessStatus: null,
+      hasGeneratedDocuments: false,
+      hasSavedOpportunity: false,
+    });
+
+    expect(state.baseline).toBe("CURRENT");
+    expect(state.fitReview).toBe("LOCKED");
   });
 
   it("routes score 76 with unready generation to fit review current and studio locked", () => {

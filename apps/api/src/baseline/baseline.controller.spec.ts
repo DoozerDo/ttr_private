@@ -31,7 +31,13 @@ describe('BaselineController - strengthening additions', () => {
 
   it('accepts structured organizational_scale payload and forwards normalized detail', async () => {
     const baselineService = {
-      appendStrengtheningAddition: jest.fn().mockResolvedValue({ id: 'baseline-1' }),
+      appendStrengtheningAddition: jest.fn().mockResolvedValue({
+        baseline: { id: 'baseline-1' },
+        impactType: 'new_match',
+        scoreDelta: 3,
+        explanation: 'This addition matched a previously unmet requirement.',
+        matchedRequirement: 'reduce incident resolution time',
+      }),
     } as any;
     const controller = new BaselineController(
       baselineService,
@@ -59,7 +65,13 @@ describe('BaselineController - strengthening additions', () => {
 
   it('accepts organizational_scale payload without parsed numeric fields when rawText is provided', async () => {
     const baselineService = {
-      appendStrengtheningAddition: jest.fn().mockResolvedValue({ id: 'baseline-1' }),
+      appendStrengtheningAddition: jest.fn().mockResolvedValue({
+        baseline: { id: 'baseline-1' },
+        impactType: 'no_match',
+        scoreDelta: 0,
+        explanation: 'This addition was saved, but it did not map to an unmet job requirement yet.',
+        matchedRequirement: null,
+      }),
     } as any;
     const controller = new BaselineController(
       baselineService,

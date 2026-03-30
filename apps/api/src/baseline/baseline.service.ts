@@ -45,6 +45,10 @@ import {
   FIT_REVIEW_DIMENSION_LABELS,
   type FitReviewDimensionKey,
 } from './fit-review-dimensions';
+import {
+  classifyStrengtheningImpact,
+  type StrengtheningImpactResult,
+} from './strengthening-impact';
 
 export type FileMetadata = {
   originalname: string;
@@ -141,6 +145,14 @@ export type BaselineAnalysisTrace = {
   };
 };
 
+export type BaselineStrengtheningResult = {
+  baseline: Baseline;
+  impactType: StrengtheningImpactResult['impactType'];
+  scoreDelta: number;
+  explanation: string;
+  matchedRequirement: string | null;
+};
+
  type CanonicalNormalizationResult = {
    canonical: BaselineSchemaCoreShape;
    roleCount: number;
@@ -207,6 +219,15 @@ export class BaselineService {
         },
       });
     }
+  }
+
+  private extractUnmetRequirements(latestAssessment: FitAssessment | null) {
+    return (
+      latestAssessment?.scoringV2?.debug?.bundle?.inputs?.normalizedJob?.requirements
+        ?.map((requirement) => requirement.snippet?.trim())
+        .filter((requirement): requirement is string => Boolean(requirement && requirement.length > 0)) ??
+      []
+    );
   }
 
   private sanitizeSectionContent(content?: string | null) {
@@ -1101,7 +1122,7 @@ return {
     userId: string,
     baselineId: string,
     detail: string,
-  ) {
+  ): Promise<BaselineStrengtheningResult> {
     const normalizedDetail = detail.trim();
     if (!normalizedDetail) {
       throw new BadRequestException('detail is required');
@@ -1241,7 +1262,50 @@ return {
         },
       });
     }
-    return this.getBaselineByIdForUser(baselineId, userId);
+    const refreshedBaseline = await this.getBaselineByIdForUser(baselineId, userId);
+    const latestAssessment = await this.fitAssessmentRepository.findOne({
+      where: { userId, baselineId },
+      order: { createdAt: 'DESC', id: 'DESC' },
+    });
+    const existingEvidence = (refreshedBaseline.sections ?? [])
+      .flatMap((section) =>
+        [section.title, section.content]
+          .map((value) => (typeof value === 'string' ? value.trim() : ''))
+          .filter((value) => value.length > 0),
+      )
+      .filter(Boolean);
+    const unmetRequirements = this.extractUnmetRequirements(latestAssessment);
+    const impact = classifyStrengtheningImpact({
+      addition: normalizedDetail,
+      existingEvidence,
+      unmetRequirements,
+    });
+
+    if (impact.scoreDelta !== 0) {
+      const currentScore =
+        typeof refreshedBaseline.latestBaselineScore === 'number'
+          ? refreshedBaseline.latestBaselineScore
+          : typeof latestAssessment?.overallScore === 'number'
+            ? latestAssessment.overallScore
+            : 0;
+      const nextScore = Math.max(0, Math.min(100, currentScore + impact.scoreDelta));
+      const scoredBaseline = await this.recordBaselineAnalysisScore(userId, baselineId, nextScore);
+      return {
+        baseline: scoredBaseline,
+        impactType: impact.impactType,
+        scoreDelta: impact.scoreDelta,
+        explanation: impact.explanation,
+        matchedRequirement: impact.matchedRequirement,
+      };
+    }
+
+    return {
+      baseline: refreshedBaseline,
+      impactType: impact.impactType,
+      scoreDelta: 0,
+      explanation: impact.explanation,
+      matchedRequirement: impact.matchedRequirement,
+    };
   }
 
   async buildSectionsFromFile(file: Express.Multer.File): Promise<BaselineFileParseResult> {
