@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { shouldSuppressCategorySuggestion } from "@/lib/evidenceSuggestions";
+
 type ImprovementOpportunity = {
   categoryKey: string;
   categoryLabel: string;
@@ -17,16 +19,38 @@ type FitImprovementResponse = {
   improvementOpportunities: ImprovementOpportunity[];
 };
 
+type RequirementGapInsight = {
+  requirement: string;
+  currentSignal: string;
+  roleExpectation: string;
+  explanation: string;
+  scope: string;
+  categoryKey?: string;
+  categoryLabel?: string;
+  estimatedScore?: number;
+  delta?: number;
+};
+
+type VisibleInsight = ImprovementOpportunity | RequirementGapInsight;
+
 type FitImprovementOpportunitiesProps = {
   assessmentId: string | null;
   actionHref?: string;
   compact?: boolean;
+  fallbackInsights?: RequirementGapInsight[];
+  supportingSignals?: unknown;
+  baselineEvidence?: unknown;
+  summary?: unknown;
 };
 
 export function FitImprovementOpportunities({
   assessmentId,
   actionHref = "/fit-review",
   compact = false,
+  fallbackInsights = [],
+  supportingSignals,
+  baselineEvidence,
+  summary,
 }: FitImprovementOpportunitiesProps) {
   const [loading, setLoading] = useState(false);
   const [opportunities, setOpportunities] = useState<ImprovementOpportunity[]>([]);
@@ -74,7 +98,29 @@ export function FitImprovementOpportunities({
     };
   }, [assessmentId]);
 
-  if (loading || opportunities.length === 0) {
+  const filteredCategorySuggestions = opportunities.filter(
+    (opportunity) =>
+      !shouldSuppressCategorySuggestion({
+        categoryLabel: opportunity.categoryLabel,
+        supportingSignals,
+        baselineEvidence,
+        summary,
+      }),
+  );
+  const visibleInsights: VisibleInsight[] =
+    filteredCategorySuggestions.length > 0 ? filteredCategorySuggestions : fallbackInsights;
+
+  if (process.env.NODE_ENV !== "production") {
+    console.info("fitImprovementOpportunitiesDebug", {
+      assessmentId,
+      categoryCount: opportunities.length,
+      filteredCategoryCount: filteredCategorySuggestions.length,
+      fallbackCount: fallbackInsights.length,
+      usingFallback: filteredCategorySuggestions.length === 0,
+    });
+  }
+
+  if (loading && visibleInsights.length === 0) {
     return null;
   }
 
@@ -86,27 +132,28 @@ export function FitImprovementOpportunities({
             Want to increase your score?
           </p>
           <h3 className="text-xl font-semibold tracking-tight text-slate-100">
-            Improve the evidence behind this match
+            What to fix to unlock Studio
           </h3>
           <p className="text-sm leading-6 text-slate-300">
-            Fit Review is the secondary path. Use it to sharpen the missing proof most likely to
-            lift this score.
+            Fit Review is the path for the missing proof most likely to unlock Studio.
           </p>
         </div>
 
         <div className="space-y-3">
-          {opportunities.slice(0, 2).map((opportunity) => (
+          {visibleInsights.slice(0, 2).map((opportunity) => (
             <article
-              key={`${opportunity.categoryKey}-${opportunity.categoryLabel}`}
+              key={`${("categoryKey" in opportunity ? opportunity.categoryKey : opportunity.requirement)}-${"categoryLabel" in opportunity ? opportunity.categoryLabel : opportunity.requirement}`}
               className="rounded-[22px] border border-white/10 bg-white/[0.04] p-4"
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-slate-100">{opportunity.categoryLabel}</p>
+                  <p className="text-sm font-semibold text-slate-100">
+                    {"categoryLabel" in opportunity ? opportunity.categoryLabel : opportunity.requirement}
+                  </p>
                   <p className="mt-1 text-sm leading-6 text-slate-400">{opportunity.explanation}</p>
                 </div>
                 <div className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-2.5 py-1 text-xs font-semibold text-emerald-100">
-                  +{opportunity.delta.toFixed(1)}
+                  {typeof opportunity.delta === "number" ? `+${opportunity.delta.toFixed(1)}` : "Gap"}
                 </div>
               </div>
             </article>
@@ -126,20 +173,22 @@ export function FitImprovementOpportunities({
   return (
     <details className="rounded-2xl border border-white/10 bg-slate-900/30 p-5">
       <summary className="cursor-pointer text-sm font-semibold text-slate-200">
-        Improve compatibility
+        What to fix to unlock Studio
       </summary>
       <div className="mt-4 space-y-4">
         <p className="text-sm text-slate-400">
-          These estimates show how additional verified baseline signals could improve compatibility for this role.
+          These estimates show which verified baseline signals are still missing or weak.
         </p>
 
         <div className="grid gap-3 lg:grid-cols-3">
-          {opportunities.map((opportunity) => (
+          {visibleInsights.map((opportunity) => (
             <article
-              key={`${opportunity.categoryKey}-${opportunity.categoryLabel}`}
+              key={`${"categoryKey" in opportunity ? opportunity.categoryKey : opportunity.requirement}-${"categoryLabel" in opportunity ? opportunity.categoryLabel : opportunity.requirement}`}
               className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4"
             >
-              <p className="text-sm font-semibold text-slate-100">{opportunity.categoryLabel}</p>
+              <p className="text-sm font-semibold text-slate-100">
+                {"categoryLabel" in opportunity ? opportunity.categoryLabel : opportunity.requirement}
+              </p>
 
               <div className="space-y-1 text-sm text-slate-300">
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Current signal</p>
@@ -154,11 +203,19 @@ export function FitImprovementOpportunities({
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1 text-sm text-slate-200">
                   <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Estimated score</p>
-                  <p className="text-base font-semibold">{opportunity.estimatedScore.toFixed(1)}</p>
+                  <p className="text-base font-semibold">
+                    {"estimatedScore" in opportunity && typeof opportunity.estimatedScore === "number"
+                      ? opportunity.estimatedScore.toFixed(1)
+                      : "n/a"}
+                  </p>
                 </div>
                 <div className="space-y-1 text-sm text-slate-200">
                   <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Potential improvement</p>
-                  <p className="text-base font-semibold">+{opportunity.delta.toFixed(1)}</p>
+                  <p className="text-base font-semibold">
+                    {"delta" in opportunity && typeof opportunity.delta === "number"
+                      ? `+${opportunity.delta.toFixed(1)}`
+                      : "Gap"}
+                  </p>
                 </div>
               </div>
 

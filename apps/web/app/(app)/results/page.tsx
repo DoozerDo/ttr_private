@@ -37,7 +37,7 @@ import { getDecisionFromFitScore } from "@/lib/fit-verdict";
 import { buildStrategicBrief } from "@/lib/resultsInsights";
 import { buildResultsSignalAlignment } from "@/lib/professionalSignals";
 import { appendStrengtheningAddition } from "@/lib/baselines";
-import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
+import { buildEvidenceSuggestion, buildRequirementGapInsight } from "@/lib/evidenceSuggestions";
 import { buildScoreDelta, hasBaselineUpdated } from "@/lib/reanalysis";
 import { buildProgressSummary } from "@/lib/progressSummary";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
@@ -709,11 +709,13 @@ export function OpportunityMapSection({
         ? "border-slate-500/50 bg-slate-800/80 text-slate-100"
         : "border-emerald-300/30 bg-emerald-500/10 text-emerald-100";
   const readinessMessage =
-    readiness.status === "blocked"
-      ? "Generation is currently blocked until key verification gaps are resolved."
-      : readiness.status === "limited"
-        ? "Some requirements need stronger verification. You can still generate documents."
-        : "Your evidence supports generation.";
+    nextAction.type === "fit_review"
+      ? "Some requirements are not yet supported by verified evidence."
+      : readiness.status === "blocked"
+        ? "Some requirements are not yet supported by verified evidence."
+        : readiness.status === "limited"
+          ? "Some requirements are not yet supported by verified evidence."
+          : "Your evidence supports generation.";
   const decisionNarrative = useMemo(() => {
     if (nextAction.type === "fit_review") {
       return { headline: "This score needs a fit review.", body: "Use the primary action to strengthen the baseline." };
@@ -1488,7 +1490,11 @@ export default function ResultsPage() {
   const activeScore = useMemo(() => {
     return resolveDisplayedFitScore(latest);
   }, [latest]);
-  const isQualified = typeof activeScore === "number" && activeScore >= 70;
+  const isQualified =
+    typeof activeScore === "number" &&
+    activeScore >= 70 &&
+    generationReadiness.status === "ready" &&
+    !generationReadiness.blocked;
   const studioLocked = searchParams?.get("locked") === "1";
 
   const scoreBreakdown = useMemo(() => {
@@ -1963,6 +1969,46 @@ export default function ResultsPage() {
     }
     return map;
   }, [canonicalUnverifiedRequirements, latest?.baselineEvidence, latest?.summary, latest?.supportingSignals]);
+  const fallbackRequirementInsights = useMemo(() => {
+    if (!(typeof activeScore === "number" && activeScore >= 70 && generationReadiness.status !== "ready")) {
+      return [];
+    }
+    const requirementsToExplain =
+      canonicalUnverifiedRequirements.length > 0
+        ? canonicalUnverifiedRequirements
+        : criticalGapDetails.map((gap) => gap.title).filter((title) => typeof title === "string" && title.trim().length > 0);
+    const criticalGapMap = new Map(
+      criticalGapDetails.map((gap) => [normalizeUserFacingRequirementLabel(gap.title, {
+        sourceContext: null,
+        issueCode: "unsupported_technology_claim",
+      })?.toLowerCase() ?? gap.title.toLowerCase(), gap]),
+    );
+    const insights = requirementsToExplain
+      .map((requirement) => {
+        const normalizedRequirement = normalizeUserFacingRequirementLabel(requirement, {
+          sourceContext: null,
+          issueCode: "unsupported_technology_claim",
+        })?.toLowerCase() ?? requirement.toLowerCase();
+        const gap = criticalGapMap.get(normalizedRequirement) ?? null;
+        return buildRequirementGapInsight({
+          requirement,
+          requirementEvidence: gap?.requirementEvidence ?? requirement,
+          baselineEvidence: gap?.baselineEvidence ?? latest?.baselineEvidence ?? latest?.summary,
+          supportingSignals: latest?.supportingSignals,
+          summary: latest?.summary,
+        });
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+    return insights.slice(0, 3);
+  }, [
+    activeScore,
+    canonicalUnverifiedRequirements,
+    criticalGapDetails,
+    generationReadiness.status,
+    latest?.baselineEvidence,
+    latest?.summary,
+    latest?.supportingSignals,
+  ]);
   const discoveredRoles = useMemo(
     () =>
       discoverCompetitiveRoles({
@@ -3217,6 +3263,10 @@ export default function ResultsPage() {
                       <FitImprovementOpportunities
                         assessmentId={latest.assessmentId ?? null}
                         actionHref={fitReviewPath}
+                        fallbackInsights={fallbackRequirementInsights}
+                        supportingSignals={latest?.supportingSignals}
+                        baselineEvidence={latest?.baselineEvidence ?? latest?.summary}
+                        summary={latest?.summary}
                         compact
                       />
                     </section>
