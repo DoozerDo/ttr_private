@@ -53,7 +53,7 @@ const MODULES: ModuleMeta[] = [
 
 const STATE_LABEL: Record<UnlockPathModuleState, string> = {
   LOCKED: "Locked",
-  CURRENT: "Current",
+  CURRENT: "CURRENT",
   UNLOCKED: "Unlocked",
   COMPLETE: "Complete",
 };
@@ -154,11 +154,11 @@ export function UnlockPathBar(props: UnlockPathBarProps) {
                 </span>
                 {isLocked ? (
                   <span className="text-[11px] leading-4 text-slate-400">{module.lockedReason}</span>
-                ) : (
+                ) : !isCurrent ? (
                   <span className="text-[11px] leading-4 text-slate-400">
-                    {isCurrent ? "You are here" : isComplete ? "Completed" : "Available"}
+                    {isComplete ? "Completed" : "Available"}
                   </span>
-                )}
+                ) : null}
               </div>
             </button>
           );

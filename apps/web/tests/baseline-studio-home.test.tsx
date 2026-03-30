@@ -147,11 +147,12 @@ describe("BaselineStudioHome", () => {
     expect(screen.getByText("Build your verified baseline")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Your baseline is the verified version of your experience used for scoring and document generation. Complete your baseline to unlock analysis.",
+        "Upload your resume to create your baseline file.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update baseline" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "ANALYZE" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "ADD JOB" })).toBeNull();
     expect(screen.queryByRole("link", { name: "VIEW LATEST RESULTS" })).toBeNull();
   });
 
@@ -175,6 +176,7 @@ describe("BaselineStudioHome", () => {
     expect(screen.getByRole("button", { name: "Update baseline" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "VIEW BASELINE DETAILS" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "ANALYZE" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "ADD JOB" })).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByRole("link", { name: "ADD JOB" })).toHaveAttribute(
         "href",
@@ -244,11 +246,7 @@ describe("BaselineStudioHome", () => {
 
     expect(screen.getByText("Build your verified baseline")).toBeInTheDocument();
     expect(screen.getByText(/Upload the resume you want to work from/i)).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        /A baseline is the verified version of your resume that this app uses for scoring and document generation\./i,
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Upload your resume to create your baseline file.")).toBeInTheDocument();
     expect(
       screen.getByText(
         "Because resumes are written for people, not systems. TTR first turns your resume into a verified working baseline so scores and generated documents stay consistent, traceable, and grounded in what you have actually done.",

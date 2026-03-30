@@ -996,7 +996,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                     : "Your baseline is the verified version of your experience used for scoring and document generation. Every downstream result depends on it."}
               </p>
               <p className="text-sm leading-6 text-slate-400">
-                A baseline is the verified version of your resume that this app uses for scoring and document generation.
+                Upload your resume to create your baseline file.
               </p>
               <p className="text-sm font-medium text-slate-200">Complete your baseline to unlock analysis.</p>
             </div>
@@ -1106,6 +1106,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   isAnalyzing: isLoading,
                 });
                 const readinessLabel = getBaselineReadinessLabel(readinessState);
+                const canTargetJob = readinessState === "READY";
                 const setActiveDisabled = isLoading || isPrimary || isArchived || !isHydrated;
                 const baselineDetailsHref = getBaselineDetailsHref(baseline.id);
                 const latestResultsForBaselineHref = assessmentSummary?.latestAssessmentId
@@ -1173,7 +1174,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                             {isLoading ? formatCardActionLabel("Targeting...") : formatCardActionLabel("Analyze")}
                           </FormButton>
                         )}
-                        {!isArchived && careerGravity.unlocked ? (
+                        {canTargetJob && !isArchived ? (
                           <Link
                             href={`/target?baselineId=${encodeURIComponent(baseline.id)}`}
                             className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-cyan-300/20 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold uppercase text-cyan-50 transition hover:bg-cyan-400/15"
