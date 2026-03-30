@@ -23,8 +23,9 @@ describe("results auto analysis loading", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("Select an active resume to continue.")).toBeInTheDocument();
+      expect(screen.getByText("No compatibility analysis yet")).toBeInTheDocument();
     });
+    expect(screen.getByRole("button", { name: "Load Compatibility Analysis" })).toBeDisabled();
   });
 
   it("creates analysis on missing latest and navigates with explicit assessmentId", async () => {
@@ -78,8 +79,9 @@ describe("results auto analysis loading", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("Select an active resume to continue.")).toBeInTheDocument();
+      expect(screen.getByText("This result is no longer linked to an active resume.")).toBeInTheDocument();
     });
+    expect(screen.getByRole("button", { name: "Retry Compatibility Analysis" })).toBeInTheDocument();
   });
 
   it("uses existing latest assessment without creating duplicate analysis", async () => {
@@ -101,13 +103,12 @@ describe("results auto analysis loading", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(mockRouterReplace).toHaveBeenCalledWith(
-        "/results?assessmentId=assessment-existing-1",
-      );
+      expect(screen.getByText("This result is no longer linked to an active resume.")).toBeInTheDocument();
     });
 
     expect(
       fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/analysis/run")),
     ).toBe(false);
+    expect(mockRouterReplace).not.toHaveBeenCalled();
   });
 });

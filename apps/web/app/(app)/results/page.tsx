@@ -398,18 +398,45 @@ function buildEvidenceLines(scoreBreakdown: ScoreBreakdownShape | null): string[
 const INTERVIEW_TOOLKIT_PATH = "/interview-toolkit";
 const LAST_ASSESSMENT_STORAGE_KEY = "ttr-last-assessment-id";
 
+function safeReadStorageItem(key: string): string | null {
+  if (typeof window === "undefined") return null;
+  const storage = window.localStorage as
+    | {
+        getItem?: (itemKey: string) => string | null;
+      }
+    | null;
+  if (!storage || typeof storage.getItem !== "function") return null;
+  return storage.getItem(key);
+}
+
+function safeWriteStorageItem(key: string, value: string | null) {
+  if (typeof window === "undefined") return;
+  const storage = window.localStorage as
+    | {
+        setItem?: (itemKey: string, itemValue: string) => void;
+        removeItem?: (itemKey: string) => void;
+      }
+    | null;
+  if (!storage) return;
+  if (value) {
+    if (typeof storage.setItem === "function") {
+      storage.setItem(key, value);
+    }
+    return;
+  }
+  if (typeof storage.removeItem === "function") {
+    storage.removeItem(key);
+  }
+}
+
 function readLastAssessmentFromStorage(): string | null {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(LAST_ASSESSMENT_STORAGE_KEY);
+  return safeReadStorageItem(LAST_ASSESSMENT_STORAGE_KEY);
 }
 
 function writeLastAssessmentToStorage(value: string | null) {
   if (typeof window === "undefined") return;
-  if (value) {
-    window.localStorage.setItem(LAST_ASSESSMENT_STORAGE_KEY, value);
-    return;
-  }
-  window.localStorage.removeItem(LAST_ASSESSMENT_STORAGE_KEY);
+  safeWriteStorageItem(LAST_ASSESSMENT_STORAGE_KEY, value);
 }
 
 const debugUiEnabled =
@@ -1731,9 +1758,13 @@ export default function ResultsPage() {
   const opportunityVerdict = useMemo(() => getOpportunityVerdict(activeScore), [activeScore]);
   const fitReviewPath = useMemo(() => {
     const candidateJobId = (latest?.jobId || jobId || "").trim();
-    if (!candidateJobId) return "/fit-review";
-    return `/fit-review?jobId=${encodeURIComponent(candidateJobId)}`;
-  }, [jobId, latest?.jobId]);
+    const candidateBaselineId = (latest?.baselineId || baselineId || "").trim();
+    const params = new URLSearchParams();
+    if (candidateJobId) params.set("jobId", candidateJobId);
+    if (candidateBaselineId) params.set("baselineId", candidateBaselineId);
+    const query = params.toString();
+    return query ? `/fit-review?${query}` : "/fit-review";
+  }, [baselineId, jobId, latest?.baselineId, latest?.jobId]);
   const interviewToolkitHref = INTERVIEW_TOOLKIT_PATH;
   useEffect(() => {
     const key = getGenerationCompletionStorageKey(latest?.jobId ?? null, latest?.baselineId ?? null);
@@ -1741,7 +1772,7 @@ export default function ResultsPage() {
       setGenerationCompleted(false);
       return;
     }
-    setGenerationCompleted(window.localStorage.getItem(key) === "true");
+    setGenerationCompleted(safeReadStorageItem(key) === "true");
   }, [latest?.baselineId, latest?.jobId]);
 
   const latestBaselineId = latest?.baselineId?.trim() ?? "";
@@ -2397,17 +2428,20 @@ export default function ResultsPage() {
         }
 
         const data: LatestAnalysis = await res.json();
+        if (!data.baselineId?.trim()) {
+          throw new Error("This result is no longer linked to an active resume.");
+        }
         setLatest(data);
         setBaselineId(data.baselineId ?? "");
         setJobId(data.jobId ?? "");
         setAnalysisSource("latest");
         await persistLastAssessmentId(data.assessmentId ?? assessmentId);
-      } catch {
+      } catch (error: unknown) {
         trackEvent("analysis_load_failed", {
           source: "results",
           status: "assessment_exception",
         });
-        setError(COMPATIBILITY_ANALYSIS_ERROR);
+        setError(error instanceof Error ? error.message : COMPATIBILITY_ANALYSIS_ERROR);
       } finally {
         setLoadingLatest(false);
       }
@@ -2565,7 +2599,7 @@ export default function ResultsPage() {
       const query = params.toString();
       const path = query ? `/results?${query}` : "/results";
       await router.replace(path);
-    } catch {
+    } catch (error: unknown) {
       console.error("[results] hydration_failed", {
         stage: "results",
         status: "exception",
@@ -2574,7 +2608,7 @@ export default function ResultsPage() {
         source: "results",
         status: "latest_exception",
       });
-      setError(COMPATIBILITY_ANALYSIS_ERROR);
+      setError(error instanceof Error ? error.message : COMPATIBILITY_ANALYSIS_ERROR);
     } finally {
       setLoadingLatest(false);
     }

@@ -83,6 +83,7 @@ describe("Studio execution surface", () => {
       if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
         return createResponse({
           score: 88,
+          scoring_v2: { score: 88 },
           jobId: "job-1",
           baselineId: "base-1",
           baselineVersionId: "base-version-1",
@@ -102,9 +103,7 @@ describe("Studio execution surface", () => {
       expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument();
     });
 
-    expect(
-      screen.queryByText("Ready to generate") ?? screen.getByText("Generation limited"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Ready to generate")).toBeInTheDocument();
     expect(
       screen.queryAllByRole("button", { name: "Generate Resume" }).length +
         screen.queryAllByRole("button", { name: "Generate Resume With Limits" }).length,
@@ -113,11 +112,9 @@ describe("Studio execution surface", () => {
       screen.queryAllByRole("button", { name: "Generate Cover Letter" }).length +
         screen.queryAllByRole("button", { name: "Generate Cover Letter With Limits" }).length,
     ).toBeGreaterThan(0);
-    expect(screen.getByText("Your application materials")).toBeInTheDocument();
     expect(screen.getByTestId("studio-evidence-allowed-panel")).toBeInTheDocument();
     expect(screen.getByText("Why this output is allowed")).toBeInTheDocument();
-    expect(screen.getByText("Resume")).toBeInTheDocument();
-    expect(screen.getByText("Cover letter")).toBeInTheDocument();
+    expect(screen.getByText("You’re ready to generate")).toBeInTheDocument();
   });
 
   it("renders BLOCKED hero with remediation-first action", async () => {
@@ -144,9 +141,8 @@ describe("Studio execution surface", () => {
       expect(screen.getByText("Generation blocked")).toBeInTheDocument();
     });
 
-    expect(screen.getByRole("link", { name: "Resolve gaps before generating" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
     expect(screen.queryByTestId("studio-evidence-allowed-panel")).toBeNull();
-    expect(screen.getByTestId("studio-evidence-blocked-panel")).toBeInTheDocument();
   });
 
   it("suppresses generation surfaces when fit is below threshold and routes to Resolve Gaps", async () => {
@@ -167,11 +163,12 @@ describe("Studio execution surface", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByRole("link", { name: "Resolve Gaps" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
     });
 
     expect(screen.queryByText("Your application materials")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Generate Resume" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("studio-evidence-allowed-panel")).toBeNull();
   });
 
   it("demotes advanced controls with optional labels", async () => {

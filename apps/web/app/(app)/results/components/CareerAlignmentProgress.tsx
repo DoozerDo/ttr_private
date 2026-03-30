@@ -40,6 +40,26 @@ const EMPTY_HISTORY: AlignmentHistoryResponse = {
   badges: [],
 };
 
+function normalizeHistory(payload: Partial<AlignmentHistoryResponse> | null | undefined): AlignmentHistoryResponse {
+  return {
+    recentAnalyses: Array.isArray(payload?.recentAnalyses) ? payload!.recentAnalyses : [],
+    alignmentPattern: {
+      strongestAlignmentRoles: Array.isArray(payload?.alignmentPattern?.strongestAlignmentRoles)
+        ? payload!.alignmentPattern!.strongestAlignmentRoles
+        : [],
+      totalAnalyses:
+        typeof payload?.alignmentPattern?.totalAnalyses === "number"
+          ? payload!.alignmentPattern!.totalAnalyses
+          : 0,
+      averageScore:
+        typeof payload?.alignmentPattern?.averageScore === "number"
+          ? payload!.alignmentPattern!.averageScore
+          : 0,
+    },
+    badges: Array.isArray(payload?.badges) ? payload!.badges : [],
+  };
+}
+
 type CareerAlignmentProgressProps = {
   showProgressSection?: boolean;
   showBadgesSection?: boolean;
@@ -70,9 +90,9 @@ export function CareerAlignmentProgress({
           return;
         }
 
-        const payload = (await response.json()) as AlignmentHistoryResponse;
+        const payload = (await response.json()) as Partial<AlignmentHistoryResponse>;
         if (!cancelled) {
-          setHistory(payload ?? EMPTY_HISTORY);
+          setHistory(normalizeHistory(payload));
         }
       } catch {
         if (!cancelled) {
@@ -94,7 +114,7 @@ export function CareerAlignmentProgress({
 
   const sortedRecentAnalyses = useMemo(
     () =>
-      [...history.recentAnalyses].sort(
+      [...(Array.isArray(history.recentAnalyses) ? history.recentAnalyses : [])].sort(
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       ),
     [history.recentAnalyses],

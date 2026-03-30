@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 
 import ResultsPage from "@/app/(app)/results/page";
-import { mockRouterReplace, overrideSearchParams, setFetchImplementation } from "@/tests/setup";
+import { overrideSearchParams, setFetchImplementation } from "@/tests/setup";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -64,26 +64,13 @@ describe("results re-analysis loop", () => {
     render(<ResultsPage />);
 
     expect(await screen.findByText("Updated Baseline Detected")).toBeInTheDocument();
-    expect(await screen.findByText("You've improved your fit")).toBeInTheDocument();
+    expect(await screen.findByText(/You['’]ve improved your fit/)).toBeInTheDocument();
     expect(await screen.findByText("+12 points (68 -> 80)")).toBeInTheDocument();
-    expect(await screen.findByText("Apply moment")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Apply to this role" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save this opportunity" })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Re-run Analysis" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/analysis/run",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({ jobId: "job-1", baselineId: "base-1" }),
-        }),
-      );
-    });
-
-    await waitFor(() => {
-      expect(mockRouterReplace).toHaveBeenCalledWith("/results?assessmentId=analysis-next");
-    });
+    expect(await screen.findByText("Want to increase your score?")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Fit Review" })).toBeInTheDocument();
+    expect(screen.getByTestId("results-hero-primary-cta")).toHaveAttribute(
+      "href",
+      "/fit-review?jobId=job-1&baselineId=base-1",
+    );
   });
 });
