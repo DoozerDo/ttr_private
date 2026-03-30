@@ -94,6 +94,12 @@ function getAssessmentCreatedTimestamp(a: FitAssessment | null | undefined): str
 
 function getAssessmentScore(assessment?: FitAssessment | AnalysisResult | null): number | null {
   if (!assessment) return null;
+  if (
+    typeof (assessment as { scoring_v2?: { score?: unknown } }).scoring_v2?.score ===
+    "number"
+  ) {
+    return (assessment as { scoring_v2: { score: number } }).scoring_v2.score;
+  }
   if (typeof assessment.overallScore === "number") return assessment.overallScore;
   if (typeof assessment.score === "number") return assessment.score;
   return null;

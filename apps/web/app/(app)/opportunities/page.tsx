@@ -146,13 +146,19 @@ export default function OpportunitiesPage() {
               { cache: "no-store" },
             );
             if (!response.ok) return [row.id, null];
-            const payload = (await response.json()) as { score?: number | null; overallScore?: number | null };
+            const payload = (await response.json()) as {
+              score?: number | null;
+              overallScore?: number | null;
+              scoring_v2?: { score?: number | null } | null;
+            };
             const scoreCandidate =
-              typeof payload.score === "number"
-                ? payload.score
-                : typeof payload.overallScore === "number"
-                  ? payload.overallScore
-                  : null;
+              typeof payload.scoring_v2?.score === "number"
+                ? payload.scoring_v2.score
+                : typeof payload.score === "number"
+                  ? payload.score
+                  : typeof payload.overallScore === "number"
+                    ? payload.overallScore
+                    : null;
             return [row.id, scoreCandidate === null ? null : Math.round(scoreCandidate)];
           } catch {
             return [row.id, null];

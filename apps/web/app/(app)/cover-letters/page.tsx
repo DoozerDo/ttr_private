@@ -527,9 +527,10 @@ export default function CoverLettersPage() {
 
 function resolveAnalysisScore(record: StoredAnalysisRecord | null): number | null {
   if (!record) return null;
-  if (typeof record.fitScore === "number") return record.fitScore;
-  const analysis = record.analysis;
-  if (typeof analysis.score === "number") return analysis.score;
+    if (typeof record.fitScore === "number") return record.fitScore;
+    const analysis = record.analysis;
+    if (typeof analysis.scoring_v2?.score === "number") return analysis.scoring_v2.score;
+    if (typeof analysis.score === "number") return analysis.score;
   if (typeof analysis.fit_score === "number") return analysis.fit_score;
   if (typeof analysis.overallScore === "number") return analysis.overallScore;
   if (typeof analysis.overall_score === "number") return analysis.overall_score;

@@ -38,17 +38,8 @@ function latestVersionId(baseline?: BaselineDto) {
 
 function resolveScore(analysis: AnalysisResult | null): number | null {
   if (!analysis) return null;
-  const candidate =
-    typeof analysis.score === "number"
-      ? analysis.score
-      : typeof analysis.fit_score === "number"
-        ? analysis.fit_score
-        : typeof analysis.overallScore === "number"
-          ? analysis.overallScore
-          : typeof analysis.overall_score === "number"
-            ? analysis.overall_score
-            : null;
-  return typeof candidate === "number" ? candidate : null;
+  if (typeof analysis.scoring_v2?.score === "number") return analysis.scoring_v2.score;
+  return null;
 }
 
 function isCanonicalCompletedAnalysis(

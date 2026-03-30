@@ -335,15 +335,22 @@ const sampleScoringV2: CxFitV2Result = {
       strengths: ['aws'],
       gaps: ['golang'],
       complianceFlags: [],
-      scoringV2: sampleScoringV2,
+      scoringV2: {
+        ...sampleScoringV2,
+        score: 68,
+      },
       createdAt: new Date(),
     });
 
     const result = await service.getFitAssessmentById('user-1', 'fit-1');
 
+    expect(result.fit_score).toBeLessThan(75);
+    expect(result.fit_score).toBe(68);
+    expect(result.overall_score).toBe(68);
+    expect(result.score).toBe(68);
     expect(result.scoring_v2).toEqual(
       expect.objectContaining({
-        score: sampleScoringV2.score,
+        score: 68,
         rubric: sampleScoringV2.rubric,
       }),
     );

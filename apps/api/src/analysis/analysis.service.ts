@@ -2928,8 +2928,7 @@ export class AnalysisService {
     })
       : null;
 
-    const scoringV2DimensionScores =
-      assessment.scoringV2?.rubric?.dimensionPercents ?? null;
+    const scoringV2DimensionScores = assessment.scoringV2?.rubric?.dimensionPercents ?? null;
     const fallbackDimensionScores = {
       role_scope_and_seniority: assessment.dimensionScores?.experienceAlignment ?? 0,
       support_operations_and_process_rigor: assessment.dimensionScores?.leadershipLevel ?? 0,
@@ -2938,8 +2937,12 @@ export class AnalysisService {
       change_leadership_and_customer_advocacy:
         assessment.dimensionScores?.strategicTacticalFit ?? 0,
     };
+    const latestScore = assessment.scoringV2?.score ?? assessment.overallScore;
+    const latestLegacyDimensionScores = assessment.scoringV2
+      ? this.mapCxFitV2ToLegacyDimensionScores(assessment.scoringV2)
+      : assessment.dimensionScores;
     const narrative = buildResultsNarrative({
-      overallScore: assessment.scoringV2?.score ?? assessment.overallScore,
+      overallScore: latestScore,
       dimensionScores: scoringV2DimensionScores ?? fallbackDimensionScores,
     });
     const scoreBreakdown = this.buildScoreBreakdown(assessment);
@@ -2957,10 +2960,12 @@ export class AnalysisService {
       baselineId: assessment.baselineId,
       baselineVersionId: baselineVersionRecord?.id ?? null,
       baselineVersion: assessment.baselineVersion,
-      overallScore: assessment.overallScore,
-      score: assessment.overallScore,
+      fit_score: latestScore,
+      overall_score: latestScore,
+      overallScore: latestScore,
+      score: latestScore,
       verdict: assessment.verdict,
-      dimensionScores: assessment.dimensionScores,
+      dimensionScores: latestLegacyDimensionScores,
       strengths: gapInsights.strengths,
       gaps: gapInsights.criticalGaps.map((gap) => gap.title),
       criticalGaps: gapInsights.criticalGaps,

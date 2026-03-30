@@ -170,14 +170,23 @@ export type CxFitV2DebugInfo = {
     jobVector: string;
     matchedVia: string;
     weight: number;
+    applied: boolean;
   }[];
   transferableCoveragePercent: number;
+  transferableContributionApplied: number;
   transferableVectors: string[];
+  droppedTransferableMatches: {
+    jobVector: string;
+    matchedVia: string;
+    weight: number;
+    reason: string;
+  }[];
   unmatchedVectors: string[];
   adjustedResponsibilityOverlapPercent: number;
   baselineBand: string;
   roleBand: string;
   bandDelta: number;
+  domainPercent: number;
   responsibilityOverlapPercent: number;
   baselineCoveragePercent: number;
   baselineRecallPercent: number;
@@ -187,6 +196,7 @@ export type CxFitV2DebugInfo = {
   strategyMatchesJob: number;
   originalAdvocacyRatioPercent: number;
   flooredAdvocacyRatioPercent: number;
+  changeLeadershipAndAdvocacyPercentFloored: number;
   changeLeadershipEligibility: 'eligible' | 'ineligible_ic_role';
   effectiveWeights: ScoringContractV1Weights;
   redistributedWeightFrom: number;
@@ -428,18 +438,19 @@ const RESPONSIBILITY_VECTORS = [
   },
 ] as const;
 
-const TRANSFER_WEIGHT = 0.4;
+const MAX_TRANSFERABLE_CONTRIBUTION = 0.25;
 
-const TRANSFERABLE_SIGNAL_MAP: Record<string, string[]> = {
-  incident_management: ['product_launch_readiness'],
-  escalation_governance: ['cross_functional_product_rhythm'],
-  service_delivery: ['product_lifecycle'],
-  service_reliability: ['product_health_metrics'],
-  dashboards_kpis: ['product_health_metrics'],
-  automation_workflow: ['release_planning'],
-  contact_center_ops: ['gtm_alignment'],
-  itsm_process_maturity: ['operating_model'],
-  process_improvement: ['roadmap_management'],
+const TRANSFERABLE_SIGNAL_MAP: Record<
+  string,
+  { target: string; weight: number }[]
+> = {
+  incident_management: [{ target: 'product_launch_readiness', weight: 0.4 }],
+  service_delivery: [{ target: 'product_lifecycle', weight: 0.4 }],
+  escalation_governance: [{ target: 'cross_functional_product_rhythm', weight: 0.35 }],
+  service_reliability: [{ target: 'product_health_metrics', weight: 0.35 }],
+  dashboards_kpis: [{ target: 'product_health_metrics', weight: 0.3 }],
+  automation_workflow: [{ target: 'release_planning', weight: 0.35 }],
+  itsm_process_maturity: [{ target: 'operating_model', weight: 0.4 }],
 };
 
 const buildTransferableMatches = (
@@ -451,22 +462,46 @@ const buildTransferableMatches = (
     jobVector: string;
     matchedVia: string;
     weight: number;
+    applied: boolean;
+  }[] = [];
+  const droppedTransferableMatches: {
+    jobVector: string;
+    matchedVia: string;
+    weight: number;
+    reason: string;
   }[] = [];
   const transferableVectors = new Set<string>();
+  const directMatchSet = new Set(jobVectors.filter((vector) => baselineVectors.includes(vector)));
+  let transferableContributionTotal = 0;
 
   for (const jobVector of jobVectors) {
-    if (directVectorSet.has(jobVector)) continue;
+    if (directMatchSet.has(jobVector)) continue;
 
     for (const baselineVector of baselineVectors) {
       const mappedVectors = TRANSFERABLE_SIGNAL_MAP[baselineVector];
-      if (!mappedVectors?.includes(jobVector)) continue;
+      const mapping = mappedVectors?.find((entry) => entry.target === jobVector);
+      if (!mapping) continue;
+
+      const appliedContribution = mapping.weight * 100;
+      const cap = 100 * MAX_TRANSFERABLE_CONTRIBUTION;
+      if (transferableContributionTotal >= cap) {
+        droppedTransferableMatches.push({
+          jobVector,
+          matchedVia: baselineVector,
+          weight: mapping.weight,
+          reason: 'transfer_cap_reached',
+        });
+        continue;
+      }
 
       transferableMatches.push({
         jobVector,
         matchedVia: baselineVector,
-        weight: TRANSFER_WEIGHT,
+        weight: mapping.weight,
+        applied: true,
       });
       transferableVectors.add(jobVector);
+      transferableContributionTotal += appliedContribution;
       break;
     }
   }
@@ -477,7 +512,7 @@ const buildTransferableMatches = (
       : clamp(
           Math.round(
             ((directVectorSet.size +
-              transferableMatches.length * TRANSFER_WEIGHT) /
+              transferableMatches.reduce((sum, entry) => sum + entry.weight, 0)) /
               jobVectors.length) *
               100,
           ),
@@ -487,6 +522,7 @@ const buildTransferableMatches = (
     transferableMatches,
     transferableCoveragePercent,
     transferableVectors: [...transferableVectors],
+    droppedTransferableMatches,
     unmatchedVectors: jobVectors.filter(
       (jobVector) => !directVectorSet.has(jobVector) && !transferableVectors.has(jobVector),
     ),
@@ -1018,11 +1054,16 @@ export const scoreCxFitV2 = (
     (sharedClusters.length / baselineClustersDenominator) * 100;
 
   const responsibilityOverlapPercent = (jobCoveragePercent + jobClusterCoveragePercent) / 2;
-  const transferableLiftPercent = transferableSignalTrace.transferableCoveragePercent * 0.5;
-  const adjustedResponsibilityOverlapPercent =
-    responsibilityOverlapPercent >= 80
-      ? Math.min(responsibilityOverlapPercent, responsibilityOverlapPercent + transferableLiftPercent)
-      : Math.min(80, responsibilityOverlapPercent + transferableLiftPercent);
+  const transferableContributionCapped = Math.min(
+    transferableSignalTrace.transferableCoveragePercent,
+    responsibilityOverlapPercent * MAX_TRANSFERABLE_CONTRIBUTION,
+  );
+  const transferableContributionApplied =
+    transferableContributionCapped * (responsibilityOverlapPercent >= 80 ? 0.18 : 0.5);
+  const adjustedResponsibilityOverlapPercent = Math.min(
+    80,
+    responsibilityOverlapPercent + transferableContributionApplied,
+  );
 
   const baselineCoveragePercent =
     (baselineRecallPercent + baselineClusterCoveragePercent) / 2;
@@ -1094,10 +1135,29 @@ export const scoreCxFitV2 = (
     domainTagsRole.push('External Delivery');
   }
 
-  const domainPercent = computeDomainPercent(
+  const domainTagPercent = computeDomainPercent(
     domainTagsBaseline,
     domainTagsRole,
   );
+  let adjustedDomainPercent = clamp(
+    Math.round(domainTagPercent * 0.55 + adjustedResponsibilityOverlapPercent * 0.45),
+  );
+  const strongDomainAdjacency =
+    domainTagsBaseline.includes('SaaS') &&
+    domainTagsBaseline.includes('External Delivery') &&
+    (domainTagsRole.includes('External Delivery') || domainTagsRole.includes('SaaS'));
+  if (
+    strongDomainAdjacency &&
+    baselineCoveragePercent >= 20 &&
+    responsibilityOverlapPercent >= 60
+  ) {
+    adjustedDomainPercent = Math.max(adjustedDomainPercent, 55);
+  }
+  if (baselineCoveragePercent < 40) {
+    adjustedDomainPercent = Math.min(adjustedDomainPercent, 75);
+  }
+  adjustedDomainPercent = clamp(adjustedDomainPercent);
+  const domainPercent = adjustedDomainPercent;
 
   const baselineExecDensity = calculateExecutiveScopeDensity(baselineRawText);
   const jobExecDensity = calculateExecutiveScopeDensity(jobRawText);
@@ -1162,6 +1222,9 @@ export const scoreCxFitV2 = (
     toolingAndPlatformPercent + platformGroupBoost,
   );
 
+  const roleFitAnchor = adjustedResponsibilityOverlapPercent;
+  const dependentDimensionAnchorCap = roleFitAnchor + 5;
+
   // ---- contract dimension percents (0-100) ----
   // 1) role_scope_and_seniority (scope + seniority alignment)
   // Mix vector overlap with band alignment.
@@ -1177,6 +1240,16 @@ export const scoreCxFitV2 = (
   const roleScopeAndSeniorityPercent = clamp(
     Math.round(scopeVectorPercent * 0.6 + bandAlignmentPercent * 0.4),
   );
+  let anchoredRoleScopeAndSeniorityPercent = Math.min(
+    roleScopeAndSeniorityPercent,
+    dependentDimensionAnchorCap,
+  );
+  if (responsibilityOverlapPercent < 70) {
+    anchoredRoleScopeAndSeniorityPercent = Math.min(
+      anchoredRoleScopeAndSeniorityPercent,
+      78,
+    );
+  }
 
   // 2) support_operations_and_process_rigor
   // Use execution and ops vectors overlap. Execution ratio is computed vs job asks.
@@ -1192,10 +1265,25 @@ export const scoreCxFitV2 = (
   const opsRigorPercent = clamp(
     Math.round(scopeVectorPercent * 0.55 + executionRatioPercent * 0.45),
   );
+  let anchoredOpsRigorPercent = Math.min(
+    opsRigorPercent,
+    dependentDimensionAnchorCap,
+  );
+  if (responsibilityOverlapPercent < 70) {
+    anchoredOpsRigorPercent = Math.min(anchoredOpsRigorPercent, 78);
+  }
 
   // 3) tooling_and_platform_experience
   // 4) domain_and_business_context
-  const domainAndContextPercent = domainPercent;
+  let anchoredToolingAndPlatformPercent = Math.min(
+    toolingAndPlatformPercent,
+    dependentDimensionAnchorCap,
+  );
+  if (responsibilityOverlapPercent < 70) {
+    anchoredToolingAndPlatformPercent = Math.min(anchoredToolingAndPlatformPercent, 75);
+  }
+
+  const domainAndContextPercent = adjustedDomainPercent;
 
   // 5) change_leadership_and_customer_advocacy
   // Combine strategy ratio and advocacy ratio.
@@ -1222,12 +1310,12 @@ export const scoreCxFitV2 = (
   const roleImpliedStrategyFloorApplied = roleBand >= 7 && bandGap <= 1;
   const flooredStrategyRatioPercent = clamp(
     roleImpliedStrategyFloorApplied
-      ? Math.max(originalStrategyRatioPercent, 65)
+      ? Math.max(originalStrategyRatioPercent, 40)
       : originalStrategyRatioPercent,
   );
   const flooredAdvocacyRatioPercent = clamp(
     roleImpliedStrategyFloorApplied
-      ? Math.max(originalAdvocacyRatioPercent, 60)
+      ? Math.max(originalAdvocacyRatioPercent, 35)
       : originalAdvocacyRatioPercent,
   );
 
@@ -1261,6 +1349,13 @@ export const scoreCxFitV2 = (
 
   strategicTacticalFit = Math.min(strategicTacticalFit, 100);
 
+  if (strategyMatchesJob < 2) {
+    strategicTacticalFit = Math.min(strategicTacticalFit, 70);
+  }
+  if (baselineCoveragePercent < 40) {
+    strategicTacticalFit = Math.min(strategicTacticalFit, 70);
+  }
+
   let strategicBoostApplied = false;
   if (
     baselineStrategicDensity > STRATEGIC_THRESHOLD &&
@@ -1272,11 +1367,26 @@ export const scoreCxFitV2 = (
 
   strategicTacticalFit = Math.min(strategicTacticalFit, 100);
 
-  const changeLeadershipAndAdvocacyPercentFloored = clamp(
+  let changeLeadershipAndAdvocacyPercentFloored = clamp(
     roleImpliedStrategyFloorApplied
-      ? Math.max(strategicTacticalFit, 65)
+      ? Math.max(strategicTacticalFit, 40)
       : strategicTacticalFit,
   );
+  if (strategyMatchesJob < 2 || baselineCoveragePercent < 40) {
+    changeLeadershipAndAdvocacyPercentFloored = Math.min(
+      changeLeadershipAndAdvocacyPercentFloored,
+      strategyMatchesJob >= 2 || transferableSignalTrace.transferableCoveragePercent >= 25
+        ? 75
+        : 70,
+    );
+  }
+  if (adjustedResponsibilityOverlapPercent < 70) {
+    adjustedDomainPercent = Math.min(adjustedDomainPercent, 70);
+    changeLeadershipAndAdvocacyPercentFloored = Math.min(
+      changeLeadershipAndAdvocacyPercentFloored,
+      72,
+    );
+  }
   const changeLeadershipEligibility: 'eligible' | 'ineligible_ic_role' =
     roleBand < 7 ? 'ineligible_ic_role' : 'eligible';
   const changeLeadershipRedistributedWeight =
@@ -1301,12 +1411,21 @@ export const scoreCxFitV2 = (
     }
   }
   const changeLeadershipPercentUsed =
-    changeLeadershipEligibility === 'eligible' ? changeLeadershipAndAdvocacyPercentFloored : 0;
+    changeLeadershipEligibility === 'eligible'
+      ? Math.min(
+          changeLeadershipAndAdvocacyPercentFloored,
+          baselineCoveragePercent < 40
+            ? strategyMatchesJob >= 1 && roleBand >= 7
+              ? 75
+              : 70
+            : 100,
+        )
+      : 0;
 
   const dimensionPercents: Record<ScoringContractV1DimensionKey, number> = {
-    role_scope_and_seniority: roleScopeAndSeniorityPercent,
-    support_operations_and_process_rigor: opsRigorPercent,
-    tooling_and_platform_experience: toolingAndPlatformPercent,
+    role_scope_and_seniority: anchoredRoleScopeAndSeniorityPercent,
+    support_operations_and_process_rigor: anchoredOpsRigorPercent,
+    tooling_and_platform_experience: anchoredToolingAndPlatformPercent,
     domain_and_business_context: domainAndContextPercent,
     change_leadership_and_customer_advocacy: changeLeadershipPercentUsed,
   };
@@ -1390,7 +1509,9 @@ export const scoreCxFitV2 = (
           baselineVectors,
           transferableMatches: transferableSignalTrace.transferableMatches,
           transferableCoveragePercent: transferableSignalTrace.transferableCoveragePercent,
+          transferableContributionApplied,
           transferableVectors: transferableSignalTrace.transferableVectors,
+          droppedTransferableMatches: transferableSignalTrace.droppedTransferableMatches,
           unmatchedVectors: transferableSignalTrace.unmatchedVectors,
           adjustedResponsibilityOverlapPercent,
           responsibilityOverlapPercent,
@@ -1458,7 +1579,9 @@ export const scoreCxFitV2 = (
       sharedVectors,
       transferableMatches: transferableSignalTrace.transferableMatches,
       transferableCoveragePercent: transferableSignalTrace.transferableCoveragePercent,
+      transferableContributionApplied,
       transferableVectors: transferableSignalTrace.transferableVectors,
+      droppedTransferableMatches: transferableSignalTrace.droppedTransferableMatches,
       unmatchedVectors: transferableSignalTrace.unmatchedVectors,
       adjustedResponsibilityOverlapPercent,
       baselineBand: `L${baselineBand}`,
@@ -1468,6 +1591,7 @@ export const scoreCxFitV2 = (
       domainTagsRole: domainTagsRole,
       domainTagsBaselineOriginal,
       domainTagsRoleOriginal,
+      domainPercent: adjustedDomainPercent,
       responsibilityOverlapPercent: clamp(Math.round(responsibilityOverlapPercent)),
       baselineCoveragePercent: clamp(Math.round(baselineCoveragePercent)),
       baselineRecallPercent: clamp(Math.round(baselineRecallPercent)),
@@ -1477,6 +1601,7 @@ export const scoreCxFitV2 = (
       strategyMatchesJob,
       originalAdvocacyRatioPercent: clamp(Math.round(originalAdvocacyRatioPercent)),
       flooredAdvocacyRatioPercent: clamp(Math.round(flooredAdvocacyRatioPercent)),
+      changeLeadershipAndAdvocacyPercentFloored,
       jobClusters: jobClustersList,
       baselineClusters: baselineClustersList,
       sharedClusters,
@@ -1536,9 +1661,17 @@ type BuildFitScoreDebugBundleParams = {
     jobVector: string;
     matchedVia: string;
     weight: number;
+    applied: boolean;
   }[];
   transferableCoveragePercent: number;
+  transferableContributionApplied: number;
   transferableVectors: string[];
+  droppedTransferableMatches: {
+    jobVector: string;
+    matchedVia: string;
+    weight: number;
+    reason: string;
+  }[];
   unmatchedVectors: string[];
   adjustedResponsibilityOverlapPercent: number;
   responsibilityOverlapPercent: number;
@@ -1604,7 +1737,9 @@ const buildFitScoreDebugBundle = (
     baselineVectors,
     transferableMatches,
     transferableCoveragePercent,
+    transferableContributionApplied,
     transferableVectors,
+    droppedTransferableMatches,
     unmatchedVectors,
     adjustedResponsibilityOverlapPercent,
     responsibilityOverlapPercent,

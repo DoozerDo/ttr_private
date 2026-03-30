@@ -41,6 +41,9 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
 
   const structuredContext = useMemo<StructuredBugContext>(() => {
     const stored = readLastAnalysis();
+    const storedAnalysisWithScoringV2 = stored?.analysis as
+      | { scoring_v2?: { score?: unknown } | null }
+      | undefined;
     const routeBaselineId = searchParams?.get("baselineId")?.trim() || null;
     const routeJobId = searchParams?.get("jobId")?.trim() || null;
     const routeAssessmentId =
@@ -53,17 +56,19 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
       (typeof stored?.analysis?.assessmentId === "string" ? stored.analysis.assessmentId : null) ||
       null;
     const score =
-      typeof stored?.fitScore === "number"
-        ? stored.fitScore
-        : typeof stored?.analysis?.score === "number"
-          ? stored.analysis.score
-          : typeof stored?.analysis?.fit_score === "number"
-            ? stored.analysis.fit_score
-            : typeof stored?.analysis?.overallScore === "number"
-              ? stored.analysis.overallScore
-              : typeof stored?.analysis?.overall_score === "number"
-                ? stored.analysis.overall_score
-                : null;
+      typeof storedAnalysisWithScoringV2?.scoring_v2?.score === "number"
+        ? storedAnalysisWithScoringV2.scoring_v2.score
+        : typeof stored?.fitScore === "number"
+          ? stored.fitScore
+          : typeof stored?.analysis?.score === "number"
+            ? stored.analysis.score
+            : typeof stored?.analysis?.fit_score === "number"
+              ? stored.analysis.fit_score
+              : typeof stored?.analysis?.overallScore === "number"
+                ? stored.analysis.overallScore
+                : typeof stored?.analysis?.overall_score === "number"
+                  ? stored.analysis.overall_score
+                  : null;
     const hasCompletedGeneration =
       typeof window !== "undefined" && Boolean(getGenerationCompletionStorageKey(jobId, baselineId))
         ? Boolean(window.localStorage.getItem(getGenerationCompletionStorageKey(jobId, baselineId) as string))

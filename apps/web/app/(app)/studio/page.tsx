@@ -123,6 +123,7 @@ type LatestAnalysis = {
   jobTitle?: string | null;
   title?: string | null;
   scoring_v2?: {
+    score?: number | null;
     debug?: {
       toolingCoverage?: {
         claims?: unknown;
@@ -713,12 +714,14 @@ export default function StudioPage() {
         const supportedRequirements = Array.isArray(coverage?.supportedRequirements)
           ? coverage.supportedRequirements
           : [];
-        const rawScore =
-          typeof analysis?.score === "number"
-            ? analysis.score
-            : typeof analysis?.overallScore === "number"
-            ? analysis.overallScore
-            : null;
+          const rawScore =
+            typeof analysis?.scoring_v2?.score === "number"
+              ? analysis.scoring_v2.score
+              : typeof analysis?.score === "number"
+                ? analysis.score
+                : typeof analysis?.overallScore === "number"
+                  ? analysis.overallScore
+                  : null;
         const scoreValue = typeof rawScore === "number" ? Math.round(rawScore) : null;
         await fetch(`/api/applications/${encodeURIComponent(trackerEntryId)}`, {
           method: "PATCH",
@@ -892,14 +895,8 @@ export default function StudioPage() {
   }, [selectedJob]);
 
   const analysisScore = useMemo(() => {
-    const value = analysis?.overallScore ?? analysis?.score;
+    const value = analysis?.scoring_v2?.score;
     if (typeof value === "number") return value;
-    if (typeof value === "string" && value.trim()) {
-      const parsed = Number(value);
-      if (!Number.isNaN(parsed)) {
-        return parsed;
-      }
-    }
     return null;
   }, [analysis]);
   const scoreBand = useMemo(() => {

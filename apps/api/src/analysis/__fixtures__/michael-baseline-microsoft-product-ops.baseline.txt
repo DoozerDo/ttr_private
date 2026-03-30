@@ -1,0 +1,103 @@
+Michael Talbert Customer Operations and ITSM Leader | SaaS | Incident/Change | Automation | Global Teams 📞 206-949-1418 ✉️ michaeltalbert@hotmail.com 🔗 linkedin.com/in/michaelbtalbert
+
+Summary
+Service Delivery and Operations leader with 15 plus years driving global incident management, service reliability, contact center optimization, and customer operations across SaaS and IT service organizations. Experienced in ITIL aligned frameworks, post incident governance, AI enabled automation, and omnichannel workflow design across voice, chat, and email. Known for calm, precise leadership under pressure bridging engineering, product, and customer teams to deliver clarity, accountability, and measurable improvement. Skilled in MTTR and MTTA optimization, SLO design, WFM administration, contact center KPI management, and data driven decision making through Salesforce, Jira, Zendesk, Five9, and Power BI. Experienced in billing operations leadership including invoice accuracy, dispute workflows, and revenue-impacting incident management.
+
+Selected Achievements
+• Directed thirty three million dollar P&L and service delivery operations spanning fifty plus global staff across NA, EMEA, and APAC.
+• Improved resolution times by eighteen percent and reduced repeat incidents by twenty five percent through AI enabled automation in Salesforce and Jira.
+• Delivered 99.99 percent uptime and plus eighteen NPS via ITIL aligned CAB governance and process optimization.
+• Designed SLA frameworks, KPI dashboards, workforce management models, and resource governance structures influencing fifty million plus in prioritization decisions.
+• Built escalation playbooks, omnichannel workflows, and customer support models that increased retention and improved stakeholder confidence.
+
+Experience
+Senior Manager, Customer Operations – SentinelOne
+Remote Dec 2022 – Aug 2025
+• Owned global incident and escalation management for Customer Operations supporting Fortune 500 clients.
+• Led distributed operations team managing two thousand plus monthly cases with 98 percent SLA adherence.
+• Operationalized Salesforce Service Cloud (FedRAMP) and Jira Service Management for compliance workflows and reporting.
+• Introduced AI enabled triage and automation improving resolution times by eighteen percent and reducing repeat incidents by twenty five percent.
+• Chaired the Change Advisory Board ensuring compliance and reliability standards.
+• Partnered with Product and Engineering to eliminate systemic friction and optimize delivery outcomes.
+• Managed, configured, and administered Five9 voice operations, including reporting, routing, and performance metrics.
+• Administered Five9 Workforce Management for staffing, forecasting, and follow the sun scheduling coverage.
+• Designed and optimized voice, chat, and email workflows including queue routing, escalation paths, and deflection triggers.
+• Led forecasting for case, voice, and chat volume to align staffing and operational capacity.
+• Implemented bot assisted routing and knowledge base driven deflection workflows.
+• Created training materials and operational playbooks for new workflows, incident response, and cross functional communication.
+• Delivered operational analyses and recommendations to Product based on case patterns, systemic issues, and tooling gaps.
+• Led QBRs and MORs presenting insights, performance trends, and operational improvements to senior leadership.
+
+Automation & AI-Enabled Operations at Scale
+Implemented AI-enabled triage, routing, and deflection in Salesforce Service Cloud, improving resolution time by 18 percent and reducing repeat incidents by 25 percent.
+Designed automated escalation flows bridging Salesforce, Jira, and Slack to reduce alert fatigue and streamline handoff to engineering.
+Built incident-response frameworks integrating PagerDuty event signals with Customer Operations workflows to ensure rapid engagement during client-impacting events.
+Designed operational playbooks governing automated routing, deflection, and workflow consistency for global teams.
+
+Senior Manager, Technology Operations Excellence – Starbucks
+Remote Apr 2020 – Mar 2022
+• Directed the Technology Operations Excellence program spanning 30,000 plus retail and corporate locations with fifty million plus in IT prioritization influence.
+• Designed SLA frameworks, KPI dashboards, and automation models guiding enterprise level decision making.
+• Partnered across IT, Finance, and HR to align governance and compliance frameworks.
+• Embedded ITIL aligned ServiceNow automation reducing MTTR by twenty two percent.
+• Produced training materials and cross team communication workflows supporting new process rollouts.
+• Standardized operational playbooks to improve consistency across enterprise teams.
+
+Director, Customer Success – iStreamPlanet (Warner Bros. Discovery)
+Seattle, WA Dec 2018 – Oct 2019
+• Directed SaaS service delivery and customer success operations for enterprise media clients.
+• Automated onboarding and feedback loops using Jira–Zendesk integration reducing time to value by twenty percent.
+• Implemented RCA and escalation frameworks improving reliability and client satisfaction.
+• Built the customer support organization from the ground up selecting and implementing Zendesk and Jira infrastructure.
+• Forecasted case and interaction volume to inform staffing and support models.
+• Authored playbooks for incident response, cross functional handoffs, chat and email workflows, and customer facing communication standards.
+• Delivered operational insights and automation recommendations to Product to address workflow and tooling gaps.
+• Trained support teams on new processes, workflows, and operational standards.
+
+Bot, AI, and Workflow Automation
+Architected chat and email automation using Zendesk and Jira integration, reducing first-response and triage time across high-volume broadcast events.
+Implemented knowledge-driven bot deflection flows that decreased support load during peak traffic windows.
+Introduced automated RCA capture and dashboarding to accelerate engineering-side fixes and customer transparency.
+
+Director, Cloud Development and Support – CenturyLink Business for Enterprise
+Dec 2013 – Dec 2018
+Support Operations Leadership • Led support and development teams of fifty plus across NA, EMEA, and APAC; managed thirty three million dollar P&L delivering enterprise cloud and infrastructure services.
+• Instituted SLA reporting, KPI tracking, and RCA driven governance reducing chronic escalations by thirty percent.
+• Delivered dashboards shaping product investment and capacity planning.
+• Built and scaled the incident management organization for the Tier 3 Cloud business unit.
+• Managed and configured Zendesk Voice including routing, reporting, and SLA aligned performance metrics.
+• Forecasted case, voice, and chat volume to refine staffing, coverage, and capacity plans.
+• Designed global follow the sun schedules and crisis spike staffing models.
+• Authored operational workflows for voice, chat, email, and cross regional handoffs.
+• Delivered process improvement analysis to Product and Engineering for systemic issue resolution and tooling improvement.
+• Created training materials and delivered operational training across global teams.
+
+Automation & Incident Framework Design
+Designed and operationalized incident automation workflows integrating PagerDuty, Slack, and Zendesk to improve cross-team response coordination.
+Built multi-system triage flows enabling faster detection of billing-impacting incidents and reducing manual handoffs.
+Implemented automated channel creation, stakeholder alerts, and severity workflows to stabilize enterprise cloud operations.
+
+Billing Operations Leadership
+• Led billing support operations for the enterprise cloud product, overseeing invoice accuracy, dispute and credit handling, pricing and entitlement mismatches, and account adjustments.
+• Managed revenue-impacting incident workflows including usage metering and reconciliation issues, partnering with Finance, Product, and Engineering to resolve systemic issues.
+• Directed two team members dedicated to billing reliability, escalation management, and customer remediation.
+• Reduced repeat billing issues using Lean and continuous improvement methodologies, improving billing stability and customer confidence.
+• Designed and delivered billing KPI reporting to highlight trends, defects, and operational gaps.
+• Implemented automation and chatbot workflows to streamline billing support and reduce manual intervention.
+• Developed billing knowledge base content and self-service processes to reduce case volume and improve clarity.
+• Improved billing-related NPS by 23 percent.
+
+Microsoft
+United States 2006 – 2013
+Progressive operations leadership roles supporting enterprise scale SaaS platforms.
+• Directed incident and change operations for Office 365 sustaining 99.99 percent uptime and 97 percent SLA adherence.
+• Created training guides for operational execution and incident practices.
+• Supported workflow documentation across cross functional teams.
+
+Certifications & Professional Development
+ITIL v3 Foundations (ITIL 4 upgrade in progress 2026)
+Salesforce Trailhead Ranger
+Lean for Business – University of Tennessee Haslam College of Business
+Lean Six Sigma Green Belt
+Jira Service Management Administration
+Generative AI for Business Leaders

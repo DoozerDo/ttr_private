@@ -49,6 +49,19 @@ const unrelatedJob = {
   ],
 };
 
+const productOpsBaselineSections = [
+  {
+    type: 'EXPERIENCE',
+    content:
+      'Product operations manager who owned operating model design, product launch readiness, roadmap management, portfolio operations, release planning, and cross-functional product rhythm.\nPartnered with data science on product health metrics, GTM alignment, and product documentation source of truth while coordinating launch readiness across releases.',
+  },
+  {
+    type: 'SKILLS',
+    content:
+      'Operating model, product lifecycle, roadmap management, release planning, product health metrics, GTM alignment, product documentation source of truth',
+  },
+];
+
 describe('cx-fit-scoring-v2 transferable bridging', () => {
   it('adds bounded partial credit for adjacent Product Ops signals without saturating the score', () => {
     const result = scoreCxFitV2(
@@ -63,8 +76,11 @@ describe('cx-fit-scoring-v2 transferable bridging', () => {
     expect(result.debug.responsibilityOverlapPercent).toBeLessThan(70);
     expect(result.debug.transferableCoveragePercent).toBeGreaterThan(0);
     expect(result.debug.transferableMatches.length).toBeGreaterThan(0);
-    expect(result.score).toBeGreaterThanOrEqual(68);
-    expect(result.score).toBeLessThan(80);
+    expect(result.debug.transferableContributionApplied).toBeLessThan(
+      result.debug.responsibilityOverlapPercent * 0.5,
+    );
+    expect(result.score).toBeGreaterThanOrEqual(65);
+    expect(result.score).toBeLessThan(75);
   });
 
   it('keeps a true support operations role strong through direct matching', () => {
@@ -80,6 +96,21 @@ describe('cx-fit-scoring-v2 transferable bridging', () => {
     expect(result.debug.transferableCoveragePercent).toBeGreaterThanOrEqual(0);
     expect(result.debug.responsibilityOverlapPercent).toBeGreaterThanOrEqual(90);
     expect(result.score).toBeGreaterThan(85);
+  });
+
+  it('keeps bridging minimal when the baseline already directly matches Product Ops', () => {
+    const result = scoreCxFitV2(
+      {
+        job: microsoftProductOpsJob,
+        baselineSections: productOpsBaselineSections,
+        jobTitle: 'Senior Product Operations Manager',
+      },
+      { debugBundle: true },
+    );
+
+    expect(result.debug.responsibilityOverlapPercent).toBeGreaterThanOrEqual(80);
+    expect(result.debug.transferableContributionApplied).toBeLessThan(25);
+    expect(result.score).toBeGreaterThan(75);
   });
 
   it('keeps a mismatched role low even when transfer mappings exist', () => {

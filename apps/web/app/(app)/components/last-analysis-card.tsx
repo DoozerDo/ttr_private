@@ -50,8 +50,14 @@ export function LastAnalysisCard() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  const analysisWithScoringV2 = stored?.analysis as
+    | { scoring_v2?: { score?: unknown } | null }
+    | undefined;
   const score =
     stored?.fitScore ??
+    (typeof analysisWithScoringV2?.scoring_v2?.score === "number"
+      ? analysisWithScoringV2.scoring_v2.score
+      : null) ??
     stored?.analysis?.score ??
     stored?.analysis?.overallScore ??
     stored?.analysis?.overall_score ??

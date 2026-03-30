@@ -338,10 +338,10 @@ export function discoverCompetitiveRoles(input: {
 
 export function resolveDisplayedFitScore(latest: LatestAnalysis | null): number | null {
   if (!latest) return null;
-  const breakdownTotal = latest.score_breakdown?.total_score;
-  if (typeof breakdownTotal === "number") return breakdownTotal;
   const scoringV2Score = latest.scoring_v2?.score;
   if (typeof scoringV2Score === "number") return scoringV2Score;
+  const breakdownTotal = latest.score_breakdown?.total_score;
+  if (typeof breakdownTotal === "number") return breakdownTotal;
   const fallback =
     latest.overallScore ??
     (typeof latest.score === "number" ? latest.score : latest.score ?? null);

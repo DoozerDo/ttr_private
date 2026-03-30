@@ -10,6 +10,10 @@ export type AnalysisResult = {
   jobId?: string;
   verdict?: string;
   assessmentId?: string;
+  scoring_v2?: {
+    score?: number | null;
+    [key: string]: unknown;
+  } | null;
   fit_score?: number;
   overall_score?: number;
   overallScore?: number;
@@ -43,6 +47,7 @@ const LEGACY_STORAGE_KEY = "ttr:lastAnalysis";
 const DEFAULT_JOB_SOURCE: JobSourceInfo = { type: "unknown" };
 
 function resolveFitScore(analysis: AnalysisResult): number | null {
+  if (typeof analysis.scoring_v2?.score === "number") return analysis.scoring_v2.score;
   if (typeof analysis.score === "number") return analysis.score;
   if (typeof analysis.fit_score === "number") return analysis.fit_score;
   if (typeof analysis.overallScore === "number") return analysis.overallScore;
@@ -51,9 +56,10 @@ function resolveFitScore(analysis: AnalysisResult): number | null {
 }
 
 function normalizeRecord(raw: StoredAnalysisRecord): StoredAnalysisRecord {
+  const resolvedFitScore = resolveFitScore(raw.analysis);
   return {
     ...raw,
-    fitScore: raw.fitScore ?? resolveFitScore(raw.analysis),
+    fitScore: resolvedFitScore ?? raw.fitScore ?? null,
     jobSource: raw.jobSource ?? DEFAULT_JOB_SOURCE,
   };
 }
@@ -138,13 +144,17 @@ export function normalizeAnalysisResult(raw: unknown): AnalysisResult {
   const obj = raw as Record<string, unknown>;
 
   const score =
-    typeof obj.score === "number"
-      ? obj.score
-      : typeof obj.fit_score === "number"
-        ? obj.fit_score
-        : typeof obj.overall_score === "number"
-          ? obj.overall_score
-          : null;
+    typeof obj.scoring_v2 === "object" &&
+    obj.scoring_v2 !== null &&
+    typeof (obj.scoring_v2 as { score?: unknown }).score === "number"
+      ? (obj.scoring_v2 as { score: number }).score
+      : typeof obj.score === "number"
+        ? obj.score
+        : typeof obj.fit_score === "number"
+          ? obj.fit_score
+          : typeof obj.overall_score === "number"
+            ? obj.overall_score
+            : null;
 
   const summary = typeof obj.summary === "string" ? obj.summary : undefined;
 
