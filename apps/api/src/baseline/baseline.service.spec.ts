@@ -6,7 +6,7 @@ import {
   BaselineSection,
   BaselineSectionType,
 } from './baseline-section.entity';
-import { Baseline } from './baseline.entity';
+import { Baseline, BaselineStatus } from './baseline.entity';
 import { BaselineBlockPolicy } from './baseline-block-policy.entity';
 import { BaselineParsed } from './baseline-parsed.entity';
 import { BaselineVersion } from './baseline-version.entity';
@@ -403,6 +403,148 @@ const ingestionResult = {
       latestAssessmentCreatedAt: null,
       latestFitScore: null,
       hasCompletedAssessment: false,
+    });
+  });
+});
+
+describe('BaselineService - library capacity', () => {
+  let service: BaselineService;
+  let baselineRepository: any;
+  let transactionManager: any;
+
+  const parseResult = {
+    sections: [
+      {
+        sectionType: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        content: 'Led support operations.',
+        includePolicy: BaselineIncludePolicy.OPTIONAL,
+        order: 0,
+      },
+    ],
+    ingestion: {
+      rawText: 'raw',
+      parsedSections: [],
+      canonical: null,
+      sourceFormat: 'docx' as const,
+    },
+  };
+
+  beforeEach(async () => {
+    transactionManager = {
+      count: jest.fn().mockResolvedValue(0),
+      create: jest.fn((_: any, payload: any) => payload),
+      save: jest.fn(async (payload: any) => {
+        if (Array.isArray(payload)) return payload;
+        return { ...payload, id: payload.id ?? 'generated-id', version: payload.version ?? 1 };
+      }),
+      find: jest.fn().mockResolvedValue([]),
+      delete: jest.fn(),
+    };
+
+    baselineRepository = {
+      findOne: jest.fn().mockResolvedValue(null),
+      manager: {
+        transaction: jest.fn(async (cb: any) => cb(transactionManager)),
+      },
+    };
+
+    const module = await Test.createTestingModule({
+      providers: [
+        BaselineService,
+        { provide: getRepositoryToken(Baseline), useValue: baselineRepository },
+        {
+          provide: getRepositoryToken(BaselineSection),
+          useValue: { find: jest.fn(), save: jest.fn(), update: jest.fn() },
+        },
+        {
+          provide: getRepositoryToken(BaselineVersion),
+          useValue: { findOne: jest.fn(), find: jest.fn(), save: jest.fn() },
+        },
+        {
+          provide: getRepositoryToken(BaselineBlockPolicy),
+          useValue: { find: jest.fn(), save: jest.fn() },
+        },
+        {
+          provide: getRepositoryToken(BaselineParsed),
+          useValue: { findOne: jest.fn() },
+        },
+        {
+          provide: getRepositoryToken(FitAssessment),
+          useValue: { createQueryBuilder: jest.fn() },
+        },
+        {
+          provide: BaselineIngestionService,
+          useValue: {},
+        },
+        {
+          provide: EmbeddingService,
+          useValue: {
+            embedText: jest.fn().mockResolvedValue([]),
+            embedTexts: jest.fn().mockResolvedValue([]),
+          },
+        },
+      ],
+    }).compile();
+
+    service = module.get(BaselineService);
+    jest.spyOn(service as any, 'computeFileHash').mockResolvedValue('hash-1');
+    jest.spyOn(service as any, 'attachEmbeddingsToSections').mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'persistParsedBaseline').mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'buildVersionHash').mockReturnValue('version-hash');
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('allows the first upload when the library is empty', async () => {
+    const result = await service.createBaseline(
+      'user-1',
+      { originalname: 'resume.pdf', mimetype: 'application/pdf', path: '/tmp/resume.pdf' },
+      parseResult as any,
+    );
+
+    expect(result.baselineId).toBeDefined();
+    expect(transactionManager.count).toHaveBeenCalledWith(Baseline, {
+      where: { userId: 'user-1', status: BaselineStatus.ACTIVE },
+    });
+  });
+
+  it('blocks a fourth upload with a structured cap error', async () => {
+    transactionManager.count.mockResolvedValue(3);
+
+    await expect(
+      service.createBaseline(
+        'user-1',
+        { originalname: 'resume.pdf', mimetype: 'application/pdf', path: '/tmp/resume.pdf' },
+        parseResult as any,
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: 'BASELINE_LIBRARY_CAP_REACHED',
+          details: {
+            activeCount: 3,
+            maxCount: 3,
+          },
+        },
+      },
+    });
+  });
+
+  it('allows uploads when archived baselines exist but active count stays under the cap', async () => {
+    transactionManager.count.mockResolvedValue(2);
+
+    const result = await service.createBaseline(
+      'user-1',
+      { originalname: 'resume.pdf', mimetype: 'application/pdf', path: '/tmp/resume.pdf' },
+      parseResult as any,
+    );
+
+    expect(result.baselineId).toBeDefined();
+    expect(transactionManager.count).toHaveBeenCalledWith(Baseline, {
+      where: { userId: 'user-1', status: BaselineStatus.ACTIVE },
     });
   });
 });

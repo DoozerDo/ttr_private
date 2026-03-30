@@ -31,6 +31,7 @@ export interface BaselineVersionDto {
 }
 
 export type BaselineStatus = "ACTIVE" | "ARCHIVED";
+export const BASELINE_LIBRARY_CAP = 3;
 
 export interface BaselineAssessmentSummaryDto {
   latestAssessmentId: string | null;

@@ -15,6 +15,8 @@ import {
   BaselineDto,
   archiveBaseline,
   listBaselines,
+  restoreBaseline,
+  BASELINE_LIBRARY_CAP,
 } from "@/lib/baselines";
 import { formatDateTime } from "@/lib/format-date";
 import { getBaselineDetailsHref } from "@/src/navigation/routes";
@@ -63,6 +65,21 @@ const getDuplicateUploadMessage = (data: unknown): string | null => {
   return "This file has already been uploaded.";
 };
 
+const getLibraryCapMessage = (data: unknown): string | null => {
+  if (!data || typeof data !== "object") return null;
+  const maybeCode = (data as { code?: unknown }).code;
+  const errorBody = (data as { error?: Record<string, unknown> }).error;
+  const capCode =
+    (typeof maybeCode === "string" ? maybeCode : undefined) ??
+    (typeof errorBody?.code === "string" ? errorBody.code : undefined);
+
+  if (capCode !== "BASELINE_LIBRARY_CAP_REACHED") return null;
+  return (
+    (typeof errorBody?.message === "string" ? errorBody.message : null) ??
+    `Maximum of ${BASELINE_LIBRARY_CAP} resumes reached.`
+  );
+};
+
 export function BaselineDashboard({
   initialBaselines,
   initialFetchError,
@@ -78,6 +95,7 @@ export function BaselineDashboard({
   const [duplicateErrorDetail, setDuplicateErrorDetail] = useState<string | null>(
     null,
   );
+  const [capacityErrorDetail, setCapacityErrorDetail] = useState<string | null>(null);
   const [archivingBaselineId, setArchivingBaselineId] = useState<string | null>(
     null,
   );
@@ -113,13 +131,58 @@ export function BaselineDashboard({
 
     try {
       await archiveBaseline(baselineId);
-      setBaselines((previous) => previous.filter((entry) => entry.id !== baselineId));
+      setBaselines((previous) =>
+        previous.map((entry) =>
+          entry.id === baselineId
+            ? { ...entry, status: "ARCHIVED" as const, archivedAt: new Date().toISOString() }
+            : entry,
+        ),
+      );
+      if (selectedBaselineId === baselineId) {
+        const nextActive = baselines.find(
+          (entry) => entry.id !== baselineId && entry.status !== "ARCHIVED",
+        );
+        if (nextActive) {
+          setBaselineSelection(nextActive.id);
+        } else {
+          const params = new URLSearchParams(searchParams?.toString() ?? "");
+          params.delete("baselineId");
+          const query = params.toString();
+          const base = pathname ?? "/baseline";
+          router.replace(query ? `${base}?${query}` : base);
+          setBaselineName(null);
+        }
+      }
     } catch (archiveError: unknown) {
       console.error("Unable to archive baseline", archiveError);
       const message =
         archiveError instanceof Error
           ? archiveError.message
           : "Unable to archive baseline right now.";
+      setError(message);
+    } finally {
+      setArchivingBaselineId(null);
+    }
+  };
+
+  const handleRestoreBaseline = async (baselineId: string) => {
+    if (archivingBaselineId === baselineId) return;
+    setError(null);
+    setArchivingBaselineId(baselineId);
+    try {
+      await restoreBaseline(baselineId);
+      setBaselines((previous) =>
+        previous.map((entry) =>
+          entry.id === baselineId
+            ? { ...entry, status: "ACTIVE" as const, archivedAt: null }
+            : entry,
+        ),
+      );
+      setBaselineSelection(baselineId);
+    } catch (restoreError: unknown) {
+      console.error("Unable to restore baseline", restoreError);
+      const message =
+        restoreError instanceof Error ? restoreError.message : "Unable to restore baseline right now.";
       setError(message);
     } finally {
       setArchivingBaselineId(null);
@@ -134,6 +197,16 @@ export function BaselineDashboard({
       ),
     [baselines],
   );
+  const activeBaselines = useMemo(
+    () => sortedBaselines.filter((baseline) => baseline.status !== "ARCHIVED"),
+    [sortedBaselines],
+  );
+  const archivedBaselines = useMemo(
+    () => sortedBaselines.filter((baseline) => baseline.status === "ARCHIVED"),
+    [sortedBaselines],
+  );
+  const activeBaselineCount = activeBaselines.length;
+  const uploadLimitReached = activeBaselineCount >= BASELINE_LIBRARY_CAP;
 
   const selectedBaselineName = useMemo(
     () =>
@@ -143,8 +216,23 @@ export function BaselineDashboard({
   );
 
   useEffect(() => {
+    const selectedStillActive =
+      selectedBaselineId &&
+      activeBaselines.some((baseline) => baseline.id === selectedBaselineId);
+    if (selectedBaselineId && !selectedStillActive) {
+      setBaselineName(null);
+      if (searchParams?.get("baselineId") === selectedBaselineId) {
+        const params = new URLSearchParams(searchParams?.toString() ?? "");
+        params.delete("baselineId");
+        const query = params.toString();
+        const base = pathname ?? "/baseline";
+        router.replace(query ? `${base}?${query}` : base);
+      }
+      return;
+    }
+
     setBaselineName(selectedBaselineName);
-  }, [selectedBaselineName]);
+  }, [activeBaselines, pathname, router, searchParams, selectedBaselineId, selectedBaselineName]);
 
   const fetchBaselineDetails = useCallback(async (baselineId: string) => {
     setLoadingSelectedBaselineDetails(true);
@@ -166,7 +254,11 @@ export function BaselineDashboard({
     }
   }, []);
 
-  const activeBaselineId = selectedBaselineId ?? latestUploadedBaselineId ?? null;
+  const activeBaselineId =
+    selectedBaselineId &&
+    activeBaselines.some((baseline) => baseline.id === selectedBaselineId)
+      ? selectedBaselineId
+      : activeBaselines[0]?.id ?? latestUploadedBaselineId ?? null;
 
   useEffect(() => {
     if (!activeBaselineId) {
@@ -271,6 +363,7 @@ export function BaselineDashboard({
     if (isUploading) return;
     setError(null);
     setDuplicateErrorDetail(null);
+    setCapacityErrorDetail(null);
     setIsUploading(true);
     setInsufficientTextError(null);
 
@@ -307,6 +400,13 @@ export function BaselineDashboard({
         if (duplicateDetail) {
           setError(null);
           setDuplicateErrorDetail(duplicateDetail);
+          return;
+        }
+
+        const capacityDetail = getLibraryCapMessage(payload);
+        if (capacityDetail) {
+          setError(null);
+          setCapacityErrorDetail(capacityDetail);
           return;
         }
 
@@ -370,8 +470,8 @@ export function BaselineDashboard({
       title=""
       description="Upload the resume you trust and keep it ready as your scoring anchor."
       primaryAction={
-      <FormButton onClick={triggerUploadClick} disabled={isUploading}>
-        {isUploading ? "Uploading..." : "Add resume"}
+      <FormButton onClick={triggerUploadClick} disabled={isUploading || uploadLimitReached}>
+        {isUploading ? "Uploading..." : uploadLimitReached ? "Maximum reached" : "Add resume"}
       </FormButton>
       }
     >
@@ -396,7 +496,7 @@ export function BaselineDashboard({
           overflow: "hidden",
           clip: "rect(0 0 0 0)",
         }}
-        disabled={isUploading}
+        disabled={isUploading || uploadLimitReached}
       />
 
       {file ? (
@@ -425,6 +525,9 @@ export function BaselineDashboard({
       {duplicateErrorDetail ? (
         <p className="text-sm text-slate-400">{duplicateErrorDetail}</p>
       ) : null}
+      {capacityErrorDetail ? (
+        <p className="text-sm text-slate-400">{capacityErrorDetail}</p>
+      ) : null}
       {insufficientTextError ? (
         <InsufficientExtractedText error={insufficientTextError} />
       ) : error ? (
@@ -449,8 +552,11 @@ export function BaselineDashboard({
         )
       ) : (
         <div className="space-y-3">
-          {sortedBaselines.map((baseline) => {
-            const isSelected = baseline.id === selectedBaselineId;
+          <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
+            {activeBaselineCount} of {BASELINE_LIBRARY_CAP} active resumes
+          </p>
+          {activeBaselines.map((baseline) => {
+            const isSelected = baseline.id === activeBaselineId;
             const cardClasses = [
               "rounded-2xl border border-white/10 bg-slate-950/40 p-4",
               isSelected ? "ring-2 ring-cyan-300/40" : "",
@@ -500,6 +606,57 @@ export function BaselineDashboard({
               </div>
             );
           })}
+          {uploadLimitReached ? (
+            <p className="text-sm text-slate-400">Maximum of {BASELINE_LIBRARY_CAP} active resumes reached.</p>
+          ) : (
+            <FormButton onClick={triggerUploadClick} disabled={isUploading}>
+              Add resume
+            </FormButton>
+          )}
+          {archivedBaselines.length ? (
+            <div className="space-y-3 pt-3">
+              <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Archived resumes</p>
+              {archivedBaselines.map((baseline) => (
+                <div
+                  key={baseline.id}
+                  className="rounded-2xl border border-white/10 bg-slate-950/25 p-4 opacity-90"
+                >
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <p className="truncate text-sm font-semibold text-slate-100">
+                        {baseline.originalFilename}
+                      </p>
+                      <span className="inline-flex items-center rounded-full border border-white/20 bg-white/5 px-2 py-0.5 text-[10px] uppercase tracking-[0.35em] text-slate-400">
+                        Archived
+                      </span>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <SecondaryActionLink href={getBaselineDetailsHref(baseline.id)}>
+                        View details
+                      </SecondaryActionLink>
+                      <FormButton
+                        variant="secondary"
+                        onClick={() => setBaselineSelection(baseline.id)}
+                        className="shrink-0"
+                      >
+                        Select
+                      </FormButton>
+                      <FormButton
+                        variant="secondary"
+                        onClick={() => void handleRestoreBaseline(baseline.id)}
+                        className="shrink-0"
+                      >
+                        Restore
+                      </FormButton>
+                    </div>
+                  </div>
+                  <p className="mt-3 text-xs text-slate-400">
+                    Updated {formatDateTime(baseline.updatedAt)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
       )}
     </SetupModuleCard>

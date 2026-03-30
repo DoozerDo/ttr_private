@@ -95,6 +95,9 @@ export type BaselineCreationResult = {
   normalization?: CanonicalNormalizationResult;
 };
 
+export const BASELINE_LIBRARY_CAP = 3;
+export const BASELINE_LIBRARY_CAP_ERROR_CODE = 'BASELINE_LIBRARY_CAP_REACHED';
+
 export type BaselineAssessmentSummary = {
   latestAssessmentId: string | null;
   latestAssessmentCreatedAt: Date | null;
@@ -188,9 +191,22 @@ export class BaselineService {
   ) {}
 
   private async enforceBaselineLimit(manager: EntityManager, userId: string) {
-    // Upload limits are intentionally disabled.
-    void manager;
-    void userId;
+    const baselineCount = await manager.count(Baseline, {
+      where: { userId, status: BaselineStatus.ACTIVE },
+    });
+
+    if (baselineCount >= BASELINE_LIBRARY_CAP) {
+      throw new ConflictException({
+        error: {
+          code: BASELINE_LIBRARY_CAP_ERROR_CODE,
+          message: `You can store up to ${BASELINE_LIBRARY_CAP} active resumes in your library.`,
+          details: {
+            activeCount: baselineCount,
+            maxCount: BASELINE_LIBRARY_CAP,
+          },
+        },
+      });
+    }
   }
 
   private sanitizeSectionContent(content?: string | null) {

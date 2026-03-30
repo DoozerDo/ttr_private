@@ -125,7 +125,7 @@ describe("BaselineStudioHome", () => {
   it("shows the upload setup CTA when no baseline exists", () => {
     render(<BaselineStudioHome baselines={[]} />);
 
-    expect(screen.getByText("Build your baseline library")).toBeInTheDocument();
+    expect(screen.getByText("Build your verified baseline")).toBeInTheDocument();
     expect(
       screen.getByText(
         "Upload the resumes you want to work from. Each file is converted into a baseline that can be used for scoring and document generation. Choose one active baseline for downstream analysis.",
@@ -137,6 +137,7 @@ describe("BaselineStudioHome", () => {
     expect(screen.getByText("Use that baseline to score roles and generate documents")).toBeInTheDocument();
     expect(screen.getByText("Why not use my resume as-is?")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Upload resume" })).toBeInTheDocument();
+    expect(screen.getByText("0 of 3 resumes")).toBeInTheDocument();
     expect(screen.queryByText("Your baseline is active")).toBeNull();
     expect(screen.queryByText("Analyze another role")).toBeNull();
   });
@@ -144,7 +145,7 @@ describe("BaselineStudioHome", () => {
   it("shows the run-analysis CTA when a baseline exists but no analysis is complete", () => {
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
 
-    expect(screen.getByText("Build your baseline library")).toBeInTheDocument();
+    expect(screen.getByText("Build your verified baseline")).toBeInTheDocument();
     expect(
       screen.getByText(
         "Upload the resumes you want to work from. Each file is converted into a baseline that can be used for scoring and document generation. Choose one active baseline for downstream analysis.",
@@ -162,7 +163,7 @@ describe("BaselineStudioHome", () => {
   it("shows the launch point for a qualified analyzed baseline", () => {
     render(<BaselineStudioHome baselines={[createAnalyzedBaseline("base-1", "resume-1.pdf", 82)]} />);
 
-    expect(screen.getByText("Build your baseline library")).toBeInTheDocument();
+    expect(screen.getByText("Build your verified baseline")).toBeInTheDocument();
     expect(screen.getByText("Baseline library")).toBeInTheDocument();
     expect(screen.getByText("Ready to target")).toBeInTheDocument();
     expect(
@@ -181,12 +182,31 @@ describe("BaselineStudioHome", () => {
     );
     expect(screen.getByRole("link", { name: "Open Resume Studio" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
+    expect(screen.getByText("1 of 3 resumes")).toBeInTheDocument();
+  });
+
+  it("renders multiple resumes and blocks upload at the library cap", () => {
+    render(
+      <BaselineStudioHome
+        baselines={[
+          createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf"),
+          createBaseline("base-2", "2026-01-02T00:00:00.000Z", "resume-2.pdf"),
+          createBaseline("base-3", "2026-01-03T00:00:00.000Z", "resume-3.pdf"),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("3 of 3 resumes")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Update baseline" })).toBeDisabled();
+    expect(screen.getByText("resume-1.pdf")).toBeInTheDocument();
+    expect(screen.getByText("resume-2.pdf")).toBeInTheDocument();
+    expect(screen.getByText("resume-3.pdf")).toBeInTheDocument();
   });
 
   it("shows the fit-review launch point for a low-fit analyzed baseline", () => {
     render(<BaselineStudioHome baselines={[createAnalyzedBaseline("base-1", "resume-1.pdf", 55)]} />);
 
-    expect(screen.getByText("Build your baseline library")).toBeInTheDocument();
+    expect(screen.getByText("Build your verified baseline")).toBeInTheDocument();
     expect(screen.getByText("Baseline library")).toBeInTheDocument();
     expect(screen.getByText("Needs fit improvement")).toBeInTheDocument();
     expect(
@@ -210,7 +230,7 @@ describe("BaselineStudioHome", () => {
   it("explains the upload flow as a structured source of truth for a new user", () => {
     render(<BaselineStudioHome baselines={[]} />);
 
-    expect(screen.getByText("Build your baseline library")).toBeInTheDocument();
+    expect(screen.getByText("Build your verified baseline")).toBeInTheDocument();
     expect(
       screen.getByText(
         /Upload the resumes you want to work from\. Each file is converted into a baseline that can be used for scoring and document generation\./i,
@@ -865,10 +885,10 @@ describe("BaselineStudioHome", () => {
   it("shows a single primary upload action for empty baseline state", () => {
     render(<BaselineStudioHome baselines={[]} />);
 
-    expect(screen.getAllByRole("button", { name: "Upload your resume" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Upload resume" })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Choose resume" })).not.toBeInTheDocument();
-    expect(screen.getByText("Upload support")).toBeInTheDocument();
-    expect(screen.getByText("No baseline uploaded yet. Upload one resume file to start your first analysis.")).toBeInTheDocument();
+    expect(screen.getByText("Accepted file types: PDF and DOCX")).toBeInTheDocument();
+    expect(screen.getByText("0 of 3 resumes")).toBeInTheDocument();
   });
 
   it("uploads successfully from wrapped API payload and does not persist score history prematurely", async () => {

@@ -1025,6 +1025,9 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   : "Upload unavailable"}
               </FormButton>
               <p className="text-sm text-slate-400">Accepted file types: PDF and DOCX</p>
+            <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
+              {activeBaselines.length} of {BETA_BASELINE_UPLOAD_LIMIT} active resumes
+            </p>
             </div>
             {hasUsableBaseline ? (
               <div className="flex flex-wrap gap-2">
@@ -1249,6 +1252,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
               onChange={onFileChange}
               disabled={isUploading || uploadLimitReached}
             />
+            {uploadLimitReached ? (
+              <p className="mt-3 text-sm text-slate-300">
+                Maximum of {BETA_BASELINE_UPLOAD_LIMIT} active resumes reached.
+              </p>
+            ) : null}
           </div>
         ) : null}
 
