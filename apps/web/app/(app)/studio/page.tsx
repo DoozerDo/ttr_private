@@ -1517,7 +1517,7 @@ export default function StudioPage() {
     if (studioGenerationState === "BLOCKED") {
       return (
         activeGenerationReadiness.reasons[0]?.message ??
-        "This role scored strongly, but your current baseline does not support compliant generation yet."
+        "This role scored strongly, but your selected resume does not support compliant generation yet."
       );
     }
     if (!effectiveBaselineVersionId) {
@@ -1950,18 +1950,20 @@ export default function StudioPage() {
         if (canceled) return;
         setBaselines(fetched);
         setBaselinesError(null);
-        setSelectedBaselineId((current) => {
-          if (current && fetched.some((baseline) => baseline.id === current)) {
-            return current;
-          }
-          if (
-            requestedBaselineId &&
-            fetched.some((baseline) => baseline.id === requestedBaselineId)
-          ) {
-            return requestedBaselineId;
-          }
-          return fetched[0]?.id ?? "";
-        });
+        const activeRequestedBaseline =
+          requestedBaselineId &&
+          fetched.find((baseline) => baseline.id === requestedBaselineId && baseline.status !== "ARCHIVED");
+        if (requestedBaselineId && !activeRequestedBaseline) {
+          setSelectedBaselineId("");
+          setBaselinesError("This resume is archived or unavailable. Select an active resume to continue.");
+          return;
+        }
+        if (activeRequestedBaseline) {
+          setSelectedBaselineId(activeRequestedBaseline.id);
+          return;
+        }
+        setSelectedBaselineId("");
+        setBaselinesError("Select an active resume to continue.");
       } catch (error) {
         if (canceled) return;
         const message =

@@ -2554,6 +2554,9 @@ export default function ResultsPage() {
       if (!data.assessmentId) {
         throw new Error("Latest assessment is missing an assessment ID.");
       }
+      if (!data.baselineId?.trim()) {
+        throw new Error("This result is no longer linked to an active resume.");
+      }
 
       const params = new URLSearchParams(searchParams?.toString() ?? "");
       params.delete("jobId");
@@ -2661,42 +2664,11 @@ export default function ResultsPage() {
     const queryJobId = searchParams?.get("jobId")?.trim() ?? "";
     const queryBaselineId = searchParams?.get("baselineId")?.trim() ?? "";
     if (queryJobId && queryBaselineId) return;
+    if (queryBaselineId || queryJobId) return;
 
     lastAssessmentHydrationAttempted.current = true;
-
-    const hydrateLastAssessment = async () => {
-      let serverId: string | null = null;
-      let serverLoaded = false;
-      try {
-        const res = await fetch("/api/users/me/last-assessment", { cache: "no-store" });
-        if (res.ok) {
-          const payload = await res.json();
-          serverId = payload?.lastAssessmentId ?? null;
-          serverLoaded = true;
-          writeLastAssessmentToStorage(serverId);
-        }
-      } catch {
-        // best effort; we rely on local storage fallback next
-      }
-
-      let candidateId = serverId;
-      if (candidateId === null && !serverLoaded) {
-        candidateId = readLastAssessmentFromStorage();
-      }
-
-      if (!candidateId) return;
-
-      const params = new URLSearchParams(window.location.search);
-      params.delete("analysisId");
-      params.delete("fitScoreId");
-      params.set("assessmentId", candidateId);
-      const query = params.toString();
-      const destination = query ? `/results?${query}` : "/results";
-      await router.replace(destination);
-    };
-
-    void hydrateLastAssessment();
-  }, [runIdentifier, router, searchParams]);
+    setError("Select an active resume to load Results.");
+  }, [runIdentifier, searchParams]);
 
   const saveOpportunityFromResults = useCallback(async () => {
     if (!latest || typeof activeScore !== "number") return;

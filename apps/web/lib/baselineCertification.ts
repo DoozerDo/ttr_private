@@ -172,7 +172,7 @@ export function buildBaselineCertification(
     supportingPoints:
       supportingPoints.length > 0
         ? supportingPoints.slice(0, 3)
-        : ["Signal clarity is still forming across the current baseline."],
+        : ["Signal clarity is still forming across the selected resume."],
     checklist,
     isCertified: false,
   };

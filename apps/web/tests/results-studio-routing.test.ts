@@ -1,7 +1,7 @@
 import { buildStudioHrefFromResultsContext } from "@/app/(app)/results/page";
 
 describe("Results to Studio routing", () => {
-  it("routes to Studio with role analysis and baseline context", () => {
+  it("routes to Studio with role analysis and explicit baseline context", () => {
     expect(
       buildStudioHrefFromResultsContext({
         jobId: "job-1",
@@ -14,7 +14,7 @@ describe("Results to Studio routing", () => {
     );
   });
 
-  it("falls back gracefully when only role analysis context is available", () => {
+  it("preserves analysis-only context when no baseline is present", () => {
     expect(
       buildStudioHrefFromResultsContext({
         analysisId: "analysis-42",

@@ -162,12 +162,29 @@ export function buildResultsUrl({
   baselineId,
 }: ResultsUrlArgs): string | null {
   const normalizedAssessmentId = assessmentId?.trim();
+  const normalizedJobId = jobId?.trim();
+  const normalizedBaselineId = baselineId?.trim();
+  if (normalizedAssessmentId && normalizedBaselineId && normalizedJobId) {
+    return `/results?assessmentId=${encodeURIComponent(normalizedAssessmentId)}&jobId=${encodeURIComponent(
+      normalizedJobId,
+    )}&baselineId=${encodeURIComponent(normalizedBaselineId)}`;
+  }
+
+  if (normalizedAssessmentId && normalizedBaselineId) {
+    return `/results?assessmentId=${encodeURIComponent(normalizedAssessmentId)}&baselineId=${encodeURIComponent(
+      normalizedBaselineId,
+    )}`;
+  }
+
+  if (normalizedAssessmentId && normalizedJobId) {
+    return `/results?assessmentId=${encodeURIComponent(normalizedAssessmentId)}&jobId=${encodeURIComponent(
+      normalizedJobId,
+    )}`;
+  }
+
   if (normalizedAssessmentId) {
     return `/results?assessmentId=${encodeURIComponent(normalizedAssessmentId)}`;
   }
-
-  const normalizedJobId = jobId?.trim();
-  const normalizedBaselineId = baselineId?.trim();
 
   if (normalizedJobId && normalizedBaselineId) {
     return `/results?jobId=${encodeURIComponent(normalizedJobId)}&baselineId=${encodeURIComponent(
@@ -654,7 +671,7 @@ export function WorkspaceRunner({
     isHighFit && !productReadiness.generation_readiness.canGenerate && isGenerationBlocked;
   const scoreBandSummary =
     isBlockedHighFit
-      ? "This role scored well, but your current baseline does not support compliant generation yet."
+      ? "This role scored well, but your selected resume does not support compliant generation yet."
       : isLimitedHighFit
       ? "This role scored well, but generation is constrained by current verification limits."
       : scoreBand?.summary ?? "";

@@ -104,7 +104,7 @@ describe("BaselineStudioHome", () => {
     setFetchImplementation(fetchMock);
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Run Career Compatibility Analysis" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Run Analysis" })[0]);
 
     await waitFor(() => {
       expect(screen.getByText("Baseline readiness")).toBeInTheDocument();
@@ -126,20 +126,15 @@ describe("BaselineStudioHome", () => {
     render(<BaselineStudioHome baselines={[]} />);
 
     expect(screen.getByText("Build your verified baseline")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Upload the resumes you want to work from. Each file is converted into a baseline that can be used for scoring and document generation. Choose one active baseline for downstream analysis.",
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Upload the resume you trust and keep it ready as your scoring anchor.")).toBeInTheDocument();
     expect(screen.getByText("Why this matters")).toBeInTheDocument();
     expect(screen.getByText("Upload your resume")).toBeInTheDocument();
     expect(screen.getByText("We verify and structure your experience")).toBeInTheDocument();
     expect(screen.getByText("Use that baseline to score roles and generate documents")).toBeInTheDocument();
     expect(screen.getByText("Why not use my resume as-is?")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Upload resume" })).toBeInTheDocument();
-    expect(screen.getByText("0 of 3 resumes")).toBeInTheDocument();
-    expect(screen.queryByText("Your baseline is active")).toBeNull();
-    expect(screen.queryByText("Analyze another role")).toBeNull();
+    expect(screen.getByRole("button", { name: "Add resume" })).toBeInTheDocument();
+    expect(screen.getByText("0 of 3 active resumes")).toBeInTheDocument();
+    expect(screen.queryByText("Selected:")).toBeNull();
   });
 
   it("shows the run-analysis CTA when a baseline exists but no analysis is complete", () => {
@@ -147,11 +142,9 @@ describe("BaselineStudioHome", () => {
 
     expect(screen.getByText("Build your verified baseline")).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "Upload the resumes you want to work from. Each file is converted into a baseline that can be used for scoring and document generation. Choose one active baseline for downstream analysis.",
-      ),
+      screen.getByText("Upload the resume you trust and keep it ready as your scoring anchor."),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Upload resume" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add resume" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run Analysis" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Analyze a job description" })).toHaveAttribute(
       "href",
@@ -167,12 +160,10 @@ describe("BaselineStudioHome", () => {
     expect(screen.getByText("Baseline library")).toBeInTheDocument();
     expect(screen.getByText("Ready to target")).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "Your active baseline is the one used when you analyze a role or generate application materials.",
-      ),
+      screen.getByText("Select a baseline to use when you analyze a role or generate application materials."),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Upload resume" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Set Active" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add resume" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View Baseline Details" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run Analysis" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View Latest Results" })).toBeInTheDocument();
@@ -182,7 +173,7 @@ describe("BaselineStudioHome", () => {
     );
     expect(screen.getByRole("link", { name: "Open Resume Studio" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
-    expect(screen.getByText("1 of 3 resumes")).toBeInTheDocument();
+    expect(screen.getByText("1 of 3 active resumes")).toBeInTheDocument();
   });
 
   it("renders multiple resumes and blocks upload at the library cap", () => {
@@ -196,8 +187,8 @@ describe("BaselineStudioHome", () => {
       />,
     );
 
-    expect(screen.getByText("3 of 3 resumes")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Update baseline" })).toBeDisabled();
+    expect(screen.getByText("3 of 3 active resumes")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Maximum reached" })).toBeDisabled();
     expect(screen.getByText("resume-1.pdf")).toBeInTheDocument();
     expect(screen.getByText("resume-2.pdf")).toBeInTheDocument();
     expect(screen.getByText("resume-3.pdf")).toBeInTheDocument();
@@ -210,12 +201,10 @@ describe("BaselineStudioHome", () => {
     expect(screen.getByText("Baseline library")).toBeInTheDocument();
     expect(screen.getByText("Needs fit improvement")).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "Your active baseline is the one used when you analyze a role or generate application materials.",
-      ),
+      screen.getByText("Select a baseline to use when you analyze a role or generate application materials."),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Upload resume" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Set Active" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add resume" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View Baseline Details" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run Analysis" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View Latest Results" })).toBeInTheDocument();
@@ -231,18 +220,14 @@ describe("BaselineStudioHome", () => {
     render(<BaselineStudioHome baselines={[]} />);
 
     expect(screen.getByText("Build your verified baseline")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        /Upload the resumes you want to work from\. Each file is converted into a baseline that can be used for scoring and document generation\./i,
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Upload the resume you trust and keep it ready as your scoring anchor.")).toBeInTheDocument();
     expect(
       screen.getByText(
         /A baseline is the verified version of your resume that this app uses for scoring and document generation\./i,
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("Your baseline is not your resume.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Upload resume" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add resume" })).toBeInTheDocument();
   });
 
   it("renders developing-only diagnosis area and no signal effect panel", async () => {
@@ -258,7 +243,7 @@ describe("BaselineStudioHome", () => {
     });
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Run Career Compatibility Analysis" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Run Analysis" })[0]);
 
     await waitFor(() => {
       expect(screen.getByText("Professional Signals Diagnosis")).toBeInTheDocument();
@@ -313,7 +298,7 @@ describe("BaselineStudioHome", () => {
     setFetchImplementation(fetchMock);
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Run Career Compatibility Analysis" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Run Analysis" })[0]);
 
     await waitFor(() => {
       expect(screen.getByText("Baseline Strengthening")).toBeInTheDocument();
@@ -369,7 +354,7 @@ describe("BaselineStudioHome", () => {
     });
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Run Career Compatibility Analysis" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Run Analysis" })[0]);
 
     await waitFor(() => {
       expect(screen.getByText("Professional Signals Diagnosis")).toBeInTheDocument();
@@ -399,7 +384,7 @@ describe("BaselineStudioHome", () => {
     });
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Run Career Compatibility Analysis" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Run Analysis" })[0]);
 
     await waitFor(() => {
       expect(screen.getByText("Career Gravity is locked")).toBeInTheDocument();
@@ -424,7 +409,7 @@ describe("BaselineStudioHome", () => {
     });
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Run Career Compatibility Analysis" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Run Analysis" })[0]);
 
     await waitFor(() => {
       expect(screen.queryByText("Career Gravity is locked")).not.toBeInTheDocument();
@@ -455,7 +440,7 @@ describe("BaselineStudioHome", () => {
     });
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Run Career Compatibility Analysis" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run Analysis" }));
 
     await waitFor(() => {
       expect(screen.getByText("Professional Signals Diagnosis")).toBeInTheDocument();
@@ -491,7 +476,7 @@ describe("BaselineStudioHome", () => {
     expect(screen.queryByText(/Fit 82%/i)).not.toBeInTheDocument();
     expect(screen.getByText("Last role analysis: 82%")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "View baseline analysis" })).toBeInTheDocument();
-      expect(screen.queryByRole("link", { name: "Run Career Compatibility Analysis" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Run Analysis" })).not.toBeInTheDocument();
   });
 
   it("does not show secondary role-fit metadata when no role analysis score exists", async () => {
@@ -543,7 +528,7 @@ describe("BaselineStudioHome", () => {
     );
 
     expect(screen.getByText("Not analyzed")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Run Career Compatibility Analysis" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "Run Analysis" }).length).toBeGreaterThan(0);
     expect(screen.getByText("Last role analysis: 67%")).toBeInTheDocument();
     expect(screen.queryByText("Ready for targeting")).not.toBeInTheDocument();
   });
@@ -590,7 +575,7 @@ describe("BaselineStudioHome", () => {
     const baselineArticle = within(screen.getByText("resume-1.pdf").closest("article") as HTMLElement);
     expect(baselineArticle.getByText("Not analyzed")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Run Career Compatibility Analysis" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run Analysis" }));
 
     await waitFor(() => {
       expect(baselineArticle.getByText("Ready for targeting")).toBeInTheDocument();
@@ -723,14 +708,14 @@ describe("BaselineStudioHome", () => {
       />,
     );
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Run Career Compatibility Analysis" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Run Analysis" })[0]);
 
     await waitFor(() => {
       expect(screen.getByText("Ready for targeting")).toBeInTheDocument();
     });
 
     expect(screen.getByText("Upload your baseline to get started.")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Run Career Compatibility Analysis" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Run Analysis" })).toHaveLength(1);
   });
 
   it("persists submitted detail, renders it back, and confirms unchanged score when recompute is flat", async () => {
@@ -789,7 +774,7 @@ describe("BaselineStudioHome", () => {
       />,
     );
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Run Career Compatibility Analysis" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Run Analysis" })[0]);
     await waitFor(() => {
       expect(screen.getByText("Baseline Strengthening")).toBeInTheDocument();
     });
@@ -879,16 +864,16 @@ describe("BaselineStudioHome", () => {
     expect(screen.queryByText("UPLOAD YOUR RESUME")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Run Career Compatibility Analysis" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "Run Analysis" }).length).toBeGreaterThan(0);
   });
 
   it("shows a single primary upload action for empty baseline state", () => {
     render(<BaselineStudioHome baselines={[]} />);
 
-    expect(screen.getAllByRole("button", { name: "Upload resume" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Add resume" })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Choose resume" })).not.toBeInTheDocument();
     expect(screen.getByText("Accepted file types: PDF and DOCX")).toBeInTheDocument();
-    expect(screen.getByText("0 of 3 resumes")).toBeInTheDocument();
+    expect(screen.getByText("0 of 3 active resumes")).toBeInTheDocument();
   });
 
   it("uploads successfully from wrapped API payload and does not persist score history prematurely", async () => {

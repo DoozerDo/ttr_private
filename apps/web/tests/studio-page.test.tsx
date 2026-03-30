@@ -176,6 +176,73 @@ describe("Studio page UX", () => {
     });
   });
 
+  it("fails cleanly when no baselineId is provided", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "",
+      baselineVersionId: "base-version-1",
+    });
+    vi.mocked(listBaselines).mockResolvedValueOnce([
+      {
+        id: "base-1",
+        originalFilename: "Leadership Resume",
+        version: 1,
+      },
+    ]);
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [] }));
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("Select an active resume to continue.");
+    });
+  });
+
+  it("fails cleanly when the requested baseline is archived", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-archived",
+      jobId: "job-archived",
+      baselineId: "base-archived",
+      baselineVersionId: "base-version-archived",
+    });
+    vi.mocked(listBaselines).mockResolvedValueOnce([
+      {
+        id: "base-archived",
+        originalFilename: "Archived Resume",
+        version: 3,
+        status: "ARCHIVED",
+      } as never,
+    ]);
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [] }));
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("This resume is archived or unavailable.");
+    });
+  });
+
   it("redirects low-fit sessions back to Results with a lock flag", async () => {
     mockRouterReplace.mockClear();
     const fetchMock = vi.fn((input: RequestInfo) => {

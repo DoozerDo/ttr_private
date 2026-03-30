@@ -148,7 +148,7 @@ export function buildRequirementGapInsight(input: {
 
   const explanation = baselineEvidence
     ? `Your ${requirement.toLowerCase()} evidence is strong, but this role requires ${roleExpectation.toLowerCase()}.`
-    : `This role requires ${roleExpectation.toLowerCase()} and the current baseline evidence does not fully show it yet.`;
+    : `This role requires ${roleExpectation.toLowerCase()} and the selected resume evidence does not fully show it yet.`;
 
   return {
     requirement,

@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import ResultsPage from "@/app/(app)/results/page";
@@ -16,7 +16,18 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe("results auto analysis loading", () => {
-  it("creates analysis on missing latest and navigates to assessmentId", async () => {
+  it("fails cleanly when no baselineId is provided", async () => {
+    overrideSearchParams({ jobId: "job-1" });
+    setFetchImplementation(vi.fn(async () => jsonResponse({}, 200)) as unknown as typeof fetch);
+
+    render(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Select an active resume to continue.")).toBeInTheDocument();
+    });
+  });
+
+  it("creates analysis on missing latest and navigates with explicit assessmentId", async () => {
     overrideSearchParams({ jobId: "job-1", baselineId: "base-1" });
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -48,6 +59,26 @@ describe("results auto analysis loading", () => {
       expect(mockRouterReplace).toHaveBeenCalledWith(
         "/results?assessmentId=assessment-new-1",
       );
+    });
+  });
+
+  it("fails cleanly when hydrated analysis is missing a baselineId", async () => {
+    overrideSearchParams({ assessmentId: "assessment-bad" });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/analysis/fit-assessments/assessment-bad")) {
+        return jsonResponse({ assessmentId: "assessment-bad", jobId: "job-1" }, 200);
+      }
+      return jsonResponse({}, 200);
+    });
+
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    render(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Select an active resume to continue.")).toBeInTheDocument();
     });
   });
 

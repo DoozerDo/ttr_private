@@ -76,8 +76,32 @@ const getLibraryCapMessage = (data: unknown): string | null => {
   if (capCode !== "BASELINE_LIBRARY_CAP_REACHED") return null;
   return (
     (typeof errorBody?.message === "string" ? errorBody.message : null) ??
-    `Maximum of ${BASELINE_LIBRARY_CAP} resumes reached.`
+    `Maximum of ${BASELINE_LIBRARY_CAP} active resumes reached.`
   );
+};
+
+const sortBaselinesNewestFirst = (baselines: BaselineDto[]) =>
+  [...baselines].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+const getMostRecentActiveBaselineId = (baselines: BaselineDto[]) =>
+  sortBaselinesNewestFirst(baselines).find((baseline) => baseline.status !== "ARCHIVED")?.id ?? null;
+
+const resolveNextActiveBaselineId = (
+  baselines: BaselineDto[],
+  previousSelectedId: string | null | undefined,
+) => {
+  const activeBaselines = sortBaselinesNewestFirst(baselines).filter(
+    (baseline) => baseline.status !== "ARCHIVED",
+  );
+
+  if (!activeBaselines.length) return null;
+
+  if (previousSelectedId) {
+    const stillActive = activeBaselines.find((baseline) => baseline.id === previousSelectedId);
+    if (stillActive) return stillActive.id;
+  }
+
+  return activeBaselines[0]?.id ?? null;
 };
 
 export function BaselineDashboard({
@@ -120,7 +144,7 @@ export function BaselineDashboard({
   };
 
   const refreshBaselines = async () => {
-    const latest = await listBaselines();
+    const latest = await listBaselines(true);
     setBaselines(latest);
   };
 
@@ -131,19 +155,12 @@ export function BaselineDashboard({
 
     try {
       await archiveBaseline(baselineId);
-      setBaselines((previous) =>
-        previous.map((entry) =>
-          entry.id === baselineId
-            ? { ...entry, status: "ARCHIVED" as const, archivedAt: new Date().toISOString() }
-            : entry,
-        ),
-      );
+      const latest = await listBaselines(true);
+      setBaselines(latest);
       if (selectedBaselineId === baselineId) {
-        const nextActive = baselines.find(
-          (entry) => entry.id !== baselineId && entry.status !== "ARCHIVED",
-        );
+        const nextActive = resolveNextActiveBaselineId(latest, baselineId);
         if (nextActive) {
-          setBaselineSelection(nextActive.id);
+          setBaselineSelection(nextActive);
         } else {
           const params = new URLSearchParams(searchParams?.toString() ?? "");
           params.delete("baselineId");
@@ -171,13 +188,8 @@ export function BaselineDashboard({
     setArchivingBaselineId(baselineId);
     try {
       await restoreBaseline(baselineId);
-      setBaselines((previous) =>
-        previous.map((entry) =>
-          entry.id === baselineId
-            ? { ...entry, status: "ACTIVE" as const, archivedAt: null }
-            : entry,
-        ),
-      );
+      const latest = await listBaselines(true);
+      setBaselines(latest);
       setBaselineSelection(baselineId);
     } catch (restoreError: unknown) {
       console.error("Unable to restore baseline", restoreError);
@@ -258,7 +270,7 @@ export function BaselineDashboard({
     selectedBaselineId &&
     activeBaselines.some((baseline) => baseline.id === selectedBaselineId)
       ? selectedBaselineId
-      : activeBaselines[0]?.id ?? latestUploadedBaselineId ?? null;
+      : getMostRecentActiveBaselineId(sortedBaselines) ?? latestUploadedBaselineId ?? null;
 
   useEffect(() => {
     if (!activeBaselineId) {
@@ -571,9 +583,9 @@ export function BaselineDashboard({
                     <p className="truncate text-sm font-semibold text-slate-100">
                       {baseline.originalFilename}
                     </p>
-                    {baseline.status === "ARCHIVED" ? (
-                      <span className="inline-flex items-center rounded-full border border-white/20 bg-white/5 px-2 py-0.5 text-[10px] uppercase tracking-[0.35em] text-slate-400">
-                        Archived
+                    {isSelected ? (
+                      <span className="inline-flex items-center rounded-full border border-cyan-300/30 bg-cyan-400/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.35em] text-cyan-100">
+                        Selected
                       </span>
                     ) : null}
                   </div>
@@ -607,7 +619,9 @@ export function BaselineDashboard({
             );
           })}
           {uploadLimitReached ? (
-            <p className="text-sm text-slate-400">Maximum of {BASELINE_LIBRARY_CAP} active resumes reached.</p>
+            <p className="text-sm text-slate-400">
+              Maximum of {BASELINE_LIBRARY_CAP} active resumes reached.
+            </p>
           ) : (
             <FormButton onClick={triggerUploadClick} disabled={isUploading}>
               Add resume
@@ -634,13 +648,6 @@ export function BaselineDashboard({
                       <SecondaryActionLink href={getBaselineDetailsHref(baseline.id)}>
                         View details
                       </SecondaryActionLink>
-                      <FormButton
-                        variant="secondary"
-                        onClick={() => setBaselineSelection(baseline.id)}
-                        className="shrink-0"
-                      >
-                        Select
-                      </FormButton>
                       <FormButton
                         variant="secondary"
                         onClick={() => void handleRestoreBaseline(baseline.id)}
