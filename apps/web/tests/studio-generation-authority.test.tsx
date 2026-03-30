@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, vi } from "vitest";
 
 import StudioPage from "@/app/(app)/studio/page";
@@ -79,10 +79,12 @@ function setupFetch(readinessStatus: "ready" | "limited" | "blocked", score = 94
       if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
         return Promise.resolve(
           createResponse({
-            score,
             jobId: "job-1",
             baselineId: "base-1",
             baselineVersionId: "base-version-1",
+            scoring_v2: {
+              score,
+            },
             verification_coverage: {
               totalClaims,
               verifiedClaims: readinessStatus === "ready" ? totalClaims : 0,
@@ -132,10 +134,15 @@ describe("Studio generation authority", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Generation status: READY")).toBeInTheDocument();
+      expect(screen.getByText("Ready to generate")).toBeInTheDocument();
     });
-    expect(screen.getByText("Ready to generate")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Generate My Application" })).toBeEnabled();
+    const readiness = screen.getByTestId("studio-generation-readiness");
+    const generationHeadline = await screen.findByText("You’re ready to generate");
+    const generationSection = generationHeadline.closest("section");
+    expect(readiness).toHaveTextContent(/^Ready/);
+    expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled();
+    expect(generationSection).not.toBeNull();
+    expect(within(generationSection as HTMLElement).getByRole("button", { name: "Generate Cover Letter" })).toBeEnabled();
   });
 
   it("LIMITED shows limited status and constrained CTA label without Studio Ready copy", async () => {
@@ -143,10 +150,14 @@ describe("Studio generation authority", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Generation status: LIMITED")).toBeInTheDocument();
+      expect(screen.getByText("Generation blocked")).toBeInTheDocument();
     });
-    expect(screen.queryByText("Studio Ready")).toBeNull();
-    expect(screen.getByRole("button", { name: "Generate With Limits" })).toBeInTheDocument();
+    expect(screen.getByText("Blocked")).toBeInTheDocument();
+    expect(screen.queryByText("Ready to generate")).toBeNull();
+    expect(screen.getByRole("button", { name: "Continue Building Experience" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Remove unsupported requirements and continue" }),
+    ).toBeInTheDocument();
   });
 
   it("BLOCKED shows blocked status and remediation CTA", async () => {
@@ -154,13 +165,13 @@ describe("Studio generation authority", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Generation status: BLOCKED")).toBeInTheDocument();
+      expect(screen.getByText("Generation blocked")).toBeInTheDocument();
     });
-    expect(screen.queryByRole("button", { name: "Generate My Application" })).toBeNull();
-    expect(screen.getByRole("link", { name: "Resolve Gaps Before Generating" })).toHaveAttribute(
-      "href",
-      "/results#advanced-insights",
-    );
+    expect(screen.getByText("Blocked")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Generate Resume" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Remove unsupported requirements and continue" }),
+    ).toBeInTheDocument();
   });
 
   it("blocked generation action does not proceed and routes to remediation", async () => {
@@ -168,12 +179,13 @@ describe("Studio generation authority", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Generation status: BLOCKED")).toBeInTheDocument();
+      expect(screen.getByText("Generation blocked")).toBeInTheDocument();
     });
 
     expect(screen.queryByRole("button", { name: "Generate Resume" })).toBeNull();
-    const remediationLink = screen.getByRole("link", { name: "Resolve Gaps Before Generating" });
-    expect(remediationLink).toHaveAttribute("href", "/results#advanced-insights");
+    expect(
+      screen.getByRole("button", { name: "Remove unsupported requirements and continue" }),
+    ).toBeInTheDocument();
     expect(mockRouterPush).not.toHaveBeenCalled();
   });
 
@@ -182,7 +194,7 @@ describe("Studio generation authority", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Generation status: LIMITED")).toBeInTheDocument();
+      expect(screen.getByText("Generation blocked")).toBeInTheDocument();
     });
     expect(screen.queryByText(/Verified claims:\s*0\s*\/\s*0/i)).toBeNull();
     expect(screen.queryByText(/Verification Coverage:/i)).toBeNull();

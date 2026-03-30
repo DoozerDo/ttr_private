@@ -113,7 +113,9 @@ describe("Analyze page assessment persistence contract", () => {
     });
 
     await waitFor(() => {
-      expect(mockRouterPush).toHaveBeenCalledWith("/results?assessmentId=assessment-2");
+      expect(mockRouterPush).toHaveBeenCalledWith(
+        "/results?assessmentId=assessment-2&analysisId=assessment-2",
+      );
     });
 
     expect(publishBaselineUpdated).toHaveBeenCalledWith({

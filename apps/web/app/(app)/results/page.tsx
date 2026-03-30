@@ -2557,6 +2557,7 @@ export default function ResultsPage() {
         params.delete("jobId");
         params.delete("baselineId");
         params.set("assessmentId", createdAssessmentId);
+        params.set("analysisId", createdAssessmentId);
         const query = params.toString();
         const path = query ? `/results?${query}` : "/results";
         await router.replace(path);
@@ -2596,6 +2597,7 @@ export default function ResultsPage() {
       params.delete("jobId");
       params.delete("baselineId");
       params.set("assessmentId", data.assessmentId);
+      params.set("analysisId", data.assessmentId);
       const query = params.toString();
       const path = query ? `/results?${query}` : "/results";
       await router.replace(path);
@@ -2795,7 +2797,11 @@ export default function ResultsPage() {
       if (!assessmentId) {
         throw new Error("Re-analysis did not return an assessment ID.");
       }
-      await router.replace(`/results?assessmentId=${encodeURIComponent(assessmentId)}`);
+      await router.replace(
+        `/results?assessmentId=${encodeURIComponent(assessmentId)}&analysisId=${encodeURIComponent(
+          assessmentId,
+        )}`,
+      );
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : "Unable to run re-analysis.");
     } finally {

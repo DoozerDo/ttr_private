@@ -27,6 +27,7 @@ function matchesPath(pathname: string | undefined, prefix: string): boolean {
 
 export function resolveUnlockPathState(input: UnlockPathInput): UnlockPathResolvedState {
   const isBaselineRoute = matchesPath(input.currentPathname, "/baseline");
+  const isTargetRoute = matchesPath(input.currentPathname, "/target");
   const isAnalyzeRoute = matchesPath(input.currentPathname, "/analyze");
   const isFitReviewRoute = matchesPath(input.currentPathname, "/fit-review");
   const isStudioRoute = matchesPath(input.currentPathname, "/studio");
@@ -43,13 +44,13 @@ export function resolveUnlockPathState(input: UnlockPathInput): UnlockPathResolv
   const fitReviewComplete = hasActiveBaseline && fitReviewRelevant && score >= 70 && readinessReady;
 
   const baseline: UnlockPathModuleState =
-    isBaselineRoute ? "CURRENT" : input.baselineReady ? "COMPLETE" : "CURRENT";
+    isBaselineRoute ? "CURRENT" : input.baselineReady ? "COMPLETE" : "LOCKED";
 
   const analysis: UnlockPathModuleState =
-    !input.baselineReady
-      ? "LOCKED"
-      : isAnalyzeRoute
-        ? "CURRENT"
+    isAnalyzeRoute || isTargetRoute
+      ? "CURRENT"
+      : !input.baselineReady
+        ? "LOCKED"
         : input.analysisExists
           ? "COMPLETE"
           : "UNLOCKED";

@@ -30,6 +30,7 @@ interface BaselineDashboardProps {
   initialBaselines: BaselineDto[];
   initialFetchError?: string | null;
   selectedBaselineId?: string | null;
+  showBaselineCreationControls?: boolean;
 }
 
 const getDuplicateUploadMessage = (data: unknown): string | null => {
@@ -108,6 +109,7 @@ export function BaselineDashboard({
   initialBaselines,
   initialFetchError,
   selectedBaselineId,
+  showBaselineCreationControls = true,
 }: BaselineDashboardProps) {
   const [baselines, setBaselines] = useState<BaselineDto[]>(initialBaselines);
   const [file, setFile] = useState<File | null>(null);
@@ -482,73 +484,79 @@ export function BaselineDashboard({
       title=""
       description="Upload the resume you trust and keep it ready as your scoring anchor."
       primaryAction={
-      <FormButton onClick={triggerUploadClick} disabled={isUploading || uploadLimitReached}>
-        {isUploading ? "Uploading..." : uploadLimitReached ? "Maximum reached" : "Add resume"}
-      </FormButton>
+        showBaselineCreationControls ? (
+          <FormButton onClick={triggerUploadClick} disabled={isUploading || uploadLimitReached}>
+            {isUploading ? "Uploading..." : uploadLimitReached ? "Maximum reached" : "Add resume"}
+          </FormButton>
+        ) : null
       }
     >
-      <input
-        id="baselineUpload"
-        ref={fileInputRef}
-        type="file"
-        accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        onChange={async (event) => {
-          const selected = event.target.files?.[0] ?? null;
-          setFile(selected);
-          if (!selected) return;
-          await uploadBaselineFile(selected);
-        }}
-        style={{
-          position: "absolute",
-          width: 1,
-          height: 1,
-          padding: 0,
-          margin: -1,
-          border: 0,
-          overflow: "hidden",
-          clip: "rect(0 0 0 0)",
-        }}
-        disabled={isUploading || uploadLimitReached}
-      />
+      {showBaselineCreationControls ? (
+        <>
+          <input
+            id="baselineUpload"
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            onChange={async (event) => {
+              const selected = event.target.files?.[0] ?? null;
+              setFile(selected);
+              if (!selected) return;
+              await uploadBaselineFile(selected);
+            }}
+            style={{
+              position: "absolute",
+              width: 1,
+              height: 1,
+              padding: 0,
+              margin: -1,
+              border: 0,
+              overflow: "hidden",
+              clip: "rect(0 0 0 0)",
+            }}
+            disabled={isUploading || uploadLimitReached}
+          />
 
-      {file ? (
-        <p className="text-xs text-slate-400">Selected: {file.name}</p>
-      ) : null}
-      {selectedBaselineName ? (
-        <p className="text-xs uppercase tracking-[0.35em] text-slate-400">
-          Selected: {selectedBaselineName}
-        </p>
-      ) : null}
+          {file ? (
+            <p className="text-xs text-slate-400">Selected: {file.name}</p>
+          ) : null}
+          {selectedBaselineName ? (
+            <p className="text-xs uppercase tracking-[0.35em] text-slate-400">
+              Selected: {selectedBaselineName}
+            </p>
+          ) : null}
 
-      {activeBaselineId ? (
-      <BaselineUnlockProgress
-        progressPercent={baselineUnlockState.progressPercent}
-        milestoneLabel={
-          loadingSelectedBaselineDetails ? "Resume ingested" : baselineUnlockState.milestoneLabel
-        }
-        isBaselineReady={baselineUnlockState.isBaselineReady}
-        onContinue={() => {
-          if (!activeBaselineId) return;
-          router.push(getBaselineDetailsHref(activeBaselineId));
-        }}
-      />
-      ) : null}
+          {activeBaselineId ? (
+            <BaselineUnlockProgress
+              progressPercent={baselineUnlockState.progressPercent}
+              milestoneLabel={
+                loadingSelectedBaselineDetails ? "Resume ingested" : baselineUnlockState.milestoneLabel
+              }
+              isBaselineReady={baselineUnlockState.isBaselineReady}
+              onContinue={() => {
+                if (!activeBaselineId) return;
+                router.push(getBaselineDetailsHref(activeBaselineId));
+              }}
+            />
+          ) : null}
 
-      {duplicateErrorDetail ? (
-        <p className="text-sm text-slate-400">{duplicateErrorDetail}</p>
-      ) : null}
-      {capacityErrorDetail ? (
-        <p className="text-sm text-slate-400">{capacityErrorDetail}</p>
-      ) : null}
-      {insufficientTextError ? (
-        <InsufficientExtractedText error={insufficientTextError} />
-      ) : error ? (
-        <div style={ttrComponents.dangerBox}>
-          <p className="m-0 text-[13px]">{error}</p>
-        </div>
-      ) : null}
+          {duplicateErrorDetail ? (
+            <p className="text-sm text-slate-400">{duplicateErrorDetail}</p>
+          ) : null}
+          {capacityErrorDetail ? (
+            <p className="text-sm text-slate-400">{capacityErrorDetail}</p>
+          ) : null}
+          {insufficientTextError ? (
+            <InsufficientExtractedText error={insufficientTextError} />
+          ) : error ? (
+            <div style={ttrComponents.dangerBox}>
+              <p className="m-0 text-[13px]">{error}</p>
+            </div>
+          ) : null}
 
-      <div className="h-px bg-white/10" />
+          <div className="h-px bg-white/10" />
+        </>
+      ) : null}
 
       {initialFetchError ? (
         <Alert intent="error" title="Unable to load resumes">
@@ -618,15 +626,15 @@ export function BaselineDashboard({
               </div>
             );
           })}
-          {uploadLimitReached ? (
+          {showBaselineCreationControls && uploadLimitReached ? (
             <p className="text-sm text-slate-400">
               Maximum of {BASELINE_LIBRARY_CAP} active resumes reached.
             </p>
-          ) : (
+          ) : showBaselineCreationControls ? (
             <FormButton onClick={triggerUploadClick} disabled={isUploading}>
               Add resume
             </FormButton>
-          )}
+          ) : null}
           {archivedBaselines.length ? (
             <div className="space-y-3 pt-3">
               <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Archived resumes</p>

@@ -1,4 +1,5 @@
 import { cookies, headers } from "next/headers";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
@@ -124,11 +125,25 @@ export default async function TargetPage({ searchParams }: TargetPageProps) {
           <p className="text-sm">New version available. Re-run compatibility score.</p>
         </Alert>
       ) : null}
+      {baselines.length === 0 ? (
+        <Alert intent="warning" title="Create a baseline first">
+          <p className="text-sm">
+            Upload your resume on the Baseline page before starting role analysis.
+          </p>
+          <Link
+            href="/baseline"
+            className="mt-3 inline-flex items-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+          >
+            GO TO BASELINE
+          </Link>
+        </Alert>
+      ) : null}
       <BaselineWorkspace
         initialBaselines={baselines}
         initialFetchError={baselineFetchError}
         initialBaselineId={selectedBaselineId}
         initialJobId={selectedJobId}
+        showBaselineCreationControls={false}
       />
     </div>
   );

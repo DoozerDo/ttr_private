@@ -23,10 +23,10 @@ const MODULES: ModuleMeta[] = [
   },
   {
     id: "analysis",
-    title: "Analysis",
+    title: "Target",
     subtitle: "Run fit analysis for a target role.",
     href: "/analyze",
-    lockedReason: "Complete your baseline before analysis.",
+    lockedReason: "Complete your baseline before targeting.",
   },
   {
     id: "fitReview",

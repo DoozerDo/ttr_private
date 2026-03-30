@@ -18,6 +18,56 @@ describe("unlock path state", () => {
     expect(state.opportunities).toBe("LOCKED");
   });
 
+  it("marks targeting as current on the target route and keeps baseline out of the current step", () => {
+    const state = resolveUnlockPathState({
+      currentPathname: "/target",
+      baselineReady: true,
+      analysisExists: false,
+      score: null,
+      readinessStatus: null,
+      hasGeneratedDocuments: false,
+      hasSavedOpportunity: false,
+    });
+
+    expect(state.baseline).toBe("COMPLETE");
+    expect(state.analysis).toBe("CURRENT");
+    expect(state.fitReview).toBe("LOCKED");
+    expect(state.studio).toBe("LOCKED");
+  });
+
+  it("keeps TARGET current even when the baseline is missing", () => {
+    const state = resolveUnlockPathState({
+      currentPathname: "/target",
+      baselineReady: false,
+      analysisExists: false,
+      score: null,
+      readinessStatus: null,
+      hasGeneratedDocuments: false,
+      hasSavedOpportunity: false,
+    });
+
+    expect(state.analysis).toBe("CURRENT");
+    expect(state.baseline).toBe("LOCKED");
+    expect(state.fitReview).toBe("LOCKED");
+    expect(state.studio).toBe("LOCKED");
+  });
+
+  it("keeps the target stage label distinct from analysis in the rail contract", () => {
+    const state = resolveUnlockPathState({
+      currentPathname: "/target",
+      baselineReady: true,
+      analysisExists: true,
+      score: 84,
+      readinessStatus: "limited",
+      hasGeneratedDocuments: false,
+      hasSavedOpportunity: false,
+    });
+
+    expect(state.analysis).toBe("CURRENT");
+    expect(state.fitReview).toBe("CURRENT");
+    expect(state.studio).toBe("LOCKED");
+  });
+
   it("keeps fit review locked when no active baseline exists", () => {
     const state = resolveUnlockPathState({
       currentPathname: "/baseline",

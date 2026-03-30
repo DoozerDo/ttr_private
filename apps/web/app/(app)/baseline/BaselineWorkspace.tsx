@@ -14,6 +14,7 @@ type BaselineWorkspaceProps = {
   initialFetchError?: string | null;
   initialBaselineId?: string | null;
   initialJobId?: string | null;
+  showBaselineCreationControls?: boolean;
 };
 
 const NOTICE_MESSAGE =
@@ -40,6 +41,7 @@ export function BaselineWorkspace({
   initialFetchError,
   initialBaselineId,
   initialJobId,
+  showBaselineCreationControls = true,
 }: BaselineWorkspaceProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -127,6 +129,7 @@ export function BaselineWorkspace({
             initialBaselines={initialBaselines}
             initialFetchError={initialFetchError}
             selectedBaselineId={baselineId}
+            showBaselineCreationControls={showBaselineCreationControls}
           />
           <p className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
             Your resume becomes a structured source of truth for compatibility scoring and

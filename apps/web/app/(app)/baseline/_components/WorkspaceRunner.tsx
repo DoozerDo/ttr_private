@@ -165,25 +165,27 @@ export function buildResultsUrl({
   const normalizedJobId = jobId?.trim();
   const normalizedBaselineId = baselineId?.trim();
   if (normalizedAssessmentId && normalizedBaselineId && normalizedJobId) {
-    return `/results?assessmentId=${encodeURIComponent(normalizedAssessmentId)}&jobId=${encodeURIComponent(
-      normalizedJobId,
-    )}&baselineId=${encodeURIComponent(normalizedBaselineId)}`;
+    return `/results?assessmentId=${encodeURIComponent(normalizedAssessmentId)}&analysisId=${encodeURIComponent(
+      normalizedAssessmentId,
+    )}&jobId=${encodeURIComponent(normalizedJobId)}&baselineId=${encodeURIComponent(normalizedBaselineId)}`;
   }
 
   if (normalizedAssessmentId && normalizedBaselineId) {
-    return `/results?assessmentId=${encodeURIComponent(normalizedAssessmentId)}&baselineId=${encodeURIComponent(
-      normalizedBaselineId,
-    )}`;
+    return `/results?assessmentId=${encodeURIComponent(normalizedAssessmentId)}&analysisId=${encodeURIComponent(
+      normalizedAssessmentId,
+    )}&baselineId=${encodeURIComponent(normalizedBaselineId)}`;
   }
 
   if (normalizedAssessmentId && normalizedJobId) {
-    return `/results?assessmentId=${encodeURIComponent(normalizedAssessmentId)}&jobId=${encodeURIComponent(
-      normalizedJobId,
-    )}`;
+    return `/results?assessmentId=${encodeURIComponent(normalizedAssessmentId)}&analysisId=${encodeURIComponent(
+      normalizedAssessmentId,
+    )}&jobId=${encodeURIComponent(normalizedJobId)}`;
   }
 
   if (normalizedAssessmentId) {
-    return `/results?assessmentId=${encodeURIComponent(normalizedAssessmentId)}`;
+    return `/results?assessmentId=${encodeURIComponent(normalizedAssessmentId)}&analysisId=${encodeURIComponent(
+      normalizedAssessmentId,
+    )}`;
   }
 
   if (normalizedJobId && normalizedBaselineId) {

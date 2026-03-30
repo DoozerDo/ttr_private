@@ -58,7 +58,7 @@ describe("results auto analysis loading", () => {
 
     await waitFor(() => {
       expect(mockRouterReplace).toHaveBeenCalledWith(
-        "/results?assessmentId=assessment-new-1",
+        "/results?assessmentId=assessment-new-1&analysisId=assessment-new-1",
       );
     });
   });
@@ -82,6 +82,65 @@ describe("results auto analysis loading", () => {
       expect(screen.getByText("This result is no longer linked to an active resume.")).toBeInTheDocument();
     });
     expect(screen.getByRole("button", { name: "Retry Compatibility Analysis" })).toBeInTheDocument();
+  });
+
+  it("hydrates populated results when the canonical analysisId is present", async () => {
+    overrideSearchParams({ analysisId: "assessment-good" });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/analysis/fit-assessments/assessment-good")) {
+        return jsonResponse({
+          assessmentId: "assessment-good",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          jobId: "job-1",
+          score: 84,
+          strengths: ["Strong leadership", "Operational rigor"],
+          verification_coverage: {
+            totalClaims: 3,
+            verifiedClaims: 3,
+            inferredClaims: 0,
+            unverifiedClaims: 0,
+            verifiedRequirements: ["Leadership", "Operations", "Systems"],
+            unverifiedRequirements: [],
+          },
+        });
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return jsonResponse([{ id: "base-version-1", versionNumber: 1 }]);
+      }
+      if (url.includes("/api/analysis/fit-assessments?jobId=job-1")) {
+        return jsonResponse([]);
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return jsonResponse({
+          status: "ready",
+          blocked: false,
+          reasonCodes: [],
+          reasons: [],
+          badgeLabel: "READY",
+          summary: "Ready for generation.",
+          verificationIssues: [],
+        });
+      }
+      return jsonResponse({}, 200);
+    });
+
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    render(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Competitive match")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("No compatibility analysis yet")).toBeNull();
+    await waitFor(() => {
+      expect(screen.getByTestId("results-hero-primary-cta")).toHaveAttribute(
+        "href",
+        "/studio?jobId=job-1&analysisId=assessment-good&baselineId=base-1&baselineVersionId=base-version-1",
+      );
+    });
   });
 
   it("uses existing latest assessment without creating duplicate analysis", async () => {

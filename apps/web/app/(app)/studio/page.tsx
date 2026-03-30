@@ -1200,7 +1200,6 @@ export default function StudioPage() {
     [activeGenerationReadiness.verificationIssues],
   );
   const generationBlockerCount = generationBlockerCodes.length;
-  const remediationHref = "/results#advanced-insights";
 
   const productReadiness = useMemo(
     () =>
@@ -1409,9 +1408,12 @@ export default function StudioPage() {
   const resultsHref = useMemo(() => {
     const params = new URLSearchParams();
     if (effectiveJobId) params.set("jobId", effectiveJobId);
+    if (requestedAnalysisId) params.set("analysisId", requestedAnalysisId);
+    if (effectiveBaselineId) params.set("baselineId", effectiveBaselineId);
     const query = params.toString();
     return query ? `/results?${query}` : "/results";
-  }, [effectiveJobId]);
+  }, [effectiveBaselineId, effectiveJobId, requestedAnalysisId]);
+  const remediationHref = `${resultsHref}#advanced-insights`;
   const primaryNextAction = useMemo(
     () =>
       getCanonicalNextAction({

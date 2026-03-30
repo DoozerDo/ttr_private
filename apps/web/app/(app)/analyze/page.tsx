@@ -787,7 +787,11 @@ export default function AnalyzePage() {
       saveLastAnalysis(record);
 
       if (returnedAssessmentId) {
-        await router.push(`/results?assessmentId=${encodeURIComponent(returnedAssessmentId)}`);
+        await router.push(
+          `/results?assessmentId=${encodeURIComponent(returnedAssessmentId)}&analysisId=${encodeURIComponent(
+            returnedAssessmentId,
+          )}`,
+        );
       }
     } catch (analysisError) {
       setResult(null);

@@ -172,7 +172,7 @@ describe("BaselineWorkspace live score panel", () => {
       ).toHaveAttribute("href", "/studio?analysisId=assessment-1&jobId=job-1&baselineId=base-1");
       expect(screen.getByRole("link", { name: "View detailed analysis" })).toHaveAttribute(
         "href",
-        "/results?assessmentId=assessment-1",
+        "/results?assessmentId=assessment-1&analysisId=assessment-1&jobId=job-1&baselineId=base-1",
       );
       expect(screen.queryByRole("button", { name: "Add to Opportunities" })).toBeNull();
       expect(
@@ -336,7 +336,7 @@ describe("BaselineWorkspace live score panel", () => {
       expect(screen.getByRole("button", { name: "Resolve gaps before generating" })).toBeDisabled();
       expect(screen.getByRole("link", { name: "Fix baseline and continue" })).toHaveAttribute(
         "href",
-        "/results?assessmentId=assessment-3",
+        "/results?assessmentId=assessment-3&analysisId=assessment-3&jobId=job-1&baselineId=base-1",
       );
       expect(screen.queryByRole("link", { name: "Generate Tailored Materials" })).toBeNull();
       expect(
@@ -409,7 +409,7 @@ describe("BaselineWorkspace live score panel", () => {
 
       expect(screen.getByRole("link", { name: "Continue Building Baseline" })).toHaveAttribute(
         "href",
-        "/results?assessmentId=assessment-4",
+        "/results?assessmentId=assessment-4&analysisId=assessment-4&jobId=job-1&baselineId=base-1",
       );
       expect(screen.queryByText("Strong match, but not ready to generate")).toBeNull();
     } finally {
