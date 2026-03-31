@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, vi } from "vitest";
 
 import StudioPage from "@/app/(app)/studio/page";
@@ -632,8 +632,15 @@ describe("Studio page UX", () => {
     await waitFor(() => {
       expect(screen.getByTestId("resume-preview")).toBeInTheDocument();
     });
+    expect(screen.getByTestId("studio-resume-trust-summary")).toHaveTextContent(
+      "Generated from verified evidence",
+    );
+    expect(screen.getByTestId("studio-resume-trust-summary")).toHaveTextContent(
+      "Verified baseline used. Aligned to this role. Unsupported claims remain blocked.",
+    );
     expect(screen.getByText("Preview of tailored resume")).toBeInTheDocument();
     expect(screen.getByText("Alex Candidate")).toBeInTheDocument();
     expect(screen.getByText("Download: DOCX | PDF")).toBeInTheDocument();
   });
+
 });

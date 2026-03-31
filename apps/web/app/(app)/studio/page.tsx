@@ -1372,6 +1372,10 @@ export default function StudioPage() {
   );
   const hasCoverLetterArtifact = coverPresenter.hasExportableContent;
   const hasCompletedGeneration = hasResumeArtifact || hasCoverLetterArtifact;
+  const resumeTrustSummaryVisible =
+    resumePresenter.status === "success" && Boolean(resumeState.response) && canGenerateDocuments;
+  const coverTrustSummaryVisible =
+    coverPresenter.status === "success" && Boolean(coverState.response) && canGenerateDocuments;
   const generationStorageKey = useMemo(
     () => getGenerationCompletionStorageKey(effectiveJobId, effectiveBaselineId),
     [effectiveBaselineId, effectiveJobId],
@@ -3468,6 +3472,19 @@ export default function StudioPage() {
                 {unlockGenerationConfirmation}
               </p>
             ) : null}
+            {resumeTrustSummaryVisible ? (
+              <div
+                className="rounded-xl border border-emerald-400/25 bg-emerald-500/8 px-3 py-2 text-xs text-emerald-50"
+                data-testid="studio-resume-trust-summary"
+              >
+                <p className="font-semibold uppercase tracking-[0.18em]">
+                  Generated from verified evidence
+                </p>
+                <p className="mt-1 text-emerald-50/80">
+                  Verified baseline used. Aligned to this role. Unsupported claims remain blocked.
+                </p>
+              </div>
+            ) : null}
             {resumeWarningFlags.length ? (
               <p className="text-xs text-amber-200">
                 Verification signals detected. Personalization may be limited. See
@@ -3651,6 +3668,19 @@ export default function StudioPage() {
                 >
                   {unlockGenerationConfirmation}
                 </p>
+              ) : null}
+              {coverTrustSummaryVisible ? (
+                <div
+                  className="rounded-xl border border-emerald-400/25 bg-emerald-500/8 px-3 py-2 text-xs text-emerald-50"
+                  data-testid="studio-cover-trust-summary"
+                >
+                  <p className="font-semibold uppercase tracking-[0.18em]">
+                    Generated from verified evidence
+                  </p>
+                  <p className="mt-1 text-emerald-50/80">
+                    Verified baseline used. Aligned to this role. Unsupported claims remain blocked.
+                  </p>
+                </div>
               ) : null}
               <div className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-3">
                 {coverLetterParagraphs.length ? (
