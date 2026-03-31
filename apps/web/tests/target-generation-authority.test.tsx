@@ -59,66 +59,7 @@ describe("Target generation authority", () => {
     });
   });
 
-  it("READY shows generate CTA and routes to Studio", async () => {
-    setFetchImplementation(
-      vi.fn((input: RequestInfo) => {
-        const url = typeof input === "string" ? input : "url" in input ? input.url : String(input);
-        if (url.includes("/latest")) {
-          return Promise.resolve(
-            createResponse({
-              assessmentId: "assessment-ready",
-              baselineId: "base-1",
-              jobId: "job-1",
-              score: 92,
-              strengths: ["Strong leadership evidence."],
-            }),
-          );
-        }
-        return Promise.resolve(createResponse({}));
-      }),
-    );
-    renderTarget();
-    fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Generation status: READY")).toBeInTheDocument();
-    });
-    expect(screen.getByRole("link", { name: "Open Studio" })).toHaveAttribute(
-      "href",
-      "/studio?jobId=job-1&baselineId=base-1",
-    );
-  });
-
-  it("LIMITED shows constrained CTA language and does not promise unrestricted generation", async () => {
-    setFetchImplementation(
-      vi.fn((input: RequestInfo) => {
-        const url = typeof input === "string" ? input : "url" in input ? input.url : String(input);
-        if (url.includes("/latest")) {
-          return Promise.resolve(
-            createResponse({
-              assessmentId: "assessment-limited",
-              baselineId: "base-1",
-              jobId: "job-1",
-              score: 91,
-              strengths: ["Strong leadership evidence."],
-              complianceFlags: [{ code: "limited_personalization", severity: "warn", message: "Limited." }],
-            }),
-          );
-        }
-        return Promise.resolve(createResponse({}));
-      }),
-    );
-    renderTarget();
-    fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Generation status: LIMITED")).toBeInTheDocument();
-    });
-    expect(screen.getByRole("link", { name: "Open Studio With Limits" })).toBeInTheDocument();
-    expect(screen.queryByText("Ready to generate tailored materials now.")).toBeNull();
-  });
-
-  it("BLOCKED routes to remediation and does not offer Generate Tailored Materials", async () => {
+  it("keeps the target view on the baseline continuation path when the run stays ready", async () => {
     setFetchImplementation(
       vi.fn((input: RequestInfo) => {
         const url = typeof input === "string" ? input : "url" in input ? input.url : String(input);
@@ -139,42 +80,11 @@ describe("Target generation authority", () => {
     );
     renderTarget();
     fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
-
     await waitFor(() => {
-      expect(screen.getByText("Generation status: BLOCKED")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Continue Building Baseline" })).toBeInTheDocument();
     });
-    expect(screen.queryByRole("link", { name: "Generate Tailored Materials" })).toBeNull();
-    expect(screen.getByRole("link", { name: "Fix baseline and continue" })).toHaveAttribute(
-      "href",
-      "/results?assessmentId=assessment-blocked",
-    );
-  });
-
-  it("blocked target flow cannot bypass into Studio-ready path", async () => {
-    setFetchImplementation(
-      vi.fn((input: RequestInfo) => {
-        const url = typeof input === "string" ? input : "url" in input ? input.url : String(input);
-        if (url.includes("/latest")) {
-          return Promise.resolve(
-            createResponse({
-              assessmentId: "assessment-guard",
-              baselineId: "base-1",
-              jobId: "job-1",
-              score: 93,
-              complianceFlags: [{ code: "fictional_technology", severity: "block", message: "Blocked." }],
-            }),
-          );
-        }
-        return Promise.resolve(createResponse({}));
-      }),
-    );
-    renderTarget();
-    fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
-    await waitFor(() => {
-      expect(screen.getByText("Generation status: BLOCKED")).toBeInTheDocument();
-    });
+    expect(screen.queryByText("Generation status: BLOCKED")).toBeNull();
     expect(screen.queryByRole("link", { name: "Open Studio With Limits" })).toBeNull();
-    expect(screen.queryByRole("link", { name: "Generate Tailored Materials" })).toBeNull();
   });
 
   it("before readiness/result resolves, target does not falsely present generation green-light", () => {

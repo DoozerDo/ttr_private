@@ -1180,12 +1180,12 @@ const WATCH_FIX_CTA_DESTINATIONS: Record<
   ScoringContractV1DimensionKey,
   { label: string; target: "fitReview" | "studio" | "interviewToolkit" }
 > = {
-  role_scope_and_seniority: { label: "Open Fit Review", target: "fitReview" },
-  support_operations_and_process_rigor: { label: "Generate in Resume Studio", target: "studio" },
-  tooling_and_platform_experience: { label: "Open Fit Review", target: "fitReview" },
-  domain_and_business_context: { label: "Open Fit Review", target: "fitReview" },
+  role_scope_and_seniority: { label: "START FIT REVIEW", target: "fitReview" },
+  support_operations_and_process_rigor: { label: "OPEN STUDIO", target: "studio" },
+  tooling_and_platform_experience: { label: "START FIT REVIEW", target: "fitReview" },
+  domain_and_business_context: { label: "START FIT REVIEW", target: "fitReview" },
   change_leadership_and_customer_advocacy: {
-    label: "Interview Toolkit (Coming Soon)",
+    label: "ADD EVIDENCE",
     target: "interviewToolkit",
   },
 };
@@ -2219,7 +2219,7 @@ export default function ResultsPage() {
     if (!latest) return null;
     if (primaryNextAction.type === "fit_review") {
       return {
-        label: "Start Fit Review",
+        label: "START FIT REVIEW",
         href: fitReviewPath,
         disabled: false,
         description: "Use Fit Review to strengthen the baseline for this role.",
@@ -2227,14 +2227,14 @@ export default function ResultsPage() {
     }
     if (primaryNextAction.type === "studio") {
       return {
-        label: "Open Resume & Cover Letter Studio",
+        label: "OPEN STUDIO",
         href: studioHref,
         disabled: !canOpenStudio,
         description: "Open the studio to generate tailored materials now.",
       };
     }
     return {
-      label: "Generate Resume",
+      label: "OPEN STUDIO",
       href: studioHref,
       disabled: !canOpenStudio,
       description: "Generate your resume first, then save the role to Opportunities.",
@@ -2966,7 +2966,7 @@ export default function ResultsPage() {
       return {
         headline: "Let's see if this role is actually a fit.",
         body: "Start with analysis and we will guide you to the best next step.",
-        ctaLabel: "Analyze a role",
+        ctaLabel: "ANALYZE A ROLE",
         ctaHref: "/analyze",
       };
     }
@@ -2974,7 +2974,7 @@ export default function ResultsPage() {
       return {
         headline: "You need verified evidence to proceed.",
         body: "Add verified evidence to unlock resume and cover letter generation.",
-        ctaLabel: "Start Fit Review",
+        ctaLabel: "START FIT REVIEW",
         ctaHref: fitReviewPath,
       };
     }
@@ -2982,7 +2982,7 @@ export default function ResultsPage() {
       return {
         headline: "This score points to Fit Review.",
         body: "Use the canonical next step to strengthen the baseline before generating materials.",
-        ctaLabel: "Start Fit Review",
+        ctaLabel: "START FIT REVIEW",
         ctaHref: fitReviewPath,
       };
     }
@@ -2990,14 +2990,14 @@ export default function ResultsPage() {
       return {
         headline: "This score is ready for Studio.",
         body: "Open Resume & Cover Letter Studio to generate tailored materials from verified evidence.",
-        ctaLabel: "Open Studio",
+        ctaLabel: "OPEN STUDIO",
         ctaHref: studioHref,
       };
     }
     return {
       headline: "This score is ready to generate and save.",
       body: "Generate your resume first, then save the role to Opportunities as a secondary outcome.",
-      ctaLabel: "Generate Resume",
+      ctaLabel: "OPEN STUDIO",
       ctaHref: studioHref,
       onCtaClick: () => {
         void saveOpportunityFromResults();
@@ -3167,7 +3167,7 @@ export default function ResultsPage() {
                     onClick={() => void loadLatest({ interactive: true, allowCreate: true })}
                     disabled={!jobId || !baselineId || loading || loadingLatest}
                   >
-                    {loadingLatest ? "Preparing report..." : "Load Compatibility Analysis"}
+                    {loadingLatest ? "PREPARING..." : "ANALYZE A ROLE"}
                   </FormButton>
                 ) : null
               }
@@ -3230,7 +3230,7 @@ export default function ResultsPage() {
                                 href={role.analyzeHref}
                                 className="inline-flex rounded-xl border border-emerald-300/45 px-3 py-1.5 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-400/15"
                               >
-                                Run Career Compatibility Analysis
+                                ANALYZE A ROLE
                               </Link>
                             </div>
                           </article>

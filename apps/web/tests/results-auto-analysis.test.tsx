@@ -25,7 +25,7 @@ describe("results auto analysis loading", () => {
     await waitFor(() => {
       expect(screen.getByText("No compatibility analysis yet")).toBeInTheDocument();
     });
-    expect(screen.getByRole("button", { name: "Load Compatibility Analysis" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "ANALYZE A ROLE" })).toBeDisabled();
   });
 
   it("fails with a dedicated recovery state when the analysisId is invalid", async () => {
@@ -52,7 +52,7 @@ describe("results auto analysis loading", () => {
     });
     expect(screen.getByText("Assessment not found.")).toBeInTheDocument();
     expect(screen.queryByText("No compatibility analysis yet")).toBeNull();
-    expect(screen.getByRole("link", { name: "ANALYZE A ROLE" })).toHaveAttribute(
+    expect(screen.getAllByRole("link", { name: "ANALYZE A ROLE" })[1]).toHaveAttribute(
       "href",
       "/analyze?jobId=job-1&baselineId=base-1",
     );
@@ -112,7 +112,10 @@ describe("results auto analysis loading", () => {
       expect(screen.getByTestId("results-analysis-recovery")).toBeInTheDocument();
     });
     expect(screen.getByText("This result is no longer linked to an active resume.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "ANALYZE A ROLE" })).toHaveAttribute("href", "/analyze");
+    expect(screen.getAllByRole("link", { name: "ANALYZE A ROLE" })[0]).toHaveAttribute(
+      "href",
+      "/analyze",
+    );
   });
 
   it("hydrates populated results when the canonical analysisId is present", async () => {

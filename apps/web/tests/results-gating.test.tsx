@@ -67,10 +67,10 @@ describe("results gating", () => {
     await waitFor(() => {
       expect(screen.getByText("Apply moment")).toBeInTheDocument();
     });
-    expect(screen.getByRole("link", { name: "Open Resume + Cover Letter Studio" })).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "OPEN STUDIO" }).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Apply to this role" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save this opportunity" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "START FIT REVIEW" })).toBeNull();
   });
 
   it("hides Studio and Apply actions below the threshold and shows only Fit Review", async () => {
@@ -84,12 +84,13 @@ describe("results gating", () => {
       expect(screen.getByText("You're not ready to apply yet.")).toBeInTheDocument();
     });
     expect(
-      screen.getByText("Strengthen your baseline before generating application materials."),
-    ).toBeInTheDocument();
+      screen.getAllByText("Strengthen your baseline before generating application materials.")
+        .length,
+    ).toBeGreaterThan(0);
     expect(screen.queryByText("Apply moment")).toBeNull();
-    expect(screen.queryByRole("link", { name: "Open Resume + Cover Letter Studio" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "OPEN STUDIO" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Apply to this role" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Save this opportunity" })).toBeNull();
-    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "START FIT REVIEW" })).toBeInTheDocument();
   });
 });
