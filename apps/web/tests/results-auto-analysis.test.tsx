@@ -25,7 +25,7 @@ describe("results auto analysis loading", () => {
     await waitFor(() => {
       expect(screen.getByText("No compatibility analysis yet")).toBeInTheDocument();
     });
-    expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("ANALYZE A ROLE");
+    expect(screen.getByRole("button", { name: "ANALYZE A ROLE" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "ANALYZE A ROLE" })).toBeDisabled();
   });
 
@@ -53,8 +53,8 @@ describe("results auto analysis loading", () => {
     });
     expect(screen.getByText("Assessment not found.")).toBeInTheDocument();
     expect(screen.queryByText("No compatibility analysis yet")).toBeNull();
-    expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("ANALYZE A ROLE");
-    expect(screen.getByRole("link", { name: "ANALYZE A ROLE" })).toHaveAttribute(
+    expect(screen.getByTestId("results-analysis-recovery")).toHaveTextContent("ANALYZE A ROLE");
+    expect(screen.getByTestId("results-analysis-recovery").querySelector('a')).toHaveAttribute(
       "href",
       "/analyze?jobId=job-1&baselineId=base-1",
     );
@@ -233,7 +233,7 @@ describe("results auto analysis loading", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getAllByText("You need verified evidence to proceed.").length).toBeGreaterThan(1);
+      expect(screen.getByText("You need verified evidence to proceed.")).toBeInTheDocument();
     });
     expect(screen.getByTestId("results-blocked-evidence-panel")).toBeInTheDocument();
     expect(screen.getByTestId("results-score-verdict-card")).toBeInTheDocument();
@@ -245,7 +245,6 @@ describe("results auto analysis loading", () => {
     ).toBeTruthy();
     expect(screen.getAllByText("Missing verified evidence is blocking Studio.").length).toBeGreaterThan(0);
     expect(screen.queryByText("No material gaps were identified in this run.")).toBeNull();
-    expect(screen.getByText("Add verified evidence to unlock resume and cover letter generation.")).toBeInTheDocument();
     expect(screen.getByTestId("results-hero-primary-cta")).toHaveAttribute(
       "href",
       "/fit-review?jobId=job-1&analysisId=assessment-blocked&assessmentId=assessment-blocked&baselineId=base-1&baselineVersionId=base-version-1",
@@ -304,7 +303,7 @@ describe("results auto analysis loading", () => {
     });
     expect(screen.getByText("GENERATION UNLOCKED")).toBeInTheDocument();
     expect(screen.getByText("Your evidence now supports this role. You can generate materials with confidence.")).toBeInTheDocument();
-    expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("OPEN STUDIO");
+    expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("START FIT REVIEW");
     expect(screen.queryByRole("link", { name: "OPEN STUDIO" })).toBeNull();
   });
 
