@@ -9,6 +9,7 @@ import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel"
 import { InsufficientExtractedText } from "@/components/compliance/InsufficientExtractedText";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
+import { RouteStateShell } from "@/components/RouteStateShell";
 import { GuidedOverlay } from "@/components/GuidedOverlay";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
@@ -776,17 +777,14 @@ export function OpportunityMapSection({
     <section className="rounded-3xl bg-slate-900/65 px-6 py-9 sm:px-8 sm:py-10">
       <div className="max-w-4xl space-y-9">
         {blockedByEvidence ? (
-          <div
-            data-testid="results-blocked-evidence-panel"
-            className="space-y-4 rounded-2xl border border-rose-300/35 bg-rose-500/12 p-5 shadow-[0_0_0_1px_rgba(251,113,133,0.08)]"
-          >
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-rose-100">Evidence readiness</p>
-            <h3 className="max-w-3xl text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl xl:text-5xl">
-              {decisionNarrative.headline}
-            </h3>
-            <p className="max-w-2xl text-base leading-7 text-rose-50 md:text-lg">{decisionNarrative.body}</p>
-            <div className="space-y-4">
-              {primaryCta ? (
+          <RouteStateShell
+            testId="results-blocked-evidence-panel"
+            tone="warning"
+            eyebrow="Evidence readiness"
+            title={decisionNarrative.headline}
+            body={<p className="max-w-2xl text-base leading-7 text-amber-50 md:text-lg">{decisionNarrative.body}</p>}
+            cta={
+              primaryCta ? (
                 primaryCta.disabled ? (
                   <span
                     data-testid="results-hero-primary-cta"
@@ -811,26 +809,27 @@ export function OpportunityMapSection({
                     {primaryCta.label}
                   </a>
                 )
-              ) : null}
-              <div className="flex flex-wrap gap-4 text-sm">
+              ) : null
+            }
+          >
+            <div className="flex flex-wrap gap-4 text-sm">
+              <a
+                data-testid="results-hero-secondary-action"
+                href={scoreAnalysisHref}
+                className="font-medium text-slate-100 underline decoration-white/30 underline-offset-4 transition hover:text-white hover:decoration-white/60"
+              >
+                View top drivers
+              </a>
+              {nextAction.type === "studio_with_save" ? (
                 <a
-                  data-testid="results-hero-secondary-action"
-                  href={scoreAnalysisHref}
+                  href="#opportunity-save"
                   className="font-medium text-slate-100 underline decoration-white/30 underline-offset-4 transition hover:text-white hover:decoration-white/60"
                 >
-                  View top drivers
+                  Save to Opportunities
                 </a>
-                {nextAction.type === "studio_with_save" ? (
-                  <a
-                    href="#opportunity-save"
-                    className="font-medium text-slate-100 underline decoration-white/30 underline-offset-4 transition hover:text-white hover:decoration-white/60"
-                  >
-                    Save to Opportunities
-                  </a>
-                ) : null}
-              </div>
+              ) : null}
             </div>
-          </div>
+          </RouteStateShell>
         ) : null}
         <div
           data-testid="results-score-verdict-card"
@@ -3135,21 +3134,21 @@ export default function ResultsPage() {
 
         <section className="space-y-7 rounded-3xl bg-slate-950/55 p-6">
           {error && !latest ? (
-            <section
-              className="rounded-2xl border border-amber-300/30 bg-amber-500/10 p-4"
-              data-testid="results-analysis-recovery"
-            >
-              <h2 className="text-base font-semibold text-amber-100">Analysis unavailable</h2>
-              <p className="mt-1 text-sm text-slate-100">{error}</p>
-              <div className="mt-3">
+            <RouteStateShell
+              testId="results-analysis-recovery"
+              tone="warning"
+              eyebrow="Recovery"
+              title="Analysis unavailable"
+              body={<p className="text-sm text-slate-100">{error}</p>}
+              cta={
                 <Link
                   href={recoveryAnalyzeHref}
                   className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
                 >
                   ANALYZE A ROLE
                 </Link>
-              </div>
-            </section>
+              }
+            />
           ) : null}
           {!latest && !error ? (
             <EmptyState

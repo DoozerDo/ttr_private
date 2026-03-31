@@ -11,6 +11,7 @@ import { GuidedOverlay } from "@/components/GuidedOverlay";
 import { type ComplianceFlag } from "@/components/ComplianceViolationPanel";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
+import { RouteStateShell } from "@/components/RouteStateShell";
 import { PageShell } from "@/components/PageShell";
 import { VerifiedGenerationTrustSummary } from "@/components/VerifiedGenerationTrustSummary";
 import { StudioNextMove } from "@/components/StudioNextMove";
@@ -2956,45 +2957,48 @@ export default function StudioPage() {
   }
 
   const unlockEntryPanel = studioGenerationRenderState.shouldShowUnlockEntry ? (
-    <section
-      className="rounded-2xl border border-emerald-300/30 bg-emerald-500/10 p-4"
-      data-testid="studio-unlock-entry-panel"
+    <RouteStateShell
+      testId="studio-unlock-entry-panel"
+      tone="success"
+      eyebrow="Unlock"
+      title="READY TO GENERATE"
+      body={
+        <p className="text-sm text-slate-100">
+          Your verified evidence supports this role. Your materials are now grounded and ready.
+        </p>
+      }
+      cta={
+        <div className="flex flex-wrap gap-3">
+          <FormButton
+            onClick={() => void handleResumeDraft()}
+            disabled={!canGenerateDocuments || resumeGenerating}
+          >
+            {resumeGenerating
+              ? studioGenerationRenderState.shouldShowEnhancedLoadingCopy
+                ? "GENERATING VERIFIED DRAFT..."
+                : "Generating..."
+              : "GENERATE RESUME"}
+          </FormButton>
+          <FormButton
+            variant="secondary"
+            onClick={() => void handleCoverDraft()}
+            disabled={!canGenerateDocuments || coverGenerating}
+          >
+            {coverGenerating
+              ? studioGenerationRenderState.shouldShowEnhancedLoadingCopy
+                ? "GENERATING VERIFIED DRAFT..."
+                : "Generating..."
+              : "GENERATE COVER LETTER"}
+          </FormButton>
+        </div>
+      }
     >
-      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-100">
-        READY TO GENERATE
-      </p>
-      <p className="mt-2 text-sm text-slate-100">
-        Your verified evidence supports this role. Your materials are now grounded and ready.
-      </p>
-      <div className="mt-4 flex flex-wrap gap-3">
-        <FormButton
-          onClick={() => void handleResumeDraft()}
-          disabled={!canGenerateDocuments || resumeGenerating}
-        >
-          {resumeGenerating
-            ? studioGenerationRenderState.shouldShowEnhancedLoadingCopy
-              ? "GENERATING VERIFIED DRAFT..."
-              : "Generating..."
-            : "GENERATE RESUME"}
-        </FormButton>
-        <FormButton
-          variant="secondary"
-          onClick={() => void handleCoverDraft()}
-          disabled={!canGenerateDocuments || coverGenerating}
-        >
-          {coverGenerating
-            ? studioGenerationRenderState.shouldShowEnhancedLoadingCopy
-              ? "GENERATING VERIFIED DRAFT..."
-              : "Generating..."
-            : "GENERATE COVER LETTER"}
-        </FormButton>
-      </div>
       {unlockGenerationLoadingMessage && studioGenerationRenderState.isGenerating ? (
         <p className="mt-3 text-xs uppercase tracking-[0.2em] text-emerald-100">
           {unlockGenerationLoadingMessage}
         </p>
       ) : null}
-    </section>
+    </RouteStateShell>
   ) : null;
 
   return (
@@ -3110,12 +3114,17 @@ export default function StudioPage() {
           ) : null}
         </section>
       ) : studioGenerationState === "BLOCKED" ? (
-        <section className="rounded-2xl border border-amber-300/30 bg-amber-500/10 p-4" data-testid="studio-evidence-blocked-panel">
-          <h2 className="text-base font-semibold text-amber-100">Why generation is not ready yet</h2>
-          <p className="mt-1 text-sm text-slate-100">
-            This role still needs stronger proof in a few areas before tailored output will be useful.
-          </p>
-        </section>
+        <RouteStateShell
+          testId="studio-evidence-blocked-panel"
+          tone="warning"
+          eyebrow="Blocked"
+          title="Why generation is not ready yet"
+          body={
+            <p className="text-sm text-slate-100">
+              This role still needs stronger proof in a few areas before tailored output will be useful.
+            </p>
+          }
+        />
       ) : null}
       {opportunityContext ? (
         <p className="text-xs text-slate-400">
