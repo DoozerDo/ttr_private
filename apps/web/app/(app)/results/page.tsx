@@ -736,22 +736,37 @@ export function OpportunityMapSection({
         ? "border-slate-500/50 bg-slate-800/80 text-slate-100"
         : "border-emerald-300/30 bg-emerald-500/10 text-emerald-100";
   const readinessMessage =
-    nextAction.type === "fit_review"
-      ? "Some requirements are not yet supported by verified evidence."
-      : readiness.status === "blocked"
+    readiness.status === "blocked"
+      ? "Missing verified evidence is blocking Studio."
+      : readiness.status === "limited"
         ? "Some requirements are not yet supported by verified evidence."
-        : readiness.status === "limited"
-          ? "Some requirements are not yet supported by verified evidence."
-          : "Your evidence supports generation.";
+        : "Your evidence supports generation.";
+  const blockedByEvidence = readiness.status === "blocked";
+  const lowFitScore = typeof score === "number" && score < 70;
   const decisionNarrative = useMemo(() => {
+    if (blockedByEvidence) {
+      return {
+        headline: "You need verified evidence to proceed.",
+        body: "Fit Review helps collect the missing evidence so Studio can open for this role.",
+      };
+    }
+    if (lowFitScore) {
+      return {
+        headline: "This role may not be a fit.",
+        body: "The score is below the fit threshold, so the role looks weaker overall.",
+      };
+    }
     if (nextAction.type === "fit_review") {
-      return { headline: "This score needs a fit review.", body: "Use the primary action to strengthen the baseline." };
+      return {
+        headline: "This score points to Fit Review.",
+        body: "Use the canonical next step to strengthen the baseline before generating materials.",
+      };
     }
     if (nextAction.type === "studio") {
       return { headline: "This score is ready for Studio.", body: "Open Resume & Cover Letter Studio next." };
     }
     return { headline: "This score is ready to generate and save.", body: "Generate your resume, then save the role to Opportunities." };
-  }, [nextAction.type]);
+  }, [blockedByEvidence, lowFitScore, nextAction.type]);
   return (
     <section className="rounded-3xl bg-slate-900/65 px-6 py-9 sm:px-8 sm:py-10">
       <div className="max-w-4xl space-y-9">
@@ -879,9 +894,12 @@ type AdvancedInsightsCardProps = {
 };
 
 type SignalAlignmentSectionProps = {
+  title: string;
   strengths: string[];
   gaps: string[];
   summary: string;
+  gapHeading: string;
+  gapEmptyMessage: string;
 };
 
 export function AdvancedInsightsCard({
@@ -961,17 +979,18 @@ export function AdvancedInsightsCard({
 }
 
 export function SignalAlignmentSection({
+  title,
   strengths,
   gaps,
   summary,
+  gapHeading,
+  gapEmptyMessage,
 }: SignalAlignmentSectionProps) {
   if (!strengths.length && !gaps.length) return null;
   return (
     <section className="rounded-3xl bg-slate-900/55 p-6">
       <header className="space-y-2">
-        <h2 className="text-2xl font-semibold tracking-tight text-slate-100">
-          Why this role fits you
-        </h2>
+        <h2 className="text-2xl font-semibold tracking-tight text-slate-100">{title}</h2>
         <p className="max-w-3xl text-sm leading-6 text-slate-300">{summary}</p>
       </header>
       <div className="mt-5 grid gap-5 lg:grid-cols-2">
@@ -989,10 +1008,10 @@ export function SignalAlignmentSection({
         </article>
         <article className="space-y-3">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200">
-            Gaps to be aware of
+            {gapHeading}
           </p>
           <ul className="space-y-2 text-sm text-slate-100">
-            {(gaps.length ? gaps : ["No material gaps were identified in this run."]).map((signal) => (
+            {(gaps.length ? gaps : [gapEmptyMessage]).map((signal) => (
               <li key={`gap-${signal}`} className="border-b border-white/10 pb-2 last:border-0">
                 {signal}
               </li>
@@ -2058,6 +2077,7 @@ export default function ResultsPage() {
       }),
     [activeScore, generationReadiness.blocked, generationReadiness.status],
   );
+  const isGenerationBlocked = generationReadiness.status === "blocked";
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
     if (!latest) return;
@@ -2217,6 +2237,8 @@ export default function ResultsPage() {
       opportunityVerdict.label,
     ],
   );
+  const hasEvidenceGaps = isGenerationBlocked;
+  const hasFitGaps = criticalGapDetails.length > 0 || signalAlignment.weakerForRole.length > 0;
 
   const renderDriverGrid = (showExtraLine: boolean) => (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -2860,6 +2882,14 @@ export default function ResultsPage() {
         ctaHref: "/analyze",
       };
     }
+    if (isGenerationBlocked) {
+      return {
+        headline: "You need verified evidence to proceed.",
+        body: "Add verified evidence to unlock resume and cover letter generation.",
+        ctaLabel: "Start Fit Review",
+        ctaHref: fitReviewPath,
+      };
+    }
     if (primaryNextAction.type === "fit_review") {
       return {
         headline: "This score points to Fit Review.",
@@ -2888,6 +2918,7 @@ export default function ResultsPage() {
   }, [
     fitReviewPath,
     isGuidedActive,
+    isGenerationBlocked,
     latest,
     primaryNextAction.type,
     saveOpportunityFromResults,
@@ -3231,11 +3262,26 @@ export default function ResultsPage() {
                   ) : null}
 
                   <SignalAlignmentSection
+                    title={isGenerationBlocked ? "Evidence gaps" : "Why this role fits you"}
                     strengths={Array.from(
                       new Set([...advantageSignals, ...signalAlignment.strongForRole]),
                     ).slice(0, 6)}
-                    gaps={signalAlignment.weakerForRole}
+                    gaps={
+                      hasEvidenceGaps && criticalGapDetails.length > 0
+                        ? criticalGapDetails.map((gap) => gap.title).slice(0, 3)
+                        : hasFitGaps
+                          ? signalAlignment.weakerForRole
+                          : []
+                    }
                     summary={signalAlignment.summary}
+                    gapHeading={
+                      isGenerationBlocked ? "Missing verification" : "Gaps to be aware of"
+                    }
+                    gapEmptyMessage={
+                      isGenerationBlocked
+                        ? "Missing verification is still preventing Studio."
+                        : "No material gaps were identified in this run."
+                    }
                   />
                   <section className="rounded-2xl border border-slate-700/60 bg-slate-900/45 p-4">
                     <button
