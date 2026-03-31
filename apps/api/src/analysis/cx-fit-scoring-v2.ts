@@ -951,6 +951,83 @@ const formatClusterList = (clusters: string[]) => {
   return `${clusters.slice(0, 8).join(',')}...`;
 };
 
+const SUPPORT_OPERATIONS_FAMILY_PATTERNS = [
+  /support operations?/,
+  /customer operations?/,
+  /support leadership/,
+  /support process ownership/,
+  /process ownership/,
+  /service delivery/,
+  /escalation management/,
+  /incident management/,
+  /incident response/,
+  /incident command/,
+  /escalation ownership/,
+  /triage/,
+  /workflow/,
+  /sla/,
+  /kpi/,
+  /support queue/,
+];
+
+const CHANGE_LEADERSHIP_FAMILY_PATTERNS = [
+  /change leadership/,
+  /change management/,
+  /transformation/,
+  /transformational/,
+  /rollout/,
+  /adoption/,
+  /migration/,
+  /operating model/,
+  /operational transformation/,
+  /process rollout/,
+  /reorganization/,
+  /redesign/,
+  /launch/,
+];
+
+const LEADERSHIP_SCOPE_FAMILY_PATTERNS = [
+  /led|leading|managed|owned|directed|supervised|built|drove|orchestrated|championed|spearheaded/,
+  /team of \d+/,
+  /\d+\+/,
+  /across \d+/,
+  /org(?:anization)?-?wide/,
+  /global/,
+  /enterprise/,
+  /multi-site/,
+  /cross-functional/,
+  /portfolio/,
+  /division/,
+  /department/,
+  /region/,
+];
+
+function hasFamilyEvidence(text: string, family: 'support' | 'change' | 'scope'): boolean {
+  const lower = text.toLowerCase();
+  if (family === 'support') {
+    return (
+      SUPPORT_OPERATIONS_FAMILY_PATTERNS.some((pattern) => pattern.test(lower)) &&
+      /led|leading|managed|owned|built|improved|scaled|optimized|directed|supervised|drove|orchestrated/.test(
+        lower,
+      )
+    );
+  }
+  if (family === 'change') {
+    return (
+      CHANGE_LEADERSHIP_FAMILY_PATTERNS.some((pattern) => pattern.test(lower)) &&
+      /led|leading|managed|owned|drove|directed|supervised|orchestrated|championed|spearheaded/.test(
+        lower,
+      )
+    );
+  }
+  return (
+    LEADERSHIP_SCOPE_FAMILY_PATTERNS.some((pattern) => pattern.test(lower)) &&
+    /led|leading|managed|owned|directed|supervised|built|drove|orchestrated|championed|spearheaded/.test(
+      lower,
+    )
+  );
+}
+
 export const scoreCxFitV2 = (
   input: CxFitV2Input,
   options?: { debugBundle?: boolean },
@@ -1430,26 +1507,65 @@ export const scoreCxFitV2 = (
     change_leadership_and_customer_advocacy: changeLeadershipPercentUsed,
   };
 
+  const calibratedDimensionPercents: Record<ScoringContractV1DimensionKey, number> = {
+    ...dimensionPercents,
+  };
+  const supportFamilyEvidence =
+    hasFamilyEvidence(baselineText, 'support') || hasFamilyEvidence(jobTextForScoring, 'support');
+  const changeFamilyEvidence =
+    hasFamilyEvidence(baselineText, 'change') || hasFamilyEvidence(jobTextForScoring, 'change');
+  const scopeFamilyEvidence =
+    hasFamilyEvidence(baselineText, 'scope') || hasFamilyEvidence(jobTextForScoring, 'scope');
+
+  if (supportFamilyEvidence) {
+    calibratedDimensionPercents.support_operations_and_process_rigor = Math.min(
+      100,
+      calibratedDimensionPercents.support_operations_and_process_rigor + 3,
+    );
+    calibratedDimensionPercents.role_scope_and_seniority = Math.min(
+      100,
+      calibratedDimensionPercents.role_scope_and_seniority + 1,
+    );
+  }
+
+  if (changeFamilyEvidence) {
+    calibratedDimensionPercents.change_leadership_and_customer_advocacy = Math.min(
+      100,
+      calibratedDimensionPercents.change_leadership_and_customer_advocacy + 3,
+    );
+    calibratedDimensionPercents.role_scope_and_seniority = Math.min(
+      100,
+      calibratedDimensionPercents.role_scope_and_seniority + 1,
+    );
+  }
+
+  if (scopeFamilyEvidence) {
+    calibratedDimensionPercents.role_scope_and_seniority = Math.min(
+      100,
+      calibratedDimensionPercents.role_scope_and_seniority + 2,
+    );
+  }
+
   // ---- weighted points ----
   const dimensionPoints: Record<ScoringContractV1DimensionKey, number> = {
     role_scope_and_seniority: toWeightedPoints(
-      dimensionPercents.role_scope_and_seniority,
+      calibratedDimensionPercents.role_scope_and_seniority,
       effectiveWeights.role_scope_and_seniority,
     ),
     support_operations_and_process_rigor: toWeightedPoints(
-      dimensionPercents.support_operations_and_process_rigor,
+      calibratedDimensionPercents.support_operations_and_process_rigor,
       effectiveWeights.support_operations_and_process_rigor,
     ),
     tooling_and_platform_experience: toWeightedPoints(
-      dimensionPercents.tooling_and_platform_experience,
+      calibratedDimensionPercents.tooling_and_platform_experience,
       effectiveWeights.tooling_and_platform_experience,
     ),
     domain_and_business_context: toWeightedPoints(
-      dimensionPercents.domain_and_business_context,
+      calibratedDimensionPercents.domain_and_business_context,
       effectiveWeights.domain_and_business_context,
     ),
     change_leadership_and_customer_advocacy: toWeightedPoints(
-      dimensionPercents.change_leadership_and_customer_advocacy,
+      calibratedDimensionPercents.change_leadership_and_customer_advocacy,
       effectiveWeights.change_leadership_and_customer_advocacy,
     ),
   };
@@ -1549,7 +1665,7 @@ export const scoreCxFitV2 = (
     domainTagsRole: domainTagsRole,
           hasRawDescription,
           dimensionPoints,
-          dimensionPercents,
+          dimensionPercents: calibratedDimensionPercents,
           penalties,
           finalBeforeClamp,
           finalScore,
@@ -1562,7 +1678,7 @@ export const scoreCxFitV2 = (
     rubric: {
       id: 'scoring_contract_v1',
       weights: BASE_WEIGHTS,
-      dimensionPercents,
+      dimensionPercents: calibratedDimensionPercents,
       dimensionPoints,
       subtotal,
       penalties,

@@ -49,6 +49,25 @@ export type RoleSignalAlignmentViewModel = {
   fallbackUsed: boolean;
 };
 
+export type ResultsScoreBreakdownDimension = {
+  key:
+    | "role_scope_and_seniority"
+    | "support_operations_and_process_rigor"
+    | "tooling_and_platform_experience"
+    | "domain_and_business_context"
+    | "change_leadership_and_customer_advocacy";
+  label: string;
+  score: number;
+  weight: number;
+};
+
+export type ResultsScoreBreakdown = {
+  total_score: number;
+  dimensions: ResultsScoreBreakdownDimension[];
+};
+
+
+
 export const PROFESSIONAL_SIGNAL_DEFINITIONS: ProfessionalSignalDefinition[] = [
   {
     id: "customer_operations_leadership",
@@ -276,3 +295,59 @@ export function buildResultsSignalAlignment(
     fallbackUsed: !renderable,
   };
 }
+
+function hasAnyLabel(labels: string[], candidates: string[]): boolean {
+  const labelSet = new Set(labels.map((label) => label.toLowerCase()));
+  return candidates.some((candidate) => labelSet.has(candidate.toLowerCase()));
+}
+
+function hasSupportOperationsEvidence(text: string): boolean {
+  return (
+    /\b(support operations?|customer operations?|support leadership|support process ownership|process ownership|service delivery|escalation management|incident management|incident response|incident command|escalation ownership|triage|workflow|sla|kpi|support queue)\b/.test(
+      text,
+    ) &&
+    /\b(led|leading|managed|owned|built|improved|scaled|optimized|directed|supervised|drove|orchestrated)\b/.test(
+      text,
+    )
+  );
+}
+
+function hasChangeLeadershipEvidence(text: string): boolean {
+  return (
+    /\b(change leadership|change management|transformation|transformational|rollout|adoption|migration|operating model|operational transformation|process rollout|reorganization|redesign|launch)\b/.test(
+      text,
+    ) &&
+    /\b(led|leading|managed|owned|drove|directed|supervised|orchestrated|championed|spearheaded)\b/.test(
+      text,
+    )
+  );
+}
+
+function hasLeadershipScopeEvidence(text: string): boolean {
+  return (
+    /\b(led|leading|managed|owned|directed|supervised|built|drove|orchestrated|championed|spearheaded)\b/.test(
+      text,
+    ) &&
+    /\b(team of \d+|\d+\+|across \d+|org(?:anization)?-?wide|global|enterprise|multi-site|cross-functional|portfolio|division|department|region)\b/.test(
+      text,
+    )
+  );
+}
+
+function hasEvidenceFamily(value: string[], family: "support" | "change" | "scope"): boolean {
+  const lower = value.join(" ").toLowerCase();
+  const labelHit =
+    family === "support"
+      ? hasAnyLabel(value, ["Customer Operations Leadership", "Support Process Design", "Incident Management"])
+      : family === "change"
+        ? hasAnyLabel(value, ["Change Leadership", "Cross Functional Coordination", "Organizational Scale"])
+        : hasAnyLabel(value, ["Organizational Scale", "Customer Operations Leadership"]);
+  const textHit =
+    family === "support"
+      ? hasSupportOperationsEvidence(lower)
+      : family === "change"
+        ? hasChangeLeadershipEvidence(lower)
+        : hasLeadershipScopeEvidence(lower);
+  return labelHit || textHit;
+}
+

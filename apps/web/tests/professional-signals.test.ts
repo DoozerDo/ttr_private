@@ -1,7 +1,4 @@
-import {
-  buildBaselineSignalGraph,
-  buildResultsSignalAlignment,
-} from "@/lib/professionalSignals";
+import { buildBaselineSignalGraph, buildResultsSignalAlignment } from "@/lib/professionalSignals";
 
 describe("professional signals", () => {
   it("derives strong and developing professional signals from baseline content", () => {
@@ -93,4 +90,5 @@ describe("professional signals", () => {
 
     expect(alignment.renderable).toBe(false);
   });
+
 });

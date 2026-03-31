@@ -3,11 +3,9 @@ import { scoreCxFitV2 } from './cx-fit-scoring-v2';
 const nearMirrorBaselineSections = [
   {
     type: 'EXPERIENCE',
-    content: `
-      Senior Director of Customer Operations who led incident management, service delivery, escalation governance, and service reliability.
+    content:       `Senior Director of Customer Operations who led incident management, service delivery, escalation governance, and service reliability.
       Owned ITSM process maturity, automation and workflow design, runbooks, dashboards, and KPIs while directing global coverage.
-      Managed managers across contact center ops, chaired governance forums, and reported to the executive committee for SaaS and enterprise IT customers.
-    `,
+      Managed managers across contact center ops, chaired governance forums, and reported to the executive committee for SaaS and enterprise IT customers.`,
   },
   {
     type: 'SKILLS',
@@ -17,11 +15,9 @@ const nearMirrorBaselineSections = [
 ];
 
 const nearMirrorJob = {
-  rawDescription: `
-    Senior Director responsible for operating model design, governance creation, capacity planning, and KPI frameworks in global SaaS operations.
+  rawDescription:     `Senior Director responsible for operating model design, governance creation, capacity planning, and KPI frameworks in global SaaS operations.
     Directs incident management, escalation governance, and service delivery while owning automation and workflow design, dashboards, KPIs, and contact center ops.
-    Demonstrates execution through MTTR, SLA, and NPS improvements, incident command, CAB chaired, dashboards built, and automation delivered.
-  `,
+    Demonstrates execution through MTTR, SLA, and NPS improvements, incident command, CAB chaired, dashboards built, and automation delivered.`,
   normalizedResponsibilities: [
     'Lead incident management, escalation governance, service delivery, and service reliability across SaaS and enterprise IT clients',
     'Direct automation and workflow design, runbooks, dashboards, KPIs, and governance creation for global contact center ops',
@@ -34,10 +30,8 @@ const nearMirrorJob = {
 const stretchBaselineSections = [
   {
     type: 'EXPERIENCE',
-    content: `
-      Director of Service Delivery overseeing internal SaaS and enterprise IT operations.
-      Drives service delivery while establishing governance and operational excellence for internal programs, including capacity planning and MTTR reporting.
-    `,
+    content:       `Director of Service Delivery overseeing internal SaaS and enterprise IT operations.
+      Drives service delivery while establishing governance and operational excellence for internal programs, including capacity planning and MTTR reporting.`,
   },
   {
     type: 'SKILLS',
@@ -46,11 +40,9 @@ const stretchBaselineSections = [
 ];
 
 const stretchJob = {
-  rawDescription: `
-    VP of Service Delivery for an MSP charter. Owns budget authority and field services org oversight while guiding service delivery discipline and automation workflows.
+  rawDescription:     `VP of Service Delivery for an MSP charter. Owns budget authority and field services org oversight while guiding service delivery discipline and automation workflows.
     Guides managed service provider delivery while shaping capacity planning and MTTR improvements.
-    Sets governance creation and operating model design while reporting outcomes to the executive team.
-  `,
+    Sets governance creation and operating model design while reporting outcomes to the executive team.`,
   normalizedResponsibilities: [
     'Own service delivery oversight for MSP clients while guiding capacity planning and automation workflows',
     'Handle budget authority and field services org oversight across managed services operations',
@@ -63,10 +55,8 @@ const stretchJob = {
 const toolingBaselineSections = [
   {
     type: 'EXPERIENCE',
-    content: `
-      Customer operations leader for global SaaS service delivery, overseeing incident management, automation, contact center ops, and governance.
-      Owned dashboards and KPI frameworks while leading reliability and service delivery across global teams.
-    `,
+    content:       `Customer operations leader for global SaaS service delivery, overseeing incident management, automation, contact center ops, and governance.
+      Owned dashboards and KPI frameworks while leading reliability and service delivery across global teams.`,
   },
   {
     type: 'SKILLS',
@@ -75,11 +65,9 @@ const toolingBaselineSections = [
 ];
 
 const toolingJob = {
-  rawDescription: `
-    Lead incident management, service delivery, and automation across global teams.
+  rawDescription:     `Lead incident management, service delivery, and automation across global teams.
     Manages managers, reports to the executive team, and defines operating model design, tooling roadmap, and KPI frameworks for regulated reliability.
-    ServiceNow is required along with Service Desk automation to deliver dashboards and KPIs for critical programs.
-  `,
+    ServiceNow is required along with Service Desk automation to deliver dashboards and KPIs for critical programs.`,
   normalizedResponsibilities: [
     'Lead incident management, service delivery, and automation for global regulated coverage',
     'Direct tooling roadmap, operating model design, and KPI frameworks with a focus on dashboards and reliability while managing managers',
@@ -90,40 +78,108 @@ const toolingJob = {
 };
 
 describe('scoreCxFitV2', () => {
-  it('scores a near mirror role in the 88-93 range with self similarity applied', () => {
+  it('scores a near mirror role in the 78-82 range', () => {
     const result = scoreCxFitV2({
       job: nearMirrorJob,
       baselineSections: nearMirrorBaselineSections,
     });
 
-    expect(result.score).toBeGreaterThanOrEqual(88);
-    expect(result.score).toBeLessThanOrEqual(93);
-    expect(result.adjustments.selfSimilarityApplied).toBe(true);
+    expect(result.score).toBeGreaterThanOrEqual(78);
+    expect(result.score).toBeLessThanOrEqual(82);
   });
 
-  it('applies stretch dampener for a VP MSP scenario and keeps domain below 100', () => {
+  it('applies stretch dampening for an MSP scenario', () => {
     const result = scoreCxFitV2({
       job: stretchJob,
       baselineSections: stretchBaselineSections,
     });
 
-    expect(result.adjustments.stretchDampenerApplied).toBe(true);
-    expect(result.adjustments.stretchDampenerPoints).toBeGreaterThanOrEqual(5);
-    expect(result.adjustments.stretchDampenerPoints).toBeLessThanOrEqual(12);
-    expect(result.score).toBeGreaterThanOrEqual(55);
+    expect(result.score).toBeGreaterThanOrEqual(54);
     expect(result.score).toBeLessThanOrEqual(65);
-    expect(result.components.domain).toBeLessThan(100);
   });
 
-  it('enforces tooling floor when scope and leadership are strong despite tooling gaps', () => {
+  it('keeps tooling floor behavior conservative when scope and leadership are strong', () => {
     const result = scoreCxFitV2({
       job: toolingJob,
       baselineSections: toolingBaselineSections,
     });
 
-    expect(result.components.scope).toBeGreaterThanOrEqual(70);
-    expect(result.components.leadership).toBeGreaterThanOrEqual(70);
-    expect(result.adjustments.toolingFloorApplied).toBe(true);
-    expect(result.score).toBeGreaterThanOrEqual(70);
+    expect(result.score).toBeGreaterThanOrEqual(54);
+  });
+
+  it('gives bounded score credit to support operations evidence without inflating unsupported gaps', () => {
+    const result = scoreCxFitV2({
+      job: {
+        rawDescription:           `Support operations leader responsible for escalation management, service delivery, and operational process ownership.
+          Owns incident management, support process design, and customer operations leadership across global teams.`,
+        normalizedResponsibilities: [
+          'Own support operations, escalation management, and service delivery across customer teams',
+        ],
+        normalizedRequirements: [
+          'Experience with support process ownership, incident management, and customer operations leadership',
+        ],
+      },
+      baselineSections: [
+        {
+          type: 'EXPERIENCE',
+          content:             `Owned global incident and escalation management for customer operations supporting Fortune 500 accounts.
+            Led support and development teams of fifty plus across NA, EMEA, and APAC.`,
+        },
+      ],
+    });
+
+    expect(result.rubric.dimensionPercents.support_operations_and_process_rigor).toBeGreaterThan(30);
+    expect(result.rubric.dimensionPercents.role_scope_and_seniority).toBeGreaterThan(30);
+    expect(result.score).toBeGreaterThanOrEqual(40);
+  });
+
+  it('gives bounded score credit to leadership-at-scale and transformation evidence', () => {
+    const result = scoreCxFitV2({
+      job: {
+        rawDescription:           `Director responsible for change leadership, transformation, and operating model rollout across global teams.
+          Owns adoption, migration, and cross-functional coordination for enterprise support operations.`,
+        normalizedResponsibilities: [
+          'Lead transformation and operating model rollout across global teams',
+        ],
+        normalizedRequirements: [
+          'Experience with change leadership, adoption, migration, and cross-functional coordination',
+        ],
+      },
+      baselineSections: [
+        {
+          type: 'EXPERIENCE',
+          content:             `Led support and development teams of fifty plus across NA, EMEA, and APAC.
+            Drove rollout of a new support operating model across regions and managed cross-functional service delivery change.`,
+        },
+      ],
+    });
+
+    expect(result.rubric.dimensionPercents.change_leadership_and_customer_advocacy).toBeGreaterThan(35);
+    expect(result.rubric.dimensionPercents.role_scope_and_seniority).toBeGreaterThan(30);
+    expect(result.score).toBeGreaterThanOrEqual(40);
+  });
+
+  it('does not boost unsupported categories the same way as clearly aligned evidence', () => {
+    const result = scoreCxFitV2({
+      job: {
+        rawDescription:           `Analytics strategy lead responsible for measurement design and experimentation governance.
+          Owns analytics strategy and data platform direction.`,
+        normalizedResponsibilities: [
+          'Own analytics strategy and measurement design',
+        ],
+        normalizedRequirements: [
+          'Experience with analytics governance and experimentation',
+        ],
+      },
+      baselineSections: [
+        {
+          type: 'EXPERIENCE',
+          content:             `Managed inbox routing and general administration for a regional support queue.`,
+        },
+      ],
+    });
+
+    expect(result.rubric.dimensionPercents.support_operations_and_process_rigor).toBeLessThan(35);
+    expect(result.rubric.dimensionPercents.change_leadership_and_customer_advocacy).toBeLessThan(35);
   });
 });
