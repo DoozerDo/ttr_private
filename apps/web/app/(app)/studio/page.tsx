@@ -680,9 +680,6 @@ export default function StudioPage() {
   }
 
   const isFirstGenerationAfterUnlock = isFromUnlock && !hasGeneratedOnce;
-  const unlockGenerationLoadingMessage = isFirstGenerationAfterUnlock
-    ? "Generating from your verified evidence..."
-    : null;
 
   const router = useRouter();
   const trackerEntryId =
@@ -1373,10 +1370,54 @@ export default function StudioPage() {
   );
   const hasCoverLetterArtifact = coverPresenter.hasExportableContent;
   const hasCompletedGeneration = hasResumeArtifact || hasCoverLetterArtifact;
+  const studioGenerationRenderState = useMemo(() => {
+    const isGenerating = resumeGenerating || coverGenerating;
+    const artifactType =
+      coverGenerating || (coverPresenter.status === "success" && Boolean(coverState.response))
+        ? "cover_letter"
+        : resumeGenerating || (resumePresenter.status === "success" && Boolean(resumeState.response))
+          ? "resume"
+          : null;
+    const shouldShowTrustSummary =
+      canGenerateDocuments &&
+      ((resumePresenter.status === "success" && Boolean(resumeState.response)) ||
+        (coverPresenter.status === "success" && Boolean(coverState.response)));
+    return {
+      isBlocked: !canGenerateDocuments,
+      isReady: canGenerateDocuments,
+      isFromUnlock,
+      isFirstGenerationAfterUnlock,
+      isGenerating,
+      hasGenerated: hasCompletedGeneration,
+      artifactType,
+      shouldShowTrustSummary,
+      shouldShowUnlockEntry: isFromUnlock,
+      shouldShowEnhancedLoadingCopy: isFromUnlock && isGenerating && !hasGeneratedOnce,
+    };
+  }, [
+    canGenerateDocuments,
+    coverGenerating,
+    coverPresenter.status,
+    coverState.response,
+    hasCompletedGeneration,
+    hasGeneratedOnce,
+    isFirstGenerationAfterUnlock,
+    isFromUnlock,
+    resumeGenerating,
+    resumePresenter.status,
+    resumeState.response,
+  ]);
   const resumeTrustSummaryVisible =
-    resumePresenter.status === "success" && Boolean(resumeState.response) && canGenerateDocuments;
+    studioGenerationRenderState.shouldShowTrustSummary &&
+    resumePresenter.status === "success" &&
+    Boolean(resumeState.response);
   const coverTrustSummaryVisible =
-    coverPresenter.status === "success" && Boolean(coverState.response) && canGenerateDocuments;
+    studioGenerationRenderState.shouldShowTrustSummary &&
+    coverPresenter.status === "success" &&
+    Boolean(coverState.response);
+  const unlockGenerationLoadingMessage = studioGenerationRenderState.shouldShowEnhancedLoadingCopy
+    ? "Generating from your verified evidence..."
+    : null;
   const generationStorageKey = useMemo(
     () => getGenerationCompletionStorageKey(effectiveJobId, effectiveBaselineId),
     [effectiveBaselineId, effectiveJobId],
@@ -1437,6 +1478,9 @@ export default function StudioPage() {
       jobId: effectiveJobId || null,
       baselineId: effectiveBaselineId || null,
       score: analysisScore,
+      artifactType: studioGenerationRenderState.artifactType,
+      isGenerating: studioGenerationRenderState.isGenerating,
+      isFirstGenerationAfterUnlock: studioGenerationRenderState.isFirstGenerationAfterUnlock,
       readinessStatus: activeGenerationReadiness.status,
       trustGateAllowed: trustGateDecision.allowed,
       finalAction: primaryNextAction.type,
@@ -1453,6 +1497,9 @@ export default function StudioPage() {
     effectiveJobId,
     primaryNextAction.reason,
     primaryNextAction.type,
+    studioGenerationRenderState.artifactType,
+    studioGenerationRenderState.isFirstGenerationAfterUnlock,
+    studioGenerationRenderState.isGenerating,
     requestedAnalysisId,
     trustGateDecision.allowed,
   ]);
@@ -2908,7 +2955,7 @@ export default function StudioPage() {
     }
   }
 
-  const unlockEntryPanel = isFromUnlock ? (
+  const unlockEntryPanel = studioGenerationRenderState.shouldShowUnlockEntry ? (
     <section
       className="rounded-2xl border border-emerald-300/30 bg-emerald-500/10 p-4"
       data-testid="studio-unlock-entry-panel"
@@ -2924,10 +2971,10 @@ export default function StudioPage() {
           onClick={() => void handleResumeDraft()}
           disabled={!canGenerateDocuments || resumeGenerating}
         >
-          {resumeGenerating && isFirstGenerationAfterUnlock
-            ? "GENERATING VERIFIED DRAFT..."
-            : resumeGenerating
-            ? "Generating..."
+          {resumeGenerating
+            ? studioGenerationRenderState.shouldShowEnhancedLoadingCopy
+              ? "GENERATING VERIFIED DRAFT..."
+              : "Generating..."
             : "GENERATE RESUME"}
         </FormButton>
         <FormButton
@@ -2935,14 +2982,14 @@ export default function StudioPage() {
           onClick={() => void handleCoverDraft()}
           disabled={!canGenerateDocuments || coverGenerating}
         >
-          {coverGenerating && isFirstGenerationAfterUnlock
-            ? "GENERATING VERIFIED DRAFT..."
-            : coverGenerating
-            ? "Generating..."
+          {coverGenerating
+            ? studioGenerationRenderState.shouldShowEnhancedLoadingCopy
+              ? "GENERATING VERIFIED DRAFT..."
+              : "Generating..."
             : "GENERATE COVER LETTER"}
         </FormButton>
       </div>
-      {unlockGenerationLoadingMessage && (resumeGenerating || coverGenerating) ? (
+      {unlockGenerationLoadingMessage && studioGenerationRenderState.isGenerating ? (
         <p className="mt-3 text-xs uppercase tracking-[0.2em] text-emerald-100">
           {unlockGenerationLoadingMessage}
         </p>
@@ -2953,7 +3000,7 @@ export default function StudioPage() {
   return (
     <PageShell className="space-y-4 pb-4">
       {unlockEntryPanel}
-      {unlockGenerationLoadingMessage && (resumeGenerating || coverGenerating) ? (
+      {unlockGenerationLoadingMessage && studioGenerationRenderState.isGenerating ? (
         <Alert intent="info" title="Verified evidence in use">
           {unlockGenerationLoadingMessage}
         </Alert>
@@ -2971,7 +3018,7 @@ export default function StudioPage() {
       <section className="space-y-5 rounded-[28px] bg-slate-900/45 p-6 md:p-8" data-testid="studio-generation-readiness">
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-            {studioUiState === "READY" ? "Ready" : "Blocked"}
+            {studioGenerationRenderState.isReady ? "Ready" : "Blocked"}
           </p>
           <p className="text-sm text-slate-300">
             {typeof analysisScore === "number" ? `Fit score ${Math.round(analysisScore)} � ` : "Fit score unavailable � "}
@@ -3302,7 +3349,7 @@ export default function StudioPage() {
 
       <StudioNextMove move={studioNextMove} />
 
-      {studioUiState !== "BLOCKED" && !studioBlockedByNextAction ? (
+      {!studioGenerationRenderState.isBlocked && !studioBlockedByNextAction ? (
       <>
       <section className="space-y-1 px-1">
         <h2 className="text-xl font-semibold text-slate-100">Your application materials</h2>
@@ -3661,7 +3708,7 @@ export default function StudioPage() {
                   {unlockGenerationConfirmation}
                 </p>
               ) : null}
-            {coverTrustSummaryVisible ? (
+              {coverTrustSummaryVisible ? (
                 <VerifiedGenerationTrustSummary testId="studio-cover-trust-summary" />
               ) : null}
               <div className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-3">
