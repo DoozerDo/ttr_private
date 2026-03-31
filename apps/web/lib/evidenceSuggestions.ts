@@ -38,6 +38,69 @@ function sentenceFromSignals(signals: string[]): string {
   return `${top[0]}, ${top[1]}, and ${top[2]}`;
 }
 
+type CategoryFamily = "support_operations" | "change_leadership" | "leadership_scope";
+
+function normalizeCategoryFamily(categoryLabel: string): CategoryFamily | null {
+  const category = categoryLabel.toLowerCase();
+  if (/\bsupport operations?\b|\bcustomer operations?\b|\bops\b|\boperations\b/.test(category)) {
+    return "support_operations";
+  }
+  if (/\bchange leadership\b|\btransformation\b|\brollout\b|\badoption\b|\bmigration\b/.test(category)) {
+    return "change_leadership";
+  }
+  if (/\bleadership\b|\bseniority\b|\bscope\b|\bteam\b|\bscale\b|\bglobal\b|\bregional\b/.test(category)) {
+    return "leadership_scope";
+  }
+  return null;
+}
+
+function hasSupportOperationsEvidence(evidenceText: string): boolean {
+  return (
+    /\b(support operations?|customer operations?|support leadership|support process ownership|process ownership|workflow|sla|kpi|incident|escalation|service delivery|triage)\b/.test(
+      evidenceText,
+    ) &&
+    /\b(led|leading|managed|owned|built|improved|scaled|optimized|directed|supervised)\b/.test(
+      evidenceText,
+    )
+  );
+}
+
+function hasChangeLeadershipEvidence(evidenceText: string): boolean {
+  return (
+    /\b(change|transformation|transformational|rollout|adoption|migration|operational transformation|process rollout|reorganization|redesign|launch)\b/.test(
+      evidenceText,
+    ) &&
+    /\b(led|leading|managed|owned|drove|directed|supervised|orchestrated)\b/.test(evidenceText)
+  );
+}
+
+function hasLeadershipScopeEvidence(evidenceText: string): boolean {
+  return (
+    /\b(led|leading|managed|owned|directed|supervised|built)\b/.test(evidenceText) &&
+    /\b(team of \d+|\d+\+|across \d+|org(?:anization)?-?wide|global|enterprise|multi-site|cross-functional|portfolio|division|department|region)\b/.test(
+      evidenceText,
+    )
+  );
+}
+
+function categoryAlreadySupported(input: {
+  categoryLabel: string;
+  evidenceText: string;
+}): boolean {
+  const family = normalizeCategoryFamily(input.categoryLabel);
+  if (!family) return false;
+
+  if (family === "support_operations") {
+    return hasSupportOperationsEvidence(input.evidenceText);
+  }
+
+  if (family === "change_leadership") {
+    return hasChangeLeadershipEvidence(input.evidenceText) || hasLeadershipScopeEvidence(input.evidenceText);
+  }
+
+  return hasLeadershipScopeEvidence(input.evidenceText);
+}
+
 function hasStrongEvidenceSignals(signals: string[]): boolean {
   const text = signals.join(" ").toLowerCase();
   const leadershipIndicators = /\b(led|leading|managed|managed a|managed the|managed team|built|owned|owned the|supervised|directed)\b/i;
@@ -59,7 +122,6 @@ export function shouldSuppressCategorySuggestion(input: {
   baselineEvidence?: unknown;
   summary?: unknown;
 }): boolean {
-  const category = input.categoryLabel.toLowerCase();
   const baselineEvidence = cleanText(input.baselineEvidence);
   const summary = cleanText(input.summary);
   const supportingSignals = cleanList(input.supportingSignals);
@@ -67,21 +129,7 @@ export function shouldSuppressCategorySuggestion(input: {
 
   if (!evidenceText) return false;
 
-  const leadershipCategory = /\bleadership\b|\bseniority\b/.test(category);
-  const supportOpsCategory = /\bsupport operations?\b|\boperations\b/.test(category);
-  const strongLeadershipEvidence =
-    /\b(led|leading|managed|owned|directed|supervised)\b/.test(evidenceText) &&
-    /\b(team of \d+|\d+\+|across \d+|org(?:anization)?-?wide|global|enterprise|multi-site|cross-functional|portfolio|division|department|region)\b/.test(
-      evidenceText,
-    );
-  const strongOpsEvidence =
-    /\b(support operations?|process ownership|workflow|sla|kpi|incident|escalation|service delivery)\b/.test(
-      evidenceText,
-    ) &&
-    /\b(led|managed|owned|built|improved|scaled|optimized)\b/.test(evidenceText);
-
-  if (leadershipCategory && strongLeadershipEvidence) return true;
-  if (supportOpsCategory && strongOpsEvidence) return true;
+  if (categoryAlreadySupported({ categoryLabel: input.categoryLabel, evidenceText })) return true;
   return hasStrongEvidenceSignals(supportingSignals) && Boolean(baselineEvidence);
 }
 
@@ -99,6 +147,14 @@ export function buildEvidenceSuggestion(input: {
   const supportingSignals = cleanList(input.supportingSignals);
   const baselineEvidence = cleanText(input.baselineEvidence);
   if (!supportingSignals.length && !baselineEvidence) return null;
+  if (
+    categoryAlreadySupported({
+      categoryLabel: requirement,
+      evidenceText: [baselineEvidence, ...supportingSignals].join(" ").toLowerCase(),
+    })
+  ) {
+    return null;
+  }
   if (hasStrongEvidenceSignals(supportingSignals) && baselineEvidence) return null;
 
   const groundedSignals = supportingSignals.slice(0, 4);
@@ -140,6 +196,15 @@ export function buildRequirementGapInsight(input: {
   const baselineEvidence = cleanText(input.baselineEvidence);
   const supportingSignals = cleanList(input.supportingSignals);
   const summary = cleanText(input.summary);
+  const evidenceText = [baselineEvidence, summary, ...supportingSignals].join(" ").toLowerCase();
+  if (
+    categoryAlreadySupported({
+      categoryLabel: requirement,
+      evidenceText,
+    })
+  ) {
+    return null;
+  }
   const currentSignal =
     baselineEvidence ||
     sentenceFromSignals(supportingSignals.slice(0, 3)) ||
