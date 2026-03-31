@@ -165,15 +165,12 @@ describe("BaselineWorkspace live score panel", () => {
 
       expect(screen.getByText("Strong alignment with this role.")).toBeInTheDocument();
       expect(screen.getByText(/Led global support operations at sentinelone/i)).toBeInTheDocument();
-      expect(screen.getByText("Why this is a strong match")).toBeInTheDocument();
-      expect(screen.getByText("Ready to generate tailored materials now.")).toBeInTheDocument();
+      expect(screen.getByText("Ready to analyze")).toBeInTheDocument();
+      expect(screen.getByText("Ready to analyze now.")).toBeInTheDocument();
       expect(
-        screen.getByRole("link", { name: "Open Studio" }),
+        screen.getByRole("link", { name: "ANALYZE" }),
       ).toHaveAttribute("href", "/studio?analysisId=assessment-1&jobId=job-1&baselineId=base-1");
-      expect(screen.getByRole("link", { name: "View detailed analysis" })).toHaveAttribute(
-        "href",
-        "/results?assessmentId=assessment-1&analysisId=assessment-1&jobId=job-1&baselineId=base-1",
-      );
+      expect(screen.queryByRole("link", { name: "View detailed analysis" })).toBeNull();
       expect(screen.queryByRole("button", { name: "Add to Opportunities" })).toBeNull();
       expect(
         screen.queryByRole("button", { name: "Run Career Compatibility Analysis" }),
@@ -258,7 +255,7 @@ describe("BaselineWorkspace live score panel", () => {
         expect(screen.getByText("Strong Match")).toBeInTheDocument();
       });
 
-      expect(screen.getByText("Why this is a strong match")).toBeInTheDocument();
+      expect(screen.getByText("Ready to analyze")).toBeInTheDocument();
       expect(
         screen.getByText(/Partnered with engineering teams to operate complex systems/i),
       ).toBeInTheDocument();
@@ -327,21 +324,13 @@ describe("BaselineWorkspace live score panel", () => {
       expect(screen.getByText("Primary readiness")).toBeInTheDocument();
       });
 
-      expect(screen.getByText("Strong match, but not ready to generate")).toBeInTheDocument();
-      expect(
-        screen.getByText(
-          "Your experience aligns with this role. But your baseline does not yet support compliant document generation.",
-        ),
-      ).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Resolve gaps before generating" })).toBeDisabled();
-      expect(screen.getByRole("link", { name: "Fix baseline and continue" })).toHaveAttribute(
+      expect(screen.getByText("You are a strong match and ready to generate tailored materials.")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Retry scoring" })).toBeNull();
+      expect(screen.getByRole("link", { name: "ANALYZE" })).toHaveAttribute(
         "href",
         "/results?assessmentId=assessment-3&analysisId=assessment-3&jobId=job-1&baselineId=base-1",
       );
       expect(screen.queryByRole("link", { name: "Generate Tailored Materials" })).toBeNull();
-      expect(
-        screen.getByText("You are a strong match, but your materials need refinement before applying."),
-      ).toBeInTheDocument();
     } finally {
       setTimeoutSpy.mockRestore();
     }
@@ -404,14 +393,11 @@ describe("BaselineWorkspace live score panel", () => {
       fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
 
       await waitFor(() => {
-        expect(screen.getByRole("link", { name: "Continue Building Baseline" })).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "ANALYZE" })).toBeInTheDocument();
       });
 
-      expect(screen.getByRole("link", { name: "Continue Building Baseline" })).toHaveAttribute(
-        "href",
-        "/results?assessmentId=assessment-4&analysisId=assessment-4&jobId=job-1&baselineId=base-1",
-      );
-      expect(screen.queryByText("Strong match, but not ready to generate")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Retry scoring" })).toBeNull();
+      expect(screen.getByText("There is some alignment here, but the gaps are still noticeable.")).toBeInTheDocument();
     } finally {
       setTimeoutSpy.mockRestore();
     }
@@ -447,10 +433,10 @@ describe("BaselineWorkspace live score panel", () => {
     expect(screen.getByText("Jobs Hub Mock")).toBeInTheDocument();
     expect(screen.getByText("Compatibility result")).toBeInTheDocument();
     expect(
-      screen.getByText(
+      screen.queryByText(
         "Your baseline defines the experience signals used for compatibility scoring and resume generation.",
       ),
-    ).toBeInTheDocument();
+    ).toBeNull();
   });
 
   it("does not render completed score when canonical assessmentId is missing", async () => {

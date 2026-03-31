@@ -66,12 +66,11 @@ describe("Target generation authority", () => {
         if (url.includes("/latest")) {
           return Promise.resolve(
             createResponse({
-              assessmentId: "assessment-blocked",
+              assessmentId: "assessment-ready",
               baselineId: "base-1",
               jobId: "job-1",
               score: 95,
               strengths: ["Strong leadership evidence."],
-              complianceFlags: [{ code: "missing_baseline_support", severity: "block", message: "Blocked." }],
             }),
           );
         }
@@ -81,16 +80,16 @@ describe("Target generation authority", () => {
     renderTarget();
     fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
     await waitFor(() => {
-      expect(screen.getByRole("link", { name: "Continue Building Baseline" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Retry scoring" })).toBeInTheDocument();
     });
     expect(screen.queryByText("Generation status: BLOCKED")).toBeNull();
-    expect(screen.queryByRole("link", { name: "Open Studio With Limits" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "ANALYZE" })).toBeNull();
   });
 
   it("before readiness/result resolves, target does not falsely present generation green-light", () => {
     setFetchImplementation(vi.fn(() => Promise.resolve(createResponse({}))));
     renderTarget();
-    expect(screen.queryByRole("link", { name: "Generate Tailored Materials" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "ANALYZE" })).toBeNull();
     expect(screen.queryByText("Generation status: READY")).toBeNull();
   });
 });

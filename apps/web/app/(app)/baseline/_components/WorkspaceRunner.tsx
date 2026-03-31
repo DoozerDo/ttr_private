@@ -1129,12 +1129,6 @@ export function WorkspaceRunner({
                     {scoreBand.label}
                   </p>
                   <p className="mt-2 text-base text-slate-100">{scoreBandSummary}</p>
-                  <a
-                    href={resultsHref}
-                    className="mt-3 inline-flex text-sm font-medium text-slate-300 underline decoration-white/10 underline-offset-4 transition hover:text-white hover:decoration-white/30"
-                  >
-                    View detailed analysis
-                  </a>
                 </>
               ) : null}
               {competitiveContext ? (
@@ -1143,7 +1137,7 @@ export function WorkspaceRunner({
             </div>
             {isStrongScore && strongMatchSignals.length ? (
               <div className="rounded-2xl border border-white/10 bg-slate-900/35 p-5">
-                <h3 className="text-base font-semibold text-white">Why this is a strong match</h3>
+                <h3 className="text-base font-semibold text-white">Ready to analyze</h3>
                 <ul className="mt-3 space-y-2 text-sm text-slate-200">
                   {strongMatchSignals.map((line) => (
                     <li key={line}>&bull; {line}</li>
@@ -1196,7 +1190,7 @@ export function WorkspaceRunner({
                 </p>
                 <p className="mt-1 text-slate-100">
                   {targetGenerationState === "READY"
-                    ? "Ready to generate tailored materials now."
+                    ? "Ready to analyze now."
                     : targetGenerationState === "LIMITED"
                     ? "Generation is limited by current verification constraints."
                     : "Generation is blocked until verification gaps are resolved."}
@@ -1235,14 +1229,6 @@ export function WorkspaceRunner({
                     ))}
                   </ul>
                 ) : null}
-                <button
-                  type="button"
-                  disabled
-                  aria-disabled="true"
-                  className="inline-flex w-full items-center justify-center whitespace-nowrap rounded-2xl bg-slate-600 px-6 py-3 text-sm font-semibold text-slate-200 opacity-80"
-                >
-                  Resolve gaps before generating
-                </button>
                 <a
                   href={resultsHref}
                   onClick={() =>
@@ -1254,7 +1240,7 @@ export function WorkspaceRunner({
                   }
                   className="inline-flex w-full items-center justify-center whitespace-nowrap rounded-2xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
                 >
-                  Fix baseline and continue
+                  ADD EVIDENCE
                 </a>
               </div>
             ) : (
@@ -1264,10 +1250,10 @@ export function WorkspaceRunner({
                 className="inline-flex items-center justify-center whitespace-nowrap rounded-2xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
               >
                 {!productReadiness.canOpenStudio
-                  ? "Continue Building Baseline"
+                  ? "ANALYZE"
                   : isLimitedHighFit
-                  ? "Open Studio With Limits"
-                  : "Open Studio"}
+                  ? "ANALYZE"
+                  : "ANALYZE"}
               </a>
             )}
           </div>
