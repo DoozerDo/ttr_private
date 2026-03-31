@@ -996,11 +996,13 @@ export function AdvancedInsightsCard({
   renderDriverGrid,
 }: AdvancedInsightsCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [showAdditionalSignals, setShowAdditionalSignals] = useState(false);
   if (!showScoreDrivers && !scoreBreakdown) {
     return null;
   }
 
   const summary = buildDiagnosticsSummary(scoreBreakdown);
+  const topSignalCount = 2;
 
   return (
     <section
@@ -1027,7 +1029,51 @@ export function AdvancedInsightsCard({
 
       {expanded ? (
         <>
-          {showScoreDrivers ? <div className="mt-4">{renderDriverGrid(true)}</div> : null}
+          {showScoreDrivers ? (
+            <div className="mt-4 space-y-4">
+              <section className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">
+                    Top signals
+                  </h3>
+                  <p className="text-xs text-slate-500">Most influential first</p>
+                </div>
+                {renderDriverGrid(true, topSignalCount, 0)}
+              </section>
+
+              {showScoreDrivers && scoreBreakdown?.dimensions?.length ? (
+                <section className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">
+                      Additional details
+                    </h3>
+                    <p className="text-xs text-slate-500">Lower emphasis</p>
+                  </div>
+                  {scoreBreakdown.dimensions.length > topSignalCount ? (
+                    <>
+                      {renderDriverGrid(
+                        true,
+                        showAdditionalSignals ? scoreBreakdown.dimensions.length : topSignalCount + 3,
+                        topSignalCount,
+                        showAdditionalSignals,
+                      )}
+                      {scoreBreakdown.dimensions.length > topSignalCount + 3 ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowAdditionalSignals((current) => !current)}
+                          className="text-xs font-semibold tracking-[0.16em] text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white"
+                        >
+                          {showAdditionalSignals
+                            ? "HIDE DETAILS"
+                            : `+${scoreBreakdown.dimensions.length - topSignalCount} MORE`}
+                        </button>
+                      ) : null}
+                    </>
+                  ) : null}
+                </section>
+              ) : null}
+            </div>
+          ) : null}
 
           {scoreBreakdown ? (
             <section className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-3.5">
@@ -2343,29 +2389,45 @@ export default function ResultsPage() {
   const hasEvidenceGaps = isGenerationBlocked;
   const hasFitGaps = criticalGapDetails.length > 0 || signalAlignment.weakerForRole.length > 0;
 
-  const renderDriverGrid = (showExtraLine: boolean) => (
+  const renderDriverGrid = (
+    showExtraLine: boolean,
+    limit = scoreDrivers.length,
+    offset = 0,
+    forceShowExtraLine = false,
+  ) => (
     <div className="grid gap-3 lg:grid-cols-2">
-      {scoreDrivers.map((driver) => {
+      {scoreDrivers.slice(offset, limit).map((driver) => {
         const cta = driver.cta;
         return (
           <article
             key={driver.key}
             className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/20 p-3.5"
           >
-            <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">{driver.label}</p>
-            <p className="text-xs text-slate-400">
-              Current score {formatDriverValue(driver.points)} of {formatDriverValue(driver.weight)} points
+            <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">{driver.label}</p>
+            <p className="text-xs text-slate-500">
+              {driver.bucket === "strong"
+                ? "Strong alignment"
+                : driver.bucket === "watch"
+                  ? "Moderate alignment"
+                  : driver.bucket === "fix"
+                    ? "Weak alignment"
+                    : "No score yet"}
             </p>
             <div className="space-y-1.5 text-sm text-slate-200">
-              <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Why this mattered</p>
+              <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Why this matters</p>
               <p>{driver.why}</p>
               {driver.evidence.length ? (
                 <div className="space-y-1">
                   <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Evidence</p>
                   <ul className="space-y-1 text-sm text-slate-200 list-disc list-inside">
-                    {driver.evidence.map((item, index) => (
+                    {driver.evidence.slice(0, 2).map((item, index) => (
                       <li key={`${driver.key}-evidence-${index}`}>{item}</li>
                     ))}
+                    {driver.evidence.length > 2 ? (
+                      <li className="list-none text-xs text-slate-500">
+                        +{driver.evidence.length - 2} more
+                      </li>
+                    ) : null}
                   </ul>
                 </div>
               ) : (
@@ -2373,7 +2435,7 @@ export default function ResultsPage() {
               )}
               <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Next action</p>
               <p>{driver.action}</p>
-              {showExtraLine && driver.extraLine ? (
+              {(forceShowExtraLine || showExtraLine) && driver.extraLine ? (
                 <p className="text-xs text-slate-400">{driver.extraLine}</p>
               ) : null}
             </div>
