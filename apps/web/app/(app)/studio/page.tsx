@@ -674,28 +674,8 @@ export default function StudioPage() {
   }
 
   const router = useRouter();
-  useEffect(() => {
-    if (!requestedBaselineId) return;
-    let canceled = false;
-    const alignCanonicalAssessment = async () => {
-      const latest = await fetchLatestAssessmentForBaseline(requestedBaselineId);
-      if (canceled || !latest?.assessmentId) return;
-      const requestedId = requestedAnalysisId?.trim() ?? "";
-      if (requestedId === latest.assessmentId) return;
-      const params = new URLSearchParams(searchParams.toString());
-      params.set("baselineId", requestedBaselineId);
-      params.set("analysisId", latest.assessmentId);
-      params.set("assessmentId", latest.assessmentId);
-      const query = params.toString();
-      await router.replace(query ? `/studio?${query}` : "/studio");
-    };
-    void alignCanonicalAssessment();
-    return () => {
-      canceled = true;
-    };
-  }, [requestedAnalysisId, requestedBaselineId, router, searchParams]);
   const trackerEntryId =
-    readTrackerField(resumeState.response, "opportunityId") ??
+    readTrackerField(resumeState.response, "opportunityId") ?? 
     readTrackerField(resumeState.response, "trackerEntryId");
   const handleOpenTracker = useCallback(() => {
     if (!trackerEntryId) return;
@@ -2090,6 +2070,18 @@ export default function StudioPage() {
           return;
         }
         const nextAnalysis = payload as LatestAnalysis;
+        const nextAnalysisId = trimString((payload as { assessmentId?: unknown }).assessmentId);
+        const nextBaselineId = trimString((payload as { baselineId?: unknown }).baselineId);
+        if (!nextAnalysisId || !nextBaselineId) {
+          setAnalysis(null);
+          setAnalysisError(ANALYSIS_LOAD_ERROR_MESSAGE);
+          console.warn("[studio] hydration_failed", {
+            stage: "studio",
+            analysisId: requestedAnalysisId,
+            status: "missing_required_context",
+          });
+          return;
+        }
         setAnalysis(nextAnalysis);
         setAnalysisError(null);
         console.info("[studio] hydration_succeeded", {

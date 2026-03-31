@@ -27,6 +27,7 @@ type GapSessionState = {
 };
 
 type LatestAnalysis = {
+  assessmentId?: string | null;
   jobId?: string | null;
   baselineId?: string | null;
   baselineVersionId?: string | null;
@@ -77,6 +78,7 @@ export default function ResolveGapsPage() {
 
   const jobId = (searchParams.get("jobId") ?? "").trim();
   const baselineId = (searchParams.get("baselineId") ?? "").trim();
+  const analysisId = (searchParams.get("analysisId") ?? searchParams.get("assessmentId") ?? "").trim();
   const storageKey = `${STORAGE_PREFIX}:${jobId}:${baselineId}`;
 
   const [loading, setLoading] = useState(true);
@@ -105,7 +107,9 @@ export default function ResolveGapsPage() {
 
       try {
         const response = await fetch(
-          `/api/analysis/job/${encodeURIComponent(jobId)}/baseline/${encodeURIComponent(baselineId)}/latest`,
+          analysisId
+            ? `/api/analysis/fit-assessments/${encodeURIComponent(analysisId)}`
+            : `/api/analysis/job/${encodeURIComponent(jobId)}/baseline/${encodeURIComponent(baselineId)}/latest`,
           { cache: "no-store" },
         );
         const payload = (await response.json()) as LatestAnalysis | { error?: string };
@@ -145,7 +149,7 @@ export default function ResolveGapsPage() {
     return () => {
       cancelled = true;
     };
-  }, [baselineId, jobId, storageKey]);
+  }, [analysisId, baselineId, jobId, storageKey]);
 
   useEffect(() => {
     if (!jobId || !baselineId) return;
@@ -296,6 +300,16 @@ export default function ResolveGapsPage() {
     const query = new URLSearchParams();
     if (jobId) query.set("jobId", jobId);
     if (baselineId) query.set("baselineId", baselineId);
+    if (analysis?.assessmentId) {
+      query.set("assessmentId", analysis.assessmentId);
+      query.set("analysisId", analysis.assessmentId);
+    } else if (analysisId) {
+      query.set("assessmentId", analysisId);
+      query.set("analysisId", analysisId);
+    }
+    if (analysis?.baselineVersionId) {
+      query.set("baselineVersionId", analysis.baselineVersionId);
+    }
     const next = query.toString() ? `/results?${query.toString()}` : "/results";
     router.push(next);
   };
@@ -334,7 +348,15 @@ export default function ResolveGapsPage() {
       if (isGuidedActive) {
         advanceStep("GENERATE");
       }
-      router.push(`/results?jobId=${encodeURIComponent(jobId)}`);
+      const params = new URLSearchParams();
+      params.set("jobId", jobId);
+      params.set("baselineId", baselineId);
+      params.set("assessmentId", assessmentId);
+      params.set("analysisId", assessmentId);
+      if (analysis?.baselineVersionId?.trim()) {
+        params.set("baselineVersionId", analysis.baselineVersionId.trim());
+      }
+      router.push(`/results?${params.toString()}`);
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : "Unable to run reanalysis.");
     } finally {
@@ -348,12 +370,12 @@ export default function ResolveGapsPage() {
       <div className="space-y-6">
         <PageHeader
           title="Resolve Gaps"
-          description="Strengthen role-specific proof before reanalyzing fit."
+          description="Add verified evidence to unblock generation and refresh the role score."
         />
         {isGuidedActive ? (
           <GuidedOverlay
-            headline="Answer this to strengthen your proof."
-            body="Complete this gap prompt with concrete ownership, systems, scope, and outcomes."
+            headline="Answer this to add verified evidence."
+            body="Complete this evidence prompt with concrete ownership, systems, scope, and outcomes."
             ctaLabel="Continue"
             onCtaClick={() => {
               if (selectedProcessed) {
@@ -372,7 +394,7 @@ export default function ResolveGapsPage() {
         {!loading && !error ? (
           <div className="grid gap-4 lg:grid-cols-[1.05fr_1.6fr_1fr]">
             <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-              <h2 className="text-base font-semibold text-slate-100">Gap Queue</h2>
+              <h2 className="text-base font-semibold text-slate-100">Evidence Queue</h2>
               <ul className="mt-3 space-y-2">
                 {requirements.map((requirement) => {
                   const state = gapState[requirement];
@@ -399,7 +421,7 @@ export default function ResolveGapsPage() {
             </section>
 
             <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-              <h2 className="text-base font-semibold text-slate-100">Guided Panel</h2>
+              <h2 className="text-base font-semibold text-slate-100">Evidence Review</h2>
               {selectedGap && selectedState ? (
                 <div className="mt-3 space-y-4">
                   <div className="rounded-lg border border-white/10 bg-slate-950/25 p-3">
@@ -407,8 +429,8 @@ export default function ResolveGapsPage() {
                     <p className="mt-1 text-sm text-slate-100">This role expects: {selectedGap}</p>
                   </div>
                   <div className="rounded-lg border border-white/10 bg-slate-950/25 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Weakness Explanation</p>
-                    <p className="mt-1 text-sm text-slate-100">Your baseline does not show enough evidence of this area.</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Evidence Gap</p>
+                    <p className="mt-1 text-sm text-slate-100">Your baseline does not show enough verified evidence for this area.</p>
                   </div>
                   <div className="rounded-lg border border-white/10 bg-slate-950/25 p-3">
                     <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">What Helps</p>
@@ -464,13 +486,13 @@ export default function ResolveGapsPage() {
             </section>
 
             <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-              <h2 className="text-base font-semibold text-slate-100">Progress Panel</h2>
+              <h2 className="text-base font-semibold text-slate-100">Unlock Progress</h2>
               <div className="mt-3 space-y-2 text-sm text-slate-100">
                 <p>Total gaps: {requirements.length}</p>
                 <p>Resolved gaps: {resolvedCount}</p>
                 <p>Remaining gaps: {remainingCount}</p>
               </div>
-              <p className="mt-3 text-sm text-slate-300">Reanalyze after strengthening key gaps.</p>
+              <p className="mt-3 text-sm text-slate-300">Reanalyze after adding verified evidence.</p>
 
               {allProcessed ? (
                 <div className="mt-4 rounded-lg border border-emerald-300/35 bg-emerald-500/10 p-3">
@@ -479,7 +501,7 @@ export default function ResolveGapsPage() {
                   </p>
                   <div className="mt-3">
                     <FormButton onClick={() => void runReanalysis()} disabled={submitting || reanalyzing}>
-                      {reanalyzing ? "Reanalyzing..." : "Reanalyze Role"}
+                      {reanalyzing ? "Reanalyzing..." : "Reanalyze"}
                     </FormButton>
                   </div>
                 </div>
@@ -500,17 +522,17 @@ export default function ResolveGapsPage() {
               }}
               disabled={submitting || !selectedGap}
             >
-              {selectedProcessed ? "Continue to next gap" : "Continue"}
+              {selectedProcessed ? "Continue Evidence Review" : "Add Evidence"}
             </FormButton>
             <FormButton variant="secondary" onClick={saveAndExit} disabled={submitting}>
-              Save and exit
+              View Updated Results
             </FormButton>
             <FormButton variant="ghost" onClick={skipCurrentGap} disabled={submitting || !selectedGap}>
-              Skip this gap
+              Skip this evidence gap
             </FormButton>
             {canShowReanalyzeNow ? (
               <FormButton variant="secondary" onClick={() => void runReanalysis()} disabled={submitting || reanalyzing}>
-                {reanalyzing ? "Reanalyzing..." : "Reanalyze now"}
+                {reanalyzing ? "Reanalyzing..." : "Reanalyze"}
               </FormButton>
             ) : null}
           </div>

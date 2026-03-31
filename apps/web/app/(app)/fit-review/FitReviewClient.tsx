@@ -62,7 +62,7 @@ type ScoringV2Result = {
 };
 
 const HERO_MESSAGE =
-  "Review your fit, close the top evidence gaps, and launch your qualification interview.";
+  "Review the blocked analysis, add verified evidence, and continue the recovery path.";
 const ACTIONABLE_DIMENSION_COUNT = 2;
 
 function parseTimestamp(value?: string | null) {
@@ -157,6 +157,8 @@ export default function FitReviewClient() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const jobId = searchParams.get("jobId") ?? "";
+  const requestedAnalysisId =
+    searchParams.get("analysisId")?.trim() ?? searchParams.get("assessmentId")?.trim() ?? "";
   const [storedAnalysis, setStoredAnalysis] = useState<StoredAnalysisRecord | null>(null);
   const [assessment, setAssessment] = useState<FitAssessment | null>(null);
   const [loading, setLoading] = useState(false);
@@ -364,7 +366,9 @@ export default function FitReviewClient() {
 
       try {
         const response = await fetch(
-          `/api/analysis/job/${encodeURIComponent(resolvedJobId)}/latest`,
+          requestedAnalysisId
+            ? `/api/analysis/fit-assessments/${encodeURIComponent(requestedAnalysisId)}`
+            : `/api/analysis/job/${encodeURIComponent(resolvedJobId)}/latest`,
           { cache: "no-store" },
         );
 
@@ -396,7 +400,7 @@ export default function FitReviewClient() {
     return () => {
       cancelled = true;
     };
-  }, [resolvedJobId]);
+  }, [requestedAnalysisId, resolvedJobId]);
 
   const hasAnalysis = Boolean(displayAssessment || storedAnalysis?.analysis);
   const displayRecord =
@@ -627,10 +631,11 @@ export default function FitReviewClient() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minWidth: 240 }}>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     <span style={ttrTypography.subtleLabel}>Current result</span>
-                    <h2 style={ttrTypography.h2}>Fit assessment</h2>
+                    <h2 style={ttrTypography.h2}>Evidence review</h2>
                   </div>
                   <p style={{ margin: 0, color: "rgba(241,245,249,0.92)", fontSize: 15 }}>
-                    {displayAssessment?.summary ?? "Capture evidence for the highlighted dimensions to evolve the baseline."}
+                    {displayAssessment?.summary ??
+                      "Capture verified evidence for the highlighted dimensions to unlock generation."}
                   </p>
                   <div
                     style={{
@@ -715,7 +720,7 @@ export default function FitReviewClient() {
                     </p>
                     <p className="mt-2 text-sm text-slate-300">
                       {isActionable
-                        ? "High-impact gap. Add concrete evidence before re-evaluating fit."
+                        ? "High-impact evidence gap. Add concrete proof before re-evaluating fit."
                         : "Informational view of this dimension."}
                     </p>
                     {isActionable && !isReviewed ? (
@@ -731,7 +736,7 @@ export default function FitReviewClient() {
                     {additionText ? (
                       <div className="mt-4 rounded-2xl border border-white/10 bg-slate-900/70 p-3 text-sm text-slate-100">
                         <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                          Proposed addition
+                          Proposed evidence
                         </p>
                         {isEditing ? (
                           <div className="mt-1 space-y-2">
@@ -765,7 +770,7 @@ export default function FitReviewClient() {
                                   Edit
                                 </FormButton>
                                 <FormButton onClick={() => handleApproveAddition(entry.key)}>
-                                  Approve addition
+                                  Approve evidence
                                 </FormButton>
                               </div>
                             ) : null}
@@ -782,10 +787,10 @@ export default function FitReviewClient() {
           <section style={{ ...ttrComponents.basePanel }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <span style={ttrTypography.subtleLabel}>Qualification proof</span>
-                <h2 style={ttrTypography.h2}>Launch qualification interview</h2>
+                <h2 style={ttrTypography.h2}>Continue evidence review</h2>
               </div>
               <p className="mt-2 text-sm text-slate-300">
-                Use this when you believe you are qualified and want to prove it with structured evidence.
+                Use this when you are ready to continue the guided evidence review and unlock the next step.
               </p>
               <div className="mt-4 space-y-3">
                 {startInterviewError ? (
@@ -797,17 +802,17 @@ export default function FitReviewClient() {
                   onClick={handleStartInterview}
                   disabled={isStartingInterview || !startJobId || (!baselineVersionId && !baselineId)}
                 >
-                  {isStartingInterview ? "Starting interview..." : "I think I'm qualified"}
+                  {isStartingInterview ? "Starting review..." : "Continue Evidence Review"}
                 </FormButton>
                 <p className="text-xs text-slate-400">
-                  Next: answer prompts, validate additions, compute expanded fit, and promote your new baseline.
+                  Next: answer prompts, validate additions, and continue the recovery path.
                 </p>
                 <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-3">
                   <p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">
                     Artifact readiness
                   </p>
                   <p className="mt-1 text-sm text-slate-300">
-                    Not ready yet. Documents unlock after interview promotion creates a new baseline version.
+                    Not ready yet. Documents unlock after evidence review creates an updated assessment.
                   </p>
                   <p className="mt-1 text-xs text-slate-400">
                     Current baseline version: {baselineVersionId ?? "Unavailable"}

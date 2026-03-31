@@ -1844,12 +1844,19 @@ export default function ResultsPage() {
   const fitReviewPath = useMemo(() => {
     const candidateJobId = (latest?.jobId || jobId || "").trim();
     const candidateBaselineId = (latest?.baselineId || baselineId || "").trim();
+    const candidateAnalysisId = (latest?.assessmentId || runIdentifier || "").trim();
+    const candidateBaselineVersionId = (latest?.baselineVersionId || "").trim();
     const params = new URLSearchParams();
     if (candidateJobId) params.set("jobId", candidateJobId);
+    if (candidateAnalysisId) {
+      params.set("analysisId", candidateAnalysisId);
+      params.set("assessmentId", candidateAnalysisId);
+    }
     if (candidateBaselineId) params.set("baselineId", candidateBaselineId);
+    if (candidateBaselineVersionId) params.set("baselineVersionId", candidateBaselineVersionId);
     const query = params.toString();
     return query ? `/fit-review?${query}` : "/fit-review";
-  }, [baselineId, jobId, latest?.baselineId, latest?.jobId]);
+  }, [baselineId, jobId, latest?.assessmentId, latest?.baselineId, latest?.baselineVersionId, latest?.jobId, runIdentifier]);
   const interviewToolkitHref = INTERVIEW_TOOLKIT_PATH;
   useEffect(() => {
     const key = getGenerationCompletionStorageKey(latest?.jobId ?? null, latest?.baselineId ?? null);
@@ -2897,6 +2904,14 @@ export default function ResultsPage() {
     }
   }, [latest?.baselineId, latest?.jobId, router]);
 
+  const recoveryAnalyzeHref = useMemo(() => {
+    const params = new URLSearchParams();
+    if (jobId.trim()) params.set("jobId", jobId.trim());
+    if (baselineId.trim()) params.set("baselineId", baselineId.trim());
+    const query = params.toString();
+    return query ? `/analyze?${query}` : "/analyze";
+  }, [baselineId, jobId]);
+
   useEffect(() => {
     const previousScore = reanalysisDelta.previousScore;
     const currentScoreValue = reanalysisDelta.currentScore;
@@ -3086,7 +3101,24 @@ export default function ResultsPage() {
         ) : null}
 
         <section className="space-y-7 rounded-3xl bg-slate-950/55 p-6">
-          {!latest ? (
+          {error && !latest ? (
+            <section
+              className="rounded-2xl border border-amber-300/30 bg-amber-500/10 p-4"
+              data-testid="results-analysis-recovery"
+            >
+              <h2 className="text-base font-semibold text-amber-100">Analysis unavailable</h2>
+              <p className="mt-1 text-sm text-slate-100">{error}</p>
+              <div className="mt-3">
+                <Link
+                  href={recoveryAnalyzeHref}
+                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                >
+                  ANALYZE A ROLE
+                </Link>
+              </div>
+            </section>
+          ) : null}
+          {!latest && !error ? (
             <EmptyState
               title="No compatibility analysis yet"
               body={
@@ -3385,7 +3417,7 @@ export default function ResultsPage() {
                   {!isWeakFitScore && scoreBand !== ScoreBand.TOP ? (
                     <section id="fit-improvement-opportunities" className="rounded-2xl border border-slate-700/50 bg-slate-900/35 p-3">
                       <FitImprovementOpportunities
-                        assessmentId={latest.assessmentId ?? null}
+                        assessmentId={latest?.assessmentId ?? null}
                         actionHref={fitReviewPath}
                         fallbackInsights={fallbackRequirementInsights}
                         supportingSignals={latest?.supportingSignals}
@@ -3409,7 +3441,7 @@ export default function ResultsPage() {
           )}
         </section>
 
-        {error ? (
+        {error && latest ? (
           <Alert intent="error" title="Uh oh">
             <div className="space-y-2">
               <p>{error}</p>

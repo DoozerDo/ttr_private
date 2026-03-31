@@ -28,6 +28,36 @@ describe("results auto analysis loading", () => {
     expect(screen.getByRole("button", { name: "Load Compatibility Analysis" })).toBeDisabled();
   });
 
+  it("fails with a dedicated recovery state when the analysisId is invalid", async () => {
+    overrideSearchParams({
+      assessmentId: "missing-assessment",
+      analysisId: "missing-assessment",
+      jobId: "job-1",
+      baselineId: "base-1",
+    });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/analysis/fit-assessments/missing-assessment")) {
+        return jsonResponse({ message: "not found" }, 404);
+      }
+      return jsonResponse({}, 200);
+    });
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    render(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("results-analysis-recovery")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Assessment not found.")).toBeInTheDocument();
+    expect(screen.queryByText("No compatibility analysis yet")).toBeNull();
+    expect(screen.getByRole("link", { name: "ANALYZE A ROLE" })).toHaveAttribute(
+      "href",
+      "/analyze?jobId=job-1&baselineId=base-1",
+    );
+  });
+
   it("creates analysis on missing latest and navigates with explicit assessmentId", async () => {
     overrideSearchParams({ jobId: "job-1", baselineId: "base-1" });
 
@@ -79,9 +109,10 @@ describe("results auto analysis loading", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("This result is no longer linked to an active resume.")).toBeInTheDocument();
+      expect(screen.getByTestId("results-analysis-recovery")).toBeInTheDocument();
     });
-    expect(screen.getByRole("button", { name: "Retry Compatibility Analysis" })).toBeInTheDocument();
+    expect(screen.getByText("This result is no longer linked to an active resume.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "ANALYZE A ROLE" })).toHaveAttribute("href", "/analyze");
   });
 
   it("hydrates populated results when the canonical analysisId is present", async () => {
@@ -210,7 +241,7 @@ describe("results auto analysis loading", () => {
     expect(screen.getByText("Add verified evidence to unlock resume and cover letter generation.")).toBeInTheDocument();
     expect(screen.getByTestId("results-hero-primary-cta")).toHaveAttribute(
       "href",
-      "/fit-review?jobId=job-1&baselineId=base-1",
+      "/fit-review?jobId=job-1&analysisId=assessment-blocked&assessmentId=assessment-blocked&baselineId=base-1&baselineVersionId=base-version-1",
     );
   });
 
@@ -266,12 +297,32 @@ describe("results auto analysis loading", () => {
   });
 
   it("uses existing latest assessment without creating duplicate analysis", async () => {
-    overrideSearchParams({ jobId: "job-2", baselineId: "base-2" });
+    overrideSearchParams({
+      assessmentId: "assessment-existing-1",
+      analysisId: "assessment-existing-1",
+      jobId: "job-2",
+      baselineId: "base-2",
+    });
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/api/analysis/job/job-2/baseline/base-2/latest")) {
-        return jsonResponse({ assessmentId: "assessment-existing-1" }, 200);
+      if (url.includes("/api/analysis/fit-assessments/assessment-existing-1")) {
+        return jsonResponse({
+          assessmentId: "assessment-existing-1",
+          baselineId: "base-2",
+          baselineVersionId: "base-version-2",
+          jobId: "job-2",
+          score: 78,
+          strengths: ["Strong leadership", "Operational rigor"],
+          verification_coverage: {
+            totalClaims: 2,
+            verifiedClaims: 2,
+            inferredClaims: 0,
+            unverifiedClaims: 0,
+            verifiedRequirements: ["Leadership", "Operations"],
+            unverifiedRequirements: [],
+          },
+        }, 200);
       }
       if (url.includes("/api/analysis/run")) {
         return jsonResponse({ assessmentId: "should-not-run" }, 200);
@@ -284,7 +335,7 @@ describe("results auto analysis loading", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("This result is no longer linked to an active resume.")).toBeInTheDocument();
+      expect(screen.getByText("Competitive match")).toBeInTheDocument();
     });
 
     expect(

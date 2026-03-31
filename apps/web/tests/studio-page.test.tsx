@@ -91,6 +91,7 @@ describe("Studio page UX", () => {
       if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
         return Promise.resolve(
           createResponse({
+            assessmentId: "analysis-1",
             scoring_v2: { score: 84 },
             jobId: "job-1",
             baselineId: "base-1",
@@ -146,6 +147,45 @@ describe("Studio page UX", () => {
     expect(screen.queryByRole("button", { name: "Generate Cover Letter" })).toBeNull();
   });
 
+  it("fails cleanly when the requested analysis is invalid", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-missing",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("analysis-missing")) {
+        return Promise.resolve(createResponse({ message: "not found" }, 404));
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/jobs/job-1")) {
+        return Promise.resolve(createResponse({ id: "job-1", title: "Support Director", company: "Acme" }));
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByText("Role analysis unavailable")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("Unable to load role analysis. Please return to Results and reopen the document generator."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Generate Resume" })).toBeNull();
+  });
+
   it("fails cleanly when the requested baseline is archived", async () => {
     overrideSearchParams({
       analysisId: "analysis-archived",
@@ -183,6 +223,7 @@ describe("Studio page UX", () => {
       if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
         return Promise.resolve(
           createResponse({
+            assessmentId: "analysis-1",
             scoring_v2: { score: 65 },
             jobId: "job-1",
             baselineId: "base-1",
@@ -221,6 +262,7 @@ describe("Studio page UX", () => {
       if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
         return Promise.resolve(
           createResponse({
+            assessmentId: "analysis-1",
             scoring_v2: { score: 95 },
             jobId: "job-1",
             baselineId: "base-1",
@@ -264,6 +306,7 @@ describe("Studio page UX", () => {
       if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
         return Promise.resolve(
           createResponse({
+            assessmentId: "analysis-1",
             scoring_v2: { score: 84 },
             jobId: "job-1",
             baselineId: "base-1",

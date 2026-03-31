@@ -70,7 +70,7 @@ describe("results re-analysis loop", () => {
     expect(screen.getByRole("link", { name: "Open Fit Review" })).toBeInTheDocument();
     expect(screen.getByTestId("results-hero-primary-cta")).toHaveAttribute(
       "href",
-      "/fit-review?jobId=job-1&baselineId=base-1",
+      "/fit-review?jobId=job-1&analysisId=analysis-current&assessmentId=analysis-current&baselineId=base-1&baselineVersionId=base-version-1",
     );
   });
 });

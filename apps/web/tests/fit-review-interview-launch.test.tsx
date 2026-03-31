@@ -59,7 +59,7 @@ describe("FitReview interview launch", () => {
 
     render(<FitReviewClient />);
 
-    const cta = await screen.findByRole("button", { name: "I think I'm qualified" });
+    const cta = await screen.findByRole("button", { name: "Continue Evidence Review" });
     fireEvent.click(cta);
 
     await waitFor(() => {
@@ -80,5 +80,74 @@ describe("FitReview interview launch", () => {
         fitAssessmentId: undefined,
       }),
     );
+  });
+
+  it("reanalyzes the exact blocked analysis and returns to contextual results", async () => {
+    overrideSearchParams({
+      jobId: "job-1",
+      baselineId: "baseline-1",
+      analysisId: "analysis-blocked",
+    });
+
+    const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+
+      if (url.includes("/api/analysis/fit-assessments/analysis-blocked")) {
+        return createResponse({
+          assessmentId: "analysis-blocked",
+          jobId: "job-1",
+          baselineId: "baseline-1",
+          baselineVersionId: "baseline-version-4",
+          score: 54,
+          verdict: "consider",
+          summary: "Needs stronger evidence",
+          verification_coverage: {
+            unverifiedRequirements: ["Missing verified evidence"],
+          },
+          scoring_v2: {
+            rubric: {
+              dimensionPercents: {
+                experienceAlignment: 40,
+                leadershipLevel: 60,
+                technicalPlatformFit: 70,
+                industryContext: 80,
+                strategicTacticalFit: 75,
+              },
+              dimensionPoints: {
+                experienceAlignment: 8,
+                leadershipLevel: 12,
+                technicalPlatformFit: 14,
+                industryContext: 16,
+                strategicTacticalFit: 15,
+              },
+            },
+          },
+        });
+      }
+
+      if (url === "/api/interview-records" && init?.method === "POST") {
+        return createResponse({ id: "interview-gap-1" });
+      }
+
+      if (url === "/api/analysis/run" && init?.method === "POST") {
+        return createResponse({ assessmentId: "analysis-next" });
+      }
+
+      return createResponse({}, false, 404);
+    });
+    setFetchImplementation(fetchMock);
+
+    render(<FitReviewClient />);
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([input]) => {
+          const url = typeof input === "string" ? input : input?.url ?? "";
+          return url === "/api/analysis/fit-assessments/analysis-blocked";
+        }),
+      ).toBe(true);
+    });
+
+    expect(screen.getByRole("button", { name: "Continue Evidence Review" })).toBeInTheDocument();
   });
 });
