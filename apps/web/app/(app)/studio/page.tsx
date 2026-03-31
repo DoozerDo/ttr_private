@@ -12,6 +12,7 @@ import { type ComplianceFlag } from "@/components/ComplianceViolationPanel";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { PageShell } from "@/components/PageShell";
+import { VerifiedGenerationTrustSummary } from "@/components/VerifiedGenerationTrustSummary";
 import { StudioNextMove } from "@/components/StudioNextMove";
 import { defaultClosingTemplateKey } from "@/lib/coverLetters";
 import { formatErrorMessage, readResponsePayload } from "@/lib/compliance/parseComplianceError";
@@ -3473,17 +3474,7 @@ export default function StudioPage() {
               </p>
             ) : null}
             {resumeTrustSummaryVisible ? (
-              <div
-                className="rounded-xl border border-emerald-400/25 bg-emerald-500/8 px-3 py-2 text-xs text-emerald-50"
-                data-testid="studio-resume-trust-summary"
-              >
-                <p className="font-semibold uppercase tracking-[0.18em]">
-                  Generated from verified evidence
-                </p>
-                <p className="mt-1 text-emerald-50/80">
-                  Verified baseline used. Aligned to this role. Unsupported claims remain blocked.
-                </p>
-              </div>
+              <VerifiedGenerationTrustSummary testId="studio-resume-trust-summary" />
             ) : null}
             {resumeWarningFlags.length ? (
               <p className="text-xs text-amber-200">
@@ -3543,6 +3534,7 @@ export default function StudioPage() {
               variant="secondary"
               onClick={handleCoverDraft}
               disabled={!canGenerateDocuments || coverGenerating}
+              data-testid="studio-cover-generate-button"
             >
               {coverGenerating
                 ? "Generating..."
@@ -3669,18 +3661,8 @@ export default function StudioPage() {
                   {unlockGenerationConfirmation}
                 </p>
               ) : null}
-              {coverTrustSummaryVisible ? (
-                <div
-                  className="rounded-xl border border-emerald-400/25 bg-emerald-500/8 px-3 py-2 text-xs text-emerald-50"
-                  data-testid="studio-cover-trust-summary"
-                >
-                  <p className="font-semibold uppercase tracking-[0.18em]">
-                    Generated from verified evidence
-                  </p>
-                  <p className="mt-1 text-emerald-50/80">
-                    Verified baseline used. Aligned to this role. Unsupported claims remain blocked.
-                  </p>
-                </div>
+            {coverTrustSummaryVisible ? (
+                <VerifiedGenerationTrustSummary testId="studio-cover-trust-summary" />
               ) : null}
               <div className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-3">
                 {coverLetterParagraphs.length ? (
