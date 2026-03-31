@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, vi } from "vitest";
 
 import StudioPage from "@/app/(app)/studio/page";
@@ -83,7 +83,7 @@ describe("Studio page UX", () => {
   });
 
   it("shows the current ready generation state for an explicit baselineId", async () => {
-    const fetchMock = vi.fn((input: RequestInfo) => {
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       if (url.includes("/api/baselines/base-1/versions")) {
         return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
@@ -138,7 +138,7 @@ describe("Studio page UX", () => {
       fromUnlock: "true",
     });
 
-    const fetchMock = vi.fn((input: RequestInfo) => {
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       if (url.includes("/api/baselines/base-1/versions")) {
         return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
@@ -189,6 +189,220 @@ describe("Studio page UX", () => {
     expect(screen.queryByTestId("studio-evidence-blocked-panel")).toBeNull();
   });
 
+  it("shows verified-evidence messaging for the first generation after unlock only", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      fromUnlock: "true",
+    });
+
+    let resolveFirstResumeGeneration: ((value: ReturnType<typeof createResponse>) => void) | null =
+      null;
+    let resolveSecondResumeGeneration: ((value: ReturnType<typeof createResponse>) => void) | null =
+      null;
+    let resumeGenerationRequestCount = 0;
+
+    const firstResumeGeneration = new Promise<ReturnType<typeof createResponse>>((resolve) => {
+      resolveFirstResumeGeneration = resolve;
+    });
+    const secondResumeGeneration = new Promise<ReturnType<typeof createResponse>>((resolve) => {
+      resolveSecondResumeGeneration = resolve;
+    });
+
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            scoring_v2: { score: 84 },
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+            verification_coverage: {
+              totalClaims: 2,
+              verifiedClaims: 2,
+              inferredClaims: 0,
+              unverifiedClaims: 0,
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.endsWith("/api/resume") && init?.method === "POST") {
+        resumeGenerationRequestCount += 1;
+        return resumeGenerationRequestCount === 1 ? firstResumeGeneration : secondResumeGeneration;
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    const generateResumeButton = await screen.findByRole("button", { name: "GENERATE RESUME" });
+    await waitFor(() => expect(generateResumeButton).toBeEnabled());
+
+    fireEvent.click(generateResumeButton);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/Generating from your verified evidence\.\.\./).length).toBeGreaterThan(0);
+    });
+
+    await act(async () => {
+      resolveFirstResumeGeneration?.(
+        createResponse({
+          status: "success",
+          generationStatus: "success",
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          preview: {
+            resume: {
+              heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+              summary: "Support leader focused on scalable operations.",
+              experience: [
+                {
+                  company: "Cat Daddy Games",
+                  roleTitle: "Senior Producer",
+                  location: "Los Angeles, CA",
+                  dateRange: "2020 - Present",
+                  bullets: ["Led support operations programs."],
+                },
+              ],
+            },
+          },
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-unlock-generation-confirmation")).toHaveTextContent(
+        "Generated from verified evidence aligned to this role.",
+      );
+    });
+
+    fireEvent.click(generateResumeButton);
+
+    await waitFor(() => {
+      expect(screen.getByText("Generating...")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Generating from your verified evidence...")).toBeNull();
+
+    await act(async () => {
+      resolveSecondResumeGeneration?.(
+        createResponse({
+          status: "success",
+          generationStatus: "success",
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          preview: {
+            resume: {
+              heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+              summary: "Support leader focused on scalable operations.",
+              experience: [
+                {
+                  company: "Cat Daddy Games",
+                  roleTitle: "Senior Producer",
+                  location: "Los Angeles, CA",
+                  dateRange: "2020 - Present",
+                  bullets: ["Led support operations programs."],
+                },
+              ],
+            },
+          },
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("studio-unlock-generation-confirmation")).toBeNull();
+    });
+  });
+
+  it("does not show verified-evidence generation messaging without fromUnlock", async () => {
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            scoring_v2: { score: 84 },
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+            verification_coverage: {
+              totalClaims: 2,
+              verifiedClaims: 2,
+              inferredClaims: 0,
+              unverifiedClaims: 0,
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.endsWith("/api/resume") && init?.method === "POST") {
+        return Promise.resolve(
+          createResponse({
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: {
+              resume: {
+                heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                summary: "Support leader focused on scalable operations.",
+                experience: [
+                  {
+                    company: "Cat Daddy Games",
+                    roleTitle: "Senior Producer",
+                    location: "Los Angeles, CA",
+                    dateRange: "2020 - Present",
+                    bullets: ["Led support operations programs."],
+                  },
+                ],
+              },
+            },
+          }),
+        );
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    const generateResumeButton = await screen.findByRole("button", { name: "Generate Resume" });
+    await waitFor(() => expect(generateResumeButton).toBeEnabled());
+    fireEvent.click(generateResumeButton);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("resume-preview")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Generating from your verified evidence...")).toBeNull();
+    expect(screen.queryByTestId("studio-unlock-generation-confirmation")).toBeNull();
+  });
+
   it("fails cleanly when no baselineId is provided", async () => {
     overrideSearchParams({
       analysisId: "analysis-1",
@@ -214,7 +428,7 @@ describe("Studio page UX", () => {
       baselineId: "base-1",
       baselineVersionId: "base-version-1",
     });
-    const fetchMock = vi.fn((input: RequestInfo) => {
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       if (url.includes("analysis-missing")) {
         return Promise.resolve(createResponse({ message: "not found" }, 404));
@@ -275,7 +489,7 @@ describe("Studio page UX", () => {
   });
 
   it("keeps the low-fit entry point bound to the selected baselineId", async () => {
-    const fetchMock = vi.fn((input: RequestInfo) => {
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       if (url.includes("/api/baselines/base-1/versions")) {
         return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
@@ -314,7 +528,7 @@ describe("Studio page UX", () => {
   });
 
   it("shows the current auto-adjust guidance for unsupported requirements", async () => {
-    const fetchMock = vi.fn((input: RequestInfo) => {
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       if (url.includes("/api/baselines/base-1/versions")) {
         return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));

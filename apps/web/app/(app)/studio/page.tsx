@@ -661,6 +661,10 @@ export default function StudioPage() {
   const [, setCoverAuditId] = useState<string | undefined>();
   const [coverLetterComplianceBlocked, setCoverLetterComplianceBlocked] =
     useState<CoverLetterComplianceBlocked | null>(null);
+  const [hasGeneratedOnce, setHasGeneratedOnce] = useState(false);
+  const [unlockGenerationConfirmation, setUnlockGenerationConfirmation] = useState<string | null>(
+    null,
+  );
   const [applicationInsights, setApplicationInsights] = useState<ApplicationInsight[]>([]);
   const [opportunityContext, setOpportunityContext] = useState<{
     status: string;
@@ -673,6 +677,11 @@ export default function StudioPage() {
     setCoverWarningFlags([]);
     setCoverAuditId(undefined);
   }
+
+  const isFirstGenerationAfterUnlock = isFromUnlock && !hasGeneratedOnce;
+  const unlockGenerationLoadingMessage = isFirstGenerationAfterUnlock
+    ? "Generating from your verified evidence..."
+    : null;
 
   const router = useRouter();
   const trackerEntryId =
@@ -2185,6 +2194,7 @@ export default function StudioPage() {
 
   const handleResumeDraft = async () => {
     if (!guardGenerationAction("resume")) return;
+    setUnlockGenerationConfirmation(null);
     if ((hasSavedResumeEdits || hasUnsavedResumeEdits) && resumeState.response) {
       const proceed =
         typeof window !== "undefined"
@@ -2204,6 +2214,7 @@ export default function StudioPage() {
       return;
     }
     setResumeGenerating(true);
+    const shouldShowUnlockConfirmation = isFirstGenerationAfterUnlock;
     trackEvent("resume_generation_attempted", {
       source: "studio",
       analysisId: requestedAnalysisId || undefined,
@@ -2358,6 +2369,10 @@ export default function StudioPage() {
       }
       setResumeWarningFlags(extractComplianceWarnings(validatedResult.output));
       setResumeAuditId(normalizeAuditId(validatedResult.output));
+      if (shouldShowUnlockConfirmation) {
+        setHasGeneratedOnce(true);
+        setUnlockGenerationConfirmation("Generated from verified evidence aligned to this role.");
+      }
       console.info("[studio] generation_succeeded", {
         documentType: "resume",
       });
@@ -2527,6 +2542,7 @@ export default function StudioPage() {
 
   const handleCoverDraft = async () => {
     if (!guardGenerationAction("cover_letter")) return;
+    setUnlockGenerationConfirmation(null);
     if (!canGenerateDocuments) {
       setCoverState((current) => ({
         ...current,
@@ -2535,6 +2551,7 @@ export default function StudioPage() {
       return;
     }
     setCoverGenerating(true);
+    const shouldShowUnlockConfirmation = isFirstGenerationAfterUnlock;
     trackEvent("cover_letter_generation_attempted", {
       source: "studio",
       analysisId: requestedAnalysisId || undefined,
@@ -2672,6 +2689,10 @@ export default function StudioPage() {
         artifactFailure: null,
         error: null,
       }));
+      if (shouldShowUnlockConfirmation) {
+        setHasGeneratedOnce(true);
+        setUnlockGenerationConfirmation("Generated from verified evidence aligned to this role.");
+      }
       trackEvent("cover_letter_generation_succeeded", {
         source: "studio",
         analysisId: requestedAnalysisId || undefined,
@@ -2898,22 +2919,40 @@ export default function StudioPage() {
           onClick={() => void handleResumeDraft()}
           disabled={!canGenerateDocuments || resumeGenerating}
         >
-          {resumeGenerating ? "Generating..." : "GENERATE RESUME"}
+          {resumeGenerating && isFirstGenerationAfterUnlock
+            ? "GENERATING VERIFIED DRAFT..."
+            : resumeGenerating
+            ? "Generating..."
+            : "GENERATE RESUME"}
         </FormButton>
         <FormButton
           variant="secondary"
           onClick={() => void handleCoverDraft()}
           disabled={!canGenerateDocuments || coverGenerating}
         >
-          {coverGenerating ? "Generating..." : "GENERATE COVER LETTER"}
+          {coverGenerating && isFirstGenerationAfterUnlock
+            ? "GENERATING VERIFIED DRAFT..."
+            : coverGenerating
+            ? "Generating..."
+            : "GENERATE COVER LETTER"}
         </FormButton>
       </div>
+      {unlockGenerationLoadingMessage && (resumeGenerating || coverGenerating) ? (
+        <p className="mt-3 text-xs uppercase tracking-[0.2em] text-emerald-100">
+          {unlockGenerationLoadingMessage}
+        </p>
+      ) : null}
     </section>
   ) : null;
 
   return (
     <PageShell className="space-y-4 pb-4">
       {unlockEntryPanel}
+      {unlockGenerationLoadingMessage && (resumeGenerating || coverGenerating) ? (
+        <Alert intent="info" title="Verified evidence in use">
+          {unlockGenerationLoadingMessage}
+        </Alert>
+      ) : null}
       {isGuidedActive && guidedStep === "GENERATE" && !studioBlockedByNextAction ? (
         <GuidedOverlay
           headline="Now this role is ready for tailored output."
@@ -3421,6 +3460,14 @@ export default function StudioPage() {
           </div>
         ) : resumePresenter.status === "success" && resumeState.response ? (
           <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+            {unlockGenerationConfirmation ? (
+              <p
+                className="text-xs font-medium uppercase tracking-[0.2em] text-emerald-200"
+                data-testid="studio-unlock-generation-confirmation"
+              >
+                {unlockGenerationConfirmation}
+              </p>
+            ) : null}
             {resumeWarningFlags.length ? (
               <p className="text-xs text-amber-200">
                 Verification signals detected. Personalization may be limited. See
@@ -3597,6 +3644,14 @@ export default function StudioPage() {
         {!coverLetterComplianceBlocked ? (
           coverPresenter.status === "success" && coverState.response ? (
             <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+              {unlockGenerationConfirmation ? (
+                <p
+                  className="text-xs font-medium uppercase tracking-[0.2em] text-emerald-200"
+                  data-testid="studio-unlock-generation-confirmation"
+                >
+                  {unlockGenerationConfirmation}
+                </p>
+              ) : null}
               <div className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-3">
                 {coverLetterParagraphs.length ? (
                   <div className="mx-auto flex w-full max-w-[760px] flex-col space-y-4 rounded-2xl border border-white/10 bg-slate-950/80 p-6 shadow-inner">
