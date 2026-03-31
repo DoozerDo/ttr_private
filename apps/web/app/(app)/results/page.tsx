@@ -960,7 +960,12 @@ export function OpportunityMapSection({
 type AdvancedInsightsCardProps = {
   scoreBreakdown: ScoreBreakdownShape | null;
   showScoreDrivers: boolean;
-  renderDriverGrid: (showExtraLine: boolean) => ReactNode;
+  renderDriverGrid: (config: {
+    showExtraLine: boolean;
+    limit?: number;
+    offset?: number;
+    forceShowExtraLine?: boolean;
+  }) => ReactNode;
 };
 
 function buildDiagnosticsSummary(scoreBreakdown: ScoreBreakdownShape | null): string {
@@ -1038,7 +1043,7 @@ export function AdvancedInsightsCard({
                   </h3>
                   <p className="text-xs text-slate-500">Most influential first</p>
                 </div>
-                {renderDriverGrid(true, topSignalCount, 0)}
+                {renderDriverGrid({ showExtraLine: true, limit: topSignalCount, offset: 0 })}
               </section>
 
               {showScoreDrivers && scoreBreakdown?.dimensions?.length ? (
@@ -1051,12 +1056,12 @@ export function AdvancedInsightsCard({
                   </div>
                   {scoreBreakdown.dimensions.length > topSignalCount ? (
                     <>
-                      {renderDriverGrid(
-                        true,
-                        showAdditionalSignals ? scoreBreakdown.dimensions.length : topSignalCount + 3,
-                        topSignalCount,
-                        showAdditionalSignals,
-                      )}
+                      {renderDriverGrid({
+                        showExtraLine: true,
+                        limit: showAdditionalSignals ? scoreBreakdown.dimensions.length : topSignalCount + 3,
+                        offset: topSignalCount,
+                        forceShowExtraLine: showAdditionalSignals,
+                      })}
                       {scoreBreakdown.dimensions.length > topSignalCount + 3 ? (
                         <button
                           type="button"
@@ -2389,12 +2394,17 @@ export default function ResultsPage() {
   const hasEvidenceGaps = isGenerationBlocked;
   const hasFitGaps = criticalGapDetails.length > 0 || signalAlignment.weakerForRole.length > 0;
 
-  const renderDriverGrid = (
-    showExtraLine: boolean,
+  const renderDriverGrid = ({
+    showExtraLine,
     limit = scoreDrivers.length,
     offset = 0,
     forceShowExtraLine = false,
-  ) => (
+  }: {
+    showExtraLine: boolean;
+    limit?: number;
+    offset?: number;
+    forceShowExtraLine?: boolean;
+  }) => (
     <div className="grid gap-3 lg:grid-cols-2">
       {scoreDrivers.slice(offset, limit).map((driver) => {
         const cta = driver.cta;
@@ -3097,7 +3107,6 @@ export default function ResultsPage() {
             body={guidedOverlayConfig.body}
             ctaLabel={guidedOverlayConfig.ctaLabel}
             ctaHref={guidedOverlayConfig.ctaHref}
-            onCtaClick={guidedOverlayConfig.onCtaClick}
           />
         ) : null}
         {opportunitySaved ? (
