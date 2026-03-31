@@ -112,4 +112,19 @@ describe("unlock path state", () => {
     expect(state.studio).toBe("CURRENT");
     expect(state.fitReview).toBe("COMPLETE");
   });
+
+  it("shows opportunities current on the opportunities route", () => {
+    const state = resolveUnlockPathState({
+      currentPathname: "/opportunities",
+      baselineReady: true,
+      analysisExists: true,
+      score: 84,
+      readinessStatus: "ready",
+      hasGeneratedDocuments: true,
+      hasSavedOpportunity: false,
+    });
+
+    expect(state.opportunities).toBe("CURRENT");
+    expect(state.studio).toBe("COMPLETE");
+  });
 });

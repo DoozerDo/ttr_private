@@ -770,27 +770,16 @@ export function OpportunityMapSection({
   return (
     <section className="rounded-3xl bg-slate-900/65 px-6 py-9 sm:px-8 sm:py-10">
       <div className="max-w-4xl space-y-9">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Decision summary</p>
-        <div className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-4">
-          <p className="text-[56px] font-black leading-[0.95] tracking-[-0.04em] text-white md:text-[64px]">
-            {typeof score === "number" ? Math.round(score) : "--"}
-          </p>
-          <h3 className="text-2xl font-semibold tracking-tight text-white">{verdict.label}</h3>
-          <p className="max-w-2xl text-sm leading-6 text-slate-300">{verdict.explanation}</p>
-          <p className="max-w-2xl text-xs leading-5 text-slate-400">
-            This score reflects how closely your verified experience aligns with this role. It does not guarantee hiring outcomes.
-          </p>
-        </div>
-        <div className="space-y-5">
-          <h2 className="max-w-3xl text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl xl:text-5xl">
-            {decisionNarrative.headline}
-          </h2>
-          <p className="max-w-2xl text-base leading-7 text-slate-100 md:text-lg">{decisionNarrative.body}</p>
-        </div>
-        {weakFitRecovery ? (
-          <ResolveGapsBlock href={weakFitRecovery.href} gapPreview={weakFitRecovery.gapPreview} />
-        ) : (
-          <div>
+        {blockedByEvidence ? (
+          <div
+            data-testid="results-blocked-evidence-panel"
+            className="space-y-4 rounded-2xl border border-rose-300/35 bg-rose-500/12 p-5 shadow-[0_0_0_1px_rgba(251,113,133,0.08)]"
+          >
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-rose-100">Evidence readiness</p>
+            <h3 className="max-w-3xl text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl xl:text-5xl">
+              {decisionNarrative.headline}
+            </h3>
+            <p className="max-w-2xl text-base leading-7 text-rose-50 md:text-lg">{decisionNarrative.body}</p>
             <div className="space-y-4">
               {primaryCta ? (
                 primaryCta.disabled ? (
@@ -822,14 +811,14 @@ export function OpportunityMapSection({
                 <a
                   data-testid="results-hero-secondary-action"
                   href={scoreAnalysisHref}
-                  className="font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
+                  className="font-medium text-slate-100 underline decoration-white/30 underline-offset-4 transition hover:text-white hover:decoration-white/60"
                 >
                   View top drivers
                 </a>
                 {nextAction.type === "studio_with_save" ? (
                   <a
                     href="#opportunity-save"
-                    className="font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
+                    className="font-medium text-slate-100 underline decoration-white/30 underline-offset-4 transition hover:text-white hover:decoration-white/60"
                   >
                     Save to Opportunities
                   </a>
@@ -837,7 +826,84 @@ export function OpportunityMapSection({
               </div>
             </div>
           </div>
-        )}
+        ) : null}
+        <div
+          data-testid="results-score-verdict-card"
+          className={`space-y-4 rounded-2xl border p-4 ${blockedByEvidence ? "border-white/10 bg-white/[0.03]" : "border-white/10 bg-white/5"}`}
+        >
+          <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${blockedByEvidence ? "text-slate-500" : "text-slate-400"}`}>
+            Decision summary
+          </p>
+          <p className="text-[56px] font-black leading-[0.95] tracking-[-0.04em] text-white md:text-[64px]">
+            {typeof score === "number" ? Math.round(score) : "--"}
+          </p>
+          <h3 className="text-2xl font-semibold tracking-tight text-white">{verdict.label}</h3>
+          <p className="max-w-2xl text-sm leading-6 text-slate-300">{verdict.explanation}</p>
+          <p className="max-w-2xl text-xs leading-5 text-slate-400">
+            This score reflects how closely your verified experience aligns with this role. It does not guarantee hiring outcomes.
+          </p>
+        </div>
+        {!blockedByEvidence ? (
+          <>
+            <div className="space-y-5">
+              <h2 className="max-w-3xl text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl xl:text-5xl">
+                {decisionNarrative.headline}
+              </h2>
+              <p className="max-w-2xl text-base leading-7 text-slate-100 md:text-lg">{decisionNarrative.body}</p>
+            </div>
+            {weakFitRecovery ? (
+              <ResolveGapsBlock href={weakFitRecovery.href} gapPreview={weakFitRecovery.gapPreview} />
+            ) : (
+              <div>
+                <div className="space-y-4">
+                  {primaryCta ? (
+                    primaryCta.disabled ? (
+                      <span
+                        data-testid="results-hero-primary-cta"
+                        className="inline-flex min-h-[52px] min-w-[300px] cursor-not-allowed items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-6 py-3 text-base font-semibold text-slate-400 md:min-w-[320px]"
+                      >
+                        {primaryCta.label}
+                      </span>
+                    ) : primaryCta.onClick ? (
+                      <button
+                        data-testid="results-hero-primary-cta"
+                        onClick={primaryCta.onClick}
+                        className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500 md:min-w-[320px]"
+                      >
+                        {primaryCta.label}
+                      </button>
+                    ) : (
+                      <a
+                        data-testid="results-hero-primary-cta"
+                        href={primaryCta.href ?? "#"}
+                        className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500 md:min-w-[320px]"
+                      >
+                        {primaryCta.label}
+                      </a>
+                    )
+                  ) : null}
+                  <div className="flex flex-wrap gap-4 text-sm">
+                    <a
+                      data-testid="results-hero-secondary-action"
+                      href={scoreAnalysisHref}
+                      className="font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
+                    >
+                      View top drivers
+                    </a>
+                    {nextAction.type === "studio_with_save" ? (
+                      <a
+                        href="#opportunity-save"
+                        className="font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
+                      >
+                        Save to Opportunities
+                      </a>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        ) : null}
         <div
           id="generation-readiness-details"
           className={`rounded-xl border px-4 py-3 text-sm ${readinessToneClass}`}

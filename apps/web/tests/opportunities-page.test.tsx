@@ -53,7 +53,9 @@ describe("Opportunities page", () => {
     expect(screen.getByRole("button", { name: "Update materials" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Open Results" }));
-    expect(mockRouterPush).toHaveBeenCalledWith("/results?assessmentId=analysis-1");
+    expect(mockRouterPush).toHaveBeenCalledWith(
+      "/results?assessmentId=analysis-1&analysisId=analysis-1&jobId=job-1&baselineId=base-1",
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Open Studio" }));
     expect(mockRouterPush).toHaveBeenCalledWith(
@@ -164,7 +166,9 @@ describe("Opportunities page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Re-analyze" }));
 
     await waitFor(() => {
-      expect(mockRouterPush).toHaveBeenCalledWith("/results?assessmentId=analysis-2");
+      expect(mockRouterPush).toHaveBeenCalledWith(
+        "/results?assessmentId=analysis-2&analysisId=analysis-2&jobId=job-1&baselineId=base-1",
+      );
     });
   });
 

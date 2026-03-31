@@ -227,7 +227,12 @@ export default function OpportunitiesPage() {
       if (!assessmentId) {
         throw new Error("Re-analysis did not return an assessment ID.");
       }
-      router.push(`/results?assessmentId=${encodeURIComponent(assessmentId)}`);
+      const params = new URLSearchParams();
+      params.set("assessmentId", assessmentId);
+      params.set("analysisId", assessmentId);
+      if (jobId) params.set("jobId", jobId);
+      if (baselineId) params.set("baselineId", baselineId);
+      router.push(`/results?${params.toString()}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to re-analyze this role.");
     } finally {
@@ -341,7 +346,11 @@ export default function OpportunitiesPage() {
                           variant="secondary"
                           onClick={() =>
                             row.analysisId
-                              ? router.push(`/results?assessmentId=${encodeURIComponent(row.analysisId)}`)
+                              ? router.push(
+                                  `/results?assessmentId=${encodeURIComponent(row.analysisId)}&analysisId=${encodeURIComponent(row.analysisId)}${
+                                    row.jobId ? `&jobId=${encodeURIComponent(row.jobId)}` : ""
+                                  }${row.baselineId ? `&baselineId=${encodeURIComponent(row.baselineId)}` : ""}`,
+                                )
                               : undefined
                           }
                         >
@@ -387,7 +396,11 @@ export default function OpportunitiesPage() {
                             variant="secondary"
                             onClick={() => {
                               if (!row.analysisId) return;
-                              router.push(`/results?assessmentId=${encodeURIComponent(row.analysisId)}`);
+                              router.push(
+                                `/results?assessmentId=${encodeURIComponent(row.analysisId)}&analysisId=${encodeURIComponent(row.analysisId)}${
+                                  row.jobId ? `&jobId=${encodeURIComponent(row.jobId)}` : ""
+                                }${row.baselineId ? `&baselineId=${encodeURIComponent(row.baselineId)}` : ""}`,
+                              );
                             }}
                           >
                             Update materials

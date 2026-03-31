@@ -198,6 +198,13 @@ describe("results auto analysis loading", () => {
     await waitFor(() => {
       expect(screen.getAllByText("You need verified evidence to proceed.").length).toBeGreaterThan(1);
     });
+    expect(screen.getByTestId("results-blocked-evidence-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("results-score-verdict-card")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("results-blocked-evidence-panel").compareDocumentPosition(
+        screen.getByTestId("results-score-verdict-card"),
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(screen.getAllByText("Missing verified evidence is blocking Studio.").length).toBeGreaterThan(0);
     expect(screen.queryByText("No material gaps were identified in this run.")).toBeNull();
     expect(screen.getByText("Add verified evidence to unlock resume and cover letter generation.")).toBeInTheDocument();

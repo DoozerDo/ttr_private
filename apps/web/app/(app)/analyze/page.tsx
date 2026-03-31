@@ -487,25 +487,44 @@ export default function AnalyzePage() {
     () => (canonicalResult?.jobId || jobId).trim(),
     [canonicalResult?.jobId, jobId],
   );
-  const resultsHref = jobContextId ? `/results?jobId=${encodeURIComponent(jobContextId)}` : "/results";
+  const analysisContextId = useMemo(
+    () => (canonicalResult?.assessmentId ?? null)?.trim() || null,
+    [canonicalResult?.assessmentId],
+  );
+  const baselineContextId = useMemo(
+    () => (canonicalResult?.baselineId ?? baselineId ?? null)?.trim() || null,
+    [baselineId, canonicalResult?.baselineId],
+  );
+  const resultsHref = useMemo(() => {
+    const params = new URLSearchParams();
+    if (jobContextId) params.set("jobId", jobContextId);
+    if (analysisContextId) params.set("analysisId", analysisContextId);
+    if (baselineContextId) params.set("baselineId", baselineContextId);
+    const query = params.toString();
+    return query ? `/results?${query}` : "/results";
+  }, [analysisContextId, baselineContextId, jobContextId]);
   const studioHref = useMemo(() => {
     if (!jobContextId) return "/studio";
     const params = new URLSearchParams();
     params.set("jobId", jobContextId);
+    if (analysisContextId) params.set("analysisId", analysisContextId);
+    if (baselineContextId) params.set("baselineId", baselineContextId);
     if (baselineVersionId) {
       params.set("baselineVersionId", baselineVersionId);
     }
     return `/studio?${params.toString()}`;
-  }, [jobContextId, baselineVersionId]);
+  }, [analysisContextId, baselineContextId, baselineVersionId, jobContextId]);
   const coverLetterHref = useMemo(() => {
     if (!jobContextId) return "/cover-letters";
     const params = new URLSearchParams();
     params.set("jobId", jobContextId);
+    if (analysisContextId) params.set("analysisId", analysisContextId);
+    if (baselineContextId) params.set("baselineId", baselineContextId);
     if (baselineVersionId) {
       params.set("baselineVersionId", baselineVersionId);
     }
     return `/cover-letters?${params.toString()}`;
-  }, [jobContextId, baselineVersionId]);
+  }, [analysisContextId, baselineContextId, baselineVersionId, jobContextId]);
 
   useEffect(() => {
     let cancelled = false;
