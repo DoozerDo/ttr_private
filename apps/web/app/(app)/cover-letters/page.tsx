@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
+import { buildExportPayload } from "../lib/exportPayload";
 import {
   formatErrorMessage,
   parseComplianceError,
@@ -157,22 +158,14 @@ export default function CoverLettersPage() {
   }, [jobCompany, jobTitle]);
 
   function buildCoverLetterPayload(oneTap: boolean): CoverLetterPayload {
-    const payload: CoverLetterPayload = {
-      jobId,
-      baselineVersionId,
-      oneTap,
+    return buildExportPayload({
       documentType: "COVER_LETTER",
-    };
-
-    if (baselineId) {
-      payload.baselineId = baselineId;
-    }
-
-    if (jobContextPayload) {
-      payload.jobContext = jobContextPayload;
-    }
-
-    return payload;
+      oneTap,
+      jobId,
+      baselineId,
+      baselineVersionId,
+      extra: jobContextPayload ? { jobContext: jobContextPayload } : undefined,
+    }) as CoverLetterPayload;
   }
 
   const readyForDocument = Boolean(jobId && baselineVersionId);

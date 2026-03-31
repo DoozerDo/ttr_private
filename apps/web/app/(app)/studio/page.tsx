@@ -16,6 +16,7 @@ import { PageShell } from "@/components/PageShell";
 import { VerifiedGenerationTrustSummary } from "@/components/VerifiedGenerationTrustSummary";
 import { StudioNextMove } from "@/components/StudioNextMove";
 import { defaultClosingTemplateKey } from "@/lib/coverLetters";
+import { buildExportPayload } from "../lib/exportPayload";
 import { formatErrorMessage, readResponsePayload } from "@/lib/compliance/parseComplianceError";
 import {
   applyTargetingExclusionsToReadiness,
@@ -1698,46 +1699,39 @@ export default function StudioPage() {
   ]);
 
   function buildCoverLetterPayload(oneTap: boolean): CoverLetterPayload {
-    const payload: CoverLetterPayload = {
-      jobId: effectiveJobId,
-      baselineId: effectiveBaselineId,
-      analysisId: requestedAnalysisId,
-      closingTemplateKey: defaultClosingTemplateKey,
+    return buildExportPayload({
       documentType: "cover_letter",
       oneTap,
-    };
-    if (effectiveBaselineVersionId) {
-      payload.baselineVersionId = effectiveBaselineVersionId;
-    }
-    if (coverLetterJobContext) {
-      payload.jobContext = coverLetterJobContext;
-    }
-    if (excludedTargetingLabels.size > 0) {
-      payload.excludedRequirements = Array.from(excludedTargetingLabels);
-    }
-    return payload;
+      jobId: effectiveJobId,
+      baselineId: effectiveBaselineId,
+      baselineVersionId: effectiveBaselineVersionId,
+      analysisId: requestedAnalysisId,
+      extra: {
+        closingTemplateKey: defaultClosingTemplateKey,
+        ...(coverLetterJobContext ? { jobContext: coverLetterJobContext } : {}),
+        ...(excludedTargetingLabels.size > 0
+          ? { excludedRequirements: Array.from(excludedTargetingLabels) }
+          : {}),
+      },
+    }) as CoverLetterPayload;
   }
 
   function buildResumePayload(oneTap: boolean) {
-    const payload: Record<string, unknown> = {
+    return buildExportPayload({
+      documentType: "resume",
+      oneTap,
       jobId: effectiveJobId,
       baselineId: effectiveBaselineId,
+      baselineVersionId: effectiveBaselineVersionId,
       analysisId: requestedAnalysisId,
-      oneTap,
-    };
-    if (effectiveBaselineVersionId) {
-      payload.baselineVersionId = effectiveBaselineVersionId;
-    }
-    if (resumeFocus !== "Auto (recommended)") {
-      payload.resumeFocus = resumeFocus;
-    }
-    if (savedEditedResumeModel) {
-      payload.editedResume = savedEditedResumeModel;
-    }
-    if (excludedTargetingLabels.size > 0) {
-      payload.excludedRequirements = Array.from(excludedTargetingLabels);
-    }
-    return payload;
+      extra: {
+        ...(resumeFocus !== "Auto (recommended)" ? { resumeFocus } : {}),
+        ...(savedEditedResumeModel ? { editedResume: savedEditedResumeModel } : {}),
+        ...(excludedTargetingLabels.size > 0
+          ? { excludedRequirements: Array.from(excludedTargetingLabels) }
+          : {}),
+      },
+    });
   }
 
   const applyTargetingAdjustment = useCallback((labels: string[]) => {
