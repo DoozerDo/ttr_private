@@ -963,6 +963,24 @@ type AdvancedInsightsCardProps = {
   renderDriverGrid: (showExtraLine: boolean) => ReactNode;
 };
 
+function buildDiagnosticsSummary(scoreBreakdown: ScoreBreakdownShape | null): string {
+  if (!scoreBreakdown?.dimensions?.length) {
+    return "No detailed scoring breakdown is available yet.";
+  }
+
+  const strongCount = scoreBreakdown.dimensions.filter((dimension) => {
+    const percent = dimension.weight > 0 ? (dimension.score / dimension.weight) * 100 : 0;
+    return percent >= 80;
+  }).length;
+  const reviewCount = scoreBreakdown.dimensions.length - strongCount;
+
+  if (reviewCount === 0) {
+    return `${strongCount} strong scoring signals and no review areas.`;
+  }
+
+  return `${strongCount} strong scoring signals and ${reviewCount} review areas.`;
+}
+
 type SignalAlignmentSectionProps = {
   title: string;
   strengths: string[];
@@ -982,36 +1000,39 @@ export function AdvancedInsightsCard({
     return null;
   }
 
+  const summary = buildDiagnosticsSummary(scoreBreakdown);
+
   return (
     <section
       id="advanced-insights"
-      className="rounded-[30px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.08),transparent_22%),linear-gradient(180deg,rgba(15,23,42,0.94),rgba(2,6,23,0.98))] p-7 shadow-[0_20px_70px_rgba(2,6,23,0.3)]"
+      className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.9),rgba(2,6,23,0.96))] p-4 shadow-[0_12px_30px_rgba(2,6,23,0.16)]"
     >
-      <header className="space-y-3 border-b border-white/10 pb-5">
+      <header className="space-y-2">
         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
           Advanced Insights
         </p>
-        <h2 className="text-2xl font-semibold tracking-tight text-slate-100">
+        <h2 className="text-xl font-semibold tracking-tight text-slate-100">
           Deeper score analysis
         </h2>
+        <p className="text-sm leading-6 text-slate-300">{summary}</p>
         <button
           type="button"
           aria-expanded={expanded}
           onClick={() => setExpanded((current) => !current)}
-          className="text-sm font-medium text-slate-200 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
+          className="text-sm font-semibold tracking-[0.16em] text-slate-200 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
         >
-          {expanded ? "Hide detailed scoring breakdown" : "View detailed scoring breakdown"}
+          {expanded ? "HIDE DETAILS" : "VIEW DETAILS"}
         </button>
       </header>
 
       {expanded ? (
         <>
-          {showScoreDrivers ? <div className="mt-5">{renderDriverGrid(false)}</div> : null}
+          {showScoreDrivers ? <div className="mt-4">{renderDriverGrid(true)}</div> : null}
 
           {scoreBreakdown ? (
-            <section className="mt-6 rounded-[24px] border border-white/10 bg-slate-950/38 p-5">
-              <h3 className="text-base font-semibold text-slate-100">Supporting score breakdown</h3>
-              <div className="mt-4 space-y-3">
+            <section className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-3.5">
+              <h3 className="text-sm font-semibold text-slate-100">Supporting score breakdown</h3>
+              <div className="mt-3 space-y-2.5">
                 {scoreBreakdown.dimensions.map((dimension) => {
                   const percent =
                     dimension.weight > 0
@@ -1019,7 +1040,7 @@ export function AdvancedInsightsCard({
                       : 0;
                   return (
                     <div key={`score-breakdown-${dimension.key}`} className="space-y-1">
-                      <div className="flex items-center justify-between gap-3 text-sm">
+                      <div className="flex items-center justify-between gap-3 text-xs md:text-sm">
                         <span className="text-slate-200">{dimension.label}</span>
                         <span className="font-semibold text-white">
                           {dimension.score.toFixed(1)} / {dimension.weight}
@@ -1031,7 +1052,7 @@ export function AdvancedInsightsCard({
                     </div>
                   );
                 })}
-                <div className="flex items-center justify-between border-t border-white/10 pt-2 text-sm">
+                <div className="flex items-center justify-between border-t border-white/10 pt-2 text-xs md:text-sm">
                   <span className="font-semibold text-slate-200">Total</span>
                   <span className="font-semibold text-white">
                     {scoreBreakdown.total_score.toFixed(1)} / 100
@@ -1042,7 +1063,9 @@ export function AdvancedInsightsCard({
           ) : null}
         </>
       ) : (
-        <p className="mt-4 text-sm text-slate-400">Collapsed by default to keep the decision flow focused.</p>
+        <p className="mt-3 text-sm leading-6 text-slate-400">
+          Collapsed by default to keep the decision flow focused.
+        </p>
       )}
     </section>
   );
