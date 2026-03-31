@@ -71,6 +71,25 @@ function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   };
 }
 
+function createExportResponse(filename: string) {
+  return {
+    ok: true,
+    status: 200,
+    headers: {
+      get: (name: string) => {
+        if (name.toLowerCase() === "content-type") return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        if (name.toLowerCase() === "content-disposition") {
+          return `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`;
+        }
+        return null;
+      },
+    },
+    json: () => Promise.resolve({}),
+    text: () => Promise.resolve(""),
+    blob: () => Promise.resolve(new Blob(["document"], { type: "application/octet-stream" })),
+  };
+}
+
 describe("Studio page UX", () => {
   beforeEach(() => {
     overrideSearchParams({
@@ -486,6 +505,95 @@ describe("Studio page UX", () => {
     });
     expect(screen.queryByText("Generate Resume")).toBeNull();
     expect(screen.queryByText("Generate Cover Letter")).toBeNull();
+  });
+
+  it("keeps trust-summary text out of resume export payloads", async () => {
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            scoring_v2: { score: 84 },
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+            verification_coverage: {
+              totalClaims: 2,
+              verifiedClaims: 2,
+              inferredClaims: 0,
+              unverifiedClaims: 0,
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.endsWith("/api/resume") && init?.method === "POST") {
+        return Promise.resolve(
+          createResponse({
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: {
+              resume: {
+                heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                summary: "Support leader focused on scalable operations.",
+                experience: [
+                  {
+                    company: "Cat Daddy Games",
+                    roleTitle: "Senior Producer",
+                    location: "Los Angeles, CA",
+                    dateRange: "2020 - Present",
+                    bullets: ["Led support operations programs."],
+                  },
+                ],
+              },
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/export") && init?.method === "POST") {
+        return Promise.resolve(createExportResponse("resume Leadership Resume.docx"));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("resume-preview")).toBeInTheDocument();
+    });
+
+    const exportButton = screen.getByRole("button", { name: "Download DOCX" });
+    fireEvent.click(exportButton);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/resume/export?format=docx"),
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    const exportCall = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        typeof url === "string" && url.includes("/api/resume/export?format=docx") && init?.method === "POST",
+    );
+    expect(exportCall).toBeTruthy();
+    const body = JSON.parse((exportCall?.[1]?.body as string) ?? "{}");
+    expect(JSON.stringify(body)).not.toContain("Generated from verified evidence");
+    expect(JSON.stringify(body)).not.toContain("Verified baseline used");
   });
 
   it("keeps the low-fit entry point bound to the selected baselineId", async () => {

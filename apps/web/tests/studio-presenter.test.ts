@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildCoverLetterParagraphs,
   formatPreview,
+  getFilenameFromContentDisposition,
   presentCoverLetterGeneration,
   presentResumeGeneration,
 } from "@/src/lib/studio/helpers";
@@ -152,6 +153,15 @@ describe("studio presenter helpers", () => {
     const paragraphs = buildCoverLetterParagraphs(payload);
     expect(paragraphs[0]).toBe("Dear Hiring Team,");
     expect(paragraphs[1]).toBe("I am applying for the role.");
+  });
+
+  it("parses export filenames from content disposition headers", () => {
+    expect(
+      getFilenameFromContentDisposition("attachment; filename*=UTF-8''resume%20Leadership.docx"),
+    ).toBe("resume Leadership.docx");
+    expect(getFilenameFromContentDisposition('attachment; filename="cover-letter.pdf"')).toBe(
+      "cover-letter.pdf",
+    );
   });
 
   it("renders one closing paragraph and one signoff when structured payload has repeated closing tokens", () => {
