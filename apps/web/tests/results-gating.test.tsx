@@ -67,7 +67,7 @@ describe("results gating", () => {
     await waitFor(() => {
       expect(screen.getByText("Apply moment")).toBeInTheDocument();
     });
-    expect(screen.getAllByRole("link", { name: "OPEN STUDIO" }).length).toBeGreaterThan(0);
+    expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("OPEN STUDIO");
     expect(screen.getByRole("button", { name: "Apply to this role" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save this opportunity" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "START FIT REVIEW" })).toBeNull();
@@ -91,6 +91,6 @@ describe("results gating", () => {
     expect(screen.queryByRole("link", { name: "OPEN STUDIO" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Apply to this role" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Save this opportunity" })).toBeNull();
-    expect(screen.getByRole("link", { name: "START FIT REVIEW" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
   });
 });

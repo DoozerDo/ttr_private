@@ -25,6 +25,7 @@ describe("results auto analysis loading", () => {
     await waitFor(() => {
       expect(screen.getByText("No compatibility analysis yet")).toBeInTheDocument();
     });
+    expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("ANALYZE A ROLE");
     expect(screen.getByRole("button", { name: "ANALYZE A ROLE" })).toBeDisabled();
   });
 
@@ -52,7 +53,8 @@ describe("results auto analysis loading", () => {
     });
     expect(screen.getByText("Assessment not found.")).toBeInTheDocument();
     expect(screen.queryByText("No compatibility analysis yet")).toBeNull();
-    expect(screen.getAllByRole("link", { name: "ANALYZE A ROLE" })[1]).toHaveAttribute(
+    expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("ANALYZE A ROLE");
+    expect(screen.getByRole("link", { name: "ANALYZE A ROLE" })).toHaveAttribute(
       "href",
       "/analyze?jobId=job-1&baselineId=base-1",
     );
@@ -302,10 +304,8 @@ describe("results auto analysis loading", () => {
     });
     expect(screen.getByText("GENERATION UNLOCKED")).toBeInTheDocument();
     expect(screen.getByText("Your evidence now supports this role. You can generate materials with confidence.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "OPEN STUDIO" })).toHaveAttribute(
-      "href",
-      "/studio?jobId=job-1&analysisId=assessment-good&baselineId=base-1&baselineVersionId=base-version-1&fromUnlock=true",
-    );
+    expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("OPEN STUDIO");
+    expect(screen.queryByRole("link", { name: "OPEN STUDIO" })).toBeNull();
   });
 
   it("keeps fit messaging when score is low but generation is not blocked", async () => {

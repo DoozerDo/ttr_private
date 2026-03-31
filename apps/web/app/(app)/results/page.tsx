@@ -774,8 +774,8 @@ export function OpportunityMapSection({
     return { headline: "This score is ready to generate and save.", body: "Generate your resume, then save the role to Opportunities." };
   }, [blockedByEvidence, lowFitScore, nextAction.type]);
   return (
-    <section className="rounded-3xl bg-slate-900/65 px-6 py-9 sm:px-8 sm:py-10">
-      <div className="max-w-4xl space-y-9">
+    <section className="rounded-3xl bg-slate-900/65 px-5 py-7 sm:px-6 sm:py-8">
+      <div className="max-w-4xl space-y-6">
         {blockedByEvidence ? (
           <RouteStateShell
             testId="results-blocked-evidence-panel"
@@ -833,7 +833,7 @@ export function OpportunityMapSection({
         ) : null}
         <div
           data-testid="results-score-verdict-card"
-          className={`space-y-4 rounded-2xl border p-4 ${blockedByEvidence ? "border-white/10 bg-white/[0.03]" : "border-white/10 bg-white/5"}`}
+          className={`space-y-3 rounded-2xl border p-4 ${blockedByEvidence ? "border-white/10 bg-white/[0.03]" : "border-white/10 bg-white/5"}`}
         >
           <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${blockedByEvidence ? "text-slate-500" : "text-slate-400"}`}>
             Decision summary
@@ -849,11 +849,11 @@ export function OpportunityMapSection({
         </div>
         {!blockedByEvidence ? (
           <>
-            <div className="space-y-5">
+            <div className="space-y-3">
               <h2 className="max-w-3xl text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl xl:text-5xl">
                 {decisionNarrative.headline}
               </h2>
-              <p className="max-w-2xl text-base leading-7 text-slate-100 md:text-lg">{decisionNarrative.body}</p>
+              <p className="max-w-2xl text-sm leading-6 text-slate-100 md:text-base">{decisionNarrative.body}</p>
             </div>
             {weakFitRecovery ? (
               <ResolveGapsBlock href={weakFitRecovery.href} gapPreview={weakFitRecovery.gapPreview} />
@@ -886,7 +886,7 @@ export function OpportunityMapSection({
                       </a>
                     )
                   ) : null}
-                  <div className="flex flex-wrap gap-4 text-sm">
+                  <div className="flex flex-wrap gap-3 text-sm">
                     <a
                       data-testid="results-hero-secondary-action"
                       href={scoreAnalysisHref}
@@ -910,7 +910,7 @@ export function OpportunityMapSection({
         ) : null}
         <div
           id="generation-readiness-details"
-          className={`rounded-xl border px-4 py-3 text-sm ${readinessToneClass}`}
+          className={`rounded-xl border px-4 py-2.5 text-sm ${readinessToneClass}`}
         >
           <p className="text-xs font-medium tracking-[0.08em] text-slate-300">
             Generation readiness: {readiness.badgeLabel}
@@ -2321,19 +2321,19 @@ export default function ResultsPage() {
   const hasFitGaps = criticalGapDetails.length > 0 || signalAlignment.weakerForRole.length > 0;
 
   const renderDriverGrid = (showExtraLine: boolean) => (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid gap-3 lg:grid-cols-2">
       {scoreDrivers.map((driver) => {
         const cta = driver.cta;
         return (
           <article
             key={driver.key}
-            className="space-y-4 rounded-2xl border border-white/10 bg-slate-900/30 p-4"
+            className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/20 p-3.5"
           >
             <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">{driver.label}</p>
-            <p className="text-sm text-slate-400">
+            <p className="text-xs text-slate-400">
               Current score {formatDriverValue(driver.points)} of {formatDriverValue(driver.weight)} points
             </p>
-            <div className="space-y-2 text-sm text-slate-200">
+            <div className="space-y-1.5 text-sm text-slate-200">
               <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Why this mattered</p>
               <p>{driver.why}</p>
               {driver.evidence.length ? (
@@ -2355,8 +2355,9 @@ export default function ResultsPage() {
               ) : null}
             </div>
             {cta ? (
-              <div>
+              <div className="pt-1">
                 <FormButton
+                  variant="ghost"
                   onClick={() => {
                     void router.push(cta.href);
                   }}
@@ -2970,47 +2971,10 @@ export default function ResultsPage() {
         ctaHref: "/analyze",
       };
     }
-    if (isGenerationBlocked) {
-      return {
-        headline: "You need verified evidence to proceed.",
-        body: "Add verified evidence to unlock resume and cover letter generation.",
-        ctaLabel: "START FIT REVIEW",
-        ctaHref: fitReviewPath,
-      };
-    }
-    if (primaryNextAction.type === "fit_review") {
-      return {
-        headline: "This score points to Fit Review.",
-        body: "Use the canonical next step to strengthen the baseline before generating materials.",
-        ctaLabel: "START FIT REVIEW",
-        ctaHref: fitReviewPath,
-      };
-    }
-    if (primaryNextAction.type === "studio") {
-      return {
-        headline: "This score is ready for Studio.",
-        body: "Open Resume & Cover Letter Studio to generate tailored materials from verified evidence.",
-        ctaLabel: "OPEN STUDIO",
-        ctaHref: studioHref,
-      };
-    }
-    return {
-      headline: "This score is ready to generate and save.",
-      body: "Generate your resume first, then save the role to Opportunities as a secondary outcome.",
-      ctaLabel: "OPEN STUDIO",
-      ctaHref: studioHref,
-      onCtaClick: () => {
-        void saveOpportunityFromResults();
-      },
-    };
+    return null;
   }, [
-    fitReviewPath,
     isGuidedActive,
-    isGenerationBlocked,
     latest,
-    primaryNextAction.type,
-    saveOpportunityFromResults,
-    studioHref,
   ]);
 
   return (
@@ -3040,14 +3004,6 @@ export default function ResultsPage() {
                 {Math.round(reanalysisDelta.delta)} points.
               </p>
             ) : null}
-            <div className="mt-4">
-              <Link
-                href={studioHref}
-                className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400"
-              >
-                OPEN STUDIO
-              </Link>
-            </div>
           </section>
         ) : null}
         {guidedOverlayConfig ? (
