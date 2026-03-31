@@ -129,6 +129,66 @@ describe("Studio page UX", () => {
     expect(screen.queryByText("Role analysis required")).toBeNull();
   });
 
+  it("shows the unlock entry panel when arriving from a successful generation unlock", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      fromUnlock: "true",
+    });
+
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            scoring_v2: { score: 84 },
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+            verification_coverage: {
+              totalClaims: 2,
+              verifiedClaims: 2,
+              inferredClaims: 0,
+              unverifiedClaims: 0,
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-unlock-entry-panel")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Ready to generate")).toBeInTheDocument();
+    });
+    expect(screen.getByText("READY TO GENERATE")).toBeInTheDocument();
+    expect(
+      screen.getByText("Your verified evidence supports this role. Your materials are now grounded and ready."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "GENERATE RESUME" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "GENERATE COVER LETTER" })).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-evidence-blocked-panel")).toBeNull();
+  });
+
   it("fails cleanly when no baselineId is provided", async () => {
     overrideSearchParams({
       analysisId: "analysis-1",

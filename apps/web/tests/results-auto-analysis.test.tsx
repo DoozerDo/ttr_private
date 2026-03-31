@@ -301,7 +301,7 @@ describe("results auto analysis loading", () => {
     expect(screen.getByText("Your evidence now supports this role. You can generate materials with confidence.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "OPEN STUDIO" })).toHaveAttribute(
       "href",
-      "/studio?jobId=job-1&analysisId=assessment-good&baselineId=base-1&baselineVersionId=base-version-1",
+      "/studio?jobId=job-1&analysisId=assessment-good&baselineId=base-1&baselineVersionId=base-version-1&fromUnlock=true",
     );
   });
 

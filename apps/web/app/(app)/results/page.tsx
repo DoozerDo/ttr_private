@@ -525,6 +525,7 @@ export function buildStudioHrefFromResultsContext(input: {
   baselineId?: string | null;
   baselineVersionId?: string | null;
   analysisId?: string | null;
+  fromUnlock?: boolean;
 }): string {
   const jobId = input.jobId?.trim() ?? "";
   const params = new URLSearchParams();
@@ -545,6 +546,10 @@ export function buildStudioHrefFromResultsContext(input: {
   const baselineVersionId = input.baselineVersionId?.trim() ?? "";
   if (baselineVersionId) {
     params.set("baselineVersionId", baselineVersionId);
+  }
+
+  if (input.fromUnlock) {
+    params.set("fromUnlock", "true");
   }
 
   if (!params.toString()) {
@@ -1869,14 +1874,16 @@ export default function ResultsPage() {
 
   const latestBaselineId = latest?.baselineId?.trim() ?? "";
   const latestBaselineVersionId = latest?.baselineVersionId?.trim() ?? "";
+  const justUnlocked = searchParams?.get("justUnlocked") === "true";
   const studioHref = useMemo(() => {
     return buildStudioHrefFromResultsContext({
       jobId: latest?.jobId,
       baselineId: latestBaselineId,
       baselineVersionId: latestBaselineVersionId,
       analysisId: latest?.assessmentId ?? null,
+      fromUnlock: justUnlocked,
     });
-  }, [latest?.assessmentId, latest?.jobId, latestBaselineId, latestBaselineVersionId]);
+  }, [justUnlocked, latest?.assessmentId, latest?.jobId, latestBaselineId, latestBaselineVersionId]);
 
   const normalizedDimensionScores = useMemo(
     () => normalizeDimensionScores(latest ?? null),
@@ -2151,7 +2158,6 @@ export default function ResultsPage() {
     [activeScore, generationReadiness.blocked, generationReadiness.status],
   );
   const isGenerationBlocked = generationReadiness.status === "blocked";
-  const justUnlocked = searchParams?.get("justUnlocked") === "true";
   const showGenerationUnlockedPanel = Boolean(latest) && justUnlocked && !isGenerationBlocked;
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;

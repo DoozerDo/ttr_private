@@ -514,6 +514,7 @@ export default function StudioPage() {
       "",
     [searchParamValue],
   );
+  const isFromUnlock = useMemo(() => searchParams.get("fromUnlock") === "true", [searchParamValue]);
   useEffect(() => {
     if (trackedStudioOpenRef.current) {
       return;
@@ -2881,8 +2882,38 @@ export default function StudioPage() {
     }
   }
 
+  const unlockEntryPanel = isFromUnlock ? (
+    <section
+      className="rounded-2xl border border-emerald-300/30 bg-emerald-500/10 p-4"
+      data-testid="studio-unlock-entry-panel"
+    >
+      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-100">
+        READY TO GENERATE
+      </p>
+      <p className="mt-2 text-sm text-slate-100">
+        Your verified evidence supports this role. Your materials are now grounded and ready.
+      </p>
+      <div className="mt-4 flex flex-wrap gap-3">
+        <FormButton
+          onClick={() => void handleResumeDraft()}
+          disabled={!canGenerateDocuments || resumeGenerating}
+        >
+          {resumeGenerating ? "Generating..." : "GENERATE RESUME"}
+        </FormButton>
+        <FormButton
+          variant="secondary"
+          onClick={() => void handleCoverDraft()}
+          disabled={!canGenerateDocuments || coverGenerating}
+        >
+          {coverGenerating ? "Generating..." : "GENERATE COVER LETTER"}
+        </FormButton>
+      </div>
+    </section>
+  ) : null;
+
   return (
     <PageShell className="space-y-4 pb-4">
+      {unlockEntryPanel}
       {isGuidedActive && guidedStep === "GENERATE" && !studioBlockedByNextAction ? (
         <GuidedOverlay
           headline="Now this role is ready for tailored output."
