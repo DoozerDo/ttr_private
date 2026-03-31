@@ -29,16 +29,68 @@ describe("evidence suggestion engine", () => {
     expect(result).toBeNull();
   });
 
-  it("returns null for support operations when verified baseline evidence already covers the category", () => {
-    const result = buildRequirementGapInsight({
-      requirement: "Support Operations",
+  it.each([
+    {
+      label: "Support Operations",
       requirementEvidence: "Own support operations and escalation management across customer teams",
-      baselineEvidence: "Owned global incident and escalation management for customer operations supporting fortune 500",
+      baselineEvidence:
+        "Owned global incident and escalation management for customer operations supporting fortune 500",
       supportingSignals: [
         "Led support and development teams of fifty plus across na, emea, and apac",
         "Owned escalation management and support process improvements",
       ],
       summary: "Strong support leadership and incident management evidence.",
+    },
+    {
+      label: "Support Operations",
+      requirementEvidence: "Own service delivery and support process ownership for customer teams",
+      baselineEvidence: "Led support process design and service delivery improvements across regional queues",
+      supportingSignals: [
+        "Managed support workflow improvements",
+        "Owned service delivery outcomes across queues",
+      ],
+      summary: "Verified support process ownership evidence.",
+    },
+  ])("suppresses support operations when verified evidence already covers the category", (input) => {
+    const result = buildRequirementGapInsight({
+      requirement: input.label,
+      requirementEvidence: input.requirementEvidence,
+      baselineEvidence: input.baselineEvidence,
+      supportingSignals: input.supportingSignals,
+      summary: input.summary,
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it.each([
+    {
+      label: "Change Leadership",
+      requirementEvidence: "Lead enterprise change rollout and adoption",
+      baselineEvidence: "Led support and development teams of fifty plus across na, emea, and apac",
+      supportingSignals: [
+        "Owned regional team leadership across three markets",
+        "Managed cross-functional support teams at global scale",
+      ],
+      summary: "Leadership at scale evidence without the exact phrase.",
+    },
+    {
+      label: "Change Leadership",
+      requirementEvidence: "Lead transformation and operating model change",
+      baselineEvidence: "Drove rollout of a new support operating model across regions",
+      supportingSignals: [
+        "Championed process rollout across customer operations",
+        "Spearheaded adoption of a new service delivery model",
+      ],
+      summary: "Rollout and operating-model change evidence.",
+    },
+  ])("suppresses change leadership when equivalent evidence exists", (input) => {
+    const result = buildRequirementGapInsight({
+      requirement: input.label,
+      requirementEvidence: input.requirementEvidence,
+      baselineEvidence: input.baselineEvidence,
+      supportingSignals: input.supportingSignals,
+      summary: input.summary,
     });
 
     expect(result).toBeNull();

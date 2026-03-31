@@ -40,15 +40,98 @@ function sentenceFromSignals(signals: string[]): string {
 
 type CategoryFamily = "support_operations" | "change_leadership" | "leadership_scope";
 
+const SUPPORT_OPERATIONS_CATEGORY_PATTERNS = [
+  /\bsupport operations?\b/,
+  /\bcustomer operations?\b/,
+  /\bsupport leadership\b/,
+  /\bsupport process ownership\b/,
+  /\bservice delivery\b/,
+  /\bescalation\b/,
+  /\bincident\b/,
+  /\bprocess rigor\b/,
+  /\bworkflow\b/,
+  /\bops\b/,
+];
+
+const CHANGE_LEADERSHIP_CATEGORY_PATTERNS = [
+  /\bchange leadership\b/,
+  /\btransformation\b/,
+  /\boperating model\b/,
+  /\boperational transformation\b/,
+  /\bprocess rollout\b/,
+  /\brollout\b/,
+  /\badoption\b/,
+  /\bmigration\b/,
+];
+
+const LEADERSHIP_SCOPE_CATEGORY_PATTERNS = [
+  /\bleadership\b/,
+  /\bseniority\b/,
+  /\bscope\b/,
+  /\bteam\b/,
+  /\bscale\b/,
+  /\bglobal\b/,
+  /\bregional\b/,
+];
+
+const SUPPORT_OPERATIONS_EVIDENCE_PATTERNS = [
+  /\bsupport operations?\b/,
+  /\bcustomer operations?\b/,
+  /\bsupport leadership\b/,
+  /\bsupport process ownership\b/,
+  /\bprocess ownership\b/,
+  /\bservice delivery\b/,
+  /\bescalation management\b/,
+  /\bincident management\b/,
+  /\bincident response\b/,
+  /\bincident command\b/,
+  /\bescalation ownership\b/,
+  /\btriage\b/,
+  /\bworkflow\b/,
+  /\bsla\b/,
+  /\bkpi\b/,
+  /\bsupport queue\b/,
+];
+
+const CHANGE_LEADERSHIP_EVIDENCE_PATTERNS = [
+  /\bchange leadership\b/,
+  /\btransformation\b/,
+  /\boperating model\b/,
+  /\boperational transformation\b/,
+  /\bprocess rollout\b/,
+  /\brollout\b/,
+  /\badoption\b/,
+  /\bmigration\b/,
+  /\bchange management\b/,
+  /\bredesign\b/,
+  /\breorganization\b/,
+  /\blaunch\b/,
+];
+
+const LEADERSHIP_SCOPE_EVIDENCE_PATTERNS = [
+  /\bteam of \d+/,
+  /\d+\+/,
+  /\bacross \d+/,
+  /\borg(?:anization)?-?wide\b/,
+  /\bglobal\b/,
+  /\benterprise\b/,
+  /\bmulti-site\b/,
+  /\bcross-functional\b/,
+  /\bportfolio\b/,
+  /\bdivision\b/,
+  /\bdepartment\b/,
+  /\bregion\b/,
+];
+
 function normalizeCategoryFamily(categoryLabel: string): CategoryFamily | null {
   const category = categoryLabel.toLowerCase();
-  if (/\bsupport operations?\b|\bcustomer operations?\b|\bops\b|\boperations\b/.test(category)) {
+  if (SUPPORT_OPERATIONS_CATEGORY_PATTERNS.some((pattern) => pattern.test(category))) {
     return "support_operations";
   }
-  if (/\bchange leadership\b|\btransformation\b|\brollout\b|\badoption\b|\bmigration\b/.test(category)) {
+  if (CHANGE_LEADERSHIP_CATEGORY_PATTERNS.some((pattern) => pattern.test(category))) {
     return "change_leadership";
   }
-  if (/\bleadership\b|\bseniority\b|\bscope\b|\bteam\b|\bscale\b|\bglobal\b|\bregional\b/.test(category)) {
+  if (LEADERSHIP_SCOPE_CATEGORY_PATTERNS.some((pattern) => pattern.test(category))) {
     return "leadership_scope";
   }
   return null;
@@ -56,10 +139,8 @@ function normalizeCategoryFamily(categoryLabel: string): CategoryFamily | null {
 
 function hasSupportOperationsEvidence(evidenceText: string): boolean {
   return (
-    /\b(support operations?|customer operations?|support leadership|support process ownership|process ownership|workflow|sla|kpi|incident|escalation|service delivery|triage)\b/.test(
-      evidenceText,
-    ) &&
-    /\b(led|leading|managed|owned|built|improved|scaled|optimized|directed|supervised)\b/.test(
+    SUPPORT_OPERATIONS_EVIDENCE_PATTERNS.some((pattern) => pattern.test(evidenceText)) &&
+    /\b(led|leading|managed|owned|built|improved|scaled|optimized|directed|supervised|drove|orchestrated)\b/.test(
       evidenceText,
     )
   );
@@ -67,19 +148,18 @@ function hasSupportOperationsEvidence(evidenceText: string): boolean {
 
 function hasChangeLeadershipEvidence(evidenceText: string): boolean {
   return (
-    /\b(change|transformation|transformational|rollout|adoption|migration|operational transformation|process rollout|reorganization|redesign|launch)\b/.test(
+    CHANGE_LEADERSHIP_EVIDENCE_PATTERNS.some((pattern) => pattern.test(evidenceText)) &&
+    /\b(led|leading|managed|owned|drove|directed|supervised|orchestrated|championed|spearheaded)\b/.test(
       evidenceText,
-    ) &&
-    /\b(led|leading|managed|owned|drove|directed|supervised|orchestrated)\b/.test(evidenceText)
+    )
   );
 }
 
 function hasLeadershipScopeEvidence(evidenceText: string): boolean {
   return (
-    /\b(led|leading|managed|owned|directed|supervised|built)\b/.test(evidenceText) &&
-    /\b(team of \d+|\d+\+|across \d+|org(?:anization)?-?wide|global|enterprise|multi-site|cross-functional|portfolio|division|department|region)\b/.test(
+    /\b(led|leading|managed|owned|directed|supervised|built|drove|orchestrated|championed|spearheaded)\b/.test(
       evidenceText,
-    )
+    ) && LEADERSHIP_SCOPE_EVIDENCE_PATTERNS.some((pattern) => pattern.test(evidenceText))
   );
 }
 
