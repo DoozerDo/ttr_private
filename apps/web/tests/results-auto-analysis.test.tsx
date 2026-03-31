@@ -163,6 +163,7 @@ describe("results auto analysis loading", () => {
     render(<ResultsPage />);
 
     await screen.findByText("Competitive match");
+    expect(screen.queryByTestId("results-generation-unlocked-panel")).toBeNull();
     expect(screen.queryByText("You need verified evidence to proceed.")).toBeNull();
     expect(screen.queryByText("This role may not be a fit.")).toBeNull();
     expect(screen.queryByText("No compatibility analysis yet")).toBeNull();
@@ -175,7 +176,7 @@ describe("results auto analysis loading", () => {
   });
 
   it("uses missing verification language when generation readiness is blocked", async () => {
-    overrideSearchParams({ analysisId: "assessment-blocked" });
+    overrideSearchParams({ analysisId: "assessment-blocked", justUnlocked: "true" });
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -231,6 +232,7 @@ describe("results auto analysis loading", () => {
     });
     expect(screen.getByTestId("results-blocked-evidence-panel")).toBeInTheDocument();
     expect(screen.getByTestId("results-score-verdict-card")).toBeInTheDocument();
+    expect(screen.queryByTestId("results-generation-unlocked-panel")).toBeNull();
     expect(
       screen.getByTestId("results-blocked-evidence-panel").compareDocumentPosition(
         screen.getByTestId("results-score-verdict-card"),
@@ -242,6 +244,64 @@ describe("results auto analysis loading", () => {
     expect(screen.getByTestId("results-hero-primary-cta")).toHaveAttribute(
       "href",
       "/fit-review?jobId=job-1&analysisId=assessment-blocked&assessmentId=assessment-blocked&baselineId=base-1&baselineVersionId=base-version-1",
+    );
+  });
+
+  it("shows generation unlocked state when a blocked analysis returns unblocked", async () => {
+    overrideSearchParams({ analysisId: "assessment-good", justUnlocked: "true" });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/analysis/fit-assessments/assessment-good")) {
+        return jsonResponse({
+          assessmentId: "assessment-good",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          jobId: "job-1",
+          score: 84,
+          strengths: ["Strong leadership", "Operational rigor"],
+          verification_coverage: {
+            totalClaims: 3,
+            verifiedClaims: 3,
+            inferredClaims: 0,
+            unverifiedClaims: 0,
+            verifiedRequirements: ["Leadership", "Operations", "Systems"],
+            unverifiedRequirements: [],
+          },
+        });
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return jsonResponse([{ id: "base-version-1", versionNumber: 1 }]);
+      }
+      if (url.includes("/api/analysis/fit-assessments?jobId=job-1")) {
+        return jsonResponse([]);
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return jsonResponse({
+          status: "ready",
+          blocked: false,
+          reasonCodes: [],
+          reasons: [],
+          badgeLabel: "READY",
+          summary: "Ready for generation.",
+          verificationIssues: [],
+        });
+      }
+      return jsonResponse({}, 200);
+    });
+
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    render(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("results-generation-unlocked-panel")).toBeInTheDocument();
+    });
+    expect(screen.getByText("GENERATION UNLOCKED")).toBeInTheDocument();
+    expect(screen.getByText("Your evidence now supports this role. You can generate materials with confidence.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "OPEN STUDIO" })).toHaveAttribute(
+      "href",
+      "/studio?jobId=job-1&analysisId=assessment-good&baselineId=base-1&baselineVersionId=base-version-1",
     );
   });
 

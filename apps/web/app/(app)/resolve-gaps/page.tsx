@@ -353,6 +353,7 @@ export default function ResolveGapsPage() {
       params.set("baselineId", baselineId);
       params.set("assessmentId", assessmentId);
       params.set("analysisId", assessmentId);
+      params.set("justUnlocked", "true");
       if (analysis?.baselineVersionId?.trim()) {
         params.set("baselineVersionId", analysis.baselineVersionId.trim());
       }

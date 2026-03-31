@@ -2151,6 +2151,8 @@ export default function ResultsPage() {
     [activeScore, generationReadiness.blocked, generationReadiness.status],
   );
   const isGenerationBlocked = generationReadiness.status === "blocked";
+  const justUnlocked = searchParams?.get("justUnlocked") === "true";
+  const showGenerationUnlockedPanel = Boolean(latest) && justUnlocked && !isGenerationBlocked;
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
     if (!latest) return;
@@ -3016,6 +3018,31 @@ export default function ResultsPage() {
             <p className="mt-1 text-sm text-slate-100">
               Strengthen your baseline before generating application materials.
             </p>
+          </section>
+        ) : null}
+        {showGenerationUnlockedPanel ? (
+          <section
+            className="rounded-2xl border border-emerald-300/30 bg-emerald-500/10 p-4"
+            data-testid="results-generation-unlocked-panel"
+          >
+            <p className="text-sm font-semibold text-emerald-100">GENERATION UNLOCKED</p>
+            <p className="mt-1 text-sm text-slate-100">
+              Your evidence now supports this role. You can generate materials with confidence.
+            </p>
+            {typeof reanalysisDelta.delta === "number" ? (
+              <p className="mt-2 text-xs text-emerald-200">
+                Evidence added. Score change: {reanalysisDelta.delta > 0 ? "+" : ""}
+                {Math.round(reanalysisDelta.delta)} points.
+              </p>
+            ) : null}
+            <div className="mt-4">
+              <Link
+                href={studioHref}
+                className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400"
+              >
+                OPEN STUDIO
+              </Link>
+            </div>
           </section>
         ) : null}
         {guidedOverlayConfig ? (
