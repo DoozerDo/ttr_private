@@ -29,6 +29,8 @@ function isPublicRoute(context: ExecutionContext): boolean {
   return (
     url === '/auth/register' ||
     url === '/auth/login' ||
+    url === '/auth/forgot-password' ||
+    url === '/auth/reset-password' ||
     url === '/auth/redeem-access-code-and-login' ||
     url === '/auth/confirm' ||
     url === '/auth/resend-confirmation' ||
