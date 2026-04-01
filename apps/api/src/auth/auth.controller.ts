@@ -19,6 +19,7 @@ import { AuthService } from './auth.service';
 import { LoginDto, RedeemAccessCodeAndLoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResendConfirmationDto } from './dto/resend-confirmation.dto';
+import { ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto } from './dto/password-reset.dto';
 import type { AuthUserDto } from './dto/auth-response.dto';
 
 const AUTH_COOKIE_NAME = 'access_token';
@@ -55,6 +56,16 @@ export class AuthController {
   @Post('resend-confirmation')
   async resendConfirmation(@Body() payload: ResendConfirmationDto) {
     return this.authService.resendConfirmation(payload.email);
+  }
+
+  @Post('forgot-password')
+  async forgotPassword(@Body() payload: ForgotPasswordDto) {
+    return this.authService.requestPasswordReset(payload.email);
+  }
+
+  @Post('reset-password')
+  async resetPassword(@Body() payload: ResetPasswordDto) {
+    return this.authService.resetPassword(payload.token, payload.password);
   }
 
   @Post('login')
@@ -114,6 +125,22 @@ export class AuthController {
   @Get('me')
   me(@Req() request: { user?: AuthUserDto }) {
     return { user: request.user };
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Post('change-password')
+  async changePassword(
+    @Req() request: { user?: AuthUserDto },
+    @Body() payload: ChangePasswordDto,
+  ) {
+    if (!request.user?.id) {
+      throw new InternalServerErrorException('Invalid user context');
+    }
+    return this.authService.changePassword(
+      request.user.id,
+      payload.currentPassword,
+      payload.newPassword,
+    );
   }
 
   private setAuthCookie(res: Response, accessToken: string) {

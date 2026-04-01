@@ -18,6 +18,10 @@ describe('AuthController', () => {
           useValue: {
             register: jest.fn(),
             login: jest.fn(),
+            resendConfirmation: jest.fn(),
+            requestPasswordReset: jest.fn(),
+            resetPassword: jest.fn(),
+            changePassword: jest.fn(),
           },
         },
       ],

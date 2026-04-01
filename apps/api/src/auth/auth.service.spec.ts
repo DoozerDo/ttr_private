@@ -51,6 +51,7 @@ describe('AuthService', () => {
             findById: jest.fn(),
             create: jest.fn(),
             setEmailConfirmed: jest.fn(),
+            updatePasswordHash: jest.fn(),
           },
         },
         {
@@ -725,6 +726,119 @@ describe('AuthService', () => {
         subject: 'New TTR registration',
       }),
     );
+  });
+
+  it('requests password reset with a generic response', async () => {
+    usersService.findByEmail.mockResolvedValue({
+      id: 'reset-user',
+      email: 'reset@example.com',
+      firstName: 'Reset',
+      lastName: 'User',
+      emailConfirmed: true,
+      passwordHash: 'hash',
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      studioResumeFocusDefault: null,
+      profileCompletedAt: null,
+      role: 'user',
+      subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as User);
+
+    const result = await service.requestPasswordReset('reset@example.com');
+
+    expect(result.success).toBe(true);
+    expect(resendEmailService.sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'reset@example.com',
+        subject: 'Reset your password',
+      }),
+    );
+  });
+
+  it('rejects invalid reset tokens and updates password on valid reset', async () => {
+    userTokensRepository.findOne.mockResolvedValueOnce(null);
+    await expect(service.resetPassword('bad-token', 'Password123')).rejects.toThrow(
+      'Invalid or expired reset token',
+    );
+
+    userTokensRepository.findOne.mockResolvedValueOnce({
+      id: 'token-id',
+      userId: 'user-id',
+      token: 'good-token',
+      type: 'reset-password',
+      expiresAt: new Date(Date.now() + 1000),
+    });
+    usersService.findById.mockResolvedValue({
+      id: 'user-id',
+      email: 'user@example.com',
+      firstName: 'Test',
+      lastName: 'User',
+      emailConfirmed: true,
+      passwordHash: 'old-hash',
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      studioResumeFocusDefault: null,
+      profileCompletedAt: null,
+      role: 'user',
+      subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as User);
+
+    const result = await service.resetPassword('good-token', 'Password123');
+    expect(result.success).toBe(true);
+    expect(usersService.updatePasswordHash).toHaveBeenCalledWith(
+      'user-id',
+      expect.any(String),
+    );
+  });
+
+  it('changes password after validating the current password', async () => {
+    const hash = await bcrypt.hash('OldPassword123', 10);
+    usersService.findById.mockResolvedValue({
+      id: 'user-id',
+      email: 'user@example.com',
+      firstName: 'Test',
+      lastName: 'User',
+      emailConfirmed: true,
+      passwordHash: hash,
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      studioResumeFocusDefault: null,
+      profileCompletedAt: null,
+      role: 'user',
+      subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as User);
+
+    await expect(
+      service.changePassword('user-id', 'WrongPassword', 'NewPassword123'),
+    ).rejects.toThrow('Current password is incorrect');
+
+    const result = await service.changePassword(
+      'user-id',
+      'OldPassword123',
+      'NewPassword123',
+    );
+    expect(result.success).toBe(true);
   });
 
 });

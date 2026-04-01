@@ -95,16 +95,20 @@ export class UsersController {
 
     const firstName = body.firstName?.trim();
     const lastName = body.lastName?.trim();
+    const company = body.company?.trim();
     const roleTitle = body.roleTitle?.trim();
+    const linkedinUrl = body.linkedinUrl?.trim();
     const intendedUse = body.intendedUse?.trim();
+    const studioResumeFocusDefault = body.studioResumeFocusDefault?.trim();
 
     const updated = await this.usersService.updateMyProfile(user.id, {
       firstName,
       lastName,
       roleTitle,
-      company: body.company,
-      linkedinUrl: body.linkedinUrl,
+      company,
+      linkedinUrl,
       intendedUse,
+      studioResumeFocusDefault,
     });
 
     const { passwordHash, ...sanitized } = updated;

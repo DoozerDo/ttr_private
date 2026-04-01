@@ -9,7 +9,7 @@ import {
 } from 'typeorm';
 import { User } from '../users/user.entity';
 
-export type UserTokenType = 'confirm';
+export type UserTokenType = 'confirm' | 'reset-password';
 
 @Entity({ name: 'user_tokens' })
 export class UserToken {

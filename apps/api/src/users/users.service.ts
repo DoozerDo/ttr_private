@@ -34,6 +34,7 @@ export class UsersService {
       company: null,
       linkedinUrl: null,
       intendedUse: null,
+      studioResumeFocusDefault: null,
       profileCompletedAt: null,
       role: 'user',
       subscriptionTier: SubscriptionTier.FREE,
@@ -77,6 +78,7 @@ export class UsersService {
       company?: string | null;
       linkedinUrl?: string | null;
       intendedUse?: string | null;
+      studioResumeFocusDefault?: string | null;
     },
   ): Promise<User> {
     const user = await this.findById(userId);
@@ -109,6 +111,11 @@ export class UsersService {
       user.intendedUse = input.intendedUse?.trim() || null;
     }
 
+    if (input.studioResumeFocusDefault !== undefined) {
+      user.studioResumeFocusDefault =
+        input.studioResumeFocusDefault?.trim() || null;
+    }
+
     if (!user.profileCompletedAt && user.roleTitle && user.intendedUse) {
       user.profileCompletedAt = new Date();
     }
@@ -131,6 +138,16 @@ export class UsersService {
     }
 
     user.lastAssessmentId = assessmentId;
+    return this.usersRepository.save(user);
+  }
+
+  async updatePasswordHash(userId: string, passwordHash: string): Promise<User> {
+    const user = await this.findById(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    user.passwordHash = passwordHash;
     return this.usersRepository.save(user);
   }
 }

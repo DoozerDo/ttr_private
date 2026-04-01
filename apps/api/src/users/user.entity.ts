@@ -62,6 +62,9 @@ export class User {
   @Column({ type: 'character varying', length: 255, nullable: true })
   intendedUse?: string | null;
 
+  @Column({ type: 'character varying', length: 64, nullable: true })
+  studioResumeFocusDefault?: string | null;
+
   @Column({ type: 'uuid', nullable: true })
   lastAssessmentId?: string | null;
 

@@ -90,6 +90,8 @@ export async function forwardAuthRequest(
       method: req.method,
       headers: {
         "content-type": req.headers.get("content-type") ?? "application/json",
+        cookie: req.headers.get("cookie") ?? "",
+        authorization: req.headers.get("authorization") ?? "",
       },
       body: body || undefined,
     });

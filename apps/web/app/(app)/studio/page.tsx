@@ -674,6 +674,47 @@ export default function StudioPage() {
     updatedAt: string;
   } | null>(null);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadResumeFocusPreference = async () => {
+      try {
+        const response = await fetch("/api/users/me", {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = (await response.json()) as { studioResumeFocusDefault?: unknown };
+        const focus = payload.studioResumeFocusDefault;
+        if (
+          !cancelled &&
+          typeof focus === "string" &&
+          [
+            "Auto (recommended)",
+            "Operational Leadership",
+            "Technical Depth",
+            "Customer Experience Strategy",
+            "Scaling Operations",
+          ].includes(focus)
+        ) {
+          setResumeFocus(focus as ResumeFocusOption);
+        }
+      } catch {
+        // Best effort.
+      }
+    };
+
+    void loadResumeFocusPreference();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   function applyCoverLetterComplianceBlocked(blocked: CoverLetterComplianceBlocked) {
     setCoverLetterComplianceBlocked(blocked);
     setCoverState(createDocumentState());

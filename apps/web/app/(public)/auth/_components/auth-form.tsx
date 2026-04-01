@@ -519,6 +519,13 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
         {message && <p className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{message}</p>}
 
         {error && <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{error}</p>}
+        {isLogin && (
+          <p className="text-sm text-slate-700">
+            <Link href="/auth/forgot-password" className="font-semibold text-blue-600 hover:underline">
+              Forgot password?
+            </Link>
+          </p>
+        )}
 
         {!awaitingVerification && (
           <button

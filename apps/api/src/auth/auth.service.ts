@@ -45,6 +45,21 @@ type ResendConfirmationResponseDto = {
   message: string;
 };
 
+type ForgotPasswordResponseDto = {
+  success: true;
+  message: string;
+};
+
+type ResetPasswordResponseDto = {
+  success: true;
+  message: string;
+};
+
+type ChangePasswordResponseDto = {
+  success: true;
+  message: string;
+};
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -280,6 +295,91 @@ export class AuthService {
     await this.sendConfirmationEmail(user.email, html, this.supportEmail);
 
     return successMessage;
+  }
+
+  async requestPasswordReset(email: string): Promise<ForgotPasswordResponseDto> {
+    const successMessage = {
+      success: true,
+      message: 'If an account exists, a reset link has been sent.',
+    } as const;
+
+    const user = await this.usersService.findByEmail(email);
+    if (!user) {
+      return successMessage;
+    }
+
+    await this.userTokensRepository.delete({ userId: user.id, type: 'reset-password' });
+
+    const token = randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+
+    await this.userTokensRepository.save(
+      this.userTokensRepository.create({
+        userId: user.id,
+        token,
+        type: 'reset-password',
+        expiresAt,
+      }),
+    );
+
+    const resetUrl = `${this.publicWebBaseUrl.replace(/\/$/, '')}/auth/reset-password?token=${token}`;
+    const html = [
+      `<p>Reset your password: <a href="${resetUrl}">${resetUrl}</a></p>`,
+      `<p>If you did not request this, you can ignore this email.</p>`,
+    ].join('');
+
+    await this.resendEmailService.sendEmail({
+      to: user.email,
+      subject: 'Reset your password',
+      html,
+      replyTo: this.supportEmail,
+    });
+
+    return successMessage;
+  }
+
+  async resetPassword(token: string, password: string): Promise<ResetPasswordResponseDto> {
+    if (!token || !password) {
+      throw new BadRequestException('Missing reset token or password');
+    }
+
+    const match = await this.userTokensRepository.findOne({
+      where: { token, type: 'reset-password' },
+    });
+
+    if (!match || match.expiresAt.getTime() <= Date.now()) {
+      throw new BadRequestException('Invalid or expired reset token');
+    }
+
+    const user = await this.usersService.findById(match.userId);
+    if (!user) {
+      throw new BadRequestException('Invalid reset token');
+    }
+
+    await this.usersService.updatePasswordHash(user.id, await bcrypt.hash(password, 10));
+    await this.userTokensRepository.delete({ id: match.id });
+
+    return { success: true, message: 'Password reset successfully. You can now log in.' };
+  }
+
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<ChangePasswordResponseDto> {
+    const user = await this.usersService.findById(userId);
+    if (!user || !user.passwordHash) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    const matches = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!matches) {
+      throw new BadRequestException('Current password is incorrect');
+    }
+
+    await this.usersService.updatePasswordHash(user.id, await bcrypt.hash(newPassword, 10));
+
+    return { success: true, message: 'Password updated.' };
   }
 
 

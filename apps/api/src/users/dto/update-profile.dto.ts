@@ -13,13 +13,18 @@ export class UpdateProfileDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(100)
+  company?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(150)
   roleTitle?: string;
 
   @IsOptional()
   @IsString()
-  @MaxLength(150)
-  company?: string;
+  @MaxLength(255)
+  intendedUse?: string;
 
   @IsOptional()
   @IsString()
@@ -29,6 +34,6 @@ export class UpdateProfileDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(255)
-  intendedUse?: string;
+  @MaxLength(64)
+  studioResumeFocusDefault?: string;
 }
