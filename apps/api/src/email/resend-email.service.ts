@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 export interface ResendEmailInput {
   to: string;
@@ -12,10 +13,12 @@ export interface ResendEmailInput {
 export class ResendEmailService {
   private readonly logger = new Logger(ResendEmailService.name);
 
-  async sendEmail(input: ResendEmailInput): Promise<void> {
-    const apiKey = process.env.RESEND_API_KEY;
-    const from = process.env.MAIL_FROM;
+  constructor(private readonly configService: ConfigService) {}
 
+  async sendEmail(input: ResendEmailInput): Promise<void> {
+    const apiKey =
+      this.configService.get<string>('RESEND_API_KEY') ?? process.env.RESEND_API_KEY;
+    const from = this.configService.get<string>('MAIL_FROM') ?? process.env.MAIL_FROM;
     if (!apiKey) {
       throw new Error(
         'Missing RESEND_API_KEY environment variable for Resend email delivery.',
@@ -33,7 +36,10 @@ export class ResendEmailService {
     }
 
     const replyTo =
-      input.replyTo ?? process.env.MAIL_REPLY_TO ?? 'support@targetthisrole.com';
+      input.replyTo ??
+      this.configService.get<string>('MAIL_REPLY_TO') ??
+      process.env.MAIL_REPLY_TO ??
+      'support@targetthisrole.com';
 
     const payload: Record<string, unknown> = {
       from,
