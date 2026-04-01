@@ -750,6 +750,12 @@ describe('AuthService', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     } as User);
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'RESEND_API_KEY') return 'test-resend-key';
+      if (key === 'NODE_ENV') return 'test';
+      if (key === 'APP_PUBLIC_WEB_URL') return 'http://localhost:3000';
+      return undefined;
+    });
 
     const result = await service.requestPasswordReset('reset@example.com');
 

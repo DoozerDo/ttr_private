@@ -298,12 +298,21 @@ export class AuthService {
   }
 
   async requestPasswordReset(email: string): Promise<ForgotPasswordResponseDto> {
+    const normalizedEmail = email?.trim().toLowerCase() ?? '';
+    this.logger.log(
+      `[password-reset] request received for email=${normalizedEmail || 'unknown'}`,
+    );
+
     const successMessage = {
       success: true,
       message: 'If an account exists, a reset link has been sent.',
     } as const;
 
     const user = await this.usersService.findByEmail(email);
+    this.logger.log(
+      `[password-reset] user lookup: found=${Boolean(user)}`,
+    );
+
     if (!user) {
       return successMessage;
     }
@@ -321,6 +330,7 @@ export class AuthService {
         expiresAt,
       }),
     );
+    this.logger.log(`[password-reset] token created for userId=${user.id}`);
 
     const resetUrl = `${this.publicWebBaseUrl.replace(/\/$/, '')}/auth/reset-password?token=${token}`;
     const html = [
@@ -328,12 +338,37 @@ export class AuthService {
       `<p>If you did not request this, you can ignore this email.</p>`,
     ].join('');
 
-    await this.resendEmailService.sendEmail({
-      to: user.email,
-      subject: 'Reset your password',
-      html,
-      replyTo: this.supportEmail,
-    });
+    try {
+      this.logger.log('[password-reset] attempting email send');
+      const resendApiKey =
+        this.configService.get<string>('RESEND_API_KEY') ??
+        process.env.RESEND_API_KEY ??
+        '';
+
+      if (!resendApiKey.trim()) {
+        throw new Error('Missing RESEND_API_KEY environment variable for password reset email delivery.');
+      }
+
+      await this.resendEmailService.sendEmail({
+        to: user.email,
+        subject: 'Reset your password',
+        html,
+        replyTo: this.supportEmail,
+      });
+      this.logger.log('[password-reset] email sent successfully');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `[password-reset][error] email send failed: ${message}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+
+      if (
+        (this.configService.get<string>('NODE_ENV') ?? '').trim() !== 'production'
+      ) {
+        this.logger.warn(`[password-reset][dev-fallback] Reset URL: ${resetUrl}`);
+      }
+    }
 
     return successMessage;
   }

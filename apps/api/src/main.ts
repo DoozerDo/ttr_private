@@ -153,6 +153,15 @@ async function bootstrap() {
     console.log(
       `[DEV CONFIG] Effective APP_PUBLIC_WEB_URL=${appPublicWebUrl?.trim() || 'unset'}`
     );
+    const resendConfigured =
+      Boolean((config.get<string>('RESEND_API_KEY') ?? process.env.RESEND_API_KEY)?.trim()) &&
+      Boolean((config.get<string>('MAIL_FROM') ?? process.env.MAIL_FROM)?.trim());
+    console.log(`[DEV CONFIG] Resend configured: ${resendConfigured}`);
+    const resendApiKey =
+      (config.get<string>('RESEND_API_KEY') ?? process.env.RESEND_API_KEY ?? '').trim();
+    console.log(
+      `[DEV CONFIG][TEMP] RESEND_API_KEY present=${Boolean(resendApiKey)} fingerprint=${resendApiKey ? `${resendApiKey.slice(0, 5)}...` : 'unset'} length=${resendApiKey.length}`,
+    );
   }
 
   const shouldRunMigrationsRaw = config.get<string>('TYPEORM_RUN_MIGRATIONS');
