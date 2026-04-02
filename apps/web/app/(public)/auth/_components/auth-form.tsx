@@ -109,6 +109,34 @@ function isAccessRequiredError(message: string | undefined, status: number): boo
   );
 }
 
+async function hasPriorAnalysis(): Promise<boolean> {
+  const response = await fetch("/api/users/me/last-assessment", {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    return false;
+  }
+
+  const payload = await response.json().catch(() => null);
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+
+  const candidate = payload as { assessmentId?: unknown; id?: unknown; lastAssessmentId?: unknown };
+  const assessmentId =
+    typeof candidate.assessmentId === "string"
+      ? candidate.assessmentId.trim()
+      : typeof candidate.id === "string"
+        ? candidate.id.trim()
+        : typeof candidate.lastAssessmentId === "string"
+          ? candidate.lastAssessmentId.trim()
+          : "";
+  return Boolean(assessmentId);
+}
+
 export function AuthForm({ mode, returnPath }: AuthFormProps) {
   const router = useRouter();
   const [firstName, setFirstName] = useState("");
@@ -152,7 +180,6 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
   };
 
   const handleLoginSuccess = async () => {
-    const targetPath = sanitizeReturnPath(returnPath) ?? "/baseline";
     const meResponse = await fetch("/api/users/me", {
       method: "GET",
       credentials: "include",
@@ -173,12 +200,13 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
 
     if (needsProfileCompletion(mePayload)) {
       const params = new URLSearchParams();
-      params.set("next", targetPath);
+      params.set("next", sanitizeReturnPath(returnPath) ?? "/first-run");
       await router.replace(`/onboarding/profile?${params.toString()}`);
       await router.refresh();
       return;
     }
 
+    const targetPath = (await hasPriorAnalysis()) ? sanitizeReturnPath(returnPath) ?? "/baseline" : "/first-run";
     await router.replace(targetPath);
     await router.refresh();
   };
