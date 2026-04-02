@@ -35,6 +35,29 @@ vi.mock("@/lib/baselines", async () => {
   };
 });
 
+vi.mock("@/lib/generationProductReadiness", () => ({
+  buildGenerationProductReadiness: vi.fn(() => ({
+    generation_readiness: {
+      canGenerate: true,
+      canExport: true,
+      reasons: [],
+      verificationIssues: [],
+      blocked: false,
+    },
+  })),
+}));
+
+vi.mock("@/lib/studioTrustGate", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/studioTrustGate")>("@/lib/studioTrustGate");
+  return {
+    ...actual,
+    evaluateStudioTrustGate: vi.fn(() => ({
+      allowed: true,
+      reason: null,
+    })),
+  };
+});
+
 function renderStudio() {
   return render(
     <EntitlementsProvider
@@ -103,42 +126,46 @@ describe("Studio generation error contract", () => {
     });
   });
 
-  it("renders a strong-fit next move for the standard Studio flow", async () => {
+  it("renders the standard Studio ready state", async () => {
     installBaselineFetches((url, init) => {
-      if (url.endsWith("/api/resume") && init?.method === "POST") {
+      if (url.includes("/api/resume") && init?.method === "POST") {
         return Promise.resolve(createResponse({}));
       }
-      if (url.endsWith("/api/cover-letters") && init?.method === "POST") {
+      if (url.includes("/api/cover-letters") && init?.method === "POST") {
         return Promise.resolve(createResponse({}));
       }
       return Promise.resolve(createResponse({}));
     });
 
     renderStudio();
-    await waitFor(() => expect(screen.getByText("You’re ready to generate")).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled();
+    await waitFor(() => expect(screen.getByText("Ready to generate")).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Generate Cover Letter" })).toBeEnabled();
   });
 
-  it("treats 422 generation_blocked as remediation, not generic failure", async () => {
+  it("renders generation_blocked as the inline failure shell", async () => {
+    let resumeFetches = 0;
     installBaselineFetches((url, init) => {
-      if (url.endsWith("/api/resume") && init?.method === "POST") {
+      if (url.includes("/api/resume") && init?.method === "POST") {
+        resumeFetches += 1;
         return Promise.resolve(
           createResponse(
             {
-              code: "generation_blocked",
-              category: "generation_blocked",
-              message:
-                "Generation is not available for this role due to insufficient verified evidence.",
-              detail: "Readiness or compliance gates blocked generation.",
-              retryable: false,
-              userAction: {
-                title: "Review baseline readiness",
-                description: "Complete the missing verified requirements before generating again.",
-              },
-              diagnostics: {
-                failureReasons: ["full_block: Missing verified evidence."],
-                missingRequirements: ["Missing verified evidence."],
+              error: {
+                code: "generation_blocked",
+                category: "generation_blocked",
+                message:
+                  "Generation is not available for this role due to insufficient verified evidence.",
+                detail: "Readiness or compliance gates blocked generation.",
+                retryable: false,
+                userAction: {
+                  title: "Review baseline readiness",
+                  description: "Complete the missing verified requirements before generating again.",
+                },
+                diagnostics: {
+                  failureReasons: ["full_block: Missing verified evidence."],
+                  missingRequirements: ["Missing verified evidence."],
+                },
               },
             },
             false,
@@ -153,19 +180,24 @@ describe("Studio generation error contract", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
 
-    await waitFor(() => {
-      expect(screen.getByText("Generation is blocked")).toBeInTheDocument();
-    });
-    expect(screen.getByRole("button", { name: "Continue Building Experience" })).toBeInTheDocument();
-    expect(screen.getByText("Complete the missing verified requirements before generating again.")).toBeInTheDocument();
+    expect(resumeFetches).toBe(1);
+    expect(await screen.findByText(/generation is limited/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
+    expect(screen.getByText("Why this output is limited")).toBeInTheDocument();
+    expect(
+      screen.getByText("This output is grounded in verified experience, but some areas still need stronger support."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/not ready to generate yet/i)).toBeNull();
+    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue Building Experience" })).toBeEnabled();
   });
 
-  it("shows generation_failed message as actual generation failure", async () => {
+  it("renders generation_failed as the inline failure shell", async () => {
     installBaselineFetches((url, init) => {
-      if (url.endsWith("/api/resume") && init?.method === "POST") {
+      if (url.includes("/api/resume") && init?.method === "POST") {
         return Promise.resolve(
           createResponse(
-            { code: "generation_failed", message: "Resume generation failed validation." },
+            { error: { code: "generation_failed", message: "Resume generation failed validation." } },
             false,
             422,
           ),
@@ -178,30 +210,35 @@ describe("Studio generation error contract", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
 
-    await waitFor(() => {
-      expect(screen.getByText("Generation didn’t complete")).toBeInTheDocument();
-    });
+    expect(await screen.findByText(/we couldn.?t generate a reliable result/i)).toBeInTheDocument();
+    expect(screen.getByText("Resume generation failed validation.")).toBeInTheDocument();
+    expect(screen.getByText("Fit score unavailable.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Adjust Input" })).toBeInTheDocument();
+    expect(screen.queryByText(/generation didn.?t complete/i)).toBeNull();
   });
 
-  it("renders unsupported_input guidance for cover letter generation", async () => {
+  it("renders unsupported_input as the inline failure shell", async () => {
+    let resumeFetches = 0;
     installBaselineFetches((url, init) => {
-      if (url.endsWith("/api/cover-letters") && init?.method === "POST") {
+      if (url.includes("/api/cover-letters") && init?.method === "POST") {
+        resumeFetches += 1;
         return Promise.resolve(
           createResponse(
             {
-              code: "insufficient_extracted_text",
-              category: "unsupported_input",
-              message: "We could not extract enough text from that resume.",
-              detail: "The current cover letter input cannot be grounded into a supported artifact.",
-              retryable: false,
-              userAction: {
-                title: "Add stronger baseline evidence",
-                description: "Include clearer accomplishment bullets and fuller role details before generating again.",
-              },
-              diagnostics: {
-                unsupportedEnvelope: "insufficient_extracted_text",
-                missingRequirements: ["Add clearer accomplishment bullets"],
+              error: {
+                code: "insufficient_extracted_text",
+                category: "unsupported_input",
+                message: "We could not extract enough text from that resume.",
+                detail: "The current cover letter input cannot be grounded into a supported artifact.",
+                retryable: false,
+                userAction: {
+                  title: "Add stronger baseline evidence",
+                  description: "Include clearer accomplishment bullets and fuller role details before generating again.",
+                },
+                diagnostics: {
+                  unsupportedEnvelope: "insufficient_extracted_text",
+                  missingRequirements: ["Add clearer accomplishment bullets"],
+                },
               },
             },
             false,
@@ -216,30 +253,41 @@ describe("Studio generation error contract", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Generate Cover Letter" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Generate Cover Letter" }));
 
-    await waitFor(() => {
-      expect(screen.getByText("This input isn’t supported yet")).toBeInTheDocument();
-    });
-    expect(screen.getByText("Include clearer accomplishment bullets and fuller role details before generating again.")).toBeInTheDocument();
+    expect(resumeFetches).toBe(1);
+    expect(
+      await screen.findByText(/this input won.?t generate a reliable result/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Fix Input")).toBeInTheDocument();
+    expect(screen.getByText(/Learn What.*Supported/i)).toBeInTheDocument();
+    expect(screen.getByText("We could not extract enough text from that resume.")).toBeInTheDocument();
+    expect(
+      screen.getByText("The current cover letter input cannot be grounded into a supported artifact."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/this input isn.?t supported yet/i)).toBeNull();
   });
 
-  it("renders trace_failure guidance for resume generation", async () => {
+  it("renders trace_failure as the inline failure shell", async () => {
+    let resumeFetches = 0;
     installBaselineFetches((url, init) => {
-      if (url.endsWith("/api/resume") && init?.method === "POST") {
+      if (url.includes("/api/resume") && init?.method === "POST") {
+        resumeFetches += 1;
         return Promise.resolve(
           createResponse(
             {
-              code: "generation_failed",
-              category: "trace_failure",
-              message: "Resume generation failed validation.",
-              detail: "Required content lines could not be traced back to baseline evidence.",
-              retryable: false,
-              userAction: {
-                title: "Repair traceable baseline evidence",
-                description: "Make sure every content line has source evidence before retrying.",
-              },
-              diagnostics: {
-                traceCoverage: 87.5,
-                failureReasons: ["Line experience:1:0 has no source evidence."],
+              error: {
+                code: "generation_failed",
+                category: "trace_failure",
+                message: "Resume generation failed validation.",
+                detail: "Required content lines could not be traced back to baseline evidence.",
+                retryable: false,
+                userAction: {
+                  title: "Repair traceable baseline evidence",
+                  description: "Add or repair baseline evidence so every content line can be traced.",
+                },
+                diagnostics: {
+                  traceCoverage: 87.5,
+                  failureReasons: ["Line experience:1:0 has no source evidence."],
+                },
               },
             },
             false,
@@ -254,9 +302,14 @@ describe("Studio generation error contract", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
 
-    await waitFor(() => {
-      expect(screen.getByText("We couldn’t verify this safely")).toBeInTheDocument();
-    });
-    expect(screen.getByText("Make sure every content line has source evidence before retrying.")).toBeInTheDocument();
+    expect(resumeFetches).toBe(1);
+    expect(await screen.findByText(/generation is limited/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
+    expect(screen.getByText("Why this output is limited")).toBeInTheDocument();
+    expect(
+      screen.getByText("This output is grounded in verified experience, but some areas still need stronger support."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/we couldn.?t generate a reliable result/i)).toBeNull();
   });
 });
+

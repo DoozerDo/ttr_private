@@ -43,6 +43,7 @@ import { useGuidedMode } from "@/hooks/useGuidedMode";
 import { type JobDto } from "@/lib/jobs";
 import {
   buildCoverLetterParagraphs,
+  readArtifactFailurePresentation,
   collectNormalizedContextValues,
   createDocumentState,
   downloadBlob,
@@ -1623,11 +1624,23 @@ export default function StudioPage() {
     trustGateDecision.allowed,
     trustGateDecision.reason,
   ]);
-  const authorityStateTitle = studioUiState === "BLOCKED" ? "Generation blocked" : "Ready to generate";
+  const generationSupportState = useMemo(() => {
+    if (activeGenerationReadiness.status === "limited") return "partial";
+    if (studioUiState === "BLOCKED") return "blocked";
+    return "strong";
+  }, [activeGenerationReadiness.status, studioUiState]);
+  const authorityStateTitle =
+    generationSupportState === "blocked"
+      ? "Generation blocked"
+      : generationSupportState === "partial"
+        ? "Generation is limited"
+        : "Ready to generate";
   const authorityStateExplanation =
-    studioUiState === "BLOCKED"
-      ? "This role is not eligible for Studio yet. Return to Fit Review to strengthen verification."
-      : "Your role analysis and verification support generation. You can generate tailored materials now.";
+    generationSupportState === "blocked"
+          ? "This role is not ready for clean Studio output yet. Return to Fit Review to strengthen verified evidence."
+      : generationSupportState === "partial"
+        ? "Your baseline supports tailored output, but some areas are still lighter than others. Studio will stay grounded in verified experience and may remain constrained until the baseline is stronger."
+        : "Your role analysis and verified baseline evidence support strong tailored output.";
   const authorityReasons = useMemo(() => {
     const reasons: string[] = [];
     activeGenerationReadiness.verificationIssues.forEach((issue) => {
@@ -2336,8 +2349,7 @@ export default function StudioPage() {
           return;
         }
         if (response.status === 422) {
-          const presented = presentResumeGeneration(responsePayload);
-          const failure = presented.failure;
+          const failure = readArtifactFailurePresentation(responsePayload);
           if (failure) {
             setResumeState((current) => ({
               ...current,
@@ -2676,8 +2688,7 @@ export default function StudioPage() {
           }
         }
         if (response.status === 422) {
-          const presented = presentCoverLetterGeneration(responsePayload);
-          const failure = presented.failure;
+          const failure = readArtifactFailurePresentation(responsePayload);
           if (failure) {
             setCoverState((current) => ({
               ...current,
@@ -3128,8 +3139,16 @@ export default function StudioPage() {
       </section>
       {canGenerateDocuments ? (
         <section className="rounded-2xl border border-white/10 bg-white/5 p-4" data-testid="studio-evidence-allowed-panel">
-          <h2 className="text-base font-semibold text-slate-100">Why this output is allowed</h2>
-          <p className="mt-1 text-sm text-slate-200">This role meets the threshold for tailored output.</p>
+          <h2 className="text-base font-semibold text-slate-100">
+            {generationSupportState === "strong"
+              ? "Why this output is grounded"
+              : "Why this output is limited"}
+          </h2>
+          <p className="mt-1 text-sm text-slate-200">
+            {generationSupportState === "strong"
+              ? "This output is grounded in your verified experience."
+              : "This output is grounded in verified experience, but some areas still need stronger support."}
+          </p>
           {evidenceLedger.entries.length ? (
             <ul className="mt-3 space-y-2">
               {evidenceLedger.entries.map((entry) => (
@@ -3144,7 +3163,7 @@ export default function StudioPage() {
           )}
           {evidenceLedger.remainingWeakAreas.length ? (
             <p className="mt-2 text-xs text-slate-300">
-              Some areas are still lighter than others, but the role is ready for tailored output.
+              Some areas are still lighter than others, so the output will stay measured until the baseline is strengthened.
             </p>
           ) : null}
         </section>
@@ -3153,10 +3172,12 @@ export default function StudioPage() {
           testId="studio-evidence-blocked-panel"
           tone="warning"
           eyebrow="Blocked"
-          title="Why generation is not ready yet"
+          title={generationSupportState === "partial" ? "Why generation is limited" : "Why generation is blocked"}
           body={
             <p className="text-sm text-slate-100">
-              This role still needs stronger proof in a few areas before tailored output will be useful.
+              {generationSupportState === "partial"
+                ? "This role can generate only in a limited way right now. Return to Fit Review to strengthen the verified baseline and unlock better output."
+                : "This role still needs stronger proof in a few areas before tailored output will be useful. Return to Fit Review to strengthen the verified baseline and try again."}
             </p>
           }
         />

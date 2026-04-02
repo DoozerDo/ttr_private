@@ -27,7 +27,7 @@ describe("studio artifact failure presentation", () => {
     expect(result.status).toBe("error");
     expect(result.failure).toMatchObject({
       category: "unsupported_input",
-      headline: "This input shape is not yet supported",
+      headline: "This input isn’t supported yet",
       nextStep: "The current resume input needs clearer bullet or section structure before generating.",
       retryable: false,
     });
@@ -55,7 +55,7 @@ describe("studio artifact failure presentation", () => {
     expect(result.status).toBe("error");
     expect(result.failure).toMatchObject({
       category: "trace_failure",
-      headline: "Generation could not be safely traced",
+      headline: "We couldn’t verify this safely",
       explanation: "Cover letter generation failed validation.",
       nextStep: "Make sure every content line has source evidence before retrying.",
     });
@@ -83,7 +83,7 @@ describe("studio artifact failure presentation", () => {
     expect(result.status).toBe("blocked");
     expect(result.failure).toMatchObject({
       category: "generation_blocked",
-      headline: "Generation is blocked",
+      headline: "You’re not ready to generate yet",
       nextStep: "Complete the missing verified requirements before generating again.",
       retryable: false,
     });

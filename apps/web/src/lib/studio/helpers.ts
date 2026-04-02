@@ -265,7 +265,7 @@ function trimMessage(value: unknown): string {
   return trimToString(value).replace(/\s+/g, " ").trim();
 }
 
-function readArtifactFailurePayload(payload: unknown): ArtifactFailurePayload | null {
+export function readArtifactFailurePayload(payload: unknown): ArtifactFailurePayload | null {
   if (!payload || typeof payload !== "object") return null;
   const record = payload as Record<string, unknown>;
   const candidate =
@@ -335,6 +335,13 @@ function readArtifactFailurePayload(payload: unknown): ArtifactFailurePayload | 
     userAction: userAction?.title || userAction?.description ? userAction : undefined,
     diagnostics,
   };
+}
+
+export function readArtifactFailurePresentation(
+  payload: unknown,
+): StudioArtifactFailurePresentation | null {
+  const failure = readArtifactFailurePayload(payload);
+  return failure ? presentArtifactFailure(failure) : null;
 }
 
 function presentArtifactFailure(failure: ArtifactFailurePayload): StudioArtifactFailurePresentation {
