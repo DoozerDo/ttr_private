@@ -20,6 +20,7 @@
     "**/*.test.tsx",
     "**/*.spec.ts",
     "**/*.spec.tsx",
-    ".next/dev/types"
+    ".next/dev/types",
+    ".next"
   ]
 }

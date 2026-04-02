@@ -6,6 +6,20 @@ export enum ProductSignalSnapshotReviewStatus {
   RESOLVED = 'resolved',
 }
 
+export type ProductSignalTone = 'neutral' | 'informative' | 'caution' | 'urgent';
+
+export type ProductSignalPrimaryFocus =
+  | 'no_signal'
+  | 'weak_step_monitor'
+  | 'weak_step_action'
+  | 'positive_recovery'
+  | 'stable_funnel';
+
+export type ProductSignalSnapshotReviewStatusValue =
+  | ProductSignalSnapshotReviewStatus.OPEN
+  | ProductSignalSnapshotReviewStatus.MONITORING
+  | ProductSignalSnapshotReviewStatus.RESOLVED;
+
 @Entity({ name: 'product_signal_snapshots' })
 export class ProductSignalSnapshot {
   @PrimaryGeneratedColumn('uuid')
@@ -21,10 +35,10 @@ export class ProductSignalSnapshot {
   headline!: string;
 
   @Column({ type: 'varchar', length: 32 })
-  tone!: string;
+  tone!: ProductSignalTone;
 
   @Column({ type: 'varchar', length: 64, name: 'primary_focus' })
-  primaryFocus!: string;
+  primaryFocus!: ProductSignalPrimaryFocus;
 
   @Column({ type: 'text', name: 'weakest_step_label', nullable: true })
   weakestStepLabel!: string | null;
@@ -65,7 +79,7 @@ export class ProductSignalSnapshot {
     name: 'review_status',
     default: ProductSignalSnapshotReviewStatus.OPEN,
   })
-  reviewStatus!: ProductSignalSnapshotReviewStatus;
+  reviewStatus!: ProductSignalSnapshotReviewStatusValue;
 
   @Column({ type: 'text', name: 'review_note', default: '' })
   reviewNote!: string;

@@ -8,7 +8,10 @@ import { BetaFeedback } from '../beta-feedback/beta-feedback.entity';
 import { Opportunity } from '../opportunities/opportunity.entity';
 import {
   ProductSignalSnapshot,
+  ProductSignalPrimaryFocus,
   ProductSignalSnapshotReviewStatus,
+  ProductSignalSnapshotReviewStatusValue,
+  ProductSignalTone,
 } from './product-signal-snapshot.entity';
 import { User } from '../users/user.entity';
 import { AnalyticsEvent } from './analytics-event.entity';
@@ -124,8 +127,8 @@ type WeakestStepReleaseContext = {
 type OperatorSummary = {
   headline: string;
   subheadline: string;
-  tone: "neutral" | "informative" | "caution" | "urgent";
-  primaryFocus: "no_signal" | "weak_step_monitor" | "weak_step_action" | "positive_recovery" | "stable_funnel";
+  tone: ProductSignalTone;
+  primaryFocus: ProductSignalPrimaryFocus;
   supportingReason: string;
   recommendedActionTitle: string | null;
 };
@@ -158,8 +161,8 @@ type ProductSignalSnapshotRecord = {
   createdAt: Date | string;
   selectedWindowDays: number;
   headline: string;
-  tone: OperatorSummary["tone"];
-  primaryFocus: OperatorSummary["primaryFocus"];
+  tone: ProductSignalTone;
+  primaryFocus: ProductSignalPrimaryFocus;
   weakestStepLabel: string | null;
   weakestStepRate: number | string;
   weakestStepDirection: "improving" | "worsening" | "flat" | "none";
@@ -176,25 +179,22 @@ type ProductSignalSnapshotRecord = {
   reviewedAt: Date | string | null;
 };
 
-type ProductSignalSnapshotReviewStatusValue =
-  | ProductSignalSnapshotReviewStatus.OPEN
-  | ProductSignalSnapshotReviewStatus.MONITORING
-  | ProductSignalSnapshotReviewStatus.RESOLVED;
+type ProductSignalCompareFieldKey =
+  | "headline"
+  | "tone"
+  | "primaryFocus"
+  | "weakestStepLabel"
+  | "weakestStepRate"
+  | "weakestStepDirection"
+  | "watchlistStatus"
+  | "watchlistPriority"
+  | "severity"
+  | "confidence"
+  | "recommendedActionTitle"
+  | "releaseContextSummary";
 
 type ProductSignalCompareField = {
-  field:
-    | "headline"
-    | "tone"
-    | "primaryFocus"
-    | "weakestStepLabel"
-    | "weakestStepRate"
-    | "weakestStepDirection"
-    | "watchlistStatus"
-    | "watchlistPriority"
-    | "severity"
-    | "confidence"
-    | "recommendedActionTitle"
-    | "releaseContextSummary";
+  field: ProductSignalCompareFieldKey;
   previousValue: string | number | null;
   currentValue: string | number | null;
 };
@@ -511,7 +511,7 @@ function getOperatorSummary(input: {
       recommendedActionTitle: input.recommendedActionTitle,
     };
   }
-  if (input.weakestStepDirection === "improving" && input.watchlistStatus !== "action_needed") {
+  if (input.weakestStepDirection === "improving") {
     return {
       tone: "informative",
       primaryFocus: "positive_recovery",
@@ -1667,14 +1667,16 @@ export class AnalyticsService {
       reviewNote: "",
       reviewedAt: null,
     });
-    return this.productSignalSnapshotRepository.save(snapshot);
+    const savedSnapshot = await this.productSignalSnapshotRepository.save(snapshot);
+    return this.mapProductSignalSnapshot(savedSnapshot);
   }
 
   async listProductSignalSnapshots(limit = 10): Promise<ProductSignalSnapshotRecord[]> {
-    return this.productSignalSnapshotRepository.find({
+    const snapshots = await this.productSignalSnapshotRepository.find({
       order: { createdAt: 'DESC' },
       take: limit,
     });
+    return snapshots.map((snapshot) => this.mapProductSignalSnapshot(snapshot));
   }
 
   async compareProductSignalSnapshot(
@@ -1698,68 +1700,70 @@ export class AnalyticsService {
       };
     }
 
-    const changedFields: ProductSignalCompareField[] = [
-      {
-        field: 'headline',
-        previousValue: latestSnapshot.headline,
-        currentValue: summary.adminSummaryExport.headline,
-      },
-      {
-        field: 'tone',
-        previousValue: latestSnapshot.tone,
-        currentValue: summary.operatorSummary.tone,
-      },
-      {
-        field: 'primaryFocus',
-        previousValue: latestSnapshot.primaryFocus,
-        currentValue: summary.operatorSummary.primaryFocus,
-      },
-      {
-        field: 'weakestStepLabel',
-        previousValue: latestSnapshot.weakestStepLabel,
-        currentValue: summary.adminSummaryExport.weakestStepLabel,
-      },
-      {
-        field: 'weakestStepRate',
-        previousValue: this.roundProductSignalRate(latestSnapshot.weakestStepRate),
-        currentValue: this.roundProductSignalRate(summary.adminSummaryExport.weakestStepRate),
-      },
-      {
-        field: 'weakestStepDirection',
-        previousValue: latestSnapshot.weakestStepDirection,
-        currentValue: summary.adminSummaryExport.weakestStepDirection,
-      },
-      {
-        field: 'watchlistStatus',
-        previousValue: latestSnapshot.watchlistStatus,
-        currentValue: summary.adminSummaryExport.watchlistStatus,
-      },
-      {
-        field: 'watchlistPriority',
-        previousValue: latestSnapshot.watchlistPriority,
-        currentValue: summary.adminSummaryExport.watchlistPriority,
-      },
-      {
-        field: 'severity',
-        previousValue: latestSnapshot.severity,
-        currentValue: summary.adminSummaryExport.severity,
-      },
-      {
-        field: 'confidence',
-        previousValue: latestSnapshot.confidence,
-        currentValue: summary.adminSummaryExport.confidence,
-      },
-      {
-        field: 'recommendedActionTitle',
-        previousValue: latestSnapshot.recommendedActionTitle,
-        currentValue: summary.adminSummaryExport.recommendedActionTitle,
-      },
-      {
-        field: 'releaseContextSummary',
-        previousValue: latestSnapshot.releaseContextSummary,
-        currentValue: summary.adminSummaryExport.releaseContextSummary,
-      },
-    ].filter((field) => field.previousValue !== field.currentValue);
+    const changedFields = (
+      [
+        {
+          field: 'headline',
+          previousValue: latestSnapshot.headline,
+          currentValue: summary.adminSummaryExport.headline,
+        },
+        {
+          field: 'tone',
+          previousValue: latestSnapshot.tone,
+          currentValue: summary.operatorSummary.tone,
+        },
+        {
+          field: 'primaryFocus',
+          previousValue: latestSnapshot.primaryFocus,
+          currentValue: summary.operatorSummary.primaryFocus,
+        },
+        {
+          field: 'weakestStepLabel',
+          previousValue: latestSnapshot.weakestStepLabel,
+          currentValue: summary.adminSummaryExport.weakestStepLabel,
+        },
+        {
+          field: 'weakestStepRate',
+          previousValue: this.roundProductSignalRate(latestSnapshot.weakestStepRate),
+          currentValue: this.roundProductSignalRate(summary.adminSummaryExport.weakestStepRate),
+        },
+        {
+          field: 'weakestStepDirection',
+          previousValue: latestSnapshot.weakestStepDirection,
+          currentValue: summary.adminSummaryExport.weakestStepDirection,
+        },
+        {
+          field: 'watchlistStatus',
+          previousValue: latestSnapshot.watchlistStatus,
+          currentValue: summary.adminSummaryExport.watchlistStatus,
+        },
+        {
+          field: 'watchlistPriority',
+          previousValue: latestSnapshot.watchlistPriority,
+          currentValue: summary.adminSummaryExport.watchlistPriority,
+        },
+        {
+          field: 'severity',
+          previousValue: latestSnapshot.severity,
+          currentValue: summary.adminSummaryExport.severity,
+        },
+        {
+          field: 'confidence',
+          previousValue: latestSnapshot.confidence,
+          currentValue: summary.adminSummaryExport.confidence,
+        },
+        {
+          field: 'recommendedActionTitle',
+          previousValue: latestSnapshot.recommendedActionTitle,
+          currentValue: summary.adminSummaryExport.recommendedActionTitle,
+        },
+        {
+          field: 'releaseContextSummary',
+          previousValue: latestSnapshot.releaseContextSummary,
+          currentValue: summary.adminSummaryExport.releaseContextSummary,
+        },
+      ] satisfies ProductSignalCompareField[]
+    ).filter((field) => field.previousValue !== field.currentValue);
 
     return {
       hasSnapshot: true,
@@ -1808,9 +1812,36 @@ export class AnalyticsService {
     }
     if (changed) {
       snapshot.reviewedAt = new Date();
-      await this.productSignalSnapshotRepository.save(snapshot);
     }
-    return snapshot as ProductSignalSnapshotRecord;
+    const updatedSnapshot = changed
+      ? await this.productSignalSnapshotRepository.save(snapshot)
+      : snapshot;
+    return this.mapProductSignalSnapshot(updatedSnapshot);
+  }
+
+  private mapProductSignalSnapshot(snapshot: ProductSignalSnapshot): ProductSignalSnapshotRecord {
+    return {
+      id: snapshot.id,
+      createdAt: snapshot.createdAt,
+      selectedWindowDays: snapshot.selectedWindowDays,
+      headline: snapshot.headline,
+      tone: snapshot.tone,
+      primaryFocus: snapshot.primaryFocus,
+      weakestStepLabel: snapshot.weakestStepLabel,
+      weakestStepRate: snapshot.weakestStepRate,
+      weakestStepDirection: snapshot.weakestStepDirection as ProductSignalSnapshotRecord['weakestStepDirection'],
+      watchlistStatus: snapshot.watchlistStatus as ProductSignalSnapshotRecord['watchlistStatus'],
+      watchlistPriority: snapshot.watchlistPriority as ProductSignalSnapshotRecord['watchlistPriority'],
+      severity: snapshot.severity as ProductSignalSnapshotRecord['severity'],
+      confidence: snapshot.confidence as ProductSignalSnapshotRecord['confidence'],
+      recommendedActionTitle: snapshot.recommendedActionTitle,
+      recommendedActionBody: snapshot.recommendedActionBody,
+      releaseContextSummary: snapshot.releaseContextSummary,
+      exportPayloadJson: snapshot.exportPayloadJson,
+      reviewStatus: snapshot.reviewStatus,
+      reviewNote: snapshot.reviewNote,
+      reviewedAt: snapshot.reviewedAt,
+    };
   }
 
   async getFounderMetrics(input?: {
