@@ -48,6 +48,14 @@ function toText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function isNoiseCompetency(value: string): boolean {
+  const normalized = toText(value).toLowerCase();
+  if (!normalized) return true;
+  if (/^(?:summary|skills|competencies|experience|education)$/i.test(normalized)) return true;
+  if (/^[|,;:\-\s]+$/.test(normalized)) return true;
+  return normalized.length < 3;
+}
+
 export function readResumeModel(payload: unknown): ResumeModel | null {
   if (!payload || typeof payload !== "object") return null;
   const record = payload as Record<string, unknown>;
@@ -153,7 +161,7 @@ export function ResumePreview({
     ? model.competencies
     : model.coreCompetencies;
   const competencies = Array.isArray(competenciesSource)
-    ? competenciesSource.map((value) => toText(value)).filter(Boolean)
+    ? competenciesSource.map((value) => toText(value)).filter(Boolean).filter((value) => !isNoiseCompetency(value))
     : [];
   const experiences = Array.isArray(model.experience)
     ? model.experience

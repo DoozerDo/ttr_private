@@ -671,6 +671,10 @@ function isLikelyResumeLeakParagraph(paragraph: string): boolean {
   ) {
     return true;
   }
+  if (/^[A-Z][A-Za-z .,'-]+ \| [A-Z][A-Za-z .,'-]+ \| (?:19|20)\d{2}/.test(value)) return true;
+  if (/^(?:generated from verified evidence|verified baseline used|baseline evidence|job description|resume fragment|candidate profile)$/i.test(value)) {
+    return true;
+  }
   return false;
 }
 
@@ -721,6 +725,10 @@ export function normalizeCoverLetterParagraphs(paragraphs: string[]): string[] {
       continue;
     }
 
+    if (/^dear hiring team[,]?\s+/i.test(cleaned)) {
+      salutationSeen = true;
+    }
+
     const withoutGreeting = removeInlineGreeting(cleaned);
     if (!withoutGreeting) {
       salutationSeen = true;
@@ -747,6 +755,9 @@ export function normalizeCoverLetterParagraphs(paragraphs: string[]): string[] {
   }
 
   if (!body.length && !salutationSeen) return [];
+  if (!body.length && salutationSeen && !signoffSeen) {
+    return ["Dear Hiring Team,", "Sincerely,"].filter(Boolean);
+  }
 
   const finalSalutation = "Dear Hiring Team,";
   const normalizedBody = body.filter(Boolean);

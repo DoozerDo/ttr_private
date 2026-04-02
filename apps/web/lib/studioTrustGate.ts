@@ -106,7 +106,12 @@ function normalizeLine(value: string): string {
 function normalizeRoleHeader(value: string): string {
   const trimmed = normalizeLine(value);
   if (!trimmed) return "";
-  return trimmed.split(ROLE_FRAGMENT_SPLIT)[0]?.trim() ?? trimmed;
+  return (
+    trimmed
+      .split(ROLE_FRAGMENT_SPLIT)[0]
+      ?.replace(/\b(?:page|experience|summary|education|skills)\b.*$/i, "")
+      .trim() ?? trimmed
+  );
 }
 
 function normalizeBulletLine(value: string): string {
@@ -118,6 +123,14 @@ function shouldDropBulletFragment(value: string): boolean {
   if (value.length < 18) return true;
   const words = value.split(/\s+/).filter(Boolean);
   return words.length < 4;
+}
+
+function isNoiseCompetency(value: string): boolean {
+  const normalized = normalizeLine(value).toLowerCase();
+  if (!normalized) return true;
+  if (/^(?:summary|skills|competencies|experience|education)$/i.test(normalized)) return true;
+  if (/^[|,;:\-\s]+$/.test(normalized)) return true;
+  return normalized.length < 3;
 }
 
 function normalizeEditedResumeModel(value: unknown): unknown {
@@ -149,10 +162,17 @@ function normalizeEditedResumeModel(value: unknown): unknown {
       };
     })
     .filter(Boolean);
+  const competencies = Array.isArray(source.competencies)
+    ? source.competencies
+        .map((item) => trimToString(item))
+        .filter(Boolean)
+        .filter((item) => !isNoiseCompetency(item))
+    : undefined;
 
   return {
     ...source,
     experience: normalizedExperience,
+    ...(competencies ? { competencies } : {}),
   };
 }
 
@@ -246,6 +266,10 @@ export function validateResumeOutput(generation: unknown): OutputValidationResul
     : Array.isArray(model.coreCompetencies)
       ? model.coreCompetencies
       : [];
+  const normalizedCompetencies = competencies
+    .map((item) => trimToString(item))
+    .filter(Boolean)
+    .filter((item) => !isNoiseCompetency(item));
 
   if (!experiences.length) {
     reasons.push("Resume must include at least one experience section.");
@@ -294,7 +318,7 @@ export function validateResumeOutput(generation: unknown): OutputValidationResul
 
   const hasEmptySections =
     !trimToString(model.summary) &&
-    competencies.length === 0 &&
+    normalizedCompetencies.length === 0 &&
     experiences.length === 0 &&
     education.length === 0;
   if (hasEmptySections) {

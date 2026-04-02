@@ -180,7 +180,7 @@ describe("BaselineStudioHome", () => {
     expect(screen.getByText("Why not use my resume as-is?")).toBeVisible();
   });
 
-  it("renders multiple resumes and blocks upload at the library cap", () => {
+  it("renders multiple resumes and blocks upload at the library cap", async () => {
     render(
       <BaselineStudioHome
         baselines={[
@@ -191,14 +191,14 @@ describe("BaselineStudioHome", () => {
       />,
     );
 
-    expect(screen.getByText("3 of 3 active resumes")).toBeInTheDocument();
+    await screen.findByText("3 of 3 active resumes");
     expect(screen.queryByRole("button", { name: "Upload resume" })).toBeNull();
     expect(screen.getByText("resume-1.pdf")).toBeInTheDocument();
     expect(screen.getByText("resume-2.pdf")).toBeInTheDocument();
     expect(screen.getByText("resume-3.pdf")).toBeInTheDocument();
   });
 
-  it("hides the targeting CTA for archived resumes", () => {
+  it("hides the targeting CTA for archived resumes", async () => {
     render(
       <BaselineStudioHome
         baselines={[
@@ -211,17 +211,17 @@ describe("BaselineStudioHome", () => {
       />,
     );
 
-    expect(screen.getByText("Baseline library")).toBeInTheDocument();
-    expect(screen.getByText("resume-1.pdf")).toBeInTheDocument();
+    await screen.findByText("Baseline library");
+    await screen.findByText("resume-1.pdf");
     expect(screen.queryByRole("button", { name: "CONTINUE BUILDING BASELINE" })).toBeNull();
   });
 
-  it("shows the fit-review launch point for a low-fit analyzed baseline", () => {
+  it("shows the fit-review launch point for a low-fit analyzed baseline", async () => {
     render(<BaselineStudioHome baselines={[createAnalyzedBaseline("base-1", "resume-1.pdf", 55)]} />);
 
-    expect(screen.getByText("Your verified baseline is ready")).toBeInTheDocument();
-    expect(screen.getByText("Baseline library")).toBeInTheDocument();
-    expect(screen.getByText("Last role analysis: 55%")).toBeInTheDocument();
+    await screen.findByText("Your verified baseline is ready");
+    await screen.findByText("Baseline library");
+    await screen.findByText("Last role analysis: 55%");
     expect(screen.queryByRole("button", { name: "Upload resume" })).toBeNull();
     expect(screen.getByRole("link", { name: "VIEW BASELINE DETAILS" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "RUN COMPATIBILITY ANALYSIS" })).toBeInTheDocument();
@@ -230,17 +230,15 @@ describe("BaselineStudioHome", () => {
     expect(screen.queryByRole("link", { name: "OPEN RESUME STUDIO" })).toBeNull();
   });
 
-  it("explains the upload flow as a structured source of truth for a new user", () => {
+  it("explains the upload flow as a structured source of truth for a new user", async () => {
     render(<BaselineStudioHome baselines={[]} />);
 
-    expect(screen.getByText("Upload your baseline to get started")).toBeInTheDocument();
-    expect(screen.getByText(/Upload the resume you want to work from/i)).toBeInTheDocument();
-    expect(screen.getByText("Upload your resume to create your baseline file.")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Because resumes are written for people, not systems. TTR first turns your resume into a verified working baseline so scores and generated documents stay consistent, traceable, and grounded in what you have actually done.",
-      ),
-    ).toBeInTheDocument();
+    await screen.findByText("Upload your baseline to get started");
+    await screen.findByText(/Upload the resume you want to work from/i);
+    await screen.findByText("Upload your resume to create your baseline file.");
+    await screen.findByText(
+      "Because resumes are written for people, not systems. TTR first turns your resume into a verified working baseline so scores and generated documents stay consistent, traceable, and grounded in what you have actually done.",
+    );
     expect(screen.getByRole("button", { name: "Upload resume" })).toBeInTheDocument();
   });
 
@@ -268,7 +266,7 @@ describe("BaselineStudioHome", () => {
     expect(screen.queryByText("Strong Signals")).not.toBeInTheDocument();
     expect(screen.queryByText("Developing Signals")).not.toBeInTheDocument();
     expect(screen.queryByText("Signal Effect")).not.toBeInTheDocument();
-    expect(screen.getByText("Baseline library")).toBeInTheDocument();
+    await screen.findByText("Baseline library");
   });
 
   it("renders strengthening entries from developing signals and supports modal proposal review", async () => {
@@ -451,7 +449,7 @@ describe("BaselineStudioHome", () => {
     });
 
     render(<BaselineStudioHome baselines={[createAnalyzedBaseline("base-1", "resume-1.pdf", 82)]} />);
-    expect(screen.getByText("Baseline library")).toBeInTheDocument();
+    await screen.findByText("Baseline library");
     expect(screen.queryByText(/% current/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/% original/i)).not.toBeInTheDocument();
   });
@@ -478,8 +476,8 @@ describe("BaselineStudioHome", () => {
       />,
     );
 
-    expect(screen.getByText("Your verified baseline is ready")).toBeInTheDocument();
-    expect(screen.getByText(/Last analyzed/i)).toBeInTheDocument();
+    await screen.findByText("Your verified baseline is ready");
+    await screen.findByText(/Last analyzed/i);
     expect(screen.queryByText(/Fit 82%/i)).not.toBeInTheDocument();
     expect(screen.getByText("Last role analysis: 82%")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "VIEW LATEST RESULTS" })).toBeInTheDocument();
@@ -508,7 +506,7 @@ describe("BaselineStudioHome", () => {
       />,
     );
 
-    expect(screen.getByText(/Last analyzed/i)).toBeInTheDocument();
+    await screen.findByText(/Last analyzed/i);
     expect(screen.queryByText(/Last role analysis:/i)).not.toBeInTheDocument();
   });
 
@@ -534,7 +532,7 @@ describe("BaselineStudioHome", () => {
       />,
     );
 
-    expect(screen.getByText(/not analyzed/i)).toBeInTheDocument();
+    await screen.findByText(/not analyzed/i);
     expect(screen.getAllByRole("button", { name: "CONTINUE BUILDING BASELINE" }).length).toBeGreaterThan(0);
     expect(screen.getByText("Last role analysis: 67%")).toBeInTheDocument();
     expect(screen.queryByText(/your verified baseline is ready/i)).not.toBeInTheDocument();
@@ -579,11 +577,13 @@ describe("BaselineStudioHome", () => {
       />,
     );
 
+    await screen.findByText("resume-1.pdf");
     const baselineArticle = within(screen.getByText("resume-1.pdf").closest("article") as HTMLElement);
     expect(baselineArticle.getByText(/not analyzed/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "CONTINUE BUILDING BASELINE" }));
 
+    await screen.findByText(/not analyzed/i);
     expect(baselineArticle.getByText(/not analyzed/i)).toBeInTheDocument();
     expect(baselineArticle.queryByText(/ready for targeting/i)).toBeNull();
   });
@@ -787,7 +787,7 @@ describe("BaselineStudioHome", () => {
     });
   });
 
-  it("supports editable vs read-only baseline library rendering modes", () => {
+  it("supports editable vs read-only baseline library rendering modes", async () => {
     render(
       <BaselineStudioHome
         baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]}
@@ -795,14 +795,16 @@ describe("BaselineStudioHome", () => {
       />,
     );
 
+    await screen.findByText("Baseline library");
     expect(screen.queryByText("UPLOAD YOUR RESUME")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "CONTINUE BUILDING BASELINE" }).length).toBeGreaterThan(0);
   });
 
-  it("shows a single primary upload action for empty baseline state", () => {
+  it("shows a single primary upload action for empty baseline state", async () => {
     render(<BaselineStudioHome baselines={[]} />);
 
+    await screen.findByText("Upload your baseline to get started");
     expect(screen.getAllByRole("button", { name: "Upload resume" })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Selected" })).not.toBeInTheDocument();
     expect(screen.getByText("Accepted file types: PDF and DOCX")).toBeInTheDocument();

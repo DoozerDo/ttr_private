@@ -59,6 +59,26 @@ describe("Studio trust gate", () => {
     expect(result.reasons.some((reason) => reason.includes("Duplicate education"))).toBe(true);
   });
 
+  it("resume validation suppresses junk competency fragments and role drift", () => {
+    const result = validateResumeOutput({
+      preview: {
+        resume: {
+          summary: "Summary",
+          competencies: ["Skills", "  ", "Operational leadership"],
+          experience: [
+            {
+              company: "Acme | Support",
+              roleTitle: "Director / Manager",
+              bullets: ["Built support workflows with measurable outcomes."],
+            },
+          ],
+        },
+      },
+    });
+
+    expect(result.valid).toBe(true);
+  });
+
   it("cover letter validation catches JD echo", () => {
     const jd = "We need a support operations leader to improve escalation workflows and lead customer support operations with KPI tracking and executive reporting.";
     const result = validateCoverLetterOutput(
@@ -112,6 +132,20 @@ describe("Studio trust gate", () => {
     expect(editedResume.experience[0]?.bullets).toEqual([
       "Built compliant support workflows with measurable outcomes",
     ]);
+  });
+
+  it("filters noise out of resume preview competencies", () => {
+    const normalized = normalizeGenerationPayload(
+      {
+        editedResume: {
+          competencies: ["Skills", "Customer strategy", "|", "Op"],
+        },
+      },
+      "resume",
+    );
+
+    const editedResume = normalized.editedResume as { competencies?: string[] };
+    expect(editedResume.competencies).toEqual(["Customer strategy"]);
   });
 
   it("blocks inflated scope and invented entity placeholders", () => {

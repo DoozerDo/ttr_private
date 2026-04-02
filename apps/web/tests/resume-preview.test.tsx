@@ -29,8 +29,9 @@ describe("ResumePreview", () => {
     render(<ResumePreview payload={payload} />);
     expect(screen.getByText("Alex Candidate")).toBeInTheDocument();
     expect(screen.getByText("Professional Experience")).toBeInTheDocument();
-    expect(screen.getByText("Cat Daddy Games | Kirkland, WA")).toBeInTheDocument();
-    expect(screen.getByText("Senior Producer | 2021 - Present")).toBeInTheDocument();
+    expect(screen.getByText("Cat Daddy Games")).toBeInTheDocument();
+    expect(screen.getByText("Senior Producer | Kirkland, WA")).toBeInTheDocument();
+    expect(screen.getByText("2021 - Present")).toBeInTheDocument();
   });
 
   it("renders discrete bullet list items", () => {

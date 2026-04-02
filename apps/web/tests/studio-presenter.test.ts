@@ -262,6 +262,33 @@ describe("studio presenter helpers", () => {
     expect(paragraphs.some((line) => /\|\s*.*\b(?:19|20)\d{2}\b/.test(line))).toBe(false);
   });
 
+  it("deduplicates greeting and signoff while dropping raw JD or baseline blobs", () => {
+    const payload = {
+      preview: {
+        coverLetter: {
+          paragraphs: [
+            "Dear Hiring Team,",
+            "Dear Hiring Team, I am applying for the role.",
+            "Job Description",
+            "Support Operations Leader | Acme | 2021 - Present",
+            "I have led support operations programs.",
+            "Sincerely,",
+            "Sincerely,",
+            "Test Candidate",
+            "Test Candidate",
+          ],
+        },
+      },
+    };
+
+    const paragraphs = buildCoverLetterParagraphs(payload);
+    expect(paragraphs.filter((line) => /^dear hiring team[,]?$/i.test(line))).toHaveLength(1);
+    expect(paragraphs.filter((line) => /^sincerely[,]?$/i.test(line))).toHaveLength(1);
+    expect(paragraphs.filter((line) => /^test candidate$/i.test(line))).toHaveLength(1);
+    expect(paragraphs.some((line) => /job description/i.test(line))).toBe(false);
+    expect(paragraphs.some((line) => /\|/i.test(line))).toBe(false);
+  });
+
   it("maps warning-only cover letter payloads to personalization-limited messaging", () => {
     const payload = {
       status: "success",
