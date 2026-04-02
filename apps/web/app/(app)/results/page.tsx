@@ -39,12 +39,17 @@ import { getDecisionFromFitScore } from "@/lib/fit-verdict";
 import { buildStrategicBrief } from "@/lib/resultsInsights";
 import { buildResultsSignalAlignment } from "@/lib/professionalSignals";
 import { appendStrengtheningAddition } from "@/lib/baselines";
-import { buildEvidenceSuggestion, buildRequirementGapInsight } from "@/lib/evidenceSuggestions";
+import {
+  buildEvidenceSuggestion,
+  buildRequirementGapInsight,
+  buildActionableImprovementSuggestion,
+} from "@/lib/evidenceSuggestions";
 import { buildScoreDelta, hasBaselineUpdated } from "@/lib/reanalysis";
 import { buildProgressSummary } from "@/lib/progressSummary";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
 import { getCanonicalNextAction, getGenerationCompletionStorageKey } from "@/lib/nextAction";
 import { deriveEvidenceLedger, type EvidenceLedger } from "@/lib/evidenceLedger";
+import { readRecentIntentState } from "@/src/lib/recentIntent";
 import { useGuidedMode } from "@/hooks/useGuidedMode";
 import { trackEvent } from "@/src/lib/analytics";
 import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
@@ -1599,6 +1604,7 @@ export default function ResultsPage() {
   const [debugCopyStatus, setDebugCopyStatus] = useState<string | null>(null);
   const [generationReadiness, setGenerationReadiness] =
     useState<GenerationReadiness>(READINESS_LOADING_STATE);
+  const [recentIntent, setRecentIntent] = useState(() => readRecentIntentState());
   const lastAssessmentHydrationAttempted = useRef(false);
   const autoLoadPairRef = useRef<string | null>(null);
   const lastReadinessKeyRef = useRef<string | null>(null);
@@ -1823,6 +1829,9 @@ export default function ResultsPage() {
       cancelled = true;
     };
   }, [latest?.assessmentId, latest?.jobId]);
+  useEffect(() => {
+    setRecentIntent(readRecentIntentState());
+  }, [latest?.assessmentId, latest?.jobId, latest?.baselineId]);
   useEffect(() => {
     const analysisId = latest?.assessmentId?.trim() ?? "";
     const jobIdValue = latest?.jobId?.trim() ?? "";
@@ -2188,7 +2197,14 @@ export default function ResultsPage() {
     return map;
   }, [canonicalUnverifiedRequirements, latest?.baselineEvidence, latest?.summary, latest?.supportingSignals]);
   const fallbackRequirementInsights = useMemo(() => {
-    if (!(typeof activeScore === "number" && activeScore >= 70 && generationReadiness.status !== "ready")) {
+    const shouldShowRefinementGuidance =
+      recentIntent === "refine_intent" || recentIntent === "used_not_committed";
+    if (
+      !(
+        (typeof activeScore === "number" && activeScore >= 70 && generationReadiness.status !== "ready") ||
+        shouldShowRefinementGuidance
+      )
+    ) {
       return [];
     }
     const requirementsToExplain =
@@ -2223,10 +2239,48 @@ export default function ResultsPage() {
     canonicalUnverifiedRequirements,
     criticalGapDetails,
     generationReadiness.status,
+    recentIntent,
     latest?.baselineEvidence,
     latest?.summary,
     latest?.supportingSignals,
   ]);
+  const improvementSuggestions = useMemo(() => {
+    const sourceRequirements = Array.from(
+      new Set([
+        ...(latest?.criticalGaps?.map((gap) => gap.title).filter(Boolean) ?? []),
+        ...criticalGapDetails.map((gap) => gap.title).filter(Boolean),
+        ...canonicalUnverifiedRequirements,
+      ]),
+    );
+    const suggestions = sourceRequirements
+      .map((requirement) => buildActionableImprovementSuggestion({ requirement }))
+      .filter((item): item is NonNullable<typeof item> => Boolean(item))
+      .sort((a, b) => a.priority - b.priority);
+    if (suggestions.length > 0) {
+      return suggestions.slice(0, 4);
+    }
+    if (recentIntent === "refine_intent" || recentIntent === "used_not_committed") {
+      return [
+        {
+          requirement: "baseline_strengthening",
+          action: "Run Fit Review to strengthen missing areas.",
+          rationale: "Use your current analysis to close the biggest gaps first.",
+          nextStep: "Start Fit Review",
+          priority: 99,
+        },
+      ];
+    }
+    return [];
+  }, [
+    canonicalUnverifiedRequirements,
+    criticalGapDetails,
+    latest?.criticalGaps,
+    latest?.baselineEvidence,
+    latest?.summary,
+    latest?.supportingSignals,
+    recentIntent,
+  ]);
+  const showImprovementModule = improvementSuggestions.length > 0;
   const discoveredRoles = useMemo(
     () =>
       discoverCompetitiveRoles({
@@ -2245,6 +2299,31 @@ export default function ResultsPage() {
       }),
     [activeScore, generationReadiness.blocked, generationReadiness.status],
   );
+  const resultsReturnCue = useMemo(() => {
+    if (recentIntent === "used_and_committed") {
+      return "You're actively pursuing this role. Keep momentum in Opportunities.";
+    }
+    if (recentIntent === "used_not_committed") {
+      return "Your artifact is ready. Save the role if you want to keep moving.";
+    }
+    if (recentIntent === "refine_intent") {
+      return "You signaled refinement, so Fit Review is the fastest path to a sharper result.";
+    }
+    return null;
+  }, [recentIntent]);
+  const resultsScoreBucket = useMemo(
+    () => (typeof activeScore === "number" ? getScoreBand(activeScore) : undefined),
+    [activeScore],
+  );
+  useEffect(() => {
+    if (!showImprovementModule) return;
+    trackEvent("results_improvement_module_viewed", {
+      source: "results",
+      intentState: recentIntent ?? "none",
+      suggestionsShown: improvementSuggestions.length,
+      scoreBucket: resultsScoreBucket ?? null,
+    });
+  }, [improvementSuggestions.length, recentIntent, resultsScoreBucket, showImprovementModule]);
   const isGenerationBlocked = generationReadiness.status === "blocked";
   const showGenerationUnlockedPanel = Boolean(latest) && justUnlocked && !isGenerationBlocked;
   useEffect(() => {
@@ -2311,7 +2390,10 @@ export default function ResultsPage() {
         label: "START FIT REVIEW",
         href: fitReviewPath,
         disabled: false,
-        description: "Use Fit Review to strengthen the baseline for this role.",
+        description:
+          recentIntent === "refine_intent"
+            ? "You already signaled refinement, so Fit Review is the fastest way to sharpen this role."
+            : "Use Fit Review to strengthen the baseline for this role.",
       };
     }
     if (primaryNextAction.type === "studio") {
@@ -2319,16 +2401,22 @@ export default function ResultsPage() {
         label: "OPEN STUDIO",
         href: studioHref,
         disabled: !canOpenStudio,
-        description: "Open the studio to generate tailored materials now.",
+        description:
+          recentIntent === "used_and_committed"
+            ? "Your artifact is already in motion. Open Studio for follow-up tweaks when needed."
+            : "Open the studio to generate tailored materials now.",
       };
     }
     return {
       label: "OPEN STUDIO",
       href: studioHref,
       disabled: !canOpenStudio,
-      description: "Generate your resume first, then save the role to Opportunities.",
+      description:
+        recentIntent === "used_not_committed"
+          ? "Generate your resume first, then save the role to Opportunities to keep momentum."
+          : "Generate your resume first, then save the role to Opportunities.",
     };
-  }, [canOpenStudio, fitReviewPath, latest, primaryNextAction.type, studioHref]);
+  }, [canOpenStudio, fitReviewPath, latest, primaryNextAction.type, recentIntent, studioHref]);
   const evidenceLedger = useMemo(
     () =>
       deriveEvidenceLedger(latest, {
@@ -3090,7 +3178,12 @@ export default function ResultsPage() {
   return (
     <PageShell className="results-page-theme">
       <div className="space-y-5">
-        <PageHeader title="Your result" description="Review your compatibility score and next best step." />
+        <PageHeader
+          title="Your result"
+          description={
+            resultsReturnCue ?? "Review your compatibility score and next best step."
+          }
+        />
         {studioLocked ? (
           <section className="rounded-2xl border border-amber-300/30 bg-amber-500/10 p-4">
             <p className="text-sm font-semibold text-amber-100">You’re not ready to apply yet.</p>
@@ -3511,7 +3604,8 @@ export default function ResultsPage() {
                       </ul>
                     ) : null}
                   </section>
-                  {!isWeakFitScore && scoreBand !== ScoreBand.TOP ? (
+                  {(!isWeakFitScore || recentIntent === "refine_intent" || recentIntent === "used_not_committed") &&
+                  scoreBand !== ScoreBand.TOP ? (
                     <section id="fit-improvement-opportunities" className="rounded-2xl border border-slate-700/50 bg-slate-900/35 p-3">
                       <FitImprovementOpportunities
                         assessmentId={latest?.assessmentId ?? null}
@@ -3522,6 +3616,46 @@ export default function ResultsPage() {
                         summary={latest?.summary}
                         compact
                       />
+                    </section>
+                  ) : null}
+                  {showImprovementModule ? (
+                    <section
+                      id="how-to-improve-your-fit"
+                      className="rounded-2xl border border-sky-300/20 bg-sky-500/10 p-4"
+                      data-testid="how-to-improve-your-fit"
+                    >
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-100">
+                          How to improve your fit
+                        </p>
+                        <ul className="space-y-1 text-sm text-slate-100">
+                          {improvementSuggestions.map((item) => (
+                            <li
+                              key={`results-fit-improve-${item.requirement}`}
+                              className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2"
+                            >
+                              {item.action}
+                            </li>
+                          ))}
+                        </ul>
+                        <div className="pt-1">
+                          <Link
+                            data-testid="results-improvement-cta"
+                            href={fitReviewPath}
+                            className="inline-flex min-h-[44px] min-w-[240px] items-center justify-center rounded-[var(--button-radius)] bg-sky-400 px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-sky-300"
+                            onClick={() => {
+                              trackEvent("results_improvement_cta_clicked", {
+                                source: "results",
+                                intentState: recentIntent ?? "none",
+                                suggestionsShown: improvementSuggestions.length,
+                                scoreBucket: resultsScoreBucket ?? null,
+                              });
+                            }}
+                          >
+                            Start Fit Review
+                          </Link>
+                        </div>
+                      </div>
                     </section>
                   ) : null}
                   <section className="rounded-2xl border border-slate-700/50 bg-slate-900/35 p-3">

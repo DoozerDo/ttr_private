@@ -314,3 +314,76 @@ export function buildRequirementGapDelta(input: {
   return buildRequirementGapInsight(input);
 }
 
+export type StrengtheningSuggestion = {
+  requirement: string;
+  action: string;
+  rationale: string;
+  nextStep: string;
+  priority: number;
+};
+
+export type ActionableImprovementSuggestion = {
+  requirement: string;
+  action: string;
+  priority: number;
+};
+
+function prioritizeRequirement(requirement: string): number {
+  const normalized = requirement.toLowerCase();
+  if (/\b(leadership|scope|ownership|team size|org scope)\b/.test(normalized)) return 1;
+  if (/\b(metric|metrics|impact|outcome|results?)\b/.test(normalized)) return 2;
+  if (/\b(incident|escalation|support operations|support process|service delivery)\b/.test(normalized)) return 3;
+  if (/\b(platform|tool|tooling|salesforce|zendesk|jira|servicenow|crm)\b/.test(normalized)) return 4;
+  return 5;
+}
+
+function actionForRequirement(requirement: string): string {
+  const normalized = requirement.toLowerCase();
+  if (/\b(leadership|scope|ownership|team size|org scope)\b/.test(normalized)) {
+    return "Clarify team size, ownership, or org scope.";
+  }
+  if (/\b(metric|metrics|impact|outcome|results?)\b/.test(normalized)) {
+    return "Add measurable outcomes or impact.";
+  }
+  if (/\b(incident|escalation|support operations|support process|service delivery)\b/.test(normalized)) {
+    return "Add incident management or escalation examples.";
+  }
+  if (/\b(platform|tool|tooling|salesforce|zendesk|jira|servicenow|crm)\b/.test(normalized)) {
+    return `Clarify exposure to ${requirement}.`;
+  }
+  return `Strengthen verified evidence for ${requirement}.`;
+}
+
+export function buildStrengtheningSuggestion(input: {
+  requirement: string;
+  requirementEvidence?: unknown;
+  baselineEvidence?: unknown;
+  supportingSignals?: unknown;
+  summary?: unknown;
+}): StrengtheningSuggestion | null {
+  const gap = buildRequirementGapInsight(input);
+  if (!gap) return null;
+  return {
+    requirement: gap.requirement,
+    action: actionForRequirement(gap.requirement),
+    rationale: gap.explanation,
+    nextStep: "Run Fit Review to strengthen this gap.",
+    priority: prioritizeRequirement(gap.requirement),
+  };
+}
+
+export function buildActionableImprovementSuggestion(input: {
+  requirement: string;
+}): ActionableImprovementSuggestion | null {
+  const requirement = normalizeUserFacingRequirementLabel(input.requirement, {
+    sourceContext: null,
+    issueCode: "unsupported_technology_claim",
+  });
+  if (!requirement) return null;
+  return {
+    requirement,
+    action: actionForRequirement(requirement),
+    priority: prioritizeRequirement(requirement),
+  };
+}
+

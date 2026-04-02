@@ -50,8 +50,8 @@ function generationBlockedMove(input: StudioNextMoveInput): StudioNextMove {
 
 function strongFitMove(input: StudioNextMoveInput): StudioNextMove {
   return {
-    title: "You’re ready to generate",
-    description: "This role clears the threshold. Generate your documents now.",
+    title: "You’re ready to generate grounded materials",
+    description: "This role clears the threshold. Generate a resume and cover letter that stay grounded in verified experience.",
     primaryAction: {
       label: "Generate Resume",
       action: input.actions.generateResume,
@@ -66,8 +66,8 @@ function strongFitMove(input: StudioNextMoveInput): StudioNextMove {
 
 function moderateFitMove(input: StudioNextMoveInput): StudioNextMove {
   return {
-    title: "Fix the gaps before applying",
-    description: "A few gaps still limit confidence. Close them before you generate.",
+    title: "Close the gaps before you generate",
+    description: "A few evidence gaps still limit output quality. Strengthen them before you produce final materials.",
     primaryAction: {
       label: "Review Top Gaps",
       action: input.actions.reviewTopGaps,
@@ -82,8 +82,8 @@ function moderateFitMove(input: StudioNextMoveInput): StudioNextMove {
 
 function lowFitMove(input: StudioNextMoveInput): StudioNextMove {
   return {
-    title: "You’re not competitive for this role",
-    description: "The score is too low to make generation worthwhile.",
+    title: "Build stronger evidence before this role",
+    description: "The score is too low for useful output. Strengthen the baseline or analyze another role.",
     primaryAction: {
       label: "Improve Experience",
       action: input.actions.improveExperience,

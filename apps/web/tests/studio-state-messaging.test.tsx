@@ -133,11 +133,11 @@ describe("Studio state messaging", () => {
     installBaselineFetches("limited");
     renderStudio();
 
-    await waitFor(() => expect(screen.getByText("Generation is limited")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Generation is usable.")).toBeInTheDocument());
     expect(screen.getByText("Why this output is limited")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Your baseline supports tailored output, but some areas are still lighter than others. Studio will stay grounded in verified experience and may remain constrained until the baseline is stronger.",
+        "Your baseline supports tailored output. You can use this now, and refine it later if you want a stronger version.",
       ),
     ).toBeInTheDocument();
   });

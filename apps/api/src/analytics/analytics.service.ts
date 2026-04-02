@@ -30,6 +30,14 @@ type AnalyticsSummaryResponse = {
   opportunitiesSaved: number;
   resumeStudioOpens: number;
   heroDemoCompletions: number;
+  resultsImprovementModuleViews: number;
+  resultsImprovementCtaClicks: number;
+  artifactUsedIntents: number;
+  artifactRefineIntents: number;
+  opportunityCommitIntents: number;
+  resultsImprovementCtaRate: number;
+  artifactToOpportunityCommitRate: number;
+  refineIntentShare: number;
   startRate: number;
   completionRate: number;
   opportunitySaveRate: number;
@@ -611,6 +619,11 @@ export class AnalyticsService {
       opportunitiesRow,
       resumeOpensRow,
       heroDemoCompletionsRow,
+      resultsImprovementModuleViewsRow,
+      resultsImprovementCtaClicksRow,
+      artifactUsedIntentsRow,
+      artifactRefineIntentsRow,
+      opportunityCommitIntentsRow,
       scoreRows,
     ] = await Promise.all([
       this.analyticsEventRepository
@@ -671,6 +684,51 @@ export class AnalyticsService {
         .createQueryBuilder('event')
         .select('COUNT(*)', 'count')
         .where('event.eventName = :eventName', {
+          eventName: 'results_improvement_module_viewed',
+        })
+        .andWhere('event.createdAt >= :since', { since })
+        .andWhere(includeSynthetic ? '1=1' : 'event.isSynthetic = false')
+        .getRawOne<{ count: string }>(),
+      this.analyticsEventRepository
+        .createQueryBuilder('event')
+        .select('COUNT(*)', 'count')
+        .where('event.eventName = :eventName', {
+          eventName: 'results_improvement_cta_clicked',
+        })
+        .andWhere('event.createdAt >= :since', { since })
+        .andWhere(includeSynthetic ? '1=1' : 'event.isSynthetic = false')
+        .getRawOne<{ count: string }>(),
+      this.analyticsEventRepository
+        .createQueryBuilder('event')
+        .select('COUNT(*)', 'count')
+        .where('event.eventName = :eventName', {
+          eventName: 'artifact_used_intent',
+        })
+        .andWhere('event.createdAt >= :since', { since })
+        .andWhere(includeSynthetic ? '1=1' : 'event.isSynthetic = false')
+        .getRawOne<{ count: string }>(),
+      this.analyticsEventRepository
+        .createQueryBuilder('event')
+        .select('COUNT(*)', 'count')
+        .where('event.eventName = :eventName', {
+          eventName: 'artifact_refine_intent',
+        })
+        .andWhere('event.createdAt >= :since', { since })
+        .andWhere(includeSynthetic ? '1=1' : 'event.isSynthetic = false')
+        .getRawOne<{ count: string }>(),
+      this.analyticsEventRepository
+        .createQueryBuilder('event')
+        .select('COUNT(*)', 'count')
+        .where('event.eventName = :eventName', {
+          eventName: 'opportunity_commit_intent',
+        })
+        .andWhere('event.createdAt >= :since', { since })
+        .andWhere(includeSynthetic ? '1=1' : 'event.isSynthetic = false')
+        .getRawOne<{ count: string }>(),
+      this.analyticsEventRepository
+        .createQueryBuilder('event')
+        .select('COUNT(*)', 'count')
+        .where('event.eventName = :eventName', {
           eventName: 'compatibility_analysis_completed',
         })
         .andWhere('event.createdAt >= :since', { since })
@@ -700,6 +758,11 @@ export class AnalyticsService {
     const opportunitiesSaved = Number(opportunitiesRow?.count ?? 0);
     const resumeStudioOpens = Number(resumeOpensRow?.count ?? 0);
     const heroDemoCompletions = Number(heroDemoCompletionsRow?.count ?? 0);
+    const resultsImprovementModuleViews = Number(resultsImprovementModuleViewsRow?.count ?? 0);
+    const resultsImprovementCtaClicks = Number(resultsImprovementCtaClicksRow?.count ?? 0);
+    const artifactUsedIntents = Number(artifactUsedIntentsRow?.count ?? 0);
+    const artifactRefineIntents = Number(artifactRefineIntentsRow?.count ?? 0);
+    const opportunityCommitIntents = Number(opportunityCommitIntentsRow?.count ?? 0);
 
     const scoreDistribution: Record<AnalyticsScoreBucket, number> = {
       under_60: 0,
@@ -735,6 +798,12 @@ export class AnalyticsService {
     const completionRate = toRate(analysisCompletions, analysisStarts);
     const opportunitySaveRate = toRate(opportunitiesSaved, analysisCompletions);
     const resumeOpenRate = toRate(resumeStudioOpens, analysisCompletions);
+    const resultsImprovementCtaRate = toRate(resultsImprovementCtaClicks, resultsImprovementModuleViews);
+    const artifactToOpportunityCommitRate = toRate(opportunityCommitIntents, artifactUsedIntents);
+    const refineIntentShare = toRate(
+      artifactRefineIntents,
+      artifactRefineIntents + opportunityCommitIntents,
+    );
 
     return {
       visitors,
@@ -743,6 +812,14 @@ export class AnalyticsService {
       opportunitiesSaved,
       resumeStudioOpens,
       heroDemoCompletions,
+      resultsImprovementModuleViews,
+      resultsImprovementCtaClicks,
+      artifactUsedIntents,
+      artifactRefineIntents,
+      opportunityCommitIntents,
+      resultsImprovementCtaRate,
+      artifactToOpportunityCommitRate,
+      refineIntentShare,
       startRate,
       completionRate,
       opportunitySaveRate,

@@ -140,6 +140,11 @@ describe("Studio generation error contract", () => {
     renderStudio();
     await waitFor(() => expect(screen.getByText("Ready to generate")).toBeInTheDocument());
     expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
+    expect(screen.getByText("Strong output: you can use this now with confidence.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Built directly from your verified experience and aligned to the role."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Generate Cover Letter" })).toBeEnabled();
   });
 
@@ -181,15 +186,15 @@ describe("Studio generation error contract", () => {
     fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
 
     expect(resumeFetches).toBe(1);
-    expect(await screen.findByText(/generation is limited/i)).toBeInTheDocument();
+    expect(await screen.findByText("Ready to generate")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
-    expect(screen.getByText("Why this output is limited")).toBeInTheDocument();
+    expect(screen.getByText("Strong output: you can use this now with confidence.")).toBeInTheDocument();
     expect(
-      screen.getByText("This output is grounded in verified experience, but some areas still need stronger support."),
+      screen.getByText("Built directly from your verified experience and aligned to the role."),
     ).toBeInTheDocument();
     expect(screen.queryByText(/not ready to generate yet/i)).toBeNull();
-    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Continue Building Experience" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Generate Resume" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Generate Cover Letter" })).toBeNull();
   });
 
   it("renders generation_failed as the inline failure shell", async () => {
@@ -303,11 +308,11 @@ describe("Studio generation error contract", () => {
     fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
 
     expect(resumeFetches).toBe(1);
-    expect(await screen.findByText(/generation is limited/i)).toBeInTheDocument();
+    expect(await screen.findByText("Ready to generate")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
-    expect(screen.getByText("Why this output is limited")).toBeInTheDocument();
+    expect(screen.getByText("Strong output: you can use this now with confidence.")).toBeInTheDocument();
     expect(
-      screen.getByText("This output is grounded in verified experience, but some areas still need stronger support."),
+      screen.getByText("Built directly from your verified experience and aligned to the role."),
     ).toBeInTheDocument();
     expect(screen.queryByText(/we couldn.?t generate a reliable result/i)).toBeNull();
   });

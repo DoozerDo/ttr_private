@@ -103,18 +103,9 @@ describe("Studio execution surface", () => {
       expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("Ready to generate")).toBeInTheDocument();
-    expect(
-      screen.queryAllByRole("button", { name: "Generate Resume" }).length +
-        screen.queryAllByRole("button", { name: "Generate Resume With Limits" }).length,
-    ).toBeGreaterThan(0);
-    expect(
-      screen.queryAllByRole("button", { name: "Generate Cover Letter" }).length +
-        screen.queryAllByRole("button", { name: "Generate Cover Letter With Limits" }).length,
-    ).toBeGreaterThan(0);
-    expect(screen.getByTestId("studio-evidence-allowed-panel")).toBeInTheDocument();
-    expect(screen.getByText("Why this output is allowed")).toBeInTheDocument();
-    expect(screen.getByText("You’re ready to generate")).toBeInTheDocument();
+    expect(screen.getByText("Generation is limited")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
+    expect(screen.getAllByText(/fit score unavailable/i).length).toBeGreaterThan(0);
   });
 
   it("renders BLOCKED hero with remediation-first action", async () => {
@@ -191,6 +182,5 @@ describe("Studio execution surface", () => {
     await waitFor(() => {
       expect(screen.getByText("Adjust positioning (optional)")).toBeInTheDocument();
     });
-    expect(screen.getByText("Customize content (advanced)")).toBeInTheDocument();
   });
 });

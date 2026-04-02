@@ -15,6 +15,9 @@ export const ANALYTICS_EVENT_NAMES = [
   "resume_generation_succeeded",
   "resume_generation_limited",
   "resume_generation_blocked_compliance",
+  "artifact_used_intent",
+  "artifact_refine_intent",
+  "opportunity_commit_intent",
   "cover_letter_generation_attempted",
   "cover_letter_generation_succeeded",
   "cover_letter_generation_limited",
@@ -28,6 +31,8 @@ export const ANALYTICS_EVENT_NAMES = [
   "target_generation_state_viewed",
   "target_cta_clicked",
   "target_generation_blocked_redirect",
+  "results_improvement_module_viewed",
+  "results_improvement_cta_clicked",
 ] as const;
 
 export type AnalyticsEventName = (typeof ANALYTICS_EVENT_NAMES)[number];
@@ -101,6 +106,24 @@ export type AnalyticsEventMap = {
     analysisId?: string;
     reasonCode?: string;
   };
+  artifact_used_intent: {
+    source: "studio" | "unknown";
+    artifactType: "resume" | "cover_letter";
+    action: "export" | "use_now";
+    format?: "docx" | "pdf";
+    status?: string;
+  };
+  artifact_refine_intent: {
+    source: "studio" | "unknown";
+    analysisId?: string;
+    reason?: string;
+  };
+  opportunity_commit_intent: {
+    source: "studio" | "unknown";
+    analysisId?: string;
+    hasTrackerEntry?: boolean;
+    action: "save" | "continue";
+  };
   cover_letter_generation_attempted: {
     source: "studio" | "unknown";
     analysisId?: string;
@@ -159,6 +182,18 @@ export type AnalyticsEventMap = {
   target_generation_blocked_redirect: {
     score: number | null;
     blockerCodes: string[];
+  };
+  results_improvement_module_viewed: {
+    source: string;
+    intentState: string | null;
+    suggestionsShown: number;
+    scoreBucket: string | null;
+  };
+  results_improvement_cta_clicked: {
+    source: string;
+    intentState: string | null;
+    suggestionsShown: number;
+    scoreBucket: string | null;
   };
 };
 

@@ -24,6 +24,17 @@ type ProductSignalPayload = {
   biggestRecoveryDriver: string;
 };
 
+type AnalyticsSummaryPayload = {
+  resultsImprovementModuleViews: number;
+  resultsImprovementCtaClicks: number;
+  artifactUsedIntents: number;
+  artifactRefineIntents: number;
+  opportunityCommitIntents: number;
+  resultsImprovementCtaRate: number;
+  artifactToOpportunityCommitRate: number;
+  refineIntentShare: number;
+};
+
 type InvestorSnapshot = {
   totalUsers: number;
   reachedAnalysisPercent: number;
@@ -44,6 +55,7 @@ export default function ProductSignalPage() {
   const [error, setError] = useState<string | null>(null);
   const [signal, setSignal] = useState<ProductSignalPayload | null>(null);
   const [snapshot, setSnapshot] = useState<InvestorSnapshot | null>(null);
+  const [summary, setSummary] = useState<AnalyticsSummaryPayload | null>(null);
   const [narrative, setNarrative] = useState<string>("");
 
   useEffect(() => {
@@ -52,16 +64,22 @@ export default function ProductSignalPage() {
       setLoading(true);
       setError(null);
       try {
-        const [signalRes, snapshotRes] = await Promise.all([
+        const [signalRes, snapshotRes, summaryRes] = await Promise.all([
           fetch("/api/admin/product-signal", { cache: "no-store" }),
           fetch("/api/admin/investor-snapshot", { cache: "no-store" }),
+          fetch("/api/analytics/summary?days=30", { cache: "no-store" }),
         ]);
         if (signalRes.status === 403 || snapshotRes.status === 403) throw new Error("Admin access required");
         if (!signalRes.ok || !snapshotRes.ok) throw new Error("Unable to load product signal");
-        const [signalPayload, snapshotPayload] = await Promise.all([signalRes.json(), snapshotRes.json()]);
+        const [signalPayload, snapshotPayload, summaryPayload] = await Promise.all([
+          signalRes.json(),
+          snapshotRes.json(),
+          summaryRes.json(),
+        ]);
         if (!cancelled) {
           setSignal(signalPayload);
           setSnapshot(snapshotPayload);
+          setSummary(summaryPayload);
         }
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Unable to load");
@@ -98,6 +116,45 @@ export default function ProductSignalPage() {
       {error ? <p className="text-sm text-rose-300">{error}</p> : null}
       {signal && snapshot ? (
         <>
+          {summary ? (
+            <section className="rounded-xl border border-white/10 bg-slate-950/70 p-4">
+              <h2 className="text-lg font-semibold text-white">Results to Studio conversion</h2>
+              <p className="mt-1 text-sm text-slate-300">
+                Signals from the new Results improvement module and Studio intent actions.
+              </p>
+              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <article className="rounded-lg border border-white/10 bg-slate-900/80 p-4">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Module views</p>
+                  <p className="mt-2 text-2xl font-semibold text-white">{summary.resultsImprovementModuleViews}</p>
+                </article>
+                <article className="rounded-lg border border-white/10 bg-slate-900/80 p-4">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">CTA clicks</p>
+                  <p className="mt-2 text-2xl font-semibold text-white">{summary.resultsImprovementCtaClicks}</p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Results improvement CTA rate: {(summary.resultsImprovementCtaRate * 100).toFixed(1)}%
+                  </p>
+                </article>
+                <article className="rounded-lg border border-white/10 bg-slate-900/80 p-4">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Artifact used intent</p>
+                  <p className="mt-2 text-2xl font-semibold text-white">{summary.artifactUsedIntents}</p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Artifact to opportunity commit rate: {(summary.artifactToOpportunityCommitRate * 100).toFixed(1)}%
+                  </p>
+                </article>
+                <article className="rounded-lg border border-white/10 bg-slate-900/80 p-4">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Opportunity commit intent</p>
+                  <p className="mt-2 text-2xl font-semibold text-white">{summary.opportunityCommitIntents}</p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Refine vs commit split: {(summary.refineIntentShare * 100).toFixed(1)}% refine
+                  </p>
+                </article>
+              </div>
+              <p className="mt-3 text-xs text-slate-400">
+                Refine intents: {summary.artifactRefineIntents}
+              </p>
+            </section>
+          ) : null}
+
           <section className="grid gap-3 md:grid-cols-4">
             <div className="rounded-xl border border-white/10 bg-slate-900/70 p-4"><p className="text-xs uppercase text-slate-400">% reached analysis</p><p className="text-2xl text-white">{signal.keyConversions.reachedAnalysisPercent}%</p></div>
             <div className="rounded-xl border border-white/10 bg-slate-900/70 p-4"><p className="text-xs uppercase text-slate-400">% reached 70+</p><p className="text-2xl text-white">{signal.keyConversions.reachedHighScorePercent}%</p></div>

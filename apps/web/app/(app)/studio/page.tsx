@@ -74,6 +74,13 @@ import { readResumeModel, ResumePreview, type ResumeModel } from "./ResumePrevie
 import { listJobs } from "@/lib/jobsClient";
 import { useEntitlements } from "@/src/lib/entitlements";
 import { trackEvent } from "@/src/lib/analytics";
+import {
+  readRecentIntentState,
+  recordArtifactRefineIntent,
+  recordArtifactUsedIntent,
+  recordOpportunityCommitIntent,
+  type RecentIntentState,
+} from "@/src/lib/recentIntent";
 import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
 
 function LockIcon(props: { className?: string; "aria-hidden"?: boolean }) {
@@ -650,6 +657,7 @@ export default function StudioPage() {
   const [resumeGenerating, setResumeGenerating] = useState(false);
   const [resumeExportFormat, setResumeExportFormat] =
     useState<"docx" | "pdf" | null>(null);
+  const [recentIntent, setRecentIntent] = useState<RecentIntentState>(() => readRecentIntentState());
   const [resumeWarningFlags, setResumeWarningFlags] = useState<ComplianceFlag[]>([]);
   const [, setResumeAuditId] = useState<string | undefined>();
   const [resumeFocus, setResumeFocus] = useState<ResumeFocusOption>("Auto (recommended)");
@@ -730,6 +738,14 @@ export default function StudioPage() {
     readTrackerField(resumeState.response, "opportunityId") ?? 
     readTrackerField(resumeState.response, "trackerEntryId");
   const handleOpenTracker = useCallback(() => {
+    recordOpportunityCommitIntent();
+    setRecentIntent(readRecentIntentState());
+    trackEvent("opportunity_commit_intent", {
+      source: "studio",
+      analysisId: requestedAnalysisId || undefined,
+      hasTrackerEntry: Boolean(trackerEntryId),
+      action: trackerEntryId ? "continue" : "save",
+    });
     if (!trackerEntryId) return;
     void (async () => {
       try {
@@ -795,6 +811,7 @@ export default function StudioPage() {
     selectedBaselineId,
     selectedBaselineVersionId,
     trackerEntryId,
+    requestedAnalysisId,
   ]);
 
   const { isPro } = useEntitlements();
@@ -1624,22 +1641,26 @@ export default function StudioPage() {
     trustGateDecision.allowed,
     trustGateDecision.reason,
   ]);
+  useEffect(() => {
+    setRecentIntent(readRecentIntentState());
+  }, [requestedAnalysisId, effectiveJobId, effectiveBaselineId]);
   const generationSupportState = useMemo(() => {
+    if (activeGenerationReadiness.blocked || studioGenerationState === "BLOCKED") return "blocked";
     if (activeGenerationReadiness.status === "limited") return "partial";
-    if (studioUiState === "BLOCKED") return "blocked";
     return "strong";
-  }, [activeGenerationReadiness.status, studioUiState]);
+  }, [activeGenerationReadiness.blocked, activeGenerationReadiness.status, studioGenerationState]);
+  const canProceedWithStudioDrafts = generationSupportState !== "blocked";
   const authorityStateTitle =
     generationSupportState === "blocked"
       ? "Generation blocked"
       : generationSupportState === "partial"
-        ? "Generation is limited"
+        ? "Generation is usable."
         : "Ready to generate";
   const authorityStateExplanation =
     generationSupportState === "blocked"
           ? "This role is not ready for clean Studio output yet. Return to Fit Review to strengthen verified evidence."
       : generationSupportState === "partial"
-        ? "Your baseline supports tailored output, but some areas are still lighter than others. Studio will stay grounded in verified experience and may remain constrained until the baseline is stronger."
+        ? "Your baseline supports tailored output. You can use this now, and refine it later if you want a stronger version."
         : "Your role analysis and verified baseline evidence support strong tailored output.";
   const authorityReasons = useMemo(() => {
     const reasons: string[] = [];
@@ -1655,6 +1676,98 @@ export default function StudioPage() {
     });
     return reasons.slice(0, 3);
   }, [activeGenerationReadiness.reasons, activeGenerationReadiness.verificationIssues]);
+  const completionCopy = useMemo(() => {
+    if (generationSupportState === "partial") {
+      if (recentIntent === "used_and_committed") {
+        return {
+          title: "Draft used and tracked",
+          body: "Your export is grounded in verified baseline evidence and the role is now saved for follow-through.",
+          nextStep: "Keep tracking momentum in Opportunities",
+        };
+      }
+      if (recentIntent === "used_not_committed") {
+        return {
+          title: "Draft ready to use",
+          body: "Your export is grounded in verified baseline evidence. Save the role if you want to keep momentum.",
+          nextStep: "Save this role to Opportunities when you're ready",
+        };
+      }
+      return {
+        title: "Draft ready to review",
+        body: "This draft is grounded in verified baseline evidence and matches the Studio view you reviewed.",
+        nextStep: "Use it now or sharpen it later",
+      };
+    }
+    if (generationSupportState === "blocked") {
+      return {
+        title: "Generation blocked",
+        body: "Return to Fit Review to strengthen verified evidence before trying again.",
+        nextStep: "Strengthen baseline first",
+      };
+    }
+    if (recentIntent === "used_and_committed") {
+      return {
+        title: "Your export is ready and tracked",
+        body: "Built from verified baseline evidence and saved to Opportunities for follow-through.",
+        nextStep: "Keep momentum in Opportunities",
+      };
+    }
+    if (recentIntent === "used_not_committed") {
+      return {
+        title: "Your export is ready",
+        body: "Built from verified baseline evidence and aligned to the role as currently supported.",
+        nextStep: "Save this role to Opportunities to keep momentum",
+      };
+    }
+    if (recentIntent === "refine_intent") {
+      return {
+        title: "Your export is ready",
+        body: "Built from verified baseline evidence. You can use it now and refine later if you want a sharper version.",
+        nextStep: "Strengthen the baseline when you're ready",
+      };
+    }
+    return {
+      title: "Your export is ready",
+      body: "Built from verified baseline evidence and aligned to the role as currently supported.",
+      nextStep: "Use this for your next application",
+    };
+  }, [generationSupportState]);
+  const prioritizedStrengtheningSuggestions = useMemo(() => {
+    if (generationSupportState === "strong" && recentIntent !== "refine_intent" && recentIntent !== "used_not_committed") {
+      return [];
+    }
+    const tips = [
+      {
+        requirement: "Measurable outcomes",
+        action: "Add measurable outcomes to the most relevant experience.",
+        rationale: "Quantified impact is the fastest way to strengthen this draft.",
+        nextStep: "Run Fit Review to capture supported evidence.",
+        priority: 1,
+      },
+      {
+        requirement: "Leadership scope",
+        action: "Clarify team size, ownership, or org scope.",
+        rationale: "Leadership scope is a major fit signal for this role.",
+        nextStep: "Add one verified example from your baseline.",
+        priority: 2,
+      },
+      {
+        requirement: "Operational depth",
+        action: "Expand incident management or escalation examples.",
+        rationale: "Operational depth is still under-supported here.",
+        nextStep: "Use Fit Review to strengthen the missing evidence.",
+        priority: 3,
+      },
+      {
+        requirement: "Tooling coverage",
+        action: "Clarify exposure to the key tools or platforms in this role.",
+        rationale: "The role expects clearer tooling coverage.",
+        nextStep: "Keep only verified experience in the baseline.",
+        priority: 4,
+      },
+    ];
+    return tips.slice(0, recentIntent === "used_not_committed" ? 2 : 4);
+  }, [generationSupportState, recentIntent]);
   const guardGenerationAction = useCallback(
     (documentType: "resume" | "cover_letter" | "application") => {
       if (studioUiState === "BLOCKED") {
@@ -2307,7 +2420,7 @@ export default function StudioPage() {
       setIsResumeEditMode(false);
       setResumeEditError(null);
     }
-    if (!canGenerateDocuments) {
+    if (!canProceedWithStudioDrafts) {
       setResumeState((current) => ({
         ...current,
         error: generationMessage ?? "Review prerequisites before generating a resume.",
@@ -2551,7 +2664,7 @@ export default function StudioPage() {
   }, [draftResumeModel]);
 
   const exportResume = async (format: "docx" | "pdf") => {
-    if (!canGenerateDocuments) {
+    if (!canProceedWithStudioDrafts) {
       setResumeState((current) => ({
         ...current,
         error: generationMessage ?? "Review prerequisites before generating a resume.",
@@ -2593,6 +2706,15 @@ export default function StudioPage() {
       );
       const blob = await response.blob();
       downloadBlob(blob, serverFilename ?? `resume.${format}`);
+      recordArtifactUsedIntent();
+      setRecentIntent(readRecentIntentState());
+      trackEvent("artifact_used_intent", {
+        source: "studio",
+        artifactType: "resume",
+        action: "export",
+        format,
+        status: completionCopy.title,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Resume export failed.";
       setResumeState((current) => ({ ...current, error: message }));
@@ -2643,7 +2765,7 @@ export default function StudioPage() {
   const handleCoverDraft = async () => {
     if (!guardGenerationAction("cover_letter")) return;
     setUnlockGenerationConfirmation(null);
-    if (!canGenerateDocuments) {
+    if (!canProceedWithStudioDrafts) {
       setCoverState((current) => ({
         ...current,
         error: generationMessage ?? "Review prerequisites before generating a cover letter.",
@@ -2885,7 +3007,7 @@ export default function StudioPage() {
 
   const handleResumeBasicDraft = async () => {
     if (!guardGenerationAction("resume")) return;
-    if (!canGenerateDocuments) {
+    if (!canProceedWithStudioDrafts) {
       setResumeState((current) => ({
         ...current,
         error: generationMessage ?? "Review prerequisites before generating a resume.",
@@ -2919,7 +3041,7 @@ export default function StudioPage() {
   };
 
   const exportCoverLetter = async (format: "docx" | "pdf") => {
-    if (!canGenerateDocuments) {
+    if (!canProceedWithStudioDrafts) {
       setCoverState((current) => ({
         ...current,
         error: generationMessage ?? "Review prerequisites before generating a cover letter.",
@@ -2972,6 +3094,15 @@ export default function StudioPage() {
 
       const blob = await response.blob();
       downloadBlob(blob, `cover-letter.${format}`);
+      recordArtifactUsedIntent();
+      setRecentIntent(readRecentIntentState());
+      trackEvent("artifact_used_intent", {
+        source: "studio",
+        artifactType: "cover_letter",
+        action: "export",
+        format,
+        status: completionCopy.title,
+      });
     } catch (error) {
       console.error("Cover letter export failed", error);
       const message = error instanceof Error ? error.message : "Cover letter export failed.";
@@ -3017,7 +3148,7 @@ export default function StudioPage() {
         <div className="flex flex-wrap gap-3">
           <FormButton
             onClick={() => void handleResumeDraft()}
-            disabled={!canGenerateDocuments || resumeGenerating}
+            disabled={(!canGenerateDocuments && !canProceedWithStudioDrafts) || resumeGenerating}
           >
             {resumeGenerating
               ? studioGenerationRenderState.shouldShowEnhancedLoadingCopy
@@ -3028,7 +3159,7 @@ export default function StudioPage() {
           <FormButton
             variant="secondary"
             onClick={() => void handleCoverDraft()}
-            disabled={!canGenerateDocuments || coverGenerating}
+            disabled={(!canGenerateDocuments && !canProceedWithStudioDrafts) || coverGenerating}
           >
             {coverGenerating
               ? studioGenerationRenderState.shouldShowEnhancedLoadingCopy
@@ -3068,7 +3199,11 @@ export default function StudioPage() {
       <section className="space-y-5 rounded-[28px] bg-slate-900/45 p-6 md:p-8" data-testid="studio-generation-readiness">
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-            {studioGenerationRenderState.isReady ? "Ready" : "Blocked"}
+            {generationSupportState === "strong"
+              ? "Ready"
+              : generationSupportState === "partial"
+                ? "Usable"
+                : "Blocked"}
           </p>
           <p className="text-sm text-slate-300">
             {typeof analysisScore === "number" ? `Fit score ${Math.round(analysisScore)} � ` : "Fit score unavailable � "}
@@ -3084,8 +3219,84 @@ export default function StudioPage() {
             Based on your analyzed role context and verified baseline evidence.
           </p>
         </div>
+        <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-decision-panel">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Decision + Action</p>
+          <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-50">
+            {generationSupportState === "strong"
+              ? "Strong output: you can use this now with confidence."
+              : generationSupportState === "partial"
+              ? "Acceptable output: usable now, stronger with refinement."
+              : "Limited output: not ready yet."}
+          </h2>
+          <p className="mt-2 text-sm text-slate-200">
+            {generationSupportState === "strong"
+              ? "Built directly from your verified experience and aligned to the role."
+              : generationSupportState === "partial"
+                ? "Built directly from verified baseline evidence and aligned to key role requirements."
+                : "Built from your verified experience, but a few signals still need strengthening."}
+          </p>
+          {generationSupportState !== "strong" ? (
+            <div className="mt-4 space-y-2">
+              <p className="text-sm font-semibold text-slate-100">
+                {generationSupportState === "partial" ? "Why this is still worth using" : "What’s holding this back"}
+              </p>
+              <ul className="space-y-1 text-sm text-slate-300">
+                {(canonicalUnverifiedRequirements.length
+                  ? canonicalUnverifiedRequirements.slice(0, 4)
+                  : evidenceLedger.remainingWeakAreas.slice(0, 4)
+                ).map((item) => (
+                  <li
+                    key={`studio-decision-gap-${item}`}
+                    className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2"
+                  >
+                    {item}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-sm font-semibold text-slate-100">
+                {generationSupportState === "partial" ? "If you want to sharpen it" : "Fastest way to improve"}
+              </p>
+              <ul className="space-y-1 text-sm text-slate-300">
+                {generationSupportState === "partial" ? (
+                  <>
+                    <li>This draft is grounded in verified baseline evidence.</li>
+                    <li>Run Fit Review later if you want stronger positioning.</li>
+                  </>
+                ) : (
+                  <>
+                    <li>Run Fit Review to strengthen missing areas.</li>
+                    <li>Add measurable outcomes to your baseline experience.</li>
+                  </>
+                )}
+              </ul>
+            </div>
+          ) : null}
+        </div>
         <div className="flex flex-wrap items-center gap-3">
-          {primaryNextAction.type === "fit_review" ? (
+          {generationSupportState === "partial" ? (
+            <>
+              <FormButton
+                onClick={handleResumeDraft}
+                disabled={(!canGenerateDocuments && !canProceedWithStudioDrafts) || resumeGenerating}
+                className="bg-indigo-600 text-white hover:bg-indigo-500"
+              >
+                {resumeGenerating ? "Generating..." : "Generate Resume"}
+              </FormButton>
+              <FormButton
+                variant="secondary"
+                onClick={handleCoverDraft}
+                disabled={(!canGenerateDocuments && !canProceedWithStudioDrafts) || coverGenerating}
+              >
+                {coverGenerating ? "Generating..." : "Generate Cover Letter"}
+              </FormButton>
+              <Link
+                href={resolveGapsHref}
+                className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
+              >
+                Improve baseline
+              </Link>
+            </>
+          ) : primaryNextAction.type === "fit_review" ? (
             <Link
               href={resolveGapsHref}
               className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
@@ -3117,7 +3328,7 @@ export default function StudioPage() {
             <>
               <FormButton
                 onClick={handleResumeDraft}
-                disabled={!canGenerateDocuments || resumeGenerating}
+                disabled={(!canGenerateDocuments && !canProceedWithStudioDrafts) || resumeGenerating}
                 className="bg-indigo-600 text-white hover:bg-indigo-500"
               >
                 {resumeGenerating
@@ -3127,7 +3338,7 @@ export default function StudioPage() {
               <FormButton
                 variant="secondary"
                 onClick={handleCoverDraft}
-                disabled={!canGenerateDocuments || coverGenerating}
+                disabled={(!canGenerateDocuments && !canProceedWithStudioDrafts) || coverGenerating}
               >
                 {coverGenerating
                   ? "Generating..."
@@ -3137,7 +3348,7 @@ export default function StudioPage() {
           )}
         </div>
       </section>
-      {canGenerateDocuments ? (
+      {generationSupportState === "partial" || canGenerateDocuments ? (
         <section className="rounded-2xl border border-white/10 bg-white/5 p-4" data-testid="studio-evidence-allowed-panel">
           <h2 className="text-base font-semibold text-slate-100">
             {generationSupportState === "strong"
@@ -3172,15 +3383,45 @@ export default function StudioPage() {
           testId="studio-evidence-blocked-panel"
           tone="warning"
           eyebrow="Blocked"
-          title={generationSupportState === "partial" ? "Why generation is limited" : "Why generation is blocked"}
+          title="Why generation is blocked"
           body={
             <p className="text-sm text-slate-100">
-              {generationSupportState === "partial"
-                ? "This role can generate only in a limited way right now. Return to Fit Review to strengthen the verified baseline and unlock better output."
-                : "This role still needs stronger proof in a few areas before tailored output will be useful. Return to Fit Review to strengthen the verified baseline and try again."}
+              This role still needs stronger proof in a few areas before tailored output will be useful. Return to Fit Review to strengthen the verified baseline and try again.
             </p>
           }
         />
+      ) : null}
+      {prioritizedStrengtheningSuggestions.length > 0 &&
+      (generationSupportState !== "strong" ||
+        recentIntent === "refine_intent" ||
+        recentIntent === "used_not_committed") ? (
+        <section
+          className="rounded-2xl border border-sky-300/25 bg-slate-950/35 p-4"
+          data-testid="studio-strengthening-guidance"
+        >
+          <div className="space-y-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-100">
+              Fastest ways to strengthen this
+            </p>
+            <p className="text-sm text-slate-300">
+              These are the highest-impact evidence gaps from your current analysis.
+            </p>
+          </div>
+          <ul className="mt-3 space-y-3">
+            {prioritizedStrengtheningSuggestions
+              .slice(0, recentIntent === "used_not_committed" ? 2 : 4)
+              .map((suggestion) => (
+                <li
+                  key={`studio-strengthen-${suggestion.requirement}`}
+                  className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
+                >
+                  <p className="text-sm font-semibold text-slate-100">{suggestion.action}</p>
+                  <p className="mt-1 text-sm text-slate-300">{suggestion.rationale}</p>
+                  <p className="mt-1 text-xs text-slate-400">{suggestion.nextStep}</p>
+                </li>
+              ))}
+          </ul>
+        </section>
       ) : null}
       {opportunityContext ? (
         <p className="text-xs text-slate-400">
@@ -3491,7 +3732,7 @@ export default function StudioPage() {
                 variant="secondary"
                 className="text-xs"
                 onClick={() => void handleResumeBasicDraft()}
-                disabled={!canGenerateDocuments || resumeGenerating}
+                disabled={(!canGenerateDocuments && !canProceedWithStudioDrafts) || resumeGenerating}
               >
                 {resumeGenerating ? "Generating..." : "Generate a basic draft anyway"}
               </FormButton>
@@ -3512,6 +3753,81 @@ export default function StudioPage() {
           <Alert intent="warning" title="Resume edits are currently unavailable">
             {resumeEditError}
           </Alert>
+        ) : null}
+
+        {resumePresenter.status === "success" && resumeState.response ? (
+          <div
+            className="space-y-3 rounded-2xl border border-emerald-300/30 bg-emerald-500/10 p-4"
+            data-testid="resume-completion-panel"
+          >
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-100">
+              Completed
+            </p>
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-slate-50">{completionCopy.title}</p>
+              <p className="text-sm text-slate-200">{completionCopy.body}</p>
+              <p className="text-sm font-medium text-slate-100">{completionCopy.nextStep}</p>
+            </div>
+            <p className="text-xs text-slate-300">The export matches the draft reviewed in Studio.</p>
+          </div>
+        ) : null}
+
+        {resumePresenter.status === "success" && resumeState.response ? (
+          <section
+            className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4"
+            data-testid="studio-opportunities-handoff"
+          >
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                Keep momentum
+              </p>
+              <h2 className="text-base font-semibold text-slate-50">
+                {trackerEntryId ? "Continue this role in Opportunities" : "Save this role to Opportunities"}
+              </h2>
+              <p className="text-sm text-slate-200">
+                {trackerEntryId
+                  ? "Update status and keep the application loop moving after export."
+                  : "Save the role so you can track progress after using the artifact."}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {trackerEntryId ? (
+                <FormButton onClick={handleOpenTracker}>Continue in Opportunities</FormButton>
+              ) : (
+                <Link
+                  href="/job-tracker"
+                  onClick={() => {
+                    recordOpportunityCommitIntent();
+                    setRecentIntent(readRecentIntentState());
+                    trackEvent("opportunity_commit_intent", {
+                      source: "studio",
+                      analysisId: requestedAnalysisId || undefined,
+                      hasTrackerEntry: false,
+                      action: "save",
+                    });
+                  }}
+                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                >
+                  Save to Opportunities
+                </Link>
+              )}
+              <Link
+                href={resolveGapsHref}
+                onClick={() => {
+                  recordArtifactRefineIntent();
+                  setRecentIntent(readRecentIntentState());
+                  trackEvent("artifact_refine_intent", {
+                    source: "studio",
+                    analysisId: requestedAnalysisId || undefined,
+                    reason: generationSupportState,
+                  });
+                }}
+                className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
+              >
+                Refine baseline later
+              </Link>
+            </div>
+          </section>
         ) : null}
 
         {resumeState.artifactFailure ? (
@@ -3645,7 +3961,7 @@ export default function StudioPage() {
             <FormButton
               variant="secondary"
               onClick={handleCoverDraft}
-              disabled={!canGenerateDocuments || coverGenerating}
+              disabled={(!canGenerateDocuments && !canProceedWithStudioDrafts) || coverGenerating}
               data-testid="studio-cover-generate-button"
             >
               {coverGenerating
@@ -3721,6 +4037,81 @@ export default function StudioPage() {
         ) : null}
         {coverWarningFlags.length ? null : null}
         {coverState.error && !coverLetterComplianceBlocked ? null : null}
+
+        {!coverLetterComplianceBlocked && coverPresenter.status === "success" && coverState.response ? (
+          <div
+            className="space-y-3 rounded-2xl border border-emerald-300/30 bg-emerald-500/10 p-4"
+            data-testid="cover-completion-panel"
+          >
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-100">
+              Completed
+            </p>
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-slate-50">{completionCopy.title}</p>
+              <p className="text-sm text-slate-200">{completionCopy.body}</p>
+              <p className="text-sm font-medium text-slate-100">{completionCopy.nextStep}</p>
+            </div>
+            <p className="text-xs text-slate-300">The export matches the draft reviewed in Studio.</p>
+          </div>
+        ) : null}
+
+        {!coverLetterComplianceBlocked && coverPresenter.status === "success" && coverState.response ? (
+          <section
+            className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4"
+            data-testid="studio-opportunities-handoff"
+          >
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                Keep momentum
+              </p>
+              <h2 className="text-base font-semibold text-slate-50">
+                {trackerEntryId ? "Continue this role in Opportunities" : "Save this role to Opportunities"}
+              </h2>
+              <p className="text-sm text-slate-200">
+                {trackerEntryId
+                  ? "Update status and keep the application loop moving after export."
+                  : "Save the role so you can track progress after using the artifact."}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {trackerEntryId ? (
+                <FormButton onClick={handleOpenTracker}>Continue in Opportunities</FormButton>
+              ) : (
+                <Link
+                  href="/job-tracker"
+                  onClick={() => {
+                    recordOpportunityCommitIntent();
+                    setRecentIntent(readRecentIntentState());
+                    trackEvent("opportunity_commit_intent", {
+                      source: "studio",
+                      analysisId: requestedAnalysisId || undefined,
+                      hasTrackerEntry: false,
+                      action: "save",
+                    });
+                  }}
+                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                >
+                  Save to Opportunities
+                </Link>
+              )}
+              <Link
+                href={resolveGapsHref}
+                onClick={() => {
+                  recordArtifactRefineIntent();
+                  setRecentIntent(readRecentIntentState());
+                  trackEvent("artifact_refine_intent", {
+                    source: "studio",
+                    analysisId: requestedAnalysisId || undefined,
+                    reason: generationSupportState,
+                  });
+                }}
+                className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
+              >
+                Refine baseline later
+              </Link>
+            </div>
+          </section>
+        ) : null}
 
         {coverState.artifactFailure ? (
           <ArtifactFailureState

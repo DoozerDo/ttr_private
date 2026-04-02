@@ -29,6 +29,18 @@ describe("Admin Product Signal page", () => {
           biggestRecoveryDriver: "reanalysis_completed",
         });
       }
+      if (url.includes("/api/analytics/summary")) {
+        return jsonResponse({
+          resultsImprovementModuleViews: 12,
+          resultsImprovementCtaClicks: 3,
+          artifactUsedIntents: 5,
+          artifactRefineIntents: 2,
+          opportunityCommitIntents: 4,
+          resultsImprovementCtaRate: 0.25,
+          artifactToOpportunityCommitRate: 0.8,
+          refineIntentShare: 0.33,
+        });
+      }
       if (url.includes("/api/admin/investor-snapshot")) {
         return jsonResponse({
           totalUsers: 10,
@@ -52,9 +64,16 @@ describe("Admin Product Signal page", () => {
     await waitFor(() => {
       expect(screen.getByText("Product Signal")).toBeInTheDocument();
       expect(screen.getByText("Top Bottleneck")).toBeInTheDocument();
+      expect(screen.getByText("Results to Studio conversion")).toBeInTheDocument();
       expect(screen.getByText("Investor Snapshot")).toBeInTheDocument();
       expect(screen.getByText("Product Narrative")).toBeInTheDocument();
     });
+    expect(screen.getByText("Module views")).toBeInTheDocument();
+    expect(screen.getByText("CTA clicks")).toBeInTheDocument();
+    expect(screen.getByText("Artifact used intent")).toBeInTheDocument();
+    expect(screen.getByText("Opportunity commit intent")).toBeInTheDocument();
+    expect(screen.getByText("Results improvement CTA rate: 25.0%")).toBeInTheDocument();
+    expect(screen.getByText("Artifact to opportunity commit rate: 80.0%")).toBeInTheDocument();
     expect(
       screen.getAllByText((content) => content.includes("Generation failed from Studio")).length,
     ).toBeGreaterThan(0);
