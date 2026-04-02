@@ -2,6 +2,8 @@
 
 export const ANALYTICS_EVENT_NAMES = [
   "landing_viewed",
+  "landing_cta_click",
+  "landing_cta_footer_click",
   "resume_upload_initiated",
   "resume_upload_completed",
   "job_description_focused",
@@ -44,6 +46,14 @@ export type AnalyticsEventMap = {
   landing_viewed: {
     referrer: string | null;
     deviceType: "mobile" | "tablet" | "desktop";
+  };
+  landing_cta_click: {
+    destination: "/auth/signup" | "/baseline";
+    authenticated: boolean;
+  };
+  landing_cta_footer_click: {
+    destination: "/auth/signup" | "/baseline";
+    authenticated: boolean;
   };
   resume_upload_initiated: {
     source: "landing";

@@ -61,13 +61,6 @@ export function RunYourAnalysisSection({
     previousReadyRef.current = jdReady;
   }, [jdReady]);
 
-  const handleSampleRoleClick = (description: string) => {
-    onJobDescriptionChange(description);
-    window.setTimeout(() => {
-      runButtonRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 50);
-  };
-
   const handleUploadClick = () => {
     onResumeUploadInitiated();
     fileInputRef.current?.click();
@@ -77,14 +70,15 @@ export function RunYourAnalysisSection({
     <>
       <div id="check-compatibility" className="scroll-mt-24" />
       <section id="compatibility-form" className="scroll-mt-24 border-b border-slate-800/60 bg-slate-900/15">
-      <div className="mx-auto w-full max-w-[1200px] px-4 py-12 md:px-10 lg:px-16">
-        <div className="mx-auto max-w-4xl rounded-2xl bg-slate-900/55 p-5 shadow-[0_18px_50px_rgba(15,23,42,0.3)]">
+      <div className="mx-auto w-full max-w-[1200px] px-4 py-10 md:px-10 lg:px-16">
+        <div className="mx-auto max-w-4xl rounded-[22px] border border-slate-700/80 bg-slate-950/72 p-5">
           <h2 className="text-2xl font-semibold text-white lg:text-3xl">Run your analysis</h2>
+          <p className="mt-2 text-sm text-slate-300">Find out if this role is actually within reach.</p>
           <p className="mt-2 text-sm text-slate-300">
-            Upload your resume, paste the job description, and see your compatibility before you apply.
+            Upload your resume and paste the job description. See your real fit before you apply.
           </p>
           <div className="mt-6 space-y-5">
-            <div className="rounded-xl border border-slate-700/70 bg-slate-950/40 p-4">
+            <div className="rounded-xl border border-slate-700/70 bg-slate-950/55 p-4">
               <div className="flex flex-wrap items-center gap-3">
                 <button
                   type="button"
@@ -121,19 +115,7 @@ export function RunYourAnalysisSection({
                 className="mt-2 h-[144px] w-full resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 focus:border-slate-500 focus:outline-none"
               />
               <div className="mt-3">
-                <p className="text-xs text-slate-400">Try a sample role (example only):</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {SAMPLE_ROLES.map((sample) => (
-                    <button
-                      key={sample.label}
-                      type="button"
-                      onClick={() => handleSampleRoleClick(sample.description)}
-                      className="rounded-full border border-slate-700 bg-slate-950/80 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-slate-500 hover:text-white"
-                    >
-                      {sample.label}
-                    </button>
-                  ))}
-                </div>
+                <p className="text-xs text-slate-400">Takes under 60 seconds. No fluff. Just a real answer.</p>
               </div>
             </div>
 
@@ -149,14 +131,13 @@ export function RunYourAnalysisSection({
                     : "cursor-not-allowed border border-slate-700 bg-slate-900/70 text-slate-400"
                 } transform transition-transform duration-[175ms] ${showReadyPulse ? "scale-[1.03]" : "scale-100"}`}
               >
-                {isPreviewLoading ? "Analyzing..." : "Run Career Compatibility Analysis"}
+                {isPreviewLoading ? "Analyzing..." : "Check this role"}
               </button>
               {!jdReady ? (
                 <p className="text-xs text-slate-600">Paste more of the job description to unlock analysis.</p>
               ) : (
                 <p className="text-xs text-slate-500">Ready. Run analysis to see your fit.</p>
               )}
-              <p className="text-xs text-slate-600">No signup required for your first preview. Your upload is used only for scoring.</p>
             </div>
           </div>
           <div className="mt-3 min-h-5">
