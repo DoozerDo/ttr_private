@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Post,
   Query,
   UseGuards,
@@ -44,6 +45,62 @@ export class AnalyticsController {
       throw new BadRequestException('days must be greater than 0');
     }
     return this.analyticsService.getSummary(days, {
+      includeSynthetic: includeSyntheticRaw === 'true',
+    });
+  }
+
+  @Post('product-signal/snapshots')
+  @UseGuards(AuthGuard('jwt'), AdminBypassGuard)
+  async saveProductSignalSnapshot(@Query('days') daysRaw?: string) {
+    const days =
+      typeof daysRaw === 'string' && daysRaw.trim()
+        ? Number(daysRaw)
+        : 30;
+    if (!Number.isFinite(days) || days < 1) {
+      throw new BadRequestException('days must be greater than 0');
+    }
+    return this.analyticsService.saveProductSignalSnapshot(days);
+  }
+
+  @Get('product-signal/snapshots')
+  @UseGuards(AuthGuard('jwt'), AdminBypassGuard)
+  async listProductSignalSnapshots(@Query('limit') limitRaw?: string) {
+    const limit =
+      typeof limitRaw === 'string' && limitRaw.trim()
+        ? Number(limitRaw)
+        : 10;
+    if (!Number.isFinite(limit) || limit < 1) {
+      throw new BadRequestException('limit must be greater than 0');
+    }
+    return this.analyticsService.listProductSignalSnapshots(limit);
+  }
+
+  @Post('product-signal/snapshots/:snapshotId/review')
+  @UseGuards(AuthGuard('jwt'), AdminBypassGuard)
+  async updateProductSignalSnapshotReview(
+    @Param('snapshotId') snapshotId: string,
+    @Body() body: { reviewStatus?: string; reviewNote?: string },
+  ) {
+    return this.analyticsService.updateProductSignalSnapshot(snapshotId, {
+      reviewStatus: body.reviewStatus as any,
+      reviewNote: body.reviewNote,
+    });
+  }
+
+  @Get('product-signal/snapshots/compare')
+  @UseGuards(AuthGuard('jwt'), AdminBypassGuard)
+  async compareProductSignalSnapshot(
+    @Query('days') daysRaw?: string,
+    @Query('includeSynthetic') includeSyntheticRaw?: string,
+  ) {
+    const days =
+      typeof daysRaw === 'string' && daysRaw.trim()
+        ? Number(daysRaw)
+        : 30;
+    if (!Number.isFinite(days) || days < 1) {
+      throw new BadRequestException('days must be greater than 0');
+    }
+    return this.analyticsService.compareProductSignalSnapshot(days, {
       includeSynthetic: includeSyntheticRaw === 'true',
     });
   }

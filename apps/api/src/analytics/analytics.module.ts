@@ -6,6 +6,7 @@ import { FitAssessment } from '../analysis/fit-assessment.entity';
 import { Application } from '../applications/application.entity';
 import { BetaFeedback } from '../beta-feedback/beta-feedback.entity';
 import { Opportunity } from '../opportunities/opportunity.entity';
+import { ProductSignalSnapshot } from './product-signal-snapshot.entity';
 import { User } from '../users/user.entity';
 import { AnalyticsController } from './analytics.controller';
 import { AnalyticsEvent } from './analytics-event.entity';
@@ -21,6 +22,7 @@ import { AnalyticsService } from './analytics.service';
       Opportunity,
       Application,
       BetaFeedback,
+      ProductSignalSnapshot,
     ]),
     AdminUsersModule,
   ],

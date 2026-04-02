@@ -6,6 +6,10 @@ import { FitAssessment } from '../analysis/fit-assessment.entity';
 import { Application } from '../applications/application.entity';
 import { BetaFeedback } from '../beta-feedback/beta-feedback.entity';
 import { Opportunity } from '../opportunities/opportunity.entity';
+import {
+  ProductSignalSnapshot,
+  ProductSignalSnapshotReviewStatus,
+} from './product-signal-snapshot.entity';
 import { User } from '../users/user.entity';
 import { AnalyticsEvent } from './analytics-event.entity';
 import type { TrackAnalyticsEventDto } from './dto/track-analytics-event.dto';
@@ -38,6 +42,47 @@ type AnalyticsSummaryResponse = {
   resultsImprovementCtaRate: number;
   artifactToOpportunityCommitRate: number;
   refineIntentShare: number;
+  trendContext: {
+    resultsImprovementCtaRate: TrendComparison;
+    artifactToOpportunityCommitRate: TrendComparison;
+    refineIntentShare: TrendComparison;
+  };
+  weakestStep: {
+    weakestStepKey: "moduleViewToCtaRate" | "ctaToArtifactRate" | "artifactToRefineRate" | "artifactToCommitRate" | null;
+    weakestStepLabel: string | null;
+    weakestStepRate: number;
+    weakestStepPreviousRate: number;
+    weakestStepDelta: number;
+    weakestStepDirection: "improving" | "worsening" | "flat" | "none";
+    weakestStepPreviousNumerator: number;
+    weakestStepPreviousDenominator: number;
+    weakestStepTrendReason: string;
+    benchmarkStepRate: number;
+    relativeDrop: number;
+    weakestStepNumerator: number;
+    weakestStepDenominator: number;
+    severity: "High" | "Medium" | "Low" | "None";
+    confidence: "High" | "Medium" | "Low" | "None";
+    confidenceReason: string;
+    watchlistStatus: "stable" | "monitor" | "action_needed";
+    watchlistPriority: "none" | "low" | "medium" | "high";
+    watchlistReason: string;
+    recommendationTitle: string;
+    recommendationBody: string;
+  };
+  releaseAnnotations: ReleaseAnnotation[];
+  weakestStepReleaseContext: WeakestStepReleaseContext;
+  operatorSummary: OperatorSummary;
+  recommendedNextAction: RecommendedNextAction;
+  adminSummaryExport: AdminSummaryExport;
+  exportMetadata: {
+    exportedAt: string;
+    selectedWindowDays: number | null;
+  };
+  formattedExports: {
+    plainTextBrief: string;
+    jsonPayload: string;
+  };
   startRate: number;
   completionRate: number;
   opportunitySaveRate: number;
@@ -45,6 +90,169 @@ type AnalyticsSummaryResponse = {
   scoreDistribution: Record<AnalyticsScoreBucket, number>;
   funnel: Array<{ eventName: AnalyticsSummaryStep; count: number }>;
 };
+
+type TrendComparison = {
+  current: number;
+  previous: number;
+  delta: number;
+  direction: "up" | "down" | "flat";
+};
+
+type WeakestStepKey =
+  | "moduleViewToCtaRate"
+  | "ctaToArtifactRate"
+  | "artifactToRefineRate"
+  | "artifactToCommitRate"
+  | null;
+
+type ReleaseAnnotation = {
+  id: string;
+  label: string;
+  date: string;
+  type: "feature" | "experiment" | "fix" | "content";
+  notes: string;
+  isInCurrentWindow: boolean;
+  isInPreviousWindow: boolean;
+};
+
+type WeakestStepReleaseContext = {
+  relevantCurrentWindowReleases: ReleaseAnnotation[];
+  relevantPreviousWindowReleases: ReleaseAnnotation[];
+  releaseContextSummary: string;
+};
+
+type OperatorSummary = {
+  headline: string;
+  subheadline: string;
+  tone: "neutral" | "informative" | "caution" | "urgent";
+  primaryFocus: "no_signal" | "weak_step_monitor" | "weak_step_action" | "positive_recovery" | "stable_funnel";
+  supportingReason: string;
+  recommendedActionTitle: string | null;
+};
+
+type RecommendedNextAction = {
+  actionTitle: string;
+  actionBody: string;
+  actionFocus: "results_cta" | "studio_entry" | "refine_flow" | "opportunity_capture" | "none";
+  actionSource: "weakest_step" | "weakest_step_with_release_context" | "none";
+};
+
+type AdminSummaryExport = {
+  headline: string;
+  tone: OperatorSummary["tone"];
+  primaryFocus: OperatorSummary["primaryFocus"];
+  weakestStepLabel: string | null;
+  weakestStepRate: number;
+  weakestStepDirection: "improving" | "worsening" | "flat" | "none";
+  watchlistStatus: "stable" | "monitor" | "action_needed";
+  watchlistPriority: "none" | "low" | "medium" | "high";
+  severity: "High" | "Medium" | "Low" | "None";
+  confidence: "High" | "Medium" | "Low" | "None";
+  recommendedActionTitle: string | null;
+  recommendedActionBody: string;
+  releaseContextSummary: string;
+};
+
+type ProductSignalSnapshotRecord = {
+  id: string;
+  createdAt: Date | string;
+  selectedWindowDays: number;
+  headline: string;
+  tone: OperatorSummary["tone"];
+  primaryFocus: OperatorSummary["primaryFocus"];
+  weakestStepLabel: string | null;
+  weakestStepRate: number | string;
+  weakestStepDirection: "improving" | "worsening" | "flat" | "none";
+  watchlistStatus: "stable" | "monitor" | "action_needed";
+  watchlistPriority: "none" | "low" | "medium" | "high";
+  severity: "High" | "Medium" | "Low" | "None";
+  confidence: "High" | "Medium" | "Low" | "None";
+  recommendedActionTitle: string | null;
+  recommendedActionBody: string;
+  releaseContextSummary: string;
+  exportPayloadJson: string;
+  reviewStatus: ProductSignalSnapshotReviewStatusValue;
+  reviewNote: string;
+  reviewedAt: Date | string | null;
+};
+
+type ProductSignalSnapshotReviewStatusValue =
+  | ProductSignalSnapshotReviewStatus.OPEN
+  | ProductSignalSnapshotReviewStatus.MONITORING
+  | ProductSignalSnapshotReviewStatus.RESOLVED;
+
+type ProductSignalCompareField = {
+  field:
+    | "headline"
+    | "tone"
+    | "primaryFocus"
+    | "weakestStepLabel"
+    | "weakestStepRate"
+    | "weakestStepDirection"
+    | "watchlistStatus"
+    | "watchlistPriority"
+    | "severity"
+    | "confidence"
+    | "recommendedActionTitle"
+    | "releaseContextSummary";
+  previousValue: string | number | null;
+  currentValue: string | number | null;
+};
+
+type ProductSignalSnapshotCompareResponse = {
+  hasSnapshot: boolean;
+  latestSnapshotCreatedAt: string | null;
+  latestSnapshotReviewStatus: ProductSignalSnapshotReviewStatusValue | null;
+  latestSnapshotReviewNote: string | null;
+  latestSnapshotReviewedAt: string | null;
+  comparisonSummary: string;
+  changedFields: ProductSignalCompareField[];
+};
+
+const RELEASE_ANNOTATIONS: Array<Omit<ReleaseAnnotation, "isInCurrentWindow" | "isInPreviousWindow">> = [
+  {
+    id: "results-improvement-copy-update",
+    label: "Results improvement module copy update",
+    date: "2026-03-30",
+    type: "content",
+    notes: "Clarified the Results improvement module CTA and reduced competing action copy.",
+  },
+  {
+    id: "results-action-grouping-cleanup",
+    label: "Results page action grouping cleanup",
+    date: "2026-03-26",
+    type: "fix",
+    notes: "Grouped the primary Results actions to keep the next step more obvious.",
+  },
+  {
+    id: "studio-first-screen-simplification",
+    label: "Studio first screen simplification",
+    date: "2026-03-22",
+    type: "feature",
+    notes: "Simplified the first Studio screen so the generation path reads more clearly.",
+  },
+  {
+    id: "artifact-refine-prompt-update",
+    label: "Artifact refine prompt update",
+    date: "2026-02-26",
+    type: "experiment",
+    notes: "Tested a sharper refine prompt to encourage stronger artifact improvement.",
+  },
+  {
+    id: "opportunity-save-cta-placement",
+    label: "Opportunity save CTA placement change",
+    date: "2026-02-20",
+    type: "feature",
+    notes: "Moved the opportunity save CTA closer to artifact completion.",
+  },
+  {
+    id: "studio-completion-copy-tune",
+    label: "Studio completion copy tune",
+    date: "2026-02-14",
+    type: "content",
+    notes: "Adjusted completion copy to better reinforce export value and next steps.",
+  },
+];
 
 type FounderFunnelStage = {
   label: 'Visitors' | 'Analyses Started' | 'Analyses Completed' | 'Accounts Created';
@@ -127,6 +335,324 @@ function toRate(numerator: number, denominator: number): number {
     return 0;
   }
   return numerator / denominator;
+}
+
+function getWeakestStepRecommendation(
+  weakestStepKey: WeakestStepKey,
+): { title: string; body: string; label: string | null } {
+  switch (weakestStepKey) {
+    case "moduleViewToCtaRate":
+      return {
+        title: "Improve Results CTA conversion",
+        body: "Users are seeing the Results improvement module but not clicking through. Tighten CTA copy, reduce competing actions, and test stronger benefit framing.",
+        label: "Results improvement module to CTA",
+      };
+    case "ctaToArtifactRate":
+      return {
+        title: "Reduce Studio entry friction",
+        body: "Users click the Results CTA but do not continue into artifact intent. Review routing, load time, and first screen clarity in Studio.",
+        label: "Results CTA to artifact intent",
+      };
+    case "artifactToRefineRate":
+      return {
+        title: "Strengthen refine value",
+        body: "Users enter artifact flow but are not choosing refinement often. Rework refine prompts and make improvement outcomes clearer.",
+        label: "Artifact intent to refine intent",
+      };
+    case "artifactToCommitRate":
+      return {
+        title: "Improve opportunity capture",
+        body: "Users use artifacts but are not committing opportunities. Make the opportunity action more visible and connect it more directly to artifact completion.",
+        label: "Artifact intent to opportunity commit",
+      };
+    default:
+      return {
+        title: "Not enough signal yet",
+        body: "There is not enough current period funnel activity to identify a weak point.",
+        label: null,
+      };
+  }
+}
+
+function getWeakestStepSeverity(relativeDrop: number, weakestStepKey: WeakestStepKey): "High" | "Medium" | "Low" | "None" {
+  if (weakestStepKey === null || relativeDrop === 0) return "None";
+  if (relativeDrop >= 0.25) return "High";
+  if (relativeDrop >= 0.12) return "Medium";
+  return "Low";
+}
+
+function getWeakestStepConfidence(denominator: number, weakestStepKey: WeakestStepKey): "High" | "Medium" | "Low" | "None" {
+  if (weakestStepKey === null || denominator === 0) return "None";
+  if (denominator >= 50) return "High";
+  if (denominator >= 20) return "Medium";
+  return "Low";
+}
+
+function getWeakestStepConfidenceReason(confidence: "High" | "Medium" | "Low" | "None"): string {
+  switch (confidence) {
+    case "High":
+      return "Based on strong current-period volume";
+    case "Medium":
+      return "Based on moderate current-period volume";
+    case "Low":
+      return "Based on limited current-period volume";
+    default:
+      return "Not enough current-period volume to trust this signal yet";
+  }
+}
+
+function getWeakestStepDirection(
+  currentRate: number,
+  previousRate: number,
+  weakestStepKey: WeakestStepKey,
+): "improving" | "worsening" | "flat" | "none" {
+  if (weakestStepKey === null) return "none";
+  const delta = currentRate - previousRate;
+  if (delta > 0.01) return "improving";
+  if (delta < -0.01) return "worsening";
+  return "flat";
+}
+
+function getWeakestStepTrendReason(direction: "improving" | "worsening" | "flat" | "none"): string {
+  switch (direction) {
+    case "improving":
+      return "This weakest step is performing better than in the prior period.";
+    case "worsening":
+      return "This weakest step is performing worse than in the prior period.";
+    case "flat":
+      return "This weakest step is materially unchanged versus the prior period.";
+    default:
+      return "No prior-period comparison is available for this weakest step.";
+  }
+}
+
+function getReleaseAnnotationKeywords(stepKey: WeakestStepKey): string[] {
+  switch (stepKey) {
+    case "moduleViewToCtaRate":
+      return ["Results", "CTA", "copy", "action grouping"];
+    case "ctaToArtifactRate":
+      return ["Studio", "routing", "first screen", "entry"];
+    case "artifactToRefineRate":
+      return ["refine", "prompt", "artifact"];
+    case "artifactToCommitRate":
+      return ["opportunity", "save", "commit", "artifact completion"];
+    default:
+      return [];
+  }
+}
+
+function isReleaseRelevant(annotation: ReleaseAnnotation, stepKey: WeakestStepKey): boolean {
+  if (stepKey === null) return false;
+  const keywords = getReleaseAnnotationKeywords(stepKey);
+  const haystack = `${annotation.label} ${annotation.notes}`.toLowerCase();
+  return keywords.some((keyword) => haystack.includes(keyword.toLowerCase()));
+}
+
+function getReleaseContextSummary(
+  weakestStepKey: WeakestStepKey,
+  current: ReleaseAnnotation[],
+  previous: ReleaseAnnotation[],
+): string {
+  if (weakestStepKey === null) {
+    return "No weakest-step release context is available yet.";
+  }
+  if (current.length === 0 && previous.length === 0) {
+    return "No directly relevant release annotations were found in the current or prior comparison windows.";
+  }
+  if (current.length > 0) {
+    return "Recent relevant product changes exist in the current comparison window.";
+  }
+  if (previous.length > 0) {
+    return "Relevant product changes were shipped in the prior comparison window.";
+  }
+  return "No directly relevant release annotations were found in the current or prior comparison windows.";
+}
+
+function getOperatorSummary(input: {
+  weakestStepKey: WeakestStepKey;
+  weakestStepLabel: string | null;
+  weakestStepDirection: "improving" | "worsening" | "flat" | "none";
+  watchlistStatus: "stable" | "monitor" | "action_needed";
+  releaseContextSummary: string;
+  recommendedActionTitle: string | null;
+}): OperatorSummary {
+  if (input.weakestStepKey === null) {
+    return {
+      tone: "neutral",
+      primaryFocus: "no_signal",
+      headline: "Not enough signal yet to identify a funnel risk.",
+      subheadline:
+        "Product Signal does not yet have enough current-period activity to surface a trustworthy weakest step.",
+      supportingReason: "No active weakest-step signal is available yet.",
+      recommendedActionTitle: null,
+    };
+  }
+  if (input.watchlistStatus === "action_needed") {
+    return {
+      tone: "urgent",
+      primaryFocus: "weak_step_action",
+      headline: `Action needed: ${input.weakestStepLabel} is the main funnel bottleneck right now.`,
+      subheadline: "The current weakest step is severe, supported by meaningful volume, and is not improving.",
+      supportingReason: "Combine the weakest-step recommendation with release context to investigate likely causes.",
+      recommendedActionTitle: input.recommendedActionTitle,
+    };
+  }
+  if (
+    input.watchlistStatus === "monitor" &&
+    (input.weakestStepDirection === "worsening" || input.weakestStepDirection === "flat")
+  ) {
+    return {
+      tone: "caution",
+      primaryFocus: "weak_step_monitor",
+      headline: `Monitor closely: ${input.weakestStepLabel} is the current funnel constraint.`,
+      subheadline:
+        "The weakest step is showing enough risk to watch, even if immediate intervention is not yet mandatory.",
+      supportingReason: "Review severity, confidence, and recent release context before making changes.",
+      recommendedActionTitle: input.recommendedActionTitle,
+    };
+  }
+  if (input.weakestStepDirection === "improving" && input.watchlistStatus !== "action_needed") {
+    return {
+      tone: "informative",
+      primaryFocus: "positive_recovery",
+      headline: "The current weakest step is improving, but it remains the main funnel constraint.",
+      subheadline:
+        "The bottleneck is recovering relative to the prior period, which lowers urgency but does not remove the constraint.",
+      supportingReason: "Keep monitoring the weakest step until the gap versus stronger steps narrows further.",
+      recommendedActionTitle: input.recommendedActionTitle,
+    };
+  }
+  return {
+    tone: "informative",
+    primaryFocus: "stable_funnel",
+    headline: "The funnel has a weakest step, but current conditions do not suggest elevated risk.",
+    subheadline:
+      "The current constraint is present, but severity, confidence, and trend do not point to urgent action.",
+    supportingReason: "Continue monitoring for movement in watchlist status, severity, or trend.",
+    recommendedActionTitle: input.recommendedActionTitle,
+  };
+}
+
+function getRecommendedNextAction(input: {
+  weakestStepKey: WeakestStepKey;
+  weakestStepLabel: string | null;
+  watchlistStatus: "stable" | "monitor" | "action_needed";
+  releaseContext: WeakestStepReleaseContext;
+}): RecommendedNextAction {
+  let actionTitle = "No action recommended yet";
+  let actionBody =
+    "There is not enough current-period signal to determine a meaningful next action.";
+  let actionFocus: RecommendedNextAction["actionFocus"] = "none";
+  let actionSource: RecommendedNextAction["actionSource"] = "none";
+
+  switch (input.weakestStepKey) {
+    case "moduleViewToCtaRate":
+      actionTitle = "Improve Results CTA clarity";
+      actionBody =
+        "Simplify CTA copy, reduce competing actions, and test a single clear next step from Results.";
+      actionFocus = "results_cta";
+      break;
+    case "ctaToArtifactRate":
+      actionTitle = "Reduce Studio entry friction";
+      actionBody =
+        "Review routing, load time, and first screen clarity to ensure users who click through can continue immediately.";
+      actionFocus = "studio_entry";
+      break;
+    case "artifactToRefineRate":
+      actionTitle = "Strengthen refine flow value";
+      actionBody =
+        "Make refinement outcomes clearer and improve prompt guidance so users understand why to refine.";
+      actionFocus = "refine_flow";
+      break;
+    case "artifactToCommitRate":
+      actionTitle = "Improve opportunity capture visibility";
+      actionBody =
+        "Make the opportunity action more prominent and tie it directly to artifact completion moments.";
+      actionFocus = "opportunity_capture";
+      break;
+    default:
+      return {
+        actionTitle,
+        actionBody,
+        actionFocus,
+        actionSource,
+      };
+  }
+
+  actionSource = "weakest_step";
+  if (
+    input.watchlistStatus === "action_needed" &&
+    input.releaseContext.relevantCurrentWindowReleases.length > 0
+  ) {
+    actionSource = "weakest_step_with_release_context";
+    actionBody +=
+      " Recent product changes in this area may be contributing. Review recent releases before making additional changes.";
+  }
+
+  return {
+    actionTitle,
+    actionBody,
+    actionFocus,
+    actionSource,
+  };
+}
+
+function getWeakestStepWatchlist(
+  weakestStepKey: WeakestStepKey,
+  severity: "High" | "Medium" | "Low" | "None",
+  confidence: "High" | "Medium" | "Low" | "None",
+  weakestStepDirection: "improving" | "worsening" | "flat" | "none",
+): {
+  watchlistStatus: "stable" | "monitor" | "action_needed";
+  watchlistPriority: "none" | "low" | "medium" | "high";
+  watchlistReason: string;
+} {
+  if (weakestStepKey === null) {
+    return {
+      watchlistStatus: "stable",
+      watchlistPriority: "none",
+      watchlistReason: "No active weakest-step signal is available yet.",
+    };
+  }
+
+  if (
+    severity === "High" &&
+    (confidence === "High" || confidence === "Medium") &&
+    (weakestStepDirection === "worsening" || weakestStepDirection === "flat")
+  ) {
+    return {
+      watchlistStatus: "action_needed",
+      watchlistPriority: "high",
+      watchlistReason: "This bottleneck is severe, supported by meaningful volume, and is not improving.",
+    };
+  }
+
+  if (
+    (severity === "High" && confidence === "Low") ||
+    (severity === "Medium" && (confidence === "High" || confidence === "Medium")) ||
+    (severity === "Medium" && weakestStepDirection === "worsening") ||
+    (severity === "Low" && confidence === "High" && weakestStepDirection === "worsening")
+  ) {
+    return {
+      watchlistStatus: "monitor",
+      watchlistPriority: "medium",
+      watchlistReason: "This bottleneck shows enough risk to monitor closely.",
+    };
+  }
+
+  if (severity === "Low" || confidence === "Low" || weakestStepDirection === "improving") {
+    return {
+      watchlistStatus: "monitor",
+      watchlistPriority: "low",
+      watchlistReason: "This bottleneck exists, but the current signal suggests lower urgency.",
+    };
+  }
+
+  return {
+    watchlistStatus: "stable",
+    watchlistPriority: "none",
+    watchlistReason: "Current weakest-step conditions do not suggest elevated risk.",
+  };
 }
 
 function normalizeScoreBucket(value: unknown): AnalyticsScoreBucket | null {
@@ -256,8 +782,10 @@ export class AnalyticsService {
     private readonly opportunityRepository: Repository<Opportunity>,
     @InjectRepository(Application)
     private readonly applicationRepository: Repository<Application>,
-    @InjectRepository(BetaFeedback)
-    private readonly betaFeedbackRepository: Repository<BetaFeedback>,
+  @InjectRepository(BetaFeedback)
+  private readonly betaFeedbackRepository: Repository<BetaFeedback>,
+  @InjectRepository(ProductSignalSnapshot)
+  private readonly productSignalSnapshotRepository: Repository<ProductSignalSnapshot>,
   ) {}
 
   async getBetaCommandCenter(input?: {
@@ -606,11 +1134,27 @@ export class AnalyticsService {
     days = 30,
     options?: { includeSynthetic?: boolean },
   ): Promise<AnalyticsSummaryResponse> {
+    const now = new Date();
     const normalizedDays = Number.isFinite(days)
       ? Math.max(1, Math.min(365, Math.floor(days)))
       : 30;
-    const since = new Date(Date.now() - normalizedDays * 24 * 60 * 60 * 1000);
+    const since = new Date(now.getTime() - normalizedDays * 24 * 60 * 60 * 1000);
+    const previousSince = new Date(now.getTime() - normalizedDays * 2 * 24 * 60 * 60 * 1000);
     const includeSynthetic = options?.includeSynthetic ?? false;
+
+    const countEventBetween = async (eventName: string, windowStart: Date, windowEnd?: Date) => {
+      const query = this.analyticsEventRepository
+        .createQueryBuilder('event')
+        .select('COUNT(*)', 'count')
+        .where('event.eventName = :eventName', { eventName })
+        .andWhere('event.createdAt >= :since', { since: windowStart })
+        .andWhere(includeSynthetic ? '1=1' : 'event.isSynthetic = false');
+      if (windowEnd) {
+        query.andWhere('event.createdAt < :until', { until: windowEnd });
+      }
+      const row = await query.getRawOne<{ count: string }>();
+      return Number(row?.count ?? 0);
+    };
 
     const [
       visitorRow,
@@ -804,6 +1348,221 @@ export class AnalyticsService {
       artifactRefineIntents,
       artifactRefineIntents + opportunityCommitIntents,
     );
+    const previousResultsImprovementModuleViews = await countEventBetween(
+      'results_improvement_module_viewed',
+      previousSince,
+      since,
+    );
+    const previousResultsImprovementCtaClicks = await countEventBetween(
+      'results_improvement_cta_clicked',
+      previousSince,
+      since,
+    );
+    const previousArtifactUsedIntents = await countEventBetween(
+      'artifact_used_intent',
+      previousSince,
+      since,
+    );
+    const previousArtifactRefineIntents = await countEventBetween(
+      'artifact_refine_intent',
+      previousSince,
+      since,
+    );
+    const previousOpportunityCommitIntents = await countEventBetween(
+      'opportunity_commit_intent',
+      previousSince,
+      since,
+    );
+    const previousResultsImprovementCtaRate = toRate(
+      previousResultsImprovementCtaClicks,
+      previousResultsImprovementModuleViews,
+    );
+    const previousArtifactToOpportunityCommitRate = toRate(
+      previousOpportunityCommitIntents,
+      previousArtifactUsedIntents,
+    );
+    const previousRefineIntentShare = toRate(
+      previousArtifactRefineIntents,
+      previousArtifactRefineIntents + previousOpportunityCommitIntents,
+    );
+    const buildComparison = (current: number, previous: number): TrendComparison => {
+      const delta = current - previous;
+      return {
+        current,
+        previous,
+        delta,
+        direction: delta > 0 ? "up" : delta < 0 ? "down" : "flat",
+      };
+    };
+    const currentStepRates = [
+      {
+        key: "moduleViewToCtaRate" as const,
+        value: toRate(resultsImprovementCtaClicks, resultsImprovementModuleViews),
+        numerator: resultsImprovementCtaClicks,
+        denominator: resultsImprovementModuleViews,
+        previousNumerator: previousResultsImprovementCtaClicks,
+        previousDenominator: previousResultsImprovementModuleViews,
+      },
+      {
+        key: "ctaToArtifactRate" as const,
+        value: toRate(artifactUsedIntents, resultsImprovementCtaClicks),
+        numerator: artifactUsedIntents,
+        denominator: resultsImprovementCtaClicks,
+        previousNumerator: previousArtifactUsedIntents,
+        previousDenominator: previousResultsImprovementCtaClicks,
+      },
+      {
+        key: "artifactToRefineRate" as const,
+        value: toRate(artifactRefineIntents, artifactUsedIntents),
+        numerator: artifactRefineIntents,
+        denominator: artifactUsedIntents,
+        previousNumerator: previousArtifactRefineIntents,
+        previousDenominator: previousArtifactUsedIntents,
+      },
+      {
+        key: "artifactToCommitRate" as const,
+        value: toRate(opportunityCommitIntents, artifactUsedIntents),
+        numerator: opportunityCommitIntents,
+        denominator: artifactUsedIntents,
+        previousNumerator: previousOpportunityCommitIntents,
+        previousDenominator: previousArtifactUsedIntents,
+      },
+    ];
+    const allZeroRates = currentStepRates.every((item) => item.value === 0);
+    const weakestStep = allZeroRates
+      ? null
+      : currentStepRates.reduce((lowest, item) => (item.value < lowest.value ? item : lowest));
+    const benchmarkStepRate = allZeroRates
+      ? 0
+      : Math.max(...currentStepRates.map((item) => item.value).filter((value) => value > 0));
+    const weakestStepRecommendation = getWeakestStepRecommendation(weakestStep?.key ?? null);
+    const weakestStepRate = weakestStep?.value ?? 0;
+    const weakestStepDenominator = weakestStep?.denominator ?? 0;
+    const weakestStepNumerator = weakestStep?.numerator ?? 0;
+    const weakestStepPreviousNumerator = weakestStep?.previousNumerator ?? 0;
+    const weakestStepPreviousDenominator = weakestStep?.previousDenominator ?? 0;
+    const weakestStepPreviousRate =
+      weakestStep === null || weakestStepPreviousDenominator === 0
+        ? 0
+        : toRate(weakestStepPreviousNumerator, weakestStepPreviousDenominator);
+    const weakestStepDelta = weakestStepRate - weakestStepPreviousRate;
+    const weakestStepDirection =
+      weakestStep === null || weakestStepPreviousDenominator === 0
+        ? "none"
+        : getWeakestStepDirection(weakestStepRate, weakestStepPreviousRate, weakestStep.key);
+    const severity = getWeakestStepSeverity(benchmarkStepRate - weakestStepRate, weakestStep?.key ?? null);
+    const confidence = getWeakestStepConfidence(weakestStepDenominator, weakestStep?.key ?? null);
+    const watchlist = getWeakestStepWatchlist(
+      weakestStep?.key ?? null,
+      severity,
+      confidence,
+      weakestStepDirection,
+    );
+    const currentWindowReleases = RELEASE_ANNOTATIONS.map((annotation) => ({
+      ...annotation,
+      isInCurrentWindow: false,
+      isInPreviousWindow: false,
+    })).map((annotation) => ({
+      ...annotation,
+      isInCurrentWindow:
+        new Date(annotation.date).getTime() >= since.getTime() &&
+        new Date(annotation.date).getTime() < now.getTime(),
+      isInPreviousWindow:
+        new Date(annotation.date).getTime() >= previousSince.getTime() &&
+        new Date(annotation.date).getTime() < since.getTime(),
+    }));
+    const relevantCurrentWindowReleases = currentWindowReleases.filter((annotation) =>
+      annotation.isInCurrentWindow && isReleaseRelevant(annotation, weakestStep?.key ?? null),
+    );
+    const relevantPreviousWindowReleases = currentWindowReleases.filter((annotation) =>
+      annotation.isInPreviousWindow && isReleaseRelevant(annotation, weakestStep?.key ?? null),
+    );
+    const releaseContextSummary = getReleaseContextSummary(
+      weakestStep?.key ?? null,
+      relevantCurrentWindowReleases,
+      relevantPreviousWindowReleases,
+    );
+    const weakestStepReleaseContext = {
+      relevantCurrentWindowReleases,
+      relevantPreviousWindowReleases,
+      releaseContextSummary,
+    };
+    const recommendedNextAction = getRecommendedNextAction({
+      weakestStepKey: weakestStep?.key ?? null,
+      weakestStepLabel: weakestStepRecommendation.label,
+      watchlistStatus: watchlist.watchlistStatus,
+      releaseContext: weakestStepReleaseContext,
+    });
+    const operatorSummary = getOperatorSummary({
+      weakestStepKey: weakestStep?.key ?? null,
+      weakestStepLabel: weakestStepRecommendation.label,
+      weakestStepDirection,
+      watchlistStatus: watchlist.watchlistStatus,
+      releaseContextSummary,
+      recommendedActionTitle:
+        recommendedNextAction.actionFocus === "none" ? null : recommendedNextAction.actionTitle,
+    });
+    const exportMetadata = {
+      exportedAt: now.toISOString(),
+      selectedWindowDays: days ?? null,
+    };
+    const adminSummaryExport = {
+      headline: operatorSummary.headline,
+      tone: operatorSummary.tone,
+      primaryFocus: operatorSummary.primaryFocus,
+      weakestStepLabel: weakestStepRecommendation.label,
+      weakestStepRate,
+      weakestStepDirection,
+      watchlistStatus: watchlist.watchlistStatus,
+      watchlistPriority: watchlist.watchlistPriority,
+      severity,
+      confidence,
+      recommendedActionTitle:
+        recommendedNextAction.actionFocus === "none" ? null : recommendedNextAction.actionTitle,
+      recommendedActionBody: recommendedNextAction.actionBody,
+      releaseContextSummary,
+    };
+    const plainTextBrief = [
+      "Product Signal Summary",
+      `Window: last ${exportMetadata.selectedWindowDays === null ? "all" : exportMetadata.selectedWindowDays} days`,
+      `Exported: ${exportMetadata.exportedAt}`,
+      "",
+      `Headline: ${adminSummaryExport.headline}`,
+      `Tone: ${adminSummaryExport.tone}`,
+      `Primary focus: ${adminSummaryExport.primaryFocus}`,
+      "",
+      `Weakest step: ${adminSummaryExport.weakestStepLabel ?? "None"}`,
+      `Weakest step rate: ${(adminSummaryExport.weakestStepRate * 100).toFixed(1)}%`,
+      `Trend: ${adminSummaryExport.weakestStepDirection}`,
+      `Watchlist: ${adminSummaryExport.watchlistStatus} (${adminSummaryExport.watchlistPriority})`,
+      `Severity: ${adminSummaryExport.severity}`,
+      `Confidence: ${adminSummaryExport.confidence}`,
+      "",
+      `Recommended action: ${adminSummaryExport.recommendedActionTitle ?? "No action recommended yet"}`,
+      `Action detail: ${adminSummaryExport.recommendedActionBody}`,
+      "",
+      `Release context: ${adminSummaryExport.releaseContextSummary}`,
+    ].join("\n");
+    const jsonPayload = JSON.stringify(
+      {
+        ...exportMetadata,
+        headline: adminSummaryExport.headline,
+        tone: adminSummaryExport.tone,
+        primaryFocus: adminSummaryExport.primaryFocus,
+        weakestStepLabel: adminSummaryExport.weakestStepLabel,
+        weakestStepRate: adminSummaryExport.weakestStepRate,
+        weakestStepDirection: adminSummaryExport.weakestStepDirection,
+        watchlistStatus: adminSummaryExport.watchlistStatus,
+        watchlistPriority: adminSummaryExport.watchlistPriority,
+        severity: adminSummaryExport.severity,
+        confidence: adminSummaryExport.confidence,
+        recommendedActionTitle: adminSummaryExport.recommendedActionTitle,
+        recommendedActionBody: adminSummaryExport.recommendedActionBody,
+        releaseContextSummary: adminSummaryExport.releaseContextSummary,
+      },
+      null,
+      2,
+    );
 
     return {
       visitors,
@@ -820,6 +1579,50 @@ export class AnalyticsService {
       resultsImprovementCtaRate,
       artifactToOpportunityCommitRate,
       refineIntentShare,
+      trendContext: {
+        resultsImprovementCtaRate: buildComparison(
+          resultsImprovementCtaRate,
+          previousResultsImprovementCtaRate,
+        ),
+        artifactToOpportunityCommitRate: buildComparison(
+          artifactToOpportunityCommitRate,
+          previousArtifactToOpportunityCommitRate,
+        ),
+        refineIntentShare: buildComparison(refineIntentShare, previousRefineIntentShare),
+      },
+      weakestStep: {
+        weakestStepKey: weakestStep?.key ?? null,
+        weakestStepLabel: weakestStepRecommendation.label,
+        weakestStepRate,
+        weakestStepPreviousRate,
+        weakestStepDelta,
+        weakestStepDirection,
+        weakestStepPreviousNumerator: weakestStepPreviousNumerator,
+        weakestStepPreviousDenominator: weakestStepPreviousDenominator,
+        weakestStepTrendReason: getWeakestStepTrendReason(weakestStepDirection),
+        benchmarkStepRate,
+        relativeDrop: weakestStep ? Math.max(0, benchmarkStepRate - weakestStep.value) : 0,
+        weakestStepNumerator,
+        weakestStepDenominator,
+        severity,
+        confidence,
+        confidenceReason: getWeakestStepConfidenceReason(confidence),
+        watchlistStatus: watchlist.watchlistStatus,
+        watchlistPriority: watchlist.watchlistPriority,
+        watchlistReason: watchlist.watchlistReason,
+        recommendationTitle: weakestStepRecommendation.title,
+        recommendationBody: weakestStepRecommendation.body,
+      },
+      releaseAnnotations: currentWindowReleases,
+      weakestStepReleaseContext,
+      operatorSummary,
+      recommendedNextAction,
+      adminSummaryExport,
+      exportMetadata,
+      formattedExports: {
+        plainTextBrief,
+        jsonPayload,
+      },
       startRate,
       completionRate,
       opportunitySaveRate,
@@ -833,6 +1636,181 @@ export class AnalyticsService {
         { eventName: 'resume_studio_opened', count: resumeStudioOpens },
       ],
     };
+  }
+
+  async saveProductSignalSnapshot(days: number): Promise<ProductSignalSnapshotRecord> {
+    const summary = await this.getSummary(days);
+    const snapshot = this.productSignalSnapshotRepository.create({
+      selectedWindowDays: days,
+      headline: summary.adminSummaryExport.headline,
+      tone: summary.adminSummaryExport.tone,
+      primaryFocus: summary.adminSummaryExport.primaryFocus,
+      weakestStepLabel: summary.adminSummaryExport.weakestStepLabel,
+      weakestStepRate: summary.adminSummaryExport.weakestStepRate.toFixed(8),
+      weakestStepDirection: summary.adminSummaryExport.weakestStepDirection,
+      watchlistStatus: summary.adminSummaryExport.watchlistStatus,
+      watchlistPriority: summary.adminSummaryExport.watchlistPriority,
+      severity: summary.adminSummaryExport.severity,
+      confidence: summary.adminSummaryExport.confidence,
+      recommendedActionTitle: summary.adminSummaryExport.recommendedActionTitle,
+      recommendedActionBody: summary.adminSummaryExport.recommendedActionBody,
+      releaseContextSummary: summary.adminSummaryExport.releaseContextSummary,
+      exportPayloadJson: JSON.stringify(
+        {
+          ...summary.adminSummaryExport,
+          ...summary.exportMetadata,
+        },
+        null,
+        2,
+      ),
+      reviewStatus: ProductSignalSnapshotReviewStatus.OPEN,
+      reviewNote: "",
+      reviewedAt: null,
+    });
+    return this.productSignalSnapshotRepository.save(snapshot);
+  }
+
+  async listProductSignalSnapshots(limit = 10): Promise<ProductSignalSnapshotRecord[]> {
+    return this.productSignalSnapshotRepository.find({
+      order: { createdAt: 'DESC' },
+      take: limit,
+    });
+  }
+
+  async compareProductSignalSnapshot(
+    days: number,
+    input?: { includeSynthetic?: boolean },
+  ): Promise<ProductSignalSnapshotCompareResponse> {
+    const summary = await this.getSummary(days, input);
+    const latestSnapshot = await this.productSignalSnapshotRepository.findOne({
+      order: { createdAt: 'DESC' },
+    });
+
+    if (!latestSnapshot) {
+      return {
+        hasSnapshot: false,
+        latestSnapshotCreatedAt: null,
+        latestSnapshotReviewStatus: null,
+        latestSnapshotReviewNote: null,
+        latestSnapshotReviewedAt: null,
+        comparisonSummary: 'No saved Product Signal snapshot exists yet.',
+        changedFields: [],
+      };
+    }
+
+    const changedFields: ProductSignalCompareField[] = [
+      {
+        field: 'headline',
+        previousValue: latestSnapshot.headline,
+        currentValue: summary.adminSummaryExport.headline,
+      },
+      {
+        field: 'tone',
+        previousValue: latestSnapshot.tone,
+        currentValue: summary.operatorSummary.tone,
+      },
+      {
+        field: 'primaryFocus',
+        previousValue: latestSnapshot.primaryFocus,
+        currentValue: summary.operatorSummary.primaryFocus,
+      },
+      {
+        field: 'weakestStepLabel',
+        previousValue: latestSnapshot.weakestStepLabel,
+        currentValue: summary.adminSummaryExport.weakestStepLabel,
+      },
+      {
+        field: 'weakestStepRate',
+        previousValue: this.roundProductSignalRate(latestSnapshot.weakestStepRate),
+        currentValue: this.roundProductSignalRate(summary.adminSummaryExport.weakestStepRate),
+      },
+      {
+        field: 'weakestStepDirection',
+        previousValue: latestSnapshot.weakestStepDirection,
+        currentValue: summary.adminSummaryExport.weakestStepDirection,
+      },
+      {
+        field: 'watchlistStatus',
+        previousValue: latestSnapshot.watchlistStatus,
+        currentValue: summary.adminSummaryExport.watchlistStatus,
+      },
+      {
+        field: 'watchlistPriority',
+        previousValue: latestSnapshot.watchlistPriority,
+        currentValue: summary.adminSummaryExport.watchlistPriority,
+      },
+      {
+        field: 'severity',
+        previousValue: latestSnapshot.severity,
+        currentValue: summary.adminSummaryExport.severity,
+      },
+      {
+        field: 'confidence',
+        previousValue: latestSnapshot.confidence,
+        currentValue: summary.adminSummaryExport.confidence,
+      },
+      {
+        field: 'recommendedActionTitle',
+        previousValue: latestSnapshot.recommendedActionTitle,
+        currentValue: summary.adminSummaryExport.recommendedActionTitle,
+      },
+      {
+        field: 'releaseContextSummary',
+        previousValue: latestSnapshot.releaseContextSummary,
+        currentValue: summary.adminSummaryExport.releaseContextSummary,
+      },
+    ].filter((field) => field.previousValue !== field.currentValue);
+
+    return {
+      hasSnapshot: true,
+      latestSnapshotCreatedAt:
+        typeof latestSnapshot.createdAt === 'string'
+          ? latestSnapshot.createdAt
+          : latestSnapshot.createdAt.toISOString(),
+      latestSnapshotReviewStatus: latestSnapshot.reviewStatus ?? null,
+      latestSnapshotReviewNote: latestSnapshot.reviewNote ?? '',
+      latestSnapshotReviewedAt:
+        latestSnapshot.reviewedAt === null || latestSnapshot.reviewedAt === undefined
+          ? null
+          : typeof latestSnapshot.reviewedAt === 'string'
+            ? latestSnapshot.reviewedAt
+            : latestSnapshot.reviewedAt.toISOString(),
+      comparisonSummary:
+        changedFields.length === 0
+          ? 'Current Product Signal summary is materially unchanged from the latest saved snapshot.'
+          : `Current Product Signal summary differs from the latest saved snapshot in ${changedFields.length} key field(s).`,
+      changedFields,
+    };
+  }
+
+  async updateProductSignalSnapshot(
+    snapshotId: string,
+    input: { reviewStatus?: ProductSignalSnapshotReviewStatusValue; reviewNote?: string },
+  ): Promise<ProductSignalSnapshotRecord> {
+    if (
+      input.reviewStatus !== undefined &&
+      !Object.values(ProductSignalSnapshotReviewStatus).includes(input.reviewStatus)
+    ) {
+      throw new BadRequestException('reviewStatus must be open, monitoring, or resolved');
+    }
+    const snapshot = await this.productSignalSnapshotRepository.findOne({ where: { id: snapshotId } });
+    if (!snapshot) {
+      throw new BadRequestException('Product Signal snapshot not found');
+    }
+    let changed = false;
+    if (input.reviewStatus !== undefined && snapshot.reviewStatus !== input.reviewStatus) {
+      snapshot.reviewStatus = input.reviewStatus;
+      changed = true;
+    }
+    if (input.reviewNote !== undefined && snapshot.reviewNote !== input.reviewNote) {
+      snapshot.reviewNote = input.reviewNote;
+      changed = true;
+    }
+    if (changed) {
+      snapshot.reviewedAt = new Date();
+      await this.productSignalSnapshotRepository.save(snapshot);
+    }
+    return snapshot as ProductSignalSnapshotRecord;
   }
 
   async getFounderMetrics(input?: {
@@ -1258,6 +2236,17 @@ export class AnalyticsService {
     }
 
     return windows;
+  }
+
+  private roundProductSignalRate(value: number | string | null): number | null {
+    if (value === null) {
+      return null;
+    }
+    const numeric = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(numeric)) {
+      return null;
+    }
+    return Math.round(numeric * 1000) / 1000;
   }
 
   private resolveCreatedAt(value?: string): Date | undefined {
