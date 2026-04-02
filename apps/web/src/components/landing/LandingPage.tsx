@@ -76,11 +76,11 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
     <div className="min-h-screen bg-[linear-gradient(180deg,_#050816_0%,_#070b14_60%,_#050816_100%)] text-slate-100">
       <LandingAnalyticsTracker />
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-2 px-4 py-3 md:px-6 md:py-4 lg:px-8">
-        <section className="rounded-[30px] border border-white/12 bg-slate-950/70 px-5 py-6 md:px-8 md:py-7">
+        <section className="rounded-[30px] border border-white/12 bg-slate-950/70 px-5 py-5 md:px-8 md:pb-4 md:pt-7">
           <div className="grid gap-4 lg:grid-cols-[1.08fr_0.92fr] lg:items-center">
             <div className="max-w-2xl">
               <h1 className="mt-0 text-4xl font-semibold tracking-tighter text-white md:text-[3.3rem] md:leading-[0.98] lg:text-[3.95rem] lg:leading-[0.96]">
-                Stop guessing. Know if you qualify before you apply.
+                Know if you qualify before you apply.
               </h1>
               <p className="mt-3.5 max-w-xl text-[0.98rem] leading-7 text-slate-200 md:text-[1.02rem]">
                 Most people apply to roles they were never going to get. This shows you where you actually stand before you waste the time.
@@ -113,7 +113,7 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
           </div>
         </section>
 
-        <div className="-mt-1.5 hidden md:block">
+        <div className="-mt-4 hidden md:block">
           <LandingCompatibilityInputSection />
         </div>
 
