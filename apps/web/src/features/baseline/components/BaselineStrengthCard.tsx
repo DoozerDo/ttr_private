@@ -28,7 +28,7 @@ export function BaselineStrengthCard({
     <section className="space-y-4 rounded-2xl border border-white/10 bg-slate-900/40 p-5">
       <div className="space-y-2">
         <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-          Baseline Strength
+          Baseline Progress
         </p>
         <div className="flex items-end gap-3">
           <p className="text-5xl font-semibold leading-none text-white">{boundedProgress}%</p>
@@ -49,7 +49,7 @@ export function BaselineStrengthCard({
 
       <div className="space-y-2">
         <p className="text-base font-semibold text-slate-100">
-          Your baseline is the foundation used for scoring and downstream generation.
+          Your baseline is the verified source used for scoring and document generation.
         </p>
         <p className="text-sm text-slate-400">
           Completing more areas improves readiness and unlocks analysis.
@@ -76,9 +76,9 @@ export function BaselineStrengthCard({
       </div>
 
       {canRunAnalysis && onRunAnalysis ? (
-        <FormButton onClick={onRunAnalysis}>Run Career Compatibility Analysis</FormButton>
+        <FormButton onClick={onRunAnalysis}>Run compatibility analysis</FormButton>
       ) : (
-        <FormButton onClick={onContinue}>Continue Building Baseline</FormButton>
+        <FormButton onClick={onContinue}>Continue building baseline</FormButton>
       )}
     </section>
   );

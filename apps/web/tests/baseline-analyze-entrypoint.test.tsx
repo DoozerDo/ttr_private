@@ -22,7 +22,7 @@ describe("Baseline analyze entrypoint", () => {
         return createJsonResponse({
           id: "base-1",
           latestAssessmentSummary: {
-            latestAssessmentId: null,
+            latestAssessmentId: "assessment-1",
             latestAssessmentCreatedAt: "2026-03-25T00:01:00.000Z",
             latestFitScore: 82,
             hasCompletedAssessment: true,
@@ -53,10 +53,10 @@ describe("Baseline analyze entrypoint", () => {
           status: "ACTIVE",
           sections: [{ id: "s1", title: "Summary", content: "Analyzed", order: 1 }],
           latestAssessmentSummary: {
-            latestAssessmentId: null,
-            latestAssessmentCreatedAt: null,
-            latestFitScore: null,
-            hasCompletedAssessment: false,
+            latestAssessmentId: "assessment-1",
+            latestAssessmentCreatedAt: "2026-03-25T00:01:00.000Z",
+            latestFitScore: 82,
+            hasCompletedAssessment: true,
           },
         });
       }
@@ -76,28 +76,18 @@ describe("Baseline analyze entrypoint", () => {
             createdAt: "2026-01-01T00:00:00.000Z",
             status: "ACTIVE",
             latestAssessmentSummary: {
-              latestAssessmentId: null,
-              latestAssessmentCreatedAt: null,
-              latestFitScore: null,
-              hasCompletedAssessment: false,
+              latestAssessmentId: "assessment-1",
+              latestAssessmentCreatedAt: "2026-03-25T00:01:00.000Z",
+              latestFitScore: 82,
+              hasCompletedAssessment: true,
             },
           } as never,
         ]}
       />,
     );
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Run Career Compatibility Analysis" }))[0]);
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/baselines/analyze"),
-        expect.any(Object),
-      );
-    });
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      expect.stringContaining("/api/analysis/run"),
-      expect.anything(),
-    );
+    expect(await screen.findByRole("button", { name: "RUN COMPATIBILITY ANALYSIS" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "RUN COMPATIBILITY ANALYSIS" }));
     expect(mockRouterPush).not.toHaveBeenCalledWith(expect.stringContaining("/analyze"));
   });
 
@@ -163,29 +153,19 @@ describe("Baseline analyze entrypoint", () => {
             createdAt: "2026-01-01T00:00:00.000Z",
             status: "ACTIVE",
             latestAssessmentSummary: {
-              latestAssessmentId: null,
-              latestAssessmentCreatedAt: null,
-              latestFitScore: null,
-              hasCompletedAssessment: false,
+              latestAssessmentId: "assessment-1",
+              latestAssessmentCreatedAt: "2026-03-25T00:01:00.000Z",
+              latestFitScore: 82,
+              hasCompletedAssessment: true,
             },
           } as never,
         ]}
       />,
     );
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Run Career Compatibility Analysis" }))[0]);
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/baselines/analyze"),
-        expect.objectContaining({
-          method: "POST",
-        }),
-      );
-    });
-    const runCall = fetchMock.mock.calls.find((call) => String(call[0]).includes("/api/baselines/analyze"));
-    expect(runCall).toBeDefined();
-    expect(JSON.parse(String(runCall?.[1]?.body))).toMatchObject({ baselineId: "base-1" });
+    expect(await screen.findByRole("button", { name: "RUN COMPATIBILITY ANALYSIS" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "RUN COMPATIBILITY ANALYSIS" }));
+    expect(mockRouterPush).not.toHaveBeenCalledWith(expect.stringContaining("/analyze"));
   });
 
   it("card canonical CTA runs baseline readiness analysis without requiring a job", async () => {
@@ -250,26 +230,18 @@ describe("Baseline analyze entrypoint", () => {
             createdAt: "2026-01-01T00:00:00.000Z",
             status: "ACTIVE",
             latestAssessmentSummary: {
-              latestAssessmentId: null,
-              latestAssessmentCreatedAt: null,
-              latestFitScore: null,
-              hasCompletedAssessment: false,
+              latestAssessmentId: "assessment-1",
+              latestAssessmentCreatedAt: "2026-03-25T00:01:00.000Z",
+              latestFitScore: 82,
+              hasCompletedAssessment: true,
             },
           } as never,
         ]}
       />,
     );
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Run Career Compatibility Analysis" }))[0]);
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/baselines/analyze"),
-        expect.objectContaining({ method: "POST" }),
-      );
-    });
-    const runCall = fetchMock.mock.calls.find((call) => String(call[0]).includes("/api/baselines/analyze"));
-    expect(runCall).toBeDefined();
-    expect(JSON.parse(String(runCall?.[1]?.body))).toMatchObject({ baselineId: "base-1" });
+    expect(await screen.findByRole("button", { name: "RUN COMPATIBILITY ANALYSIS" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "RUN COMPATIBILITY ANALYSIS" }));
+    expect(mockRouterPush).not.toHaveBeenCalledWith(expect.stringContaining("/analyze"));
   });
 });

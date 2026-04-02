@@ -81,7 +81,7 @@ export function RunYourAnalysisSection({
         <div className="mx-auto max-w-4xl rounded-2xl bg-slate-900/55 p-5 shadow-[0_18px_50px_rgba(15,23,42,0.3)]">
           <h2 className="text-2xl font-semibold text-white lg:text-3xl">Run your analysis</h2>
           <p className="mt-2 text-sm text-slate-300">
-            Upload your resume, paste the job description, and run career compatibility analysis.
+            Upload your resume, paste the job description, and see your compatibility before you apply.
           </p>
           <div className="mt-6 space-y-5">
             <div className="rounded-xl border border-slate-700/70 bg-slate-950/40 p-4">
@@ -152,13 +152,11 @@ export function RunYourAnalysisSection({
                 {isPreviewLoading ? "Analyzing..." : "Run Career Compatibility Analysis"}
               </button>
               {!jdReady ? (
-                <p className="text-xs text-slate-600">Paste more of the job description to enable analysis.</p>
+                <p className="text-xs text-slate-600">Paste more of the job description to unlock analysis.</p>
               ) : (
-                <p className="text-xs text-slate-500">Ready. Run analysis to generate your score.</p>
+                <p className="text-xs text-slate-500">Ready. Run analysis to see your fit.</p>
               )}
-              <p className="text-xs text-slate-600">
-                No signup required for your first analysis. We process your resume for scoring only.
-              </p>
+              <p className="text-xs text-slate-600">No signup required for your first preview. Your upload is used only for scoring.</p>
             </div>
           </div>
           <div className="mt-3 min-h-5">

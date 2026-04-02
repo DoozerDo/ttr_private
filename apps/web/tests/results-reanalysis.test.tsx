@@ -66,8 +66,8 @@ describe("results re-analysis loop", () => {
     expect(await screen.findByText("Updated Baseline Detected")).toBeInTheDocument();
     expect(await screen.findByText(/You['’]ve improved your fit/)).toBeInTheDocument();
     expect(await screen.findByText("+12 points (68 -> 80)")).toBeInTheDocument();
-    expect(await screen.findByText("Want to increase your score?")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open Fit Review" })).toBeInTheDocument();
+    expect(await screen.findByText("Recover the missing evidence")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
     expect(screen.getByTestId("results-hero-primary-cta")).toHaveAttribute(
       "href",
       "/fit-review?jobId=job-1&analysisId=analysis-current&assessmentId=analysis-current&baselineId=base-1&baselineVersionId=base-version-1",

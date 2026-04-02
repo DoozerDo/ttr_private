@@ -3,14 +3,12 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-type ConfidenceLevel = "High" | "Moderate" | "Low";
-
 type CareerGravityInsight = {
   summary: string;
   primaryRoleFamily: string;
   secondaryRoleFamily: string | null;
   seniorityTrend: string | null;
-  confidence: ConfidenceLevel;
+  signalStrength: string;
   supportingSignals: string[];
 };
 
@@ -118,8 +116,8 @@ export function CareerGravity() {
             <dd className="mt-1 text-sm text-slate-100">{insight.secondaryRoleFamily ?? "n/a"}</dd>
           </div>
           <div>
-            <dt className="text-xs uppercase tracking-[0.18em] text-slate-400">Confidence</dt>
-            <dd className="mt-1 text-sm text-slate-100">{insight.confidence}</dd>
+            <dt className="text-xs uppercase tracking-[0.18em] text-slate-400">Signal strength</dt>
+            <dd className="mt-1 text-sm text-slate-100">{insight.signalStrength}</dd>
           </div>
         </dl>
       </article>

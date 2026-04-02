@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState } from "react";
 type FitVerdictRevealProps = {
   score: number | null;
   classification: string;
-  confidenceLevel?: "High" | "Moderate" | "Low";
   analysisLoaded: boolean;
 };
 
@@ -29,7 +28,6 @@ function formatScore(value: number): string {
 export function FitVerdictReveal({
   score,
   classification,
-  confidenceLevel = "Moderate",
   analysisLoaded,
 }: FitVerdictRevealProps) {
   const [isRevealed, setIsRevealed] = useState(false);
@@ -86,8 +84,8 @@ export function FitVerdictReveal({
 
   const scoreAnnouncement = useMemo(() => {
     if (!isRevealed || score === null) return "";
-    return `Compatibility score ${formatScore(score)}. Confidence level ${confidenceLevel}.`;
-  }, [confidenceLevel, isRevealed, score]);
+    return `Compatibility score ${formatScore(score)}.`;
+  }, [isRevealed, score]);
 
   return (
     <section className="space-y-4 rounded-2xl border border-white/10 bg-slate-900/40 p-6">
@@ -111,9 +109,6 @@ export function FitVerdictReveal({
           </p>
           <p className="text-sm text-slate-400">
             This evaluation is based on structured signals in your baseline, not keyword matching.
-          </p>
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
-            Confidence Level: {confidenceLevel}
           </p>
           <span className="sr-only" aria-live="polite">
             {scoreAnnouncement}

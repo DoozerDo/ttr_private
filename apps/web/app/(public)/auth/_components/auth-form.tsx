@@ -125,7 +125,7 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
 
   const isLogin = mode === "login";
   const title = isLogin ? "Log in" : "Create an account";
-  const actionLabel = isLogin ? "Log in" : "Register";
+  const actionLabel = isLogin ? "Log in" : "Create account";
   const helperText = isLogin ? "Don't have an account?" : "Already registered?";
   const helperHref = isLogin ? "/auth/signup" : "/auth/login";
   const helperLinkLabel = isLogin ? "Sign up" : "Log in";
@@ -205,13 +205,13 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
       const messageFromApi = extractAuthApiMessage(data) ?? "Login failed";
 
       if (response.status === 403 && hasAccessCodeRequired(data)) {
-        setError("This account needs an active beta access code. Redeem your code to continue.");
+        setError("This beta invite still needs a code. Redeem access to continue.");
         router.push(buildRedeemPath(trimmedEmail));
         return;
       }
 
       if (isAccessRequiredError(messageFromApi, response.status)) {
-        setError("This account needs an active beta access code. Redeem your code to continue.");
+        setError("This beta invite still needs a code. Redeem access to continue.");
         router.push(buildRedeemPath(trimmedEmail));
         return;
       }
@@ -342,8 +342,8 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
       const successMessage =
         extractAuthApiMessage(data) ??
         (requiresVerification
-          ? "Check your inbox for a verification email from Target This Role."
-          : "Account created.");
+          ? "Check your inbox for a verification email from Target This Role, then come back to redeem access."
+          : "Account created. Next, redeem your beta access code.");
       setMessage(successMessage);
 
       if (!requiresVerification) {
@@ -383,7 +383,11 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
     <div className="mx-auto w-full max-w-md space-y-6">
       <div className="space-y-2 text-center">
         <h1 className="text-3xl font-bold text-white">{title}</h1>
-        <p className="text-sm text-slate-300">Use your invite email and password to enter beta.</p>
+        <p className="text-sm text-slate-300">
+          {isLogin
+            ? "Sign in with the email tied to your invite. If access is still pending, we will route you to redemption."
+            : "Create your account with the email tied to your invite. If a code is needed, you will redeem it next."}
+        </p>
       </div>
 
       <form onSubmit={onSubmit} className="space-y-4 rounded-xl border border-white/10 bg-white p-6 shadow-lg">
@@ -480,7 +484,7 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">Email verification</p>
             <h2 className="text-3xl font-bold text-slate-900">Verify your email</h2>
             <p className="text-sm text-slate-700">
-              Check your inbox for a verification email from Target This Role. Once verified, return here and click the button to continue.
+              Check your inbox for a verification email from Target This Role. Once verified, return here and continue to access.
             </p>
 
             <label className="flex items-start gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800">

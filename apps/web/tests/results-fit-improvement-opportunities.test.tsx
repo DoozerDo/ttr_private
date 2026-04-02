@@ -178,6 +178,6 @@ describe("Results fit improvement opportunities", () => {
     );
 
     await waitFor(() => expect(screen.getByText("Analytics Strategy")).toBeTruthy());
-    expect(screen.getByText("Open Fit Review")).toBeTruthy();
+    expect(screen.getByText("Start Fit Review")).toBeTruthy();
   });
 });

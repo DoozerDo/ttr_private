@@ -3,14 +3,12 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-type ConfidenceLevel = "High" | "Moderate" | "Low";
-
 type CareerGravityInsight = {
   summary: string;
   primaryRoleFamily: string;
   secondaryRoleFamily: string | null;
   seniorityTrend: string | null;
-  confidence: ConfidenceLevel;
+  signalStrength: string;
   supportingSignals: string[];
 };
 
@@ -54,10 +52,10 @@ function buildFallbackSummary(paths: string[]): string {
   return `Your recent analyses show recurring fit across ${paths[0]} and ${paths[1]} role paths.`;
 }
 
-function buildFallbackConfidence(totalAnalyses: number, averageScore: number): ConfidenceLevel {
-  if (totalAnalyses >= 5 && averageScore >= 80) return "High";
+function buildFallbackSignalStrength(totalAnalyses: number, averageScore: number): string {
+  if (totalAnalyses >= 5 && averageScore >= 80) return "Strong";
   if (totalAnalyses >= 3) return "Moderate";
-  return "Low";
+  return "Emerging";
 }
 
 export function CareerInsightEmerging() {
@@ -127,9 +125,9 @@ export function CareerInsightEmerging() {
 
   const summary =
     gravity.careerGravity?.summary?.trim() || buildFallbackSummary(recurringPaths);
-  const confidence =
-    gravity.careerGravity?.confidence ??
-    buildFallbackConfidence(totalAnalyses, history.alignmentPattern.averageScore);
+  const signalStrength =
+    gravity.careerGravity?.signalStrength ??
+    buildFallbackSignalStrength(totalAnalyses, history.alignmentPattern.averageScore);
 
   return (
     <section className="rounded-[24px] border border-white/10 bg-slate-900/40 p-5">
@@ -145,7 +143,7 @@ export function CareerInsightEmerging() {
       <p className="mt-3 text-sm leading-6 text-slate-300">{summary}</p>
 
       <p className="mt-4 text-sm text-slate-400">
-        Pattern Confidence: <span className="font-semibold text-slate-100">{confidence}</span>
+        Signal strength: <span className="font-semibold text-slate-100">{signalStrength}</span>
       </p>
 
       {recurringPaths.length ? (

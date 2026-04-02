@@ -21,8 +21,6 @@ describe("ResultsV2", () => {
         onPrimaryAction={() => {}}
         primaryActionDisabled={false}
         delta={null}
-        confidenceScore={78}
-        confidenceReasons={["missing_job_text"]}
         scoreBreakdown={{
           total_score: 80,
           dimensions: [
@@ -65,8 +63,6 @@ describe("ResultsV2", () => {
         onPrimaryAction={() => {}}
         primaryActionDisabled={false}
         delta={null}
-        confidenceScore={78}
-        confidenceReasons={["missing_job_text"]}
         scoreBreakdown={null}
       />,
     );

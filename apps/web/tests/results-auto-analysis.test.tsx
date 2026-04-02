@@ -302,7 +302,7 @@ describe("results auto analysis loading", () => {
       expect(screen.getByTestId("results-generation-unlocked-panel")).toBeInTheDocument();
     });
     expect(screen.getByText("GENERATION UNLOCKED")).toBeInTheDocument();
-    expect(screen.getByText("Your evidence now supports this role. You can generate materials with confidence.")).toBeInTheDocument();
+    expect(screen.getByText("Your evidence now supports this role. You can move into Studio with this result.")).toBeInTheDocument();
     expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("START FIT REVIEW");
     expect(screen.queryByRole("link", { name: "OPEN STUDIO" })).toBeNull();
   });
@@ -354,7 +354,7 @@ describe("results auto analysis loading", () => {
 
     render(<ResultsPage />);
 
-    await screen.findByText("This role may not be a fit.");
+    await screen.findByText("Strategic Next Move");
     expect(screen.queryByText("You need verified evidence to proceed.")).toBeNull();
   });
 

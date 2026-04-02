@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+const authNext = "/baseline";
+
 type LandingNavProps = {
   isAuthenticated: boolean;
 };
@@ -38,20 +40,20 @@ export function LandingNav({ isAuthenticated }: LandingNavProps) {
           ) : (
             <>
               <Link
-                href="/auth/login"
+                href={`/auth/login?next=${encodeURIComponent(authNext)}`}
                 className="inline-flex items-center justify-center rounded-lg border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-200 transition hover:border-slate-500 hover:text-white"
               >
                 Log In
               </Link>
               <Link
-                href="/auth/signup"
+                href={`/auth/signup?next=${encodeURIComponent(authNext)}`}
                 className="inline-flex items-center justify-center rounded-lg bg-[var(--accent-primary)] px-3 py-2 text-sm font-semibold text-slate-950 transition hover:bg-[var(--accent-primary-hover)]"
               >
-                Get Started
-              </Link>
-            </>
-          )}
-        </div>
+                Get beta access
+            </Link>
+          </>
+        )}
+      </div>
       </div>
     </header>
   );

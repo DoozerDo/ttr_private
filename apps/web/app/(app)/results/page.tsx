@@ -14,6 +14,7 @@ import { GuidedOverlay } from "@/components/GuidedOverlay";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { CareerAlignmentProgress } from "./components/CareerAlignmentProgress";
+import { CareerGravity } from "./components/CareerGravity";
 import { FitImprovementOpportunities } from "./components/FitImprovementOpportunities";
 import {
   formatErrorMessage,
@@ -160,8 +161,6 @@ type LatestAnalysis = {
     strengths: string[];
     gaps: string[];
   } | null;
-  confidenceScore?: number | null;
-  confidenceReasons?: string[] | null;
   supportingSignals?: unknown;
   baselineEvidence?: unknown;
   score_breakdown?: {
@@ -512,7 +511,10 @@ export function getOpportunityVerdict(score?: number | null): {
   if (band === ScoreBand.MID) {
     return {
       label: "Competitive match",
-      explanation: "You can win this with focused tailoring.",
+      explanation:
+        typeof score === "number" && score >= 80
+          ? "You can win this role with focused tailoring."
+          : "You can win this with focused tailoring.",
     };
   }
   return {
@@ -768,6 +770,12 @@ export function OpportunityMapSection({
         body: "Use the canonical next step to strengthen the baseline before generating materials.",
       };
     }
+    if (typeof score === "number" && score >= 80) {
+      return {
+        headline: "You can win this role.",
+        body: "The evidence is strong enough to compete if you tailor with care.",
+      };
+    }
     if (nextAction.type === "studio") {
       return { headline: "This score is ready for Studio.", body: "Open Resume & Cover Letter Studio next." };
     }
@@ -836,7 +844,7 @@ export function OpportunityMapSection({
           className={`space-y-3 rounded-2xl border p-4 ${blockedByEvidence ? "border-white/10 bg-white/[0.03]" : "border-white/10 bg-white/5"}`}
         >
           <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${blockedByEvidence ? "text-slate-500" : "text-slate-400"}`}>
-            Decision summary
+            Fit Verdict Reveal
           </p>
           <p className="text-[56px] font-black leading-[0.95] tracking-[-0.04em] text-white md:text-[64px]">
             {typeof score === "number" ? Math.round(score) : "--"}
@@ -855,57 +863,64 @@ export function OpportunityMapSection({
               </h2>
               <p className="max-w-2xl text-sm leading-6 text-slate-100 md:text-base">{decisionNarrative.body}</p>
             </div>
-            {weakFitRecovery ? (
-              <ResolveGapsBlock href={weakFitRecovery.href} gapPreview={weakFitRecovery.gapPreview} />
-            ) : (
-              <div>
-                <div className="space-y-4">
-                  {primaryCta ? (
-                    primaryCta.disabled ? (
-                      <span
-                        data-testid="results-hero-primary-cta"
-                        className="inline-flex min-h-[52px] min-w-[300px] cursor-not-allowed items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-6 py-3 text-base font-semibold text-slate-400 md:min-w-[320px]"
-                      >
-                        {primaryCta.label}
-                      </span>
-                    ) : primaryCta.onClick ? (
-                      <button
-                        data-testid="results-hero-primary-cta"
-                        onClick={primaryCta.onClick}
-                        className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500 md:min-w-[320px]"
-                      >
-                        {primaryCta.label}
-                      </button>
-                    ) : (
-                      <a
-                        data-testid="results-hero-primary-cta"
-                        href={primaryCta.href ?? "#"}
-                        className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500 md:min-w-[320px]"
-                      >
-                        {primaryCta.label}
-                      </a>
-                    )
-                  ) : null}
-                  <div className="flex flex-wrap gap-3 text-sm">
+            <CareerGravity />
+            <section className="space-y-3 rounded-[24px] border border-white/10 bg-slate-900/30 p-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                Strategic Next Move
+              </p>
+              <div className="space-y-3">
+                <h3 className="text-xl font-semibold tracking-tight text-slate-100">
+                  {decisionNarrative.headline}
+                </h3>
+                <p className="max-w-2xl text-sm leading-6 text-slate-100 md:text-base">{decisionNarrative.body}</p>
+                {primaryCta ? (
+                  primaryCta.disabled ? (
+                    <span
+                      data-testid="results-hero-primary-cta"
+                      className="inline-flex min-h-[52px] min-w-[300px] cursor-not-allowed items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-6 py-3 text-base font-semibold text-slate-400 md:min-w-[320px]"
+                    >
+                      {primaryCta.label}
+                    </span>
+                  ) : primaryCta.onClick ? (
+                    <button
+                      data-testid="results-hero-primary-cta"
+                      onClick={primaryCta.onClick}
+                      className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500 md:min-w-[320px]"
+                    >
+                      {primaryCta.label}
+                    </button>
+                  ) : (
                     <a
-                      data-testid="results-hero-secondary-action"
-                      href={scoreAnalysisHref}
+                      data-testid="results-hero-primary-cta"
+                      href={primaryCta.href ?? "#"}
+                      className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500 md:min-w-[320px]"
+                    >
+                      {primaryCta.label}
+                    </a>
+                  )
+                ) : null}
+                <div className="flex flex-wrap gap-3 text-sm">
+                  <a
+                    data-testid="results-hero-secondary-action"
+                    href={scoreAnalysisHref}
+                    className="font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
+                  >
+                    View top drivers
+                  </a>
+                  {nextAction.type === "studio_with_save" ? (
+                    <a
+                      href="#opportunity-save"
                       className="font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
                     >
-                      View top drivers
+                      Save to Opportunities
                     </a>
-                    {nextAction.type === "studio_with_save" ? (
-                      <a
-                        href="#opportunity-save"
-                        className="font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
-                      >
-                        Save to Opportunities
-                      </a>
-                    ) : null}
-                  </div>
+                  ) : null}
                 </div>
               </div>
-            )}
+            </section>
+            {lowFitScore && weakFitRecovery ? (
+              <ResolveGapsBlock href={weakFitRecovery.href} gapPreview={weakFitRecovery.gapPreview} />
+            ) : null}
           </>
         ) : null}
         <div
@@ -1082,7 +1097,7 @@ export function AdvancedInsightsCard({
 
           {scoreBreakdown ? (
             <section className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-3.5">
-              <h3 className="text-sm font-semibold text-slate-100">Supporting score breakdown</h3>
+              <h3 className="text-sm font-semibold text-slate-100">Score Breakdown</h3>
               <div className="mt-3 space-y-2.5">
                 {scoreBreakdown.dimensions.map((dimension) => {
                   const percent =
@@ -3091,7 +3106,7 @@ export default function ResultsPage() {
           >
             <p className="text-sm font-semibold text-emerald-100">GENERATION UNLOCKED</p>
             <p className="mt-1 text-sm text-slate-100">
-              Your evidence now supports this role. You can generate materials with confidence.
+              Your evidence now supports this role. You can move into Studio with this result.
             </p>
             {typeof reanalysisDelta.delta === "number" ? (
               <p className="mt-2 text-xs text-emerald-200">
@@ -3510,8 +3525,8 @@ export default function ResultsPage() {
                     </section>
                   ) : null}
                   <section className="rounded-2xl border border-slate-700/50 bg-slate-900/35 p-3">
-                    <CareerAlignmentProgress showProgressSection={false} />
-                  </section>
+                  <CareerAlignmentProgress showProgressSection={false} />
+                </section>
                 </div>
 
               <AdvancedInsightsCard

@@ -129,13 +129,13 @@ export function FitImprovementOpportunities({
       <section className="space-y-5 rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.82),rgba(2,6,23,0.9))] p-5 shadow-[0_16px_45px_rgba(2,6,23,0.2)]">
         <div className="space-y-2 border-b border-white/10 pb-4">
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-            Want to increase your score?
+            Recover the missing evidence
           </p>
           <h3 className="text-xl font-semibold tracking-tight text-slate-100">
-            What to fix to unlock Studio
+            Use Fit Review to close the gap
           </h3>
           <p className="text-sm leading-6 text-slate-300">
-            Fit Review is the path for the missing proof most likely to unlock Studio.
+            Start the canonical interview, capture validated evidence, accept supported additions into baseline, re-score, then regenerate.
           </p>
         </div>
 
@@ -164,7 +164,7 @@ export function FitImprovementOpportunities({
           href={actionHref}
           className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/15 px-4 py-2.5 text-sm font-semibold text-slate-100 transition hover:border-white/30 hover:bg-white/[0.04]"
         >
-          Open Fit Review
+          Start Fit Review
         </Link>
       </section>
     );

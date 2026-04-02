@@ -2,7 +2,6 @@
 
 import type React from "react";
 import { PageHeader } from "@/components/PageHeader";
-import { ScoreGauge } from "@/components/ScoreGauge";
 import type { ParsedComplianceError } from "@/lib/compliance/parseComplianceError";
 import { buildEvidenceLines, type ScoreBreakdown } from "@/lib/evidenceLines";
 import { sanitizeScoreExplanationList } from "@/lib/scoreExplanationCopy";
@@ -23,8 +22,6 @@ type ResultsV2Props = {
   onPrimaryAction: () => void;
   primaryActionDisabled?: boolean;
   delta?: number | null;
-  confidenceScore?: number | null;
-  confidenceReasons?: string[] | null;
   scoreBreakdown?: ScoreBreakdown | null;
 };
 
@@ -71,7 +68,7 @@ export function ResultsV2({
             padding: "calc(var(--space-lg))",
           }}
         >
-          <div className="grid gap-8 lg:grid-cols-[1.25fr,0.75fr] lg:items-center">
+          <div className="grid gap-8 lg:grid-cols-[1.25fr,0.75fr] lg:items-start">
             <div className="space-y-2">
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">{heroHeading}</p>
               <p className="text-5xl font-semibold leading-none text-white">
@@ -81,7 +78,7 @@ export function ResultsV2({
 
               {evidenceLines.length ? (
                 <section style={{ marginTop: 16, marginBottom: 16 }}>
-                  <h3 className="text-sm font-semibold text-slate-200">Why this role fits you</h3>
+                  <h3 className="text-sm font-semibold text-slate-200">Matched evidence</h3>
                   <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-300">
                     {evidenceLines.map((line) => (
                       <li key={line}>{line}</li>
@@ -109,9 +106,24 @@ export function ResultsV2({
               </button>
             </div>
 
-            <div className="flex items-center justify-center">
-              <ScoreGauge score={activeScore ?? undefined} loading={activeScore === null} label="Current score" />
-            </div>
+            <aside className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/35 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Score context</p>
+              <p className="text-sm leading-6 text-slate-300">
+                {typeof activeScore === "number"
+                  ? "This score is the working summary of verified fit signals."
+                  : "Score will appear after analysis completes."}
+              </p>
+              {scoreBreakdown ? (
+                <div className="space-y-2 text-sm text-slate-300">
+                  {scoreBreakdown.dimensions.slice(0, 3).map((dimension) => (
+                    <div key={`summary-${dimension.key}`} className="flex items-center justify-between gap-3">
+                      <span>{dimension.label}</span>
+                      <span className="font-semibold text-white">{dimension.score.toFixed(1)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </aside>
           </div>
         </section>
 

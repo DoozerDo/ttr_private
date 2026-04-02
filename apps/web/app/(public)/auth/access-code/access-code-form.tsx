@@ -137,8 +137,10 @@ export function AccessCodeForm({
   return (
     <div className="mx-auto w-full max-w-md space-y-6">
       <div className="space-y-2 text-center">
-        <h1 className="text-3xl font-bold text-white">Enter Access Code</h1>
-        <p className="text-sm text-slate-300">Your account needs an access code before login.</p>
+        <h1 className="text-3xl font-bold text-white">Redeem beta access</h1>
+        <p className="text-sm text-slate-300">
+          Enter the code from your invite, then we will take you to your first product step.
+        </p>
       </div>
 
       <form
@@ -200,7 +202,7 @@ export function AccessCodeForm({
           disabled={isSubmitting || !hasAllRequiredFields}
           className="flex w-full items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-70"
         >
-          {isSubmitting ? "Working..." : "Redeem code and log in"}
+          {isSubmitting ? "Working..." : "Redeem access and continue"}
         </button>
       </form>
     </div>

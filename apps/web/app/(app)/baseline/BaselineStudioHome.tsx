@@ -983,22 +983,32 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             <div className="space-y-2">
               <h1 className="text-3xl font-semibold tracking-tight text-white md:text-[34px]">
                 {heroState === "no_baseline"
-                  ? "Build your verified baseline"
+                  ? "Upload your baseline to get started"
                   : heroState === "no_analysis"
-                    ? "Build your verified baseline"
+                    ? "Continue building your baseline"
                     : "Your verified baseline is ready"}
               </h1>
               <p className="text-base leading-7 text-slate-300">
                 {heroState === "no_baseline"
-                  ? "Upload the resume you want to work from. We turn it into the verified baseline used for scoring and document generation. Complete your baseline to unlock analysis."
+                  ? "Upload the resume you want to work from. We turn it into the verified baseline used for scoring and document generation."
                   : heroState === "no_analysis"
-                    ? "Your baseline is the verified version of your experience used for scoring and document generation. Complete your baseline to unlock analysis."
-                    : "Your baseline is the verified version of your experience used for scoring and document generation. Every downstream result depends on it."}
+                    ? "You already have a baseline. Add the missing evidence to unlock analysis."
+                    : "Your baseline is ready. Run compatibility analysis when you want a score."}
               </p>
               <p className="text-sm leading-6 text-slate-400">
-                Upload your resume to create your baseline file.
+                {heroState === "no_baseline"
+                  ? "Upload your resume to create your baseline file."
+                  : heroState === "no_analysis"
+                    ? "Complete your baseline to unlock analysis."
+                    : "Analysis is unlocked and ready whenever you are."}
               </p>
-              <p className="text-sm font-medium text-slate-200">Complete your baseline to unlock analysis.</p>
+              <p className="text-sm font-medium text-slate-200">
+                {heroState === "analysis_exists"
+                  ? "Primary action: run compatibility analysis."
+                  : heroState === "no_analysis"
+                    ? "Primary action: continue building baseline."
+                    : "Primary action: upload your baseline."}
+              </p>
             </div>
             <div
               className={`rounded-[18px] border px-4 py-4 transition ${
@@ -1021,11 +1031,13 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                       ? "Uploading..."
                       : heroState === "no_baseline"
                         ? "Upload resume"
-                        : "Update baseline"
+                        : "Continue building baseline"
                     : "Upload unavailable"}
                 </FormButton>
                 <p className="text-sm text-slate-300">
-                  Upload resume or drag and drop a PDF or DOCX here.
+                  {heroState === "no_baseline"
+                    ? "Upload resume or drag and drop a PDF or DOCX here."
+                    : "Add more evidence or replace the source file if you need to strengthen the baseline."}
                 </p>
                 <p className="text-sm text-slate-400">Accepted file types: PDF and DOCX</p>
                 <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
@@ -1165,13 +1177,23 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                         >
                           {formatCardActionLabel("View Baseline Details")}
                         </Link>
-                        {isArchived ? null : (
+                        {isArchived ? null : readinessState === "READY" ? (
                           <FormButton
                             onClick={() => void runCanonicalBaselineAnalysis(baseline.id)}
                             disabled={isLoading || !isEditableLibrary}
                             className="bg-indigo-600 uppercase text-white hover:bg-indigo-500"
                           >
-                            {isLoading ? formatCardActionLabel("Targeting...") : formatCardActionLabel("Analyze")}
+                            {isLoading
+                              ? formatCardActionLabel("Running...")
+                              : formatCardActionLabel("Run Compatibility Analysis")}
+                          </FormButton>
+                        ) : (
+                          <FormButton
+                            onClick={() => setPrimaryBaselineId(baseline.id)}
+                            disabled={setActiveDisabled}
+                            className="bg-indigo-600 uppercase text-white hover:bg-indigo-500"
+                          >
+                            {formatCardActionLabel("Continue Building Baseline")}
                           </FormButton>
                         )}
                         {canTargetJob && !isArchived ? (

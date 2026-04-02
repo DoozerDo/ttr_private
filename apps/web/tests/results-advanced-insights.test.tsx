@@ -42,9 +42,11 @@ describe("results advanced insights", () => {
     expect(screen.getByRole("button", { name: "HIDE DETAILS" })).toBeInTheDocument();
     expect(screen.getByText("Top signals")).toBeInTheDocument();
     expect(screen.getByText("Additional details")).toBeInTheDocument();
-    expect(renderDriverGrid.mock.calls[0]).toEqual([true, 2, 0]);
-    expect(renderDriverGrid.mock.calls[1]).toEqual([true, 5, 2, false]);
-    expect(screen.getByText("Supporting score breakdown")).toBeInTheDocument();
+    expect(renderDriverGrid.mock.calls[0]).toEqual([{ showExtraLine: true, limit: 2, offset: 0 }]);
+    expect(renderDriverGrid.mock.calls[1]).toEqual([
+      { showExtraLine: true, limit: 5, offset: 2, forceShowExtraLine: false },
+    ]);
+    expect(screen.getByText("Score Breakdown")).toBeInTheDocument();
     expect(screen.getByText("Leadership scope")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "+4 MORE" })).toBeInTheDocument();
   });

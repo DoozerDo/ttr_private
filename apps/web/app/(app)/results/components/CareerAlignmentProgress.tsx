@@ -121,10 +121,10 @@ export function CareerAlignmentProgress({
   );
 
   if (loading) {
-    return (
+      return (
       <section className="space-y-2 rounded-[24px] border border-white/10 bg-slate-900/30 p-5">
         <h3 className="text-lg font-semibold text-slate-100">
-          {showProgressSection ? "Analysis Momentum" : "Signals Worth Keeping"}
+          {showProgressSection ? "Career Alignment Progress" : "Signals Worth Keeping"}
         </h3>
         <p className="text-sm text-slate-400">Preparing compatibility report…</p>
       </section>
@@ -134,7 +134,7 @@ export function CareerAlignmentProgress({
   if (showProgressSection && sortedRecentAnalyses.length < 2) {
     return (
       <section className="space-y-3 rounded-[24px] border border-white/10 bg-slate-900/30 p-5">
-        <h3 className="text-lg font-semibold text-slate-100">Analysis Momentum</h3>
+        <h3 className="text-lg font-semibold text-slate-100">Career Alignment Progress</h3>
         <p className="text-sm leading-6 text-slate-400">
           Run additional role analyses to begin identifying alignment patterns in your career.
         </p>
@@ -160,7 +160,7 @@ export function CareerAlignmentProgress({
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
               Progress and History
             </p>
-            <h3 className="text-2xl font-semibold tracking-tight text-slate-100">Analysis Momentum</h3>
+            <h3 className="text-2xl font-semibold tracking-tight text-slate-100">Career Alignment Progress</h3>
             <p className="text-sm leading-6 text-slate-400">
               See how recent score history is shaping your strongest profile patterns.
             </p>
@@ -194,7 +194,7 @@ export function CareerAlignmentProgress({
               </ul>
             ) : (
               <p className="text-sm text-slate-400">
-                Run additional analyses to strengthen pattern confidence.
+                Run additional analyses to strengthen the pattern signal.
               </p>
             )}
             <p className="text-xs text-slate-400">

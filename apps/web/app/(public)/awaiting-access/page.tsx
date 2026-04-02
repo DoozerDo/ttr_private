@@ -29,7 +29,7 @@ export default async function AwaitingAccessPage({
       <div className="mx-auto w-full max-w-xl space-y-5 rounded-xl border border-white/10 bg-white p-6 shadow-lg">
         <h1 className="text-2xl font-bold text-slate-900">Your beta account is ready</h1>
         <p className="text-sm text-slate-700">
-          Your account exists, but beta access is not active yet. Redeem your invite code or wait for approval to continue.
+          Your account exists, but beta access is not active yet. Redeem your invite code to continue.
         </p>
         <div className="flex flex-wrap gap-3">
           <Link
@@ -46,7 +46,7 @@ export default async function AwaitingAccessPage({
           </Link>
         </div>
         <p className="text-xs text-slate-500">
-          If you do not have a code yet, access is still pending invite issuance.
+          If you do not have a code yet, ask the person who invited you for the next step.
         </p>
       </div>
     </main>

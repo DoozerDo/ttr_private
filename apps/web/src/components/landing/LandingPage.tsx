@@ -19,8 +19,8 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
       <main>
         <LandingHero />
         <LandingCompatibilityInputSection />
-        <DemoAnalysisPreviewSection />
         <HowItWorksSection />
+        <DemoAnalysisPreviewSection />
         <TruthFirstSection />
       </main>
       <LandingFooter />

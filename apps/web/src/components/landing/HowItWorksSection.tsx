@@ -1,15 +1,15 @@
 const steps = [
   {
-    title: "Upload your resume (we use this as your baseline)",
-    body: "Your verified background becomes the evidence foundation for analysis.",
+    title: "Create your account and verify access",
+    body: "Beta invites flow through signup, and access codes activate the account when required.",
   },
   {
-    title: "Compare against a real job description",
-    body: "Run compatibility scoring against role requirements, level, and tooling expectations.",
+    title: "Add your baseline and a real role",
+    body: "Upload your resume, then compare it against the job you want to pursue.",
   },
   {
-    title: "Decide where to apply with confidence",
-    body: "Review the outcome and move forward with roles that fit your verified experience.",
+    title: "Move to the next right step",
+    body: "Low-fit results route to recovery, and strong-fit results move into Studio.",
   },
 ] as const;
 

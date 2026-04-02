@@ -111,13 +111,13 @@ export function OpportunityPreviewSection({ isAuthenticated = false }: Opportuni
               ) : (
                 <>
                   <Link
-                    href="/auth/signup"
+                    href="/auth/signup?next=/baseline"
                     className="inline-flex items-center justify-center rounded-xl bg-amber-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-amber-200"
                   >
                     Create Free Account
                   </Link>
                   <Link
-                    href="/auth/login"
+                    href="/auth/login?next=/baseline"
                     className="inline-flex items-center justify-center rounded-xl border border-amber-200/50 px-4 py-2 text-sm font-semibold text-amber-100 transition hover:border-amber-100 hover:text-amber-50"
                   >
                     Log In
