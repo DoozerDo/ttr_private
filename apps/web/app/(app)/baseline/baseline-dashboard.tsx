@@ -19,6 +19,7 @@ import {
   BASELINE_LIBRARY_CAP,
 } from "@/lib/baselines";
 import { formatDateTime } from "@/lib/format-date";
+import { publishBaselineUpdated, subscribeBaselineUpdated } from "@/src/lib/baseline-sync";
 import { getBaselineDetailsHref } from "@/src/navigation/routes";
 import { ttrComponents } from "@/app/(app)/ui/ttrStyles";
 import { OverflowMenu } from "./_components/OverflowMenu";
@@ -273,6 +274,12 @@ export function BaselineDashboard({
     activeBaselines.some((baseline) => baseline.id === selectedBaselineId)
       ? selectedBaselineId
       : getMostRecentActiveBaselineId(sortedBaselines) ?? latestUploadedBaselineId ?? null;
+  const activeBaselineDetailsHref = activeBaselineId
+    ? getBaselineDetailsHref(activeBaselineId)
+    : "/baseline";
+  const activeTargetHref = activeBaselineId
+    ? `/target?baselineId=${encodeURIComponent(activeBaselineId)}`
+    : "/target";
 
   useEffect(() => {
     if (!activeBaselineId) {
@@ -288,6 +295,23 @@ export function BaselineDashboard({
 
     return () => window.clearInterval(timer);
   }, [activeBaselineId, fetchBaselineDetails]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeBaselineUpdated(async (detail) => {
+      if (!detail.baselineId) {
+        await refreshBaselines();
+        return;
+      }
+
+      await refreshBaselines();
+      await fetchBaselineDetails(detail.baselineId);
+      if (process.env.NODE_ENV !== "production") {
+        console.debug("[BaselineDashboard] baseline-updated event received", detail);
+      }
+    });
+
+    return unsubscribe;
+  }, [fetchBaselineDetails]);
 
   const baselineUnlockState = useMemo(() => {
     const baseline = selectedBaselineDetails;
@@ -373,6 +397,19 @@ export function BaselineDashboard({
       isBaselineReady,
     };
   }, [activeBaselineId, selectedBaselineDetails]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production") {
+      console.debug("[BaselineDashboard] baseline unlock state", {
+        activeBaselineId,
+        hasSelectedBaselineDetails: Boolean(selectedBaselineDetails),
+        progressPercent: baselineUnlockState.progressPercent,
+        milestoneLabel: baselineUnlockState.milestoneLabel,
+        isBaselineReady: baselineUnlockState.isBaselineReady,
+      });
+    }
+  }, [activeBaselineId, baselineUnlockState, selectedBaselineDetails]);
+
   const uploadBaselineFile = async (fileToUpload: File) => {
     if (isUploading) return;
     setError(null);
@@ -392,6 +429,14 @@ export function BaselineDashboard({
       });
 
       const payload = await readResponsePayload(response);
+
+      if (process.env.NODE_ENV !== "production") {
+        console.debug("[BaselineDashboard] resume upload response", {
+          status: response.status,
+          ok: response.ok,
+          payload,
+        });
+      }
 
       if (response.status === 401) {
         window.location.href = "/auth/login";
@@ -449,6 +494,7 @@ export function BaselineDashboard({
       }
       setLatestUploadedBaselineId(baselineRecord.id);
       setBaselineSelection(baselineRecord.id);
+      publishBaselineUpdated({ baselineId: baselineRecord.id, source: "baseline" });
       setFile(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
@@ -534,8 +580,10 @@ export function BaselineDashboard({
               }
               isBaselineReady={baselineUnlockState.isBaselineReady}
               onContinue={() => {
-                if (!activeBaselineId) return;
-                router.push(getBaselineDetailsHref(activeBaselineId));
+                router.push(activeBaselineDetailsHref);
+              }}
+              onRunAnalysis={() => {
+                router.push(activeTargetHref);
               }}
             />
           ) : null}

@@ -78,41 +78,103 @@ type BaselineFetchResult = {
   baseline: BaselineDto | null;
   error: string | null;
   notFound: boolean;
+  isProcessing: boolean;
 };
 
+const TRANSIENT_BASELINE_FETCH_ATTEMPTS = 4;
+const TRANSIENT_BASELINE_FETCH_DELAY_MS = 300;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function fetchBaseline(id: string): Promise<BaselineFetchResult> {
-  try {
-    const response = await fetch(
-      await buildInternalApiUrl(`/api/baselines/${id}`),
-      await buildInternalFetchOptions(),
-    );
+  let lastError: string | null = null;
 
-    if (response.status === 401 || response.status === 403) {
-      redirect("/auth/login");
+  for (let attempt = 1; attempt <= TRANSIENT_BASELINE_FETCH_ATTEMPTS; attempt += 1) {
+    try {
+      const url = await buildInternalApiUrl(`/api/baselines/${id}`);
+      const options = await buildInternalFetchOptions();
+
+      if (process.env.NODE_ENV !== "production") {
+        console.debug("[BaselineDetailPage] fetch baseline", {
+          attempt,
+          baselineId: id,
+          url,
+          hasCookieHeader: Boolean((options.headers as Record<string, string> | undefined)?.cookie),
+        });
+      }
+
+      const response = await fetch(url, options);
+
+      if (response.status === 401 || response.status === 403) {
+        redirect("/auth/login");
+      }
+
+      if (response.status === 404) {
+        return { baseline: null, error: null, notFound: true, isProcessing: false };
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        const message = errorText || "Unable to load baseline.";
+
+        if (process.env.NODE_ENV !== "production") {
+          console.debug("[BaselineDetailPage] fetch baseline failed", {
+            attempt,
+            baselineId: id,
+            status: response.status,
+            message,
+          });
+        }
+
+        lastError = message;
+        if (response.status >= 500 && attempt < TRANSIENT_BASELINE_FETCH_ATTEMPTS) {
+          await sleep(TRANSIENT_BASELINE_FETCH_DELAY_MS * attempt);
+          continue;
+        }
+
+        return { baseline: null, error: message, notFound: false, isProcessing: false };
+      }
+
+      const data = (await response.json()) as BaselineDto;
+
+      if (process.env.NODE_ENV !== "production") {
+        console.debug("[BaselineDetailPage] fetch baseline succeeded", {
+          attempt,
+          baselineId: id,
+          responseBaselineId: data.id,
+        });
+      }
+
+      return { baseline: data, error: null, notFound: false, isProcessing: false };
+    } catch (error) {
+      if (isNextRedirectError(error)) {
+        throw error;
+      }
+
+      const message = error instanceof Error ? error.message : "Unable to load baseline.";
+      lastError = message;
+
+      if (process.env.NODE_ENV !== "production") {
+        console.debug("[BaselineDetailPage] fetch baseline exception", {
+          attempt,
+          baselineId: id,
+          message,
+        });
+      }
+
+      if (attempt < TRANSIENT_BASELINE_FETCH_ATTEMPTS) {
+        await sleep(TRANSIENT_BASELINE_FETCH_DELAY_MS * attempt);
+        continue;
+      }
     }
-
-    if (response.status === 404) {
-      return { baseline: null, error: null, notFound: true };
-    }
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "");
-      const message = errorText || "Unable to load baseline.";
-      return { baseline: null, error: message, notFound: false };
-    }
-
-    const data = (await response.json()) as BaselineDto;
-    return { baseline: data, error: null, notFound: false };
-  } catch (error) {
-    if (isNextRedirectError(error)) {
-      throw error;
-    }
-
-    console.error("Failed to fetch baseline", error);
-    const message =
-      error instanceof Error ? error.message : "Unable to load baseline.";
-    return { baseline: null, error: message, notFound: false };
   }
+
+  return {
+    baseline: null,
+    error: null,
+    notFound: false,
+    isProcessing: true,
+  };
 }
 
 const friendlyTitles: Record<string, string> = {
@@ -214,6 +276,7 @@ export default async function BaselineDetailPage({
 
   const baseline = baselineResult.baseline;
   const baselineFetchError = baselineResult.error;
+  const baselineIsProcessing = baselineResult.isProcessing;
   const groupedSections: GroupedSections = baseline
     ? organizeSections(baseline.sections ?? [])
     : {};
@@ -269,7 +332,21 @@ export default async function BaselineDetailPage({
           </Link>
         </div>
 
-        {baselineFetchError ? (
+        {baselineIsProcessing ? (
+          <section className="space-y-4 rounded-lg border border-amber-200 bg-amber-50 p-6 shadow-sm">
+            <Alert intent="error" title="Setting up your baseline">
+              <p>
+                We found your upload, but the baseline is still finishing setup. We&apos;re retrying automatically.
+              </p>
+              <p className="text-xs text-gray-600">
+                If this keeps happening, retry to reload the baseline details.
+              </p>
+              <div className="flex flex-wrap gap-2 pt-2">
+                <RetryButton label="Retry baseline" />
+              </div>
+            </Alert>
+          </section>
+        ) : baselineFetchError ? (
           <div className="space-y-3">
             <Alert intent="error" title="Unable to load baseline">
               <p>{baselineFetchError}</p>

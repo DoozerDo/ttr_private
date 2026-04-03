@@ -709,6 +709,7 @@ export function OpportunityMapSection({
   score,
   verdict,
   nextAction,
+  advantageSignals,
   primaryCta,
   evidenceLedger,
   scoreAnalysisHref,
@@ -835,7 +836,7 @@ export function OpportunityMapSection({
             <article className="rounded-[22px] border border-white/10 bg-slate-950/30 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Strength signals</p>
               <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-slate-200">
-                {strengthBullets.map((signal) => (
+                {strengthBullets.map((signal: string) => (
                   <li key={signal}>{signal}</li>
                 ))}
               </ul>

@@ -74,7 +74,7 @@ export function RunYourAnalysisSection({
           <div className="mx-auto max-w-4xl rounded-[22px] border border-slate-600/70 bg-slate-900/95 p-6 shadow-[0_12px_25px_rgba(2,6,19,0.5)]">
             <h2 className="text-2xl font-semibold text-white lg:text-3xl">Run your analysis</h2>
             <p className="mt-2 text-sm text-slate-300">
-              Upload your resume, paste the job description, and check whether this role is truly within reach.
+              Upload your resume, paste the job description, and see whether this role is worth pursuing.
             </p>
             <div className="mt-6 space-y-6">
               <div className="rounded-[18px] border border-slate-500/70 bg-slate-900/85 p-5 shadow-[0_10px_20px_rgba(2,6,23,0.45)]">
@@ -90,9 +90,7 @@ export function RunYourAnalysisSection({
                     {resumeFilename ? `Ready: ${resumeFilename}` : "PDF or DOCX"}
                   </p>
                 </div>
-                <p className="mt-3 text-xs text-slate-500">
-                  Upload a PDF or DOCX. We automatically extract and analyze your experience.
-                </p>
+                <p className="mt-3 text-xs text-slate-500">Upload a PDF or DOCX. We automatically extract and analyze your experience.</p>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -113,9 +111,7 @@ export function RunYourAnalysisSection({
                   placeholder="Paste the full job description here"
                   className="mt-2 h-[144px] w-full resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 focus:border-white/60 focus:outline-none"
                 />
-                <div className="mt-3">
-                  <p className="text-xs text-slate-400">Takes under 60 seconds. No fluff. Just a real answer.</p>
-                </div>
+                <div className="mt-3" />
               </div>
 
               <div className="space-y-2">

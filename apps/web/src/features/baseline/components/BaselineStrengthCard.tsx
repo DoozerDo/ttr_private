@@ -76,7 +76,7 @@ export function BaselineStrengthCard({
       </div>
 
       {canRunAnalysis && onRunAnalysis ? (
-        <FormButton onClick={onRunAnalysis}>Run compatibility analysis</FormButton>
+        <FormButton onClick={onRunAnalysis}>Analyze this role</FormButton>
       ) : (
         <FormButton onClick={onContinue}>Continue building baseline</FormButton>
       )}
