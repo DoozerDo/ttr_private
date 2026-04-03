@@ -79,7 +79,7 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
         <section className="rounded-[30px] border border-white/12 bg-slate-950/70 px-5 py-5 md:px-8 md:pb-4 md:pt-7">
           <div className="grid gap-4 lg:grid-cols-[1.08fr_0.92fr] lg:items-center">
             <div className="max-w-2xl">
-              <h1 className="mt-0 text-4xl font-semibold tracking-tighter text-white md:text-[3.3rem] md:leading-[0.98] lg:text-[3.95rem] lg:leading-[0.96]">
+              <h1 className="mt-0 text-3xl md:text-4xl leading-[1.1] font-semibold max-w-2xl text-white">
                 Know if you qualify before you apply.
               </h1>
               <p className="mt-3.5 max-w-xl text-[0.98rem] leading-7 text-slate-200 md:text-[1.02rem]">
