@@ -71,27 +71,26 @@ export function RunYourAnalysisSection({
       <div id="check-compatibility" className="scroll-mt-24" />
       <section id="compatibility-form" className="scroll-mt-24 bg-transparent">
         <div className="mx-auto w-full max-w-[1200px] px-4 pt-3 pb-8 md:px-10 md:pt-4 md:pb-10 lg:px-16">
-          <div className="mx-auto max-w-4xl rounded-[22px] border border-slate-700/80 bg-slate-950/72 p-5">
+          <div className="mx-auto max-w-4xl rounded-[22px] border border-slate-600/70 bg-slate-900/95 p-6 shadow-[0_12px_25px_rgba(2,6,19,0.5)]">
             <h2 className="text-2xl font-semibold text-white lg:text-3xl">Run your analysis</h2>
-            <p className="mt-2 text-sm text-slate-300">Find out if this role is actually within reach.</p>
             <p className="mt-2 text-sm text-slate-300">
-              Upload your resume and paste the job description. See your real fit before you apply.
+              Upload your resume, paste the job description, and check whether this role is truly within reach.
             </p>
-            <div className="mt-6 space-y-5">
-              <div className="rounded-xl border border-slate-700/70 bg-slate-950/55 p-4">
-                <div className="flex flex-wrap items-center gap-3">
+            <div className="mt-6 space-y-6">
+              <div className="rounded-[18px] border border-slate-500/70 bg-slate-900/85 p-5 shadow-[0_10px_20px_rgba(2,6,23,0.45)]">
+                <div className="flex flex-wrap items-center gap-4">
                   <button
                     type="button"
                     onClick={handleUploadClick}
-                    className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300/70"
+                    className="inline-flex items-center justify-center rounded-lg border border-slate-200/40 bg-white px-5 py-3 text-sm font-semibold text-slate-950 shadow-[0_8px_20px_rgba(15,23,42,0.45)] transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
                   >
                     Select resume
                   </button>
-                  <p className="text-sm text-slate-200">
+                  <p className="text-xs text-slate-400">
                     {resumeFilename ? `Ready: ${resumeFilename}` : "PDF or DOCX"}
                   </p>
                 </div>
-                <p className="mt-2 text-xs text-slate-400">
+                <p className="mt-3 text-xs text-slate-500">
                   Upload a PDF or DOCX. We automatically extract and analyze your experience.
                 </p>
                 <input
@@ -103,7 +102,7 @@ export function RunYourAnalysisSection({
                 />
               </div>
 
-              <div>
+              <div className="space-y-2">
                 <label className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
                   Paste job description
                 </label>
@@ -112,7 +111,7 @@ export function RunYourAnalysisSection({
                   onChange={(event) => onJobDescriptionChange(event.target.value)}
                   onFocus={onJobDescriptionFocus}
                   placeholder="Paste the full job description here"
-                  className="mt-2 h-[144px] w-full resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 focus:border-slate-500 focus:outline-none"
+                  className="mt-2 h-[144px] w-full resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 focus:border-white/60 focus:outline-none"
                 />
                 <div className="mt-3">
                   <p className="text-xs text-slate-400">Takes under 60 seconds. No fluff. Just a real answer.</p>
@@ -127,7 +126,7 @@ export function RunYourAnalysisSection({
                   disabled={!jdReady || isPreviewLoading}
                   className={`inline-flex w-full items-center justify-center rounded-lg px-4 py-3 text-sm font-semibold transition ${
                     jdReady
-                      ? "bg-[var(--accent-primary)] text-slate-950 hover:bg-[var(--accent-primary-hover)]"
+                      ? "bg-[var(--accent-primary)] border border-[var(--accent-primary)] text-slate-950 shadow-[0_10px_30px_rgba(15,23,42,0.45)] hover:bg-[var(--accent-primary-hover)]"
                       : "cursor-not-allowed border border-slate-700 bg-slate-900/70 text-slate-400"
                   } transform transition-transform duration-[175ms] ${showReadyPulse ? "scale-[1.03]" : "scale-100"}`}
                 >

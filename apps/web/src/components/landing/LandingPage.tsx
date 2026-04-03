@@ -47,9 +47,9 @@ function CtaButton({
 
 function MockPanel() {
   return (
-    <div className="rounded-[22px] border border-white/12 bg-slate-950/80 p-4">
+    <div className="rounded-[22px] border border-slate-700/60 bg-slate-950/70 p-4">
       <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Compatibility readout</p>
-      <div className="mt-3 space-y-2.5 rounded-[18px] border border-white/10 bg-black/20 p-3.5">
+      <div className="mt-3 space-y-2.5 rounded-[18px] border border-slate-800/60 bg-black/10 p-3.5">
         <div className="flex items-center justify-between gap-4">
           <span className="text-sm text-slate-300">Fit score</span>
           <span className="text-sm font-medium text-white">Shown after upload</span>
