@@ -286,10 +286,9 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   const analysisSectionRef = useRef<HTMLDivElement | null>(null);
   const analysisHeadingRef = useRef<HTMLHeadingElement | null>(null);
 
-  const allBaselines = useMemo(() => sortBaselinesNewestFirst(baselineList), [baselineList]);
   const activeBaselines = useMemo(
-    () => allBaselines.filter((baseline) => baseline.status !== "ARCHIVED"),
-    [allBaselines],
+    () => sortBaselinesNewestFirst(baselineList).filter((baseline) => baseline.status !== "ARCHIVED"),
+    [baselineList],
   );
   const uploadLimitReached = activeBaselines.length >= BETA_BASELINE_UPLOAD_LIMIT;
   const isEditableLibrary = libraryMode === "editable";
@@ -305,10 +304,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     }
 
     setPrimaryBaselineId((current) => {
-      if (
-        current &&
-        activeBaselines.some((baseline) => baseline.id === current && baseline.status !== "ARCHIVED")
-      ) {
+      if (current && activeBaselines.some((baseline) => baseline.id === current)) {
         return current;
       }
       return activeBaselines[0]?.id ?? null;
@@ -317,8 +313,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
 
   const primaryBaseline = useMemo(() => {
     if (!primaryBaselineId) return null;
-    const listBaseline =
-      allBaselines.find((item) => item.id === primaryBaselineId && item.status !== "ARCHIVED") ?? null;
+    const listBaseline = activeBaselines.find((item) => item.id === primaryBaselineId) ?? null;
     const detailBaseline = baselineDetails[primaryBaselineId] ?? null;
 
     if (!listBaseline) return detailBaseline;
@@ -332,7 +327,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         listBaseline.latestAssessmentSummary,
       ),
     };
-  }, [allBaselines, baselineDetails, primaryBaselineId]);
+  }, [activeBaselines, baselineDetails, primaryBaselineId]);
 
   const primaryAnalysisStatus = isBaselineAnalyzedFromSummary(
     primaryBaseline?.latestAssessmentSummary,
@@ -509,7 +504,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   }, []);
 
   const refreshBaselineLibrary = useCallback(async () => {
-    const response = await fetch("/api/baselines?includeArchived=true", {
+    const response = await fetch("/api/baselines", {
       cache: "no-store",
       credentials: "include",
     });
@@ -890,7 +885,9 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         });
         setPostUploadCtaBaselineId((current) => (current === baselineId ? null : current));
         setUploadSuccessId((current) => (current === baselineId ? null : current));
+        setHighlightedBaselineId((current) => (current === baselineId ? null : current));
         setPrimaryBaselineId(nextPrimaryId);
+        setBaselineUpdatedNotice("Baseline archived");
       } catch (archiveError) {
         console.error("Unable to delete baseline", archiveError);
         setError(
@@ -933,8 +930,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         const hasTarget = targetBaselineId
           ? latestBaselines.some((baseline) => baseline.id === targetBaselineId)
           : false;
-        const fallbackBaselineId =
-          latestBaselines.find((baseline) => baseline.status !== "ARCHIVED")?.id ?? null;
+        const fallbackBaselineId = latestBaselines[0]?.id ?? null;
 
         if (hasTarget && targetBaselineId) {
           await fetchBaselineDetails(targetBaselineId);
@@ -978,6 +974,12 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   return (
     <div className="mx-auto w-full max-w-6xl px-6 2xl:px-8">
       <div className="space-y-8">
+        {baselineUpdatedNotice ? (
+          <section className="rounded-[18px] border border-emerald-300/15 bg-emerald-400/[0.06] px-4 py-3 text-sm text-emerald-50">
+            {baselineUpdatedNotice}
+          </section>
+        ) : null}
+
         <section className="rounded-[28px] bg-slate-900/40 p-6 md:p-8">
           <div className="max-w-3xl space-y-5">
             <div className="space-y-2">
@@ -1004,7 +1006,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
               </p>
               <p className="text-sm font-medium text-slate-200">
                 {heroState === "analysis_exists"
-                  ? "Primary action: run compatibility analysis."
+                  ? "Primary action: analyze this role."
                   : heroState === "no_analysis"
                     ? "Primary action: continue building baseline."
                     : "Primary action: upload your baseline."}
@@ -1093,18 +1095,17 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             </p>
           </details>
         </section>
-        {allBaselines.length > 0 ? (
+        {activeBaselines.length > 0 ? (
           <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
             <header className="space-y-1">
-              <h2 className="text-xl font-semibold tracking-tight text-slate-100">Baseline library</h2>
+              <h2 className="text-xl font-semibold tracking-tight text-slate-100">Active baselines</h2>
               <p className="text-sm text-slate-400">
-                Your verified baseline is the one used when you analyze a job description or generate application materials.
+                These are the baselines currently used for analysis and document generation.
               </p>
             </header>
             <div className="space-y-3">
-              {allBaselines.slice(0, 3).map((baseline) => {
+              {activeBaselines.slice(0, 3).map((baseline) => {
                 const isPrimary = primaryBaselineId === baseline.id;
-                const isArchived = baseline.status === "ARCHIVED";
                 const assessmentSummary = baseline.latestAssessmentSummary;
                 const hasCompletedAssessment = isBaselineAnalyzedFromSummary(assessmentSummary);
                 const isLoading = loadingBaselineId === baseline.id;
@@ -1119,7 +1120,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 });
                 const readinessLabel = getBaselineReadinessLabel(readinessState);
                 const canTargetJob = readinessState === "READY";
-                const setActiveDisabled = isLoading || isPrimary || isArchived || !isHydrated;
+                const setActiveDisabled = isLoading || isPrimary || !isHydrated;
                 const baselineDetailsHref = getBaselineDetailsHref(baseline.id);
                 const latestResultsForBaselineHref = assessmentSummary?.latestAssessmentId
                   ? `/results?assessmentId=${encodeURIComponent(assessmentSummary.latestAssessmentId)}`
@@ -1143,7 +1144,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                         </span>
                       ) : null}
                       <span className="rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-300">
-                        {isArchived ? "archived" : readinessLabel.toLowerCase()}
+                        {readinessLabel.toLowerCase()}
                       </span>
                     </div>
                     <p className="mt-2 text-xs text-slate-400">Uploaded {formatDateTime(baseline.createdAt)}</p>
@@ -1177,7 +1178,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                         >
                           {formatCardActionLabel("View Baseline Details")}
                         </Link>
-                        {isArchived ? null : readinessState === "READY" ? (
+                        {readinessState === "READY" ? (
                           <FormButton
                             onClick={() => void runCanonicalBaselineAnalysis(baseline.id)}
                             disabled={isLoading || !isEditableLibrary}
@@ -1187,16 +1188,8 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                               ? formatCardActionLabel("Running...")
                               : formatCardActionLabel("Run Compatibility Analysis")}
                           </FormButton>
-                        ) : (
-                          <FormButton
-                            onClick={() => setPrimaryBaselineId(baseline.id)}
-                            disabled={setActiveDisabled}
-                            className="bg-indigo-600 uppercase text-white hover:bg-indigo-500"
-                          >
-                            {formatCardActionLabel("Continue Building Baseline")}
-                          </FormButton>
-                        )}
-                        {canTargetJob && !isArchived ? (
+                        ) : null}
+                        {canTargetJob ? (
                           <Link
                             href={`/target?baselineId=${encodeURIComponent(baseline.id)}`}
                             className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-cyan-300/20 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold uppercase text-cyan-50 transition hover:bg-cyan-400/15"
@@ -1209,14 +1202,12 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                             <FormButton
                               variant="ghost"
                               onClick={() => void handleArchiveBaseline(baseline.id)}
-                              disabled={archivingBaselineId === baseline.id || isArchived}
+                              disabled={archivingBaselineId === baseline.id}
                               className="uppercase"
                             >
-                              {isArchived
-                                ? formatCardActionLabel("Archived")
-                                : archivingBaselineId === baseline.id
-                                  ? formatCardActionLabel("Archiving...")
-                                  : formatCardActionLabel("Archive")}
+                              {archivingBaselineId === baseline.id
+                                ? formatCardActionLabel("Archiving...")
+                                : formatCardActionLabel("Archive")}
                             </FormButton>
                           </>
                         ) : null}
@@ -1253,6 +1244,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             </div>
           </section>
         ) : null}
+
         {analysisReady ? (
           <section className="space-y-3 rounded-[20px] border border-white/10 bg-slate-900/20 p-5">
             <h2 className="text-xl font-semibold tracking-tight text-slate-100">Baseline readiness</h2>

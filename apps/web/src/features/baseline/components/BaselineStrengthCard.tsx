@@ -1,35 +1,36 @@
 "use client";
 
 import { FormButton } from "@/components/FormButton";
-import {
-  BASELINE_MILESTONES,
-  BASELINE_READINESS_LABELS,
-  BASELINE_USABLE_MIN_PERCENT,
-} from "@/src/features/baseline/constants";
+import { BASELINE_READINESS_LABELS, BASELINE_USABLE_MIN_PERCENT } from "@/src/features/baseline/constants";
 import { buildBaselineStrength } from "@/src/features/baseline/utils/baselineStrength";
 
 type BaselineStrengthCardProps = {
   progressPercent: number;
+  analysisStatus: "NOT_ANALYZED" | "ANALYZING" | "READY";
+  isIncomplete: boolean;
   onContinue: () => void;
   onRunAnalysis?: () => void;
 };
 
 export function BaselineStrengthCard({
   progressPercent,
+  analysisStatus,
+  isIncomplete,
   onContinue,
   onRunAnalysis,
 }: BaselineStrengthCardProps) {
   const boundedProgress = Math.max(0, Math.min(100, Math.round(progressPercent)));
   const strength = buildBaselineStrength(boundedProgress);
   const readinessLabel = BASELINE_READINESS_LABELS[strength.readiness];
-  const canRunAnalysis = boundedProgress >= BASELINE_USABLE_MIN_PERCENT;
+  const shouldAnalyze = analysisStatus === "NOT_ANALYZED" || analysisStatus === "READY";
+  const nextStepLabel = shouldAnalyze
+    ? "Next step: analyze this role."
+    : "Next step: continue building baseline.";
 
   return (
     <section className="space-y-4 rounded-2xl border border-white/10 bg-slate-900/40 p-5">
       <div className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-          Baseline Progress
-        </p>
+        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Baseline state</p>
         <div className="flex items-end gap-3">
           <p className="text-5xl font-semibold leading-none text-white">{boundedProgress}%</p>
           <div className="pb-1">
@@ -49,33 +50,23 @@ export function BaselineStrengthCard({
 
       <div className="space-y-2">
         <p className="text-base font-semibold text-slate-100">
-          Your baseline is the verified source used for scoring and document generation.
+          {analysisStatus === "NOT_ANALYZED"
+            ? "Your baseline is active, but it has not been analyzed yet."
+            : isIncomplete
+              ? "Your baseline still needs a few signals before it is ready."
+              : "Your baseline is ready for role analysis."}
         </p>
         <p className="text-sm text-slate-400">
-          Completing more areas improves readiness and unlocks analysis.
+          {analysisStatus === "NOT_ANALYZED"
+            ? "The baseline exists, so the next step is to analyze it against a role."
+            : isIncomplete
+              ? "Add the missing baseline evidence before you analyze a role."
+              : "The baseline is ready to compare against a specific role."}
         </p>
+        <p className="text-sm font-medium text-slate-200">{nextStepLabel}</p>
       </div>
 
-      <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-5">
-        {BASELINE_MILESTONES.map((milestone) => {
-          const isComplete = boundedProgress >= milestone.value;
-          return (
-            <div
-              key={milestone.value}
-              className={`rounded-xl border px-3 py-2 text-xs ${
-                isComplete
-                  ? "border-white/30 bg-white/10 text-slate-100"
-                  : "border-white/10 bg-slate-950/40 text-slate-400"
-              }`}
-            >
-              <p className="font-semibold">{milestone.valueLabel}</p>
-              <p>{milestone.label}</p>
-            </div>
-          );
-        })}
-      </div>
-
-      {canRunAnalysis && onRunAnalysis ? (
+      {shouldAnalyze && onRunAnalysis ? (
         <FormButton onClick={onRunAnalysis}>Analyze this role</FormButton>
       ) : (
         <FormButton onClick={onContinue}>Continue building baseline</FormButton>

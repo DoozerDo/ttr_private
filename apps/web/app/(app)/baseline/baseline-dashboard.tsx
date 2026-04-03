@@ -397,6 +397,9 @@ export function BaselineDashboard({
       isBaselineReady,
     };
   }, [activeBaselineId, selectedBaselineDetails]);
+  const baselineAnalysisStatus: "NOT_ANALYZED" | "ANALYZING" | "READY" = selectedBaselineDetails?.latestAssessmentSummary
+    ? "READY"
+    : "NOT_ANALYZED";
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "production") {
@@ -575,6 +578,8 @@ export function BaselineDashboard({
           {activeBaselineId ? (
             <BaselineUnlockProgress
               progressPercent={baselineUnlockState.progressPercent}
+              analysisStatus={baselineAnalysisStatus}
+              isIncomplete={baselineAnalysisStatus === "READY" && baselineUnlockState.progressPercent < 100}
               milestoneLabel={
                 loadingSelectedBaselineDetails ? "Resume ingested" : baselineUnlockState.milestoneLabel
               }

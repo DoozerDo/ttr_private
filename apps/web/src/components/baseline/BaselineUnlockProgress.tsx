@@ -4,6 +4,8 @@ import { BaselineStrengthCard } from "@/src/features/baseline/components/Baselin
 
 type BaselineUnlockProgressProps = {
   progressPercent: number;
+  analysisStatus: "NOT_ANALYZED" | "ANALYZING" | "READY";
+  isIncomplete: boolean;
   milestoneLabel: string;
   isBaselineReady: boolean;
   onContinue: () => void;
@@ -12,6 +14,8 @@ type BaselineUnlockProgressProps = {
 
 export function BaselineUnlockProgress({
   progressPercent,
+  analysisStatus,
+  isIncomplete,
   milestoneLabel: _milestoneLabel,
   isBaselineReady: _isBaselineReady,
   onContinue,
@@ -20,6 +24,8 @@ export function BaselineUnlockProgress({
   return (
     <BaselineStrengthCard
       progressPercent={progressPercent}
+      analysisStatus={analysisStatus}
+      isIncomplete={isIncomplete}
       onContinue={onContinue}
       onRunAnalysis={onRunAnalysis}
     />
