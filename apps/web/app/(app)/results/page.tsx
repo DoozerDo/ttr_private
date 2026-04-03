@@ -786,192 +786,176 @@ export function OpportunityMapSection({
     }
     return { headline: "This score is ready to generate and save.", body: "Generate your resume, then save the role to Opportunities." };
   }, [blockedByEvidence, lowFitScore, nextAction.type]);
+  const isStrongFit = typeof score === "number" && score >= 70 && !blockedByEvidence;
+  const verdictStatement = isStrongFit ? "You are a strong fit" : "You are not a strong fit";
+  const primaryActionLabel = typeof score === "number" && score >= 70 ? "Generate Resume & Cover Letter" : "Start Fit Review";
+  const primaryActionHref = primaryCta?.href ?? nextAction.route;
+  const primaryActionDisabled = primaryCta?.disabled ?? false;
+  const primaryActionDescription = primaryCta?.description ?? nextAction.reason;
+  const strengthCandidates = advantageSignals.slice(0, 2);
+  const strengthBullets = strengthCandidates.length
+    ? strengthCandidates
+    : verdict.explanation
+      ? [verdict.explanation]
+      : [];
+  const gapSources =
+    weakFitRecovery?.gapPreview && weakFitRecovery.gapPreview.length
+      ? weakFitRecovery.gapPreview.map((gap) =>
+          gap.explanation ? `${gap.requirement}: ${gap.explanation}` : gap.requirement,
+        )
+      : unverifiedSignals.length
+        ? unverifiedSignals.map((signal) => `Missing verification for ${signal}`)
+        : blockedByEvidence
+          ? [readinessMessage]
+          : [];
+  const riskBullets = gapSources.slice(0, 2);
+  if (!riskBullets.length) {
+    riskBullets.push(readinessMessage);
+  }
   return (
     <section className="rounded-3xl bg-slate-900/65 px-5 py-7 sm:px-6 sm:py-8">
-      <div className="max-w-4xl space-y-6">
-        {blockedByEvidence ? (
-          <RouteStateShell
-            testId="results-blocked-evidence-panel"
-            tone="warning"
-            eyebrow="Evidence readiness"
-            title={decisionNarrative.headline}
-            body={<p className="max-w-2xl text-base leading-7 text-amber-50 md:text-lg">{decisionNarrative.body}</p>}
-            cta={
-              primaryCta ? (
-                primaryCta.disabled ? (
-                  <span
-                    data-testid="results-hero-primary-cta"
-                    className="inline-flex min-h-[52px] min-w-[300px] cursor-not-allowed items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-6 py-3 text-base font-semibold text-slate-400 md:min-w-[320px]"
-                  >
-                    {primaryCta.label}
-                  </span>
-                ) : primaryCta.onClick ? (
-                  <button
-                    data-testid="results-hero-primary-cta"
-                    onClick={primaryCta.onClick}
-                    className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500 md:min-w-[320px]"
-                  >
-                    {primaryCta.label}
-                  </button>
-                ) : (
-                  <a
-                    data-testid="results-hero-primary-cta"
-                    href={primaryCta.href ?? "#"}
-                    className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500 md:min-w-[320px]"
-                  >
-                    {primaryCta.label}
-                  </a>
-                )
-              ) : null
-            }
-          >
-            <div className="flex flex-wrap gap-4 text-sm">
-              <a
-                data-testid="results-hero-secondary-action"
-                href={scoreAnalysisHref}
-                className="font-medium text-slate-100 underline decoration-white/30 underline-offset-4 transition hover:text-white hover:decoration-white/60"
-              >
-                View top drivers
-              </a>
-              {nextAction.type === "studio_with_save" ? (
-                <a
-                  href="#opportunity-save"
-                  className="font-medium text-slate-100 underline decoration-white/30 underline-offset-4 transition hover:text-white hover:decoration-white/60"
+      <div className="max-w-4xl space-y-8">
+        <div className="space-y-5">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-[0_18px_40px_rgba(2,6,23,0.25)]">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Fit verdict</p>
+            <p
+              className={`mt-1 text-3xl font-semibold leading-tight ${isStrongFit ? "text-emerald-100" : "text-rose-100"} md:text-4xl`}
+            >
+              {verdictStatement}
+            </p>
+            {typeof score === "number" ? (
+              <p className="text-sm text-slate-300">Score: {Math.round(score)} / 100</p>
+            ) : (
+              <p className="text-sm text-slate-500">Score pending</p>
+            )}
+            <p className="mt-2 text-sm leading-6 text-slate-300">{verdict.explanation}</p>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <article className="rounded-[22px] border border-white/10 bg-slate-950/30 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Strength signals</p>
+              <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-slate-200">
+                {strengthBullets.map((signal) => (
+                  <li key={signal}>{signal}</li>
+                ))}
+              </ul>
+            </article>
+
+            <article className="rounded-[22px] border border-white/10 bg-slate-950/30 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Risk signals</p>
+              <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-slate-200">
+                {riskBullets.map((signal) => (
+                  <li key={signal}>{signal}</li>
+                ))}
+              </ul>
+            </article>
+          </div>
+
+          <div className="rounded-[26px] border border-white/10 bg-slate-950/60 p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Next step</p>
+            <div className="mt-3 flex flex-col gap-3">
+              {primaryActionDisabled ? (
+                <span className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-6 py-3 text-base font-semibold text-slate-400">
+                  {primaryActionLabel}
+                </span>
+              ) : primaryCta?.onClick ? (
+                <button
+                  type="button"
+                  onClick={primaryCta.onClick}
+                  className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500"
                 >
-                  Save to Opportunities
-                </a>
+                  {primaryActionLabel}
+                </button>
+              ) : (
+                <Link
+                  href={primaryActionHref}
+                  className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500"
+                >
+                  {primaryActionLabel}
+                </Link>
+              )}
+              {primaryActionDescription ? (
+                <p className="text-xs text-slate-400">{primaryActionDescription}</p>
               ) : null}
             </div>
-          </RouteStateShell>
-        ) : null}
-        <div
-          data-testid="results-score-verdict-card"
-          className={`space-y-3 rounded-2xl border p-4 ${blockedByEvidence ? "border-white/10 bg-white/[0.03]" : "border-white/10 bg-white/5"}`}
-        >
-          <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${blockedByEvidence ? "text-slate-500" : "text-slate-400"}`}>
-            Fit Verdict Reveal
-          </p>
-          <p className="text-[56px] font-black leading-[0.95] tracking-[-0.04em] text-white md:text-[64px]">
-            {typeof score === "number" ? Math.round(score) : "--"}
-          </p>
-          <h3 className="text-2xl font-semibold tracking-tight text-white">{verdict.label}</h3>
-          <p className="max-w-2xl text-sm leading-6 text-slate-300">{verdict.explanation}</p>
-          <p className="max-w-2xl text-xs leading-5 text-slate-400">
-            This score reflects how closely your verified experience aligns with this role. It does not guarantee hiring outcomes.
-          </p>
+          </div>
         </div>
-        {!blockedByEvidence ? (
-          <>
-            <div className="space-y-3">
-              <h2 className="max-w-3xl text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl xl:text-5xl">
-                {decisionNarrative.headline}
-              </h2>
-              <p className="max-w-2xl text-sm leading-6 text-slate-100 md:text-base">{decisionNarrative.body}</p>
-            </div>
-            <CareerGravity />
-            <section className="space-y-3 rounded-[24px] border border-white/10 bg-slate-900/30 p-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-                Strategic Next Move
-              </p>
+
+        <div className="space-y-6 opacity-80">
+          {blockedByEvidence ? (
+            <RouteStateShell
+              testId="results-blocked-evidence-panel"
+              tone="warning"
+              eyebrow="Evidence readiness"
+              title={decisionNarrative.headline}
+              body={<p className="max-w-2xl text-base leading-7 text-amber-50 md:text-lg">{decisionNarrative.body}</p>}
+              cta={null}
+            />
+          ) : null}
+
+          {!blockedByEvidence ? (
+            <div className="space-y-6">
               <div className="space-y-3">
-                <h3 className="text-xl font-semibold tracking-tight text-slate-100">
+                <h2 className="max-w-3xl text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl">
                   {decisionNarrative.headline}
-                </h3>
+                </h2>
                 <p className="max-w-2xl text-sm leading-6 text-slate-100 md:text-base">{decisionNarrative.body}</p>
-                {primaryCta ? (
-                  primaryCta.disabled ? (
-                    <span
-                      data-testid="results-hero-primary-cta"
-                      className="inline-flex min-h-[52px] min-w-[300px] cursor-not-allowed items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-6 py-3 text-base font-semibold text-slate-400 md:min-w-[320px]"
-                    >
-                      {primaryCta.label}
-                    </span>
-                  ) : primaryCta.onClick ? (
-                    <button
-                      data-testid="results-hero-primary-cta"
-                      onClick={primaryCta.onClick}
-                      className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500 md:min-w-[320px]"
-                    >
-                      {primaryCta.label}
-                    </button>
-                  ) : (
-                    <a
-                      data-testid="results-hero-primary-cta"
-                      href={primaryCta.href ?? "#"}
-                      className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500 md:min-w-[320px]"
-                    >
-                      {primaryCta.label}
-                    </a>
-                  )
-                ) : null}
-                <div className="flex flex-wrap gap-3 text-sm">
-                  <a
-                    data-testid="results-hero-secondary-action"
-                    href={scoreAnalysisHref}
-                    className="font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
-                  >
-                    View top drivers
-                  </a>
-                  {nextAction.type === "studio_with_save" ? (
-                    <a
-                      href="#opportunity-save"
-                      className="font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
-                    >
-                      Save to Opportunities
-                    </a>
-                  ) : null}
-                </div>
               </div>
-            </section>
-            {lowFitScore && weakFitRecovery ? (
-              <ResolveGapsBlock href={weakFitRecovery.href} gapPreview={weakFitRecovery.gapPreview} />
-            ) : null}
-          </>
-        ) : null}
-        <div
-          id="generation-readiness-details"
-          className={`rounded-xl border px-4 py-2.5 text-sm ${readinessToneClass}`}
-        >
-          <p className="text-xs font-medium tracking-[0.08em] text-slate-300">
-            Generation readiness: {readiness.badgeLabel}
-          </p>
-          <p className="mt-1 text-slate-100">{readinessMessage}</p>
-          {readiness.reasons[0]?.message ? (
-            <p className="mt-1 text-xs text-slate-300">{readiness.reasons[0].message}</p>
+              <CareerGravity />
+              <section className="space-y-3 rounded-[24px] border border-white/10 bg-slate-900/30 p-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Strategic next move</p>
+                <div className="space-y-3">
+                  <h3 className="text-xl font-semibold tracking-tight text-slate-100">{decisionNarrative.headline}</h3>
+                  <p className="max-w-2xl text-sm leading-6 text-slate-100 md:text-base">{decisionNarrative.body}</p>
+                </div>
+              </section>
+              {lowFitScore && weakFitRecovery ? (
+                <ResolveGapsBlock href={weakFitRecovery.href} gapPreview={weakFitRecovery.gapPreview} />
+              ) : null}
+            </div>
           ) : null}
-          <p className="mt-1 text-xs text-slate-400">
-            Verification coverage: {verificationCoverage.status.toUpperCase()} - {verificationCoverage.verifiedClaims} /{" "}
-            {verificationCoverage.totalClaims > 0 ? verificationCoverage.totalClaims : "?"} verified claims
-          </p>
-          {unverifiedSignals.length > 0 ? (
-            <p className="mt-1 text-xs text-slate-300">Needs stronger verification: {unverifiedSignals.join(", ")}</p>
-          ) : null}
-          {predictiveUnlock ? (
-            <p className="mt-2 text-xs text-slate-300">
-              Removing unsupported requirements from targeting can{" "}
-              {predictiveUnlock.predictedOutcome === "full"
-                ? "fully unlock generation."
-                : "improve generation quality while you add stronger evidence."}
+
+          <div id="generation-readiness-details" className={`rounded-xl border px-4 py-2.5 text-sm ${readinessToneClass}`}>
+            <p className="text-xs font-medium tracking-[0.08em] text-slate-300">
+              Generation readiness: {readiness.badgeLabel}
             </p>
-          ) : null}
+            <p className="mt-1 text-slate-100">{readinessMessage}</p>
+            {readiness.reasons[0]?.message ? (
+              <p className="mt-1 text-xs text-slate-300">{readiness.reasons[0].message}</p>
+            ) : null}
+            <p className="mt-1 text-xs text-slate-400">
+              Verification coverage: {verificationCoverage.status.toUpperCase()} - {verificationCoverage.verifiedClaims} /{" "}
+              {verificationCoverage.totalClaims > 0 ? verificationCoverage.totalClaims : "?"} verified claims
+            </p>
+            {unverifiedSignals.length > 0 ? (
+              <p className="mt-1 text-xs text-slate-300">Needs stronger verification: {unverifiedSignals.join(", ")}</p>
+            ) : null}
+            {predictiveUnlock ? (
+              <p className="mt-2 text-xs text-slate-300">
+                Removing unsupported requirements from targeting can{" "}
+                {predictiveUnlock.predictedOutcome === "full"
+                  ? "fully unlock generation."
+                  : "improve generation quality while you add stronger evidence."}
+              </p>
+            ) : null}
+          </div>
+
+          <section className="rounded-xl border border-white/10 bg-white/5 p-4">
+            <h3 className="text-sm font-semibold text-slate-100">Evidence used for this role</h3>
+            {resolvedEvidenceLedger.entries.length ? (
+              <ul className="mt-3 space-y-2">
+                {resolvedEvidenceLedger.entries.map((entry) => (
+                  <li key={entry.id} className="rounded-lg border border-white/10 bg-slate-950/35 p-2">
+                    <p className="text-sm text-slate-100">{entry.text}</p>
+                    {entry.sourceLabel ? <p className="mt-1 text-xs text-slate-400">{entry.sourceLabel}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2 text-sm text-slate-300">No evidence details are available yet.</p>
+            )}
+          </section>
         </div>
-        <section className="rounded-xl border border-white/10 bg-white/5 p-4">
-          <h3 className="text-sm font-semibold text-slate-100">Evidence used for this role</h3>
-          {resolvedEvidenceLedger.entries.length ? (
-            <ul className="mt-3 space-y-2">
-              {resolvedEvidenceLedger.entries.map((entry) => (
-                <li key={entry.id} className="rounded-lg border border-white/10 bg-slate-950/35 p-2">
-                  <p className="text-sm text-slate-100">{entry.text}</p>
-                  {entry.sourceLabel ? (
-                    <p className="mt-1 text-xs text-slate-400">{entry.sourceLabel}</p>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-2 text-sm text-slate-300">No evidence details are available yet.</p>
-          )}
-        </section>
       </div>
     </section>
   );
