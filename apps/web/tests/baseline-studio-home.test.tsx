@@ -20,6 +20,8 @@ function createBaseline(
     id,
     userId: "user-1",
     version: 1,
+    versionNumber: 1,
+    isActive: true,
     originalFilename: filename,
     mimeType: "application/pdf",
     storagePath: `/tmp/${id}`,
@@ -174,6 +176,7 @@ describe("BaselineStudioHome", () => {
     expect(within(activeSection as HTMLElement).getByText("resume-1.pdf")).toBeInTheDocument();
     expect(within(activeSection as HTMLElement).getByText("Validated baseline")).toBeInTheDocument();
     expect(within(activeSection as HTMLElement).getByText("Ready for targeting")).toBeInTheDocument();
+    expect(within(activeSection as HTMLElement).getByText("Version 1 (current)")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Upload resume" })).toBeNull();
     expect(screen.getAllByRole("link", { name: "View baseline details" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: /target a role/i }).length).toBeGreaterThan(0);

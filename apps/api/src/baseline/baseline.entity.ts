@@ -26,6 +26,9 @@ export class Baseline {
   @Column({ default: 0 })
   version!: number;
 
+  @Column({ type: 'int', default: 1 })
+  versionNumber!: number;
+
   @Column()
   originalFilename!: string;
 
@@ -44,6 +47,9 @@ export class Baseline {
     default: BaselineStatus.ACTIVE,
   })
   status!: BaselineStatus;
+
+  @Column({ type: 'boolean', default: true })
+  isActive!: boolean;
 
   @Column({ type: 'timestamptz', nullable: true })
   archivedAt!: Date | null;

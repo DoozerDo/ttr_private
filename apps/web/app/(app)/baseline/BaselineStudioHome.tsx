@@ -119,7 +119,11 @@ function sortBaselinesNewestFirst(baselines: BaselineDto[]) {
 }
 
 function getMostRecentBaselineId(baselines: BaselineDto[]) {
-  return sortBaselinesNewestFirst(baselines).find((baseline) => baseline.status !== "ARCHIVED")?.id ?? null;
+  return (
+    sortBaselinesNewestFirst(baselines).find((baseline) => baseline.isActive === true)?.id ??
+    sortBaselinesNewestFirst(baselines).find((baseline) => baseline.status !== "ARCHIVED")?.id ??
+    null
+  );
 }
 
 function deriveBaselineStrengthPercent(
@@ -468,6 +472,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
       ? "Source resumes"
       : "Your resumes"
     : "Uploaded resumes";
+  const activeBaselineVersionLabel = `Version ${primaryBaseline?.versionNumber ?? primaryBaseline?.version ?? 1} (current)`;
 
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
@@ -1215,6 +1220,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 {latestFitScore !== null ? (
                   <p className="mt-1 text-xs text-slate-500">Role fit score: {latestFitScore}%</p>
                 ) : null}
+                <p className="mt-1 text-xs text-slate-400">{activeBaselineVersionLabel}</p>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <Link
                     href={targetRoleHref}

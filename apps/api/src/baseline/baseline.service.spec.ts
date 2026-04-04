@@ -135,6 +135,7 @@ const ingestionResult = {
 
   const transactionManager = {
     create: jest.fn((_: any, payload: any) => payload),
+    update: jest.fn(async () => ({ affected: 1 })),
     save: jest.fn(async (payload: any) => {
       if (Array.isArray(payload)) {
         return payload.map((item: any, index: number) => ({
@@ -455,6 +456,7 @@ describe('BaselineService - library capacity', () => {
     transactionManager = {
       count: jest.fn().mockResolvedValue(0),
       create: jest.fn((_: any, payload: any) => payload),
+      update: jest.fn(async () => ({ affected: 1 })),
       save: jest.fn(async (payload: any) => {
         if (Array.isArray(payload)) return payload;
         return { ...payload, id: payload.id ?? 'generated-id', version: payload.version ?? 1 };
@@ -568,6 +570,47 @@ describe('BaselineService - library capacity', () => {
     expect(transactionManager.count).toHaveBeenCalledWith(Baseline, {
       where: { userId: 'user-1', status: BaselineStatus.ACTIVE },
     });
+  });
+
+  it('increments the active baseline version and keeps only one active baseline', async () => {
+    const priorBaseline = {
+      id: 'prior-baseline',
+      userId: 'user-1',
+      version: 4,
+      versionNumber: 4,
+      status: BaselineStatus.ACTIVE,
+      isActive: true,
+      createdAt: new Date('2026-03-01T00:00:00.000Z'),
+    } as Baseline;
+
+    baselineRepository.findOne.mockImplementation(async ({ where, order }: any) => {
+      if (where?.hash) {
+        return null;
+      }
+      if (where?.userId === 'user-1' && order?.versionNumber) {
+        return priorBaseline;
+      }
+      return null;
+    });
+
+    const result = await service.createBaseline(
+      'user-1',
+      { originalname: 'resume.pdf', mimetype: 'application/pdf', path: '/tmp/resume.pdf' },
+      parseResult as any,
+    );
+
+    expect(result.baseline.versionNumber).toBe(5);
+    expect(result.baseline.isActive).toBe(true);
+    expect(transactionManager.update).toHaveBeenCalledWith(
+      Baseline,
+      { userId: 'user-1' },
+      { isActive: false },
+    );
+    expect(transactionManager.update).toHaveBeenCalledWith(
+      Baseline,
+      { id: result.baseline.id, userId: 'user-1' },
+      { isActive: true },
+    );
   });
 });
 

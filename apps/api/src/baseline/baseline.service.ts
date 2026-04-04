@@ -418,6 +418,28 @@ export class BaselineService {
     });
   }
 
+  private async getNextBaselineVersionNumber(userId: string) {
+    const latestBaseline = await this.baselineRepository.findOne({
+      where: { userId },
+      order: { versionNumber: 'DESC', version: 'DESC', createdAt: 'DESC' },
+    });
+
+    return (latestBaseline?.versionNumber ?? latestBaseline?.version ?? 0) + 1;
+  }
+
+  private async setSingleActiveBaseline(
+    manager: EntityManager,
+    userId: string,
+    activeBaselineId: string,
+  ) {
+    await manager.update(Baseline, { userId }, { isActive: false });
+    await manager.update(
+      Baseline,
+      { id: activeBaselineId, userId },
+      { isActive: true },
+    );
+  }
+
   async getLatestParsedBaseline(baselineId: string) {
     return this.baselineParsedRepository.findOne({
       where: { baselineId },
@@ -551,6 +573,7 @@ export class BaselineService {
         hash: baseline.hash,
         status: BaselineStatus.ACTIVE,
         archivedAt: null,
+        isActive: true,
         sections: baselineSectionPartials,
       });
 
@@ -620,6 +643,8 @@ export class BaselineService {
       }
 
       savedBaseline.version = nextVersionNumber;
+      savedBaseline.versionNumber = nextVersionNumber;
+      savedBaseline.isActive = true;
       await manager.save(savedBaseline);
 
       return savedBaseline.id;
@@ -673,12 +698,13 @@ export class BaselineService {
       hash: fileHash,
       status: BaselineStatus.ACTIVE,
       archivedAt: null,
+      isActive: true,
       sections: sectionPayloads,
     });
 
     const savedBaseline = await manager.save(baseline);
 
-    const nextVersionNumber = (savedBaseline.version ?? 0) + 1;
+    const nextVersionNumber = await this.getNextBaselineVersionNumber(userId);
 
     const policyState = this.normalizePoliciesFromSections(
       (savedBaseline.sections ?? []) as PolicySectionInput[],
@@ -715,7 +741,10 @@ export class BaselineService {
 
     await manager.save(policyEntities);
 
+    await this.setSingleActiveBaseline(manager, userId, savedBaseline.id);
     savedBaseline.version = nextVersionNumber;
+    savedBaseline.versionNumber = nextVersionNumber;
+    savedBaseline.isActive = true;
     savedBaseline.versions = [savedVersion];
 
         let normalization: CanonicalNormalizationResult | undefined;
@@ -734,6 +763,7 @@ export class BaselineService {
       );
     }
 
+    await this.setSingleActiveBaseline(manager, userId, savedBaseline.id);
     const finalBaseline = await manager.save(savedBaseline);
 return {
       baselineId: finalBaseline.id,
@@ -999,23 +1029,59 @@ return {
     baselineId: string,
     status: BaselineStatus,
   ) {
-    const baseline = await this.baselineRepository.findOne({
-      where: { id: baselineId, userId },
+    return this.baselineRepository.manager.transaction(async (manager) => {
+      const baseline = await manager.findOne(Baseline, {
+        where: { id: baselineId, userId },
+      });
+
+      if (!baseline) {
+        throw new NotFoundException('Baseline not found');
+      }
+
+      if (baseline.status === status) {
+        return baseline;
+      }
+
+      const baselines = await manager.find(Baseline, {
+        where: { userId },
+        order: { createdAt: 'DESC' },
+      });
+
+      const nextActiveBaselineId =
+        status === BaselineStatus.ACTIVE
+          ? baseline.id
+          : baselines.find((item) => item.id !== baseline.id)?.id ?? baseline.id;
+
+      const updatedBaselines = baselines.map((item) => {
+        const nextStatus =
+          item.id === baseline.id
+            ? status
+            : item.id === nextActiveBaselineId
+              ? BaselineStatus.ACTIVE
+              : item.status;
+
+        return {
+          ...item,
+          status: nextStatus,
+          archivedAt:
+            item.id === baseline.id
+              ? status === BaselineStatus.ARCHIVED
+                ? new Date()
+                : null
+              : nextStatus === BaselineStatus.ARCHIVED
+                ? item.archivedAt ?? null
+                : null,
+          isActive: item.id === nextActiveBaselineId,
+        };
+      });
+
+      await manager.save(updatedBaselines);
+
+      return (
+        updatedBaselines.find((item) => item.id === baseline.id) ??
+        baseline
+      );
     });
-
-    if (!baseline) {
-      throw new NotFoundException('Baseline not found');
-    }
-
-    if (baseline.status === status) {
-      return baseline;
-    }
-
-    baseline.status = status;
-    baseline.archivedAt =
-      status === BaselineStatus.ARCHIVED ? new Date() : null;
-
-    return this.baselineRepository.save(baseline);
   }
 
   async getBaselineByIdForUser(
@@ -1429,6 +1495,8 @@ return {
       await manager.save(policyEntities);
 
       baseline.version = nextVersionNumber;
+      baseline.versionNumber = nextVersionNumber;
+      baseline.isActive = true;
       baseline.versions = [savedVersion];
 
       await this.persistParsedBaseline(manager, baseline, ingestion);
@@ -1705,6 +1773,8 @@ return {
       await manager.save(policyEntities);
 
       baseline.version = nextVersionNumber;
+      baseline.versionNumber = nextVersionNumber;
+      baseline.isActive = true;
       const updatedSections = sections.map((section) => {
         const applied = nextPolicies.find(
           (policy) => policy.baselineSectionId === section.id,

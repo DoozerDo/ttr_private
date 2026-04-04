@@ -60,6 +60,8 @@ export interface BaselineDto {
   id: string;
   userId: string;
   version: number;
+  versionNumber?: number;
+  isActive?: boolean;
   originalFilename: string;
   mimeType: string;
   storagePath: string;
