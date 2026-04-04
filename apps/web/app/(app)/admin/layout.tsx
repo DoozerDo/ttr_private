@@ -19,6 +19,7 @@ const NAV_LINKS = [
   { href: "/admin/beta-friction-dashboard", label: "Beta Friction" },
   { href: "/admin/funnel-diagnostics", label: "Funnel Diagnostics" },
   { href: "/admin/product-signal", label: "Product Signal" },
+  { href: "/admin/file-staleness-audit", label: "File Staleness Audit" },
 ];
 
 export default function AdminLayout({ children }: AdminLayoutProps) {

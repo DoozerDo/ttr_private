@@ -76,6 +76,12 @@ export default function AdminPage() {
         >
           Product Signal
         </Link>
+        <Link
+          className="block rounded-md border border-slate-800 bg-slate-900/70 px-4 py-3 text-base font-medium text-slate-50 transition hover:border-slate-600 hover:bg-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
+          href="/admin/file-staleness-audit"
+        >
+          File Staleness Audit
+        </Link>
       </section>
     </div>
   );
