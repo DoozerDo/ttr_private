@@ -148,7 +148,13 @@ export function JobsHub({ selectedJobId, onJobMissing }: JobsHubProps) {
         label="JOB DESCRIPTION"
         title=""
         description="Add a job description to score against your resume."
-        primaryAction={<FormButton onClick={navigateToAddJob}>Add job</FormButton>}
+        primaryAction={
+          visibleJobs.length > 0 ? (
+            <FormButton variant="secondary" onClick={navigateToAddJob}>
+              Add job
+            </FormButton>
+          ) : null
+        }
       >
         {error ? (
           <Alert intent="error" title="Jobs error">

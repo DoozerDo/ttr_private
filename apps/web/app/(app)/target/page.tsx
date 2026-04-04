@@ -113,11 +113,11 @@ export default async function TargetPage({ searchParams }: TargetPageProps) {
           Target
         </p>
         <h1 className="text-3xl font-semibold text-slate-100">
-          Compare your baseline against a specific role.
+          Run a compatibility score for a role.
         </h1>
         <p className="max-w-3xl text-sm text-slate-300">
-          Select a baseline, bring in a job description, and generate the role-specific score that
-          powers Results, Studio, and the rest of the workflow.
+          Select a baseline, add a job description, and generate the score that powers Results,
+          Studio, and the rest of the workflow.
         </p>
       </div>
       {showNewBaselineToast ? (

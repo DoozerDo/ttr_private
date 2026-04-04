@@ -32,6 +32,7 @@ type WorkspaceRunnerProps = {
   jobId: string | null;
   onAutoRunComplete?: () => void;
   onProgressStateChange?: (state: ProgressState) => void;
+  onMatchingScoreChange?: (pair: { baselineId: string; jobId: string } | null) => void;
 };
 
 type DimensionScoreValue = number | string | null | undefined;
@@ -104,6 +105,11 @@ type ScoreBandPresentation = {
   summary: string;
   accentClassName: string;
   surfaceClassName: string;
+};
+
+type PairKey = {
+  baselineId: string;
+  jobId: string;
 };
 
 export function resolveScoreBandPresentation(score: number): ScoreBandPresentation {
@@ -340,6 +346,42 @@ function getCompetitiveContext(score: number | null): string | null {
   return null;
 }
 
+function isMatchingPair(
+  candidate: PairKey | null | undefined,
+  baselineId: string | null,
+  jobId: string | null,
+): candidate is PairKey {
+  return Boolean(
+    candidate &&
+      baselineId &&
+      jobId &&
+      candidate.baselineId === baselineId &&
+      candidate.jobId === jobId,
+  );
+}
+
+function resolveResultPair(result: FitResultPayload | null): PairKey | null {
+  const baselineId = typeof result?.baselineId === "string" ? result.baselineId.trim() : "";
+  const jobId = typeof result?.jobId === "string" ? result.jobId.trim() : "";
+  if (!baselineId || !jobId) return null;
+  return { baselineId, jobId };
+}
+
+const MISMATCH_RECOVERY_MESSAGE = "No saved score for this selection";
+const MISMATCH_RECOVERY_BODY =
+  "Your current baseline and job selection do not have a matching saved score yet.";
+const MISMATCH_RECOVERY_RETRY =
+  "Run the compatibility score again to generate a fresh result for this role.";
+
+function isSelectionMismatchMessage(message: string | null): boolean {
+  if (!message) return false;
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("does not match the active baseline and job selection") ||
+    normalized.includes("does not match the active baseline and job")
+  );
+}
+
 export function buildStudioUrl({
   assessmentId,
   jobId,
@@ -522,6 +564,7 @@ export function WorkspaceRunner({
   jobId,
   onAutoRunComplete,
   onProgressStateChange,
+  onMatchingScoreChange,
 }: WorkspaceRunnerProps) {
   const [isRunning, setIsRunning] = useState(false);
   const [isLoadingLastRun, setIsLoadingLastRun] = useState(false);
@@ -557,6 +600,12 @@ export function WorkspaceRunner({
       onProgressStateChange?.(payload);
     },
     [onProgressStateChange],
+  );
+  const reportMatchingScore = useCallback(
+    (pair: { baselineId: string; jobId: string } | null) => {
+      onMatchingScoreChange?.(pair);
+    },
+    [onMatchingScoreChange],
   );
   const requestBaselineUploadAgain = useCallback(() => {
     if (typeof window === "undefined") return;
@@ -595,12 +644,13 @@ export function WorkspaceRunner({
     setSelectedJobId(jobId);
   }, [jobId]);
 
-  const displayResult = latestCompletedScore ?? result;
   const isDevMode = process.env.NODE_ENV !== "production";
   const debugUiEnabled = isDevMode || process.env.NEXT_PUBLIC_DEBUG_UI === "true";
 
   const showLoadLastRun = Boolean(baselineId) && Boolean(jobId);
-  const showResult = Boolean(latestCompletedScore);
+  const latestCompletedScorePair = resolveResultPair(latestCompletedScore);
+  const showResult = isMatchingPair(latestCompletedScorePair, baselineId, jobId);
+  const displayResult = showResult ? latestCompletedScore ?? result : null;
   const score = typeof displayResult?.score === "number" ? displayResult.score : null;
   const scoreBreakdown = extractScoreBreakdown(displayResult);
   const evidenceLinesFromBreakdown = buildEvidenceLines(scoreBreakdown);
@@ -678,6 +728,8 @@ export function WorkspaceRunner({
       ? "This role scored well, but generation is constrained by current verification limits."
       : scoreBand?.summary ?? "";
   const blockingReasons = generationReadiness.verificationIssues.slice(0, 3);
+  const showPreAnalysisState = !showResult && !isRunning && !isRevealAnalyzing && !error;
+  const showMismatchRecovery = isSelectionMismatchMessage(error);
 
   const resultCardClasses = [
     "score-summary-card space-y-3 rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.12),transparent_42%),linear-gradient(180deg,rgba(15,23,42,0.95),rgba(2,6,23,0.98))] p-4 text-[13px] text-slate-200 shadow-[0_24px_80px_rgba(2,6,23,0.45)]",
@@ -751,6 +803,7 @@ export function WorkspaceRunner({
     setError(null);
     setCompleteBanner(null);
     setLatestCompletedScore(null);
+    reportMatchingScore(null);
     setLatestJobId(null);
     setLatestBaselineId(null);
     setRunState(null);
@@ -837,7 +890,13 @@ export function WorkspaceRunner({
         setRevealedScoreValue(numericScore);
       }
 
+      const nextResultPair = resolveResultPair(nextResult);
+      if (!isMatchingPair(nextResultPair, baselineForRun, jobForRun)) {
+        throw new Error("Analysis result does not match the active baseline and job selection.");
+      }
+
       setLatestCompletedScore(nextResult);
+      reportMatchingScore(nextResultPair);
 
       const completionText =
         runState === "compliance_blocked" ? "Assessment blocked" : "Compatibility scored";
@@ -854,6 +913,7 @@ export function WorkspaceRunner({
       const shouldShowUploadCTA = isMissingCanonicalRunError(runError, message);
       setResult(null);
       setLatestCompletedScore(null);
+      reportMatchingScore(null);
       setRevealedScoreValue(null);
       setError(message);
       setShowUploadAgainCTA(shouldShowUploadCTA);
@@ -908,8 +968,14 @@ export function WorkspaceRunner({
       }
 
       const nextResult = payload as FitResultPayload;
+      const nextResultPair = resolveResultPair(nextResult);
+      if (!isMatchingPair(nextResultPair, baselineId, jobId)) {
+        throw new Error("Loaded run does not match the active baseline and job selection.");
+      }
+
       setResult(nextResult);
       setLatestCompletedScore(nextResult);
+      reportMatchingScore(nextResultPair);
       setRevealedScoreValue(typeof nextResult.score === "number" ? nextResult.score : null);
 
       const loadedIsBlocked =
@@ -946,6 +1012,7 @@ export function WorkspaceRunner({
       setLatestJobId(null);
       setLatestBaselineId(null);
       setRunState(null);
+      reportMatchingScore(null);
     } finally {
       setIsLoadingLastRun(false);
     }
@@ -1079,23 +1146,63 @@ export function WorkspaceRunner({
           <p className="mt-1 text-xs text-slate-400">Preparing your score reveal...</p>
         </div>
       ) : error ? (
-        <div className="space-y-3">
-          <Alert intent="error" title="Scoring failed">
-            <p className="text-sm text-current">{error}</p>
-          </Alert>
-          <div className="flex flex-wrap justify-end gap-2">
-            <FormButton onClick={runAssessment} disabled={isRunning}>
-              Retry scoring
-            </FormButton>
-            {showUploadAgainCTA ? (
-              <FormButton
-                variant="secondary"
-                onClick={requestBaselineUploadAgain}
-                disabled={isRunning}
-              >
-                Upload resume again
+        showMismatchRecovery ? (
+          <div className="space-y-4 rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">
+                Compatibility result
+              </p>
+              <p className="text-base font-medium text-slate-100">{MISMATCH_RECOVERY_MESSAGE}</p>
+              <p className="text-sm text-slate-400">{MISMATCH_RECOVERY_BODY}</p>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3">
+              <p className="text-sm text-slate-300">{MISMATCH_RECOVERY_RETRY}</p>
+              <FormButton onClick={runAssessment} disabled={isRunning}>
+                Run compatibility score
               </FormButton>
-            ) : null}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <Alert intent="error" title="Scoring failed">
+              <p className="text-sm text-current">{error}</p>
+            </Alert>
+            <div className="flex flex-wrap justify-end gap-2">
+              <FormButton onClick={runAssessment} disabled={isRunning}>
+                Retry scoring
+              </FormButton>
+              {showUploadAgainCTA ? (
+                <FormButton
+                  variant="secondary"
+                  onClick={requestBaselineUploadAgain}
+                  disabled={isRunning}
+                >
+                  Upload resume again
+                </FormButton>
+              ) : null}
+            </div>
+          </div>
+        )
+      ) : showPreAnalysisState ? (
+        <div className="space-y-4 rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.95),rgba(2,6,23,0.98))] p-5">
+          <div className="space-y-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">
+              Compatibility result
+            </p>
+            <p className="text-base font-medium text-slate-100">
+              Add a job description to generate your compatibility score.
+            </p>
+            <p className="text-sm text-slate-400">
+              Your score will power Results, Studio, and the rest of the workflow.
+            </p>
+          </div>
+          <div className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+            <div className="h-24 rounded-2xl border border-dashed border-white/10 bg-slate-950/40" />
+            <div className="space-y-2">
+              <div className="h-3 w-2/5 rounded-full bg-white/8" />
+              <div className="h-3 w-3/5 rounded-full bg-white/6" />
+              <div className="h-3 w-1/2 rounded-full bg-white/8" />
+            </div>
           </div>
         </div>
       ) : null}

@@ -168,7 +168,7 @@ describe("BaselineWorkspace live score panel", () => {
       expect(screen.getByText("Ready to analyze")).toBeInTheDocument();
       expect(screen.getByText("Ready to analyze now.")).toBeInTheDocument();
       expect(
-        screen.getByRole("link", { name: "ANALYZE" }),
+        screen.getByRole("link", { name: "Generate Compatibility Score" }),
       ).toHaveAttribute("href", "/studio?analysisId=assessment-1&jobId=job-1&baselineId=base-1");
       expect(screen.queryByRole("link", { name: "View detailed analysis" })).toBeNull();
       expect(screen.queryByRole("button", { name: "Add to Opportunities" })).toBeNull();
@@ -321,12 +321,12 @@ describe("BaselineWorkspace live score panel", () => {
       fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
 
       await waitFor(() => {
-      expect(screen.getByText("Primary readiness")).toBeInTheDocument();
+        expect(screen.getByText("Primary readiness")).toBeInTheDocument();
       });
 
       expect(screen.getByText("You are a strong match and ready to generate tailored materials.")).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Retry scoring" })).toBeNull();
-      expect(screen.getByRole("link", { name: "ANALYZE" })).toHaveAttribute(
+      expect(screen.getByRole("link", { name: "Generate Compatibility Score" })).toHaveAttribute(
         "href",
         "/results?assessmentId=assessment-3&analysisId=assessment-3&jobId=job-1&baselineId=base-1",
       );
@@ -393,7 +393,7 @@ describe("BaselineWorkspace live score panel", () => {
       fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
 
       await waitFor(() => {
-        expect(screen.getByRole("link", { name: "ANALYZE" })).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Generate Compatibility Score" })).toBeInTheDocument();
       });
 
       expect(screen.queryByRole("button", { name: "Retry scoring" })).toBeNull();
@@ -431,7 +431,7 @@ describe("BaselineWorkspace live score panel", () => {
     expect(screen.getByText("Baseline Dashboard Mock")).toBeInTheDocument();
     expect(screen.getByText("Job description")).toBeInTheDocument();
     expect(screen.getByText("Jobs Hub Mock")).toBeInTheDocument();
-    expect(screen.getByText("Compatibility result")).toBeInTheDocument();
+    expect(screen.getAllByText("Compatibility result")).toHaveLength(2);
     expect(
       screen.queryByText(
         "Your baseline defines the experience signals used for compatibility scoring and resume generation.",
@@ -495,6 +495,82 @@ describe("BaselineWorkspace live score panel", () => {
       });
 
       expect(screen.queryByText("Compatibility Score")).toBeNull();
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
+  });
+
+  it("does not restore a historical score when the loaded job does not match the active pair", async () => {
+    stubWindowState();
+    const setTimeoutSpy = blockAutoRunTimer();
+
+    try {
+      setFetchImplementation(
+        vi.fn((input: RequestInfo) => {
+          const url =
+            typeof input === "string"
+              ? input
+              : input instanceof URL
+                ? input.toString()
+                : "url" in input
+                  ? input.url
+                  : String(input);
+
+          if (url.includes("/api/analysis/") && url.includes("/latest")) {
+            return Promise.resolve(
+              createResponse({
+                assessmentId: "assessment-historical",
+                baselineId: "base-1",
+                jobId: "job-2",
+                score: 91,
+                strengths: ["Historical score for a different job."],
+              }),
+            );
+          }
+
+          if (url.includes("/api/analysis/run")) {
+            return Promise.resolve(createResponse({}));
+          }
+
+          return Promise.resolve(createResponse({}));
+        }),
+      );
+
+      render(
+        <BaselineWorkspace
+          initialBaselines={[
+            {
+              id: "base-1",
+              originalFilename: "resume.pdf",
+              version: 1,
+            } as never,
+          ]}
+          initialFetchError={null}
+          initialBaselineId="base-1"
+          initialJobId="job-1"
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("No saved score for this selection"),
+        ).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText("91")).toBeNull();
+      expect(
+        screen.queryByText("Add a job description to generate your compatibility score."),
+      ).toBeNull();
+      expect(
+        screen.getByText(
+          "Your current baseline and job selection do not have a matching saved score yet.",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Run compatibility score" }),
+      ).toBeInTheDocument();
     } finally {
       setTimeoutSpy.mockRestore();
     }

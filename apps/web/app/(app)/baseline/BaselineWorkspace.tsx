@@ -36,6 +36,95 @@ const buildTargetUrl = (params: URLSearchParams, pathname?: string | null) => {
   return query ? `${basePath}?${query}` : basePath;
 };
 
+type FlowStep = {
+  key: string;
+  label: string;
+  complete: boolean;
+};
+
+export type TargetWorkflowState = {
+  hasBaselineSelected: boolean;
+  hasJob: boolean;
+  hasScore: boolean;
+};
+
+export function useTargetWorkflowState({
+  baselineId,
+  jobId,
+  hasMatchingScore,
+}: {
+  baselineId: string | null;
+  jobId: string | null;
+  hasMatchingScore: boolean;
+}): TargetWorkflowState {
+  return useMemo(
+    () => ({
+      hasBaselineSelected: Boolean(baselineId),
+      hasJob: Boolean(jobId),
+      hasScore: Boolean(baselineId && jobId && hasMatchingScore),
+    }),
+    [baselineId, hasMatchingScore, jobId],
+  );
+}
+
+export function buildTargetWorkflowSteps(workflowState: TargetWorkflowState): FlowStep[] {
+  return [
+    {
+      key: "baseline-selected",
+      label: "Baseline selected",
+      complete: workflowState.hasBaselineSelected,
+    },
+    {
+      key: "job-added",
+      label: "Job added",
+      complete: workflowState.hasJob,
+    },
+    {
+      key: "score-generated",
+      label: "Score generated",
+      complete: workflowState.hasScore,
+    },
+  ];
+}
+
+function WorkflowProgressStrip({ steps }: { steps: FlowStep[] }) {
+  return (
+    <div
+      className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3"
+      aria-label="Target workflow progress"
+    >
+      {steps.map((step, index) => (
+        <div key={step.key} className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <span
+              className={[
+                "flex h-5 w-5 items-center justify-center rounded-full border text-[10px] font-semibold",
+                step.complete
+                  ? "border-cyan-300/30 bg-cyan-400/10 text-cyan-100"
+                  : "border-white/15 bg-slate-950/40 text-slate-500",
+              ].join(" ")}
+              aria-hidden="true"
+            >
+              {step.complete ? "✓" : index + 1}
+            </span>
+            <span
+              className={[
+                "text-sm font-medium",
+                step.complete ? "text-slate-100" : "text-slate-400",
+              ].join(" ")}
+            >
+              {step.label}
+            </span>
+          </div>
+          {index < steps.length - 1 ? (
+            <span className="h-px w-6 bg-white/10" aria-hidden="true" />
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function BaselineWorkspace({
   initialBaselines,
   initialFetchError,
@@ -49,6 +138,10 @@ export function BaselineWorkspace({
   const [notice, setNotice] = useState<string | null>(null);
   const baselineClearedRef = useRef(false);
   const [hasHydrated, setHasHydrated] = useState(false);
+  const [activeScorePair, setActiveScorePair] = useState<{
+    baselineId: string;
+    jobId: string;
+  } | null>(null);
 
   useEffect(() => {
     setHasHydrated(true);
@@ -67,6 +160,20 @@ export function BaselineWorkspace({
     return initialBaselines.some((baseline) => baseline.id === baselineId);
   }, [baselineId, initialBaselines]);
 
+  const targetWorkflowState = useTargetWorkflowState({
+    baselineId: baselineId && baselineExists ? baselineId : null,
+    jobId,
+    hasMatchingScore:
+      Boolean(activeScorePair) &&
+      activeScorePair?.baselineId === baselineId &&
+      activeScorePair?.jobId === jobId,
+  });
+
+  const workflowSteps = useMemo(
+    () => buildTargetWorkflowSteps(targetWorkflowState),
+    [targetWorkflowState],
+  );
+
   const removeParamFromUrl = useCallback(
     (key: "baselineId" | "jobId") => {
       const params = new URLSearchParams(searchParams?.toString() ?? "");
@@ -84,6 +191,14 @@ export function BaselineWorkspace({
     const target = buildTargetUrl(params, pathname);
     router.replace(target);
   }, [pathname, router, searchParams]);
+
+  useEffect(() => {
+    setActiveScorePair((current) => {
+      if (!current) return null;
+      if (current.baselineId === baselineId && current.jobId === jobId) return current;
+      return null;
+    });
+  }, [baselineId, jobId]);
 
   useEffect(() => {
     if (!hasHydrated) return;
@@ -111,6 +226,7 @@ export function BaselineWorkspace({
 
   return (
     <div className="space-y-6">
+      <WorkflowProgressStrip steps={workflowSteps} />
       {notice ? (
         <Alert intent="warning" title="Selection reset">
           <p className="text-sm">{notice}</p>
@@ -151,9 +267,11 @@ export function BaselineWorkspace({
             Compatibility result
           </p>
           <WorkspaceRunner
+            key={`${baselineId ?? "none"}:${jobId ?? "none"}`}
             baselineId={baselineId}
             jobId={jobId}
             onAutoRunComplete={clearSelections}
+            onMatchingScoreChange={setActiveScorePair}
           />
         </section>
       </div>
