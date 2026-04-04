@@ -448,6 +448,8 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   const latestResultsHref = latestAssessmentId
     ? `/results?assessmentId=${encodeURIComponent(latestAssessmentId)}`
     : null;
+  const baselineDetailsHref = primaryBaselineId ? getBaselineDetailsHref(primaryBaselineId) : "/baseline";
+  const targetRoleHref = primaryBaselineId ? `/target?baselineId=${encodeURIComponent(primaryBaselineId)}` : "/target";
   const studioHref = latestAssessmentId
     ? `/studio?assessmentId=${encodeURIComponent(latestAssessmentId)}&analysisId=${encodeURIComponent(latestAssessmentId)}${
         primaryBaselineId ? `&baselineId=${encodeURIComponent(primaryBaselineId)}` : ""
@@ -459,6 +461,12 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     if (!hasCompletedAnalysis) return "no_analysis";
     return "analysis_exists";
   }, [hasBaseline, hasCompletedAnalysis]);
+  const isValidatedBaselineState = heroState === "analysis_exists";
+  const sourceResumesSectionTitle = hasBaseline
+    ? isValidatedBaselineState
+      ? "Source resumes"
+      : "Your resumes"
+    : "Uploaded resumes";
 
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
@@ -1092,132 +1100,192 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
 
   return (
     <div className="mx-auto w-full max-w-6xl px-6 2xl:px-8">
-      <div className="space-y-8">
+      <div className="flex flex-col gap-8">
         <section className="rounded-[28px] bg-slate-900/40 p-6 md:p-8">
           <div className="max-w-3xl space-y-5">
             <div className="space-y-2">
               <h1 className="text-3xl font-semibold tracking-tight text-white md:text-[34px]">
                 {heroState === "no_baseline"
-                  ? "Upload your baseline to get started"
+                  ? "Upload your resume to get started"
                   : heroState === "no_analysis"
-                    ? "Continue building your baseline"
-                    : "Your verified baseline is ready"}
+                    ? "Your baseline is ready"
+                    : "Your baseline is ready"}
               </h1>
               <p className="text-base leading-7 text-slate-300">
                 {heroState === "no_baseline"
-                  ? "Upload the resume you want to work from. We turn it into the verified baseline used for scoring and document generation."
+                  ? "Upload the resume you want to work from. We convert it into a baseline used for scoring and tailored documents."
                   : heroState === "no_analysis"
-                    ? "You already have a baseline. Add the missing evidence to unlock analysis."
-                    : "Your baseline is ready. Run compatibility analysis when you want a score."}
+                    ? "Your resume has been converted into a baseline."
+                    : "Your resume has been converted into a baseline."}
               </p>
               <p className="text-sm leading-6 text-slate-400">
                 {heroState === "no_baseline"
-                  ? "Upload your resume to create your baseline file."
+                  ? "Upload your resume to create your baseline."
                   : heroState === "no_analysis"
-                    ? "Complete your baseline to unlock analysis."
-                    : "Analysis is unlocked and ready whenever you are."}
-              </p>
-              <p className="text-sm font-medium text-slate-200">
-                {heroState === "analysis_exists"
-                  ? "Primary action: Add Job Description."
-                  : heroState === "no_analysis"
-                    ? "Primary action: continue building baseline."
-                    : "Primary action: upload your baseline."}
+                    ? "Your baseline is ready for targeting, but it still needs analysis before it can guide tailored generation."
+                    : "This baseline is ready for targeting and tailored document generation."}
               </p>
             </div>
-            <div
-              className={`rounded-[18px] border px-4 py-4 transition ${
-                uploadLimitReached
-                  ? "border-white/10 bg-slate-950/25"
-                  : "border-dashed border-white/20 bg-slate-950/35"
-              }`}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={onDrop}
-              data-testid="baseline-upload-surface"
-            >
-              <div className="space-y-3">
-                <FormButton
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isUploading || uploadLimitReached || !isEditableLibrary}
-                  className="bg-indigo-600 text-white hover:bg-indigo-500"
+            {isValidatedBaselineState ? (
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href={targetRoleHref}
+                  className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold uppercase text-cyan-50 transition hover:bg-cyan-400/15"
                 >
-                  {isEditableLibrary
-                    ? isUploading
-                      ? "Uploading..."
-                      : heroState === "no_baseline"
-                        ? "Upload resume"
-                        : "Continue building baseline"
-                    : "Upload unavailable"}
-                </FormButton>
-                <p className="text-sm text-slate-300">
-                  {heroState === "no_baseline"
-                    ? "Upload resume or drag and drop a PDF or DOCX here."
-                    : "Add more evidence or replace the source file if you need to strengthen the baseline."}
-                </p>
-                <p className="text-sm text-slate-400">Accepted file types: PDF and DOCX</p>
-                <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
-                  {activeBaselines.length} of {BETA_BASELINE_UPLOAD_LIMIT} active resumes
-                </p>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                  className="hidden"
-                  onChange={onFileChange}
-                  disabled={isUploading || uploadLimitReached}
-                />
-                {uploadLimitReached ? (
-                  <p className="text-sm text-slate-300">
-                    Maximum of {BETA_BASELINE_UPLOAD_LIMIT} active resumes reached.
-                  </p>
-                ) : null}
+                  Target a role
+                </Link>
+                <Link
+                  href={baselineDetailsHref}
+                  className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold uppercase text-slate-100 transition hover:bg-white/10"
+                >
+                  View baseline details
+                </Link>
               </div>
-            </div>
+            ) : (
+              <div
+                className={`rounded-[18px] border px-4 py-4 transition ${
+                  uploadLimitReached
+                    ? "border-white/10 bg-slate-950/25"
+                    : "border-dashed border-white/20 bg-slate-950/35"
+                }`}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={onDrop}
+                data-testid="baseline-upload-surface"
+              >
+                <div className="space-y-3">
+                  <FormButton
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading || uploadLimitReached || !isEditableLibrary}
+                    className="bg-indigo-600 text-white hover:bg-indigo-500"
+                  >
+                    {isEditableLibrary
+                      ? isUploading
+                        ? "Uploading..."
+                        : heroState === "no_baseline"
+                          ? "Upload resume"
+                          : "Upload another resume"
+                      : "Upload unavailable"}
+                  </FormButton>
+                  <p className="text-sm text-slate-300">
+                    {heroState === "no_baseline"
+                      ? "Upload resume or drag and drop a PDF or DOCX here."
+                      : "Upload another resume if you want to replace the source file."}
+                  </p>
+                  <p className="text-sm text-slate-400">Accepted file types: PDF and DOCX</p>
+                  <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
+                    {activeBaselines.length} of {BETA_BASELINE_UPLOAD_LIMIT} active resumes
+                  </p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    className="hidden"
+                    onChange={onFileChange}
+                    disabled={isUploading || uploadLimitReached}
+                  />
+                  {uploadLimitReached ? (
+                    <p className="text-sm text-slate-300">
+                      Maximum of {BETA_BASELINE_UPLOAD_LIMIT} active resumes reached.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            )}
           </div>
         </section>
+        {isValidatedBaselineState ? (
+          <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
+            <header className="space-y-1">
+              <h2 className="text-xl font-semibold tracking-tight text-slate-100">Active baseline</h2>
+              <p className="text-sm text-slate-400">
+                {primaryBaseline?.originalFilename ?? "Your active baseline"} is the validated asset TTR now uses.
+              </p>
+            </header>
+            {primaryBaseline ? (
+              <article className="rounded-[16px] border border-white/10 bg-slate-950/30 p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold text-slate-100">{primaryBaseline.originalFilename}</p>
+                  <span className="rounded-full border border-cyan-300/15 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-cyan-100">
+                    Validated baseline
+                  </span>
+                  <span className="rounded-full border border-emerald-300/15 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-emerald-100">
+                    Ready for targeting
+                  </span>
+                </div>
+                {latestAssessmentCreatedAt ? (
+                  <p className="mt-2 text-xs text-slate-400">Last analyzed {formatDateTime(latestAssessmentCreatedAt)}</p>
+                ) : null}
+                {latestFitScore !== null ? (
+                  <p className="mt-1 text-xs text-slate-500">Role fit score: {latestFitScore}%</p>
+                ) : null}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Link
+                    href={targetRoleHref}
+                    className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold uppercase text-cyan-50 transition hover:bg-cyan-400/15"
+                  >
+                    Target a role
+                  </Link>
+                  <Link
+                    href={baselineDetailsHref}
+                    className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold uppercase text-slate-100 transition hover:bg-white/10"
+                  >
+                    View baseline details
+                  </Link>
+                  {isEditableLibrary ? (
+                    <FormButton
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isUploading || uploadLimitReached || !isEditableLibrary}
+                      className="bg-indigo-600 text-white hover:bg-indigo-500 uppercase"
+                    >
+                      Upload another resume
+                    </FormButton>
+                  ) : null}
+                </div>
+              </article>
+            ) : null}
+          </section>
+        ) : null}
         <section className="rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
-          <h2 className="text-lg font-semibold text-slate-100">How this works</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-300">
-            Your baseline is the system of record for scoring and document generation. It keeps every downstream
-            result grounded in your verified experience.
-          </p>
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <h2 className="text-lg font-semibold text-slate-100">What is a baseline?</h2>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
             <div className="rounded-xl border border-white/10 bg-slate-950/30 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Upload</p>
-              <p className="mt-2 text-sm font-medium text-slate-100">Upload your resume</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">What is a baseline?</p>
+              <p className="mt-2 text-sm leading-6 text-slate-300">You upload a resume.</p>
+              <p className="mt-2 text-sm leading-6 text-slate-300">
+                We convert it into a structured baseline that represents your verified experience.
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-300">
+                This baseline is what we use to score your fit for a role and generate tailored application materials.
+              </p>
             </div>
             <div className="rounded-xl border border-white/10 bg-slate-950/30 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Verify</p>
-              <p className="mt-2 text-sm font-medium text-slate-100">We verify and structure your experience</p>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-slate-950/30 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Unlock</p>
-              <p className="mt-2 text-sm font-medium text-slate-100">
-                Complete your baseline to unlock analysis and document generation
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                Why not just use your resume?
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-300">Resumes are written for people, not systems.</p>
+              <p className="mt-2 text-sm leading-6 text-slate-300">
+                The baseline translates your resume into a format that can be analyzed, scored, and reused across every job you target.
               </p>
             </div>
           </div>
-          <details className="mt-4 rounded-xl border border-white/10 bg-slate-950/30 p-4" open>
-            <summary className="cursor-pointer text-sm font-semibold text-slate-100">
-              Why not use my resume as-is?
-            </summary>
-            <p className="mt-2 text-sm leading-6 text-slate-300">
-              Because resumes are written for people, not systems. TTR first turns your resume into a verified
-              working baseline so scores and generated documents stay consistent, traceable, and grounded in what
-              you have actually done.
-            </p>
-          </details>
         </section>
         {allBaselines.length > 0 ? (
           <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
             <header className="space-y-1">
-              <h2 className="text-xl font-semibold tracking-tight text-slate-100">Baseline library</h2>
+              <h2 className="text-xl font-semibold tracking-tight text-slate-100">
+                {sourceResumesSectionTitle}
+              </h2>
               <p className="text-sm text-slate-400">
-                Your verified baseline is the one used when you analyze a job description or generate application materials.
+                {isValidatedBaselineState
+                  ? "The source file for the active baseline is shown here without repeating the same record at full weight."
+                  : "One resume becomes the active baseline used for scoring and tailored documents."}
               </p>
             </header>
             <div className="space-y-3">
-              {allBaselines.slice(0, 3).map((baseline) => {
+              {allBaselines
+                .filter((baseline) => !(isValidatedBaselineState && baseline.id === primaryBaselineId))
+                .slice(0, 3)
+                .map((baseline) => {
                 const isPrimary = primaryBaselineId === baseline.id;
                 const isArchived = baseline.status === "ARCHIVED";
                 const assessmentSummary = baseline.latestAssessmentSummary;
@@ -1234,7 +1302,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 const readinessLabel = getBaselineReadinessLabel(readinessState);
                 const canTargetJob = readinessState === "READY";
                 const setActiveDisabled = isLoading || isPrimary || isArchived || !isHydrated;
-                const baselineDetailsHref = getBaselineDetailsHref(baseline.id);
                 const latestResultsForBaselineHref = baselineReadiness.latestAssessmentId
                   ? `/results?assessmentId=${encodeURIComponent(baselineReadiness.latestAssessmentId)}`
                   : null;
@@ -1244,6 +1311,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                     ? Math.max(0, Math.min(100, Math.round(baselineReadiness.latestFitScore)))
                     : null;
                 const canOpenStudio = latestRoleFitScore !== null && latestRoleFitScore >= 70;
+                const isReadyBaseline = readinessState === "READY" && !isArchived;
 
                 if (process.env.NODE_ENV !== "production") {
                   console.debug("[BaselineStudioHome] library readiness", {
@@ -1270,7 +1338,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                       <p className="text-sm font-semibold text-slate-100">{baseline.originalFilename}</p>
                       {isPrimary ? (
                         <span className="rounded-full border border-cyan-300/15 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-cyan-100">
-                          Active
+                          Active baseline
                         </span>
                       ) : null}
                       <span className="rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-300">
@@ -1308,28 +1376,25 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                         >
                           {formatCardActionLabel("View Baseline Details")}
                         </Link>
-                        {isArchived ? null : readinessState === "READY" ? (
-                          <FormButton
-                            onClick={() => void runCanonicalBaselineAnalysis(baseline.id)}
-                            disabled={isLoading || !isEditableLibrary}
-                            className="bg-indigo-600 uppercase text-white hover:bg-indigo-500"
+                        {isArchived ? null : isReadyBaseline ? (
+                          <Link
+                            href={targetRoleHref}
+                            className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold uppercase text-cyan-50 transition hover:bg-cyan-400/15"
                           >
-                            {isLoading
-                              ? formatCardActionLabel("Running...")
-                              : formatCardActionLabel("Run Compatibility Analysis")}
-                          </FormButton>
+                            {formatCardActionLabel("Target a role")}
+                          </Link>
                         ) : (
                           <FormButton
                             onClick={() => setPrimaryBaselineId(baseline.id)}
                             disabled={setActiveDisabled}
                             className="bg-indigo-600 uppercase text-white hover:bg-indigo-500"
                           >
-                            {formatCardActionLabel("Continue Building Baseline")}
+                            {formatCardActionLabel("Upload Another Resume")}
                           </FormButton>
                         )}
-                        {canTargetJob && !isArchived ? (
+                        {isReadyBaseline ? null : canTargetJob && !isArchived ? (
                           <Link
-                            href={`/target?baselineId=${encodeURIComponent(baseline.id)}`}
+                            href={targetRoleHref}
                             className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-cyan-300/20 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold uppercase text-cyan-50 transition hover:bg-cyan-400/15"
                           >
                             {formatCardActionLabel("Add Job Description")}
@@ -1381,6 +1446,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   </article>
                 );
               })}
+              {isValidatedBaselineState && !allBaselines.some((baseline) => baseline.id !== primaryBaselineId) ? (
+                <p className="text-sm text-slate-400">
+                  Source file for active baseline: {primaryBaseline?.originalFilename ?? "active baseline"}
+                </p>
+              ) : null}
             </div>
           </section>
         ) : null}
@@ -1505,7 +1575,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                         Your baseline signals are already well developed.
                       </p>
                       <p className="mt-2 text-sm leading-6 text-slate-200">
-                        Reanalyze after future updates, or move into TARGET to apply your certified signal profile.
+                        Reanalyze after future updates, or move into TARGET to apply your certified signal set.
                       </p>
                     </article>
                   ) : null}
