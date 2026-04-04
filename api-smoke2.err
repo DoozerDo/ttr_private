@@ -1,0 +1,44 @@
+(node:23136) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+[31m[Nest] 23136  - [39m04/03/2026, 6:55:10 PM [31m  ERROR[39m [38;5;3m[SupportService] [39m[31mBug reporting misconfigured: missing GitHub credentials[39m
+[31m[Nest] 23136  - [39m04/03/2026, 6:55:13 PM [31m  ERROR[39m [38;5;3m[TypeOrmModule] [39m[31mUnable to connect to the database. Retrying (1)...[39m
+Error: getaddrinfo ENOTFOUND db
+    at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:121:26)
+[31m[Nest] 23136  - [39m04/03/2026, 6:55:18 PM [31m  ERROR[39m [38;5;3m[TypeOrmModule] [39m[31mUnable to connect to the database. Retrying (2)...[39m
+Error: getaddrinfo ENOTFOUND db
+    at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:121:26)
+[31m[Nest] 23136  - [39m04/03/2026, 6:55:24 PM [31m  ERROR[39m [38;5;3m[TypeOrmModule] [39m[31mUnable to connect to the database. Retrying (3)...[39m
+Error: getaddrinfo ENOTFOUND db
+    at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:121:26)
+[31m[Nest] 23136  - [39m04/03/2026, 6:55:30 PM [31m  ERROR[39m [38;5;3m[TypeOrmModule] [39m[31mUnable to connect to the database. Retrying (4)...[39m
+Error: getaddrinfo ENOTFOUND db
+    at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:121:26)
+[31m[Nest] 23136  - [39m04/03/2026, 6:55:35 PM [31m  ERROR[39m [38;5;3m[TypeOrmModule] [39m[31mUnable to connect to the database. Retrying (5)...[39m
+Error: getaddrinfo ENOTFOUND db
+    at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:121:26)
+[31m[Nest] 23136  - [39m04/03/2026, 6:55:41 PM [31m  ERROR[39m [38;5;3m[TypeOrmModule] [39m[31mUnable to connect to the database. Retrying (6)...[39m
+Error: getaddrinfo ENOTFOUND db
+    at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:121:26)
+[31m[Nest] 23136  - [39m04/03/2026, 6:55:47 PM [31m  ERROR[39m [38;5;3m[TypeOrmModule] [39m[31mUnable to connect to the database. Retrying (7)...[39m
+Error: getaddrinfo ENOTFOUND db
+    at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:121:26)
+[31m[Nest] 23136  - [39m04/03/2026, 6:55:53 PM [31m  ERROR[39m [38;5;3m[TypeOrmModule] [39m[31mUnable to connect to the database. Retrying (8)...[39m
+Error: getaddrinfo ENOTFOUND db
+    at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:121:26)
+[31m[Nest] 23136  - [39m04/03/2026, 6:55:58 PM [31m  ERROR[39m [38;5;3m[TypeOrmModule] [39m[31mUnable to connect to the database. Retrying (9)...[39m
+Error: getaddrinfo ENOTFOUND db
+    at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:121:26)
+[31m[Nest] 23136  - [39m04/03/2026, 6:55:58 PM [31m  ERROR[39m [38;5;3m[ExceptionHandler] [39mError: getaddrinfo ENOTFOUND db
+[90m    at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:121:26)[39m {
+  errno: [33m-3008[39m,
+  code: [32m'ENOTFOUND'[39m,
+  syscall: [32m'getaddrinfo'[39m,
+  hostname: [32m'db'[39m
+}
+npm error Lifecycle script `start` failed with error:
+npm error code 1
+npm error path C:\dev\ttr_private\apps\api
+npm error workspace api@0.0.1
+npm error location C:\dev\ttr_private\apps\api
+npm error command failed
+npm error command C:\WINDOWS\system32\cmd.exe /d /s /c nest start --port 3003

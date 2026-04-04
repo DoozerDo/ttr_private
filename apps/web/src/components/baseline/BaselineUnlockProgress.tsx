@@ -10,6 +10,7 @@ type BaselineUnlockProgressProps = {
   isBaselineReady: boolean;
   onContinue: () => void;
   onRunAnalysis?: () => void;
+  onAddJobDescription?: () => void;
 };
 
 export function BaselineUnlockProgress({
@@ -20,6 +21,7 @@ export function BaselineUnlockProgress({
   isBaselineReady: _isBaselineReady,
   onContinue,
   onRunAnalysis,
+  onAddJobDescription,
 }: BaselineUnlockProgressProps) {
   return (
     <BaselineStrengthCard
@@ -28,6 +30,7 @@ export function BaselineUnlockProgress({
       isIncomplete={isIncomplete}
       onContinue={onContinue}
       onRunAnalysis={onRunAnalysis}
+      onAddJobDescription={onAddJobDescription}
     />
   );
 }

@@ -39,6 +39,7 @@ import {
 } from "@/lib/professionalSignals";
 import { publishBaselineUpdated, subscribeBaselineUpdated } from "@/src/lib/baseline-sync";
 import { BETA_BASELINE_UPLOAD_LIMIT } from "@/src/features/baseline/constants";
+import { deriveBaselineLoopState } from "@/lib/baselineLoopState";
 import { getBaselineDetailsHref } from "@/src/navigation/routes";
 import { CareerGravity } from "../results/components/CareerGravity";
 
@@ -329,11 +330,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     };
   }, [activeBaselines, baselineDetails, primaryBaselineId]);
 
-  const primaryAnalysisStatus = isBaselineAnalyzedFromSummary(
-    primaryBaseline?.latestAssessmentSummary,
-  )
-    ? "ready"
-    : "not_analyzed";
+  const primaryLoopState = useMemo(
+    () => deriveBaselineLoopState(primaryBaseline ? [primaryBaseline] : [], primaryBaselineId),
+    [primaryBaseline, primaryBaselineId],
+  );
+  const primaryAnalysisStatus = primaryLoopState.analysisStatus === "READY" ? "ready" : "not_analyzed";
 
   const approvedSignalAdditions = useMemo(
     () => extractApprovedSignalAdditions(primaryBaseline),
@@ -408,9 +409,21 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   const fitReviewHref = latestResultsHref ? `${latestResultsHref}&locked=1` : "/fit-review";
   const heroState: "no_baseline" | "no_analysis" | "analysis_exists" = useMemo(() => {
     if (!hasBaseline) return "no_baseline";
-    if (!hasCompletedAnalysis) return "no_analysis";
+    if (!primaryLoopState.isAnalyzed) return "no_analysis";
     return "analysis_exists";
-  }, [hasBaseline, hasCompletedAnalysis]);
+  }, [hasBaseline, primaryLoopState.isAnalyzed]);
+  const heroPrimaryActionLabel = useMemo(() => {
+    if (!hasBaseline) return "Upload Resume";
+    if (!primaryLoopState.isAnalyzed) return "Analyze this role";
+    if (primaryLoopState.isValidated) return "Add Job Description";
+    return "Improve Baseline";
+  }, [hasBaseline, primaryLoopState.isAnalyzed, primaryLoopState.isValidated]);
+  const heroPrimaryActionHref = useMemo(() => {
+    if (!hasBaseline) return null;
+    if (!primaryLoopState.isAnalyzed) return activeBaselines[0]?.id ? `/target?baselineId=${encodeURIComponent(activeBaselines[0].id)}` : null;
+    if (primaryLoopState.isValidated) return activeBaselines[0]?.id ? `/target?baselineId=${encodeURIComponent(activeBaselines[0].id)}` : null;
+    return primaryBaselineId ? getBaselineDetailsHref(primaryBaselineId) : null;
+  }, [activeBaselines, hasBaseline, primaryBaselineId, primaryLoopState.isAnalyzed, primaryLoopState.isValidated]);
 
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
@@ -987,29 +1000,31 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 {heroState === "no_baseline"
                   ? "Upload your baseline to get started"
                   : heroState === "no_analysis"
-                    ? "Continue building your baseline"
-                    : "Your verified baseline is ready"}
+                    ? "Analyze this role"
+                    : primaryLoopState.isValidated
+                      ? "Your verified baseline is ready"
+                      : "Continue building your baseline"}
               </h1>
               <p className="text-base leading-7 text-slate-300">
                 {heroState === "no_baseline"
                   ? "Upload the resume you want to work from. We turn it into the verified baseline used for scoring and document generation."
                   : heroState === "no_analysis"
-                    ? "You already have a baseline. Add the missing evidence to unlock analysis."
-                    : "Your baseline is ready. Run compatibility analysis when you want a score."}
+                    ? "You already have a baseline. Analyze it first so we can unlock the next step."
+                    : primaryLoopState.isValidated
+                      ? "Your baseline is validated. Add a job description to create the compatibility score."
+                      : "Your baseline is analyzed, but it still needs improvement before it can unlock scoring."}
               </p>
               <p className="text-sm leading-6 text-slate-400">
                 {heroState === "no_baseline"
                   ? "Upload your resume to create your baseline file."
                   : heroState === "no_analysis"
-                    ? "Complete your baseline to unlock analysis."
-                    : "Analysis is unlocked and ready whenever you are."}
+                    ? "Analyze your active baseline to determine whether it is ready."
+                    : primaryLoopState.isValidated
+                      ? "The validated baseline now unlocks job description entry."
+                      : "Continue improving the active baseline until it reaches the validation threshold."}
               </p>
               <p className="text-sm font-medium text-slate-200">
-                {heroState === "analysis_exists"
-                  ? "Primary action: analyze this role."
-                  : heroState === "no_analysis"
-                    ? "Primary action: continue building baseline."
-                    : "Primary action: upload your baseline."}
+                Primary action: {heroPrimaryActionLabel}.
               </p>
             </div>
             <div
@@ -1023,25 +1038,33 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
               data-testid="baseline-upload-surface"
             >
               <div className="space-y-3">
-                <FormButton
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isUploading || uploadLimitReached || !isEditableLibrary}
-                  className="bg-indigo-600 text-white hover:bg-indigo-500"
-                >
-                  {isEditableLibrary
-                    ? isUploading
-                      ? "Uploading..."
-                      : heroState === "no_baseline"
-                        ? "Upload resume"
-                        : "Continue building baseline"
-                    : "Upload unavailable"}
-                </FormButton>
+                {heroPrimaryActionHref ? (
+                  <Link
+                    href={heroPrimaryActionHref}
+                    className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                  >
+                    {heroPrimaryActionLabel}
+                  </Link>
+                ) : (
+                  <FormButton
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading || uploadLimitReached || !isEditableLibrary}
+                    className="bg-indigo-600 text-white hover:bg-indigo-500"
+                  >
+                    {isEditableLibrary
+                      ? isUploading
+                        ? "Uploading..."
+                        : "Upload Resume"
+                      : "Upload unavailable"}
+                  </FormButton>
+                )}
                 <p className="text-sm text-slate-300">
                   {heroState === "no_baseline"
                     ? "Upload resume or drag and drop a PDF or DOCX here."
-                    : "Add more evidence or replace the source file if you need to strengthen the baseline."}
+                    : primaryLoopState.isValidated
+                      ? "Add a job description to move into scoring."
+                      : "Analyze the active baseline to determine whether it is ready."}
                 </p>
-                <p className="text-sm text-slate-400">Accepted file types: PDF and DOCX</p>
                 <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
                   {activeBaselines.length} of {BETA_BASELINE_UPLOAD_LIMIT} active resumes
                 </p>
@@ -1119,7 +1142,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   isAnalyzing: isLoading,
                 });
                 const readinessLabel = getBaselineReadinessLabel(readinessState);
-                const canTargetJob = readinessState === "READY";
+                const canTargetJob = readinessState === "READY" && (latestRoleFitScore ?? 0) >= 80;
                 const setActiveDisabled = isLoading || isPrimary || !isHydrated;
                 const baselineDetailsHref = getBaselineDetailsHref(baseline.id);
                 const latestResultsForBaselineHref = assessmentSummary?.latestAssessmentId
@@ -1178,7 +1201,14 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                         >
                           {formatCardActionLabel("View Baseline Details")}
                         </Link>
-                        {readinessState === "READY" ? (
+                        {readinessState === "READY" ? canTargetJob ? (
+                          <Link
+                            href={`/target?baselineId=${encodeURIComponent(baseline.id)}`}
+                            className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-cyan-300/20 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold uppercase text-cyan-50 transition hover:bg-cyan-400/15"
+                          >
+                            {formatCardActionLabel("Add Job Description")}
+                          </Link>
+                        ) : (
                           <FormButton
                             onClick={() => void runCanonicalBaselineAnalysis(baseline.id)}
                             disabled={isLoading || !isEditableLibrary}
@@ -1186,16 +1216,8 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                           >
                             {isLoading
                               ? formatCardActionLabel("Running...")
-                              : formatCardActionLabel("Run Compatibility Analysis")}
+                              : formatCardActionLabel("Continue Building Baseline")}
                           </FormButton>
-                        ) : null}
-                        {canTargetJob ? (
-                          <Link
-                            href={`/target?baselineId=${encodeURIComponent(baseline.id)}`}
-                            className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-cyan-300/20 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold uppercase text-cyan-50 transition hover:bg-cyan-400/15"
-                          >
-                            {formatCardActionLabel("Add Job")}
-                          </Link>
                         ) : null}
                         {isEditableLibrary ? (
                           <>

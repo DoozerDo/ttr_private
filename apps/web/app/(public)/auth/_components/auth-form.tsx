@@ -109,8 +109,8 @@ function isAccessRequiredError(message: string | undefined, status: number): boo
   );
 }
 
-async function hasPriorAnalysis(): Promise<boolean> {
-  const response = await fetch("/api/users/me/last-assessment", {
+async function hasActiveBaseline(): Promise<boolean> {
+  const response = await fetch("/api/baselines", {
     method: "GET",
     credentials: "include",
     cache: "no-store",
@@ -121,20 +121,15 @@ async function hasPriorAnalysis(): Promise<boolean> {
   }
 
   const payload = await response.json().catch(() => null);
-  if (!payload || typeof payload !== "object") {
+  if (!Array.isArray(payload)) {
     return false;
   }
 
-  const candidate = payload as { assessmentId?: unknown; id?: unknown; lastAssessmentId?: unknown };
-  const assessmentId =
-    typeof candidate.assessmentId === "string"
-      ? candidate.assessmentId.trim()
-      : typeof candidate.id === "string"
-        ? candidate.id.trim()
-        : typeof candidate.lastAssessmentId === "string"
-          ? candidate.lastAssessmentId.trim()
-          : "";
-  return Boolean(assessmentId);
+  return payload.some((baseline) => {
+    if (!baseline || typeof baseline !== "object") return false;
+    const status = (baseline as { status?: unknown }).status;
+    return typeof status === "string" && status.toUpperCase() !== "ARCHIVED";
+  });
 }
 
 export function AuthForm({ mode, returnPath }: AuthFormProps) {
@@ -206,7 +201,7 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
       return;
     }
 
-    const targetPath = (await hasPriorAnalysis()) ? sanitizeReturnPath(returnPath) ?? "/baseline" : "/first-run";
+    const targetPath = (await hasActiveBaseline()) ? sanitizeReturnPath(returnPath) ?? "/baseline" : "/first-run";
     await router.replace(targetPath);
     await router.refresh();
   };

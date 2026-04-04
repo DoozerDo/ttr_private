@@ -148,7 +148,7 @@ export function JobsHub({ selectedJobId, onJobMissing }: JobsHubProps) {
         label="JOB DESCRIPTION"
         title=""
         description="Add a job description to score against your resume."
-        primaryAction={<FormButton onClick={navigateToAddJob}>Add job</FormButton>}
+        primaryAction={<FormButton onClick={navigateToAddJob}>Add Job Description</FormButton>}
       >
         {error ? (
           <Alert intent="error" title="Jobs error">
@@ -170,7 +170,7 @@ export function JobsHub({ selectedJobId, onJobMissing }: JobsHubProps) {
           <EmptyState
             title="No jobs yet"
             body="Add a job to start building your target workspace."
-            cta={<FormButton onClick={navigateToAddJob}>Add job</FormButton>}
+            cta={<FormButton onClick={navigateToAddJob}>Add Job Description</FormButton>}
           />
         ) : (
           <div className="space-y-3">
@@ -237,8 +237,8 @@ export function JobsHub({ selectedJobId, onJobMissing }: JobsHubProps) {
       {isIngestOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-3xl rounded-2xl border border-white/10 bg-slate-950 p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="text-sm font-semibold text-slate-100">Add job</div>
+              <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="text-sm font-semibold text-slate-100">Add Job Description</div>
               <FormButton variant="secondary" onClick={() => setIsIngestOpen(false)}>
                 Close
               </FormButton>

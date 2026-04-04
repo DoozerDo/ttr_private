@@ -1250,10 +1250,10 @@ export function WorkspaceRunner({
                 className="inline-flex items-center justify-center whitespace-nowrap rounded-2xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
               >
                 {!productReadiness.canOpenStudio
-                  ? "ANALYZE"
+                  ? "Generate Compatibility Score"
                   : isLimitedHighFit
-                  ? "ANALYZE"
-                  : "ANALYZE"}
+                  ? "Generate Compatibility Score"
+                  : "Generate Compatibility Score"}
               </a>
             )}
           </div>

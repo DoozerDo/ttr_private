@@ -14,6 +14,88 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe("auth entry flow", () => {
+  it("sends logged-in users with an active baseline back to baseline instead of first run", async () => {
+    setFetchImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/auth/login")) {
+        return jsonResponse({ message: "ok" }, 200);
+      }
+      if (url.includes("/api/users/me")) {
+        return jsonResponse({
+          email: "user@example.com",
+          profileCompletedAt: "2025-03-01T00:00:00.000Z",
+          roleTitle: "Director of Support",
+          intendedUse: "baseline",
+        });
+      }
+      if (url.includes("/api/baselines")) {
+        return jsonResponse([
+          {
+            id: "base-1",
+            status: "ACTIVE",
+            latestBaselineScore: 84,
+            latestAssessmentSummary: {
+              latestAssessmentId: "assessment-1",
+              latestAssessmentCreatedAt: "2026-03-01T00:00:00.000Z",
+              latestFitScore: 84,
+              hasCompletedAssessment: true,
+            },
+          },
+        ]);
+      }
+      return jsonResponse({}, 200);
+    });
+
+    render(<AuthForm mode="login" returnPath="/baseline" />);
+
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "user@example.com" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Log in" }));
+
+    await waitFor(() => {
+      expect(mockRouterReplace).toHaveBeenCalledWith("/baseline");
+    });
+    expect(mockRouterReplace).not.toHaveBeenCalledWith("/first-run");
+  });
+
+  it("keeps archived-only users on first run", async () => {
+    setFetchImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/auth/login")) {
+        return jsonResponse({ message: "ok" }, 200);
+      }
+      if (url.includes("/api/users/me")) {
+        return jsonResponse({
+          email: "user@example.com",
+          profileCompletedAt: "2025-03-01T00:00:00.000Z",
+          roleTitle: "Director of Support",
+          intendedUse: "baseline",
+        });
+      }
+      if (url.includes("/api/baselines")) {
+        return jsonResponse([
+          {
+            id: "base-archived",
+            status: "ARCHIVED",
+            archivedAt: "2026-03-01T00:00:00.000Z",
+            latestBaselineScore: 92,
+          },
+        ]);
+      }
+      return jsonResponse({}, 200);
+    });
+
+    render(<AuthForm mode="login" returnPath="/baseline" />);
+
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "user@example.com" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Log in" }));
+
+    await waitFor(() => {
+      expect(mockRouterReplace).toHaveBeenCalledWith("/first-run");
+    });
+  });
+
   it("routes login users who need access code into redemption with a clean next path", async () => {
     setFetchImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);

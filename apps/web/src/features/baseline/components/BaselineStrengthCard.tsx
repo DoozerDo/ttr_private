@@ -1,7 +1,7 @@
 "use client";
 
 import { FormButton } from "@/components/FormButton";
-import { BASELINE_READINESS_LABELS, BASELINE_USABLE_MIN_PERCENT } from "@/src/features/baseline/constants";
+import { BASELINE_READINESS_LABELS } from "@/src/features/baseline/constants";
 import { buildBaselineStrength } from "@/src/features/baseline/utils/baselineStrength";
 
 type BaselineStrengthCardProps = {
@@ -10,6 +10,7 @@ type BaselineStrengthCardProps = {
   isIncomplete: boolean;
   onContinue: () => void;
   onRunAnalysis?: () => void;
+  onAddJobDescription?: () => void;
 };
 
 export function BaselineStrengthCard({
@@ -18,14 +19,19 @@ export function BaselineStrengthCard({
   isIncomplete,
   onContinue,
   onRunAnalysis,
+  onAddJobDescription,
 }: BaselineStrengthCardProps) {
   const boundedProgress = Math.max(0, Math.min(100, Math.round(progressPercent)));
   const strength = buildBaselineStrength(boundedProgress);
   const readinessLabel = BASELINE_READINESS_LABELS[strength.readiness];
-  const shouldAnalyze = analysisStatus === "NOT_ANALYZED" || analysisStatus === "READY";
+  const shouldAnalyze = analysisStatus === "NOT_ANALYZED";
+  const shouldContinue = analysisStatus === "READY" && isIncomplete;
+  const shouldAddJobDescription = analysisStatus === "READY" && !isIncomplete;
   const nextStepLabel = shouldAnalyze
     ? "Next step: analyze this role."
-    : "Next step: continue building baseline.";
+    : shouldContinue
+      ? "Next step: continue building baseline."
+      : "Next step: add a job description.";
 
   return (
     <section className="space-y-4 rounded-2xl border border-white/10 bg-slate-900/40 p-5">
@@ -50,23 +56,29 @@ export function BaselineStrengthCard({
 
       <div className="space-y-2">
         <p className="text-base font-semibold text-slate-100">
-          {analysisStatus === "NOT_ANALYZED"
+          {shouldAnalyze
             ? "Your baseline is active, but it has not been analyzed yet."
-            : isIncomplete
+            : shouldContinue
               ? "Your baseline still needs a few signals before it is ready."
-              : "Your baseline is ready for role analysis."}
+              : "Your baseline is ready to unlock job scoring."}
         </p>
         <p className="text-sm text-slate-400">
-          {analysisStatus === "NOT_ANALYZED"
+          {shouldAnalyze
             ? "The baseline exists, so the next step is to analyze it against a role."
-            : isIncomplete
+            : shouldContinue
               ? "Add the missing baseline evidence before you analyze a role."
-              : "The baseline is ready to compare against a specific role."}
+              : "Add a job description to create the compatibility score."}
         </p>
         <p className="text-sm font-medium text-slate-200">{nextStepLabel}</p>
       </div>
 
       {shouldAnalyze && onRunAnalysis ? (
+        <FormButton onClick={onRunAnalysis}>Analyze this role</FormButton>
+      ) : shouldAddJobDescription && onAddJobDescription ? (
+        <FormButton onClick={onAddJobDescription}>Add Job Description</FormButton>
+      ) : shouldContinue ? (
+        <FormButton onClick={onContinue}>Continue building baseline</FormButton>
+      ) : onRunAnalysis ? (
         <FormButton onClick={onRunAnalysis}>Analyze this role</FormButton>
       ) : (
         <FormButton onClick={onContinue}>Continue building baseline</FormButton>

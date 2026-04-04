@@ -9,6 +9,7 @@ import { PageShell } from "@/components/PageShell";
 import { ScoreGauge } from "@/components/ScoreGauge";
 import type { BaselineDto } from "@/lib/baselines";
 import type { JobDto } from "@/lib/jobs";
+import { deriveBaselineLoopState } from "@/lib/baselineLoopState";
 import type { AnalysisResult, JobSourceType, StoredAnalysisRecord } from "../lib/session";
 import {
   normalizeAnalysisResult,
@@ -469,7 +470,11 @@ export default function AnalyzePage() {
   const hasBaseline = Boolean(baselineId);
   const hasSelectedJob = Boolean(jobId);
   const hasJobDescription = jobDescription.trim().length > 0;
-  const inputsReady = hasBaseline && (hasSelectedJob || hasJobDescription);
+  const baselineLoopState = useMemo(
+    () => deriveBaselineLoopState(baselines, baselineId, hasSelectedJob || hasJobDescription),
+    [baselines, baselineId, hasJobDescription, hasSelectedJob],
+  );
+  const inputsReady = baselineLoopState.isReadyForJobInput || baselineLoopState.isReadyForScoring;
 
   const resultScore = useMemo(() => resolveScore(result), [result]);
   const canonicalResult = useMemo(

@@ -26,6 +26,7 @@ import { OverflowMenu } from "./_components/OverflowMenu";
 import { SetupModuleCard } from "./_components/SetupModuleCard";
 import { setBaselineName } from "./_components/selectionStore";
 import { BaselineUnlockProgress } from "@/src/components/baseline/BaselineUnlockProgress";
+import { deriveBaselineLoopState } from "@/lib/baselineLoopState";
 
 interface BaselineDashboardProps {
   initialBaselines: BaselineDto[];
@@ -397,9 +398,16 @@ export function BaselineDashboard({
       isBaselineReady,
     };
   }, [activeBaselineId, selectedBaselineDetails]);
-  const baselineAnalysisStatus: "NOT_ANALYZED" | "ANALYZING" | "READY" = selectedBaselineDetails?.latestAssessmentSummary
-    ? "READY"
-    : "NOT_ANALYZED";
+  const baselineLoopState = useMemo(
+    () =>
+      deriveBaselineLoopState(
+        selectedBaselineDetails ? [selectedBaselineDetails] : sortedBaselines,
+        activeBaselineId,
+      ),
+    [activeBaselineId, selectedBaselineDetails, sortedBaselines],
+  );
+  const baselineAnalysisStatus = baselineLoopState.analysisStatus;
+  const baselineValidated = baselineLoopState.isValidated;
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "production") {
@@ -576,10 +584,10 @@ export function BaselineDashboard({
           ) : null}
 
           {activeBaselineId ? (
-            <BaselineUnlockProgress
+              <BaselineUnlockProgress
               progressPercent={baselineUnlockState.progressPercent}
               analysisStatus={baselineAnalysisStatus}
-              isIncomplete={baselineAnalysisStatus === "READY" && baselineUnlockState.progressPercent < 100}
+              isIncomplete={baselineAnalysisStatus === "READY" && !baselineValidated}
               milestoneLabel={
                 loadingSelectedBaselineDetails ? "Resume ingested" : baselineUnlockState.milestoneLabel
               }
@@ -588,6 +596,9 @@ export function BaselineDashboard({
                 router.push(activeBaselineDetailsHref);
               }}
               onRunAnalysis={() => {
+                router.push(activeTargetHref);
+              }}
+              onAddJobDescription={() => {
                 router.push(activeTargetHref);
               }}
             />

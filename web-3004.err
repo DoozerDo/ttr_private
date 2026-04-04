@@ -1,0 +1,7 @@
+[baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+Auth proxy upstream config error {
+  code: 'UPSTREAM_API_URL_MISSING',
+  message: 'Missing upstream API base URL. Set API_BASE_URL for Next.js server-side route handlers.',
+  details: { checkedKeys: [ 'API_BASE_URL', 'NEXT_PUBLIC_API_BASE_URL' ] },
+  endpoint: '/auth/login'
+}
