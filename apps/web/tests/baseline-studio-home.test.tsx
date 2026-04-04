@@ -165,9 +165,10 @@ describe("BaselineStudioHome", () => {
     expect(screen.queryByRole("button", { name: "Upload resume" })).toBeNull();
     expect(screen.getByRole("link", { name: "VIEW BASELINE DETAILS" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "RUN COMPATIBILITY ANALYSIS" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "ADD JOB" })).toBeInTheDocument();
+    expect(screen.getByText("Primary action: Add Job Description.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "ADD JOB DESCRIPTION" })).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByRole("link", { name: "ADD JOB" })).toHaveAttribute(
+      expect(screen.getByRole("link", { name: "ADD JOB DESCRIPTION" })).toHaveAttribute(
         "href",
         "/target?baselineId=base-1",
       );
@@ -812,16 +813,33 @@ describe("BaselineStudioHome", () => {
   });
 
   it("uploads successfully from wrapped API payload and does not persist score history prematurely", async () => {
-    let analysisScoreCalled = false;
+    let analyzeCalled = false;
 
     setFetchImplementation(async (input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (url.includes("/api/analysis/history")) {
         return createJsonResponse([]);
       }
+      if (url.includes("/api/baselines/analyze")) {
+        analyzeCalled = true;
+        return createJsonResponse({
+          id: "uploaded-1",
+          latestAssessmentSummary: {
+            latestAssessmentId: "assessment-uploaded-1",
+            latestAssessmentCreatedAt: "2026-01-10T00:05:00.000Z",
+            latestFitScore: 82,
+            hasCompletedAssessment: true,
+          },
+        });
+      }
       if (url.includes("/api/baselines") && init?.method === "POST") {
         return createJsonResponse({
-          baseline: createBaseline("uploaded-1", "2026-01-10T00:00:00.000Z", "uploaded.pdf"),
+          baseline: createBaseline("uploaded-1", "2026-01-10T00:00:00.000Z", "uploaded.pdf", {
+            latestAssessmentId: null,
+            latestAssessmentCreatedAt: null,
+            latestFitScore: null,
+            hasCompletedAssessment: false,
+          }),
           baselineId: "uploaded-1",
           schemaVersion: "baseline_schema_v1",
           userVerified: false,
@@ -830,9 +848,13 @@ describe("BaselineStudioHome", () => {
           flagsSummary: { missingFields: 0, lowConfidence: 0 },
         });
       }
-      if (url.includes("/analysis-score")) {
-        analysisScoreCalled = true;
-        throw new Error(`Unexpected fetch: ${url}`);
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return createJsonResponse([
+          createAnalyzedBaseline("uploaded-1", "uploaded.pdf", 82),
+        ]);
+      }
+      if (url.includes("/api/baselines/uploaded-1")) {
+        return createJsonResponse(createAnalyzedBaseline("uploaded-1", "uploaded.pdf", 82));
       }
       throw new Error(`Unexpected fetch: ${url}`);
     });
@@ -847,7 +869,11 @@ describe("BaselineStudioHome", () => {
     await waitFor(() => {
       expect(screen.getByText("uploaded.pdf")).toBeInTheDocument();
     });
-    expect(analysisScoreCalled).toBe(false);
+    await waitFor(() => {
+      expect(analyzeCalled).toBe(true);
+    });
+    expect(screen.getByText("Your verified baseline is ready")).toBeInTheDocument();
+    expect(screen.getByText("Primary action: Add Job Description.")).toBeInTheDocument();
   });
 });
 

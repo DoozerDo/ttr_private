@@ -7,6 +7,7 @@ import { useMemo, type ReactNode } from "react";
 import { LandingAnalyticsTracker } from "@/src/components/landing/LandingAnalyticsTracker";
 import { DemoAnalysisPreviewSection } from "@/src/components/landing/DemoAnalysisPreviewSection";
 import { LandingCompatibilityInputSection } from "@/src/components/landing/LandingCompatibilityInputSection";
+import { LandingNav } from "@/src/components/landing/LandingNav";
 import { trackEvent } from "@/src/lib/analytics";
 
 type LandingPageProps = {
@@ -75,6 +76,7 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,_#050816_0%,_#070b14_60%,_#050816_100%)] text-slate-100">
       <LandingAnalyticsTracker />
+      <LandingNav isAuthenticated={isAuthenticated} />
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-2 px-4 py-3 md:px-6 md:py-4 lg:px-8">
         <section className="rounded-[30px] border border-white/12 bg-slate-950/70 px-5 py-5 md:px-8 md:pb-4 md:pt-7">
           <div className="grid gap-4 lg:grid-cols-[1.08fr_0.92fr] lg:items-center">

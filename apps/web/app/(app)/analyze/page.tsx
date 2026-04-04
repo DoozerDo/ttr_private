@@ -369,7 +369,7 @@ function CompatibilitySection({
       ) : null}
       <div className="mt-8 flex justify-center">
         <FormButton onClick={onAssess} disabled={!inputsReady || loading}>
-          {loading ? "Assessing…" : "Assess compatibility"}
+          {loading ? "Assessing…" : "Generate Compatibility Score"}
         </FormButton>
       </div>
     </section>

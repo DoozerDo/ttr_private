@@ -771,6 +771,15 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     async (file: File) => {
       if (isUploading || uploadLimitReached) return;
 
+      if (process.env.NODE_ENV !== "production") {
+        console.debug("[BaselineStudioHome] upload handler entered", {
+          filename: file.name,
+          size: file.size,
+          isUploading,
+          uploadLimitReached,
+        });
+      }
+
       setIsUploading(true);
       setError(null);
       setDuplicateError(null);
@@ -838,6 +847,14 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           setError("Unable to upload resume right now.");
           return;
         }
+
+        if (process.env.NODE_ENV !== "production") {
+          console.debug("[BaselineStudioHome] upload persisted", {
+            uploadedBaselineId: baselineRecord.id,
+            originalFilename: baselineRecord.originalFilename,
+          });
+        }
+
         setBaselineList((current) => [
           baselineRecord,
           ...current.filter((item) => item.id !== baselineRecord.id),
@@ -846,6 +863,57 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         setUploadSuccessId(baselineRecord.id);
         setHighlightedBaselineId(baselineRecord.id);
         setPostUploadCtaBaselineId(baselineRecord.id);
+
+        if (process.env.NODE_ENV !== "production") {
+          console.debug("[BaselineStudioHome] upload baseline ready for analysis", {
+            uploadedBaselineId: baselineRecord.id,
+            status: baselineRecord.status,
+            latestBaselineScore: baselineRecord.latestBaselineScore ?? null,
+            latestAssessmentSummary: baselineRecord.latestAssessmentSummary ?? null,
+          });
+        }
+
+        const analysisResponse = await fetch("/api/baselines/analyze", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ baselineId: baselineRecord.id }),
+        });
+
+        if (process.env.NODE_ENV !== "production") {
+          console.debug("[BaselineStudioHome] upload analyze request issued", {
+            uploadedBaselineId: baselineRecord.id,
+            requestPath: "/api/baselines/analyze",
+          });
+        }
+
+        const analysisPayload = (await readResponsePayload(analysisResponse)) as ErrorPayload | null;
+        if (!analysisResponse.ok) {
+          if (process.env.NODE_ENV !== "production") {
+            console.debug("[BaselineStudioHome] upload analyze failed", {
+              uploadedBaselineId: baselineRecord.id,
+              status: analysisResponse.status,
+              payload: analysisPayload,
+            });
+          }
+          throw new Error(
+            typeof analysisPayload?.message === "string"
+              ? analysisPayload.message
+              : "Unable to analyze the uploaded resume right now.",
+          );
+        }
+
+        if (process.env.NODE_ENV !== "production") {
+          console.debug("[BaselineStudioHome] upload analysis complete", {
+            uploadedBaselineId: baselineRecord.id,
+            hasCompletedAssessment:
+              analysisPayload?.latestAssessmentSummary?.hasCompletedAssessment ?? false,
+            latestFitScore: analysisPayload?.latestAssessmentSummary?.latestFitScore ?? null,
+          });
+        }
+
+        await refreshBaselineLibrary();
+        await fetchBaselineDetails(baselineRecord.id);
       } catch (uploadError) {
         console.error("Upload failed", uploadError);
         setError("Unable to upload resume right now.");
@@ -1004,7 +1072,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
               </p>
               <p className="text-sm font-medium text-slate-200">
                 {heroState === "analysis_exists"
-                  ? "Primary action: run compatibility analysis."
+                  ? "Primary action: Add Job Description."
                   : heroState === "no_analysis"
                     ? "Primary action: continue building baseline."
                     : "Primary action: upload your baseline."}
@@ -1201,7 +1269,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                             href={`/target?baselineId=${encodeURIComponent(baseline.id)}`}
                             className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-cyan-300/20 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold uppercase text-cyan-50 transition hover:bg-cyan-400/15"
                           >
-                            {formatCardActionLabel("Add Job")}
+                            {formatCardActionLabel("Add Job Description")}
                           </Link>
                         ) : null}
                         {isEditableLibrary ? (

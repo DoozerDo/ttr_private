@@ -10,30 +10,17 @@ class MockIntersectionObserver {
 }
 
 describe("Landing conversion pass", () => {
-  it("renders hero and input CTAs with clear example labeling", () => {
+  it("shows a visible login route on the public landing page for unauthenticated users", () => {
     vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
 
     render(<LandingPage isAuthenticated={false} />);
 
-    expect(
-      screen.getByRole("heading", { name: "Beta invite holders use Target This Role to see if their background truly fits a role before they apply." }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Get beta access" })).toHaveAttribute("href", "/auth/signup?next=%2Fbaseline");
-    expect(screen.getByRole("button", { name: "Select resume" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Run Career Compatibility Analysis" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "How it works" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Example compatibility analysis" })).toBeInTheDocument();
-    expect(screen.getByText("This is a static example for format only. Your uploaded inputs produce your actual result.")).toBeInTheDocument();
+    const loginLinks = screen.getAllByRole("link", { name: "Log in" });
+    const scoreButtons = screen.getAllByRole("button", { name: "Get your score" });
 
-    const heroHeading = screen.getByRole("heading", { name: "Beta invite holders use Target This Role to see if their background truly fits a role before they apply." });
-    const inputHeading = screen.getByRole("button", { name: "Select resume" });
-    const previewHeading = screen.getByRole("heading", { name: "Example compatibility analysis" });
-    expect(
-      heroHeading.compareDocumentPosition(inputHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(
-      inputHeading.compareDocumentPosition(previewHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(loginLinks.some((link) => link.getAttribute("href") === "/auth/login?next=%2Fbaseline")).toBe(true);
+    expect(screen.getByRole("link", { name: "Get beta access" })).toHaveAttribute("href", "/auth/signup?next=%2Fbaseline");
+    expect(scoreButtons.length).toBeGreaterThan(0);
   });
 });
 

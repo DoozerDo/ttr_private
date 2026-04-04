@@ -100,7 +100,8 @@ describe("Analyze page assessment persistence contract", () => {
     fireEvent.change(screen.getByLabelText("Saved job"), {
       target: { value: "job-1" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Assess compatibility" }));
+    expect(screen.getByRole("button", { name: "Generate Compatibility Score" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Generate Compatibility Score" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -163,7 +164,7 @@ describe("Analyze page assessment persistence contract", () => {
     fireEvent.change(screen.getByLabelText("Saved job"), {
       target: { value: "job-1" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Assess compatibility" }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate Compatibility Score" }));
 
     await waitFor(() => {
       expect(
@@ -225,7 +226,7 @@ describe("Analyze page assessment persistence contract", () => {
     fireEvent.change(screen.getByLabelText("Saved job"), {
       target: { value: "job-1" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Assess compatibility" }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate Compatibility Score" }));
 
     await waitFor(() => {
       expect(
