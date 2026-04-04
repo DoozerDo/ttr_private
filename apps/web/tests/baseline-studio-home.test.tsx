@@ -169,7 +169,11 @@ describe("BaselineStudioHome", () => {
     render(<BaselineStudioHome baselines={[createAnalyzedBaseline("base-1", "resume-1.pdf", 82)]} />);
 
     expect(screen.getByText("Your baseline is ready")).toBeInTheDocument();
-    expect(screen.getByText(/Source file for active baseline:/i)).toBeInTheDocument();
+    const activeSection = screen.getByRole("heading", { name: "Active baseline" }).closest("section");
+    expect(activeSection).toBeTruthy();
+    expect(within(activeSection as HTMLElement).getByText("resume-1.pdf")).toBeInTheDocument();
+    expect(within(activeSection as HTMLElement).getByText("Validated baseline")).toBeInTheDocument();
+    expect(within(activeSection as HTMLElement).getByText("Ready for targeting")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Upload resume" })).toBeNull();
     expect(screen.getAllByRole("link", { name: "View baseline details" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: /target a role/i }).length).toBeGreaterThan(0);
@@ -229,7 +233,10 @@ describe("BaselineStudioHome", () => {
     await screen.findByText("Your baseline is ready");
     await screen.findByText("Source resumes");
     expect(screen.getByText("Role fit score: 55%")).toBeInTheDocument();
-    expect(screen.getByText(/Source file for active baseline:/i)).toBeInTheDocument();
+    const activeSection = screen.getByRole("heading", { name: "Active baseline" }).closest("section");
+    expect(activeSection).toBeTruthy();
+    expect(within(activeSection as HTMLElement).getByText("resume-1.pdf")).toBeInTheDocument();
+    expect(within(activeSection as HTMLElement).getByText("Validated baseline")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Upload resume" })).toBeNull();
     expect(screen.getAllByRole("link", { name: "View baseline details" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: /target a role/i }).length).toBeGreaterThan(0);
@@ -506,11 +513,15 @@ describe("BaselineStudioHome", () => {
     expect(screen.getAllByText(/Last analyzed/i).length).toBeGreaterThan(0);
     expect(screen.queryByText(/Fit 82%/i)).not.toBeInTheDocument();
     expect(screen.getByText("Role fit score: 82%")).toBeInTheDocument();
-    expect(screen.getByText("Source file for active baseline: resume-1.pdf")).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "View baseline details" }).length).toBeGreaterThan(0);
+    const activeSection = screen.getByRole("heading", { name: "Active baseline" }).closest("section");
+    expect(activeSection).toBeTruthy();
+    expect(within(activeSection as HTMLElement).getByText("resume-1.pdf")).toBeInTheDocument();
+    expect(within(activeSection as HTMLElement).getByText("Validated baseline")).toBeInTheDocument();
     const sourceSection = screen.getByRole("heading", { name: "Source resumes" }).closest("section");
     expect(sourceSection).toBeTruthy();
-    expect(within(sourceSection as HTMLElement).queryByRole("button", { name: /upload another resume/i })).toBeNull();
+    expect(within(sourceSection as HTMLElement).getByText("resume-1.pdf")).toBeInTheDocument();
+    expect(within(sourceSection as HTMLElement).getByText("Used to create active baseline")).toBeInTheDocument();
   });
 
   it("keeps the active analyzed baseline authoritative when stale non-active baselines are still not analyzed", async () => {
@@ -599,7 +610,7 @@ describe("BaselineStudioHome", () => {
       />,
     );
 
-    await screen.findByText(/not analyzed/i);
+    await screen.findByText("resume-1.pdf");
     expect(screen.getAllByRole("button", { name: /upload another resume/i }).length).toBeGreaterThan(0);
     expect(screen.getByText("Last role analysis: 67%")).toBeInTheDocument();
   });
@@ -645,12 +656,11 @@ describe("BaselineStudioHome", () => {
 
     await screen.findByText("resume-1.pdf");
     const baselineArticle = within(screen.getByText("resume-1.pdf").closest("article") as HTMLElement);
-    expect(baselineArticle.getByText(/not analyzed/i)).toBeInTheDocument();
+    expect(baselineArticle.queryByText(/not analyzed/i)).toBeNull();
 
     fireEvent.click(screen.getAllByRole("button", { name: /upload another resume/i })[0]);
 
-    await screen.findByText(/not analyzed/i);
-    expect(baselineArticle.getByText(/not analyzed/i)).toBeInTheDocument();
+    expect(baselineArticle.queryByText(/not analyzed/i)).toBeNull();
     expect(baselineArticle.queryByText(/ready for targeting/i)).toBeNull();
   });
 
@@ -702,15 +712,15 @@ describe("BaselineStudioHome", () => {
 
     const baselineAArticle = within(screen.getByText("resume-a.pdf").closest("article") as HTMLElement);
     const baselineBArticle = within(screen.getByText("resume-b.pdf").closest("article") as HTMLElement);
-    expect(baselineAArticle.getByText(/not analyzed/i)).toBeInTheDocument();
-    expect(baselineBArticle.getByText(/not analyzed/i)).toBeInTheDocument();
+    expect(baselineAArticle.queryByText(/not analyzed/i)).toBeNull();
+    expect(baselineBArticle.queryByText(/not analyzed/i)).toBeNull();
 
     publishBaselineUpdated({ baselineId: "base-a", source: "analysis" });
 
     await waitFor(() => {
       expect(screen.getByText(/ready for targeting/i)).toBeInTheDocument();
     });
-    expect(baselineBArticle.getByText(/not analyzed/i)).toBeInTheDocument();
+    expect(baselineBArticle.queryByText(/not analyzed/i)).toBeNull();
     expect(
       fetchMock.mock.calls.some(
         ([url]) => typeof url === "string" && url.includes("/api/baselines?includeArchived=true"),

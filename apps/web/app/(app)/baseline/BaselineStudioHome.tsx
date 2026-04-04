@@ -41,6 +41,7 @@ import { publishBaselineUpdated, subscribeBaselineUpdated } from "@/src/lib/base
 import { BETA_BASELINE_UPLOAD_LIMIT } from "@/src/features/baseline/constants";
 import { getBaselineDetailsHref } from "@/src/navigation/routes";
 import { CareerGravity } from "../results/components/CareerGravity";
+import { ResumeWithBaselineStatus } from "./_components/ResumeWithBaselineStatus";
 
 type BaselineStudioHomeProps = {
   baselines: BaselineDto[];
@@ -1203,15 +1204,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             </header>
             {primaryBaseline ? (
               <article className="rounded-[16px] border border-white/10 bg-slate-950/30 p-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm font-semibold text-slate-100">{primaryBaseline.originalFilename}</p>
-                  <span className="rounded-full border border-cyan-300/15 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-cyan-100">
-                    Validated baseline
-                  </span>
-                  <span className="rounded-full border border-emerald-300/15 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-emerald-100">
-                    Ready for targeting
-                  </span>
-                </div>
+                <ResumeWithBaselineStatus
+                  filename={primaryBaseline.originalFilename}
+                  isValidated
+                  isReadyForTargeting
+                />
                 {latestAssessmentCreatedAt ? (
                   <p className="mt-2 text-xs text-slate-400">Last analyzed {formatDateTime(latestAssessmentCreatedAt)}</p>
                 ) : null}
@@ -1334,19 +1331,14 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                         : "border-white/10 bg-slate-950/30"
                     }`}
                   >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-semibold text-slate-100">{baseline.originalFilename}</p>
-                      {isPrimary ? (
-                        <span className="rounded-full border border-cyan-300/15 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-cyan-100">
-                          Active baseline
-                        </span>
-                      ) : null}
-                      <span className="rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-300">
-                        {isArchived ? "archived" : readinessLabel.toLowerCase()}
-                      </span>
-                    </div>
+                    <ResumeWithBaselineStatus
+                      filename={baseline.originalFilename}
+                      isActiveBaseline={isPrimary}
+                      isValidated={hasCompletedAssessment && isPrimary}
+                      isReadyForTargeting={isReadyBaseline}
+                      isSourceForActiveBaseline={isValidatedBaselineState && isPrimary}
+                    />
                     <p className="mt-2 text-xs text-slate-400">Uploaded {formatDateTime(baseline.createdAt)}</p>
-                    <p className="mt-1 text-xs text-slate-400">Baseline name: {baseline.originalFilename}</p>
                     {hasCompletedAssessment ? (
                       <p className="mt-1 text-xs text-slate-400">
                         Last analyzed{" "}
@@ -1447,9 +1439,12 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 );
               })}
               {isValidatedBaselineState && !allBaselines.some((baseline) => baseline.id !== primaryBaselineId) ? (
-                <p className="text-sm text-slate-400">
-                  Source file for active baseline: {primaryBaseline?.originalFilename ?? "active baseline"}
-                </p>
+                <article className="rounded-[16px] border border-white/10 bg-slate-950/25 p-4">
+                  <ResumeWithBaselineStatus
+                    filename={primaryBaseline?.originalFilename ?? "active baseline"}
+                    isSourceForActiveBaseline
+                  />
+                </article>
               ) : null}
             </div>
           </section>
