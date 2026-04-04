@@ -54,6 +54,15 @@ type ErrorPayload = {
 
 type BaselineStrengthState = "empty" | "needs_analysis" | "ready";
 type BaselineReadinessState = "NOT_ANALYZED" | "ANALYZING" | "READY";
+type BaselinePageReadinessContract = {
+  activeBaselineId: string | null;
+  baselineId: string | null;
+  hasCompletedAssessment: boolean;
+  latestAssessmentId: string | null;
+  latestAssessmentCreatedAt: string | null;
+  latestFitScore: number | null;
+  readinessState: BaselineReadinessState;
+};
 
 type StrengtheningPrompt = {
   question: string;
@@ -226,6 +235,35 @@ function resolveCanonicalAssessmentSummary(
   )[0];
 }
 
+function buildBaselineReadinessContract({
+  baselineId,
+  summary,
+  isAnalyzing = false,
+}: {
+  baselineId: string | null;
+  summary?: BaselineAssessmentSummaryDto | null;
+  isAnalyzing?: boolean;
+}): BaselinePageReadinessContract {
+  const hasCompletedAssessment = isBaselineAnalyzedFromSummary(summary);
+  const latestAssessmentId = summary?.latestAssessmentId?.trim() ?? null;
+  const latestAssessmentCreatedAt = summary?.latestAssessmentCreatedAt?.trim() ?? null;
+  const latestFitScore = getLatestRoleAnalysisFitScore(summary);
+  const readinessState = getBaselineReadinessState({
+    hasCompletedAssessment,
+    isAnalyzing,
+  });
+
+  return {
+    activeBaselineId: baselineId,
+    baselineId,
+    hasCompletedAssessment,
+    latestAssessmentId,
+    latestAssessmentCreatedAt,
+    latestFitScore,
+    readinessState,
+  };
+}
+
 function createBaselineUpdateProposal(signalLabel: string, answer: string) {
   return `${signalLabel}: ${answer.trim()}`;
 }
@@ -334,11 +372,16 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     };
   }, [allBaselines, baselineDetails, primaryBaselineId]);
 
-  const primaryAnalysisStatus = isBaselineAnalyzedFromSummary(
-    primaryBaseline?.latestAssessmentSummary,
-  )
-    ? "ready"
-    : "not_analyzed";
+  const primaryBaselineReadiness = useMemo(
+    () =>
+      buildBaselineReadinessContract({
+        baselineId: primaryBaseline?.id ?? primaryBaselineId ?? null,
+        summary: primaryBaseline?.latestAssessmentSummary ?? null,
+      }),
+    [primaryBaseline, primaryBaselineId],
+  );
+  const primaryAnalysisStatus =
+    primaryBaselineReadiness.readinessState === "READY" ? "ready" : "not_analyzed";
 
   const approvedSignalAdditions = useMemo(
     () => extractApprovedSignalAdditions(primaryBaseline),
@@ -398,7 +441,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   const analysisReady = baselineStrengthState === "ready";
   const latestAssessmentSummary = primaryBaseline?.latestAssessmentSummary ?? null;
   const hasBaseline = activeBaselines.length > 0;
-  const hasCompletedAnalysis = isBaselineAnalyzedFromSummary(latestAssessmentSummary);
+  const hasCompletedAnalysis = primaryBaselineReadiness.hasCompletedAssessment;
   const latestFitScore = getLatestRoleAnalysisFitScore(latestAssessmentSummary);
   const latestAssessmentId = latestAssessmentSummary?.latestAssessmentId?.trim() ?? null;
   const latestAssessmentCreatedAt = latestAssessmentSummary?.latestAssessmentCreatedAt?.trim() ?? null;
@@ -428,16 +471,20 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         selectedAtRuntime: Boolean(primaryBaselineId),
       },
       analysis: {
-        id: latestAssessmentId,
-        score: latestFitScore,
+        id: primaryBaselineReadiness.latestAssessmentId,
+        score: primaryBaselineReadiness.latestFitScore,
+        hasCompletedAssessment: primaryBaselineReadiness.hasCompletedAssessment,
+        readinessState: primaryBaselineReadiness.readinessState,
       },
       decision: {
-        finalAction: latestAssessmentId ? "analysis" : "baseline",
-        why: latestAssessmentId ? "baseline has a completed analysis" : "baseline still needs analysis",
+        finalAction: primaryBaselineReadiness.latestAssessmentId ? "analysis" : "baseline",
+        why: primaryBaselineReadiness.latestAssessmentId
+          ? "baseline has a completed analysis"
+          : "baseline still needs analysis",
       },
     };
     console.debug("baselineRuntimeDebug", baselineRuntimeDebug);
-  }, [latestAssessmentId, latestFitScore, primaryBaseline, primaryBaselineId]);
+  }, [primaryBaseline, primaryBaselineId, primaryBaselineReadiness]);
   const careerGravity = useMemo(
     () => buildCareerGravityUnlock(completedRoleAnalyses),
     [completedRoleAnalyses],
@@ -1174,25 +1221,41 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 const isPrimary = primaryBaselineId === baseline.id;
                 const isArchived = baseline.status === "ARCHIVED";
                 const assessmentSummary = baseline.latestAssessmentSummary;
-                const hasCompletedAssessment = isBaselineAnalyzedFromSummary(assessmentSummary);
-                const isLoading = loadingBaselineId === baseline.id;
-                const latestAssessmentTimestamp = assessmentSummary?.latestAssessmentCreatedAt;
-                const latestRoleFitScore =
-                  typeof assessmentSummary?.latestFitScore === "number"
-                    ? Math.max(0, Math.min(100, Math.round(assessmentSummary.latestFitScore)))
-                    : null;
-                const readinessState = getBaselineReadinessState({
-                  hasCompletedAssessment,
-                  isAnalyzing: isLoading,
+                const activeBaselineSummary =
+                  isPrimary ? primaryBaseline?.latestAssessmentSummary ?? assessmentSummary ?? null : assessmentSummary ?? null;
+                const baselineReadiness = buildBaselineReadinessContract({
+                  baselineId: baseline.id,
+                  summary: activeBaselineSummary,
+                  isAnalyzing: loadingBaselineId === baseline.id,
                 });
+                const hasCompletedAssessment = baselineReadiness.hasCompletedAssessment;
+                const isLoading = loadingBaselineId === baseline.id;
+                const readinessState = baselineReadiness.readinessState;
                 const readinessLabel = getBaselineReadinessLabel(readinessState);
                 const canTargetJob = readinessState === "READY";
                 const setActiveDisabled = isLoading || isPrimary || isArchived || !isHydrated;
                 const baselineDetailsHref = getBaselineDetailsHref(baseline.id);
-                const latestResultsForBaselineHref = assessmentSummary?.latestAssessmentId
-                  ? `/results?assessmentId=${encodeURIComponent(assessmentSummary.latestAssessmentId)}`
+                const latestResultsForBaselineHref = baselineReadiness.latestAssessmentId
+                  ? `/results?assessmentId=${encodeURIComponent(baselineReadiness.latestAssessmentId)}`
                   : null;
+                const latestAssessmentTimestamp = baselineReadiness.latestAssessmentCreatedAt;
+                const latestRoleFitScore =
+                  typeof baselineReadiness.latestFitScore === "number"
+                    ? Math.max(0, Math.min(100, Math.round(baselineReadiness.latestFitScore)))
+                    : null;
                 const canOpenStudio = latestRoleFitScore !== null && latestRoleFitScore >= 70;
+
+                if (process.env.NODE_ENV !== "production") {
+                  console.debug("[BaselineStudioHome] library readiness", {
+                    baselineId: baseline.id,
+                    isPrimary,
+                    activeBaselineId: primaryBaselineReadiness.activeBaselineId,
+                    hasCompletedAssessment: baselineReadiness.hasCompletedAssessment,
+                    readinessState,
+                    latestAssessmentId: baselineReadiness.latestAssessmentId,
+                    latestAssessmentCreatedAt: baselineReadiness.latestAssessmentCreatedAt,
+                  });
+                }
 
                 return (
                   <article

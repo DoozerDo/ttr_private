@@ -485,6 +485,44 @@ describe("BaselineStudioHome", () => {
     expect(screen.queryByRole("link", { name: "CONTINUE BUILDING BASELINE" })).not.toBeInTheDocument();
   });
 
+  it("keeps the active analyzed baseline authoritative when stale non-active baselines are still not analyzed", async () => {
+    setFetchImplementation(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(
+      <BaselineStudioHome
+        baselines={[
+          createBaseline("base-old", "2026-01-01T00:00:00.000Z", "resume-old.pdf", {
+            latestAssessmentId: null,
+            latestAssessmentCreatedAt: null,
+            latestFitScore: null,
+            hasCompletedAssessment: false,
+          }),
+          createBaseline("base-new", "2026-01-03T00:00:00.000Z", "resume-new.pdf", {
+            latestAssessmentId: "assessment-new",
+            latestAssessmentCreatedAt: "2026-03-20T12:00:00.000Z",
+            latestFitScore: 87,
+            hasCompletedAssessment: true,
+          }),
+        ]}
+      />,
+    );
+
+    await screen.findByText("Your verified baseline is ready");
+    expect(screen.getByText("Primary action: Add Job Description.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "RUN COMPATIBILITY ANALYSIS" })).toBeInTheDocument();
+
+    const activeCard = within(screen.getByText("resume-new.pdf").closest("article") as HTMLElement);
+    expect(activeCard.getByText(/ready for targeting/i)).toBeInTheDocument();
+    expect(activeCard.queryByText(/not analyzed/i)).toBeNull();
+    expect(screen.queryByText("Continue building your baseline")).not.toBeInTheDocument();
+  });
+
   it("does not show secondary role-fit metadata when no role analysis score exists", async () => {
     setFetchImplementation(async (input: RequestInfo) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
