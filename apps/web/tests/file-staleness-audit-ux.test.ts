@@ -44,6 +44,7 @@ describe("fileStalenessAudit UX helpers", () => {
         totalScanned: 10,
         totalExcluded: 5,
       },
+      likelyCleanupCandidates: 0,
     });
   });
 

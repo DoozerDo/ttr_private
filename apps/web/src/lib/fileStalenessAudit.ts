@@ -6,20 +6,25 @@ import type {
   FileStalenessRecord,
   FileStalenessAuditResult,
   FileStalenessAuditSummary,
+  PersistedFileStalenessAuditSnapshot,
 } from "./fileStalenessAudit.shared";
 import { classifyFileAge } from "./fileStalenessAudit.shared";
 
 export {
   classifyFileAge,
+  getDaysSinceLastAudit,
   getAuditReminderStatus,
   getCandidateReason,
   getCandidateTag,
   getLikelyCleanupCandidates,
+  getHygieneInsight,
+  getFileStalenessHygieneStatus,
   matchesAuditQuery,
   buildFileStalenessAuditSummaryText,
   buildPersistedSnapshot,
   getUniqueExtensions,
   type AuditReminderStatus,
+  type HygieneInsight,
   type FileStalenessAuditOptions,
   type FileStalenessAuditResult,
   type FileStalenessAuditSummary,
@@ -163,4 +168,20 @@ export async function runFileStalenessAudit(
     records,
     excludedPaths,
   };
+}
+
+const SNAPSHOT_PATH = path.resolve(process.cwd(), ".data", "file-staleness-audit.json");
+
+export async function readPersistedFileStalenessAuditSnapshot(): Promise<PersistedFileStalenessAuditSnapshot | null> {
+  try {
+    const raw = await fs.readFile(SNAPSHOT_PATH, "utf8");
+    return JSON.parse(raw) as PersistedFileStalenessAuditSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+export async function writePersistedFileStalenessAuditSnapshot(snapshot: PersistedFileStalenessAuditSnapshot) {
+  await fs.mkdir(path.dirname(SNAPSHOT_PATH), { recursive: true });
+  await fs.writeFile(SNAPSHOT_PATH, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
 }

@@ -1,40 +1,11 @@
-import { cookies, headers } from "next/headers";
-
-import { AUTH_COOKIE_NAME } from "@/lib/auth";
 import { FileStalenessAuditClient } from "./FileStalenessAuditClient";
-import type { PersistedFileStalenessAuditSnapshot } from "@/src/lib/fileStalenessAudit.shared";
+import { readPersistedFileStalenessAuditSnapshot } from "@/src/lib/fileStalenessAudit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-async function buildInternalUrl(path: string) {
-  const headerList = await headers();
-  const protocol = headerList.get("x-forwarded-proto") ?? "http";
-  const host = headerList.get("x-forwarded-host") ?? headerList.get("host");
-  const baseUrl = host ? `${protocol}://${host}` : "http://localhost:3000";
-  return new URL(path, baseUrl).toString();
-}
-
-async function loadSnapshot(): Promise<PersistedFileStalenessAuditSnapshot | null> {
-  const cookieStore = await cookies();
-  if (!cookieStore.get(AUTH_COOKIE_NAME)?.value) return null;
-
-  try {
-    const response = await fetch(await buildInternalUrl("/api/admin/file-staleness-audit"), {
-      cache: "no-store",
-      headers: {
-        cookie: (await headers()).get("cookie") ?? "",
-      },
-    });
-    if (!response.ok) return null;
-    return (await response.json()) as PersistedFileStalenessAuditSnapshot | null;
-  } catch {
-    return null;
-  }
-}
-
 export default async function FileStalenessAuditPage() {
-  const snapshot = await loadSnapshot();
+  const snapshot = await readPersistedFileStalenessAuditSnapshot();
 
   return (
     <div className="space-y-6">

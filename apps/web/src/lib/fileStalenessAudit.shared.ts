@@ -31,6 +31,7 @@ export type PersistedFileStalenessAuditSnapshot = {
   lastAuditRunAt: string;
   repoRoot: string;
   summary: FileStalenessAuditSummary;
+  likelyCleanupCandidates: number;
 };
 
 export type FileStalenessAuditOptions = {
@@ -40,6 +41,10 @@ export type FileStalenessAuditOptions = {
 
 export type AuditReminderStatus = "healthy" | "due_soon" | "overdue" | "first_run";
 type CandidateTag = "Review candidate" | "Strong review candidate";
+export type HygieneInsight = {
+  label: string;
+  detail: string;
+};
 
 export function classifyFileAge(ageDays: number): FileStalenessBucket {
   if (ageDays <= 30) return "ACTIVE";
@@ -53,6 +58,57 @@ export function getAuditReminderStatus(daysSinceLastRun: number | null): AuditRe
   if (daysSinceLastRun <= 30) return "healthy";
   if (daysSinceLastRun <= 44) return "due_soon";
   return "overdue";
+}
+
+export function getDaysSinceLastAudit(lastAuditRunAt: string | null | undefined, now = new Date()) {
+  if (!lastAuditRunAt) return null;
+  const parsed = new Date(lastAuditRunAt);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return Math.max(0, Math.floor((now.getTime() - parsed.getTime()) / 86_400_000));
+}
+
+export function getHygieneInsight(summary: Pick<FileStalenessAuditSummary, "stale" | "cold">): HygieneInsight {
+  if (summary.cold >= 25) {
+    return {
+      label: "High cleanup opportunity",
+      detail: `${summary.cold} cold files detected`,
+    };
+  }
+  if (summary.cold > 0) {
+    return {
+      label: "Moderate drift",
+      detail: `${summary.stale} stale files, review recommended`,
+    };
+  }
+  if (summary.stale > 0) {
+    return {
+      label: "Light drift",
+      detail: `${summary.stale} stale files, worth a monthly pass`,
+    };
+  }
+  return {
+    label: "Audit clean",
+    detail: "no cold files detected",
+  };
+}
+
+export function getFileStalenessHygieneStatus(
+  snapshot: PersistedFileStalenessAuditSnapshot | null,
+  now = new Date(),
+) {
+  const daysSinceLastRun = getDaysSinceLastAudit(snapshot?.lastAuditRunAt ?? null, now);
+  const reminderStatus = getAuditReminderStatus(daysSinceLastRun);
+  const insight = getHygieneInsight(
+    snapshot?.summary ?? {
+      active: 0,
+      dormant: 0,
+      stale: 0,
+      cold: 0,
+      totalScanned: 0,
+      totalExcluded: 0,
+    },
+  );
+  return { daysSinceLastRun, reminderStatus, insight };
 }
 
 export function matchesAuditQuery(record: Pick<FileStalenessRecord, "relativePath" | "extension">, query: string) {
@@ -86,6 +142,7 @@ export function buildPersistedSnapshot(result: FileStalenessAuditResult): Persis
     lastAuditRunAt: result.scannedAt,
     repoRoot: result.repoRoot,
     summary: result.summary,
+    likelyCleanupCandidates: getLikelyCleanupCandidates(result.records).length,
   };
 }
 
