@@ -6,4 +6,6 @@ export class RunFitAssessmentDto {
   baselineVersion?: number;
 
   debug?: boolean;
+
+  triggerType?: "manual" | "retry" | "autorun";
 }

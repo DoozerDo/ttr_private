@@ -111,6 +111,17 @@ type PairKey = {
   jobId: string;
 };
 
+type RunTriggerType = "manual" | "retry" | "autorun";
+
+type ActivePairLifecycleState =
+  | "no_pair"
+  | "loading_saved_result"
+  | "ready_to_run"
+  | "running"
+  | "scored"
+  | "failed"
+  | "mismatch_rejected";
+
 export function resolveScoreBandPresentation(score: number): ScoreBandPresentation {
   if (score >= 90) {
     return {
@@ -593,6 +604,8 @@ export function WorkspaceRunner({
   const revealRunIdRef = useRef(0);
   const [isPreparingMatch, setIsPreparingMatch] = useState(false);
   const activePairKey = baselineId && jobId ? `${baselineId}:${jobId}` : null;
+  const [activePairState, setActivePairState] = useState<ActivePairLifecycleState>("no_pair");
+  const activePairLifecycleKeyRef = useRef<string | null>(null);
   const AUTO_RUN_DELAY_MS = 320;
   const reportProgressState = useCallback(
     (payload: ProgressState) => {
@@ -663,6 +676,19 @@ export function WorkspaceRunner({
       });
     }
   }, [activePairKey, baselineId, jobId]);
+
+  useEffect(() => {
+    if (!activePairKey) {
+      activePairLifecycleKeyRef.current = null;
+      setActivePairState("no_pair");
+      return;
+    }
+
+    if (activePairLifecycleKeyRef.current !== activePairKey) {
+      activePairLifecycleKeyRef.current = activePairKey;
+      setActivePairState("ready_to_run");
+    }
+  }, [activePairKey]);
 
   const isDevMode = process.env.NODE_ENV !== "production";
   const debugUiEnabled = isDevMode || process.env.NEXT_PUBLIC_DEBUG_UI === "true";
@@ -829,9 +855,19 @@ export function WorkspaceRunner({
     const jobForRun = selectedJobId;
     if (!baselineForRun || !jobForRun || isRunning) return;
 
+    const isRetry = activePairState === "failed";
+    const runTriggerType: RunTriggerType = autoRunInitiatedRef.current
+      ? "autorun"
+      : isRetry
+      ? "retry"
+      : "manual";
+
     const pairKey = `${baselineForRun}:${jobForRun}`;
     if (inFlightPairKey === pairKey) return;
     setInFlightPairKey(pairKey);
+    if (activePairLifecycleKeyRef.current === pairKey) {
+      setActivePairState("running");
+    }
 
     if (isPreparingMatch) {
       setIsPreparingMatch(false);
@@ -863,7 +899,12 @@ export function WorkspaceRunner({
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ baselineId: baselineForRun, jobId: jobForRun, debug: debugUiEnabled }),
+        body: JSON.stringify({
+          baselineId: baselineForRun,
+          jobId: jobForRun,
+          debug: debugUiEnabled,
+          triggerType: runTriggerType,
+        }),
       });
 
       const { payload: nextResult, runState } = await parseAnalysisRunResponse(response);
@@ -962,6 +1003,9 @@ export function WorkspaceRunner({
 
       setLatestCompletedScore(nextResult);
       reportMatchingScore(nextResultPair);
+      if (activePairLifecycleKeyRef.current === pairKey) {
+        setActivePairState("scored");
+      }
 
       const completionText =
         runState === "compliance_blocked" ? "Assessment blocked" : "Compatibility scored";
@@ -985,6 +1029,9 @@ export function WorkspaceRunner({
       setLatestJobId(null);
       setLatestBaselineId(null);
       setRunState(null);
+      if (activePairLifecycleKeyRef.current === pairKey) {
+        setActivePairState("failed");
+      }
       autoRunInitiatedRef.current = false;
       setIsRevealAnalyzing(false);
       reportProgressState({
@@ -998,6 +1045,7 @@ export function WorkspaceRunner({
       setIsRunning(false);
     }
   }, [
+    activePairState,
     debugUiEnabled,
     inFlightPairKey,
     isPreparingMatch,
@@ -1009,6 +1057,11 @@ export function WorkspaceRunner({
 
   const loadLastRun = async () => {
     if (!baselineId || !jobId || isLoadingLastRun) return;
+
+    const loadPairKey = `${baselineId}:${jobId}`;
+    if (activePairLifecycleKeyRef.current === loadPairKey) {
+      setActivePairState("loading_saved_result");
+    }
 
     setIsLoadingLastRun(true);
     setIsRevealAnalyzing(false);
@@ -1093,6 +1146,9 @@ export function WorkspaceRunner({
       setLatestJobId(resolvedJobId);
       setLatestBaselineId(resolvedBaselineId);
       setCompleteBanner("Loaded last run");
+      if (loadPairKey && activePairLifecycleKeyRef.current === loadPairKey) {
+        setActivePairState("scored");
+      }
     } catch (loadError: unknown) {
       const message = extractErrorMessage(loadError) ?? "Unable to load the last run.";
       setError(message);
@@ -1100,6 +1156,11 @@ export function WorkspaceRunner({
       setLatestBaselineId(null);
       setRunState(null);
       reportMatchingScore(null);
+      if (loadPairKey && activePairLifecycleKeyRef.current === loadPairKey) {
+        setActivePairState(
+          isSelectionMismatchMessage(message) ? "mismatch_rejected" : "failed",
+        );
+      }
     } finally {
       setIsLoadingLastRun(false);
     }
@@ -1131,11 +1192,10 @@ export function WorkspaceRunner({
     }
     if (!selectedBaselineId || !selectedJobId) return;
     const pairKey = `${selectedBaselineId}:${selectedJobId}`;
-    const alreadyCompleted =
-      latestBaselineId === selectedBaselineId &&
-      latestJobId === selectedJobId &&
-      Boolean(latestCompletedScore);
-    if (isRunning || inFlightPairKey === pairKey || alreadyCompleted) {
+    if (activePairState !== "ready_to_run") {
+      return;
+    }
+    if (isRunning || inFlightPairKey === pairKey) {
       return;
     }
 
@@ -1161,11 +1221,9 @@ export function WorkspaceRunner({
       }
     };
   }, [
+    activePairState,
     inFlightPairKey,
     isRunning,
-    latestBaselineId,
-    latestCompletedScore,
-    latestJobId,
     runAssessment,
     selectedBaselineId,
     selectedJobId,

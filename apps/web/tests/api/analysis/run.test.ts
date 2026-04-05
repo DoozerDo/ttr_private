@@ -24,7 +24,11 @@ describe("POST /api/analysis/run", () => {
     return new NextRequest("https://example.com/api/analysis/run", {
       method: "POST",
       headers,
-      body: JSON.stringify({ baselineId: "baseline", jobId: "job" }),
+      body: JSON.stringify({
+        baselineId: "baseline",
+        jobId: "job",
+        triggerType: "manual",
+      }),
     });
   }
 

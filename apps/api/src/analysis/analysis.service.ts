@@ -9,7 +9,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
 import { Baseline } from '../baseline/baseline.entity';
 import {
@@ -153,6 +153,7 @@ export type JobTextForScoring = {
 };
 
 const RAW_TEXT_WARNING_THRESHOLD = 3000;
+const PROMPT_LIKE_FLAG_MESSAGE = 'Job description contains prompt-like content';
 const BASELINE_INVALID_MESSAGE =
   'Baseline content is missing in this environment. Please re upload or select a valid baseline.';
 
@@ -370,6 +371,38 @@ type RunFitAssessmentComplianceBlockedResponse = {
 export type RunAssessmentResult =
   | RunFitAssessmentOkResponse
   | RunFitAssessmentComplianceBlockedResponse;
+
+type TriggerType = "manual" | "retry" | "autorun";
+
+type FailureCategory =
+  | "input_missing_or_invalid"
+  | "generation_failed"
+  | "parse_or_schema_failed"
+  | "compliance_or_validation_rejected"
+  | "persistence_failed"
+  | "pair_mismatch_rejected"
+  | "unknown_runtime_error";
+
+type PipelineStage =
+  | "input_validation"
+  | "parsing"
+  | "generation"
+  | "compliance"
+  | "persistence";
+
+type CanonicalBaselineResult = {
+  canonical: BaselineSchemaCoreShape;
+  fallbackUsed: boolean;
+};
+
+type RunFitAssessmentAttemptContext = {
+  attemptId: string;
+  baselineId: string;
+  jobId: string;
+  triggerType: TriggerType;
+  baselineLabel?: string | null;
+  jobTitle?: string | null;
+};
 
 type RunFitAssessmentPayload = RunFitAssessmentDto & {
   job?: { id?: string; jobId?: string };
@@ -1048,16 +1081,41 @@ export class AnalysisService {
 
   private getCanonicalBaselineForScoring(
     baseline: Baseline,
-  ): BaselineSchemaCoreShape {
+  ): CanonicalBaselineResult {
     const records = baseline.parsedRecords ?? [];
     const latest = records
       .slice()
       .sort(
         (a, b) =>
           (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0),
-      )[0];
+        )[0];
 
     if (!latest) {
+      return {
+        canonical: this.buildFallbackCanonicalBaseline(baseline),
+        fallbackUsed: true,
+      };
+    }
+
+    try {
+      const canonical = BaselineSchema.parse(latest.parsedJson);
+      return { canonical, fallbackUsed: false };
+    } catch (error) {
+      this.logger.warn(
+        `Canonical baseline validation failed for ${baseline.id}: ${error}`,
+      );
+      return {
+        canonical: this.buildFallbackCanonicalBaseline(baseline),
+        fallbackUsed: true,
+      };
+    }
+  }
+
+  private buildFallbackCanonicalBaseline(
+    baseline: Baseline,
+  ): BaselineSchemaCoreShape {
+    const sections = baseline.sections ?? [];
+    if (!sections.length) {
       throw new BadRequestException({
         error: {
           code: 'baseline_canonical_missing',
@@ -1067,21 +1125,109 @@ export class AnalysisService {
       });
     }
 
-    try {
-      const canonical = BaselineSchema.parse(latest.parsedJson);
-      return canonical;
-    } catch (error) {
-      this.logger.warn(
-        `Canonical baseline validation failed for ${baseline.id}: ${error}`,
-      );
-      throw new BadRequestException({
-        error: {
-          code: 'baseline_canonical_invalid',
-          message:
-            'Baseline canonical data is invalid. Please re-ingest the baseline document before scoring.',
-        },
+    const summarySection = sections.find(
+      (section) => section.sectionType === BaselineSectionType.SUMMARY,
+    );
+    const summaryContent =
+      summarySection?.content?.trim() ||
+      sections[0]?.content?.trim() ||
+      null;
+
+    const experienceEntries: BaselineSchemaCoreShape['experience'] = sections
+      .filter(
+        (section) =>
+          section.sectionType === BaselineSectionType.EXPERIENCE ||
+          section.sectionType === BaselineSectionType.PROJECT,
+      )
+      .map((section, index) => {
+        const title = section.title?.trim() ?? `Experience ${index + 1}`;
+        return {
+          company: title,
+          role: title,
+          start_date: null,
+          end_date: null,
+          evidence: [],
+          company_name: title,
+          role_title: title,
+          // There is no scope_summary on BaselineSection; leave undefined for canonical fallback.
+          details_text: section.content?.trim() ?? '',
+        };
+      });
+
+    if (!experienceEntries.length) {
+      experienceEntries.push({
+        company: baseline.originalFilename ?? 'Baseline experience',
+        role: baseline.originalFilename ?? 'Baseline experience',
+        start_date: null,
+        end_date: null,
+        evidence: [],
+        company_name: baseline.originalFilename ?? 'Baseline',
+        role_title: 'Experience',
+        scope_summary: undefined,
+        details_text:
+          sections.map((block) => block.content ?? '').join('\n').trim() ||
+          'Baseline resume content',
       });
     }
+
+    return {
+      schema_version: 'baseline_schema_v1',
+      user_verified: false,
+      identity: {
+        full_name: null,
+        summary: summaryContent,
+        current_title: null,
+        current_company: null,
+        location: null,
+      },
+      experience: experienceEntries,
+      education: [],
+      skills: [],
+      people_leadership: {
+        direct_reports: null,
+        managers_led: null,
+        global_teams: null,
+      },
+      operational_ownership: {
+        functions_owned: [],
+        process_design: null,
+        process_scaling: null,
+      },
+      tooling_and_platforms: {
+        tools: [],
+        ownership_level: 'unknown',
+      },
+      cross_functional_partnership: {
+        product: null,
+        engineering: null,
+        sales_cs: null,
+        executive: null,
+      },
+      customer_advocacy: {
+        executive_escalations: null,
+        voice_of_customer: null,
+        post_incident_rca: null,
+      },
+      scale_and_scope: {
+        customer_segment: 'unknown',
+        geo_scope: 'unknown',
+        org_stage: 'unknown',
+      },
+      metrics_and_outcomes: {
+        metrics_present: false,
+        metrics: [],
+      },
+      skills_and_tools: {
+        tools: [],
+        methodologies: [],
+        domains: [],
+      },
+      system_generated_read_only: {
+        missing_fields: [],
+        ambiguity_flags: [],
+        low_confidence_extractions: [],
+      },
+    };
   }
 
   private buildInputsHash(
@@ -1147,7 +1293,8 @@ export class AnalysisService {
     job: Job,
     baseline: Baseline,
   ) {
-      const canonicalBaseline = this.getCanonicalBaselineForScoring(baseline);
+      const { canonical: canonicalBaseline } =
+        this.getCanonicalBaselineForScoring(baseline);
     const canonicalSections = this.buildCanonicalSectionPayload(
       canonicalBaseline,
     );
@@ -1310,7 +1457,10 @@ export class AnalysisService {
     return flags.map((flag) => ({
       code: flag as any,
       message: flag,
-      severity: ComplianceFlagSeverity.BLOCK,
+      severity:
+        flag === PROMPT_LIKE_FLAG_MESSAGE
+          ? ComplianceFlagSeverity.WARN
+          : ComplianceFlagSeverity.BLOCK,
     }));
   }
 
@@ -1685,6 +1835,24 @@ export class AnalysisService {
       payload.baseline_version_id,
     );
 
+    let currentStage: PipelineStage | null = null;
+    const attemptContext = {
+      baselineId: baseline.id,
+      jobId: payload.job?.id?.trim() ?? 'ad-hoc',
+      triggerType: 'manual' as TriggerType,
+    };
+    const logAttemptEvent = (
+      event: string,
+      details: Record<string, unknown> = {},
+    ) => {
+      if (!this.isDevMode()) return;
+      this.logPipelineEvent(event, {
+        ...attemptContext,
+        stage: currentStage ?? 'input_validation',
+        ...details,
+      });
+    };
+
     if (!baseline.sections?.length) {
       baseline.sections = await this.baselineSectionRepository.find({
         where: { baselineId: baseline.id },
@@ -1695,7 +1863,8 @@ export class AnalysisService {
     const normalizedSelectedBlockIds = this.normalizeSelectedBlockIds(
       payload.selected_block_ids,
     );
-    const canonicalBaseline = this.getCanonicalBaselineForScoring(baseline);
+    const { canonical: canonicalBaseline } =
+      this.getCanonicalBaselineForScoring(baseline);
     const canonicalSections = this.buildCanonicalSectionPayload(
       canonicalBaseline,
     );
@@ -1836,6 +2005,7 @@ export class AnalysisService {
         );
       }
 
+
       this.applyBaselineCoverageDetails(
         scoringV2,
         baseline,
@@ -1912,6 +2082,7 @@ export class AnalysisService {
 
     let savedAssessment: FitAssessment | null = null;
     if (job) {
+      currentStage = "persistence";
       const assessment = this.fitAssessmentRepository.create({
         userId,
         jobId: job.id,
@@ -2198,6 +2369,40 @@ export class AnalysisService {
     syntheticMetadata?: SyntheticMetadataInput,
   ): Promise<RunAssessmentResult> {
     let shortTextWarningKey: string | undefined;
+    let baselineForLog: string | null = null;
+    let jobForLog: string | null = null;
+    let triggerTypeForLog: TriggerType = "manual";
+    let currentStage: PipelineStage = "input_validation";
+    let attemptContext: RunFitAssessmentAttemptContext | null = null;
+    let logAttemptEvent:
+      | ((event: string, details?: Record<string, unknown>) => void)
+      | null = null;
+    const safeStringify = (value: unknown) => {
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return '"[unserializable]"';
+      }
+    };
+    const logStageLifecycle = (
+      event: string,
+      pipelineStage: PipelineStage | 'run',
+      details: Record<string, unknown> = {},
+    ) => {
+      if (!this.isDevMode() || !attemptContext) return;
+      const payload = {
+        runId: attemptContext.attemptId,
+        baselineId: attemptContext.baselineId,
+        jobId: attemptContext.jobId,
+        pipelineStage,
+        ...details,
+      };
+      console.log(
+        `[SCORING][runId=${attemptContext.attemptId}] stage=${event} details=${safeStringify(
+          payload,
+        )}`,
+      );
+    };
     try {
       const normalizedPayload = payload as RunFitAssessmentPayload;
       const baselineCandidate =
@@ -2239,6 +2444,28 @@ export class AnalysisService {
 
       const resolvedBaselineId = baselineId!;
       const resolvedJobId = jobId!;
+      const triggerType = (payload.triggerType ?? "manual") as TriggerType;
+      baselineForLog = resolvedBaselineId;
+      jobForLog = resolvedJobId;
+      triggerTypeForLog = triggerType;
+      const attemptId = randomUUID();
+      attemptContext = {
+        attemptId,
+        baselineId: resolvedBaselineId,
+        jobId: resolvedJobId,
+        triggerType,
+      };
+      logAttemptEvent = (event, details = {}) => {
+        if (!attemptContext) return;
+        this.logPipelineEvent(event, { ...attemptContext, ...details });
+      };
+      currentStage = "input_validation";
+      logAttemptEvent("scoring_attempt_started", {
+        stage: currentStage,
+      });
+      logStageLifecycle("run_started", currentStage, {
+        triggerType,
+      });
 
       const baseline = await this.baselineRepository.findOne({
         where: { id: resolvedBaselineId, userId },
@@ -2266,17 +2493,44 @@ export class AnalysisService {
         throw new NotFoundException('Job not found');
       }
 
+      if (attemptContext) {
+        attemptContext.baselineLabel =
+          baseline.originalFilename ?? baseline.id ?? resolvedBaselineId;
+        attemptContext.jobTitle =
+          job.title ?? job.company ?? resolvedJobId;
+      }
+
       const jobKey = job.id;
       const requestRunId = this.nextShortTextWarningRequestRunId();
       shortTextWarningKey = this.buildShortTextWarningKey(jobKey, requestRunId);
 
-      const canonicalBaseline = this.getCanonicalBaselineForScoring(baseline);
+      const {
+        canonical: canonicalBaseline,
+        fallbackUsed: baselineFallbackUsed,
+      } = this.getCanonicalBaselineForScoring(baseline);
       const canonicalSections = this.buildCanonicalSectionPayload(
         canonicalBaseline,
       );
+      currentStage = "parsing";
+      logStageLifecycle("parse_started", currentStage);
+      logAttemptEvent?.("baseline_parsing_started", {
+        stage: currentStage,
+      });
       const baselineSelection = selectBaselineTextForScoring({
         baseline,
         canonicalSections,
+      });
+      if (baselineFallbackUsed) {
+        logAttemptEvent?.("canonical_baseline_fallback", {
+          stage: currentStage,
+          fallbackReason: 'missing_or_invalid_canonical',
+        });
+      }
+      logAttemptEvent?.("canonical_baseline_parsed", {
+        stage: currentStage,
+      });
+      logStageLifecycle("parse_completed", currentStage, {
+        fallbackUsed: baselineFallbackUsed,
       });
       const baselineText = baselineSelection.normalizedBaselineText;
       const insufficientBaselineDetails =
@@ -2353,6 +2607,19 @@ export class AnalysisService {
 
       const allowDebug = Boolean(payload.debug);
 
+      currentStage = "generation";
+      logStageLifecycle("generation_started", currentStage);
+      const promptFlags = this.fitScoringService.buildComplianceFlags(
+        jobText,
+        baselineText,
+        job.sourceUrl ?? null,
+      );
+      if (promptFlags.includes(PROMPT_LIKE_FLAG_MESSAGE)) {
+        logStageLifecycle("prompt_like_job_detected", currentStage, {
+          warning: true,
+          message: PROMPT_LIKE_FLAG_MESSAGE,
+        });
+      }
       const scoringV2 = scoreCxFitV2(
         {
           job: {
@@ -2384,6 +2651,9 @@ export class AnalysisService {
           'CX Fit v2 scoring produced incomplete results',
         );
       }
+      logStageLifecycle("generation_completed", currentStage, {
+        score: scoringV2.score,
+      });
 
       this.applyBaselineCoverageDetails(
         scoringV2,
@@ -2440,7 +2710,7 @@ export class AnalysisService {
         strategic_vs_tactical: legacyDimensionScores.strategicTacticalFit,
       };
 
-      const baselineVersionHash = baseline.hash ?? null;
+      const baselineVersionHashForDebug = baseline.hash ?? null;
       const jobIdentifier = job?.id ?? resolvedJobId ?? null;
 
       const jobNormalizationPayload = {
@@ -2458,7 +2728,7 @@ export class AnalysisService {
       const debugInfo: CompatibilityRunDebugPayload | undefined = allowDebug
         ? this.buildCompatibilityDebugPayload({
             baselineId: baseline.id,
-            baselineVersionHash,
+              baselineVersionHash: baselineVersionHashForDebug,
             baselineSelectedSectionCount: baselineSelection.selectedSectionCount,
             baselineTotalChars: baselineTextCharsScored,
             jobId: jobIdentifier,
@@ -2502,10 +2772,19 @@ export class AnalysisService {
         ? [{ title: 'Job Description', content: normalizedJobDescription }]
         : undefined;
 
+      const baselineHashSource = baseline.hash ? 'stored' : 'derived';
+      const baselineVersionHash =
+        (baseline.hash ?? this.buildBaselineFallbackHash(canonicalBaseline));
+
+      currentStage = "compliance";
+      logStageLifecycle("validation_started", currentStage);
+      logAttemptEvent?.("compliance_started", {
+        stage: currentStage,
+      });
       const compliance = await this.complianceService.validateAndAudit({
         action: ComplianceAction.FIT_SCORE,
         actorId: userId,
-        baselineVersion: { hash: baseline.hash } as BaselineVersion,
+        baselineVersion: { hash: baselineVersionHash } as BaselineVersion,
         job,
         outputHash: inputsHash,
         baselineSections: complianceBaselineSections,
@@ -2514,6 +2793,12 @@ export class AnalysisService {
         extraFlags: debugScoring
           ? this.mapComplianceStringsToFlags(debugScoring.complianceFlags)
           : undefined,
+      });
+
+      logAttemptEvent?.("compliance_checked", {
+        stage: currentStage,
+        blocked: compliance.blocked,
+        baselineHashSource,
       });
 
       if (compliance.blocked) {
@@ -2526,6 +2811,15 @@ export class AnalysisService {
               }
             : flag,
         );
+
+        logAttemptEvent?.("scoring_attempt_blocked", {
+          stage: currentStage,
+          failureCategory: "compliance_or_validation_rejected",
+        });
+        logStageLifecycle("validation_rejected", currentStage, {
+          reason: 'compliance_blocked',
+          blockedFlags: normalizedFlags.map((flag) => flag.code ?? flag.message),
+        });
 
       const blockedResponse: RunFitAssessmentComplianceBlockedResponse = {
         status: 'compliance_blocked',
@@ -2560,7 +2854,7 @@ export class AnalysisService {
           audit_id: compliance.audit.id,
           auditId: compliance.audit.id,
           baseline_version_hash:
-            compliance.audit.baselineVersionHash ?? baseline.hash ?? null,
+            compliance.audit.baselineVersionHash ?? baselineVersionHash,
           jobId: resolvedJobId,
           baselineId: baseline.id,
           baselineVersion: baselineVersion ?? baseline.version ?? null,
@@ -2569,10 +2863,15 @@ export class AnalysisService {
         return blockedResponse;
       }
 
-    const assessment = this.fitAssessmentRepository.create({
-      userId,
-      jobId: resolvedJobId,
-      baselineId: baseline.id,
+      logStageLifecycle("validation_passed", currentStage, {
+        blocked: false,
+        baselineHashSource,
+      });
+
+      const assessment = this.fitAssessmentRepository.create({
+        userId,
+        jobId: resolvedJobId,
+        baselineId: baseline.id,
       baselineVersion: baselineVersion ?? baseline.version ?? null,
       overallScore: finalScore,
       verdict: persistenceVerdict,
@@ -2589,6 +2888,11 @@ export class AnalysisService {
         applySyntheticMetadata(assessment, syntheticMetadata);
       }
 
+      currentStage = "persistence";
+      logStageLifecycle("persistence_started", currentStage);
+      logAttemptEvent?.("persistence_started", {
+        stage: currentStage,
+      });
       const savedAssessment = await this.fitAssessmentRepository.save(assessment);
       if (
         savedAssessment.userId !== userId ||
@@ -2609,6 +2913,19 @@ export class AnalysisService {
         ...scoringProof,
         assessmentId: savedAssessment.id,
       };
+
+      logAttemptEvent?.("persistence_completed", {
+        stage: currentStage,
+        assessmentId: savedAssessment.id,
+      });
+      logStageLifecycle("persistence_completed", currentStage, {
+        assessmentId: savedAssessment.id,
+        score: finalScore,
+      });
+      logAttemptEvent?.("scoring_attempt_success", {
+        stage: currentStage,
+        score: finalScore,
+      });
 
       try {
         await this.usersRepository.update(
@@ -2653,11 +2970,39 @@ export class AnalysisService {
         confidenceScore: confidenceResult.confidenceScore,
         confidenceReasons: confidenceResult.confidenceReasons,
         baseline_version_hash:
-          compliance.audit.baselineVersionHash ?? baseline.hash ?? null,
+          compliance.audit.baselineVersionHash ?? baselineVersionHash,
       };
 
       return successResponse;
     } catch (error) {
+      const context =
+        attemptContext ??
+        {
+          baselineId: baselineForLog ?? 'unknown',
+          jobId: jobForLog ?? 'unknown',
+          triggerType: triggerTypeForLog,
+        };
+      const failureCategory = this.classifyPipelineFailure(error, currentStage);
+      const failureEvent =
+        currentStage === "parsing"
+          ? "parse_failed"
+          : currentStage === "generation"
+          ? "generation_failed"
+          : currentStage === "compliance"
+          ? "validation_rejected"
+          : currentStage === "persistence"
+          ? "persistence_failed"
+          : "run_failed";
+      logStageLifecycle(failureEvent, currentStage, {
+        failureCategory,
+        reason: this.simplifyErrorMessage(error),
+      });
+      this.logPipelineEvent("scoring_attempt_failed", {
+        ...context,
+        stage: currentStage,
+        failureCategory,
+        error: this.simplifyErrorMessage(error),
+      });
       if (error instanceof HttpException) {
         throw error;
       }
@@ -2669,6 +3014,68 @@ export class AnalysisService {
         this.clearShortTextWarningKey(shortTextWarningKey);
       }
     }
+  }
+
+  private isDevMode() {
+    return process.env.NODE_ENV !== 'production';
+  }
+
+  private logPipelineEvent(event: string, details: Record<string, unknown>) {
+    if (!this.isDevMode()) return;
+    this.logger.debug(`[fit-score-pipeline] ${event}`, {
+      timestamp: new Date().toISOString(),
+      ...details,
+    });
+  }
+
+  private classifyPipelineFailure(
+    error: unknown,
+    stage: PipelineStage,
+  ): FailureCategory {
+    if (error instanceof BadRequestException || error instanceof NotFoundException) {
+      const response =
+        error instanceof HttpException && typeof error.getResponse === 'function'
+          ? error.getResponse()
+          : null;
+      const errorCode =
+        response && typeof response === 'object'
+          ? (response as any).error?.code ?? (response as any).errorCode
+          : null;
+      if (errorCode === 'analysis_context_mismatch') {
+        return 'pair_mismatch_rejected';
+      }
+      return 'input_missing_or_invalid';
+    }
+    if (stage === 'parsing') {
+      return 'parse_or_schema_failed';
+    }
+    if (stage === 'generation') {
+      return 'generation_failed';
+    }
+    if (stage === 'compliance') {
+      return 'compliance_or_validation_rejected';
+    }
+    if (stage === 'persistence') {
+      return 'persistence_failed';
+    }
+    return 'unknown_runtime_error';
+  }
+
+  private simplifyErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    if (typeof error === 'string') {
+      return error;
+    }
+    return 'Unknown error';
+  }
+
+  private buildBaselineFallbackHash(
+    canonicalBaseline: BaselineSchemaCoreShape,
+  ): string {
+    const payload = JSON.stringify(canonicalBaseline);
+    return createHash('sha256').update(payload).digest('hex');
   }
 
   async runExpandedFitAssessment(
@@ -2766,7 +3173,8 @@ export class AnalysisService {
       calibration.weights,
     );
 
-    const canonicalBaseline = this.getCanonicalBaselineForScoring(baseline);
+    const { canonical: canonicalBaseline } =
+      this.getCanonicalBaselineForScoring(baseline);
     const canonicalSections = this.buildCanonicalSectionPayload(
       canonicalBaseline,
     );
@@ -3041,10 +3449,11 @@ export class AnalysisService {
 
     const canonicalSections = (() => {
       try {
-        const canonicalBaseline = this.getCanonicalBaselineForScoring({
-          ...baseline,
-          sections,
-        } as Baseline);
+        const { canonical: canonicalBaseline } =
+          this.getCanonicalBaselineForScoring({
+            ...baseline,
+            sections,
+          } as Baseline);
         return this.buildCanonicalSectionPayload(canonicalBaseline);
       } catch {
         return [] as Array<{ type?: string; content: string }>;

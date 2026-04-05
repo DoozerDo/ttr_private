@@ -104,13 +104,20 @@ describe("Analyze page assessment persistence contract", () => {
     fireEvent.click(screen.getByRole("button", { name: "Generate Compatibility Score" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/analysis/run",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({ baselineId: "base-2", jobId: "job-1" }),
-        }),
+      const runCall = fetchMock.mock.calls.find(([url]) =>
+        String(url).includes("/api/analysis/run"),
       );
+      expect(runCall).toBeDefined();
+      const runInit = runCall?.[1];
+      expect(runInit?.method).toBe("POST");
+      const payload = runInit?.body
+        ? JSON.parse(runInit.body as string)
+        : null;
+      expect(payload).toMatchObject({
+        baselineId: "base-2",
+        jobId: "job-1",
+        triggerType: "manual",
+      });
     });
 
     await waitFor(() => {

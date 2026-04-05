@@ -1,13 +1,17 @@
 import { BadRequestException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { createHash } from 'crypto';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Baseline } from '../baseline/baseline.entity';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import {
   BaselineIncludePolicy,
   BaselineSection,
+  BaselineSectionType,
 } from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
+import { BaselineParsed } from '../baseline/baseline-parsed.entity';
+import { BaselineSchemaCoreShape } from '../baseline/baseline-schema';
 import {
   ComplianceAction,
   ComplianceFlagSeverity,
@@ -211,7 +215,7 @@ const sampleScoringV2: CxFitV2Result = {
         {
           provide: GapAnalysisService,
           useValue: {
-            analyze: jest.fn().mockResolvedValue({
+            analyze: jest.fn().mockReturnValue({
               strengths: [],
               criticalGaps: [],
               recommendedActions: [],
@@ -1016,6 +1020,153 @@ const sampleScoringV2: CxFitV2Result = {
     const rawCharCount = jobRecord.rawDescription.trim().length;
     expect(result.scoringProof?.jobTextCharsScored).toBe(rawCharCount);
     expect(result.scoringProof?.jobTextSource).toBe('raw');
+  });
+
+  it('falls back to baseline sections when canonical data is missing', async () => {
+    const fallbackSections: BaselineSection[] = [
+      {
+        id: 'fallback-1',
+        baselineId: baseline.id,
+        sectionType: BaselineSectionType.EXPERIENCE,
+        title: 'Fallback Experience',
+        content: 'Experience details '.repeat(40),
+        includePolicy: BaselineIncludePolicy.OPTIONAL,
+        order: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ];
+    const fallbackBaseline: Baseline = {
+      ...baseline,
+      parsedRecords: [],
+      sections: fallbackSections,
+    };
+    const baselineRepo = service['baselineRepository'] as {
+      findOne: jest.Mock;
+    };
+    baselineRepo.findOne.mockResolvedValue(fallbackBaseline);
+    jobRepository.findOne.mockResolvedValue({
+      ...defaultJobRecord,
+      id: 'job-1',
+    });
+
+    const baselineSectionRepo = service['baselineSectionRepository'] as {
+      createQueryBuilder: jest.Mock;
+    };
+    baselineSectionRepo.createQueryBuilder = jest
+      .fn()
+      .mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({
+          sectionCount: '1',
+          totalChars: '620',
+        }),
+      });
+    const logSpy = jest.spyOn(service as any, 'logPipelineEvent');
+    const result = await service.runFitAssessment('user-1', {
+      baselineId: 'b-1',
+      jobId: 'job-1',
+    });
+
+    expect(result.status).toBe('ok');
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('canonical_baseline_fallback'),
+      expect.objectContaining({
+        fallbackReason: 'missing_or_invalid_canonical',
+      }),
+    );
+    logSpy.mockRestore();
+  });
+
+  it('derives a fallback baseline hash when stored hash is missing', async () => {
+    const canonicalBaseline: BaselineSchemaCoreShape = {
+      schema_version: 'baseline_schema_v1',
+      user_verified: false,
+      identity: {
+        full_name: 'Test User',
+        summary: null,
+        current_title: null,
+        current_company: null,
+        location: 'Remote',
+      },
+      experience: [],
+      education: [],
+      skills: [],
+      people_leadership: {
+        direct_reports: null,
+        managers_led: null,
+        global_teams: null,
+      },
+      operational_ownership: {
+        functions_owned: [],
+        process_design: null,
+        process_scaling: null,
+      },
+      tooling_and_platforms: {
+        tools: [],
+        ownership_level: 'unknown',
+      },
+      cross_functional_partnership: {
+        product: null,
+        engineering: null,
+        sales_cs: null,
+        executive: null,
+      },
+      customer_advocacy: {
+        executive_escalations: null,
+        voice_of_customer: null,
+        post_incident_rca: null,
+      },
+      scale_and_scope: {
+        customer_segment: 'unknown',
+        geo_scope: 'unknown',
+        org_stage: 'unknown',
+      },
+      metrics_and_outcomes: {
+        metrics_present: false,
+        metrics: [],
+      },
+      skills_and_tools: {
+        tools: [],
+        methodologies: [],
+        domains: [],
+      },
+      system_generated_read_only: {
+        missing_fields: [],
+        ambiguity_flags: [],
+        low_confidence_extractions: [],
+      },
+    };
+    const parsedRecord = {
+      parsedJson: canonicalBaseline,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as BaselineParsed;
+
+    const baselineRepo = service['baselineRepository'] as { findOne: jest.Mock };
+    baselineRepo.findOne.mockResolvedValueOnce({
+      ...baseline,
+      hash: null,
+      parsedRecords: [parsedRecord],
+    });
+    const baselineSectionRepo = service['baselineSectionRepository'] as {
+      find: jest.Mock;
+    };
+    baselineSectionRepo.find.mockResolvedValue(baselineSections);
+
+    const expectedHash = createHash('sha256')
+      .update(JSON.stringify(canonicalBaseline))
+      .digest('hex');
+
+    await service.runFitAssessment('user-1', {
+      baselineId: 'b-1',
+      jobId: 'job-1',
+    });
+
+    const [validatePayload] = (complianceService.validateAndAudit as jest.Mock).mock.calls[0];
+    expect(validatePayload.baselineVersion.hash).toBe(expectedHash);
   });
 
   it('falls back to normalized segments when the raw description is missing', async () => {
