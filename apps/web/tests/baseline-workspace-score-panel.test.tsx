@@ -571,9 +571,114 @@ describe("BaselineWorkspace live score panel", () => {
       expect(
         screen.getByRole("button", { name: "Run compatibility score" }),
       ).toBeInTheDocument();
+      expect(screen.queryByText("91")).toBeNull();
     } finally {
       setTimeoutSpy.mockRestore();
     }
   });
+
+  it("auto-runs the newly selected pair after switching jobs from a scored pair", async () => {
+    const fetchSpy = vi.fn((input: RequestInfo) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : "url" in input
+              ? input.url
+              : String(input);
+
+      if (url.includes("/api/analysis/") && url.includes("/latest")) {
+        if (url.includes("/baseline/base-1")) {
+          return Promise.resolve(
+            createResponse({
+              assessmentId: "assessment-a",
+              baselineId: "base-1",
+              jobId: "job-a",
+              score: 84,
+              strengths: ["Prior job A score."],
+            }),
+          );
+        }
+      }
+
+      if (url.includes("/api/analysis/run")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "assessment-b",
+            baselineId: "base-1",
+            jobId: "job-b",
+            score: 91,
+            strengths: ["Fresh job B score."],
+          }),
+        );
+      }
+
+      return Promise.resolve(createResponse([]));
+    });
+
+    try {
+      setFetchImplementation(fetchSpy);
+      overrideSearchParams({ baselineId: "base-1", jobId: "job-a" });
+      const { rerender } = render(
+        <BaselineWorkspace
+          initialBaselines={[
+            {
+              id: "base-1",
+              originalFilename: "resume.pdf",
+              version: 1,
+            } as never,
+          ]}
+          initialFetchError={null}
+          initialBaselineId="base-1"
+          initialJobId="job-a"
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
+      await waitFor(() => {
+        expect(screen.getByText("Strong Match")).toBeInTheDocument();
+      });
+
+      overrideSearchParams({ baselineId: "base-1", jobId: "job-b" });
+      rerender(
+        <BaselineWorkspace
+          initialBaselines={[
+            {
+              id: "base-1",
+              originalFilename: "resume.pdf",
+              version: 1,
+            } as never,
+          ]}
+          initialFetchError={null}
+          initialBaselineId="base-1"
+          initialJobId="job-b"
+        />,
+      );
+
+      await waitFor(
+        () => {
+          expect(fetchSpy).toHaveBeenCalledWith(
+            expect.stringContaining("/api/analysis/run"),
+            expect.any(Object),
+          );
+        },
+        { timeout: 6000 },
+      );
+
+      await waitFor(
+        () => {
+          expect(screen.getByText("Primary readiness")).toBeInTheDocument();
+          expect(screen.getByText("91")).toBeInTheDocument();
+        },
+        { timeout: 7000 },
+      );
+
+      expect(screen.queryByText("Prior job A score.")).toBeNull();
+      expect(screen.queryByText("No saved score for this selection")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 10000);
 
 });

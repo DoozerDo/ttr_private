@@ -184,14 +184,6 @@ export function BaselineWorkspace({
     [pathname, router, searchParams],
   );
 
-  const clearSelections = useCallback(() => {
-    const params = new URLSearchParams(searchParams?.toString() ?? "");
-    params.delete("baselineId");
-    params.delete("jobId");
-    const target = buildTargetUrl(params, pathname);
-    router.replace(target);
-  }, [pathname, router, searchParams]);
-
   useEffect(() => {
     setActiveScorePair((current) => {
       if (!current) return null;
@@ -270,7 +262,6 @@ export function BaselineWorkspace({
             key={`${baselineId ?? "none"}:${jobId ?? "none"}`}
             baselineId={baselineId}
             jobId={jobId}
-            onAutoRunComplete={clearSelections}
             onMatchingScoreChange={setActiveScorePair}
           />
         </section>

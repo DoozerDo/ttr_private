@@ -30,7 +30,6 @@ type ProgressState = {
 type WorkspaceRunnerProps = {
   baselineId: string | null;
   jobId: string | null;
-  onAutoRunComplete?: () => void;
   onProgressStateChange?: (state: ProgressState) => void;
   onMatchingScoreChange?: (pair: { baselineId: string; jobId: string } | null) => void;
 };
@@ -562,7 +561,6 @@ const parseAnalysisRunResponse = async (
 export function WorkspaceRunner({
   baselineId,
   jobId,
-  onAutoRunComplete,
   onProgressStateChange,
   onMatchingScoreChange,
 }: WorkspaceRunnerProps) {
@@ -594,6 +592,7 @@ export function WorkspaceRunner({
   const revealStartMsRef = useRef<number>(0);
   const revealRunIdRef = useRef(0);
   const [isPreparingMatch, setIsPreparingMatch] = useState(false);
+  const activePairKey = baselineId && jobId ? `${baselineId}:${jobId}` : null;
   const AUTO_RUN_DELAY_MS = 320;
   const reportProgressState = useCallback(
     (payload: ProgressState) => {
@@ -643,6 +642,27 @@ export function WorkspaceRunner({
   useLayoutEffect(() => {
     setSelectedJobId(jobId);
   }, [jobId]);
+
+  useEffect(() => {
+    autoRunCombinationRef.current = null;
+    autoRunInitiatedRef.current = false;
+    pendingCompletionKeyRef.current = null;
+    if (autoRunTriggerTimerRef.current !== null) {
+      window.clearTimeout(autoRunTriggerTimerRef.current);
+      autoRunTriggerTimerRef.current = null;
+    }
+    if (autoRunCompletionTimerRef.current !== null) {
+      window.clearTimeout(autoRunCompletionTimerRef.current);
+      autoRunCompletionTimerRef.current = null;
+    }
+    if (process.env.NODE_ENV !== "production" && activePairKey) {
+      console.debug("[target] active pair reset", {
+        baselineId,
+        jobId,
+        activePairKey,
+      });
+    }
+  }, [activePairKey, baselineId, jobId]);
 
   const isDevMode = process.env.NODE_ENV !== "production";
   const debugUiEnabled = isDevMode || process.env.NEXT_PUBLIC_DEBUG_UI === "true";
@@ -730,6 +750,29 @@ export function WorkspaceRunner({
   const blockingReasons = generationReadiness.verificationIssues.slice(0, 3);
   const showPreAnalysisState = !showResult && !isRunning && !isRevealAnalyzing && !error;
   const showMismatchRecovery = isSelectionMismatchMessage(error);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    console.debug("[target] workflow state", {
+      baselineId,
+      jobId,
+      isRunning,
+      isRevealAnalyzing,
+      showResult,
+      showPreAnalysisState,
+      showMismatchRecovery,
+      error,
+    });
+  }, [
+    baselineId,
+    error,
+    isRevealAnalyzing,
+    isRunning,
+    jobId,
+    showMismatchRecovery,
+    showPreAnalysisState,
+    showResult,
+  ]);
 
   const resultCardClasses = [
     "score-summary-card space-y-3 rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.12),transparent_42%),linear-gradient(180deg,rgba(15,23,42,0.95),rgba(2,6,23,0.98))] p-4 text-[13px] text-slate-200 shadow-[0_24px_80px_rgba(2,6,23,0.45)]",
@@ -890,9 +933,31 @@ export function WorkspaceRunner({
         setRevealedScoreValue(numericScore);
       }
 
-      const nextResultPair = resolveResultPair(nextResult);
-      if (!isMatchingPair(nextResultPair, baselineForRun, jobForRun)) {
+      const nextResultPair: PairKey | null = resolveResultPair(nextResult);
+      const pair: PairKey | null = nextResultPair;
+      let resultBaselineId: string | null = null;
+      let resultJobId: string | null = null;
+      if (pair) {
+        resultBaselineId = pair.baselineId;
+        resultJobId = pair.jobId;
+      }
+      if (!isMatchingPair(pair, baselineForRun, jobForRun)) {
+        if (process.env.NODE_ENV !== "production") {
+          console.debug("[target] run rejected", {
+            baselineId: baselineForRun,
+            jobId: jobForRun,
+            resultBaselineId,
+            resultJobId,
+          });
+        }
         throw new Error("Analysis result does not match the active baseline and job selection.");
+      }
+
+      if (process.env.NODE_ENV !== "production") {
+        console.debug("[target] run accepted", {
+          baselineId: baselineForRun,
+          jobId: jobForRun,
+        });
       }
 
       setLatestCompletedScore(nextResult);
@@ -968,9 +1033,31 @@ export function WorkspaceRunner({
       }
 
       const nextResult = payload as FitResultPayload;
-      const nextResultPair = resolveResultPair(nextResult);
-      if (!isMatchingPair(nextResultPair, baselineId, jobId)) {
+      const nextResultPair: PairKey | null = resolveResultPair(nextResult);
+      const pair: PairKey | null = nextResultPair;
+      let resultBaselineId: string | null = null;
+      let resultJobId: string | null = null;
+      if (pair) {
+        resultBaselineId = pair.baselineId;
+        resultJobId = pair.jobId;
+      }
+      if (!isMatchingPair(pair, baselineId, jobId)) {
+        if (process.env.NODE_ENV !== "production") {
+          console.debug("[target] saved run rejected", {
+            baselineId,
+            jobId,
+            resultBaselineId,
+            resultJobId,
+          });
+        }
         throw new Error("Loaded run does not match the active baseline and job selection.");
+      }
+
+      if (process.env.NODE_ENV !== "production") {
+        console.debug("[target] saved run accepted", {
+          baselineId,
+          jobId,
+        });
       }
 
       setResult(nextResult);
@@ -1022,8 +1109,6 @@ export function WorkspaceRunner({
     autoRunCombinationRef.current = null;
     autoRunInitiatedRef.current = false;
     pendingCompletionKeyRef.current = null;
-    setSelectedBaselineId(null);
-    setSelectedJobId(null);
     setInFlightPairKey(null);
     reportProgressState({
       isScoring: false,
@@ -1031,8 +1116,13 @@ export function WorkspaceRunner({
       isComplianceBlocked: false,
       isPreparingMatch: false,
     });
-    onAutoRunComplete?.();
-  }, [onAutoRunComplete, reportProgressState]);
+    if (process.env.NODE_ENV !== "production") {
+      console.debug("[target] auto-run finalized", {
+        baselineId: selectedBaselineId,
+        jobId: selectedJobId,
+      });
+    }
+  }, [reportProgressState, selectedBaselineId, selectedJobId]);
 
   useEffect(() => {
     if (autoRunTriggerTimerRef.current !== null) {
@@ -1203,6 +1293,11 @@ export function WorkspaceRunner({
               <div className="h-3 w-3/5 rounded-full bg-white/6" />
               <div className="h-3 w-1/2 rounded-full bg-white/8" />
             </div>
+          </div>
+          <div className="flex flex-wrap justify-end">
+            <FormButton onClick={runAssessment} disabled={isRunning || !baselineId || !jobId}>
+              Run compatibility score
+            </FormButton>
           </div>
         </div>
       ) : null}
