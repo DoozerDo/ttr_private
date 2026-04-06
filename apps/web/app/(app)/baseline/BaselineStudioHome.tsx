@@ -467,6 +467,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     return "analysis_exists";
   }, [hasBaseline, hasCompletedAnalysis]);
   const isValidatedBaselineState = heroState === "analysis_exists";
+  const canReplaceActiveBaseline = isValidatedBaselineState || !uploadLimitReached;
   const sourceResumesSectionTitle = hasBaseline
     ? isValidatedBaselineState
       ? "Source resumes"
@@ -830,7 +831,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
 
   const handleUpload = useCallback(
     async (file: File) => {
-      if (isUploading || uploadLimitReached) return;
+      if (isUploading || (!canReplaceActiveBaseline && uploadLimitReached)) return;
 
       if (process.env.NODE_ENV !== "production") {
         console.debug("[BaselineStudioHome] upload handler entered", {
@@ -838,6 +839,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           size: file.size,
           isUploading,
           uploadLimitReached,
+          canReplaceActiveBaseline,
         });
       }
 
@@ -985,7 +987,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         }
       }
     },
-    [isUploading, refreshBaselineLibrary, uploadLimitReached],
+    [canReplaceActiveBaseline, isUploading, refreshBaselineLibrary, uploadLimitReached],
   );
 
   const handleArchiveBaseline = useCallback(
@@ -1034,15 +1036,21 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     [activeBaselines, archivingBaselineId, primaryBaselineId],
   );
 
+  const triggerUploadClick = useCallback(() => {
+    if (isUploading || !isEditableLibrary) return;
+    if (!canReplaceActiveBaseline && uploadLimitReached) return;
+    fileInputRef.current?.click();
+  }, [canReplaceActiveBaseline, isEditableLibrary, isUploading, uploadLimitReached]);
+
   const onDrop = useCallback(
     async (event: DragEvent<HTMLDivElement>) => {
       event.preventDefault();
-      if (uploadLimitReached || isUploading) return;
+      if ((!canReplaceActiveBaseline && uploadLimitReached) || isUploading) return;
       const file = event.dataTransfer.files?.[0];
       if (!file) return;
       await handleUpload(file);
     },
-    [handleUpload, isUploading, uploadLimitReached],
+    [canReplaceActiveBaseline, handleUpload, isUploading, uploadLimitReached],
   );
 
   const onFileChange = useCallback(
@@ -1131,8 +1139,8 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
               >
                 <div className="space-y-3">
                   <FormButton
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isUploading || uploadLimitReached || !isEditableLibrary}
+                    onClick={triggerUploadClick}
+                    disabled={isUploading || (!canReplaceActiveBaseline && uploadLimitReached) || !isEditableLibrary}
                     className="bg-indigo-600 text-white hover:bg-indigo-500"
                   >
                     {isEditableLibrary
@@ -1158,7 +1166,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                     accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     className="hidden"
                     onChange={onFileChange}
-                    disabled={isUploading || uploadLimitReached}
+                    disabled={isUploading || (!canReplaceActiveBaseline && uploadLimitReached)}
                   />
                   {uploadLimitReached ? (
                     <p className="text-sm text-slate-300">
@@ -1186,6 +1194,14 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   isReadyForTargeting
                   showValidatedBadge={false}
                 />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  className="hidden"
+                  onChange={onFileChange}
+                  disabled={isUploading || (!canReplaceActiveBaseline && uploadLimitReached)}
+                />
                 {latestAssessmentCreatedAt ? (
                   <p className="mt-2 text-xs text-slate-400">Last analyzed {formatDateTime(latestAssessmentCreatedAt)}</p>
                 ) : null}
@@ -1209,8 +1225,8 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   {isEditableLibrary ? (
                     <FormButton
                       variant="ghost"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={isUploading || uploadLimitReached || !isEditableLibrary}
+                      onClick={triggerUploadClick}
+                      disabled={isUploading || (!canReplaceActiveBaseline && uploadLimitReached) || !isEditableLibrary}
                       className="uppercase border-white/10 bg-transparent text-slate-300 hover:border-white/20 hover:text-slate-100"
                     >
                       Upload another resume

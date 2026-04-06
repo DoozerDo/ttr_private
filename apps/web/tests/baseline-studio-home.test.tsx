@@ -185,6 +185,74 @@ describe("BaselineStudioHome", () => {
     expect(screen.getByText("Why not just use your resume?")).toBeVisible();
   });
 
+  it("opens the file picker from the ready-state upload button and replaces the active baseline on upload", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([
+          { status: "complete", score: 81 },
+          { status: "complete", score: 78 },
+          { status: "complete", score: 84 },
+        ]);
+      }
+      if (url.includes("/api/baselines") && init?.method === "POST") {
+        return createJsonResponse({
+          baseline: createBaseline("base-2", "2026-01-04T00:00:00.000Z", "resume-2.pdf", {
+            latestAssessmentId: null,
+            latestAssessmentCreatedAt: null,
+            latestFitScore: null,
+            hasCompletedAssessment: false,
+          }),
+          baselineId: "base-2",
+          schemaVersion: "baseline_schema_v1",
+          userVerified: false,
+          rolesCount: 0,
+          toolsCount: 0,
+          flagsSummary: { missingFields: 0, lowConfidence: 0 },
+        });
+      }
+      if (url.includes("/api/baselines/analyze")) {
+        return createJsonResponse({
+          id: "base-2",
+          latestAssessmentSummary: {
+            latestAssessmentId: "assessment-base-2",
+            latestAssessmentCreatedAt: "2026-03-21T12:00:00.000Z",
+            latestFitScore: 86,
+            hasCompletedAssessment: true,
+          },
+        });
+      }
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return createJsonResponse([createAnalyzedBaseline("base-2", "resume-2.pdf", 86)]);
+      }
+      if (url.includes("/api/baselines/base-2")) {
+        return createJsonResponse(createAnalyzedBaseline("base-2", "resume-2.pdf", 86));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    setFetchImplementation(fetchMock);
+
+    const { container } = render(<BaselineStudioHome baselines={[createAnalyzedBaseline("base-1", "resume-1.pdf", 82)]} />);
+
+    await screen.findByRole("heading", { name: "Your baseline" });
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(fileInput).not.toBeNull();
+    const clickSpy = vi.spyOn(fileInput as HTMLInputElement, "click").mockImplementation(() => {});
+    fireEvent.click(screen.getByRole("button", { name: "Upload another resume" }));
+    expect(clickSpy).toHaveBeenCalled();
+
+    const replacement = new File(["resume 2"], "resume-2.pdf", { type: "application/pdf" });
+    fireEvent.change(fileInput as HTMLInputElement, { target: { files: [replacement] } });
+
+    await waitFor(() => {
+      expect(screen.getAllByText("resume-2.pdf").length).toBeGreaterThan(0);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("link", { name: /target a role/i })).toHaveAttribute("href", "/target?baselineId=base-2");
+    });
+    clickSpy.mockRestore();
+  });
+
   it("renders multiple resumes and blocks upload at the library cap", async () => {
     render(
       <BaselineStudioHome
