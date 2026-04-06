@@ -803,6 +803,9 @@ export function WorkspaceRunner({
   const resultCardClasses = [
     "score-summary-card space-y-3 rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.12),transparent_42%),linear-gradient(180deg,rgba(15,23,42,0.95),rgba(2,6,23,0.98))] p-4 text-[13px] text-slate-200 shadow-[0_24px_80px_rgba(2,6,23,0.45)]",
   ].join(" ");
+  const primaryTargetCtaLabel = productReadiness.canOpenStudio
+    ? "Open Studio"
+    : "Generate Compatibility Score";
   useEffect(() => {
     if (typeof score !== "number" || !latestBaselineId || !latestJobId) return;
     const assessmentId = asString((displayResult as { assessmentId?: unknown } | null)?.assessmentId) ?? "none";
@@ -822,7 +825,11 @@ export function WorkspaceRunner({
       trackEvent("target_cta_clicked", {
         state: targetGenerationState,
         score,
-        actionType: isLimitedHighFit ? "open_studio_limited" : "open_studio_generate",
+        actionType: productReadiness.canOpenStudio
+          ? "open_studio_generate"
+          : isLimitedHighFit
+            ? "open_studio_limited"
+            : "open_studio_generate",
       });
       if (isBlockedHighFit || !productReadiness.canOpenStudio) {
         event.preventDefault();
@@ -1397,7 +1404,10 @@ export function WorkspaceRunner({
             </div>
             {isStrongScore && strongMatchSignals.length ? (
               <div className="rounded-2xl border border-white/10 bg-slate-900/35 p-5">
-                <h3 className="text-base font-semibold text-white">Ready to analyze</h3>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                  Compatibility result
+                </p>
+                <h3 className="mt-1 text-base font-semibold text-white">{scoreDisplayValue}</h3>
                 <ul className="mt-3 space-y-2 text-sm text-slate-200">
                   {strongMatchSignals.map((line) => (
                     <li key={line}>&bull; {line}</li>
@@ -1445,16 +1455,7 @@ export function WorkspaceRunner({
                     : "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
                 }`}
               >
-                <p className="text-xs font-semibold uppercase tracking-[0.2em]">
-                  Generation status: {targetGenerationState}
-                </p>
-                <p className="mt-1 text-slate-100">
-                  {targetGenerationState === "READY"
-                    ? "Ready to analyze now."
-                    : targetGenerationState === "LIMITED"
-                    ? "Generation is limited by current verification constraints."
-                    : "Generation is blocked until verification gaps are resolved."}
-                </p>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em]">Generation Ready</p>
                 {targetGenerationState !== "READY" && blockingReasons.length ? (
                   <ul className="mt-2 space-y-1 text-slate-200">
                     {blockingReasons.map((reason, index) => (
@@ -1470,7 +1471,7 @@ export function WorkspaceRunner({
                   ? "You are a strong match, but your materials need refinement before applying."
                   : isLimitedHighFit
                     ? "You are a strong match, but generation is constrained until verification is stronger."
-                  : "You are a strong match and ready to generate tailored materials."}
+                    : "You are well aligned with this role and ready to generate tailored materials."}
               </p>
             ) : null}
             {isBlockedHighFit ? (
@@ -1509,7 +1510,7 @@ export function WorkspaceRunner({
                 onClick={handleGenerateClick}
                 className="inline-flex items-center justify-center whitespace-nowrap rounded-2xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
               >
-                Generate Compatibility Score
+                {primaryTargetCtaLabel}
               </a>
             )}
           </div>

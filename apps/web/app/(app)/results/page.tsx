@@ -2413,10 +2413,11 @@ export default function ResultsPage() {
         score: typeof activeScore === "number" ? activeScore : null,
         generationBlocked: isGenerationBlocked,
         hasVerifiedEvidence: evidenceLedger.entries.length > 0,
-        hasGaps: criticalGapDetails.length > 0,
+        hasGaps: generationReadiness.status !== "ready" && criticalGapDetails.length > 0,
       }),
-    [activeScore, evidenceLedger.entries.length, isGenerationBlocked, criticalGapDetails.length],
+    [activeScore, evidenceLedger.entries.length, generationReadiness.status, isGenerationBlocked, criticalGapDetails.length],
   );
+  const isReadyResultsState = resultsDecision.state === "READY";
   const formatDriverValue = (value?: number | null) =>
     typeof value === "number" ? value.toFixed(1) : "n/a";
   const summarySnippet = typeof latest?.summary === "string" ? latest.summary.trim() : null;
@@ -3573,28 +3574,36 @@ export default function ResultsPage() {
                     </section>
                   ) : null}
 
-                  <SignalAlignmentSection
-                    title={resultsDecision.state === "BLOCKED" ? "Evidence gaps" : "Why this role fits you"}
-                    strengths={Array.from(
-                      new Set([...advantageSignals, ...signalAlignment.strongForRole]),
-                    ).slice(0, 6)}
-                    gaps={
-                      resultsDecision.state === "BLOCKED" && criticalGapDetails.length > 0
-                        ? criticalGapDetails.map((gap) => gap.title).slice(0, 3)
-                        : resultsDecision.state === "IMPROVE"
-                          ? signalAlignment.weakerForRole
-                          : []
-                    }
-                    summary={signalAlignment.summary}
-                    gapHeading={
-                      resultsDecision.state === "BLOCKED" ? "Missing verification" : "Gaps to be aware of"
-                    }
-                    gapEmptyMessage={
-                      resultsDecision.state === "BLOCKED"
-                        ? "Missing verification is still preventing Studio."
-                        : "No material gaps were identified in this run."
-                    }
-                  />
+                  {isReadyResultsState ? (
+                    <section className="rounded-2xl border border-slate-700/60 bg-slate-900/45 p-4">
+                      <h3 className="text-lg font-semibold text-slate-100">Why this role fits you</h3>
+                      <p className="mt-1 text-sm leading-6 text-slate-300">{signalAlignment.summary}</p>
+                      <p className="mt-3 text-sm text-slate-200">No material gaps were identified in this run.</p>
+                    </section>
+                  ) : (
+                    <SignalAlignmentSection
+                      title={resultsDecision.state === "BLOCKED" ? "Evidence gaps" : "Why this role fits you"}
+                      strengths={Array.from(
+                        new Set([...advantageSignals, ...signalAlignment.strongForRole]),
+                      ).slice(0, 6)}
+                      gaps={
+                        resultsDecision.state === "BLOCKED" && criticalGapDetails.length > 0
+                          ? criticalGapDetails.map((gap) => gap.title).slice(0, 3)
+                          : resultsDecision.state === "IMPROVE"
+                            ? signalAlignment.weakerForRole
+                            : []
+                      }
+                      summary={signalAlignment.summary}
+                      gapHeading={
+                        resultsDecision.state === "BLOCKED" ? "Missing verification" : "Gaps to be aware of"
+                      }
+                      gapEmptyMessage={
+                        resultsDecision.state === "BLOCKED"
+                          ? "Missing verification is still preventing Studio."
+                          : "No material gaps were identified in this run."
+                      }
+                    />
+                  )}
                   <section className="rounded-2xl border border-slate-700/60 bg-slate-900/45 p-4">
                     <button
                       type="button"
@@ -3628,7 +3637,8 @@ export default function ResultsPage() {
                       </ul>
                     ) : null}
                   </section>
-                  {(!isWeakFitScore || recentIntent === "refine_intent" || recentIntent === "used_not_committed") &&
+                  {!isReadyResultsState &&
+                  (!isWeakFitScore || recentIntent === "refine_intent" || recentIntent === "used_not_committed") &&
                   scoreBand !== ScoreBand.TOP ? (
                     <section id="fit-improvement-opportunities" className="rounded-2xl border border-slate-700/50 bg-slate-900/35 p-3">
                       <FitImprovementOpportunities
@@ -3642,7 +3652,7 @@ export default function ResultsPage() {
                       />
                     </section>
                   ) : null}
-                  {showImprovementModule ? (
+                  {!isReadyResultsState && showImprovementModule ? (
                     <section
                       id="how-to-improve-your-fit"
                       className="rounded-2xl border border-sky-300/20 bg-sky-500/10 p-4"
@@ -3682,9 +3692,11 @@ export default function ResultsPage() {
                       </div>
                     </section>
                   ) : null}
-                  <section className="rounded-2xl border border-slate-700/50 bg-slate-900/35 p-3">
-                  <CareerAlignmentProgress showProgressSection={false} />
-                </section>
+                  {!isReadyResultsState ? (
+                    <section className="rounded-2xl border border-slate-700/50 bg-slate-900/35 p-3">
+                      <CareerAlignmentProgress showProgressSection={false} />
+                    </section>
+                  ) : null}
                 </div>
 
               <AdvancedInsightsCard
