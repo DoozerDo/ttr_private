@@ -1107,47 +1107,18 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   return (
     <div className="mx-auto w-full max-w-6xl px-6 2xl:px-8">
       <div className="flex flex-col gap-8">
-        <section className="rounded-[28px] bg-slate-900/40 p-6 md:p-8">
-          <div className="max-w-3xl space-y-5">
-            <div className="space-y-2">
-              <h1 className="text-3xl font-semibold tracking-tight text-white md:text-[34px]">
-                {heroState === "no_baseline"
-                  ? "Upload your resume to get started"
-                  : heroState === "no_analysis"
-                    ? "Your baseline is ready"
-                    : "Your baseline is ready"}
-              </h1>
-              <p className="text-base leading-7 text-slate-300">
-                {heroState === "no_baseline"
-                  ? "Upload the resume you want to work from. We convert it into a baseline used for scoring and tailored documents."
-                  : heroState === "no_analysis"
-                    ? "Your resume has been converted into a baseline."
-                    : "Your resume has been converted into a baseline."}
-              </p>
-              <p className="text-sm leading-6 text-slate-400">
-                {heroState === "no_baseline"
-                  ? "Upload your resume to create your baseline."
-                  : heroState === "no_analysis"
-                    ? "Your baseline is ready for targeting, but it still needs analysis before it can guide tailored generation."
-                    : "This baseline is ready for targeting and tailored document generation."}
-              </p>
-            </div>
-            {isValidatedBaselineState ? (
-              <div className="flex flex-wrap gap-2">
-                <Link
-                  href={targetRoleHref}
-                  className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold uppercase text-cyan-50 transition hover:bg-cyan-400/15"
-                >
-                  Target a role
-                </Link>
-                <Link
-                  href={baselineDetailsHref}
-                  className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold uppercase text-slate-100 transition hover:bg-white/10"
-                >
-                  View baseline details
-                </Link>
+        {!isValidatedBaselineState ? (
+          <section className="rounded-[28px] bg-slate-900/40 p-6 md:p-8">
+            <div className="max-w-3xl space-y-5">
+              <div className="space-y-2">
+                <h1 className="text-3xl font-semibold tracking-tight text-white md:text-[34px]">
+                  Upload your resume to get started
+                </h1>
+                <p className="text-base leading-7 text-slate-300">
+                  Upload the resume you want to work from. We convert it into a baseline used for scoring and tailored documents.
+                </p>
+                <p className="text-sm leading-6 text-slate-400">Upload your resume to create your baseline.</p>
               </div>
-            ) : (
               <div
                 className={`rounded-[18px] border px-4 py-4 transition ${
                   uploadLimitReached
@@ -1196,9 +1167,9 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   ) : null}
                 </div>
               </div>
-            )}
-          </div>
-        </section>
+            </div>
+          </section>
+        ) : null}
         {isValidatedBaselineState ? (
           <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
             <header className="space-y-1">
@@ -1213,6 +1184,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   filename={primaryBaseline.originalFilename}
                   isValidated
                   isReadyForTargeting
+                  showValidatedBadge={false}
                 />
                 {latestAssessmentCreatedAt ? (
                   <p className="mt-2 text-xs text-slate-400">Last analyzed {formatDateTime(latestAssessmentCreatedAt)}</p>

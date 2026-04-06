@@ -4,6 +4,7 @@ type ResumeWithBaselineStatusProps = {
   isValidated?: boolean;
   isReadyForTargeting?: boolean;
   isSourceForActiveBaseline?: boolean;
+  showValidatedBadge?: boolean;
 };
 
 export function ResumeWithBaselineStatus({
@@ -12,12 +13,13 @@ export function ResumeWithBaselineStatus({
   isValidated = false,
   isReadyForTargeting = false,
   isSourceForActiveBaseline = false,
+  showValidatedBadge = true,
 }: ResumeWithBaselineStatusProps) {
   return (
     <div className="space-y-1">
       <p className="text-sm font-semibold text-slate-100">{filename}</p>
       <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em]">
-        {isValidated ? (
+        {isValidated && showValidatedBadge ? (
           <span className="rounded-full border border-cyan-300/15 px-2.5 py-0.5 text-cyan-100">
             Validated baseline
           </span>
