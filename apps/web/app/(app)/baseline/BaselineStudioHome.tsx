@@ -1106,7 +1106,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
 
   return (
     <div className="mx-auto w-full max-w-6xl px-6 2xl:px-8">
-      <div className="flex flex-col gap-8">
+      <div className="flex flex-col gap-6">
         {!isValidatedBaselineState ? (
           <section className="rounded-[28px] bg-slate-900/40 p-6 md:p-8">
             <div className="max-w-3xl space-y-5">
@@ -1173,9 +1173,9 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         {isValidatedBaselineState ? (
           <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
             <header className="space-y-1">
-              <h2 className="text-xl font-semibold tracking-tight text-slate-100">Active baseline</h2>
+              <h2 className="text-xl font-semibold tracking-tight text-slate-100">Your baseline</h2>
               <p className="text-sm text-slate-400">
-                {primaryBaseline?.originalFilename ?? "Your active baseline"} is the validated asset TTR now uses.
+                This is the version used to score your fit and generate tailored applications.
               </p>
             </header>
             {primaryBaseline ? (
@@ -1208,9 +1208,10 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   </Link>
                   {isEditableLibrary ? (
                     <FormButton
+                      variant="ghost"
                       onClick={() => fileInputRef.current?.click()}
                       disabled={isUploading || uploadLimitReached || !isEditableLibrary}
-                      className="bg-indigo-600 text-white hover:bg-indigo-500 uppercase"
+                      className="uppercase border-white/10 bg-transparent text-slate-300 hover:border-white/20 hover:text-slate-100"
                     >
                       Upload another resume
                     </FormButton>

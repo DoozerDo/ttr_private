@@ -17,7 +17,7 @@ const MODULES: ModuleMeta[] = [
   {
     id: "baseline",
     title: "Baseline",
-    subtitle: "Upload your resume baseline.",
+    subtitle: "Create your baseline.",
     href: "/baseline",
     lockedReason: "Baseline setup is required first.",
   },
