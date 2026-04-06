@@ -57,7 +57,7 @@ function installFetch(score: number) {
 }
 
 describe("results gating", () => {
-  it("shows Studio and Apply actions only when fit score is qualified", async () => {
+  it("shows the blocked decision and one primary CTA when evidence is missing", async () => {
     overrideSearchParams({ assessmentId: "analysis-current" });
     const fetchMock = installFetch(75);
     setFetchImplementation(fetchMock as unknown as typeof fetch);
@@ -65,12 +65,11 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("Apply moment")).toBeInTheDocument();
+      expect(screen.getByText("You need verified evidence to proceed.")).toBeInTheDocument();
     });
-    expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("OPEN STUDIO");
-    expect(screen.getByRole("button", { name: "Apply to this role" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save this opportunity" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "START FIT REVIEW" })).toBeNull();
+    expect(screen.getAllByTestId("results-hero-primary-cta")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Apply to this role" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save this opportunity" })).toBeNull();
   });
 
   it("hides Studio and Apply actions below the threshold and shows only Fit Review", async () => {
@@ -81,13 +80,8 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("You're not ready to apply yet.")).toBeInTheDocument();
+      expect(screen.getByText("You need verified evidence to proceed.")).toBeInTheDocument();
     });
-    expect(
-      screen.getAllByText("Strengthen your baseline before generating application materials.")
-        .length,
-    ).toBeGreaterThan(0);
-    expect(screen.queryByText("Apply moment")).toBeNull();
     expect(screen.queryByRole("link", { name: "OPEN STUDIO" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Apply to this role" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Save this opportunity" })).toBeNull();

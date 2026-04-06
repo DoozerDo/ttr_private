@@ -48,6 +48,7 @@ import { buildScoreDelta, hasBaselineUpdated } from "@/lib/reanalysis";
 import { buildProgressSummary } from "@/lib/progressSummary";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
 import { getCanonicalNextAction, getGenerationCompletionStorageKey } from "@/lib/nextAction";
+import { resolveResultsDecision } from "@/lib/resultsDecisionResolver";
 import { deriveEvidenceLedger, type EvidenceLedger } from "@/lib/evidenceLedger";
 import { readRecentIntentState } from "@/src/lib/recentIntent";
 import { useGuidedMode } from "@/hooks/useGuidedMode";
@@ -854,8 +855,12 @@ export function OpportunityMapSection({
           <p className="text-[56px] font-black leading-[0.95] tracking-[-0.04em] text-white md:text-[64px]">
             {typeof score === "number" ? Math.round(score) : "--"}
           </p>
-          <h3 className="text-2xl font-semibold tracking-tight text-white">{verdict.label}</h3>
-          <p className="max-w-2xl text-sm leading-6 text-slate-300">{verdict.explanation}</p>
+          <h3 className="text-2xl font-semibold tracking-tight text-white">
+            {blockedByEvidence ? decisionNarrative.headline : verdict.label}
+          </h3>
+          <p className="max-w-2xl text-sm leading-6 text-slate-300">
+            {blockedByEvidence ? decisionNarrative.body : verdict.explanation}
+          </p>
           <p className="max-w-2xl text-xs leading-5 text-slate-400">
             This score reflects how closely your verified experience aligns with this role. It does not guarantee hiring outcomes.
           </p>
@@ -864,9 +869,11 @@ export function OpportunityMapSection({
           <>
             <div className="space-y-3">
               <h2 className="max-w-3xl text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl xl:text-5xl">
-                {decisionNarrative.headline}
+                {blockedByEvidence ? decisionNarrative.headline : verdict.label}
               </h2>
-              <p className="max-w-2xl text-sm leading-6 text-slate-100 md:text-base">{decisionNarrative.body}</p>
+              <p className="max-w-2xl text-sm leading-6 text-slate-100 md:text-base">
+                {blockedByEvidence ? decisionNarrative.body : verdict.explanation}
+              </p>
             </div>
             <CareerGravity />
             <section className="space-y-3 rounded-[24px] border border-white/10 bg-slate-900/30 p-5">
@@ -875,35 +882,11 @@ export function OpportunityMapSection({
               </p>
               <div className="space-y-3">
                 <h3 className="text-xl font-semibold tracking-tight text-slate-100">
-                  {decisionNarrative.headline}
+                  {blockedByEvidence ? decisionNarrative.headline : verdict.label}
                 </h3>
-                <p className="max-w-2xl text-sm leading-6 text-slate-100 md:text-base">{decisionNarrative.body}</p>
-                {primaryCta ? (
-                  primaryCta.disabled ? (
-                    <span
-                      data-testid="results-hero-primary-cta"
-                      className="inline-flex min-h-[52px] min-w-[300px] cursor-not-allowed items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-6 py-3 text-base font-semibold text-slate-400 md:min-w-[320px]"
-                    >
-                      {primaryCta.label}
-                    </span>
-                  ) : primaryCta.onClick ? (
-                    <button
-                      data-testid="results-hero-primary-cta"
-                      onClick={primaryCta.onClick}
-                      className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500 md:min-w-[320px]"
-                    >
-                      {primaryCta.label}
-                    </button>
-                  ) : (
-                    <a
-                      data-testid="results-hero-primary-cta"
-                      href={primaryCta.href ?? "#"}
-                      className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500 md:min-w-[320px]"
-                    >
-                      {primaryCta.label}
-                    </a>
-                  )
-                ) : null}
+                <p className="max-w-2xl text-sm leading-6 text-slate-100 md:text-base">
+                  {blockedByEvidence ? decisionNarrative.body : verdict.explanation}
+                </p>
                 <div className="flex flex-wrap gap-3 text-sm">
                   <a
                     data-testid="results-hero-secondary-action"
@@ -2424,6 +2407,16 @@ export default function ResultsPage() {
     }),
     [latest, primaryNextAction.type],
   );
+  const resultsDecision = useMemo(
+    () =>
+      resolveResultsDecision({
+        score: typeof activeScore === "number" ? activeScore : null,
+        generationBlocked: isGenerationBlocked,
+        hasVerifiedEvidence: evidenceLedger.entries.length > 0,
+        hasGaps: criticalGapDetails.length > 0,
+      }),
+    [activeScore, evidenceLedger.entries.length, isGenerationBlocked, criticalGapDetails.length],
+  );
   const formatDriverValue = (value?: number | null) =>
     typeof value === "number" ? value.toFixed(1) : "n/a";
   const summarySnippet = typeof latest?.summary === "string" ? latest.summary.trim() : null;
@@ -3184,7 +3177,7 @@ export default function ResultsPage() {
             resultsReturnCue ?? "Review your compatibility score and next best step."
           }
         />
-        {studioLocked ? (
+        {false ? (
           <section className="rounded-2xl border border-amber-300/30 bg-amber-500/10 p-4">
             <p className="text-sm font-semibold text-amber-100">You’re not ready to apply yet.</p>
             <p className="mt-1 text-sm text-slate-100">
@@ -3192,6 +3185,37 @@ export default function ResultsPage() {
             </p>
           </section>
         ) : null}
+        <section
+          className={`rounded-2xl border p-4 ${
+            resultsDecision.state === "BLOCKED"
+              ? "border-amber-300/30 bg-amber-500/10"
+              : resultsDecision.state === "READY"
+                ? "border-emerald-300/30 bg-emerald-500/10"
+                : "border-slate-700/60 bg-slate-900/45"
+          }`}
+        >
+          <p
+            className={`text-sm font-semibold ${
+              resultsDecision.state === "BLOCKED"
+                ? "text-amber-100"
+                : resultsDecision.state === "READY"
+                  ? "text-emerald-100"
+                  : "text-slate-100"
+            }`}
+          >
+            {resultsDecision.headline}
+          </p>
+          <p className="mt-1 text-sm text-slate-100">{resultsDecision.subtext}</p>
+          <div className="mt-3">
+            <a
+              data-testid="results-hero-primary-cta"
+              href={resultsDecision.primaryCta === "START_FIT_REVIEW" ? fitReviewPath : studioHref}
+              className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
+            >
+              {resultsDecision.primaryCta === "START_FIT_REVIEW" ? "START FIT REVIEW" : "OPEN STUDIO"}
+            </a>
+          </div>
+        </section>
         {showGenerationUnlockedPanel ? (
           <section
             className="rounded-2xl border border-emerald-300/30 bg-emerald-500/10 p-4"
@@ -3550,23 +3574,23 @@ export default function ResultsPage() {
                   ) : null}
 
                   <SignalAlignmentSection
-                    title={isGenerationBlocked ? "Evidence gaps" : "Why this role fits you"}
+                    title={resultsDecision.state === "BLOCKED" ? "Evidence gaps" : "Why this role fits you"}
                     strengths={Array.from(
                       new Set([...advantageSignals, ...signalAlignment.strongForRole]),
                     ).slice(0, 6)}
                     gaps={
-                      hasEvidenceGaps && criticalGapDetails.length > 0
+                      resultsDecision.state === "BLOCKED" && criticalGapDetails.length > 0
                         ? criticalGapDetails.map((gap) => gap.title).slice(0, 3)
-                        : hasFitGaps
+                        : resultsDecision.state === "IMPROVE"
                           ? signalAlignment.weakerForRole
                           : []
                     }
                     summary={signalAlignment.summary}
                     gapHeading={
-                      isGenerationBlocked ? "Missing verification" : "Gaps to be aware of"
+                      resultsDecision.state === "BLOCKED" ? "Missing verification" : "Gaps to be aware of"
                     }
                     gapEmptyMessage={
-                      isGenerationBlocked
+                      resultsDecision.state === "BLOCKED"
                         ? "Missing verification is still preventing Studio."
                         : "No material gaps were identified in this run."
                     }
