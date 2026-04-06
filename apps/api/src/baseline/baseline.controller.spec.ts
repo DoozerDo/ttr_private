@@ -147,3 +147,96 @@ describe('BaselineController - strengthening additions', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 });
+
+describe('BaselineController - listBaselines', () => {
+  const baselineVersionService = {
+    promoteBaselineVersion: jest.fn(),
+  } as any;
+
+  it('returns stripped baselines for the authenticated user', async () => {
+    const userId = 'user-1';
+    const baselineService = {
+      listBaselinesForUser: jest.fn().mockResolvedValue([
+        {
+          id: 'base-1',
+          userId,
+          version: 3,
+          versions: [],
+          status: 'ACTIVE',
+          originalFilename: 'resume.pdf',
+          mimeType: 'application/pdf',
+          storagePath: '/tmp/resume.pdf',
+          hash: 'hash',
+          archivedAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          latestAssessmentSummary: {
+            latestAssessmentId: null,
+            latestAssessmentCreatedAt: null,
+            latestFitScore: null,
+            hasCompletedAssessment: false,
+          },
+        },
+      ]),
+    } as any;
+    const controller = new BaselineController(
+      baselineService,
+      baselineVersionService,
+    );
+
+    const result = await controller.listBaselines(
+      { user: { id: userId } } as any,
+    );
+
+    expect(baselineService.listBaselinesForUser).toHaveBeenCalledWith(
+      userId,
+      false,
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      id: 'base-1',
+      userId,
+      status: 'ACTIVE',
+    });
+    expect(result[0]).not.toHaveProperty('version');
+    expect(result[0]).not.toHaveProperty('versions');
+  });
+
+  it('propagates includeArchived when requested', async () => {
+    const userId = 'user-1';
+    const baselineService = {
+      listBaselinesForUser: jest.fn().mockResolvedValue([]),
+    } as any;
+    const controller = new BaselineController(
+      baselineService,
+      baselineVersionService,
+    );
+
+    await controller.listBaselines(
+      { user: { id: userId } } as any,
+      'true',
+    );
+
+    expect(baselineService.listBaselinesForUser).toHaveBeenCalledWith(
+      userId,
+      true,
+    );
+  });
+
+  it('returns an empty array when no baselines exist', async () => {
+    const userId = 'user-1';
+    const baselineService = {
+      listBaselinesForUser: jest.fn().mockResolvedValue([]),
+    } as any;
+    const controller = new BaselineController(
+      baselineService,
+      baselineVersionService,
+    );
+
+    const result = await controller.listBaselines(
+      { user: { id: userId } } as any,
+    );
+
+    expect(result).toEqual([]);
+  });
+});

@@ -833,11 +833,15 @@ return {
       .addOrderBy('assessment."createdAt"', 'DESC')
       .addOrderBy('assessment.id', 'DESC')
       .getRawMany<{
-        baselineId: string;
-        id: string;
-        createdAt: Date | string;
-        overallScore: number | string | null;
-      }>();
+      baselineId: string;
+      id: string;
+      createdAt: Date | string;
+      overallScore: number | string | null;
+    }>();
+
+    this.logger.debug(
+      `buildLatestAssessmentSummaryByBaselineId userId=${userId} requested=${baselineIds.length} rawResults=${latestPerBaseline.length}`,
+    );
 
     for (const row of latestPerBaseline) {
       const parsedScore =
@@ -907,11 +911,18 @@ return {
       },
     });
 
+    this.logger.debug(
+      `listBaselinesForUser userId=${userId} includeArchived=${includeArchived} repositoryCount=${baselines.length}`,
+    );
+
     let summaries: Map<string, BaselineAssessmentSummary> = new Map();
     try {
       summaries = await this.buildLatestAssessmentSummaryByBaselineId(
         userId,
         baselines.map((baseline) => baseline.id),
+      );
+      this.logger.debug(
+        `listBaselinesForUser userId=${userId} receivedAssessments=${summaries.size}`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -929,6 +940,16 @@ return {
           ? (summaries.get(baseline.id) as BaselineAssessmentSummary)
           : this.toBaselineReadinessSummary(baseline),
     }));
+
+    this.logger.debug(
+      `listBaselinesForUser userId=${userId} mappedRows=${rows.length}`,
+    );
+    rows.forEach((baseline) => {
+      const summary = baseline.latestAssessmentSummary;
+      this.logger.debug(
+        `baseline summary userId=${userId} baselineId=${baseline.id} hasCompletedAssessment=${summary.hasCompletedAssessment} latestFitScore=${summary.latestFitScore ?? 'null'}`,
+      );
+    });
 
     if (process.env.NODE_ENV !== 'production') {
       rows.forEach((baseline) => {
@@ -1042,15 +1063,23 @@ return {
         return baseline;
       }
 
-      const baselines = await manager.find(Baseline, {
-        where: { userId },
-        order: { createdAt: 'DESC' },
-      });
+    const baselines = await manager.find(Baseline, {
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
 
-      const nextActiveBaselineId =
-        status === BaselineStatus.ACTIVE
-          ? baseline.id
-          : baselines.find((item) => item.id !== baseline.id)?.id ?? baseline.id;
+    this.logger.debug(
+      `updateBaselineStatus userId=${userId} baselineId=${baselineId} targetStatus=${status} baselineCount=${baselines.length}`,
+    );
+
+    const nextActiveBaselineId =
+      status === BaselineStatus.ACTIVE
+        ? baseline.id
+        : baselines.find((item) => item.id !== baseline.id)?.id ?? baseline.id;
+
+    this.logger.debug(
+      `updateBaselineStatus selectedActiveBaselineId=${nextActiveBaselineId}`,
+    );
 
       const updatedBaselines = baselines.map((item) => {
         const nextStatus =

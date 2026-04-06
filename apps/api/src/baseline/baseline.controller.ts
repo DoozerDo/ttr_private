@@ -211,17 +211,25 @@ export class BaselineController {
     @Req() request: Request & { user?: { id?: string } },
     @Query('includeArchived') includeArchived?: string,
   ) {
+    this.logger.debug(
+      `GET /baselines entry includeArchived=${includeArchived ?? 'unset'}`,
+    );
     const userId = request.user?.id;
 
     if (!userId) {
       throw new BadRequestException('Invalid user context');
     }
+    this.logger.debug(`Resolved authenticated userId=${userId}`);
 
     const include = includeArchived === 'true';
     const baselines = await this.baselineService.listBaselinesForUser(userId, include);
-    return baselines.map((baseline) =>
+    const payload = baselines.map((baseline) =>
       stripBaselineVersioning(baseline as unknown as Record<string, unknown>),
     );
+    this.logger.debug(
+      `GET /baselines returning ${payload.length} entries for userId=${userId} includeArchived=${include}`,
+    );
+    return payload;
   }
 
   @Get('debug/baseline-assessment-state')
