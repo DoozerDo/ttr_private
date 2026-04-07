@@ -1326,6 +1326,7 @@ const sampleScoringV2: CxFitV2Result = {
     };
 
     let expectedHash: string;
+    let legacyExpectedHash: string;
 
     beforeEach(async () => {
       jobRepository.findOne.mockResolvedValue(refreshJobRecord);
@@ -1334,6 +1335,29 @@ const sampleScoringV2: CxFitV2Result = {
         refreshJobRecord,
         baseline,
       );
+      legacyExpectedHash = createHash('sha256')
+        .update(
+          JSON.stringify({
+            scoringVersion: 'cx-fit-v2-heuristics-2026-04-06',
+            normalizationVersion: 'job-normalization-sanitization-2026-04-06',
+            job: {
+              rawDescription: refreshJobRecord.rawDescription,
+              normalizedResponsibilities: refreshJobRecord.normalizedResponsibilities,
+              normalizedRequirements: refreshJobRecord.normalizedRequirements,
+              title: refreshJobRecord.title ?? null,
+              company: refreshJobRecord.company ?? null,
+            },
+            baseline: {
+              id: baseline.id,
+              version: baseline.version ?? null,
+              sections: service['buildSectionPayload'](
+                service['getIncludedSections'](baseline.sections),
+              ),
+            },
+            calibration: dimensionWeights,
+          }),
+        )
+        .digest('hex');
     });
 
     it('buildInputsHash ignores normalized segments when raw description exists', () => {
@@ -1471,6 +1495,61 @@ const sampleScoringV2: CxFitV2Result = {
 
       expect(fitScoringServiceMock.score).toHaveBeenCalled();
       expect(savedAssessment).not.toBeNull();
+      expect(savedAssessment?.inputsHash).toBe(expectedHash);
+      expect(result.assessmentId).toBe(savedAssessment?.id);
+    });
+
+    it('recomputes when a legacy persisted hash predates the scorer version', async () => {
+      const legacyAssessment: FitAssessment = {
+        id: 'fit-legacy',
+        userId: 'user-1',
+        jobId: 'job-1',
+        baselineId: 'b-1',
+        baselineVersion: baseline.version,
+        overallScore: 48,
+        verdict: FitAssessmentVerdict.CONSIDER,
+        dimensionScores: {
+          experienceAlignment: 45,
+          leadershipLevel: 45,
+          technicalPlatformFit: 45,
+          industryContext: 45,
+          strategicTacticalFit: 45,
+        },
+        strengths: [],
+        gaps: [],
+        complianceFlags: [],
+        scoringV2: null,
+        inputsHash: legacyExpectedHash,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      let savedAssessment: FitAssessment | null = null;
+
+      fitAssessmentRepository.save.mockImplementation(async (payload) => {
+        savedAssessment = {
+          ...payload,
+          id: 'fresh-fit-versioned',
+          createdAt: new Date(),
+        } as FitAssessment;
+        return savedAssessment;
+      });
+
+      fitAssessmentRepository.findOne.mockImplementation(({ where }) => {
+        if (where?.id) {
+          return Promise.resolve(savedAssessment);
+        }
+        return Promise.resolve(legacyAssessment);
+      });
+
+      const result = await service.getLatestAssessmentForBaseline(
+        'user-1',
+        'job-1',
+        'b-1',
+      );
+
+      expect(legacyExpectedHash).not.toBe(expectedHash);
+      expect(fitScoringServiceMock.score).toHaveBeenCalled();
       expect(savedAssessment?.inputsHash).toBe(expectedHash);
       expect(result.assessmentId).toBe(savedAssessment?.id);
     });

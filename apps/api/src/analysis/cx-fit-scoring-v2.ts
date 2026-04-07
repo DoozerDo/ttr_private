@@ -621,6 +621,32 @@ const RESPONSIBILITY_VECTORS = [
       'scorecards',
     ],
   },
+  {
+    id: 'network_infrastructure_operations',
+    keywords: [
+      'network engineer',
+      'networking infrastructure',
+      'network infrastructure',
+      'datacenter networking',
+      'data center networking',
+      'l3 routing',
+      'layer 3 routing',
+      'bgp',
+      'vlan',
+      'dns',
+      'dhcp',
+      'vpn',
+      'switch operations',
+      'switch deployment',
+      'linux systems',
+      'linux infrastructure',
+      'firewall',
+      'firewalls',
+      'monitoring',
+      'virtualization',
+      'vmware',
+    ],
+  },
 ] as const;
 
 const MAX_TRANSFERABLE_CONTRIBUTION = 0.25;
@@ -761,6 +787,14 @@ const DOMAIN_MATCHERS: Array<{ tag: DomainTag; patterns: RegExp[] }> = [
       /enterprise technology/,
       /it operations/,
       /enterprise operations/,
+      /network infrastructure/,
+      /datacenter/,
+      /data center/,
+      /linux systems?/,
+      /virtualization/,
+      /firewalls?/,
+      /routing/,
+      /switch(?:es|ing)?/,
     ],
   },
   {
@@ -785,6 +819,10 @@ const DOMAIN_MATCHERS: Array<{ tag: DomainTag; patterns: RegExp[] }> = [
       /internal (?:operations|support|teams|stakeholders|services)/,
       /employee facing/,
       /internal customers/,
+      /lab infrastructure/,
+      /physical infrastructure/,
+      /device operations/,
+      /network runs?/,
     ],
   },
   {
@@ -2860,13 +2898,65 @@ export function computeConfidenceScore(
 
   const baselineTags = debug.domainTagsBaseline ?? [];
   const roleTags = debug.domainTagsRole ?? [];
+  const baselineTextForPenalty =
+    debug.bundle?.inputs.normalizedBaseline.sections.map((section) => section.snippet).join(' ') ??
+    '';
+  const jobTextForPenalty =
+    [
+      ...(debug.bundle?.inputs.normalizedJob.responsibilities ?? []),
+      ...(debug.bundle?.inputs.normalizedJob.requirements ?? []),
+    ]
+      .map((segment) => segment.snippet)
+      .join(' ') ?? '';
+  const baselineInfraNetworkSignals = countTermHits(baselineTextForPenalty, [
+    'network infrastructure',
+    'networking',
+    'linux systems',
+    'linux infrastructure',
+    'datacenter',
+    'data center',
+    'routing',
+    'l3 routing',
+    'layer 3 routing',
+    'bgp',
+    'vlan',
+    'firewall',
+    'firewalls',
+    'switch',
+    'switches',
+    'virtualization',
+    'vmware',
+    'monitoring',
+  ]);
+  const roleInfraNetworkSignals = countTermHits(jobTextForPenalty, [
+    'network infrastructure',
+    'networking',
+    'linux systems',
+    'linux infrastructure',
+    'datacenter',
+    'data center',
+    'routing',
+    'l3 routing',
+    'layer 3 routing',
+    'bgp',
+    'vlan',
+    'firewall',
+    'firewalls',
+    'switch',
+    'switches',
+    'virtualization',
+    'vmware',
+    'monitoring',
+  ]);
+  const strongInfraNetworkMatch =
+    baselineInfraNetworkSignals >= 6 && roleInfraNetworkSignals >= 2;
   if (roleTags.length && !baselineTags.length) {
-    score -= 15;
+    score -= strongInfraNetworkMatch ? 5 : 15;
     reasons.push('low_domain_overlap');
   } else if (roleTags.length && baselineTags.length) {
     const overlap = roleTags.some((tag) => baselineTags.includes(tag));
     if (!overlap) {
-      score -= 10;
+      score -= strongInfraNetworkMatch ? 4 : 10;
       reasons.push('low_domain_overlap');
     }
   }
@@ -2878,10 +2968,10 @@ export function computeConfidenceScore(
 
   if (!baselineInsufficient && typeof debug.responsibilityOverlapPercent === 'number') {
     if (debug.responsibilityOverlapPercent < 35) {
-      score -= 15;
+      score -= strongInfraNetworkMatch ? 6 : 15;
       reasons.push('low_responsibility_overlap');
     } else if (debug.responsibilityOverlapPercent < 50) {
-      score -= 8;
+      score -= strongInfraNetworkMatch ? 4 : 8;
       reasons.push('moderate_responsibility_overlap');
     }
   }

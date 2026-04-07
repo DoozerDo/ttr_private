@@ -72,6 +72,7 @@ export type GapAnalysisResult = {
 
 type AnalyzeGapInput = {
   baselineSections: Array<{ content: string }>;
+  validatedRequirements?: string[] | null;
   jobRequirements?: string[] | null;
   jobResponsibilities?: string[] | null;
   dimensionPercents?: Record<string, number | undefined> | null;
@@ -237,6 +238,39 @@ const STRUCTURAL_REQUIREMENT_NOISE_PATTERNS = [
   /^\s*abilities\s*:?\s*$/i,
   /^\s*candidate\s*:?\s*$/i,
 ];
+const LOCATION_ONLY_PATTERNS = [
+  /^\s*[a-z .'-]+,\s*[a-z]{2}(?:\s+\d{5})?\s*$/i,
+  /^\s*remote(?:\s*-\s*[a-z .'-]+)?\s*$/i,
+];
+const GAP_REQUIREMENT_NOISE_PATTERNS = [
+  ...LOCATION_ONLY_PATTERNS,
+  /\b(?:salary|compensation|pay|wage|bonus|equity|benefits)\b/i,
+  /\bequal opportunity employer\b/i,
+  /\ball qualified applicants\b/i,
+  /\breasonable accommodation\b/i,
+  /\bapplication process\b/i,
+  /\bbackground check\b/i,
+  /\bwork authorization\b/i,
+  /^\s*(?:or\s+)?equivalent experience\.?$/i,
+  /^\s*proficient\.?$/i,
+  /^\s*strong ability\.?$/i,
+  /^\s*excellent communication\.?$/i,
+  /^\s*entry[-\s]*level\b.*\bdesigner\b.*$/i,
+  /^\s*entry[-\s]*level\b.*\bengineer\b.*$/i,
+  /^\s*entry[-\s]*level\b.*\bmanager\b.*$/i,
+];
+const REQUIREMENT_NARRATIVE_PATTERNS = [
+  /^\s*the\s+[a-z0-9][a-z0-9\s&/.-]{2,}\s+(?:team|group|org|organization|department)\s+is\s+on\s+a\s+mission\b/i,
+  /^\s*we(?:'re| are)?\s+on\s+a\s+mission\b/i,
+  /^\s*join\s+us\b/i,
+  /^\s*about\s+the\s+(?:team|role|company)\b/i,
+  /^\s*our\s+(?:team|company|group)\b/i,
+  /^\s*the\s+(?:team|company|group)\s+(?:will|should|can|is)\b/i,
+  /^\s*demonstrates\s+some\s+knowledge\s+of\b/i,
+  /\b(?:build|own|lead|deliver|support|maintain)\s+the\s*$/i,
+  /\b(?:and|or|to|for|of|in|with|on|at|by)\s*$/i,
+  /\bknows?\s+what\s+data\s+is\b/i,
+];
 const ACRONYM_WORDS = new Set([
   'api',
   'apis',
@@ -314,10 +348,49 @@ const GAP_CATEGORY_KEYWORDS: Array<{
   },
 ];
 
+const SPECIALIZED_ROLE_KEYWORDS = [
+  'network',
+  'networking',
+  'infrastructure',
+  'sre',
+  'site reliability',
+  'noc',
+  'security',
+  'cloud',
+  'platform',
+  'datacenter',
+  'data center',
+  'routing',
+  'switch',
+  'firewall',
+  'juniper',
+  'cisco',
+  'arista',
+  'mellanox',
+  'bgp',
+];
+const GENERIC_SOFTWARE_SIGNAL_PATTERNS = [
+  /\bportfolio\b/i,
+  /\bwebsite\b/i,
+  /\bweb(?:site| app| application)?\b/i,
+  /\bfrontend\b/i,
+  /\bfront-end\b/i,
+  /\bui\b/i,
+  /\bclient[-\s]?facing\b/i,
+  /\bnon[-\s]?technical client\b/i,
+];
+
 @Injectable()
 export class GapAnalysisService {
+  validateRequirements(entries: string[] | null | undefined): string[] {
+    return this.collectValidatedRequirements(entries).map((entry) => entry.text);
+  }
+
   analyze(input: AnalyzeGapInput): GapAnalysisResult {
-    const requirements = this.collectRequirements(input);
+    const requirements = Array.isArray(input.validatedRequirements)
+      ? this.collectValidatedRequirements(input.validatedRequirements)
+      : this.collectRequirements(input);
+    this.assertNoInvalidRequirementLeak(requirements, input);
     if (!requirements.length) {
       return {
         strengths: [],
@@ -503,6 +576,14 @@ export class GapAnalysisService {
   }
 
   private collectRequirements(input: AnalyzeGapInput): RequirementCandidate[] {
+    if (Array.isArray(input.validatedRequirements)) {
+      return input.validatedRequirements
+        .map((entry) => this.normalizeRequirementCandidate(entry))
+        .filter((entry): entry is string => Boolean(entry))
+        .filter((entry) => this.isValidRequirementCandidate(entry))
+        .map((text) => ({ text, source: 'requirement' }));
+    }
+
     const raw: RequirementCandidate[] = [];
 
     for (const entry of input.jobRequirements ?? []) {
@@ -527,9 +608,63 @@ export class GapAnalysisService {
       const key = item.text.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
+      if (!this.isValidRequirementCandidate(item.text)) continue;
       deduped.push(item);
     }
     return deduped;
+  }
+
+  private collectValidatedRequirements(entries: string[] | null | undefined): RequirementCandidate[] {
+    const raw = (entries ?? [])
+      .map((entry) => this.normalizeRequirementCandidate(entry))
+      .filter((entry): entry is string => Boolean(entry))
+      .filter((entry) => this.isValidRequirementCandidate(entry))
+      .map((text) => ({ text, source: 'requirement' as const }));
+
+    const seen = new Set<string>();
+    const deduped: RequirementCandidate[] = [];
+    for (const item of raw) {
+      const key = item.text.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(item);
+    }
+    return deduped;
+  }
+
+  private isValidRequirementCandidate(value: string): boolean {
+    const text = this.clean(value);
+    if (!text) return false;
+    if (text.length < 12) return false;
+    if (GAP_REQUIREMENT_NOISE_PATTERNS.some((pattern) => pattern.test(text))) return false;
+    if (REQUIREMENT_NARRATIVE_PATTERNS.some((pattern) => pattern.test(text))) return false;
+    if (this.isCompensationText(text)) return false;
+    if (this.isLegalOrApplicationBoilerplate(text)) return false;
+    if (this.isGenericCompanyBoilerplate(text)) return false;
+    if (this.isStructuralRequirementNoise(text)) return false;
+    const words = text.split(/\s+/).filter(Boolean);
+    if (words.length <= 2) return false;
+    if (!/[a-z]/i.test(text) || !/\b[a-z]{3,}\b/i.test(text)) return false;
+    return true;
+  }
+
+  private assertNoInvalidRequirementLeak(
+    validatedRequirements: RequirementCandidate[],
+    input: AnalyzeGapInput,
+  ): void {
+    const legacyInputs = [...(input.jobRequirements ?? []), ...(input.jobResponsibilities ?? [])];
+    if (!legacyInputs.length) return;
+    const invalid = legacyInputs
+      .map((entry) => this.normalizeRequirementCandidate(entry))
+      .filter((entry): entry is string => Boolean(entry))
+      .filter((entry) => !this.isValidRequirementCandidate(entry));
+    if (!invalid.length) return;
+    const leaked = invalid.find((candidate) =>
+      validatedRequirements.some((validated) => validated.text.toLowerCase() === candidate.toLowerCase()),
+    );
+    if (leaked && process.env.NODE_ENV !== 'production') {
+      throw new Error(`Invalid requirement leaked into validatedRequirements: ${leaked}`);
+    }
   }
 
   private collectBaselineLines(
@@ -561,18 +696,25 @@ export class GapAnalysisService {
   ): string[] {
     const selected: string[] = [];
     const selectedKeys: string[] = [];
+    const isSpecializedRole = this.isSpecializedInfrastructureRole(assessments);
 
     const candidates = assessments
       .filter(
         (entry) =>
           entry.finalDecision === 'matched' &&
-          entry.evidenceScore >= 0.5 &&
-          entry.importance >= 0.45 &&
+          entry.evidenceScore >= (isSpecializedRole ? 0.48 : 0.5) &&
+          entry.relevanceScore >= 0.45 &&
+          entry.importance >= (isSpecializedRole ? 0.42 : 0.45) &&
           typeof entry.baselineEvidence === 'string' &&
           entry.baselineEvidence.trim().length > 0 &&
           this.isDisplayableBaselineEvidence(entry.baselineEvidence),
       )
       .sort((a, b) => {
+        if (isSpecializedRole) {
+          const aSpecialized = this.getSpecializedSignalScore(a.baselineEvidence ?? '');
+          const bSpecialized = this.getSpecializedSignalScore(b.baselineEvidence ?? '');
+          if (bSpecialized !== aSpecialized) return bSpecialized - aSpecialized;
+        }
         if (b.relevanceScore !== a.relevanceScore) return b.relevanceScore - a.relevanceScore;
         return b.evidenceScore - a.evidenceScore;
       });
@@ -582,6 +724,13 @@ export class GapAnalysisService {
       if (!signal) continue;
       const normalized = this.normalizeSignalKey(signal);
       if (!normalized) continue;
+      if (
+        isSpecializedRole &&
+        this.isGenericSoftwareSignal(signal) &&
+        !this.hasSpecializedRoleOverlap(signal, signal)
+      ) {
+        continue;
+      }
       if (selectedKeys.some((key) => this.signalsOverlap(key, normalized))) continue;
       selected.push(signal);
       selectedKeys.push(normalized);
@@ -618,6 +767,7 @@ export class GapAnalysisService {
         ?.text ?? this.findBestEvidence(tokens, baselineLines);
     const evidenceScore = this.estimateEvidenceScore(tokenCoverage, baselineEvidence);
     const dimensionKey = this.inferDimensionKey(req);
+    const specializedRole = this.isSpecializedInfrastructureRoleText(req);
 
     const sourceWeight = candidate.source === 'requirement' ? 0.9 : 0.75;
     const keywordBoost = this.keywordBoost(req);
@@ -775,6 +925,39 @@ export class GapAnalysisService {
       return phraseTitle;
     }
     return this.toTitleFromRequirement(requirement);
+  }
+
+  private isSpecializedInfrastructureRole(assessments: RequirementAssessment[]): boolean {
+    const text = assessments
+      .map((assessment) => `${assessment.title} ${assessment.requirementEvidence} ${assessment.baselineEvidence ?? ''}`)
+      .join(' ')
+      .toLowerCase();
+    return SPECIALIZED_ROLE_KEYWORDS.some((keyword) => text.includes(keyword));
+  }
+
+  private isSpecializedInfrastructureRoleText(text: string): boolean {
+    const normalized = this.clean(text).toLowerCase();
+    return SPECIALIZED_ROLE_KEYWORDS.some((keyword) => normalized.includes(keyword));
+  }
+
+  private getSpecializedSignalScore(text: string): number {
+    const normalized = this.clean(text).toLowerCase();
+    if (!normalized) return 0;
+    return SPECIALIZED_ROLE_KEYWORDS.reduce(
+      (score, keyword) => score + (normalized.includes(keyword) ? 1 : 0),
+      0,
+    );
+  }
+
+  private hasSpecializedRoleOverlap(signal: string, requirement: string): boolean {
+    const combined = `${signal} ${requirement}`.toLowerCase();
+    return SPECIALIZED_ROLE_KEYWORDS.some((keyword) => combined.includes(keyword));
+  }
+
+  private isGenericSoftwareSignal(text: string): boolean {
+    const normalized = this.clean(text);
+    if (!normalized) return false;
+    return GENERIC_SOFTWARE_SIGNAL_PATTERNS.some((pattern) => pattern.test(normalized));
   }
 
   private assignCategory(text: string): string | null {

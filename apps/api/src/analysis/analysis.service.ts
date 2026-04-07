@@ -156,6 +156,8 @@ const RAW_TEXT_WARNING_THRESHOLD = 3000;
 const PROMPT_LIKE_FLAG_MESSAGE = 'Job description contains prompt-like content';
 const BASELINE_INVALID_MESSAGE =
   'Baseline content is missing in this environment. Please re upload or select a valid baseline.';
+const SCORING_V2_INPUTS_VERSION = 'cx-fit-v2-heuristics-2026-04-06';
+const JOB_NORMALIZATION_VERSION = 'job-normalization-sanitization-2026-04-06';
 
 export function buildJobTextForScoring(job: JobTextInput): JobTextForScoring {
   const rawDescription = (job.rawDescription ?? '').trim();
@@ -770,8 +772,9 @@ export class AnalysisService {
       baselineSections: allowedSections.map((section) => ({
         content: section.content ?? '',
       })),
-      jobRequirements: job.normalizedRequirements ?? [],
-      jobResponsibilities: job.normalizedResponsibilities ?? [],
+      validatedRequirements: this.gapAnalysisService.validateRequirements(
+        job.normalizedRequirements ?? [],
+      ),
       dimensionPercents: this.mapAssessmentDimensionPercents(assessment),
       debugMatching: false,
     });
@@ -868,20 +871,21 @@ export class AnalysisService {
       .map((entry) => entry?.trim() ?? '')
       .filter(Boolean);
 
-    const shouldParse =
-      rawDescription.length > 0 &&
-      (!providedResponsibilities.length || !providedRequirements.length);
-    const parsedSegments = shouldParse
+    const parsedSegments = rawDescription.length > 0
       ? normalizeJobDescription(rawDescription)
       : null;
     const normalizedResponsibilities =
-      providedResponsibilities.length || !shouldParse
-        ? providedResponsibilities
-        : parsedSegments?.normalized.responsibilities ?? [];
+      rawDescription.length > 0
+        ? parsedSegments?.normalized.responsibilities ?? []
+        : providedResponsibilities.length
+          ? providedResponsibilities
+          : parsedSegments?.normalized.responsibilities ?? [];
     const normalizedRequirements =
-      providedRequirements.length || !shouldParse
-        ? providedRequirements
-        : parsedSegments?.normalized.requirements ?? [];
+      rawDescription.length > 0
+        ? parsedSegments?.normalized.requirements ?? []
+        : providedRequirements.length
+          ? providedRequirements
+          : parsedSegments?.normalized.requirements ?? [];
 
     return {
       rawDescription,
@@ -1247,6 +1251,8 @@ export class AnalysisService {
     dimensionWeights: DimensionWeightOverrides,
   ) {
     const payload = {
+      scoringVersion: SCORING_V2_INPUTS_VERSION,
+      normalizationVersion: JOB_NORMALIZATION_VERSION,
       job: {
         rawDescription: job.rawDescription,
         normalizedResponsibilities: job.normalizedResponsibilities,
@@ -1957,6 +1963,8 @@ export class AnalysisService {
     } = normalizeJobDescription(jobText);
     const normalizedJobResponsibilities = normalizedJob.responsibilities;
     const normalizedJobRequirements = normalizedJob.requirements;
+    const validatedRequirements =
+      this.gapAnalysisService.validateRequirements(normalizedJobRequirements);
     const jobTextSource: JobTextSource =
       normalizedJob.meta.source === 'normalized' ? 'normalized' : 'raw';
     const normalizedJobDescription = this.complianceService.normalizeText(
@@ -1976,7 +1984,10 @@ export class AnalysisService {
       version: baselineVersion.versionNumber ?? baseline.version,
     };
     const inputsHash = this.buildInputsHash(
-      canonicalJobForHash,
+      {
+        ...canonicalJobForHash,
+        normalizedRequirements: validatedRequirements,
+      },
       baselineForHash,
       sectionPayload,
       dimensionWeights,
@@ -1987,10 +1998,10 @@ export class AnalysisService {
           job: {
             rawDescription: canonicalJobForHash.rawDescription,
             normalizedResponsibilities: normalizedJobResponsibilities,
-            normalizedRequirements: normalizedJobRequirements,
+            normalizedRequirements: validatedRequirements,
           },
           normalizedJobResponsibilities,
-          normalizedJobRequirements,
+          normalizedJobRequirements: validatedRequirements,
           baselineSections: sectionPayload,
           metadata: {
             jobId: job?.id ?? jobId ?? undefined,
@@ -2050,13 +2061,14 @@ export class AnalysisService {
           )
         : undefined;
 
-    const gapInsights = this.gapAnalysisService.analyze({
-      baselineSections: sectionPayload,
-      jobRequirements: normalizedJobRequirements,
-      jobResponsibilities: normalizedJobResponsibilities,
-      dimensionPercents: scoringV2.rubric.dimensionPercents,
-      debugMatching: false,
-    });
+      const gapInsights = this.gapAnalysisService.analyze({
+        baselineSections: sectionPayload,
+        validatedRequirements: this.gapAnalysisService.validateRequirements(
+          validatedRequirements,
+        ),
+        dimensionPercents: scoringV2.rubric.dimensionPercents,
+        debugMatching: false,
+      });
     const strengths = gapInsights.strengths;
     const gaps = gapInsights.criticalGaps.map((gap) => gap.title);
     const complianceFlags = scoring?.complianceFlags ?? [];
@@ -2595,6 +2607,8 @@ export class AnalysisService {
       } = normalizeJobDescription(jobText);
       const normalizedJobResponsibilities = normalizedJob.responsibilities;
       const normalizedJobRequirements = normalizedJob.requirements;
+      const validatedRequirements =
+        this.gapAnalysisService.validateRequirements(normalizedJobRequirements);
       const jobTextSource: JobTextSource =
         normalizedJob.meta.source === 'normalized' ? 'normalized' : 'raw';
       const normalizedJobDescription = this.complianceService.normalizeText(
@@ -2614,7 +2628,10 @@ export class AnalysisService {
         calibration.weights,
       );
       const inputsHash = this.buildInputsHash(
-        canonicalJobForHash,
+        {
+          ...canonicalJobForHash,
+          normalizedRequirements: validatedRequirements,
+        },
         baselineForHash,
         sectionPayload,
         dimensionWeights,
@@ -2640,10 +2657,10 @@ export class AnalysisService {
           job: {
             rawDescription: canonicalJobForHash.rawDescription,
             normalizedResponsibilities: normalizedJobResponsibilities,
-            normalizedRequirements: normalizedJobRequirements,
+            normalizedRequirements: validatedRequirements,
           },
           normalizedJobResponsibilities,
-          normalizedJobRequirements,
+          normalizedJobRequirements: validatedRequirements,
           baselineSections: sectionPayload,
           metadata: {
             jobId: job?.id ?? resolvedJobId ?? null,
@@ -2669,6 +2686,11 @@ export class AnalysisService {
       logStageLifecycle("generation_completed", currentStage, {
         score: scoringV2.score,
       });
+      if (this.isDevMode()) {
+        this.logger.log(
+          `[fit-score] scoring_v2_completed baselineId=${baseline.id} jobId=${resolvedJobId} score=${scoringV2.score} heuristicUsed=${scoringV2.debug.heuristicInference.usedHeuristicInference} heuristicLiftTotal=${scoringV2.debug.heuristicInference.heuristicLiftTotal} scoreConfidence=${scoringV2.scoreConfidence} scorePresentationMode=${scoringV2.scorePresentationMode}`,
+        );
+      }
 
       this.applyBaselineCoverageDetails(
         scoringV2,
@@ -2705,8 +2727,9 @@ export class AnalysisService {
 
       const gapInsights = this.gapAnalysisService.analyze({
         baselineSections: sectionPayload,
-        jobRequirements: normalizedJobRequirements,
-        jobResponsibilities: normalizedJobResponsibilities,
+        validatedRequirements: this.gapAnalysisService.validateRequirements(
+          validatedRequirements,
+        ),
         dimensionPercents: scoringV2.rubric.dimensionPercents,
         debugMatching: Boolean(
           (normalizedPayload as RunFitAssessmentPayload).debugMatching,
@@ -3553,6 +3576,11 @@ export class AnalysisService {
     );
 
     if (assessment.inputsHash !== expectedHash) {
+      if (this.isDevMode()) {
+        this.logger.log(
+          `[fit-score] latest_assessment_stale_recompute jobId=${jobId} baselineId=${assessment.baselineId} persistedAssessmentId=${assessment.id} persistedInputsHash=${assessment.inputsHash} expectedInputsHash=${expectedHash}`,
+        );
+      }
       const baselineVersion =
         assessment.baselineVersion ?? baseline.version ?? undefined;
       return this.runAndPersistFitAssessment(
@@ -3563,6 +3591,11 @@ export class AnalysisService {
       );
     }
 
+    if (this.isDevMode()) {
+      this.logger.log(
+        `[fit-score] latest_assessment_reused jobId=${jobId} baselineId=${assessment.baselineId} assessmentId=${assessment.id} score=${assessment.overallScore}`,
+      );
+    }
     return this.buildLatestAssessmentPayload(assessment);
   }
 
@@ -3596,6 +3629,11 @@ export class AnalysisService {
       }
     }
 
+    if (this.isDevMode()) {
+      this.logger.log(
+        `[fit-score] assessment_rehydrated assessmentId=${assessmentId} forceFreshRecompute=${Boolean(options?.forceFreshRecompute)} skipFreshRecompute=${Boolean(options?.skipFreshRecompute)} score=${assessment.overallScore}`,
+      );
+    }
     return this.buildLatestAssessmentPayload(assessment);
   }
 
@@ -3622,6 +3660,11 @@ export class AnalysisService {
     );
 
     if (assessment.inputsHash !== expectedHash) {
+      if (this.isDevMode()) {
+        this.logger.log(
+          `[fit-score] latest_assessment_for_baseline_stale_recompute jobId=${jobId} baselineId=${baselineId} persistedAssessmentId=${assessment.id} persistedInputsHash=${assessment.inputsHash} expectedInputsHash=${expectedHash}`,
+        );
+      }
       const baselineVersion =
         assessment.baselineVersion ?? baseline.version ?? undefined;
       return this.runAndPersistFitAssessment(
@@ -3632,6 +3675,11 @@ export class AnalysisService {
       );
     }
 
+    if (this.isDevMode()) {
+      this.logger.log(
+        `[fit-score] latest_assessment_for_baseline_reused jobId=${jobId} baselineId=${baselineId} assessmentId=${assessment.id} score=${assessment.overallScore}`,
+      );
+    }
     return this.buildLatestAssessmentPayload(assessment);
   }
 }

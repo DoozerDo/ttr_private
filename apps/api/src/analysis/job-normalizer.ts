@@ -25,6 +25,9 @@ export type JobNormalizationDebug = {
   headingsDetected: string[];
   bulletsDetected: number;
   fallbackSentenceSplitUsed: boolean;
+  sanitizedRequirementCandidates: number;
+  rejectedRequirementCandidates: number;
+  extractionQuality: 'high' | 'medium' | 'low';
 };
 
 const RESPONSIBILITY_HEADINGS = [
@@ -139,6 +142,36 @@ const LABEL_ONLY_PHRASES = new Set([
   "team overview",
 ]);
 
+const LOCATION_ONLY_PATTERNS = [
+  /^\s*[a-z .'-]+,\s*[a-z]{2}(?:\s+\d{5})?\s*$/i,
+  /^\s*remote(?:\s*-\s*[a-z .'-]+)?\s*$/i,
+  /^\s*(?:microsoft|google|amazon|apple|meta|netflix|nvidia|openai)\s*[,|-].*$/i,
+];
+const BOILERPLATE_PATTERNS = [
+  /\bequal opportunity employer\b/i,
+  /\ball qualified applicants\b/i,
+  /\bwithout regard to\b/i,
+  /\breasonable accommodation\b/i,
+  /\bapplication process\b/i,
+  /\bapply (?:today|now)\b/i,
+  /\bbenefits?\b/i,
+  /\bcompensation\b/i,
+  /\bsalary\b/i,
+  /\bpay range\b/i,
+  /\bbonus\b/i,
+  /\bequity\b/i,
+  /\bwork authorization\b/i,
+  /\bbackground check\b/i,
+  /\bdrug screening\b/i,
+];
+const MALFORMED_FRAGMENT_PATTERNS = [
+  /^[-–—•·\s]*(?:requirements?|qualifications?|skills?|experience|candidate|preferred|required)\s*[:\-]?\s*$/i,
+  /^\s*(?:or\s+)?equivalent experience\.?$/i,
+  /^\s*proficient\.?$/i,
+  /^\s*strong ability\.?$/i,
+  /^\s*excellent communication\.?$/i,
+];
+
 const BULLET_PATTERNS = [
   /^[-*??]\s+(.+)$/,
   /^\d+\.\s+(.+)$/,
@@ -192,21 +225,30 @@ function extractBulletText(line: string): string | null {
 function extractBlockItems(block: string[]): {
   items: string[];
   count: number;
+  rejected: number;
 } {
   const seen = new Set<string>();
   const items: string[] = [];
   let count = 0;
+  let rejected = 0;
   for (const rawLine of block) {
     const candidate = extractBulletText(rawLine);
     if (!candidate || candidate.length < 8) {
+      rejected += 1;
       continue;
     }
     const normalized = collapseSpaces(candidate);
     if (!normalized) {
+      rejected += 1;
       continue;
     }
     const lower = normalized.toLowerCase();
     if (LABEL_ONLY_PHRASES.has(lower)) {
+      rejected += 1;
+      continue;
+    }
+    if (isNoiseCandidate(normalized)) {
+      rejected += 1;
       continue;
     }
     count += 1;
@@ -218,7 +260,20 @@ function extractBlockItems(block: string[]): {
       items.push(normalized);
     }
   }
-  return { items, count };
+  return { items, count, rejected };
+}
+
+function isNoiseCandidate(value: string): boolean {
+  const normalized = collapseSpaces(value);
+  if (!normalized) return true;
+  if (normalized.length < 12) return true;
+  if (LOCATION_ONLY_PATTERNS.some((pattern) => pattern.test(normalized))) return true;
+  if (BOILERPLATE_PATTERNS.some((pattern) => pattern.test(normalized))) return true;
+  if (MALFORMED_FRAGMENT_PATTERNS.some((pattern) => pattern.test(normalized))) return true;
+  if (!/[a-z]/i.test(normalized) || !/\b[a-z]{3,}\b/i.test(normalized)) return true;
+  const words = normalized.split(/\s+/).filter(Boolean);
+  if (words.length <= 2) return true;
+  return false;
 }
 
 function containsKeyword(value: string, keywords: string[]): boolean {
@@ -355,6 +410,8 @@ export function normalizeJobDescription(
   let responsibilities = respExtraction.items;
   let requirements = reqExtraction.items;
   const bulletsDetected = respExtraction.count + reqExtraction.count;
+  const sanitizedRequirementCandidates = reqExtraction.count;
+  const rejectedRequirementCandidates = reqExtraction.rejected;
   let fallbackSentenceSplitUsed = false;
 
   if (!responsibilities.length) {
@@ -395,6 +452,21 @@ export function normalizeJobDescription(
     }
   }
 
+  const requirementPollutionScore = requirements.length
+    ? rejectedRequirementCandidates / Math.max(1, sanitizedRequirementCandidates + rejectedRequirementCandidates)
+    : 1;
+  if (requirements.length && (requirements.length < 2 || requirementPollutionScore >= 0.45)) {
+    const fallbackRequirements = gatherSentenceCandidates(
+      normalizedText,
+      REQUIREMENT_KEYWORDS,
+      60,
+    ).filter((candidate) => !isNoiseCandidate(candidate));
+    if (fallbackRequirements.length) {
+      requirements = fallbackRequirements;
+      fallbackSentenceSplitUsed = true;
+    }
+  }
+
   const combinedSignals = [...responsibilities, ...requirements];
   const signals = {
     leadership: collectSignalBucket(combinedSignals, LEADERSHIP_KEYWORDS),
@@ -426,6 +498,14 @@ export function normalizeJobDescription(
     headingsDetected,
     bulletsDetected,
     fallbackSentenceSplitUsed,
+    sanitizedRequirementCandidates,
+    rejectedRequirementCandidates,
+    extractionQuality:
+      requirements.length >= 3 && requirementPollutionScore < 0.25
+        ? 'high'
+        : requirements.length >= 1 && requirementPollutionScore < 0.5
+          ? 'medium'
+          : 'low',
   };
 
   return { normalized, debug };

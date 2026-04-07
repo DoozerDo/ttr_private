@@ -221,6 +221,42 @@ describe('scoreCxFitV2', () => {
     expect(result.score).toBeLessThan(85);
   });
 
+  it('recognizes direct network-infrastructure evidence strongly enough to avoid collapsing a Dalen-style baseline', () => {
+    const result = scoreCxFitV2(
+      {
+        job: {
+          rawDescription: `Network Engineer on an HPC/AI team responsible for BGP, VLAN design, datacenter networking, Linux infrastructure, and network device operations across Azure cloud environments.`,
+          normalizedResponsibilities: [
+            'Lead BGP routing, VLAN design, datacenter networking, and network device operations',
+            'Operate Linux infrastructure, monitoring, and automation across cloud networking environments',
+          ],
+          normalizedRequirements: [
+            'Experience with Arista, Cisco, Juniper, Mellanox, VMware, firewalls, and network troubleshooting',
+          ],
+        },
+        baselineSections: [
+          {
+            type: 'EXPERIENCE',
+            content: `Infrastructure engineer and datacenter technician supporting Linux systems, BGP routing, VLANs, firewalls, virtualization, monitoring, and switch deployments.
+              Supported network infrastructure, server deployment, cabling, physical infrastructure, and live-site troubleshooting across complex environments.`,
+          },
+          {
+            type: 'SKILLS',
+            content: 'Linux, BGP, VLAN, DNS, DHCP, VPN, Cisco, Juniper, Arista, Mellanox, VMware, monitoring, datacenter operations',
+          },
+        ],
+      },
+      { debugBundle: true },
+    );
+
+    expect(result.debug.jobVectorsLength).toBeGreaterThan(0);
+    expect(result.debug.responsibilityOverlapPercent).toBeGreaterThan(0);
+    expect(result.rubric.dimensionPercents.tooling_and_platform_experience).toBeGreaterThan(55);
+    expect(result.rubric.dimensionPercents.domain_and_business_context).toBeGreaterThan(55);
+    expect(result.score).toBeGreaterThanOrEqual(55);
+    expect(result.score).toBeLessThan(85);
+  });
+
   it('keeps heuristics quiet on shallow keyword overlap', () => {
     const result = scoreCxFitV2(
       {
@@ -305,5 +341,131 @@ describe('scoreCxFitV2', () => {
     expect(result.debug.heuristicInference.heuristicLiftByDimension.role_scope_and_seniority).toBeLessThanOrEqual(2);
     expect(result.debug.heuristicInference.heuristicLiftByDimension.tooling_and_platform_experience).toBeGreaterThanOrEqual(0);
     expect(result.score).toBeLessThan(80);
+  });
+
+  it('ignores polluted raw job requirements when validated requirements are supplied', () => {
+    const cleanRequirements = [
+      'Own network operations and routing reliability for production services.',
+      'Maintain BGP routing, VLAN segmentation, and datacenter switch operations.',
+    ];
+
+    const pollutedJob = {
+      job: {
+        rawDescription:
+          'Network engineer role responsible for datacenter routing and infrastructure.',
+        normalizedResponsibilities: [
+          'Operate production networking and incident response workflows.',
+        ],
+        normalizedRequirements: [
+          ...cleanRequirements,
+          'The HPC/AI team is on a mission to build the',
+          'Demonstrates some knowledge of data — knows what data is',
+        ],
+      },
+      normalizedJobResponsibilities: [
+        'Operate production networking and incident response workflows.',
+      ],
+      normalizedJobRequirements: cleanRequirements,
+      baselineSections: [
+        {
+          type: 'EXPERIENCE',
+          content:
+            'Built datacenter networking and routing reliability for production services. Maintained BGP, VLANs, and switch operations.',
+        },
+      ],
+      jobTitle: 'Network Engineer',
+    } as const;
+
+    const pollutedResult = scoreCxFitV2(pollutedJob);
+    const cleanResult = scoreCxFitV2({
+      ...pollutedJob,
+      job: {
+        ...pollutedJob.job,
+        normalizedRequirements: cleanRequirements,
+      },
+    });
+
+    expect(pollutedResult.score).toBe(cleanResult.score);
+  });
+
+  it('recognizes explicit infra and network evidence in a Dalen-style baseline for network roles', () => {
+    const richBaseline = [
+      {
+        type: 'SUMMARY',
+        content:
+          'Infrastructure professional with security, Linux systems, datacenter hardware, network infrastructure, and firewalls.',
+      },
+      {
+        type: 'SKILLS',
+        content:
+          'VLAN, DHCP, VPN, DNS, Cisco ASA, Sophos, Unifi, Fortinet, Palo Alto, VMware, Azure, failover clusters, reverse proxies, Cisco, Juniper, Arista, Mellanox, Dell, HP switches.',
+      },
+      {
+        type: 'EXPERIENCE',
+        content:
+          'Linux systems administration, Linux VMs, monitoring, Linux and network infrastructure tickets, and internal tools for network scanning and asset tracking.',
+      },
+      {
+        type: 'EXPERIENCE',
+        content:
+          'Core lab infrastructure, Layer 2 networking devices, KVMs, PDUs, UPS systems, Linux automation, System Center, Cisco, Dell, Mellanox, SONiC, Arista, Layer 3 routing, and BGP configuration.',
+      },
+      {
+        type: 'EXPERIENCE',
+        content:
+          'Physical infrastructure, cabling, network runs, server deployment, troubleshooting, and datacenter operations.',
+      },
+    ];
+
+    const richResult = scoreCxFitV2({
+      job: {
+        rawDescription:
+          'Network Engineer responsible for network infrastructure, routing, firewalls, and datacenter operations.',
+        normalizedResponsibilities: [
+          'Own network infrastructure, routing, and firewall operations',
+          'Support datacenter networking and monitoring',
+        ],
+        normalizedRequirements: [
+          'Experience with Linux systems, BGP, VLANs, and switch operations',
+        ],
+      },
+      baselineSections: richBaseline,
+      jobTitle: 'Network Engineer',
+    });
+
+    const bareResult = scoreCxFitV2({
+      job: {
+        rawDescription:
+          'Network Engineer responsible for network infrastructure, routing, firewalls, and datacenter operations.',
+        normalizedResponsibilities: [
+          'Own network infrastructure, routing, and firewall operations',
+          'Support datacenter networking and monitoring',
+        ],
+        normalizedRequirements: [
+          'Experience with Linux systems, BGP, VLANs, and switch operations',
+        ],
+      },
+      baselineSections: [
+        {
+          type: 'EXPERIENCE',
+          content: 'Built software features and maintained product documentation.',
+        },
+      ],
+      jobTitle: 'Network Engineer',
+    });
+
+    expect(richResult.debug.domainTagsBaseline).toEqual(
+      expect.arrayContaining(['Enterprise IT', 'Internal Delivery']),
+    );
+    expect(
+      richResult.debug.penalties?.find((penalty) => penalty.code === 'domain_mismatch_hard'),
+    ).toBeUndefined();
+    expect(richResult.score).toBeGreaterThan(bareResult.score);
+    expect(richResult.rubric.dimensionPercents.tooling_and_platform_experience).toBeGreaterThanOrEqual(
+      bareResult.rubric.dimensionPercents.tooling_and_platform_experience,
+    );
+    expect(richResult.rubric.dimensionPercents.domain_and_business_context).toBeGreaterThanOrEqual(
+      bareResult.rubric.dimensionPercents.domain_and_business_context,
+    );
   });
 });

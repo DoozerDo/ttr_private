@@ -871,6 +871,13 @@ export function WorkspaceRunner({
 
     const pairKey = `${baselineForRun}:${jobForRun}`;
     if (inFlightPairKey === pairKey) return;
+    if (process.env.NODE_ENV !== "production") {
+      console.info("[target] run_scoring_started", {
+        baselineId: baselineForRun,
+        jobId: jobForRun,
+        triggerType: runTriggerType,
+      });
+    }
     setInFlightPairKey(pairKey);
     if (activePairLifecycleKeyRef.current === pairKey) {
       setActivePairState("running");
@@ -1006,6 +1013,18 @@ export function WorkspaceRunner({
           baselineId: baselineForRun,
           jobId: jobForRun,
         });
+        console.info("[target] run_scoring_completed", {
+          baselineId: baselineForRun,
+          jobId: jobForRun,
+          score: numericScore,
+          heuristicUsed:
+            Boolean((nextResult as { scoring_v2?: { debug?: { heuristicInference?: { usedHeuristicInference?: boolean; heuristicLiftTotal?: number; heuristicLiftByDimension?: Record<string, number> } } } }).scoring_v2?.debug?.heuristicInference?.usedHeuristicInference),
+          heuristicLiftTotal:
+            (nextResult as { scoring_v2?: { debug?: { heuristicInference?: { heuristicLiftTotal?: number } } } }).scoring_v2?.debug?.heuristicInference?.heuristicLiftTotal ?? null,
+          scoreConfidence: (nextResult as { scoreConfidence?: string }).scoreConfidence ?? null,
+          scorePresentationMode:
+            (nextResult as { scorePresentationMode?: string }).scorePresentationMode ?? null,
+        });
       }
 
       setLatestCompletedScore(nextResult);
@@ -1080,6 +1099,12 @@ export function WorkspaceRunner({
     setLatestBaselineId(null);
 
     try {
+      if (process.env.NODE_ENV !== "production") {
+        console.info("[target] load_last_run_started", {
+          baselineId,
+          jobId,
+        });
+      }
       const url = `/api/analysis/job/${encodeURIComponent(jobId)}/baseline/${encodeURIComponent(
         baselineId,
       )}/latest`;
@@ -1093,6 +1118,23 @@ export function WorkspaceRunner({
       }
 
       const nextResult = payload as FitResultPayload;
+      if (process.env.NODE_ENV !== "production") {
+        console.info("[target] load_last_run_completed", {
+          baselineId,
+          jobId,
+          score: typeof nextResult.score === "number" ? nextResult.score : null,
+          source: (nextResult as { scoring_v2?: { score?: number } }).scoring_v2?.score
+            ? "scoring_v2"
+            : "legacy",
+          heuristicUsed:
+            Boolean((nextResult as { scoring_v2?: { debug?: { heuristicInference?: { usedHeuristicInference?: boolean } } } }).scoring_v2?.debug?.heuristicInference?.usedHeuristicInference),
+          heuristicLiftTotal:
+            (nextResult as { scoring_v2?: { debug?: { heuristicInference?: { heuristicLiftTotal?: number } } } }).scoring_v2?.debug?.heuristicInference?.heuristicLiftTotal ?? null,
+          scoreConfidence: (nextResult as { scoreConfidence?: string }).scoreConfidence ?? null,
+          scorePresentationMode:
+            (nextResult as { scorePresentationMode?: string }).scorePresentationMode ?? null,
+        });
+      }
       const nextResultPair: PairKey | null = resolveResultPair(nextResult);
       const pair: PairKey | null = nextResultPair;
       let resultBaselineId: string | null = null;

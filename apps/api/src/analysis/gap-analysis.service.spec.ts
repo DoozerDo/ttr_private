@@ -247,6 +247,109 @@ describe('GapAnalysisService', () => {
     expect(flattened).toContain('embedded systems development');
   });
 
+  it('drops location metadata and malformed fragments from gap candidates', () => {
+    const result = service.analyze({
+      baselineSections: [{ content: 'Built gameplay systems and shipped player experiences.' }],
+      jobRequirements: [
+        'Middletown, CT',
+        'Entry-level movement/dv experience designer',
+        'Proficient',
+        'Lead gameplay systems for live service games.',
+      ],
+      jobResponsibilities: ['Own gameplay tuning and rapid iteration.'],
+    });
+
+    const flattened = [
+      ...result.criticalGaps.map((gap) => `${gap.title} ${gap.requirementEvidence}`),
+      ...result.recommendedActions,
+      ...result.positioningSuggestions,
+      ...result.interviewRisks.map((risk) => `${risk.topic} ${risk.whyTheyMayChallengeYou}`),
+    ]
+      .join(' ')
+      .toLowerCase();
+
+    expect(flattened).not.toContain('middletown, ct');
+    expect(flattened).not.toContain('entry-level movement/dv experience designer');
+    expect(flattened).not.toContain('proficient');
+    expect(flattened).toContain('lead gameplay systems for live service games');
+  });
+
+  it('uses validated requirements as the only downstream source of truth', () => {
+    const result = service.analyze({
+      baselineSections: [{ content: 'Built gameplay systems and shipped player experiences.' }],
+      validatedRequirements: [
+        'Lead gameplay systems for live service games.',
+        'The HPC/AI team is on a mission to build the',
+        'Demonstrates some knowledge of data — knows what data is',
+      ],
+      jobRequirements: [
+        'The HPC/AI team is on a mission to build the',
+        'Demonstrates some knowledge of data — knows what data is',
+      ],
+      jobResponsibilities: [
+        'The HPC/AI team is on a mission to build the',
+      ],
+    });
+
+    const flattened = [
+      ...result.criticalGaps.map((gap) => `${gap.title} ${gap.requirementEvidence}`),
+      ...result.recommendedActions,
+      ...result.positioningSuggestions,
+      ...result.interviewRisks.map((risk) => `${risk.topic} ${risk.whyTheyMayChallengeYou}`),
+      ...result.strengths,
+    ]
+      .join(' ')
+      .toLowerCase();
+
+    expect(flattened).toContain('lead gameplay systems for live service games');
+    expect(flattened).not.toContain('the hpc/ai team is on a mission to build the');
+    expect(flattened).not.toContain('demonstrates some knowledge of data');
+  });
+
+  it('prefers specialized-role relevant fit rationale over generic software evidence', () => {
+    const result = service.analyze({
+      baselineSections: [
+        {
+          content:
+            'Engineered network automation and datacenter operations for BGP-driven environments. Owned routing reliability for production infrastructure.',
+        },
+      ],
+      jobRequirements: [
+        'Lead network engineering for enterprise routing and infrastructure.',
+        'Own incident response for network outages.',
+      ],
+      jobResponsibilities: [
+        'Design and maintain network infrastructure for production systems.',
+      ],
+    });
+
+    const joined = result.strengths.join(' ').toLowerCase();
+    expect(joined).not.toContain('portfolio');
+    expect(joined).not.toContain('website');
+  });
+
+  it('does not promote generic portfolio bullets as top fit rationale for network roles', () => {
+    const result = service.analyze({
+      baselineSections: [
+        {
+          content:
+            'Designed and developed a custom portfolio website tailored to a non-technical client.',
+        },
+      ],
+      jobRequirements: [
+        'Lead network engineering for enterprise routing and infrastructure.',
+        'Own incident response for network outages.',
+      ],
+      jobResponsibilities: [
+        'Design and maintain network infrastructure for production systems.',
+      ],
+    });
+
+    const joined = result.strengths.join(' ').toLowerCase();
+    expect(joined).not.toContain('portfolio website');
+    expect(joined).not.toContain('non-technical client');
+  });
+
   it('selects up to three unique strength signals when available', () => {
     const result = service.analyze({
       baselineSections: [
@@ -256,6 +359,9 @@ describe('GapAnalysisService', () => {
             'Built operational workflows across support teams.',
             'Partnered with engineering teams to operate complex systems.',
             'Led customer operations and escalation programs.',
+            'Directed incident response and service delivery for enterprise infrastructure.',
+            'Owned network operations and routing reliability for production services.',
+            'Maintained BGP routing, VLAN segmentation, and datacenter switch operations.',
           ].join('\n'),
         },
       ],
@@ -263,6 +369,9 @@ describe('GapAnalysisService', () => {
         'Lead customer operations and escalation programs.',
         'Build operational workflows across support teams.',
         'Partner with engineering teams to operate complex systems.',
+        'Direct incident response and service delivery for enterprise infrastructure.',
+        'Own network operations and routing reliability for production services.',
+        'Maintain BGP routing, VLAN segmentation, and datacenter switch operations.',
       ],
       jobResponsibilities: [],
     });
