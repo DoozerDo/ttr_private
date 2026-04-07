@@ -11,6 +11,7 @@
     "lint": "eslint . || exit 0",
     "lint:strict": "eslint .",
     "lint:fix": "eslint . --fix",
+    "synthetic:bug-report": "node scripts/synthetic-bug-report.mjs",
     "test:compliance": "tsc -p tsconfig.parseComplianceTest.json && node --test .tmp/compliance-test/lib/compliance/parseComplianceError.test.js",
     "test:smoke": "vitest run",
     "scan:routes": "node scripts/route-integrity-scan.mjs"

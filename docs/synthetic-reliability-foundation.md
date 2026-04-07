@@ -50,6 +50,19 @@ Inspect:
 ## Analytics and admin metrics exclusion
 Synthetic analytics events (`analytics_events.is_synthetic = true`) are excluded by default in analytics summary/metrics and beta command center. Funnel and engagement metrics exclude synthetic users and synthetic journey records by default.
 
+## Browser recovery-path synthetic transactions
+
+Browser-level synthetic transactions are allowed when the recovery path depends on the UI, such as submitting a bug report from the authenticated shell.
+
+Current browser synthetic checks:
+- `synthetic:bug-report`
+
+These should:
+- open an authenticated page with a visible `Report Issue` entry point
+- submit the real modal and validate the request payload
+- fail loudly on validation errors or 5xx responses
+- log pass/fail counts and success rate for the request
+
 ## Metadata to pass from future synthetic transaction jobs
 Synthetic jobs should send:
 - stable `syntheticScenarioKey` (e.g. `beta_baseline_full_flow`)

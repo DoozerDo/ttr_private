@@ -223,6 +223,22 @@ Screenshots are base64 encoded client side, but binary persistence is not implem
 7. Trigger a controlled runtime error in dev tools (`throw new Error('auto-capture smoke')`) and verify `/api/support/auto-error` is called once and deduped for repeats.
 8. Visit `/admin/error-health` as an admin account and confirm rows show mixed statuses and issue links when escalated.
 
+## Synthetic recovery-path coverage
+
+- `npm run synthetic:bug-report`
+- This browser synthetic transaction:
+  - logs in as the synthetic user
+  - opens the in-app `Report a bug` modal from the authenticated shell
+  - submits `message` and `details`
+  - asserts the request reaches `/api/support/report-bug`
+  - fails if the payload contract breaks, validation blocks valid input, or the endpoint returns a 500
+- The script logs:
+  - start/end timestamps
+  - request count
+  - success/failure counts
+  - success rate
+  - observed payload fields for the contract check
+
 ## Additional notes
 
 - The backend rate limits one report per 30 seconds per user to protect the endpoint.
