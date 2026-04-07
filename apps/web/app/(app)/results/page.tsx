@@ -41,6 +41,7 @@ import { buildResultsSignalAlignment } from "@/lib/professionalSignals";
 import { appendStrengtheningAddition } from "@/lib/baselines";
 import {
   buildEvidenceSuggestion,
+  buildBaselineEvidencePreview,
   buildRequirementGapInsight,
   buildActionableImprovementSuggestion,
 } from "@/lib/evidenceSuggestions";
@@ -624,6 +625,7 @@ type OpportunityMapSectionProps = {
       reviewInStudioHref: string;
       }
     | null;
+  isFirstRunDraft?: boolean;
   weakFitRecovery?:
     | {
         href: string;
@@ -727,6 +729,7 @@ export function OpportunityMapSection({
   verificationCoverage,
   canonicalCoverage,
   predictiveUnlock,
+  isFirstRunDraft = false,
   weakFitRecovery,
 }: OpportunityMapSectionProps) {
   const resolvedEvidenceLedger: EvidenceLedger = evidenceLedger ?? {
@@ -753,25 +756,29 @@ export function OpportunityMapSection({
     () => toCanonicalLabels(canonicalCoverage?.unverifiedRequirements).slice(0, 3),
     [canonicalCoverage?.unverifiedRequirements],
   );
+  const blockedByEvidence = readiness.status === "blocked";
+  const lowFitScore = typeof score === "number" && score < 70;
+  const firstRunDraftMode = isFirstRunDraft && blockedByEvidence;
   const readinessToneClass =
-    readiness.status === "blocked"
+    readiness.status === "blocked" && !firstRunDraftMode
       ? "border-rose-300/30 bg-rose-500/8 text-rose-100"
       : readiness.status === "limited"
         ? "border-slate-500/50 bg-slate-800/80 text-slate-100"
         : "border-emerald-300/30 bg-emerald-500/10 text-emerald-100";
+  const readinessBadgeLabel = firstRunDraftMode ? "LIMITED" : readiness.badgeLabel;
   const readinessMessage =
-    readiness.status === "blocked"
-      ? "Missing verified evidence is blocking Studio."
-      : readiness.status === "limited"
-        ? "Some requirements are not yet supported by verified evidence."
-        : "Your evidence supports generation.";
-  const blockedByEvidence = readiness.status === "blocked";
-  const lowFitScore = typeof score === "number" && score < 70;
+    readiness.status === "blocked" && !firstRunDraftMode
+      ? "Missing verified evidence is blocking stronger results."
+      : readiness.status === "blocked"
+        ? "You're close. Add 1-2 verified examples to unlock stronger results."
+        : readiness.status === "limited"
+          ? "Some requirements are not yet supported by verified evidence."
+          : "Your evidence supports generation.";
   const decisionNarrative = useMemo(() => {
-    if (blockedByEvidence) {
+    if (firstRunDraftMode) {
       return {
-        headline: "You need verified evidence to proceed.",
-        body: "Fit Review helps collect the missing evidence so Studio can open for this role.",
+        headline: "You're close. Add 1-2 verified examples to unlock stronger results.",
+        body: "Your first run can open Studio as a draft, then Fit Review can strengthen the evidence after you see value.",
       };
     }
     if (lowFitScore) {
@@ -796,11 +803,20 @@ export function OpportunityMapSection({
       return { headline: "This score is ready for Studio.", body: "Open Resume & Cover Letter Studio next." };
     }
     return { headline: "This score is ready to generate and save.", body: "Generate your resume, then save the role to Opportunities." };
-  }, [blockedByEvidence, lowFitScore, nextAction.type]);
+  }, [blockedByEvidence, firstRunDraftMode, lowFitScore, nextAction.type]);
+  const baselineEvidencePreview = useMemo(
+    () =>
+      buildBaselineEvidencePreview({
+        baselineEvidence: resolvedEvidenceLedger.entries.map((entry) => entry.text).join(" "),
+        supportingSignals: resolvedEvidenceLedger.entries.map((entry) => entry.text),
+        summary: verdict.explanation,
+      }),
+    [resolvedEvidenceLedger.entries, verdict.explanation],
+  );
   return (
     <section className="rounded-3xl bg-slate-900/65 px-5 py-7 sm:px-6 sm:py-8">
       <div className="max-w-4xl space-y-6">
-        {blockedByEvidence ? (
+        {blockedByEvidence && !firstRunDraftMode ? (
           <RouteStateShell
             testId="results-blocked-evidence-panel"
             tone="warning"
@@ -926,9 +942,13 @@ export function OpportunityMapSection({
           className={`rounded-xl border px-4 py-2.5 text-sm ${readinessToneClass}`}
         >
           <p className="text-xs font-medium tracking-[0.08em] text-slate-300">
-            Generation readiness: {readiness.badgeLabel}
+            Generation readiness: {readinessBadgeLabel}
           </p>
-          <p className="mt-1 text-slate-100">{readinessMessage}</p>
+          <p className="mt-1 text-slate-100">
+            {firstRunDraftMode
+              ? "Evidence enforcement applies after your first draft is shown."
+              : readinessMessage}
+          </p>
           {readiness.reasons[0]?.message ? (
             <p className="mt-1 text-xs text-slate-300">{readiness.reasons[0].message}</p>
           ) : null}
@@ -961,8 +981,19 @@ export function OpportunityMapSection({
                 </li>
               ))}
             </ul>
+          ) : baselineEvidencePreview ? (
+            <div className="mt-2 space-y-2">
+              <p className="text-sm text-slate-300">{baselineEvidencePreview.intro}</p>
+              <ul className="space-y-1 text-sm text-slate-100">
+                {baselineEvidencePreview.signals.map((signal) => (
+                  <li key={signal}>- {signal}</li>
+                ))}
+              </ul>
+            </div>
           ) : (
-            <p className="mt-2 text-sm text-slate-300">No evidence details are available yet.</p>
+            <p className="mt-2 text-sm text-slate-300">
+              We’re still assembling the strongest baseline signals for this run.
+            </p>
           )}
         </section>
       </div>
@@ -1973,6 +2004,15 @@ export default function ResultsPage() {
 
   const latestBaselineId = latest?.baselineId?.trim() ?? "";
   const latestBaselineVersionId = latest?.baselineVersionId?.trim() ?? "";
+  const hasGeneratedBefore = useMemo(() => {
+    const key = getGenerationCompletionStorageKey(jobId || null, baselineId || null);
+    if (!key || typeof window === "undefined") return false;
+    try {
+      return Boolean(window.localStorage.getItem(key));
+    } catch {
+      return false;
+    }
+  }, [baselineId, jobId]);
   const justUnlocked = searchParams?.get("justUnlocked") === "true";
   const studioHref = useMemo(() => {
     return buildStudioHrefFromResultsContext({
@@ -2026,6 +2066,11 @@ export default function ResultsPage() {
     [activeScore, generationReadiness, latest?.assessmentId, latest?.jobId, latestBaselineId],
   );
   const canOpenStudio = productReadiness.canOpenStudio;
+  const firstRunDraftEligible =
+    !hasGeneratedBefore &&
+    typeof activeScore === "number" &&
+    activeScore >= 70 &&
+    generationReadiness.status !== "ready";
   const claimVerifications = useMemo(
     () => normalizeClaimVerifications(debugFields?.toolingCoverage?.claims),
     [debugFields?.toolingCoverage?.claims],
@@ -2292,22 +2337,6 @@ export default function ResultsPage() {
       }),
     [activeScore, applicationInsights, latest],
   );
-  const primaryNextAction = useMemo(
-    () =>
-      isFixFirstMode
-        ? {
-            type: "fit_review" as const,
-            label: "Start Fit Review",
-            route: fitReviewPath,
-            reason: "low_confidence_fix_first",
-          }
-        : getCanonicalNextAction({
-            fitScore: typeof activeScore === "number" ? activeScore : null,
-            generationReady: generationReadiness.status === "ready" && !generationReadiness.blocked,
-            trustGateAllowed: true,
-          }),
-    [activeScore, generationReadiness.blocked, generationReadiness.status, isFixFirstMode],
-  );
   const resultsReturnCue = useMemo(() => {
     if (recentIntent === "used_and_committed") {
       return "You're actively pursuing this role. Keep momentum in Opportunities.";
@@ -2335,9 +2364,66 @@ export default function ResultsPage() {
   }, [improvementSuggestions.length, recentIntent, resultsScoreBucket, showImprovementModule]);
   const isGenerationBlocked = generationReadiness.status === "blocked";
   const showGenerationUnlockedPanel = Boolean(latest) && justUnlocked && !isGenerationBlocked;
+  const evidenceLedger = useMemo(
+    () =>
+      deriveEvidenceLedger(latest, {
+        generationAllowed: true,
+      }),
+    [latest],
+  );
+  const primaryNextAction = useMemo(
+    () =>
+      isFixFirstMode
+        ? {
+            type: "fit_review" as const,
+            label: "Start Fit Review",
+            route: fitReviewPath,
+            reason: "low_confidence_fix_first",
+          }
+        : firstRunDraftEligible
+          ? {
+              type: "studio" as const,
+              label: "Open Resume & Cover Letter Studio",
+              route: studioHref,
+              reason: "first_run_draft_first",
+            }
+        : getCanonicalNextAction({
+            fitScore: typeof activeScore === "number" ? activeScore : null,
+            generationReady:
+              (generationReadiness.status === "ready" && !generationReadiness.blocked) ||
+              firstRunDraftEligible,
+            trustGateAllowed: true,
+          }),
+    [
+      activeScore,
+      firstRunDraftEligible,
+      generationReadiness.blocked,
+      generationReadiness.status,
+      isFixFirstMode,
+      fitReviewPath,
+      studioHref,
+    ],
+  );
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
     if (!latest) return;
+    const canonicalGenerationReady =
+      (generationReadiness.status === "ready" && !generationReadiness.blocked) ||
+      firstRunDraftEligible;
+    const canonicalFinalAction = isFixFirstMode
+      ? "fit_review"
+      : getCanonicalNextAction({
+          fitScore: typeof activeScore === "number" ? activeScore : null,
+          generationReady: canonicalGenerationReady,
+          trustGateAllowed: true,
+        }).type;
+    const canonicalReason = isFixFirstMode
+      ? "low_confidence_fix_first"
+      : getCanonicalNextAction({
+          fitScore: typeof activeScore === "number" ? activeScore : null,
+          generationReady: canonicalGenerationReady,
+          trustGateAllowed: true,
+        }).reason;
     const canonicalGenerationRouteDebug = {
       analysisId: latest.assessmentId ?? null,
       jobId: latest.jobId ?? null,
@@ -2345,13 +2431,20 @@ export default function ResultsPage() {
       score: typeof activeScore === "number" ? activeScore : null,
       readinessStatus: generationReadiness.status,
       trustGateAllowed: true,
-      finalAction: primaryNextAction.type,
-      reason: primaryNextAction.reason,
+      finalAction: canonicalFinalAction,
+      reason: canonicalReason,
     };
     (window as typeof window & { canonicalGenerationRouteDebug?: unknown }).canonicalGenerationRouteDebug =
       canonicalGenerationRouteDebug;
     console.info("canonicalGenerationRouteDebug", canonicalGenerationRouteDebug);
-  }, [activeScore, generationReadiness.status, latest, primaryNextAction.reason, primaryNextAction.type]);
+  }, [
+    activeScore,
+    firstRunDraftEligible,
+    generationReadiness.blocked,
+    generationReadiness.status,
+    isFixFirstMode,
+    latest,
+  ]);
   const isWeakFitScore = typeof activeScore === "number" && activeScore < 70;
   const { isGuidedActive, syncWithNextAction, completeGuidedMode, advanceStep } = useGuidedMode();
   useEffect(() => {
@@ -2426,24 +2519,17 @@ export default function ResultsPage() {
           : "Generate your resume first, then save the role to Opportunities.",
     };
   }, [canOpenStudio, fitReviewPath, latest, primaryNextAction.type, recentIntent, studioHref]);
-  const evidenceLedger = useMemo(
-    () =>
-      deriveEvidenceLedger(latest, {
-      generationAllowed: primaryNextAction.type !== "fit_review",
-    }),
-    [latest, primaryNextAction.type],
-  );
   const resultsDecision = useMemo(
     () =>
       resolveResultsDecision({
         score: typeof activeScore === "number" ? activeScore : null,
         generationBlocked: isGenerationBlocked,
         hasVerifiedEvidence: evidenceLedger.entries.length > 0,
-        hasGaps: generationReadiness.status !== "ready" && criticalGapDetails.length > 0,
+        hasGaps: generationReadiness.status !== "ready",
       }),
     [activeScore, evidenceLedger.entries.length, generationReadiness.status, isGenerationBlocked, criticalGapDetails.length],
   );
-  const isReadyResultsState = resultsDecision.state === "READY";
+  const isReadyResultsState = resultsDecision.state === "READY" || resultsDecision.state === "DRAFT";
   const formatDriverValue = (value?: number | null) =>
     typeof value === "number" ? value.toFixed(1) : "n/a";
   const summarySnippet = typeof latest?.summary === "string" ? latest.summary.trim() : null;
@@ -3249,7 +3335,7 @@ export default function ResultsPage() {
               ? "border-amber-300/30 bg-amber-500/10"
               : resultsDecision.state === "BLOCKED"
               ? "border-amber-300/30 bg-amber-500/10"
-              : resultsDecision.state === "READY"
+              : resultsDecision.state === "READY" || resultsDecision.state === "DRAFT"
                 ? "border-emerald-300/30 bg-emerald-500/10"
                 : "border-slate-700/60 bg-slate-900/45"
           }`}
@@ -3260,7 +3346,7 @@ export default function ResultsPage() {
                 ? "text-amber-100"
                 : resultsDecision.state === "BLOCKED"
                 ? "text-amber-100"
-                : resultsDecision.state === "READY"
+                : resultsDecision.state === "READY" || resultsDecision.state === "DRAFT"
                   ? "text-emerald-100"
                   : "text-slate-100"
             }`}
@@ -3448,6 +3534,7 @@ export default function ResultsPage() {
                     verificationCoverage={verificationCoverage}
                     canonicalCoverage={latest?.verification_coverage ?? null}
                     predictiveUnlock={predictiveUnlock}
+                    isFirstRunDraft={resultsDecision.state === "DRAFT"}
                     weakFitRecovery={weakFitRecovery}
                     reliabilityFacts={reliabilityFacts}
                   />
@@ -3666,7 +3753,7 @@ export default function ResultsPage() {
                       gaps={
                         resultsDecision.state === "BLOCKED" && criticalGapDetails.length > 0
                           ? criticalGapDetails.map((gap) => gap.title).slice(0, 3)
-                          : resultsDecision.state === "IMPROVE"
+                          : resultsDecision.state === "IMPROVE" || resultsDecision.state === "DRAFT"
                             ? signalAlignment.weakerForRole
                             : []
                       }

@@ -39,22 +39,22 @@ function installFetch(input: {
     const url = String(input);
     if (url.includes("/api/analysis/fit-assessments/analysis-current")) {
       return jsonResponse({
-          assessmentId: "analysis-current",
-          jobId: "job-1",
-          baselineId: "base-1",
-          baselineVersionId: "base-version-1",
-          score,
-          scorePresentationMode,
-          likelyUnderestimatedFit,
-          scoreConfidence,
-          scoreConfidenceReasons,
-          scoreSanityFlags,
-          strengths,
-          supportingSignals: strengths,
-          baselineEvidence: strengths,
-          verification_coverage: {
-            totalClaims: strengths.length + unverifiedRequirements.length,
-            verifiedClaims: strengths.length,
+        assessmentId: "analysis-current",
+        jobId: "job-1",
+        baselineId: "base-1",
+        baselineVersionId: "base-version-1",
+        score,
+        scorePresentationMode,
+        likelyUnderestimatedFit,
+        scoreConfidence,
+        scoreConfidenceReasons,
+        scoreSanityFlags,
+        strengths,
+        supportingSignals: strengths,
+        baselineEvidence: strengths,
+        verification_coverage: {
+          totalClaims: strengths.length + unverifiedRequirements.length,
+          verifiedClaims: strengths.length,
           inferredClaims: 0,
           unverifiedClaims: unverifiedRequirements.length,
           verifiedRequirements: strengths,
@@ -142,7 +142,7 @@ function installFetch(input: {
 }
 
 describe("results gating", () => {
-  it("keeps blocked score-and-readiness contradictions collapsed into one dominant fit-review path", async () => {
+  it("opens a first-run draft instead of hard-blocking when evidence is incomplete", async () => {
     overrideSearchParams({ assessmentId: "analysis-current" });
     const fetchMock = installFetch({
       score: 72,
@@ -155,14 +155,12 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("You need verified evidence to proceed.")).toBeInTheDocument();
+      expect(screen.getByText(/You\'re close\. Add 1-2 verified examples to unlock stronger results\./)).toBeInTheDocument();
     });
-    expect(screen.queryByText("No material gaps were identified in this run.")).toBeNull();
-    expect(screen.getByText("Recover the missing evidence")).toBeInTheDocument();
-    expect(screen.getByText("Use Fit Review to close the gap")).toBeInTheDocument();
-    expect(screen.queryByText(/you can win this role|you are ready to generate materials/i)).toBeNull();
-    expect(screen.queryByRole("link", { name: "OPEN STUDIO" })).toBeNull();
-    expect(screen.getAllByTestId("results-hero-primary-cta")).toHaveLength(1);
+    expect(screen.queryByText("You need verified evidence to proceed.")).toBeNull();
+    expect(screen.getAllByText(/We found this in your experience/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole("link", { name: "OPEN STUDIO" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "START FIT REVIEW" })).toBeNull();
   });
 
   it("routes ready results to Studio and suppresses recovery guidance when evidence is verified", async () => {
@@ -217,7 +215,7 @@ describe("results gating", () => {
     });
     expect(screen.queryByText("Recover the missing evidence")).toBeNull();
     expect(screen.queryByText("Use Fit Review to close the gap")).toBeNull();
-    expect(screen.getByText("No material gaps were identified in this run.")).toBeInTheDocument();
+    expect(screen.getAllByText(/No material gaps were identified in this run\.|Why this role fits you/).length).toBeGreaterThan(0);
     expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
   });
 
@@ -242,10 +240,8 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("We may be underestimating your fit.")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "OPEN STUDIO" })).toBeInTheDocument();
     });
-    expect(screen.getByText("This score looks low confidence. Fix the evidence story first, then rerun generation.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "START FIT REVIEW" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "OPEN STUDIO" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "START FIT REVIEW" })).toBeNull();
   });
 });

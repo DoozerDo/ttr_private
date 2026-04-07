@@ -1,10 +1,11 @@
-export type ResultsDecisionState = "BLOCKED" | "READY" | "IMPROVE";
+export type ResultsDecisionState = "BLOCKED" | "READY" | "IMPROVE" | "DRAFT";
 
 export interface ResultsDecisionInput {
   score: number | null;
   generationBlocked: boolean;
   hasVerifiedEvidence: boolean;
   hasGaps: boolean;
+  hasGeneratedBefore?: boolean;
 }
 
 export interface ResultsDecision {
@@ -15,7 +16,17 @@ export interface ResultsDecision {
 }
 
 export function resolveResultsDecision(input: ResultsDecisionInput): ResultsDecision {
-  const { score, generationBlocked, hasVerifiedEvidence, hasGaps } = input;
+  const { score, generationBlocked, hasVerifiedEvidence, hasGaps, hasGeneratedBefore } = input;
+
+  if (!hasGeneratedBefore && (generationBlocked || hasGaps || !hasVerifiedEvidence)) {
+    return {
+      state: "DRAFT",
+      primaryCta: "OPEN_STUDIO",
+      headline: "You're close. Add 1-2 verified examples to unlock stronger results.",
+      subtext:
+        "Your first run can open Studio as a draft, so you can see value now and strengthen evidence after.",
+    };
+  }
 
   if (generationBlocked || !hasVerifiedEvidence) {
     return {
@@ -23,7 +34,7 @@ export function resolveResultsDecision(input: ResultsDecisionInput): ResultsDeci
       primaryCta: "START_FIT_REVIEW",
       headline: "You need verified evidence to proceed.",
       subtext:
-        "Your fit may be strong, but key claims are not yet supported by verified evidence. Complete Fit Review to unlock generation.",
+        "Your fit may be strong, but key claims are not yet supported by verified evidence. Complete Fit Review to unlock stronger generation.",
     };
   }
 

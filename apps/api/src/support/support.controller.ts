@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import type { AuthUserDto } from '../auth/dto/auth-response.dto';
 import { AutoErrorDto } from './dto/auto-error.dto';
+import { bugReportValidationExceptionFactory } from './bug-report-validation';
 import { CriticalFlowTrackerService } from './critical-flow-tracker.service';
 import { ReportBugDto } from './dto/report-bug.dto';
 import { StillSeeingDto } from './dto/still-seeing.dto';
@@ -20,6 +21,12 @@ type SupportRequest = {
   user: AuthUserDto;
 };
 
+const reportBugValidationPipe = new ValidationPipe({
+  whitelist: true,
+  transform: true,
+  exceptionFactory: bugReportValidationExceptionFactory,
+});
+
 @Controller('support')
 export class SupportController {
   constructor(
@@ -28,7 +35,7 @@ export class SupportController {
   ) {}
 
   @Post('report-bug')
-  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
+  @UsePipes(reportBugValidationPipe)
   async reportBug(@Body() payload: ReportBugDto, @Req() request: SupportRequest) {
     const result = await this.supportService.reportBug(payload, request.user);
     return {

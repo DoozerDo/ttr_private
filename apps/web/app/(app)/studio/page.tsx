@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -1260,6 +1260,7 @@ export default function StudioPage() {
           Boolean(effectiveJobId && effectiveBaselineId) &&
           (Boolean(effectiveBaselineVersionId) || isNonProduction),
         isPro,
+        hasCompletedGeneration: false,
       }),
     [
       analysisError,
@@ -1274,6 +1275,7 @@ export default function StudioPage() {
     ],
   );
   const canGenerateDocuments = productReadiness.generation_readiness.canGenerate && trustGateDecision.allowed;
+  const studioDraftMode = productReadiness.generationMode === "draft" && isFromUnlock && !hasGeneratedOnce;
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
     if (!analysis || !requestedAnalysisId) return;
@@ -2600,7 +2602,7 @@ export default function StudioPage() {
         ...current,
         error: message,
         artifactFailure: {
-          headline: "Generation didn�t complete",
+          headline: "Generation didn?t complete",
           explanation: message,
           nextStep: "Review the input and try again with stronger baseline evidence.",
           retryable: false,
@@ -2935,7 +2937,7 @@ export default function StudioPage() {
         ...current,
         error: message,
         artifactFailure: {
-          headline: "Generation didn�t complete",
+          headline: "Generation didn?t complete",
           explanation: message,
           nextStep: "Review the input and try again with stronger baseline evidence.",
           retryable: false,
@@ -3197,16 +3199,24 @@ export default function StudioPage() {
         />
       ) : null}
       <section className="space-y-5 rounded-[28px] bg-slate-900/45 p-6 md:p-8" data-testid="studio-generation-readiness">
+        {studioDraftMode ? (
+          <div
+            className="rounded-2xl border border-amber-300/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-50"
+            data-testid="studio-results-ready-banner"
+          >
+            This is a draft based on unverified signals. Add evidence to strengthen it.
+          </div>
+        ) : null}
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
             {generationSupportState === "strong"
               ? "Ready"
               : generationSupportState === "partial"
-                ? "Usable"
+                ? "Draft"
                 : "Blocked"}
           </p>
           <p className="text-sm text-slate-300">
-            {typeof analysisScore === "number" ? `Fit score ${Math.round(analysisScore)} � ` : "Fit score unavailable � "}
+            {typeof analysisScore === "number" ? `Fit score ${Math.round(analysisScore)} ? ` : "Fit score unavailable ? "}
             {(selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company")} -{" "}
             {(selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Unknown role")}
           </p>
@@ -3225,20 +3235,20 @@ export default function StudioPage() {
             {generationSupportState === "strong"
               ? "Strong output: you can use this now with confidence."
               : generationSupportState === "partial"
-              ? "Acceptable output: usable now, stronger with refinement."
+              ? "Draft output: usable now, stronger with refinement."
               : "Limited output: not ready yet."}
           </h2>
           <p className="mt-2 text-sm text-slate-200">
             {generationSupportState === "strong"
               ? "Built directly from your verified experience and aligned to the role."
               : generationSupportState === "partial"
-                ? "Built directly from verified baseline evidence and aligned to key role requirements."
+                ? "Built from verified baseline evidence and aligned to key role requirements."
                 : "Built from your verified experience, but a few signals still need strengthening."}
           </p>
           {generationSupportState !== "strong" ? (
             <div className="mt-4 space-y-2">
               <p className="text-sm font-semibold text-slate-100">
-                {generationSupportState === "partial" ? "Why this is still worth using" : "What’s holding this back"}
+                {generationSupportState === "partial" ? "Why this is still worth using" : "What's holding this back"}
               </p>
               <ul className="space-y-1 text-sm text-slate-300">
                 {(canonicalUnverifiedRequirements.length
@@ -3259,7 +3269,7 @@ export default function StudioPage() {
               <ul className="space-y-1 text-sm text-slate-300">
                 {generationSupportState === "partial" ? (
                   <>
-                    <li>This draft is grounded in verified baseline evidence.</li>
+                    <li>This draft is grounded in baseline evidence and can be strengthened later.</li>
                     <li>Run Fit Review later if you want stronger positioning.</li>
                   </>
                 ) : (
@@ -3370,7 +3380,9 @@ export default function StudioPage() {
               ))}
             </ul>
           ) : (
-            <p className="mt-2 text-sm text-slate-300">No evidence details are available for this analysis yet.</p>
+            <p className="mt-2 text-sm text-slate-300">
+              We found likely baseline signals here. Confirm or refine them to strengthen the draft.
+            </p>
           )}
           {evidenceLedger.remainingWeakAreas.length ? (
             <p className="mt-2 text-xs text-slate-300">
@@ -3378,7 +3390,7 @@ export default function StudioPage() {
             </p>
           ) : null}
         </section>
-      ) : studioGenerationState === "BLOCKED" ? (
+      ) : studioGenerationState === "BLOCKED" && !studioDraftMode ? (
         <RouteStateShell
           testId="studio-evidence-blocked-panel"
           tone="warning"
@@ -3425,7 +3437,7 @@ export default function StudioPage() {
       ) : null}
       {opportunityContext ? (
         <p className="text-xs text-slate-400">
-          Opportunity status: {opportunityContext.status} � Updated{" "}
+          Opportunity status: {opportunityContext.status} ? Updated{" "}
           {new Date(opportunityContext.updatedAt).toLocaleDateString()}
         </p>
       ) : null}
@@ -4227,7 +4239,7 @@ export default function StudioPage() {
         <div className="mt-3 space-y-3">
           <p className="text-sm text-slate-300">
             <span className="font-semibold text-slate-100">
-              {(selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company")} � {(selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Unknown role")}
+              {(selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company")} ? {(selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Unknown role")}
             </span>
           </p>
           <p className="text-sm text-slate-300">
@@ -4244,7 +4256,7 @@ export default function StudioPage() {
             {evidenceSummaryBullets.length ? (
               <ul className="space-y-1 text-sm text-slate-200">
                 {evidenceSummaryBullets.map((bullet) => (
-                  <li key={`evidence-summary-${bullet}`}>� {bullet}</li>
+                  <li key={`evidence-summary-${bullet}`}>? {bullet}</li>
                 ))}
               </ul>
             ) : (

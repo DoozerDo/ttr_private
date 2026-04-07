@@ -208,6 +208,58 @@ describe("Studio page UX", () => {
     expect(screen.queryByTestId("studio-evidence-blocked-panel")).toBeNull();
   });
 
+  it("shows a draft banner on first-run studio entry with incomplete evidence", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      fromUnlock: "true",
+    });
+
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            scoring_v2: { score: 84 },
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+            verification_coverage: {
+              totalClaims: 2,
+              verifiedClaims: 1,
+              inferredClaims: 1,
+              unverifiedClaims: 1,
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(createResponse({ status: "limited", reasons: [], compliance_flags: [] }));
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "limited", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByText("Draft")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("heading", { name: "Generation is usable." })).toBeInTheDocument();
+    expect(screen.getByTestId("studio-evidence-allowed-panel")).toBeInTheDocument();
+  });
+
   it("shows verified-evidence messaging for the first generation after unlock only", async () => {
     overrideSearchParams({
       analysisId: "analysis-1",
@@ -436,8 +488,6 @@ describe("Studio page UX", () => {
     await waitFor(() => {
       expect(screen.getByText("Select an active resume to continue.")).toBeInTheDocument();
     });
-    expect(screen.queryByRole("button", { name: "Generate Resume" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Generate Cover Letter" })).toBeNull();
   });
 
   it("fails cleanly when the requested analysis is invalid", async () => {
@@ -476,7 +526,6 @@ describe("Studio page UX", () => {
     expect(
       screen.getByText("Unable to load role analysis. Please return to Results and reopen the document generator."),
     ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Generate Resume" })).toBeNull();
   });
 
   it("fails cleanly when the requested baseline is archived", async () => {
@@ -503,8 +552,6 @@ describe("Studio page UX", () => {
         screen.getByText("This resume is archived or unavailable. Select an active resume to continue."),
       ).toBeInTheDocument();
     });
-    expect(screen.queryByText("Generate Resume")).toBeNull();
-    expect(screen.queryByText("Generate Cover Letter")).toBeNull();
   });
 
   it("keeps trust-summary text out of resume export payloads", async () => {
@@ -569,8 +616,8 @@ describe("Studio page UX", () => {
 
     renderStudio();
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Generate Resume" })[0]).toBeEnabled());
+    fireEvent.click(screen.getAllByRole("button", { name: "Generate Resume" })[0]);
 
     await waitFor(() => {
       expect(screen.getByTestId("resume-preview")).toBeInTheDocument();
@@ -626,13 +673,12 @@ describe("Studio page UX", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Generation blocked")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Draft output: usable now, stronger with refinement." })).toBeInTheDocument();
     });
-    expect(screen.getByRole("link", { name: "Start Fit Review" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Improve baseline" })).toHaveAttribute(
       "href",
       "/resolve-gaps?jobId=job-1&baselineId=base-1",
     );
-    expect(screen.queryByRole("button", { name: "Generate Resume" })).toBeNull();
   });
 
   it("shows the current auto-adjust guidance for unsupported requirements", async () => {
@@ -672,9 +718,9 @@ describe("Studio page UX", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Generation blocked")).toBeInTheDocument();
+      expect(screen.getByText("Draft")).toBeInTheDocument();
     });
-    expect(screen.getByText("Complete your profile before generating")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Generation is usable." })).toBeInTheDocument();
     expect(screen.getByTestId("studio-auto-adjust-panel")).toBeInTheDocument();
     expect(screen.getByTestId("studio-one-step-unverified-list")).toHaveTextContent("- Salesforce Service Cloud administration");
   });

@@ -3,24 +3,26 @@ import { describe, expect, it } from "vitest";
 import { resolveResultsDecision } from "@/lib/resultsDecisionResolver";
 
 describe("resolveResultsDecision", () => {
-  it("BLOCKED overrides everything", () => {
+  it("shows a draft on the first run even when evidence is incomplete", () => {
     expect(
       resolveResultsDecision({
         score: 92,
         generationBlocked: true,
-        hasVerifiedEvidence: true,
+        hasVerifiedEvidence: false,
         hasGaps: false,
+        hasGeneratedBefore: false,
       }),
-    ).toMatchObject({ state: "BLOCKED" });
+    ).toMatchObject({ state: "DRAFT", primaryCta: "OPEN_STUDIO" });
   });
 
-  it("no evidence triggers BLOCKED", () => {
+  it("enforces evidence after the first generation", () => {
     expect(
       resolveResultsDecision({
         score: 92,
         generationBlocked: false,
         hasVerifiedEvidence: false,
         hasGaps: false,
+        hasGeneratedBefore: true,
       }),
     ).toMatchObject({ state: "BLOCKED" });
   });

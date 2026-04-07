@@ -16,8 +16,8 @@ describe("evidence suggestion engine", () => {
 
     expect(result).not.toBeNull();
     expect(result?.requirement).toBe("Zendesk");
-    expect(result?.description).toMatch(/Managed support workflows|Escalation operations/i);
-    expect(result?.scope).toMatch(/Led support operations/i);
+    expect(result?.description).toMatch(/Confirm or refine/i);
+    expect(result?.scope).toMatch(/Example anchor/i);
   });
 
   it("returns null when no grounded signals are available", () => {

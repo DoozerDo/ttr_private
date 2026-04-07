@@ -31,6 +31,21 @@ describe("generation product readiness contract", () => {
     expect(readiness.tier).toBe("generation_export_allowed");
   });
 
+  it("allows a first draft even when required context is incomplete", () => {
+    const readiness = buildGenerationProductReadiness({
+      score: 82,
+      authorityState: "LIMITED",
+      hasCanonicalAssessment: true,
+      hasRequiredContext: false,
+      isPro: true,
+      hasCompletedGeneration: false,
+    });
+
+    expect(readiness.canOpenStudio).toBe(true);
+    expect(readiness.generation_readiness.canGenerate).toBe(true);
+    expect(readiness.generationMode).toBe("draft");
+  });
+
   it("allows generation at 70+ when readiness is ready and export for pro", () => {
     const score76 = buildGenerationProductReadiness({
       score: 76,

@@ -16,6 +16,7 @@ export type GenerationProductReadiness = {
   generation_readiness: GenerationReadinessContract;
   tier: GenerationProductTier;
   canOpenStudio: boolean;
+  generationMode: "draft" | "verified";
 };
 
 type BuildGenerationProductReadinessInput = {
@@ -24,6 +25,7 @@ type BuildGenerationProductReadinessInput = {
   hasCanonicalAssessment: boolean;
   hasRequiredContext: boolean;
   isPro: boolean;
+  hasCompletedGeneration?: boolean;
 };
 
 export function buildGenerationProductReadiness(
@@ -53,14 +55,12 @@ export function buildGenerationProductReadiness(
 
   const canOpenStudio =
     scoreEligibleForStudio &&
-    input.authorityState === "READY" &&
     input.hasCanonicalAssessment &&
-    input.hasRequiredContext;
+    (input.hasRequiredContext || !input.hasCompletedGeneration);
   const canGenerate =
     scoreEligibleForStudio &&
-    input.authorityState === "READY" &&
     input.hasCanonicalAssessment &&
-    input.hasRequiredContext;
+    (input.hasRequiredContext || !input.hasCompletedGeneration);
   const canExport = canGenerate && input.isPro;
 
   if (!input.isPro) {
@@ -85,5 +85,6 @@ export function buildGenerationProductReadiness(
     },
     tier,
     canOpenStudio,
+    generationMode: input.hasCompletedGeneration ? "verified" : "draft",
   };
 }

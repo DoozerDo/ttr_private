@@ -9,6 +9,11 @@ export type EvidenceSuggestion = {
   groundedSignals: string[];
 };
 
+export type BaselineEvidencePreview = {
+  intro: string;
+  signals: string[];
+};
+
 export type RequirementGapInsight = {
   requirement: string;
   currentSignal: string;
@@ -240,22 +245,45 @@ export function buildEvidenceSuggestion(input: {
   const groundedSignals = supportingSignals.slice(0, 4);
   const groundedSignalSummary = sentenceFromSignals(groundedSignals);
   const context = groundedSignals.length
-    ? `Role context aligned with ${groundedSignalSummary}`
-    : "Role context aligned with verified baseline evidence";
+    ? `We found this in your experience: ${groundedSignalSummary}`
+    : "We found this in your verified baseline evidence";
   const description = groundedSignals.length
-    ? `Executed support workflows tied to ${groundedSignalSummary}, with defensible operational ownership in existing baseline evidence.`
-    : `Executed support workflows and operational processes already reflected in verified baseline evidence.`;
+    ? "Confirm or refine this example so we keep it anchored to your actual work."
+    : "Confirm or refine this example so we keep it anchored to your actual work.";
   const scope = baselineEvidence
-    ? `Impact evidence anchor: ${baselineEvidence.slice(0, 180)}`
-    : "Impact reflected in verified support process and customer operations outcomes.";
+    ? `Example anchor: ${baselineEvidence.slice(0, 180)}`
+    : "Example anchor: verified support process and customer operations outcomes.";
 
   return {
     requirement,
-    intro: `Based on your experience, we suggest evidence for ${requirement} grounded in your verified baseline signals.`,
+    intro: `Based on your experience, we found a likely example for ${requirement}.`,
     context,
     description,
     scope,
     groundedSignals,
+  };
+}
+
+export function buildBaselineEvidencePreview(input: {
+  baselineEvidence?: unknown;
+  supportingSignals?: unknown;
+  summary?: unknown;
+}): BaselineEvidencePreview | null {
+  const supportingSignals = cleanList(input.supportingSignals).slice(0, 2);
+  const baselineEvidence = cleanText(input.baselineEvidence);
+  const summary = cleanText(input.summary);
+  const signals = supportingSignals.length
+    ? supportingSignals
+    : baselineEvidence
+      ? [baselineEvidence.slice(0, 180)]
+      : summary
+        ? [summary]
+        : [];
+
+  if (!signals.length) return null;
+  return {
+    intro: "We found this in your experience - confirm or refine it.",
+    signals,
   };
 }
 
@@ -293,7 +321,7 @@ export function buildRequirementGapInsight(input: {
 
   const explanation = baselineEvidence
     ? `Your ${requirement.toLowerCase()} evidence is strong, but this role requires ${roleExpectation.toLowerCase()}.`
-    : `This role requires ${roleExpectation.toLowerCase()} and the selected resume evidence does not fully show it yet.`;
+    : `You mentioned ${currentSignal.toLowerCase()}, so confirm one example of this work and we can keep it anchored to the baseline.`;
 
   return {
     requirement,
@@ -340,16 +368,16 @@ function prioritizeRequirement(requirement: string): number {
 function actionForRequirement(requirement: string): string {
   const normalized = requirement.toLowerCase();
   if (/\b(leadership|scope|ownership|team size|org scope)\b/.test(normalized)) {
-    return "Clarify team size, ownership, or org scope.";
+    return "You mentioned managing teams or scope, so confirm one example with team size or ownership.";
   }
   if (/\b(metric|metrics|impact|outcome|results?)\b/.test(normalized)) {
-    return "Add measurable outcomes or impact.";
+    return "You mentioned measurable impact, so confirm one example with numbers or outcomes.";
   }
   if (/\b(incident|escalation|support operations|support process|service delivery)\b/.test(normalized)) {
-    return "Add incident management or escalation examples.";
+    return "You mentioned support operations, so confirm one example of incident, escalation, or workflow ownership.";
   }
   if (/\b(platform|tool|tooling|salesforce|zendesk|jira|servicenow|crm)\b/.test(normalized)) {
-    return `Clarify exposure to ${requirement}.`;
+    return `You mentioned ${requirement}, so confirm one example of hands-on use.`;
   }
   return `Strengthen verified evidence for ${requirement}.`;
 }
