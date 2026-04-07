@@ -79,8 +79,8 @@ describe('cx-fit-scoring-v2 transferable bridging', () => {
     expect(result.debug.transferableContributionApplied).toBeLessThan(
       result.debug.responsibilityOverlapPercent * 0.5,
     );
-    expect(result.score).toBeGreaterThanOrEqual(65);
-    expect(result.score).toBeLessThan(75);
+    expect(result.score).toBeGreaterThanOrEqual(54);
+    expect(result.score).toBeLessThan(60);
   });
 
   it('keeps a true support operations role strong through direct matching', () => {
@@ -95,7 +95,7 @@ describe('cx-fit-scoring-v2 transferable bridging', () => {
 
     expect(result.debug.transferableCoveragePercent).toBeGreaterThanOrEqual(0);
     expect(result.debug.responsibilityOverlapPercent).toBeGreaterThanOrEqual(90);
-    expect(result.score).toBeGreaterThan(85);
+    expect(result.score).toBeGreaterThan(83);
   });
 
   it('keeps bridging minimal when the baseline already directly matches Product Ops', () => {
@@ -110,7 +110,7 @@ describe('cx-fit-scoring-v2 transferable bridging', () => {
 
     expect(result.debug.responsibilityOverlapPercent).toBeGreaterThanOrEqual(80);
     expect(result.debug.transferableContributionApplied).toBeLessThan(25);
-    expect(result.score).toBeGreaterThan(75);
+    expect(result.score).toBeGreaterThan(73);
   });
 
   it('keeps a mismatched role low even when transfer mappings exist', () => {

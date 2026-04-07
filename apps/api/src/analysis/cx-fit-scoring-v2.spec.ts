@@ -182,4 +182,128 @@ describe('scoreCxFitV2', () => {
     expect(result.rubric.dimensionPercents.support_operations_and_process_rigor).toBeLessThan(35);
     expect(result.rubric.dimensionPercents.change_leadership_and_customer_advocacy).toBeLessThan(35);
   });
+
+  it('lifts a credible cloud network adjacency case without inflating it into a direct match', () => {
+    const result = scoreCxFitV2(
+      {
+        job: {
+          rawDescription:     `Cloud Network Engineer responsible for BGP, VLAN design, datacenter networking, and device operations across Linux infrastructure.
+            Owns Arista, Cisco, Juniper, and Mellanox environments with remote access, monitoring, and automation.`,
+          normalizedResponsibilities: [
+            'Lead BGP routing, VLAN design, and datacenter networking for cloud environments',
+            'Operate Arista, Cisco, Juniper, and Mellanox network devices with automation and monitoring',
+          ],
+          normalizedRequirements: [
+            'Experience with Linux infrastructure, remote access, and infrastructure automation',
+          ],
+        },
+        baselineSections: [
+          {
+            type: 'EXPERIENCE',
+            content:
+              `Infrastructure engineer and datacenter technician supporting Linux systems, BGP routing, and network devices.
+              Maintained remote access, monitoring, automation, and device operations in a high-complexity technical environment.`,
+          },
+          {
+            type: 'SKILLS',
+            content: 'Linux, BGP, VLAN, Arista, Cisco, Juniper, Mellanox, monitoring, automation',
+          },
+        ],
+      },
+      { debugBundle: true },
+    );
+
+    expect(result.debug.heuristicInference.usedHeuristicInference).toBe(true);
+    expect(result.debug.heuristicInference.heuristicLiftTotal).toBeGreaterThan(0);
+    expect(result.debug.heuristicInference.heuristicLiftByDimension.tooling_and_platform_experience).toBeGreaterThan(0);
+    expect(result.debug.heuristicInference.heuristics.length).toBeGreaterThan(0);
+    expect(result.score).toBeGreaterThanOrEqual(30);
+    expect(result.score).toBeLessThan(85);
+  });
+
+  it('keeps heuristics quiet on shallow keyword overlap', () => {
+    const result = scoreCxFitV2(
+      {
+        job: {
+          rawDescription: 'Office administrator role with calendar management and document filing.',
+          normalizedResponsibilities: ['Manage calendars and documents'],
+          normalizedRequirements: ['Communication and organization'],
+        },
+        baselineSections: [
+          {
+            type: 'EXPERIENCE',
+            content: 'Supported general office operations and filing for a small team.',
+          },
+        ],
+      },
+      { debugBundle: true },
+    );
+
+    expect(result.debug.heuristicInference.usedHeuristicInference).toBe(false);
+    expect(result.debug.heuristicInference.heuristicLiftTotal).toBe(0);
+    expect(result.score).toBeLessThan(40);
+  });
+
+  it('translates support verbs only when the surrounding technical context is rich', () => {
+    const result = scoreCxFitV2(
+      {
+        job: {
+          rawDescription:     `Infrastructure analyst responsible for supporting Linux systems, maintaining VM lifecycle workflows, configuring monitoring, and operating remote access across cloud infrastructure.`,
+          normalizedResponsibilities: [
+            'Supported Linux infrastructure, VM lifecycle workflows, and monitoring',
+            'Maintained remote access, automation, and operational runbooks',
+          ],
+          normalizedRequirements: [
+            'Configured infrastructure tools and operated technical environments',
+          ],
+        },
+        baselineSections: [
+          {
+            type: 'EXPERIENCE',
+            content:
+              'Supported Linux systems, maintained monitoring, and configured VM lifecycle workflows for infrastructure operations.',
+          },
+        ],
+      },
+      { debugBundle: true },
+    );
+
+    expect(result.debug.heuristicInference.usedHeuristicInference).toBe(true);
+    expect(
+      result.debug.heuristicInference.heuristics.some((entry) => entry.type === 'verb_translation'),
+    ).toBe(true);
+    expect(result.rubric.dimensionPercents.support_operations_and_process_rigor).toBeGreaterThan(30);
+    expect(result.score).toBeGreaterThanOrEqual(34);
+  });
+
+  it('keeps scope and seniority constrained for adjacent but lower-scope candidates', () => {
+    const result = scoreCxFitV2(
+      {
+        job: {
+          rawDescription:     `Director of Cloud Network Engineering responsible for operating model, cross-functional leadership, and global network strategy.
+            Owns BGP, datacenter networking, and platform direction.`,
+          normalizedResponsibilities: [
+            'Lead cloud network engineering strategy and cross-functional delivery',
+            'Own BGP and datacenter networking operations',
+          ],
+          normalizedRequirements: [
+            'Experience leading cloud networking platforms and infrastructure direction',
+          ],
+        },
+        baselineSections: [
+          {
+            type: 'EXPERIENCE',
+            content:
+              `Datacenter technician and infrastructure engineer supporting BGP routing, network devices, and Linux systems.
+              Managed automation, monitoring, and device operations but did not own organizational strategy.`,
+          },
+        ],
+      },
+      { debugBundle: true },
+    );
+
+    expect(result.debug.heuristicInference.heuristicLiftByDimension.role_scope_and_seniority).toBeLessThanOrEqual(2);
+    expect(result.debug.heuristicInference.heuristicLiftByDimension.tooling_and_platform_experience).toBeGreaterThanOrEqual(0);
+    expect(result.score).toBeLessThan(80);
+  });
 });

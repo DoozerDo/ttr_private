@@ -286,6 +286,11 @@ type FitScoreResponse = {
   baseline_version_hash?: string | null;
   confidenceScore?: number;
   confidenceReasons?: string[];
+  scoreConfidence?: 'high' | 'medium' | 'low';
+  scoreConfidenceReasons?: string[];
+  scoreSanityFlags?: string[];
+  likelyUnderestimatedFit?: boolean;
+  scorePresentationMode?: 'normal' | 'caution' | 'fix_first';
 
   scoring_v2?: CxFitV2Result;
   verification_coverage?: {
@@ -361,6 +366,11 @@ type RunFitAssessmentComplianceBlockedResponse = {
   baseline_version_hash?: string | null;
   confidenceScore?: number;
   confidenceReasons?: string[];
+  scoreConfidence?: 'high' | 'medium' | 'low';
+  scoreConfidenceReasons?: string[];
+  scoreSanityFlags?: string[];
+  likelyUnderestimatedFit?: boolean;
+  scorePresentationMode?: 'normal' | 'caution' | 'fix_first';
   assessmentId?: string;
   jobId?: string;
   baselineId?: string;
@@ -2196,6 +2206,11 @@ export class AnalysisService {
       scoringProof,
       confidenceScore: confidenceResult.confidenceScore,
       confidenceReasons: confidenceResult.confidenceReasons,
+      scoreConfidence: scoringV2.scoreConfidence,
+      scoreConfidenceReasons: scoringV2.scoreConfidenceReasons,
+      scoreSanityFlags: scoringV2.scoreSanityFlags,
+      likelyUnderestimatedFit: scoringV2.likelyUnderestimatedFit,
+      scorePresentationMode: scoringV2.scorePresentationMode,
     };
     } finally {
       this.clearShortTextWarningKey(shortTextWarningKey);
@@ -2843,6 +2858,11 @@ export class AnalysisService {
           this.buildSummaryFromTerms(strengths, gaps),
         confidenceScore: confidenceResult.confidenceScore,
         confidenceReasons: confidenceResult.confidenceReasons,
+        scoreConfidence: scoringV2.scoreConfidence,
+        scoreConfidenceReasons: scoringV2.scoreConfidenceReasons,
+        scoreSanityFlags: scoringV2.scoreSanityFlags,
+        likelyUnderestimatedFit: scoringV2.likelyUnderestimatedFit,
+        scorePresentationMode: scoringV2.scorePresentationMode,
         ...(compliance.debugTrace ? { compliance_debug: compliance.debugTrace } : {}),
         compliance: {
           blocked: true,
@@ -2969,6 +2989,11 @@ export class AnalysisService {
         scoringProof: successScoringProof,
         confidenceScore: confidenceResult.confidenceScore,
         confidenceReasons: confidenceResult.confidenceReasons,
+        scoreConfidence: scoringV2.scoreConfidence,
+        scoreConfidenceReasons: scoringV2.scoreConfidenceReasons,
+        scoreSanityFlags: scoringV2.scoreSanityFlags,
+        likelyUnderestimatedFit: scoringV2.likelyUnderestimatedFit,
+        scorePresentationMode: scoringV2.scorePresentationMode,
         baseline_version_hash:
           compliance.audit.baselineVersionHash ?? baselineVersionHash,
       };

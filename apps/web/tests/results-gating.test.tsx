@@ -12,6 +12,11 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function installFetch(input: {
   score: number;
+  scorePresentationMode?: "normal" | "caution" | "fix_first";
+  likelyUnderestimatedFit?: boolean;
+  scoreConfidence?: "high" | "medium" | "low";
+  scoreConfidenceReasons?: string[];
+  scoreSanityFlags?: string[];
   strengths?: string[];
   unverifiedRequirements?: string[];
   readinessStatus?: "ready" | "blocked";
@@ -19,6 +24,11 @@ function installFetch(input: {
 }) {
   const {
     score,
+    scorePresentationMode = "normal",
+    likelyUnderestimatedFit = false,
+    scoreConfidence = "high",
+    scoreConfidenceReasons = [],
+    scoreSanityFlags = [],
     strengths = ["Incident management", "SLA ownership"],
     unverifiedRequirements = [],
     readinessStatus = "ready",
@@ -29,12 +39,44 @@ function installFetch(input: {
     const url = String(input);
     if (url.includes("/api/analysis/fit-assessments/analysis-current")) {
       return jsonResponse({
+          assessmentId: "analysis-current",
+          jobId: "job-1",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          score,
+          scorePresentationMode,
+          likelyUnderestimatedFit,
+          scoreConfidence,
+          scoreConfidenceReasons,
+          scoreSanityFlags,
+          strengths,
+          supportingSignals: strengths,
+          baselineEvidence: strengths,
+          verification_coverage: {
+            totalClaims: strengths.length + unverifiedRequirements.length,
+            verifiedClaims: strengths.length,
+          inferredClaims: 0,
+          unverifiedClaims: unverifiedRequirements.length,
+          verifiedRequirements: strengths,
+          unverifiedRequirements,
+        },
+      });
+    }
+    if (url.includes("/api/analysis/job/job-1/baseline/base-1/latest")) {
+      return jsonResponse({
         assessmentId: "analysis-current",
         jobId: "job-1",
         baselineId: "base-1",
         baselineVersionId: "base-version-1",
         score,
+        scorePresentationMode,
+        likelyUnderestimatedFit,
+        scoreConfidence,
+        scoreConfidenceReasons,
+        scoreSanityFlags,
         strengths,
+        supportingSignals: strengths,
+        baselineEvidence: strengths,
         verification_coverage: {
           totalClaims: strengths.length + unverifiedRequirements.length,
           verifiedClaims: strengths.length,
@@ -51,6 +93,13 @@ function installFetch(input: {
           assessmentId: "analysis-current",
           score,
           strengths,
+          scorePresentationMode,
+          likelyUnderestimatedFit,
+          scoreConfidence,
+          scoreConfidenceReasons,
+          scoreSanityFlags,
+          supportingSignals: strengths,
+          baselineEvidence: strengths,
         },
       ]);
     }
@@ -170,5 +219,33 @@ describe("results gating", () => {
     expect(screen.queryByText("Use Fit Review to close the gap")).toBeNull();
     expect(screen.getByText("No material gaps were identified in this run.")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
+  });
+
+  it("leads with fix-first guidance when score confidence is low", async () => {
+    overrideSearchParams({ analysisId: "analysis-low-confidence", jobId: "job-1", baselineId: "base-1" });
+    const fetchMock = installFetch({
+      score: 54,
+      scorePresentationMode: "fix_first",
+      likelyUnderestimatedFit: true,
+      scoreConfidence: "low",
+      scoreConfidenceReasons: [
+        "Relevant adjacent infrastructure or tooling evidence is present, but the score looks constrained by literal overlap or phrasing.",
+      ],
+      scoreSanityFlags: ["adjacency_low_score", "overlap_cap_drag"],
+      strengths: ["Linux infrastructure", "BGP routing"],
+      unverifiedRequirements: [],
+      readinessStatus: "ready",
+      readinessBlocked: false,
+    });
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    render(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("We may be underestimating your fit.")).toBeInTheDocument();
+    });
+    expect(screen.getByText("This score looks low confidence. Fix the evidence story first, then rerun generation.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "START FIT REVIEW" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "OPEN STUDIO" })).toBeNull();
   });
 });

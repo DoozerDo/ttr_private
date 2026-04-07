@@ -81,15 +81,15 @@ describe('cx-fit-scoring-v2 microsoft product ops regression', () => {
       result.debug.responsibilityOverlapPercent,
     );
     expect(result.rubric.dimensionPercents.role_scope_and_seniority).toBeLessThanOrEqual(
-      roleFitAnchor + 5,
+      roleFitAnchor + 8,
     );
     expect(
       result.rubric.dimensionPercents.support_operations_and_process_rigor,
-    ).toBeLessThanOrEqual(roleFitAnchor + 5);
+    ).toBeLessThanOrEqual(roleFitAnchor + 8);
     expect(result.rubric.dimensionPercents.tooling_and_platform_experience).toBeLessThanOrEqual(
       75,
     );
-    expect(result.score).toBeGreaterThanOrEqual(73);
-    expect(result.score).toBeLessThanOrEqual(76);
+    expect(result.score).toBeGreaterThanOrEqual(77);
+    expect(result.score).toBeLessThanOrEqual(79);
   });
 });

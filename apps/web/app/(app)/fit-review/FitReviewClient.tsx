@@ -59,6 +59,11 @@ type ScoringV2Rubric = {
 type ScoringV2Result = {
   score: number;
   rubric: ScoringV2Rubric;
+  scoreConfidence?: "high" | "medium" | "low";
+  scoreConfidenceReasons?: string[];
+  scoreSanityFlags?: string[];
+  likelyUnderestimatedFit?: boolean;
+  scorePresentationMode?: "normal" | "caution" | "fix_first";
 };
 
 const HERO_MESSAGE =

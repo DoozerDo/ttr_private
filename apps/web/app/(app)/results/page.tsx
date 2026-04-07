@@ -120,6 +120,11 @@ type ScoringV2Result = {
   rubric: ScoringV2Rubric;
   debug: ScoringV2DebugInfo;
   jobTextSource?: "normalized" | "raw";
+  scoreConfidence?: "high" | "medium" | "low";
+  scoreConfidenceReasons?: string[];
+  scoreSanityFlags?: string[];
+  likelyUnderestimatedFit?: boolean;
+  scorePresentationMode?: "normal" | "caution" | "fix_first";
 };
 
 type LatestAnalysis = {
@@ -160,6 +165,11 @@ type LatestAnalysis = {
   evaluationNotes?: string[] | null;
   systemConstraints?: string[] | null;
   createdAt?: string | null;
+  scoreConfidence?: "high" | "medium" | "low";
+  scoreConfidenceReasons?: string[] | null;
+  scoreSanityFlags?: string[] | null;
+  likelyUnderestimatedFit?: boolean | null;
+  scorePresentationMode?: "normal" | "caution" | "fix_first" | null;
   scoring_v2?: ScoringV2Result | null;
   narrative?: {
     headline: string;
@@ -1734,6 +1744,15 @@ export default function ResultsPage() {
   }, [latest?.score_breakdown, latest?.scoring_v2?.rubric]);
 
   const scoringV2 = latest?.scoring_v2 ?? null;
+  const scorePresentationMode =
+    latest?.scorePresentationMode ?? scoringV2?.scorePresentationMode ?? "normal";
+  const scoreConfidenceReasons = latest?.scoreConfidenceReasons ?? scoringV2?.scoreConfidenceReasons ?? [];
+  const likelyUnderestimatedFit =
+    Boolean(latest?.likelyUnderestimatedFit ?? scoringV2?.likelyUnderestimatedFit) ||
+    scorePresentationMode === "fix_first";
+  const isFixFirstMode =
+    scorePresentationMode === "fix_first" ||
+    (typeof activeScore === "number" && activeScore < 60);
   const resultsAssessmentId = latest?.assessmentId ?? null;
   const scoringRubric = scoringV2?.rubric ?? null;
   const debugFields = scoringV2?.debug ?? null;
@@ -2275,12 +2294,19 @@ export default function ResultsPage() {
   );
   const primaryNextAction = useMemo(
     () =>
-      getCanonicalNextAction({
-        fitScore: typeof activeScore === "number" ? activeScore : null,
-        generationReady: generationReadiness.status === "ready" && !generationReadiness.blocked,
-        trustGateAllowed: true,
-      }),
-    [activeScore, generationReadiness.blocked, generationReadiness.status],
+      isFixFirstMode
+        ? {
+            type: "fit_review" as const,
+            label: "Start Fit Review",
+            route: fitReviewPath,
+            reason: "low_confidence_fix_first",
+          }
+        : getCanonicalNextAction({
+            fitScore: typeof activeScore === "number" ? activeScore : null,
+            generationReady: generationReadiness.status === "ready" && !generationReadiness.blocked,
+            trustGateAllowed: true,
+          }),
+    [activeScore, generationReadiness.blocked, generationReadiness.status, isFixFirstMode],
   );
   const resultsReturnCue = useMemo(() => {
     if (recentIntent === "used_and_committed") {
@@ -3178,6 +3204,37 @@ export default function ResultsPage() {
             resultsReturnCue ?? "Review your compatibility score and next best step."
           }
         />
+        {scorePresentationMode !== "normal" ? (
+          <section
+            className={`rounded-2xl border p-4 ${
+              scorePresentationMode === "fix_first"
+                ? "border-amber-300/30 bg-amber-500/10"
+                : "border-sky-300/30 bg-sky-500/10"
+            }`}
+          >
+            <p
+              className={`text-sm font-semibold ${
+                scorePresentationMode === "fix_first" ? "text-amber-100" : "text-sky-100"
+              }`}
+            >
+              {scorePresentationMode === "fix_first"
+                ? "We may be underestimating your fit."
+                : "This score has some uncertainty."}
+            </p>
+            <p className="mt-1 text-sm text-slate-100">
+              {scorePresentationMode === "fix_first"
+                ? "We found relevant experience, but the resume does not clearly show ownership for this role."
+                : "Relevant evidence is present, but some signals are still mixed or partially translated."}
+            </p>
+            {scoreConfidenceReasons.length ? (
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-100">
+                {scoreConfidenceReasons.slice(0, 2).map((reason: string) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
+        ) : null}
         {false ? (
           <section className="rounded-2xl border border-amber-300/30 bg-amber-500/10 p-4">
             <p className="text-sm font-semibold text-amber-100">You’re not ready to apply yet.</p>
@@ -3188,7 +3245,9 @@ export default function ResultsPage() {
         ) : null}
         <section
           className={`rounded-2xl border p-4 ${
-            resultsDecision.state === "BLOCKED"
+            scorePresentationMode === "fix_first"
+              ? "border-amber-300/30 bg-amber-500/10"
+              : resultsDecision.state === "BLOCKED"
               ? "border-amber-300/30 bg-amber-500/10"
               : resultsDecision.state === "READY"
                 ? "border-emerald-300/30 bg-emerald-500/10"
@@ -3197,23 +3256,41 @@ export default function ResultsPage() {
         >
           <p
             className={`text-sm font-semibold ${
-              resultsDecision.state === "BLOCKED"
+              scorePresentationMode === "fix_first"
+                ? "text-amber-100"
+                : resultsDecision.state === "BLOCKED"
                 ? "text-amber-100"
                 : resultsDecision.state === "READY"
                   ? "text-emerald-100"
                   : "text-slate-100"
             }`}
           >
-            {resultsDecision.headline}
+            {scorePresentationMode === "fix_first"
+              ? "We may be underestimating your fit."
+              : resultsDecision.headline}
           </p>
-          <p className="mt-1 text-sm text-slate-100">{resultsDecision.subtext}</p>
+          <p className="mt-1 text-sm text-slate-100">
+            {scorePresentationMode === "fix_first"
+              ? "This score looks low confidence. Fix the evidence story first, then rerun generation."
+              : resultsDecision.subtext}
+          </p>
           <div className="mt-3">
             <a
               data-testid="results-hero-primary-cta"
-              href={resultsDecision.primaryCta === "START_FIT_REVIEW" ? fitReviewPath : studioHref}
+              href={
+                scorePresentationMode === "fix_first"
+                  ? fitReviewPath
+                  : resultsDecision.primaryCta === "START_FIT_REVIEW"
+                    ? fitReviewPath
+                    : studioHref
+              }
               className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
             >
-              {resultsDecision.primaryCta === "START_FIT_REVIEW" ? "START FIT REVIEW" : "OPEN STUDIO"}
+              {scorePresentationMode === "fix_first"
+                ? "START FIT REVIEW"
+                : resultsDecision.primaryCta === "START_FIT_REVIEW"
+                  ? "START FIT REVIEW"
+                  : "OPEN STUDIO"}
             </a>
           </div>
         </section>

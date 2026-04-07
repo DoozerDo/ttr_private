@@ -108,6 +108,13 @@ export type FitScoreDebugBundle = {
     finalScore: number;
     redistributedWeightFrom: number;
   };
+  heuristicInference: {
+    usedHeuristicInference: boolean;
+    heuristicLiftTotal: number;
+    heuristicLiftByDimension: Record<ScoringContractV1DimensionKey, number>;
+    heuristicConfidenceSummary: Record<HeuristicConfidence, number>;
+    heuristics: HeuristicDebugEntry[];
+  };
   evidence: Record<ScoringContractV1DimensionKey, FitScoreDimensionEvidence>;
   determinism: {
     randomSeed: number | null;
@@ -227,6 +234,13 @@ export type CxFitV2DebugInfo = {
     guardEnabled: boolean;
     tacticalSuppressionSkipped: boolean;
   };
+  heuristicInference: {
+    usedHeuristicInference: boolean;
+    heuristicLiftTotal: number;
+    heuristicLiftByDimension: Record<ScoringContractV1DimensionKey, number>;
+    heuristicConfidenceSummary: Record<'low' | 'medium' | 'high', number>;
+    heuristics: HeuristicDebugEntry[];
+  };
   industryBundles: {
     evidence: {
       id: string;
@@ -250,9 +264,158 @@ export type CxFitV2DebugInfo = {
   baselineClusterHits: Record<string, number>;
 };
 
+type HeuristicType =
+  | 'adjacency'
+  | 'environment_elevation'
+  | 'verb_translation'
+  | 'trajectory'
+  | 'tool_domain_bridge';
+
+type HeuristicConfidence = 'low' | 'medium' | 'high';
+
+type HeuristicDimension = ScoringContractV1DimensionKey;
+
+type HeuristicDebugEntry = {
+  type: HeuristicType;
+  dimension: HeuristicDimension;
+  confidence: HeuristicConfidence;
+  rawContribution: number;
+  cappedContribution: number;
+  evidence: string[];
+  reason: string;
+};
+
+type HeuristicInferenceResult = {
+  usedHeuristicInference: boolean;
+  heuristicLiftTotal: number;
+  heuristicLiftByDimension: Record<ScoringContractV1DimensionKey, number>;
+  heuristicConfidenceSummary: Record<HeuristicConfidence, number>;
+  heuristics: HeuristicDebugEntry[];
+};
+
+export function assessScoreConfidence(input: {
+  score: number;
+  debug: CxFitV2DebugInfo;
+}): ScoreConfidenceClassification {
+  const { score, debug } = input;
+  const heuristicInference = debug.heuristicInference;
+  const triggeredSanityRules: string[] = [];
+  const scoreConfidenceReasons: string[] = [];
+
+  const adjacencyLift =
+    (heuristicInference?.heuristicLiftByDimension.tooling_and_platform_experience ?? 0) +
+    (heuristicInference?.heuristicLiftByDimension.domain_and_business_context ?? 0);
+  const technicalDensity =
+    (debug.toolingCoverage?.requiredCoverage ?? 0) +
+    (debug.toolingCoverage?.preferredCoverage ?? 0) +
+    (debug.platformGroups?.totalBoost ?? 0);
+  const supportVerbSignals = debug.toolingCoverage.requiredCoverage > 0.45;
+  const overlapDrag =
+    debug.responsibilityOverlapPercent < 45 ||
+    (debug.adjustedResponsibilityOverlapPercent - debug.responsibilityOverlapPercent >= 4 &&
+      score < 70);
+  const richAdjacencyButLowScore = adjacencyLift >= 4 && score < 65;
+  const supportVerbMismatch =
+    technicalDensity >= 0.8 &&
+    supportVerbSignals &&
+    score < 70 &&
+    heuristicInference.usedHeuristicInference;
+  const capsDrag =
+    heuristicInference.usedHeuristicInference &&
+    score < 70 &&
+    debug.adjustedResponsibilityOverlapPercent < 75 &&
+    debug.responsibilityOverlapPercent < 60;
+  const extractionThinness =
+    debug.baselineCoveragePercent < 25 || debug.jobVectorsLength === 0 || debug.baselineVectors.length === 0;
+  const directFitSignals =
+    debug.responsibilityOverlapPercent >= 75 &&
+    debug.adjustedResponsibilityOverlapPercent >= 80 &&
+    debug.bandDelta <= 1 &&
+    !heuristicInference.usedHeuristicInference;
+
+  if (richAdjacencyButLowScore) triggeredSanityRules.push('adjacency_low_score');
+  if (supportVerbMismatch) triggeredSanityRules.push('technical_density_support_verb_mismatch');
+  if (overlapDrag) triggeredSanityRules.push('overlap_cap_drag');
+  if (capsDrag) triggeredSanityRules.push('cap_or_floor_drag');
+  if (extractionThinness) triggeredSanityRules.push('extraction_thinness');
+
+  const likelyUnderestimatedFit =
+    (richAdjacencyButLowScore || supportVerbMismatch || capsDrag) &&
+    score < 70 &&
+    adjacencyLift >= 2;
+
+  if (likelyUnderestimatedFit) {
+    scoreConfidenceReasons.push(
+      'Relevant adjacent infrastructure or tooling evidence is present, but the score looks constrained by literal overlap or phrasing.',
+    );
+  }
+  if (supportVerbMismatch) {
+    scoreConfidenceReasons.push(
+      'Technical density is present, but support-oriented wording may be understating ownership.',
+    );
+  }
+  if (capsDrag) {
+    scoreConfidenceReasons.push(
+      'Hard scoring caps appear to be compressing the result despite adjacent evidence.',
+    );
+  }
+  if (extractionThinness) {
+    scoreConfidenceReasons.push('Parsed evidence appears thin or incomplete.');
+  }
+  if (!scoreConfidenceReasons.length) {
+    scoreConfidenceReasons.push(
+      'Score is grounded in the current evidence set without major contradiction signals.',
+    );
+  }
+
+  let scoreConfidence: 'high' | 'medium' | 'low' = 'high';
+  if (directFitSignals && score >= 85 && triggeredSanityRules.length === 0) {
+    scoreConfidence = 'high';
+  } else if (likelyUnderestimatedFit || triggeredSanityRules.length >= 2 || score < 45) {
+    scoreConfidence = 'low';
+  } else if (!directFitSignals && (triggeredSanityRules.length > 0 || score < 75)) {
+    scoreConfidence = 'medium';
+  }
+
+  const scorePresentationMode =
+    scoreConfidence === 'low'
+      ? 'fix_first'
+      : scoreConfidence === 'medium'
+        ? 'caution'
+        : 'normal';
+
+  return {
+    scoreConfidence,
+    scoreConfidenceReasons,
+    scoreSanityFlags: triggeredSanityRules,
+    likelyUnderestimatedFit,
+    scorePresentationMode,
+    confidenceDiagnostics: {
+      confidenceInputsSummary: {
+        score,
+        responsibilityOverlapPercent: debug.responsibilityOverlapPercent,
+        adjustedResponsibilityOverlapPercent: debug.adjustedResponsibilityOverlapPercent,
+        baselineCoveragePercent: debug.baselineCoveragePercent,
+        baselineRecallPercent: debug.baselineRecallPercent,
+        bandDelta: debug.bandDelta,
+        heuristicLiftTotal: heuristicInference?.heuristicLiftTotal ?? 0,
+        heuristicUsed: Boolean(heuristicInference?.usedHeuristicInference),
+      },
+      triggeredSanityRules,
+      confidenceDecisionSummary: scorePresentationMode,
+    },
+  };
+}
+
 export type CxFitV2Result = {
   // canonical
   score: number;
+  scoreConfidence: 'high' | 'medium' | 'low';
+  scoreConfidenceReasons: string[];
+  scoreSanityFlags: string[];
+  likelyUnderestimatedFit: boolean;
+  scorePresentationMode: 'normal' | 'caution' | 'fix_first';
+  confidenceDiagnostics?: ScoreConfidenceClassification['confidenceDiagnostics'];
 
   // contract v1
   rubric: {
@@ -291,6 +454,28 @@ export type ConfidenceReasonLabel =
 export type ConfidenceScoreResult = {
   confidenceScore: number;
   confidenceReasons: ConfidenceReasonLabel[];
+};
+
+export type ScoreConfidenceClassification = {
+  scoreConfidence: 'high' | 'medium' | 'low';
+  scoreConfidenceReasons: string[];
+  scoreSanityFlags: string[];
+  likelyUnderestimatedFit: boolean;
+  scorePresentationMode: 'normal' | 'caution' | 'fix_first';
+  confidenceDiagnostics: {
+    confidenceInputsSummary: {
+      score: number;
+      responsibilityOverlapPercent: number;
+      adjustedResponsibilityOverlapPercent: number;
+      baselineCoveragePercent: number;
+      baselineRecallPercent: number;
+      bandDelta: number;
+      heuristicLiftTotal: number;
+      heuristicUsed: boolean;
+    };
+    triggeredSanityRules: string[];
+    confidenceDecisionSummary: string;
+  };
 };
 
 const BASE_WEIGHTS: ScoringContractV1Weights = {
@@ -616,6 +801,79 @@ const DOMAIN_MATCHERS: Array<{ tag: DomainTag; patterns: RegExp[] }> = [
 ];
 
 const HARD_TOOL_GUARDS = ['servicenow', 'service desk'];
+
+const HEURISTIC_LIFT_CAPS: Record<HeuristicDimension, number> = {
+  role_scope_and_seniority: 2,
+  support_operations_and_process_rigor: 4,
+  tooling_and_platform_experience: 6,
+  domain_and_business_context: 5,
+  change_leadership_and_customer_advocacy: 2,
+};
+
+const HEURISTIC_TOTAL_LIFT_CAP = 10;
+
+const NETWORK_ADJACENCY_TERMS = [
+  'bgp',
+  'l3 routing',
+  'layer 3 routing',
+  'routing',
+  'switching',
+  'networking',
+  'network devices',
+  'arista',
+  'cisco',
+  'juniper',
+  'mellanox',
+  'vlan',
+  'dns',
+  'dhcp',
+  'vpn',
+  'datacenter',
+  'data center',
+  'fabric',
+  'high performance networking',
+];
+
+const HIGH_COMPLEXITY_ENVIRONMENT_TERMS = [
+  'microsoft schie',
+  'schie',
+  'hardware infrastructure engineering',
+  'infra lab',
+  'infrastructure lab',
+  'research and development',
+  'r&d',
+  'advanced datacenter',
+  'advanced data center',
+];
+
+const SUPPORT_TRANSLATION_TERMS = ['supported', 'maintained', 'configured', 'operated'];
+const INFRA_CONTEXT_TERMS = [
+  'vm lifecycle',
+  'virtual machine',
+  'monitoring',
+  'automation',
+  'remote access',
+  'linux',
+  'infrastructure',
+  'systems',
+  'networking',
+];
+const TRAJECTORY_TERMS = [
+  'technician',
+  'infrastructure engineer',
+  'infrastructure',
+  'system administrator',
+  'systems administrator',
+  'linux administrator',
+  'cloud',
+  'network',
+];
+
+const HEURISTIC_CONFIDENCE_POINTS: Record<HeuristicConfidence, number> = {
+  low: 1,
+  medium: 2,
+  high: 3,
+};
 
 const STRATEGIC_SIGNAL_TERMS = [
   'define',
@@ -1026,6 +1284,250 @@ function hasFamilyEvidence(text: string, family: 'support' | 'change' | 'scope')
       lower,
     )
   );
+}
+
+function countTermHits(text: string, terms: string[]): number {
+  const lower = text.toLowerCase();
+  return terms.reduce((sum, term) => sum + (lower.includes(term) ? 1 : 0), 0);
+}
+
+function buildHeuristicInference(params: {
+  normalizedBaselineText: string;
+  normalizedJobText: string;
+  jobTitle?: string;
+  responsibilityOverlapPercent: number;
+  adjustedResponsibilityOverlapPercent: number;
+  baselineCoveragePercent: number;
+  baselineBand: number;
+  roleBand: number;
+}): {
+  heuristicLiftByDimension: Record<ScoringContractV1DimensionKey, number>;
+  heuristicLiftTotal: number;
+  heuristicInference: {
+    usedHeuristicInference: boolean;
+    heuristicLiftTotal: number;
+    heuristicLiftByDimension: Record<ScoringContractV1DimensionKey, number>;
+    heuristicConfidenceSummary: Record<HeuristicConfidence, number>;
+    heuristics: HeuristicDebugEntry[];
+  };
+} {
+  const {
+    normalizedBaselineText,
+    normalizedJobText,
+    jobTitle,
+    responsibilityOverlapPercent,
+    adjustedResponsibilityOverlapPercent,
+    baselineCoveragePercent,
+    baselineBand,
+    roleBand,
+  } = params;
+
+  const heuristicLiftByDimension: Record<ScoringContractV1DimensionKey, number> = {
+    role_scope_and_seniority: 0,
+    support_operations_and_process_rigor: 0,
+    tooling_and_platform_experience: 0,
+    domain_and_business_context: 0,
+    change_leadership_and_customer_advocacy: 0,
+  };
+  const heuristics: HeuristicDebugEntry[] = [];
+  const confidenceSummary: Record<HeuristicConfidence, number> = {
+    low: 0,
+    medium: 0,
+    high: 0,
+  };
+  let heuristicLiftTotal = 0;
+
+  const addHeuristic = (
+    type: HeuristicType,
+    dimension: HeuristicDimension,
+    confidence: HeuristicConfidence,
+    rawContribution: number,
+    evidence: string[],
+    reason: string,
+  ) => {
+    if (rawContribution <= 0) return;
+    if (heuristicLiftTotal >= HEURISTIC_TOTAL_LIFT_CAP) return;
+    const remainingGlobal = HEURISTIC_TOTAL_LIFT_CAP - heuristicLiftTotal;
+    const remainingDimension = HEURISTIC_LIFT_CAPS[dimension] - heuristicLiftByDimension[dimension];
+    const cappedContribution = Math.max(
+      0,
+      Math.min(rawContribution, remainingGlobal, remainingDimension),
+    );
+    if (cappedContribution <= 0) return;
+    heuristicLiftByDimension[dimension] += cappedContribution;
+    heuristicLiftTotal += cappedContribution;
+    confidenceSummary[confidence] += 1;
+    heuristics.push({
+      type,
+      dimension,
+      confidence,
+      rawContribution,
+      cappedContribution,
+      evidence,
+      reason,
+    });
+  };
+
+  const adjacencyTerms = [
+    'bgp',
+    'l3 routing',
+    'routing',
+    'switching',
+    'networking',
+    'network devices',
+    'arista',
+    'cisco',
+    'juniper',
+    'mellanox',
+    'vlan',
+    'dns',
+    'dhcp',
+    'vpn',
+    'datacenter',
+    'data center',
+    'fabric',
+    'linux infrastructure',
+  ];
+  const environmentTerms = [
+    'microsoft schie',
+    'schie',
+    'hardware infrastructure engineering',
+    'infrastructure lab',
+    'advanced datacenter',
+    'advanced data center',
+    'research and development',
+    'r&d',
+  ];
+  const translationVerbs = ['supported', 'maintained', 'configured', 'operated'];
+  const trajectoryTerms = [
+    'technician',
+    'infrastructure engineer',
+    'system administrator',
+    'systems administrator',
+    'linux administrator',
+    'cloud',
+    'network',
+  ];
+  const bridgeTerms = ['bgp', 'mellanox', 'vlan', 'dns', 'dhcp', 'vpn', 'linux'];
+
+  const adjacencySignals =
+    countTermHits(normalizedBaselineText, adjacencyTerms) +
+    countTermHits(normalizedJobText, adjacencyTerms);
+  const environmentSignals =
+    countTermHits(normalizedBaselineText, environmentTerms) +
+    countTermHits(normalizedJobText, environmentTerms);
+  const translationSignals =
+    countTermHits(normalizedBaselineText, translationVerbs) +
+    countTermHits(normalizedJobText, translationVerbs);
+  const trajectorySignals =
+    countTermHits(normalizedBaselineText, trajectoryTerms) +
+    countTermHits(normalizedJobText, trajectoryTerms);
+  const bridgeSignals =
+    countTermHits(normalizedBaselineText, bridgeTerms) +
+    countTermHits(normalizedJobText, bridgeTerms);
+
+  const baselineContextRich =
+    countTermHits(normalizedBaselineText, ['network', 'infrastructure', 'datacenter', 'linux']) >=
+    2;
+  const jobContextRich =
+    countTermHits(normalizedJobText, ['network', 'infrastructure', 'datacenter', 'linux']) >= 2;
+  const contextRich = baselineContextRich || jobContextRich;
+  const supportsTrajectory = /technician|engineer|administrator|admin|sysadmin/.test(
+    `${normalizedBaselineText} ${normalizedJobText}`,
+  );
+  const hasStrongAdjacentEvidence =
+    adjacencySignals >= 2 && contextRich && responsibilityOverlapPercent >= 25;
+
+  if (hasStrongAdjacentEvidence) {
+    addHeuristic(
+      'adjacency',
+      'tooling_and_platform_experience',
+      adjacencySignals >= 4 ? 'high' : 'medium',
+      adjacencySignals >= 4 ? 4 : 3,
+      ['networking', 'datacenter', 'infra adjacency'],
+      'Adjacent networking and infrastructure evidence supports partial tooling/platform credit',
+    );
+    addHeuristic(
+      'adjacency',
+      'domain_and_business_context',
+      adjacencySignals >= 4 ? 'medium' : 'low',
+      adjacencySignals >= 4 ? 2 : 1,
+      ['adjacent domain signal'],
+      'Adjacency modestly strengthens domain relevance without becoming direct match evidence',
+    );
+  }
+
+  if (environmentSignals > 0 && hasStrongAdjacentEvidence) {
+    addHeuristic(
+      'environment_elevation',
+      'tooling_and_platform_experience',
+      environmentSignals >= 2 ? 'high' : 'medium',
+      environmentSignals >= 2 ? 2 : 1,
+      [jobTitle ?? '', 'high-complexity technical environment'].filter(Boolean),
+      'High-complexity environment increases the credibility of adjacent technical work',
+    );
+  }
+
+  if (translationSignals > 0 && contextRich) {
+    addHeuristic(
+      'verb_translation',
+      'support_operations_and_process_rigor',
+      translationSignals >= 3 ? 'high' : 'medium',
+      translationSignals >= 3 ? 3 : 2,
+      ['supported', 'maintained', 'configured', 'complex infra context'],
+      'Support-oriented verbs become partial operational ownership in a technically rich context',
+    );
+    addHeuristic(
+      'verb_translation',
+      'tooling_and_platform_experience',
+      'low',
+      1,
+      ['support verbs plus infra tooling'],
+      'Operational verbs contribute a small amount of tooling/platform confidence',
+    );
+  }
+
+  if (trajectorySignals >= 2 && supportsTrajectory && roleBand >= baselineBand - 1) {
+    addHeuristic(
+      'trajectory',
+      'role_scope_and_seniority',
+      trajectorySignals >= 4 ? 'medium' : 'low',
+      trajectorySignals >= 4 ? 2 : 1,
+      ['career progression signal'],
+      'Career progression toward the target role is recognized as a small partial credit signal',
+    );
+  }
+
+  if (bridgeSignals >= 2 && responsibilityOverlapPercent >= 20) {
+    addHeuristic(
+      'tool_domain_bridge',
+      'tooling_and_platform_experience',
+      bridgeSignals >= 4 ? 'high' : 'medium',
+      bridgeSignals >= 4 ? 4 : 2,
+      bridgeTerms.filter((term) => normalizedBaselineText.includes(term) || normalizedJobText.includes(term)),
+      'Concrete tools and protocols bridge into adjacent platform relevance',
+    );
+    addHeuristic(
+      'tool_domain_bridge',
+      'domain_and_business_context',
+      bridgeSignals >= 4 ? 'medium' : 'low',
+      bridgeSignals >= 4 ? 2 : 1,
+      ['network architecture fundamentals'],
+      'Technical tools support the adjacent domain signal, but only with a small bounded lift',
+    );
+  }
+
+  return {
+    heuristicLiftByDimension,
+    heuristicLiftTotal,
+    heuristicInference: {
+      usedHeuristicInference: heuristics.length > 0,
+      heuristicLiftTotal,
+      heuristicLiftByDimension,
+      heuristicConfidenceSummary: confidenceSummary,
+      heuristics,
+    },
+  };
 }
 
 export const scoreCxFitV2 = (
@@ -1507,6 +2009,17 @@ export const scoreCxFitV2 = (
     change_leadership_and_customer_advocacy: changeLeadershipPercentUsed,
   };
 
+  const heuristicResult = buildHeuristicInference({
+    normalizedBaselineText,
+    normalizedJobText,
+    jobTitle: input.jobTitle,
+    responsibilityOverlapPercent,
+    adjustedResponsibilityOverlapPercent,
+    baselineCoveragePercent,
+    baselineBand,
+    roleBand,
+  });
+
   const calibratedDimensionPercents: Record<ScoringContractV1DimensionKey, number> = {
     ...dimensionPercents,
   };
@@ -1544,6 +2057,13 @@ export const scoreCxFitV2 = (
       100,
       calibratedDimensionPercents.role_scope_and_seniority + 2,
     );
+  }
+
+  for (const [dimension, lift] of Object.entries(heuristicResult.heuristicLiftByDimension) as [
+    ScoringContractV1DimensionKey,
+    number,
+  ][]) {
+    calibratedDimensionPercents[dimension] = Math.min(100, calibratedDimensionPercents[dimension] + lift);
   }
 
   // ---- weighted points ----
@@ -1609,6 +2129,83 @@ export const scoreCxFitV2 = (
   // contract rounding: round half up, final only
   const roundedFinal = roundHalfUp(finalBeforeClamp);
   const finalScore = clamp(roundedFinal);
+  const scoreConfidenceClassification = assessScoreConfidence({
+    score: finalScore,
+    debug: {
+      jobScoringTextSource,
+      jobTextForScoring,
+      jobTextForScoringLength: jobTextForScoring.length,
+      jobVectorsLength: jobVectors.length,
+      jobVectors,
+      baselineVectors,
+      sharedVectors,
+      transferableMatches: transferableSignalTrace.transferableMatches,
+      transferableCoveragePercent: transferableSignalTrace.transferableCoveragePercent,
+      transferableContributionApplied,
+      transferableVectors: transferableSignalTrace.transferableVectors,
+      droppedTransferableMatches: transferableSignalTrace.droppedTransferableMatches,
+      unmatchedVectors: transferableSignalTrace.unmatchedVectors,
+      adjustedResponsibilityOverlapPercent,
+      baselineBand: `L${baselineBand}`,
+      roleBand: `L${roleBand}`,
+      bandDelta,
+      domainTagsBaseline: domainTagsBaseline,
+      domainTagsRole: domainTagsRole,
+      domainTagsBaselineOriginal,
+      domainTagsRoleOriginal,
+      domainPercent: adjustedDomainPercent,
+      responsibilityOverlapPercent: clamp(Math.round(responsibilityOverlapPercent)),
+      baselineCoveragePercent: clamp(Math.round(baselineCoveragePercent)),
+      baselineRecallPercent: clamp(Math.round(baselineRecallPercent)),
+      roleImpliedStrategyFloorApplied,
+      originalStrategyRatioPercent: clamp(Math.round(originalStrategyRatioPercent)),
+      flooredStrategyRatioPercent: clamp(Math.round(flooredStrategyRatioPercent)),
+      strategyMatchesJob,
+      originalAdvocacyRatioPercent: clamp(Math.round(originalAdvocacyRatioPercent)),
+      flooredAdvocacyRatioPercent: clamp(Math.round(flooredAdvocacyRatioPercent)),
+      changeLeadershipAndAdvocacyPercentFloored,
+      jobClusters: jobClustersList,
+      baselineClusters: baselineClustersList,
+      sharedClusters,
+      jobClusterHits,
+      baselineClusterHits,
+      toolingCoverage: {
+        requiredCoverage: toolingCoverage.requiredCoverage,
+        preferredCoverage: toolingCoverage.preferredCoverage,
+        claims: toolingCoverage.claims,
+      },
+      platformGroups: {
+        totalBoost: platformGroupBoost,
+        evidence: platformGroupEvidence,
+      },
+      industryBundles: {
+        evidence: industryBundleEvidence,
+      },
+      strategicDensity: {
+        baseline: baselineStrategicDensity,
+        job: jobStrategicDensity,
+        appliedBoost: strategicBoostApplied,
+      },
+      executiveScopeDensity: {
+        baseline: baselineExecDensity,
+        job: jobExecDensity,
+        appliedBoost: execBoostApplied,
+      },
+      strategicGuard: {
+        leadershipLevel,
+        baselineExecutiveScopeDensity: baselineExecDensity,
+        executiveScopeThreshold: EXEC_THRESHOLD,
+        leadershipThreshold: EXECUTIVE_STRATEGIC_GUARD_LEADERSHIP_THRESHOLD,
+        guardEnabled: executiveOperationalGuardEnabled,
+        tacticalSuppressionSkipped,
+      },
+      bundle: undefined,
+      heuristicInference: heuristicResult.heuristicInference,
+      changeLeadershipEligibility,
+      effectiveWeights,
+      redistributedWeightFrom: changeLeadershipRedistributedWeight,
+    },
+  });
   const debugBundle =
     options?.debugBundle
       ? buildFitScoreDebugBundle({
@@ -1656,6 +2253,7 @@ export const scoreCxFitV2 = (
           originalAdvocacyRatioPercent,
           flooredAdvocacyRatioPercent,
           domainPercent,
+          heuristicInference: heuristicResult.heuristicInference,
           jobClusters: jobClustersList,
           baselineClusters: baselineClustersList,
           sharedClusters,
@@ -1675,6 +2273,11 @@ export const scoreCxFitV2 = (
 
   return {
     score: finalScore,
+    scoreConfidence: scoreConfidenceClassification.scoreConfidence,
+    scoreConfidenceReasons: scoreConfidenceClassification.scoreConfidenceReasons,
+    scoreSanityFlags: scoreConfidenceClassification.scoreSanityFlags,
+    likelyUnderestimatedFit: scoreConfidenceClassification.likelyUnderestimatedFit,
+    scorePresentationMode: scoreConfidenceClassification.scorePresentationMode,
     rubric: {
       id: 'scoring_contract_v1',
       weights: BASE_WEIGHTS,
@@ -1754,6 +2357,7 @@ export const scoreCxFitV2 = (
         tacticalSuppressionSkipped,
       },
       bundle: debugBundle,
+      heuristicInference: heuristicResult.heuristicInference,
       changeLeadershipEligibility,
       effectiveWeights,
       redistributedWeightFrom: changeLeadershipRedistributedWeight,
@@ -1827,6 +2431,13 @@ type BuildFitScoreDebugBundleParams = {
   domainTagsRole: DomainTag[];
   domainTagsBaseline: DomainTag[];
   dimensionPoints: Record<ScoringContractV1DimensionKey, number>;
+  heuristicInference: {
+    usedHeuristicInference: boolean;
+    heuristicLiftTotal: number;
+    heuristicLiftByDimension: Record<ScoringContractV1DimensionKey, number>;
+    heuristicConfidenceSummary: Record<HeuristicConfidence, number>;
+    heuristics: HeuristicDebugEntry[];
+  };
   penalties: ScoringContractV1Penalty[];
   finalBeforeClamp: number;
   finalScore: number;
@@ -1884,13 +2495,14 @@ const buildFitScoreDebugBundle = (
   flooredAdvocacyRatioPercent,
   domainPercent,
   domainTagsBaseline,
-  domainTagsRole,
-  jobClusters,
-  baselineClusters,
-  sharedClusters,
-  jobClusterHits,
-  baselineClusterHits,
-  dimensionPoints,
+    domainTagsRole,
+    jobClusters,
+    baselineClusters,
+    sharedClusters,
+    jobClusterHits,
+    baselineClusterHits,
+    heuristicInference,
+    dimensionPoints,
     penalties,
     finalBeforeClamp,
     finalScore,
@@ -2080,6 +2692,7 @@ const buildFitScoreDebugBundle = (
         requirements: requirementSegments,
       },
     },
+    heuristicInference,
     math: {
       contractVersion: 'scoring_contract_v1',
       weights: BASE_WEIGHTS,
