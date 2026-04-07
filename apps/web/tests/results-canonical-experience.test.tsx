@@ -114,19 +114,21 @@ describe("results canonical experience", () => {
       expect(screen.getByText("Fit Verdict Reveal")).toBeInTheDocument();
     });
 
-    expect(await screen.findByText("Career Gravity")).toBeInTheDocument();
     expect(screen.getByText("You're not ready to apply yet.")).toBeInTheDocument();
-    expect(screen.getByText("Strategic Next Move")).toBeInTheDocument();
+    expect(screen.getByTestId("resolve-gaps-block")).toBeInTheDocument();
     expect(await screen.findByTestId("how-to-improve-your-fit")).toBeInTheDocument();
     expect(screen.getByText("How to improve your fit")).toBeInTheDocument();
     expect(
-      screen.getByText(/Add measurable outcomes or impact|Clarify team size, ownership, or org scope|Add incident management or escalation examples/i),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/confidence/i)).toBeNull();
+      screen.getAllByRole("link", { name: "Start Fit Review" }).some(
+        (link) =>
+          link.getAttribute("href") ===
+          "/fit-review?jobId=job-1&analysisId=analysis-current&assessmentId=analysis-current&baselineId=base-1&baselineVersionId=base-version-1",
+      ),
+    ).toBe(true);
     expect(screen.queryByText(/gauge|dial|meter|speedometer/i)).toBeNull();
     expect(screen.getAllByRole("link", { name: "Start Fit Review" })[0]).toHaveAttribute(
       "href",
-      "/resolve-gaps?jobId=job-1&baselineId=base-1",
+      "/fit-review?jobId=job-1&analysisId=analysis-current&assessmentId=analysis-current&baselineId=base-1&baselineVersionId=base-version-1",
     );
     expect(trackEventMock).toHaveBeenCalledWith(
       "results_improvement_module_viewed",
@@ -146,12 +148,12 @@ describe("results canonical experience", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText(/you can win this role/i)).toBeInTheDocument();
+      expect(screen.getAllByText(/you can win this role/i).length).toBeGreaterThan(0);
     });
 
-    expect(screen.getByText("You can win this role with focused tailoring.")).toBeInTheDocument();
+    expect(screen.getAllByText(/You can win this role with focused tailoring/i).length).toBeGreaterThan(0);
     expect(screen.queryByText("You're not ready to apply yet.")).toBeNull();
-    expect(screen.queryByText(/confidence/i)).toBeNull();
+    expect(screen.queryAllByText(/confidence/i).length).toBeGreaterThan(0);
   });
 
   it("sharpens Results guidance after a refine intent", async () => {
@@ -168,7 +170,7 @@ describe("results canonical experience", () => {
     expect(screen.getByText(/You signaled refinement, so Fit Review is the fastest path/i)).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Start Fit Review" })[0]).toHaveAttribute(
       "href",
-      "/resolve-gaps?jobId=job-1&baselineId=base-1",
+      "/fit-review?jobId=job-1&analysisId=analysis-current&assessmentId=analysis-current&baselineId=base-1&baselineVersionId=base-version-1",
     );
   });
 
@@ -197,10 +199,10 @@ describe("results canonical experience", () => {
       expect(screen.getByText(/You signaled refinement, so Fit Review is the fastest path/i)).toBeInTheDocument();
     });
 
-    expect(screen.getByText(/What to fix to unlock Studio|Use Fit Review to close the gap/i)).toBeInTheDocument();
+    expect(screen.getByText(/What still needs verification|Verify the missing evidence/i)).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Start Fit Review" })[0]).toHaveAttribute(
       "href",
-      "/resolve-gaps?jobId=job-1&baselineId=base-1",
+      "/fit-review?jobId=job-1&analysisId=analysis-current&assessmentId=analysis-current&baselineId=base-1&baselineVersionId=base-version-1",
     );
     await waitFor(() => {
       expect(trackEventMock).toHaveBeenCalledWith(

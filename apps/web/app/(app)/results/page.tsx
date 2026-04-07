@@ -612,6 +612,10 @@ type OpportunityMapSectionProps = {
         description: string;
       }
     | null;
+  secondaryAction?: {
+    label: string;
+    href: string;
+  } | null;
   evidenceLedger?: EvidenceLedger;
   scoreAnalysisHref: string;
   readiness: GenerationReadiness;
@@ -625,7 +629,6 @@ type OpportunityMapSectionProps = {
       reviewInStudioHref: string;
       }
     | null;
-  isFirstRunDraft?: boolean;
   weakFitRecovery?:
     | {
         href: string;
@@ -727,9 +730,9 @@ export function OpportunityMapSection({
   scoreAnalysisHref,
   readiness,
   verificationCoverage,
+  secondaryAction,
   canonicalCoverage,
   predictiveUnlock,
-  isFirstRunDraft = false,
   weakFitRecovery,
 }: OpportunityMapSectionProps) {
   const resolvedEvidenceLedger: EvidenceLedger = evidenceLedger ?? {
@@ -758,52 +761,59 @@ export function OpportunityMapSection({
   );
   const blockedByEvidence = readiness.status === "blocked";
   const lowFitScore = typeof score === "number" && score < 70;
-  const firstRunDraftMode = isFirstRunDraft && blockedByEvidence;
   const readinessToneClass =
-    readiness.status === "blocked" && !firstRunDraftMode
+    readiness.status === "blocked"
       ? "border-rose-300/30 bg-rose-500/8 text-rose-100"
       : readiness.status === "limited"
         ? "border-slate-500/50 bg-slate-800/80 text-slate-100"
         : "border-emerald-300/30 bg-emerald-500/10 text-emerald-100";
-  const readinessBadgeLabel = firstRunDraftMode ? "LIMITED" : readiness.badgeLabel;
+  const readinessBadgeLabel = readiness.badgeLabel;
+  const fitDescriptor =
+    typeof score === "number" && score >= 80
+      ? "Strong fit"
+      : typeof score === "number" && score >= 70
+        ? "Competitive fit"
+        : "This role needs more work";
   const readinessMessage =
-    readiness.status === "blocked" && !firstRunDraftMode
-      ? "Missing verified evidence is blocking stronger results."
-      : readiness.status === "blocked"
-        ? "You're close. Add 1-2 verified examples to unlock stronger results."
-        : readiness.status === "limited"
-          ? "Some requirements are not yet supported by verified evidence."
-          : "Your evidence supports generation.";
+    readiness.status === "blocked"
+      ? lowFitScore
+        ? "This role needs stronger fit before Studio can generate safely. Start with Fit Review."
+        : "Your experience aligns with this role, but key claims still need verified evidence before Studio can generate safely."
+      : readiness.status === "limited"
+        ? lowFitScore
+          ? "Studio can open in draft mode, but the fit still needs improvement."
+          : "Studio can open in draft mode, but the evidence is still thin."
+        : "Your evidence is verified enough to generate safely.";
   const decisionNarrative = useMemo(() => {
-    if (firstRunDraftMode) {
-      return {
-        headline: "You're close. Add 1-2 verified examples to unlock stronger results.",
-        body: "Your first run can open Studio as a draft, then Fit Review can strengthen the evidence after you see value.",
-      };
-    }
     if (lowFitScore) {
       return {
         headline: "This role may not be a fit.",
         body: "The score is below the fit threshold, so the role looks weaker overall.",
       };
     }
-    if (nextAction.type === "fit_review") {
+    if (readiness.status === "blocked") {
       return {
-        headline: "This score points to Fit Review.",
-        body: "Use the canonical next step to strengthen the baseline before generating materials.",
+        headline: `${fitDescriptor}. Not ready to generate yet.`,
+        body: "Your experience aligns with this role, but key claims still need verified evidence before Studio can generate safely.",
       };
     }
-    if (typeof score === "number" && score >= 80) {
+    if (readiness.status === "limited") {
       return {
-        headline: "You can win this role.",
-        body: "The evidence is strong enough to compete if you tailor with care.",
+        headline: `${fitDescriptor}. Studio is available, but evidence is still thin.`,
+        body: "Studio can open in draft mode now, and stronger verification will improve confidence and output quality.",
       };
     }
-    if (nextAction.type === "studio") {
-      return { headline: "This score is ready for Studio.", body: "Open Resume & Cover Letter Studio next." };
+    if (readiness.status === "ready") {
+      return {
+        headline: `${fitDescriptor}. Studio is ready.`,
+        body: "Your verified evidence is complete enough to generate safely in Studio.",
+      };
     }
-    return { headline: "This score is ready to generate and save.", body: "Generate your resume, then save the role to Opportunities." };
-  }, [blockedByEvidence, firstRunDraftMode, lowFitScore, nextAction.type]);
+    return {
+      headline: "This role is ready for review.",
+      body: "Use the next step that matches the evidence state so Studio only uses trusted signals.",
+    };
+  }, [fitDescriptor, lowFitScore, readiness.status]);
   const baselineEvidencePreview = useMemo(
     () =>
       buildBaselineEvidencePreview({
@@ -816,7 +826,7 @@ export function OpportunityMapSection({
   return (
     <section className="rounded-3xl bg-slate-900/65 px-5 py-7 sm:px-6 sm:py-8">
       <div className="max-w-4xl space-y-6">
-        {blockedByEvidence && !firstRunDraftMode ? (
+        {blockedByEvidence && !lowFitScore ? (
           <RouteStateShell
             testId="results-blocked-evidence-panel"
             tone="warning"
@@ -832,6 +842,15 @@ export function OpportunityMapSection({
                   >
                     {primaryCta.label}
                   </span>
+                ) : primaryCta.href ? (
+                  <a
+                    data-testid="results-hero-primary-cta"
+                    href={primaryCta.href}
+                    onClick={primaryCta.onClick}
+                    className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500 md:min-w-[320px]"
+                  >
+                    {primaryCta.label}
+                  </a>
                 ) : primaryCta.onClick ? (
                   <button
                     data-testid="results-hero-primary-cta"
@@ -855,10 +874,10 @@ export function OpportunityMapSection({
             <div className="flex flex-wrap gap-4 text-sm">
               <a
                 data-testid="results-hero-secondary-action"
-                href={scoreAnalysisHref}
+                href={secondaryAction?.href ?? scoreAnalysisHref}
                 className="font-medium text-slate-100 underline decoration-white/30 underline-offset-4 transition hover:text-white hover:decoration-white/60"
               >
-                View top drivers
+                {secondaryAction?.label ?? "View top drivers"}
               </a>
               {nextAction.type === "studio_with_save" ? (
                 <a
@@ -873,32 +892,32 @@ export function OpportunityMapSection({
         ) : null}
         <div
           data-testid="results-score-verdict-card"
-          className={`space-y-3 rounded-2xl border p-4 ${blockedByEvidence ? "border-white/10 bg-white/[0.03]" : "border-white/10 bg-white/5"}`}
+          className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4"
         >
-          <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${blockedByEvidence ? "text-slate-500" : "text-slate-400"}`}>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
             Fit Verdict Reveal
           </p>
           <p className="text-[56px] font-black leading-[0.95] tracking-[-0.04em] text-white md:text-[64px]">
             {typeof score === "number" ? Math.round(score) : "--"}
           </p>
           <h3 className="text-2xl font-semibold tracking-tight text-white">
-            {blockedByEvidence ? decisionNarrative.headline : verdict.label}
+            {decisionNarrative.headline}
           </h3>
           <p className="max-w-2xl text-sm leading-6 text-slate-300">
-            {blockedByEvidence ? decisionNarrative.body : verdict.explanation}
+            {decisionNarrative.body}
           </p>
           <p className="max-w-2xl text-xs leading-5 text-slate-400">
-            This score reflects how closely your verified experience aligns with this role. It does not guarantee hiring outcomes.
+            Fit verdict: {verdict.label}. {verdict.explanation}
           </p>
         </div>
-        {!blockedByEvidence ? (
+        {!lowFitScore ? (
           <>
             <div className="space-y-3">
               <h2 className="max-w-3xl text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl xl:text-5xl">
-                {blockedByEvidence ? decisionNarrative.headline : verdict.label}
+                {decisionNarrative.headline}
               </h2>
               <p className="max-w-2xl text-sm leading-6 text-slate-100 md:text-base">
-                {blockedByEvidence ? decisionNarrative.body : verdict.explanation}
+                {decisionNarrative.body}
               </p>
             </div>
             <CareerGravity />
@@ -908,18 +927,18 @@ export function OpportunityMapSection({
               </p>
               <div className="space-y-3">
                 <h3 className="text-xl font-semibold tracking-tight text-slate-100">
-                  {blockedByEvidence ? decisionNarrative.headline : verdict.label}
+                  {decisionNarrative.headline}
                 </h3>
                 <p className="max-w-2xl text-sm leading-6 text-slate-100 md:text-base">
-                  {blockedByEvidence ? decisionNarrative.body : verdict.explanation}
+                  {decisionNarrative.body}
                 </p>
                 <div className="flex flex-wrap gap-3 text-sm">
                   <a
                     data-testid="results-hero-secondary-action"
-                    href={scoreAnalysisHref}
+                    href={secondaryAction?.href ?? scoreAnalysisHref}
                     className="font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
                   >
-                    View top drivers
+                    {secondaryAction?.label ?? "View top drivers"}
                   </a>
                   {nextAction.type === "studio_with_save" ? (
                     <a
@@ -932,10 +951,10 @@ export function OpportunityMapSection({
                 </div>
               </div>
             </section>
-            {lowFitScore && weakFitRecovery ? (
-              <ResolveGapsBlock href={weakFitRecovery.href} gapPreview={weakFitRecovery.gapPreview} />
-            ) : null}
           </>
+        ) : null}
+        {lowFitScore && weakFitRecovery ? (
+          <ResolveGapsBlock href={weakFitRecovery.href} gapPreview={weakFitRecovery.gapPreview} />
         ) : null}
         <div
           id="generation-readiness-details"
@@ -945,9 +964,7 @@ export function OpportunityMapSection({
             Generation readiness: {readinessBadgeLabel}
           </p>
           <p className="mt-1 text-slate-100">
-            {firstRunDraftMode
-              ? "Evidence enforcement applies after your first draft is shown."
-              : readinessMessage}
+            {readinessMessage}
           </p>
           {readiness.reasons[0]?.message ? (
             <p className="mt-1 text-xs text-slate-300">{readiness.reasons[0].message}</p>
@@ -2004,15 +2021,6 @@ export default function ResultsPage() {
 
   const latestBaselineId = latest?.baselineId?.trim() ?? "";
   const latestBaselineVersionId = latest?.baselineVersionId?.trim() ?? "";
-  const hasGeneratedBefore = useMemo(() => {
-    const key = getGenerationCompletionStorageKey(jobId || null, baselineId || null);
-    if (!key || typeof window === "undefined") return false;
-    try {
-      return Boolean(window.localStorage.getItem(key));
-    } catch {
-      return false;
-    }
-  }, [baselineId, jobId]);
   const justUnlocked = searchParams?.get("justUnlocked") === "true";
   const studioHref = useMemo(() => {
     return buildStudioHrefFromResultsContext({
@@ -2066,11 +2074,6 @@ export default function ResultsPage() {
     [activeScore, generationReadiness, latest?.assessmentId, latest?.jobId, latestBaselineId],
   );
   const canOpenStudio = productReadiness.canOpenStudio;
-  const firstRunDraftEligible =
-    !hasGeneratedBefore &&
-    typeof activeScore === "number" &&
-    activeScore >= 70 &&
-    generationReadiness.status !== "ready";
   const claimVerifications = useMemo(
     () => normalizeClaimVerifications(debugFields?.toolingCoverage?.claims),
     [debugFields?.toolingCoverage?.claims],
@@ -2353,6 +2356,9 @@ export default function ResultsPage() {
     () => (typeof activeScore === "number" ? getScoreBand(activeScore) : undefined),
     [activeScore],
   );
+  const isGenerationBlocked = generationReadiness.blocked || generationReadiness.status === "blocked";
+  const effectiveReadinessStatus: GenerationReadiness["status"] =
+    isGenerationBlocked ? "blocked" : generationReadiness.status;
   useEffect(() => {
     if (!showImprovementModule) return;
     trackEvent("results_improvement_module_viewed", {
@@ -2362,7 +2368,6 @@ export default function ResultsPage() {
       scoreBucket: resultsScoreBucket ?? null,
     });
   }, [improvementSuggestions.length, recentIntent, resultsScoreBucket, showImprovementModule]);
-  const isGenerationBlocked = generationReadiness.status === "blocked";
   const showGenerationUnlockedPanel = Boolean(latest) && justUnlocked && !isGenerationBlocked;
   const evidenceLedger = useMemo(
     () =>
@@ -2380,25 +2385,14 @@ export default function ResultsPage() {
             route: fitReviewPath,
             reason: "low_confidence_fix_first",
           }
-        : firstRunDraftEligible
-          ? {
-              type: "studio" as const,
-              label: "Open Resume & Cover Letter Studio",
-              route: studioHref,
-              reason: "first_run_draft_first",
-            }
         : getCanonicalNextAction({
             fitScore: typeof activeScore === "number" ? activeScore : null,
-            generationReady:
-              (generationReadiness.status === "ready" && !generationReadiness.blocked) ||
-              firstRunDraftEligible,
+            generationReady: effectiveReadinessStatus !== "blocked",
             trustGateAllowed: true,
           }),
     [
       activeScore,
-      firstRunDraftEligible,
-      generationReadiness.blocked,
-      generationReadiness.status,
+      effectiveReadinessStatus,
       isFixFirstMode,
       fitReviewPath,
       studioHref,
@@ -2407,9 +2401,7 @@ export default function ResultsPage() {
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
     if (!latest) return;
-    const canonicalGenerationReady =
-      (generationReadiness.status === "ready" && !generationReadiness.blocked) ||
-      firstRunDraftEligible;
+    const canonicalGenerationReady = effectiveReadinessStatus !== "blocked";
     const canonicalFinalAction = isFixFirstMode
       ? "fit_review"
       : getCanonicalNextAction({
@@ -2430,6 +2422,7 @@ export default function ResultsPage() {
       baselineId: latest.baselineId ?? null,
       score: typeof activeScore === "number" ? activeScore : null,
       readinessStatus: generationReadiness.status,
+      effectiveReadinessStatus,
       trustGateAllowed: true,
       finalAction: canonicalFinalAction,
       reason: canonicalReason,
@@ -2439,9 +2432,7 @@ export default function ResultsPage() {
     console.info("canonicalGenerationRouteDebug", canonicalGenerationRouteDebug);
   }, [
     activeScore,
-    firstRunDraftEligible,
-    generationReadiness.blocked,
-    generationReadiness.status,
+    effectiveReadinessStatus,
     isFixFirstMode,
     latest,
   ]);
@@ -2485,51 +2476,127 @@ export default function ResultsPage() {
         : null,
     [isWeakFitScore, resolveGapPreview, resolveGapsHref],
   );
+  const advancedInsightsHref = "#advanced-insights";
+  const verificationUnlockLabel = useMemo(() => {
+    if (canonicalUnverifiedRequirements.length === 0) {
+      return "Verify examples to unlock Studio";
+    }
+    const count = canonicalUnverifiedRequirements.length;
+    return `Verify ${count} example${count === 1 ? "" : "s"} to unlock Studio`;
+  }, [canonicalUnverifiedRequirements.length]);
+  const secondaryAction = useMemo(() => {
+    if (effectiveReadinessStatus === "limited") {
+      return {
+        label: "Verify examples",
+        href: fitReviewPath,
+      };
+    }
+    return {
+      label: "View top drivers",
+      href: advancedInsightsHref,
+    };
+  }, [advancedInsightsHref, effectiveReadinessStatus, fitReviewPath]);
   const oneClickResultsCta = useMemo(() => {
     if (!latest) return null;
-    if (primaryNextAction.type === "fit_review") {
+    if (isWeakFitScore) {
       return {
-        label: "START FIT REVIEW",
+        label: "Start Fit Review",
         href: fitReviewPath,
         disabled: false,
         description:
           recentIntent === "refine_intent"
             ? "You already signaled refinement, so Fit Review is the fastest way to sharpen this role."
             : "Use Fit Review to strengthen the baseline for this role.",
-      };
+        onClick: () => {
+          trackEvent("results_primary_cta_clicked", {
+            source: "results",
+            intentState: recentIntent ?? "none",
+            action: "fit_review",
+            scoreBucket: resultsScoreBucket ?? null,
+            readinessStatus: generationReadiness.status,
+          });
+        },
+        };
     }
-    if (primaryNextAction.type === "studio") {
+    if (effectiveReadinessStatus === "blocked") {
       return {
-        label: "OPEN STUDIO",
+        label: verificationUnlockLabel,
+        href: fitReviewPath,
+        disabled: false,
+        description:
+          recentIntent === "refine_intent"
+            ? "You already signaled refinement. Verify the missing evidence so Studio can generate safely."
+            : "Verify the missing evidence so Studio can generate safely.",
+        onClick: () => {
+          trackEvent("results_primary_cta_clicked", {
+            source: "results",
+            intentState: recentIntent ?? "none",
+            action: "verify_examples",
+            scoreBucket: resultsScoreBucket ?? null,
+            readinessStatus: generationReadiness.status,
+          });
+        },
+        };
+    }
+    if (effectiveReadinessStatus === "limited") {
+      return {
+        label: "Open Studio",
         href: studioHref,
         disabled: !canOpenStudio,
         description:
           recentIntent === "used_and_committed"
-            ? "Your artifact is already in motion. Open Studio for follow-up tweaks when needed."
-            : "Open the studio to generate tailored materials now.",
+            ? "Your artifact is already in motion. Open Studio in draft mode for follow-up tweaks when needed."
+            : "Open Studio in draft mode. Stronger verification will improve confidence and output quality.",
+        onClick: () => {
+          trackEvent("results_primary_cta_clicked", {
+            source: "results",
+            intentState: recentIntent ?? "none",
+            action: "open_studio_draft",
+            scoreBucket: resultsScoreBucket ?? null,
+            readinessStatus: generationReadiness.status,
+          });
+        },
       };
     }
     return {
-      label: "OPEN STUDIO",
+      label: "Open Studio",
       href: studioHref,
       disabled: !canOpenStudio,
       description:
         recentIntent === "used_not_committed"
           ? "Generate your resume first, then save the role to Opportunities to keep momentum."
-          : "Generate your resume first, then save the role to Opportunities.",
+          : "Open Studio to generate tailored materials now.",
+      onClick: () => {
+        trackEvent("results_primary_cta_clicked", {
+          source: "results",
+          intentState: recentIntent ?? "none",
+          action: "open_studio",
+          scoreBucket: resultsScoreBucket ?? null,
+          readinessStatus: generationReadiness.status,
+        });
+      },
     };
-  }, [canOpenStudio, fitReviewPath, latest, primaryNextAction.type, recentIntent, studioHref]);
+  }, [
+    canOpenStudio,
+    fitReviewPath,
+    generationReadiness.status,
+    latest,
+    isWeakFitScore,
+    effectiveReadinessStatus,
+    recentIntent,
+    resultsScoreBucket,
+    studioHref,
+    verificationUnlockLabel,
+  ]);
   const resultsDecision = useMemo(
     () =>
       resolveResultsDecision({
         score: typeof activeScore === "number" ? activeScore : null,
-        generationBlocked: isGenerationBlocked,
-        hasVerifiedEvidence: evidenceLedger.entries.length > 0,
-        hasGaps: generationReadiness.status !== "ready",
+        generationReadinessStatus: effectiveReadinessStatus,
       }),
-    [activeScore, evidenceLedger.entries.length, generationReadiness.status, isGenerationBlocked, criticalGapDetails.length],
+    [activeScore, effectiveReadinessStatus],
   );
-  const isReadyResultsState = resultsDecision.state === "READY" || resultsDecision.state === "DRAFT";
+  const isReadyResultsState = resultsDecision.state === "READY";
   const formatDriverValue = (value?: number | null) =>
     typeof value === "number" ? value.toFixed(1) : "n/a";
   const summarySnippet = typeof latest?.summary === "string" ? latest.summary.trim() : null;
@@ -3335,8 +3402,10 @@ export default function ResultsPage() {
               ? "border-amber-300/30 bg-amber-500/10"
               : resultsDecision.state === "BLOCKED"
               ? "border-amber-300/30 bg-amber-500/10"
-              : resultsDecision.state === "READY" || resultsDecision.state === "DRAFT"
+              : resultsDecision.state === "READY"
                 ? "border-emerald-300/30 bg-emerald-500/10"
+                : resultsDecision.state === "DRAFT"
+                  ? "border-amber-300/30 bg-amber-500/10"
                 : "border-slate-700/60 bg-slate-900/45"
           }`}
         >
@@ -3346,8 +3415,10 @@ export default function ResultsPage() {
                 ? "text-amber-100"
                 : resultsDecision.state === "BLOCKED"
                 ? "text-amber-100"
-                : resultsDecision.state === "READY" || resultsDecision.state === "DRAFT"
+                : resultsDecision.state === "READY"
                   ? "text-emerald-100"
+                  : resultsDecision.state === "DRAFT"
+                    ? "text-amber-100"
                   : "text-slate-100"
             }`}
           >
@@ -3361,23 +3432,25 @@ export default function ResultsPage() {
               : resultsDecision.subtext}
           </p>
           <div className="mt-3">
-            <a
-              data-testid="results-hero-primary-cta"
-              href={
-                scorePresentationMode === "fix_first"
-                  ? fitReviewPath
-                  : resultsDecision.primaryCta === "START_FIT_REVIEW"
-                    ? fitReviewPath
-                    : studioHref
-              }
-              className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
-            >
-              {scorePresentationMode === "fix_first"
-                ? "START FIT REVIEW"
-                : resultsDecision.primaryCta === "START_FIT_REVIEW"
-                  ? "START FIT REVIEW"
-                  : "OPEN STUDIO"}
-            </a>
+            {oneClickResultsCta ? (
+              oneClickResultsCta.disabled ? (
+                <span
+                  data-testid="results-hero-primary-cta"
+                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2 text-sm font-semibold text-slate-400"
+                >
+                  {oneClickResultsCta.label}
+                </span>
+              ) : oneClickResultsCta.href ? (
+                <a
+                  data-testid="results-hero-primary-cta"
+                  href={oneClickResultsCta.href}
+                  onClick={oneClickResultsCta.onClick}
+                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                >
+                  {oneClickResultsCta.label}
+                </a>
+              ) : null
+            ) : null}
           </div>
         </section>
         {showGenerationUnlockedPanel ? (
@@ -3534,9 +3607,9 @@ export default function ResultsPage() {
                     verificationCoverage={verificationCoverage}
                     canonicalCoverage={latest?.verification_coverage ?? null}
                     predictiveUnlock={predictiveUnlock}
-                    isFirstRunDraft={resultsDecision.state === "DRAFT"}
                     weakFitRecovery={weakFitRecovery}
                     reliabilityFacts={reliabilityFacts}
+                    secondaryAction={secondaryAction}
                   />
                   {applicationInsights.length ? (
                     <section className="rounded-2xl border border-sky-300/30 bg-sky-500/10 p-4">
@@ -3601,7 +3674,7 @@ export default function ResultsPage() {
                               key={`results-expansion-${requirement}`}
                               className="rounded-xl border border-white/10 bg-slate-950/35 p-3"
                             >
-                              <p className="text-sm text-slate-100">{requirement} is not verified</p>
+                              <p className="text-sm text-slate-100">This claim needs verification: {requirement}</p>
                               {suggestion && !isDismissed ? (
                                 <div className="mt-2 rounded-lg border border-emerald-300/25 bg-emerald-500/10 p-3 text-xs text-slate-100">
                                   <p className="font-semibold text-emerald-100">Suggested evidence:</p>
@@ -3746,25 +3819,37 @@ export default function ResultsPage() {
                     </section>
                   ) : (
                     <SignalAlignmentSection
-                      title={resultsDecision.state === "BLOCKED" ? "Evidence gaps" : "Why this role fits you"}
+                      title={isGenerationBlocked ? "Evidence gaps" : "Why this role fits you"}
                       strengths={Array.from(
                         new Set([...advantageSignals, ...signalAlignment.strongForRole]),
                       ).slice(0, 6)}
                       gaps={
-                        resultsDecision.state === "BLOCKED" && criticalGapDetails.length > 0
+                        isGenerationBlocked && criticalGapDetails.length > 0
                           ? criticalGapDetails.map((gap) => gap.title).slice(0, 3)
                           : resultsDecision.state === "IMPROVE" || resultsDecision.state === "DRAFT"
                             ? signalAlignment.weakerForRole
                             : []
                       }
-                      summary={signalAlignment.summary}
+                      summary={
+                        effectiveReadinessStatus === "limited"
+                          ? "Alignment looks strong, but verified evidence is not yet complete."
+                          : effectiveReadinessStatus === "blocked"
+                            ? "Your experience aligns with the role, but some claims still need verification."
+                            : signalAlignment.summary
+                      }
                       gapHeading={
-                        resultsDecision.state === "BLOCKED" ? "Missing verification" : "Gaps to be aware of"
+                        effectiveReadinessStatus === "blocked"
+                          ? "Missing verification"
+                          : effectiveReadinessStatus === "limited"
+                            ? "Verification still needed"
+                            : "Gaps to be aware of"
                       }
                       gapEmptyMessage={
-                        resultsDecision.state === "BLOCKED"
+                        effectiveReadinessStatus === "blocked"
                           ? "Missing verification is still preventing Studio."
-                          : "No material gaps were identified in this run."
+                          : effectiveReadinessStatus === "limited"
+                            ? "Alignment looks strong, but verified evidence is not yet complete."
+                            : "No material gaps were identified in this run."
                       }
                     />
                   )}

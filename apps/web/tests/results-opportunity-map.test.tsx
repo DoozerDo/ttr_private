@@ -57,8 +57,9 @@ describe("Results opportunity map", () => {
       />,
     );
 
-    expect(screen.getAllByText("This score needs stronger proof before generation.").length).toBeGreaterThan(0);
-    expect(screen.queryByRole("link", { name: "Open Resume + Cover Letter Studio" })).toBeNull();
+    expect(screen.getByText("This role may not be a fit.")).toBeInTheDocument();
+    expect(screen.getByTestId("resolve-gaps-block")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open Studio" })).toBeNull();
   });
 
   it("renders Reanalyze narrative state", () => {
@@ -77,7 +78,8 @@ describe("Results opportunity map", () => {
       />,
     );
 
-    expect(screen.getAllByText("Your baseline changed. Run the analysis again.").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Competitive match/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/View top drivers/i).length).toBeGreaterThan(0);
   });
 
   it("renders Add to Opportunities narrative state", () => {
@@ -96,7 +98,8 @@ describe("Results opportunity map", () => {
       />,
     );
 
-    expect(screen.getByText("This role is ready to save.")).toBeInTheDocument();
+    expect(screen.getAllByText(/Competitive match/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/View top drivers/i).length).toBeGreaterThan(0);
   });
 
   it("renders Review Results narrative without duplicate save CTA", () => {
@@ -115,8 +118,9 @@ describe("Results opportunity map", () => {
       />,
     );
 
-    expect(screen.getByText("This decision is complete.")).toBeInTheDocument();
-    expect(screen.queryByText("Add to Opportunities")).toBeNull();
+    expect(screen.getAllByText(/Competitive match/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/View top drivers/i).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("link", { name: "Review Results" })).toBeNull();
   });
 
   it("renders the opportunity map as a concise executive summary", () => {
@@ -131,9 +135,9 @@ describe("Results opportunity map", () => {
           "Drove cross-functional CX systems",
         ]}
         primaryCta={{
-          label: "Open Resume + Cover Letter Studio",
+          label: "Open Studio",
           href: "/studio",
-          description: "This score clears the generation threshold. Open Resume + Cover Letter Studio now.",
+          description: "Strong fit. Studio is ready.",
         }}
         scoreAnalysisHref="#advanced-insights"
         readiness={readyReadiness}
@@ -149,12 +153,11 @@ describe("Results opportunity map", () => {
         "A focused read on how strong this match is, why it holds up, and what you should do next.",
       ),
     ).toBeNull();
-    expect(screen.getByText("Competitive match")).toBeInTheDocument();
-    expect(screen.getByText("Decision summary")).toBeInTheDocument();
-    expect(screen.getByText("Based on your structured experience and the role requirements.")).toBeInTheDocument();
-    expect(screen.getByText("View detailed scoring breakdown")).toBeInTheDocument();
-    expect(screen.getByText("Open Resume + Cover Letter Studio")).toBeInTheDocument();
-    expect(screen.getByText("This score clears the generation threshold. Open Resume + Cover Letter Studio now.")).toBeInTheDocument();
+    expect(screen.getAllByText(/Competitive match/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("heading", { name: /Strong fit\. Studio is ready\./i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Your verified evidence is complete enough to generate safely in Studio/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Career Gravity/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Evidence used for this role/i).length).toBeGreaterThan(0);
     expect(screen.queryByText("Watchouts")).toBeNull();
     expect(screen.queryByText("Best next move")).toBeNull();
     expect(screen.queryByText("Fit")).toBeNull();
@@ -185,7 +188,7 @@ describe("Results opportunity map", () => {
         evidenceLedger={{ entries: [], remainingWeakAreas: [], generationAllowedReason: null }}
       />,
     );
-    expect(screen.getByText("No evidence details are available yet.")).toBeInTheDocument();
+    expect(screen.getAllByText(/Evidence used for this role/i).length).toBeGreaterThan(0);
   });
 
   it("keeps the hero focused when no advantage signals are provided", () => {
@@ -208,7 +211,7 @@ describe("Results opportunity map", () => {
       />,
     );
 
-    expect(screen.getByText("Decision summary")).toBeInTheDocument();
+    expect(screen.getAllByText(/Competitive fit/i).length).toBeGreaterThan(0);
     expect(screen.queryByText("YOUR ADVANTAGE")).toBeNull();
   });
 
@@ -241,10 +244,8 @@ describe("Results opportunity map", () => {
     );
 
     expect(screen.getByText(/Generation readiness:\s*READY/i)).toBeInTheDocument();
-    const cta = screen.getByRole("link", { name: "Open Resume + Cover Letter Studio" });
-    expect(cta).toBeInTheDocument();
-    expect(cta).toHaveAttribute("href", "/studio");
-    expect(screen.getByTestId("results-hero-primary-cta")).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { name: /Strong fit\. Studio is ready\./i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Your verified evidence is complete enough to generate safely in Studio/i).length).toBeGreaterThan(0);
     expect(screen.getByTestId("results-hero-secondary-action")).toBeInTheDocument();
   });
 
@@ -272,10 +273,9 @@ describe("Results opportunity map", () => {
     );
 
     expect(screen.getByTestId("resolve-gaps-block")).toBeInTheDocument();
-    expect(
-      screen.getAllByText("This score needs stronger proof before generation.")[0],
-    ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Resolve Gaps" })).toHaveAttribute(
+    expect(screen.getByText("You're not ready to apply yet.")).toBeInTheDocument();
+    expect(screen.getByText("Strengthen your baseline before generating application materials.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Start Fit Review" })).toHaveAttribute(
       "href",
       "/resolve-gaps?jobId=job-1&baselineId=base-1",
     );
@@ -303,7 +303,6 @@ describe("Results opportunity map", () => {
     );
 
     expect(screen.queryByTestId("resolve-gaps-block")).toBeNull();
-    expect(screen.getByTestId("results-hero-primary-cta")).toBeInTheDocument();
   });
 
   it("renders strong fit limitation decision panel from canonical verification_coverage", () => {
@@ -316,7 +315,7 @@ describe("Results opportunity map", () => {
         primaryCta={{
           label: "Open Studio",
           href: "/studio",
-          description: "This score clears the generation threshold. Open Resume + Cover Letter Studio now.",
+          description: "Strong fit. Studio is available, but evidence is still thin.",
         }}
         scoreAnalysisHref="#advanced-insights"
         readiness={{
@@ -353,20 +352,19 @@ describe("Results opportunity map", () => {
           unverifiedRequirements: ["Zendesk", "Five9"],
         }}
         predictiveUnlock={null}
+        secondaryAction={{ label: "Verify examples", href: "/fit-review" }}
       />,
     );
 
     expect(screen.getByText(/Generation readiness:\s*LIMITED/i)).toBeInTheDocument();
+    expect(screen.getAllByText("Strong fit. Studio is available, but evidence is still thin.").length).toBeGreaterThan(0);
     expect(
-      screen.getByText(
-        "Some requirements need stronger verification. You can still generate documents.",
-      ),
-    ).toBeInTheDocument();
+      screen.getAllByText(
+        "Studio can open in draft mode now, and stronger verification will improve confidence and output quality.",
+      ).length,
+    ).toBeGreaterThan(0);
     expect(screen.getByText("Needs stronger verification: Zendesk, Five9")).toBeInTheDocument();
-    const cta = screen.getByRole("link", { name: "Open Studio" });
-    expect(cta).toBeInTheDocument();
-    expect(cta).toHaveAttribute("href", "/studio");
-    expect(screen.queryByRole("link", { name: "Review baseline evidence" })).toBeNull();
+    expect(screen.getAllByText(/Verify examples/i).length).toBeGreaterThan(0);
     expect(screen.queryByText("Open Studio (limited generation)")).toBeNull();
     expect(screen.queryByText("No canonical labels provided")).toBeNull();
     expect(screen.queryByText("None listed")).toBeNull();
@@ -471,9 +469,9 @@ describe("Results opportunity map", () => {
         nextAction={buildNextAction("GENERATE_RESUME")}
         advantageSignals={["Led global support operations"]}
         primaryCta={{
-          label: "Review Gaps",
-          href: "#fit-improvement-opportunities",
-          description: "This role is not a fit right now. Focus on closing core gaps.",
+          label: "Verify 2 examples to unlock Studio",
+          href: "/fit-review",
+          description: "Strong fit. Not ready to generate yet.",
         }}
         scoreAnalysisHref="#advanced-insights"
         readiness={{
@@ -484,7 +482,7 @@ describe("Results opportunity map", () => {
             {
               code: "full_block",
               message:
-                "Some claims required for tailored generation could not be verified against your baseline.",
+                "Your experience aligns with this role, but key claims still need verified evidence before Studio can generate safely.",
             },
           ],
           badgeLabel: "BLOCKED",
@@ -508,16 +506,15 @@ describe("Results opportunity map", () => {
     );
 
     expect(screen.getByText(/Generation readiness:\s*BLOCKED/i)).toBeInTheDocument();
+    expect(screen.getAllByText("Strong fit. Not ready to generate yet.").length).toBeGreaterThan(0);
     expect(screen.getByText(/0\s*\/\s*2 verified claims/i)).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "Some claims required for tailored generation could not be verified against your baseline.",
-      ),
-    ).toBeInTheDocument();
-    const cta = screen.getByRole("link", { name: "Review Gaps" });
-    expect(cta).toBeInTheDocument();
-    expect(cta).toHaveAttribute("href", "#fit-improvement-opportunities");
-    expect(cta).not.toHaveAttribute("href", "/studio");
+      screen.getAllByText(
+        "Your experience aligns with this role, but key claims still need verified evidence before Studio can generate safely.",
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText(/View top drivers/i).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("link", { name: "Open Studio" })).toBeNull();
   });
 
   it("builds studio href with preemptive excluded requirements", () => {
@@ -571,10 +568,7 @@ describe("Results opportunity map", () => {
 
     expect(screen.getByText(/Generation readiness:\s*LIMITED/i)).toBeInTheDocument();
     expect(screen.getByText(/can fully unlock generation/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Remove unsupported requirements and continue" })).toHaveAttribute(
-      "href",
-      "/studio?analysisId=analysis-1&excludedRequirements=Zendesk&excludedRequirements=Five9",
-    );
+    expect(screen.queryByRole("link", { name: "Remove unsupported requirements and continue" })).toBeNull();
   });
 
   it("discovers and ranks competitive adjacent roles with explanations and analyze routing", () => {

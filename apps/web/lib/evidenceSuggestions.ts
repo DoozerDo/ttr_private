@@ -245,18 +245,16 @@ export function buildEvidenceSuggestion(input: {
   const groundedSignals = supportingSignals.slice(0, 4);
   const groundedSignalSummary = sentenceFromSignals(groundedSignals);
   const context = groundedSignals.length
-    ? `We found this in your experience: ${groundedSignalSummary}`
-    : "We found this in your verified baseline evidence";
-  const description = groundedSignals.length
-    ? "Confirm or refine this example so we keep it anchored to your actual work."
-    : "Confirm or refine this example so we keep it anchored to your actual work.";
+    ? `This example is grounded in your experience: ${groundedSignalSummary}`
+    : "This example is grounded in your verified baseline evidence.";
+  const description = "Confirm or refine this example so it stays anchored to your real experience.";
   const scope = baselineEvidence
     ? `Example anchor: ${baselineEvidence.slice(0, 180)}`
     : "Example anchor: verified support process and customer operations outcomes.";
 
   return {
     requirement,
-    intro: `Based on your experience, we found a likely example for ${requirement}.`,
+    intro: `This claim needs verification before Studio can use it.`,
     context,
     description,
     scope,
@@ -282,7 +280,7 @@ export function buildBaselineEvidencePreview(input: {
 
   if (!signals.length) return null;
   return {
-    intro: "We found this in your experience - confirm or refine it.",
+    intro: "This example comes from your experience. Confirm or refine it.",
     signals,
   };
 }

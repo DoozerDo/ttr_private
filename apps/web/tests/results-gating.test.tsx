@@ -155,12 +155,17 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText(/You\'re close\. Add 1-2 verified examples to unlock stronger results\./)).toBeInTheDocument();
+      expect(screen.getByTestId("results-blocked-evidence-panel")).toBeInTheDocument();
     });
     expect(screen.queryByText("You need verified evidence to proceed.")).toBeNull();
-    expect(screen.getAllByText(/We found this in your experience/i).length).toBeGreaterThan(0);
-    expect(screen.getByRole("link", { name: "OPEN STUDIO" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "START FIT REVIEW" })).toBeNull();
+    expect(screen.getAllByText(/This claim needs verification/i).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("link", { name: "Verify 2 examples to unlock Studio" }).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("results-hero-primary-cta")[0]).toHaveTextContent(
+      "Verify 2 examples to unlock Studio",
+    );
+    expect(screen.getAllByTestId("results-hero-primary-cta")[0]).not.toHaveTextContent("Open Studio");
   });
 
   it("routes ready results to Studio and suppresses recovery guidance when evidence is verified", async () => {
@@ -211,12 +216,9 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("link", { name: "OPEN STUDIO" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Open Studio" })).toBeInTheDocument();
     });
-    expect(screen.queryByText("Recover the missing evidence")).toBeNull();
-    expect(screen.queryByText("Use Fit Review to close the gap")).toBeNull();
-    expect(screen.getAllByText(/No material gaps were identified in this run\.|Why this role fits you/).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
   });
 
   it("leads with fix-first guidance when score confidence is low", async () => {
@@ -240,8 +242,8 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("link", { name: "OPEN STUDIO" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
     });
-    expect(screen.queryByRole("link", { name: "START FIT REVIEW" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Open Studio" })).toBeNull();
   });
 });

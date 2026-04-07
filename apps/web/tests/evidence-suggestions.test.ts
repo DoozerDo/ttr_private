@@ -16,7 +16,9 @@ describe("evidence suggestion engine", () => {
 
     expect(result).not.toBeNull();
     expect(result?.requirement).toBe("Zendesk");
-    expect(result?.description).toMatch(/Confirm or refine/i);
+    expect(result?.intro).toBe("This claim needs verification before Studio can use it.");
+    expect(result?.context).toMatch(/grounded in your experience/i);
+    expect(result?.description).toMatch(/real experience/i);
     expect(result?.scope).toMatch(/Example anchor/i);
   });
 

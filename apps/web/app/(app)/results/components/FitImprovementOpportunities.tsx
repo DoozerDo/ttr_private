@@ -129,13 +129,11 @@ export function FitImprovementOpportunities({
       <section className="space-y-5 rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.82),rgba(2,6,23,0.9))] p-5 shadow-[0_16px_45px_rgba(2,6,23,0.2)]">
         <div className="space-y-2 border-b border-white/10 pb-4">
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-            Recover the missing evidence
+            Verification-first next step
           </p>
-          <h3 className="text-xl font-semibold tracking-tight text-slate-100">
-            Use Fit Review to close the gap
-          </h3>
+          <h3 className="text-xl font-semibold tracking-tight text-slate-100">Verify the missing evidence</h3>
           <p className="text-sm leading-6 text-slate-300">
-            Start the canonical interview, capture validated evidence, accept supported additions into baseline, re-score, then regenerate.
+            Start Fit Review to confirm the claims Studio still needs before it can generate safely.
           </p>
         </div>
 
@@ -172,12 +170,10 @@ export function FitImprovementOpportunities({
 
   return (
     <details className="rounded-2xl border border-white/10 bg-slate-900/30 p-5">
-      <summary className="cursor-pointer text-sm font-semibold text-slate-200">
-        What to fix to unlock Studio
-      </summary>
+      <summary className="cursor-pointer text-sm font-semibold text-slate-200">What still needs verification</summary>
       <div className="mt-4 space-y-4">
         <p className="text-sm text-slate-400">
-          These estimates show which verified baseline signals are still missing or weak.
+          These examples are grounded in your experience, but Studio still needs verified evidence for them.
         </p>
 
         <div className="grid gap-3 lg:grid-cols-3">

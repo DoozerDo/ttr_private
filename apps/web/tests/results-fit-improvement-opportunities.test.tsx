@@ -104,7 +104,7 @@ describe("Results fit improvement opportunities", () => {
     );
 
     await waitFor(() => expect(screen.queryByText("Support Operations")).toBeNull());
-    expect(screen.getByText("Open Resume + Cover Letter Studio")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeTruthy();
   });
 
   it("keeps change leadership out of What to fix when leadership-at-scale evidence is already present", async () => {
@@ -178,6 +178,6 @@ describe("Results fit improvement opportunities", () => {
     );
 
     await waitFor(() => expect(screen.getByText("Analytics Strategy")).toBeTruthy());
-    expect(screen.getByText("Start Fit Review")).toBeTruthy();
+    expect(screen.getByText("Verify the missing evidence")).toBeTruthy();
   });
 });

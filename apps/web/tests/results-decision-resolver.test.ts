@@ -3,49 +3,54 @@ import { describe, expect, it } from "vitest";
 import { resolveResultsDecision } from "@/lib/resultsDecisionResolver";
 
 describe("resolveResultsDecision", () => {
-  it("shows a draft on the first run even when evidence is incomplete", () => {
+  it("blocks strong fit when readiness is blocked", () => {
     expect(
       resolveResultsDecision({
         score: 92,
-        generationBlocked: true,
-        hasVerifiedEvidence: false,
-        hasGaps: false,
-        hasGeneratedBefore: false,
+        generationReadinessStatus: "blocked",
       }),
-    ).toMatchObject({ state: "DRAFT", primaryCta: "OPEN_STUDIO" });
+    ).toMatchObject({
+      state: "BLOCKED",
+      primaryCta: "START_FIT_REVIEW",
+      headline: "Strong fit. Not ready to generate yet.",
+    });
   });
 
-  it("enforces evidence after the first generation", () => {
+  it("opens Studio in draft mode when readiness is limited", () => {
     expect(
       resolveResultsDecision({
         score: 92,
-        generationBlocked: false,
-        hasVerifiedEvidence: false,
-        hasGaps: false,
-        hasGeneratedBefore: true,
+        generationReadinessStatus: "limited",
       }),
-    ).toMatchObject({ state: "BLOCKED" });
+    ).toMatchObject({
+      state: "DRAFT",
+      primaryCta: "OPEN_STUDIO",
+      headline: "Strong fit. Studio is available, but evidence is still thin.",
+    });
   });
 
-  it("READY requires score, evidence, and no gaps", () => {
+  it("opens Studio when readiness is ready", () => {
     expect(
       resolveResultsDecision({
-        score: 80,
-        generationBlocked: false,
-        hasVerifiedEvidence: true,
-        hasGaps: false,
+        score: 84,
+        generationReadinessStatus: "ready",
       }),
-    ).toMatchObject({ state: "READY", primaryCta: "OPEN_STUDIO" });
+    ).toMatchObject({
+      state: "READY",
+      primaryCta: "OPEN_STUDIO",
+      headline: "Strong fit. Studio is ready.",
+    });
   });
 
-  it("otherwise returns IMPROVE", () => {
+  it("keeps the improvement loop for low fit even when readiness is blocked", () => {
     expect(
       resolveResultsDecision({
-        score: 79,
-        generationBlocked: false,
-        hasVerifiedEvidence: true,
-        hasGaps: true,
+        score: 62,
+        generationReadinessStatus: "blocked",
       }),
-    ).toMatchObject({ state: "IMPROVE", primaryCta: "START_FIT_REVIEW" });
+    ).toMatchObject({
+      state: "IMPROVE",
+      primaryCta: "START_FIT_REVIEW",
+    });
   });
 });

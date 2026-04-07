@@ -1,5 +1,8 @@
 "use client";
 
+import type { RecentIntentState } from "@/src/lib/recentIntent";
+import type { ScoreBand } from "@/src/lib/score-band";
+
 export const ANALYTICS_EVENT_NAMES = [
   "landing_viewed",
   "landing_cta_click",
@@ -35,12 +38,14 @@ export const ANALYTICS_EVENT_NAMES = [
   "target_generation_blocked_redirect",
   "results_improvement_module_viewed",
   "results_improvement_cta_clicked",
+  "results_primary_cta_clicked",
 ] as const;
 
 export type AnalyticsEventName = (typeof ANALYTICS_EVENT_NAMES)[number];
 
 export type ScoreBucket = "under_60" | "60s" | "70s" | "80s" | "90_plus";
 export type ScrollDepth = 25 | 50 | 75 | 100;
+export type ResultsPrimaryCtaReadinessStatus = "ready" | "limited" | "blocked";
 
 export type AnalyticsEventMap = {
   landing_viewed: {
@@ -204,6 +209,13 @@ export type AnalyticsEventMap = {
     intentState: string | null;
     suggestionsShown: number;
     scoreBucket: string | null;
+  };
+  results_primary_cta_clicked: {
+    source: "results";
+    intentState: RecentIntentState | "none";
+    action: "fit_review" | "verify_examples" | "open_studio_draft" | "open_studio";
+    scoreBucket: ScoreBand | null;
+    readinessStatus: ResultsPrimaryCtaReadinessStatus;
   };
 };
 
