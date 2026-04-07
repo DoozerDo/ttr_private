@@ -38,6 +38,7 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [createdReportId, setCreatedReportId] = useState<string | null>(null);
+  const [hasSubmitted, setHasSubmitted] = useState(false);
 
   const structuredContext = useMemo<StructuredBugContext>(() => {
     const stored = readLastAnalysis();
@@ -101,14 +102,19 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
     setStatus("idle");
     setStatusMessage(null);
     setCreatedReportId(null);
+    setHasSubmitted(false);
   }, [open]);
 
-  const isValid = whatHappened.trim().length >= 10;
+  const trimmedMessage = whatHappened.trim();
+  const messageLength = trimmedMessage.length;
+  const messageIsValid = messageLength >= 10 && messageLength <= 4000;
+  const showMessageError = hasSubmitted && !messageIsValid;
 
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      if (!isValid || status === "loading") return;
+      setHasSubmitted(true);
+      if (!messageIsValid || status === "loading") return;
 
       setStatus("loading");
       setStatusMessage(null);
@@ -117,7 +123,7 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
       const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : null;
 
       const requestPayload = {
-        description: whatHappened.trim(),
+        message: trimmedMessage,
         details: details.trim() || undefined,
         route: `${window.location.pathname}${window.location.search}`,
         timestamp,
@@ -149,12 +155,13 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
         setCreatedReportId(responsePayload.reportId);
         setWhatHappened("");
         setDetails("");
+        setHasSubmitted(false);
       } catch (err) {
         setStatus("error");
         setStatusMessage(err instanceof Error ? err.message : "Bug report failed to send. Please try again.");
       }
     },
-    [details, isValid, pathname, status, structuredContext, userId, whatHappened],
+    [details, messageIsValid, pathname, status, structuredContext, trimmedMessage, userId, whatHappened],
   );
 
   if (!open) return null;
@@ -199,6 +206,9 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
             className="h-32 w-full rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white outline-none transition focus:border-amber-300/70"
             placeholder="What went wrong?"
           />
+          {showMessageError ? (
+            <p className="text-xs text-rose-300">Please enter a message between 10 and 4000 characters.</p>
+          ) : null}
         </div>
 
         <div className="space-y-1 text-sm">
@@ -215,21 +225,27 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="submit"
-            disabled={!isValid || status === "loading"}
+          disabled={status === "loading"}
             className="flex-1 rounded-2xl border border-amber-400/60 bg-amber-400/20 px-4 py-2 text-sm font-semibold text-amber-100 transition hover:border-amber-400/90 hover:bg-amber-400/30 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {status === "loading" ? "Sending..." : "Send issue report"}
           </button>
           <span
             className={`text-xs ${status === "success" ? "text-emerald-300" : status === "error" ? "text-rose-300" : "text-slate-400"}`}
-            role="status"
-            aria-live="polite"
-          >
-            {statusMessage ??
-              (isValid ? (createdReportId ? `Report ID: ${createdReportId}` : "Ready to send.") : "Please enter at least 10 characters.")}
-          </span>
-        </div>
-      </form>
-    </div>
+          role="status"
+          aria-live="polite"
+        >
+          {statusMessage ??
+              (messageIsValid
+                ? createdReportId
+                  ? `Report ID: ${createdReportId}`
+                  : "Ready to send."
+                : hasSubmitted
+                  ? "Please enter a message between 10 and 4000 characters."
+                  : "Message must be 10 to 4000 characters." )}
+        </span>
+      </div>
+    </form>
+  </div>
   );
 }

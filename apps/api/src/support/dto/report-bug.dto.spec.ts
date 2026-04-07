@@ -14,6 +14,26 @@ describe('ReportBugDto', () => {
     );
   });
 
+  it('rejects a short message', async () => {
+    const dto = plainToInstance(ReportBugDto, { message: 'short' });
+    const errors = await validate(dto);
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ property: 'message' }),
+      ]),
+    );
+  });
+
+  it('rejects a long message', async () => {
+    const dto = plainToInstance(ReportBugDto, { message: 'a'.repeat(4001) });
+    const errors = await validate(dto);
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ property: 'message' }),
+      ]),
+    );
+  });
+
   it('rejects invalid screenshot data', async () => {
     const dto = plainToInstance(ReportBugDto, {
       message: 'failure happened',

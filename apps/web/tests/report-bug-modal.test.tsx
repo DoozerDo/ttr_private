@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { vi } from "vitest";
 import { ReportBugModal } from "@/src/components/support/ReportBugModal";
 import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
 import { overrideSearchParams, mockPathname, setFetchImplementation } from "@/tests/setup";
@@ -12,12 +13,12 @@ function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
 }
 
 describe("ReportBugModal", () => {
-  it("submit button is disabled until required content is present", () => {
+  it("submit button stays enabled while validation is handled on submit", () => {
     setFetchImplementation(async () => createResponse({}));
     render(<ReportBugModal open onClose={() => {}} />);
 
     const button = screen.getByRole("button", { name: /send issue report/i });
-    expect(button).toBeDisabled();
+    expect(button).not.toBeDisabled();
 
     fireEvent.change(screen.getByPlaceholderText("What went wrong?"), {
       target: { value: "This is long enough text" },
@@ -63,6 +64,59 @@ describe("ReportBugModal", () => {
     await waitFor(() => {
       expect(screen.getByText("Bug report failed to send. Please try again.")).toBeInTheDocument();
     });
+  });
+
+  it("sends the message field expected by the backend", async () => {
+    let payload: Record<string, unknown> | null = null;
+    setFetchImplementation(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/support/report-bug")) {
+        payload = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
+        return createResponse({ ok: true, reportId: "bug-789" });
+      }
+      return createResponse({});
+    });
+
+    render(<ReportBugModal open onClose={() => {}} />);
+    fireEvent.change(screen.getByPlaceholderText("What went wrong?"), {
+      target: { value: "Valid bug report message" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send issue report/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Thanks. Your report was submitted successfully.")).toBeInTheDocument();
+    });
+
+    expect(payload).toMatchObject({
+      message: "Valid bug report message",
+    });
+    expect(payload).not.toHaveProperty("description");
+  });
+
+  it("does not submit an empty message", async () => {
+    const fetchSpy = vi.fn(async () => createResponse({ ok: true, reportId: "bug-000" }));
+    setFetchImplementation(fetchSpy as unknown as typeof fetch);
+
+    render(<ReportBugModal open onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /send issue report/i }));
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not submit a short message", async () => {
+    const fetchSpy = vi.fn(async () => createResponse({ ok: true, reportId: "bug-001" }));
+    setFetchImplementation(fetchSpy as unknown as typeof fetch);
+
+    render(<ReportBugModal open onClose={() => {}} />);
+    fireEvent.change(screen.getByPlaceholderText("What went wrong?"), {
+      target: { value: "short" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send issue report/i }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Please enter a message between 10 and 4000 characters.").length).toBeGreaterThan(0);
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("submits issue context with route and user id", async () => {
@@ -145,8 +199,8 @@ describe("ReportBugModal", () => {
       expect(screen.getByText("Thanks. Your report was submitted successfully.")).toBeInTheDocument();
     });
 
-    expect(payload).toMatchObject({
-      description: "The header report button does not open on mobile.",
+      expect(payload).toMatchObject({
+      message: "The header report button does not open on mobile.",
       details: "Opened Baseline, clicked the header button, nothing happened.",
       route: "/results?baselineId=baseline-1&jobId=job-1&assessmentId=assessment-1",
       userId: "user-123",
@@ -154,7 +208,6 @@ describe("ReportBugModal", () => {
       jobId: "job-1",
       assessmentId: "assessment-1",
       score: 82,
-      nextAction: "ADD_TO_OPPORTUNITIES",
       timestamp: "2026-03-27T10:00:00.000Z",
       userAgent: expect.any(String),
     });
