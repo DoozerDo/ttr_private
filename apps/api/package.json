@@ -9,6 +9,7 @@
     "build": "nest build",
     "build:verify": "npm run build && node scripts/assert-safe-migrations.js",
     "print:assessment-debug": "node dist/scripts/print-assessment-debug.js",
+    "synthetic:generation": "ts-node -r tsconfig-paths/register src/scripts/run-synthetic-generation-suite.ts",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
     "start:dev": "nest start --watch",
@@ -91,6 +92,10 @@
       "json"
     ],
     "rootDir": "src",
+    "moduleNameMapper": {
+      "^@/lib/(.*)$": "<rootDir>/../../web/lib/$1",
+      "^@/app/(.*)$": "<rootDir>/../../web/app/$1"
+    },
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"

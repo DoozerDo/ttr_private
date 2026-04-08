@@ -27,13 +27,31 @@ import { User } from '../users/user.entity';
 import { UsersService } from '../users/users.service';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
 import { Application } from '../applications/application.entity';
+import { DEFAULT_COVER_LETTER_CLOSING_TEMPLATE_KEY } from '../cover-letters/closing-templates';
 import {
   buildSyntheticRunContext,
   buildSyntheticMetadata,
 } from './synthetic-metadata.util';
 import { SyntheticCleanupRun } from './synthetic-cleanup-run.entity';
+import {
+  evaluateSyntheticGenerationScenario,
+} from './generation/synthetic-generation.evaluator';
+import {
+  type SyntheticGenerationBaselineFixture,
+  type SyntheticGenerationEvaluationInput,
+  type SyntheticGenerationFixtureBundle,
+  type SyntheticGenerationJobFixture,
+  type SyntheticGenerationResult,
+  type SyntheticGenerationSuiteResult,
+} from './generation/synthetic-generation.types';
+import {
+  getSyntheticGenerationBenchmarkFixture,
+  listSyntheticGenerationScenarioBundles,
+} from './generation/synthetic-generation.fixtures';
+import { buildDocumentStrategyPlan } from '../../../web/lib/documentStrategyPlan';
 
 const SCENARIO_KEY = 'core_loop_smoke';
+const GENERATION_HARNESS_SCENARIO_KEY = 'document_generation_harness';
 const SYNTHETIC_USER_EMAIL = 'synthetic-core-loop@targetthisrole.local';
 const SYNTHETIC_USER_PASSWORD = 'SyntheticUserPass!123';
 const FIXTURE_BASELINE_FILENAME = 'core-loop-smoke-baseline.txt';
@@ -417,6 +435,149 @@ export class SyntheticTransactionRunnerService {
     }
   }
 
+  async runDocumentGenerationHarnessSuite(
+    triggerSource: 'manual' | 'system' = 'manual',
+  ): Promise<SyntheticGenerationSuiteResult> {
+    const startedAt = new Date();
+    const runContext = buildSyntheticRunContext(GENERATION_HARNESS_SCENARIO_KEY, randomUUID());
+    const syntheticMetadata = buildSyntheticMetadata({
+      isSynthetic: true,
+      syntheticScenarioKey: runContext.scenarioKey,
+      syntheticRunId: runContext.runId,
+      syntheticCreatedAt: runContext.syntheticCreatedAt,
+      preserveFromCleanup: false,
+    });
+
+    const bundles = listSyntheticGenerationScenarioBundles();
+    const scenarioResults: SyntheticGenerationResult[] = [];
+    const stepResults: StepResult[] = [];
+    const summary: Record<string, unknown> = {
+      scenarioCount: bundles.length,
+      scenarioNames: bundles.map((bundle) => bundle.scenario.name),
+    };
+
+    const run = await this.syntheticRunRepository.save(
+      this.syntheticRunRepository.create({
+        runType: 'synthetic_transaction',
+        scenarioKey: GENERATION_HARNESS_SCENARIO_KEY,
+        syntheticRunId: runContext.runId,
+        status: 'started',
+        triggerSource,
+        summaryJson: {},
+        stepResultsJson: [],
+      }),
+    );
+
+    try {
+      const userStep = await this.runStep('resolve_user', async () => {
+        const user = await this.resolveOrCreateSyntheticUser(runContext);
+        return {
+          userId: user.id,
+          created: (user.createdAt ?? runContext.syntheticCreatedAt).toISOString(),
+        };
+      });
+      stepResults.push(userStep.result);
+      if (userStep.result.status === 'failed') {
+        throw new InternalServerErrorException(userStep.result.errorMessage ?? 'resolve_user failed');
+      }
+
+      const user = await this.userRepository.findOneOrFail({
+        where: { id: String(userStep.result.details?.userId) },
+      });
+
+      for (const bundle of bundles) {
+        const scenarioRun = await this.runDocumentGenerationScenario(
+          bundle,
+          user,
+          runContext,
+          syntheticMetadata,
+        );
+        scenarioResults.push(scenarioRun.result);
+        stepResults.push({
+          step: bundle.scenario.name,
+          status: scenarioRun.result.status === 'pass' ? 'succeeded' : 'failed',
+          startedAt: scenarioRun.startedAt,
+          finishedAt: scenarioRun.finishedAt,
+          details: {
+            fitScore: scenarioRun.result.fitScore,
+            roleMatchReadiness: scenarioRun.result.roleMatchReadiness,
+            overallCalibration: scenarioRun.result.overallCalibration,
+            calibrationBarPassed: scenarioRun.result.calibrationBarPassed,
+            highSeverityCalibrationGapCount: scenarioRun.result.highSeverityCalibrationGapCount,
+            detectedRoleSignals: scenarioRun.result.detectedRoleSignals,
+            failureReasons: scenarioRun.result.failureReasons,
+          },
+        });
+      }
+
+      const passCount = scenarioResults.filter((result) => result.status === 'pass').length;
+      const failCount = scenarioResults.length - passCount;
+      const finishedAt = new Date();
+      const output: SyntheticGenerationSuiteResult = {
+        status: failCount === 0 ? 'pass' : 'fail',
+        startedAt: startedAt.toISOString(),
+        finishedAt: finishedAt.toISOString(),
+        durationMs: finishedAt.getTime() - startedAt.getTime(),
+        scenarioResults,
+        passCount,
+        failCount,
+        summary: {
+          ...summary,
+          passCount,
+          failCount,
+          overallStatus: failCount === 0 ? 'pass' : 'fail',
+        },
+        errorMessage: null,
+      };
+
+      await this.syntheticRunRepository.update(run.id, {
+        status: failCount === 0 ? 'succeeded' : 'failed',
+        finishedAt,
+        durationMs: output.durationMs,
+        stepResultsJson: stepResults as any,
+        summaryJson: {
+          ...output.summary,
+          scenarioResults,
+        } as any,
+        errorMessage: null,
+      } as any);
+
+      return output;
+    } catch (error) {
+      const finishedAt = new Date();
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const output: SyntheticGenerationSuiteResult = {
+        status: 'fail',
+        startedAt: startedAt.toISOString(),
+        finishedAt: finishedAt.toISOString(),
+        durationMs: finishedAt.getTime() - startedAt.getTime(),
+        scenarioResults,
+        passCount: scenarioResults.filter((result) => result.status === 'pass').length,
+        failCount: scenarioResults.filter((result) => result.status === 'fail').length,
+        summary: {
+          ...summary,
+          overallStatus: 'fail',
+          errorMessage,
+        },
+        errorMessage,
+      };
+
+      await this.syntheticRunRepository.update(run.id, {
+        status: 'failed',
+        finishedAt,
+        durationMs: output.durationMs,
+        stepResultsJson: stepResults as any,
+        summaryJson: {
+          ...output.summary,
+          scenarioResults,
+        } as any,
+        errorMessage,
+      } as any);
+
+      return output;
+    }
+  }
+
   async listRecentSyntheticTransactionRuns(limit = 20): Promise<SyntheticCleanupRun[]> {
     return this.syntheticRunRepository.find({
       where: {
@@ -435,9 +596,349 @@ export class SyntheticTransactionRunnerService {
     });
   }
 
+  async listRecentDocumentGenerationHarnessRuns(limit = 20): Promise<SyntheticCleanupRun[]> {
+    return this.syntheticRunRepository.find({
+      where: {
+        runType: 'synthetic_transaction',
+        scenarioKey: GENERATION_HARNESS_SCENARIO_KEY,
+      },
+      order: { startedAt: 'DESC' },
+      take: Math.max(1, Math.min(limit, 100)),
+    });
+  }
+
+  async getLatestDocumentGenerationHarnessRun(): Promise<SyntheticCleanupRun | null> {
+    return this.syntheticRunRepository.findOne({
+      where: { runType: 'synthetic_transaction', scenarioKey: GENERATION_HARNESS_SCENARIO_KEY },
+      order: { startedAt: 'DESC' },
+    });
+  }
+
+  private async runDocumentGenerationScenario(
+    bundle: SyntheticGenerationFixtureBundle,
+    user: User,
+    runContext: {
+      scenarioKey: string;
+      runId: string;
+      syntheticCreatedAt: Date;
+    },
+    syntheticMetadata: ReturnType<typeof buildSyntheticMetadata>,
+  ): Promise<{
+    startedAt: string;
+    finishedAt: string;
+    result: SyntheticGenerationResult;
+  }> {
+    const startedAt = new Date();
+    const orchestrationFailures: string[] = [];
+
+    const baselineStep = await this.runStep(`resolve_baseline_fixture:${bundle.scenario.name}`, async () => {
+      const baseline = await this.resolveOrCreateSyntheticBaselineFixture(user.id, bundle.baseline, runContext);
+      return {
+        baselineId: baseline.id,
+        baselineVersionId: baseline.versions?.[0]?.id ?? null,
+      };
+    });
+    if (baselineStep.result.status === 'failed') {
+      orchestrationFailures.push(baselineStep.result.errorMessage ?? 'resolve_baseline_fixture failed');
+    }
+
+    const jobStep = await this.runStep(`resolve_job_fixture:${bundle.scenario.name}`, async () => {
+      const job = await this.resolveOrCreateSyntheticJobFixture(user.id, bundle.job);
+      return { jobId: job.id };
+    });
+    if (jobStep.result.status === 'failed') {
+      orchestrationFailures.push(jobStep.result.errorMessage ?? 'resolve_job_fixture failed');
+    }
+
+    const baselineId =
+      baselineStep.result.status === 'succeeded'
+        ? String(baselineStep.result.details?.baselineId ?? '')
+        : '';
+    const baselineVersionId =
+      baselineStep.result.status === 'succeeded'
+        ? String(baselineStep.result.details?.baselineVersionId ?? '')
+        : '';
+    const jobId =
+      jobStep.result.status === 'succeeded' ? String(jobStep.result.details?.jobId ?? '') : '';
+
+    let fitScore: number | null = null;
+    let analysisId: string | null = null;
+    let analysisSummary: string | null = null;
+    let analysisStrengths: string[] = [];
+    let analysisGaps: string[] = [];
+    let analysisRecommendedActions: string[] = [];
+
+    if (baselineId && jobId) {
+      const analysisStep = await this.runStep(`run_fit_assessment:${bundle.scenario.name}`, async () => {
+        const result = await this.analysisService.runFitAssessment(
+          user.id,
+          {
+            baselineId,
+            jobId,
+          },
+          syntheticMetadata,
+        );
+
+        if (result.status !== 'ok' || !result.assessmentId) {
+          throw new BadRequestException('Fit assessment did not return a persisted assessment.');
+        }
+        if (typeof result.score !== 'number' || Number.isNaN(result.score)) {
+          throw new BadRequestException('Fit assessment score is missing or invalid.');
+        }
+        return result;
+      });
+
+      if (analysisStep.result.status === 'succeeded') {
+        const result = analysisStep.result.details as Record<string, unknown> | undefined;
+        fitScore =
+          typeof result?.score === 'number'
+            ? result.score
+            : typeof result?.overallScore === 'number'
+              ? result.overallScore
+              : null;
+        analysisId =
+          typeof result?.assessmentId === 'string'
+            ? result.assessmentId
+            : typeof result?.id === 'string'
+              ? result.id
+              : null;
+        analysisSummary = typeof result?.summary === 'string' ? result.summary : null;
+        analysisStrengths = Array.isArray(result?.strengths)
+          ? (result.strengths as unknown[]).map((value) => String(value)).filter(Boolean)
+          : [];
+        analysisGaps = Array.isArray(result?.gaps)
+          ? (result.gaps as unknown[]).map((value) => String(value)).filter(Boolean)
+          : [];
+        analysisRecommendedActions = Array.isArray(result?.recommendedActions)
+          ? (result.recommendedActions as unknown[]).map((value) => String(value)).filter(Boolean)
+          : [];
+      } else {
+        orchestrationFailures.push(analysisStep.result.errorMessage ?? 'run_fit_assessment failed');
+      }
+    } else {
+      orchestrationFailures.push('Generation skipped because baseline or job creation failed.');
+    }
+
+    const plan = buildDocumentStrategyPlan({
+      fitScore,
+      jobTitle: bundle.job.title,
+      jobCompany: bundle.job.company,
+      jobDescription: bundle.job.rawDescription,
+      jobRequirements: bundle.job.normalizedRequirements,
+      jobResponsibilities: bundle.job.normalizedResponsibilities,
+      analysisSummary,
+      analysisStrengths,
+      analysisGaps,
+      analysisRecommendedActions,
+      baselineSections: bundle.baseline.sections.map((section) => ({
+        id: section.id,
+        title: section.title,
+        sectionType: section.sectionType as BaselineSectionType,
+        content: section.content,
+      })),
+    });
+
+    let generatedResume: SyntheticGenerationEvaluationInput['generatedResume'] = null;
+    let generatedCoverLetter: SyntheticGenerationEvaluationInput['generatedCoverLetter'] = null;
+
+    if (baselineId && baselineVersionId && jobId) {
+      const resumeStep = await this.runStep(`generate_resume:${bundle.scenario.name}`, async () => {
+        const result = await this.resumeService.generateResume(
+          user.id,
+          {
+            baselineId,
+            baselineVersionId,
+            jobId,
+            analysisId: analysisId ?? undefined,
+            oneTap: false,
+            documentStrategyPlan: plan,
+          } as never,
+          undefined,
+          syntheticMetadata,
+        );
+        if (result.status !== 'success') {
+          throw new BadRequestException('Resume generation did not succeed.');
+        }
+        return result;
+      });
+      if (resumeStep.result.status === 'succeeded') {
+        const result = resumeStep.result.details as Record<string, unknown> | undefined;
+        generatedResume = (result?.preview as Record<string, unknown> | undefined)?.resume as
+          | SyntheticGenerationEvaluationInput['generatedResume']
+          | null;
+      } else {
+        orchestrationFailures.push(resumeStep.result.errorMessage ?? 'generate_resume failed');
+      }
+
+      const coverStep = await this.runStep(`generate_cover_letter:${bundle.scenario.name}`, async () => {
+        const result = await this.coverLettersService.generateCoverLetter(
+          user.id,
+          {
+            baselineId,
+            baselineVersionId,
+            jobId,
+            analysisId: analysisId ?? undefined,
+            closingTemplateKey: DEFAULT_COVER_LETTER_CLOSING_TEMPLATE_KEY,
+            documentStrategyPlan: plan,
+          } as never,
+          syntheticMetadata,
+        );
+        if (result.status !== 'success') {
+          throw new BadRequestException('Cover letter generation did not succeed.');
+        }
+        return result;
+      });
+      if (coverStep.result.status === 'succeeded') {
+        const result = coverStep.result.details as Record<string, unknown> | undefined;
+        generatedCoverLetter = (result?.preview as Record<string, unknown> | undefined)?.coverLetter as
+          | SyntheticGenerationEvaluationInput['generatedCoverLetter']
+          | null;
+      } else {
+        orchestrationFailures.push(coverStep.result.errorMessage ?? 'generate_cover_letter failed');
+      }
+    }
+
+    const evaluation = evaluateSyntheticGenerationScenario({
+      scenario: bundle.scenario,
+      fitScore,
+      plan,
+      generatedResume,
+      generatedCoverLetter,
+      jobDescription: bundle.job.rawDescription,
+      benchmark: bundle.benchmark ?? getSyntheticGenerationBenchmarkFixture(bundle.scenario.benchmarkFixtureId ?? '') ?? null,
+    });
+
+    const failureReasons = Array.from(new Set([...orchestrationFailures, ...evaluation.failureReasons]));
+    const finishedAt = new Date();
+    return {
+      startedAt: startedAt.toISOString(),
+      finishedAt: finishedAt.toISOString(),
+      result: {
+        ...evaluation,
+        status: failureReasons.length === 0 ? 'pass' : 'fail',
+        failureReasons,
+      },
+    };
+  }
+
+  private async resolveOrCreateSyntheticBaselineFixture(
+    userId: string,
+    fixture: SyntheticGenerationBaselineFixture,
+    runContext: { scenarioKey: string; runId: string; syntheticCreatedAt: Date },
+  ): Promise<Baseline & { versions?: BaselineVersion[] }> {
+    const existing = await this.baselineRepository.findOne({
+      where: {
+        userId,
+        originalFilename: fixture.originalFilename,
+      },
+      relations: ['versions'],
+      order: { versions: { createdAt: 'DESC' } },
+    });
+
+    if (existing && existing.versions?.[0]) {
+      if (!existing.preserveFromCleanup || !existing.isSynthetic) {
+        existing.isSynthetic = true;
+        existing.preserveFromCleanup = true;
+        existing.syntheticScenarioKey = runContext.scenarioKey;
+        existing.syntheticRunId = runContext.runId;
+        existing.syntheticCreatedAt = runContext.syntheticCreatedAt;
+        await this.baselineRepository.save(existing);
+      }
+      return existing;
+    }
+
+    const baseline = this.baselineRepository.create({
+      userId,
+      originalFilename: fixture.originalFilename,
+      mimeType: 'text/plain',
+      storagePath: fixture.storagePath,
+      hash: `${fixture.id}-hash`,
+      version: fixture.version,
+      isSynthetic: true,
+      syntheticScenarioKey: runContext.scenarioKey,
+      syntheticRunId: runContext.runId,
+      syntheticCreatedAt: runContext.syntheticCreatedAt,
+      preserveFromCleanup: true,
+    });
+    const savedBaseline = await this.baselineRepository.save(baseline);
+
+    const savedSections: BaselineSection[] = [];
+    for (const [index, section] of fixture.sections.entries()) {
+      const savedSection = await this.baselineSectionRepository.save(
+        this.baselineSectionRepository.create({
+          baselineId: savedBaseline.id,
+          sectionType: section.sectionType as BaselineSectionType,
+          title: section.title,
+          content: section.content,
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: index,
+        }),
+      );
+      savedSections.push(savedSection);
+    }
+
+    const version = this.baselineVersionRepository.create({
+      baselineId: savedBaseline.id,
+      versionNumber: fixture.version,
+      fileHash: `${fixture.id}-version-hash`,
+      storagePath: fixture.storagePath,
+      verifiedAdditions: [],
+      additionDiff: null,
+      promotedFromInterviewId: null,
+      allowedCompanies: fixture.allowedCompanies,
+      allowedRoles: fixture.allowedRoles,
+      allowedTechnologies: fixture.allowedTechnologies,
+      allowedMetricTokens: fixture.allowedMetricTokens,
+    });
+    const savedVersion = await this.baselineVersionRepository.save(version);
+
+    await Promise.all(
+      savedSections.map((section, index) =>
+        this.baselineBlockPolicyRepository.save(
+          this.baselineBlockPolicyRepository.create({
+            baselineVersionId: savedVersion.id,
+            baselineSectionId: section.id,
+            includePolicy: BaselineIncludePolicy.ALWAYS,
+            order: index,
+          }),
+        ),
+      ),
+    );
+
+    return { ...savedBaseline, versions: [savedVersion] };
+  }
+
+  private async resolveOrCreateSyntheticJobFixture(
+    userId: string,
+    fixture: SyntheticGenerationJobFixture,
+  ) {
+    const existing = await this.jobRepository.findOne({
+      where: {
+        userId,
+        title: fixture.title,
+        company: fixture.company,
+        rawDescription: fixture.rawDescription,
+      },
+    });
+
+    if (existing) {
+      return existing;
+    }
+
+    const created = await this.jobsService.createJob(userId, {
+      title: fixture.title,
+      company: fixture.company,
+      rawDescription: fixture.rawDescription,
+      sourceUrl: `synthetic://${fixture.id}`,
+      jdIngestionMethod: JobIngestionMethod.PASTE,
+    });
+
+    return created.job;
+  }
+
   private async runStep(
     step: string,
-    handler: () => Promise<Record<string, unknown>>,
+    handler: () => Promise<unknown>,
   ): Promise<{ result: StepResult }> {
     const startedAt = new Date();
     try {
@@ -448,7 +949,7 @@ export class SyntheticTransactionRunnerService {
           status: 'succeeded',
           startedAt: startedAt.toISOString(),
           finishedAt: new Date().toISOString(),
-          details,
+          details: details as Record<string, unknown>,
         },
       };
     } catch (error) {
