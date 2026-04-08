@@ -149,14 +149,17 @@ function evaluateArtifactUsability(
       coverLetter.signatureName ?? "",
     ]);
     const coverText = paragraphs.join(" ");
+    const coverWordCount = countWords(coverText);
     if (!paragraphs.length) {
       coverLetterReasons.push("Cover letter paragraphs are missing.");
     }
     if (paragraphs.length < 4) {
       coverLetterReasons.push("Cover letter should contain properly structured paragraphs.");
     }
-    if (countWords(coverText) < 250 || countWords(coverText) > 400) {
-      coverLetterReasons.push("Cover letter word count must be between 250 and 400 words.");
+    if (coverWordCount < 250 || coverWordCount > 400) {
+      coverLetterReasons.push(
+        `Cover letter word count ${coverWordCount} must be between 250 and 400 words.`,
+      );
     }
     if (looksPlaceholderLike(coverText)) {
       coverLetterReasons.push("Cover letter contains placeholder-like content.");

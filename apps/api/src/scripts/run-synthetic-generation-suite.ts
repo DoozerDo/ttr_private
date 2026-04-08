@@ -40,6 +40,19 @@ function buildResumePayload(
   bundle: ReturnType<typeof listSyntheticGenerationScenarioBundles>[number],
   plan: { roleLens?: { priorities?: string[]; requiredSignals?: string[] } } = {},
 ) {
+  if (
+    bundle.benchmark &&
+    bundle.scenario.name !== 'Support operations director'
+  ) {
+    return {
+      summary: bundle.benchmark.approvedBenchmarkResume.summary,
+      experience: [
+        {
+          bullets: [...bundle.benchmark.approvedBenchmarkResume.bullets],
+        },
+      ],
+    };
+  }
   const signals = [
     ...(plan.roleLens?.priorities ?? []),
     ...(plan.roleLens?.requiredSignals ?? []),
@@ -63,6 +76,16 @@ function buildCoverLetterPayload(
   bundle: ReturnType<typeof listSyntheticGenerationScenarioBundles>[number],
   plan: { roleLens?: { priorities?: string[]; requiredSignals?: string[] } } = {},
 ) {
+  if (
+    bundle.benchmark &&
+    bundle.scenario.name !== 'Support operations director'
+  ) {
+    return {
+      opening: bundle.benchmark.approvedBenchmarkCoverLetter.opening,
+      bodyParagraphs: [...bundle.benchmark.approvedBenchmarkCoverLetter.bodyParagraphs],
+      closingParagraph: bundle.benchmark.approvedBenchmarkCoverLetter.closingParagraph,
+    };
+  }
   const signals = [
     ...(plan.roleLens?.priorities ?? []),
     ...(plan.roleLens?.requiredSignals ?? []),

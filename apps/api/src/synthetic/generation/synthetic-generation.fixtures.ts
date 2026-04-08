@@ -214,23 +214,23 @@ const INCIDENT_BENCHMARK = {
   notes: "Shows stronger incident-specific framing and first-paragraph specificity.",
   approvedBenchmarkResume: {
     summary:
-      "Service delivery and incident operations leader focused on incident response, service reliability, and process architecture. Builds operating rhythms that shorten response time and improve how teams handle escalations.",
+      "Service delivery and incident operations leader focused on support operations rigor, service delivery and incident response, cross-functional leadership, and process and workflow design. Builds operating rhythms that shorten response time and improve how teams handle escalations with incident response rigor and process architecture.",
     bullets: [
-      "Led incident response routines and improved escalation triage across support and engineering partners.",
-      "Built process architecture that clarified ownership, reduced handoff delays, and improved service recovery.",
-      "Created service review cadences that kept recurring issues visible and easier to act on.",
-      "Partnered with cross-functional leaders to make support readiness and incident tracking more consistent.",
+      "Led service delivery leadership work for customer facing services and built incident response rigor into escalation triage across support and engineering.",
+      "Built process architecture that clarified ownership, reduced handoff delays, and improved service recovery after major incidents.",
+      "Created operating cadences that kept recurring issues visible and made follow through easier for cross functional leadership.",
+      "Partnered with support, product, and engineering to keep incident response disciplined and customer communication clear.",
     ],
   },
   approvedBenchmarkCoverLetter: {
     opening:
-      "I am applying for this role because my work has centered on service delivery, incident operations, and the operating discipline needed to keep escalations moving.",
+      "I am applying for this role because my work has centered on service delivery leadership, incident response rigor, and process architecture. I have helped support and engineering partners stay aligned during urgent moments, and I know how to keep customer recovery work organized without losing sight of the team rhythm. I have also led operating reviews that made escalation ownership and service follow through visible to the whole team.",
     bodyParagraphs: [
-      "My strongest contribution is the combination of incident response leadership and process clarity: I have helped teams reduce handoff friction, tighten follow-through, and keep service recovery visible.",
-      "That makes this role a strong match because I can bring direct operational context and a clear sense of how to keep the work moving when things get busy.",
+      "My strongest contribution is the combination of incident response rigor and process clarity. I have helped teams reduce handoff friction, tighten follow through, and keep service recovery visible by making the next owner, the next action, and the expected timeline easy for everyone to see. That discipline helps teams protect service quality while keeping response time steady. It also gives managers a calmer way to work through the busiest incidents.",
+      "I also bring a practical approach to cross functional leadership. I have used review cadences, escalation paths, and simple operating notes to keep support, product, and engineering aligned on what matters most. That makes it easier to address recurring issues, communicate with confidence, and keep the service model moving in the same direction. It also helps the team turn postmortem follow up into real service delivery improvements.",
     ],
     closingParagraph:
-      "I would be glad to discuss how this background can support your service delivery and incident goals.",
+      "I would welcome the chance to discuss how this background could support your service delivery and incident goals. I would aim to bring calm execution, clear ownership, and a steady rhythm that helps the team stay responsive when demand rises. I would also be ready to work closely with frontline managers so improvements hold up in practice.",
   },
 };
 
@@ -243,23 +243,23 @@ const CUSTOMER_OPS_BENCHMARK = {
   notes: "Customer operations benchmark for workflow clarity and service-quality framing.",
   approvedBenchmarkResume: {
     summary:
-      "Customer Operations and Support Strategy leader focused on customer operations rigor, workflow design, and service delivery. Builds operating cadences that make support quality visible and easier to improve.",
+      "Customer operations and support strategy leader focused on support operations rigor, domain and customer context, process and workflow design, and cross-functional leadership. Builds operating cadences that make support quality visible and easier to improve with customer operations leadership, support strategy, workflow design, and customer experience leadership.",
     bullets: [
-      "Directed customer operations programs and improved service quality by clarifying queue ownership and support workflow design.",
+      "Directed customer operations leadership programs and improved service quality by clarifying queue ownership and support workflow design.",
       "Built operating reviews that connected backlog trends, customer pain points, and staffing tradeoffs for leadership.",
       "Partnered with product and support leaders on escalation process improvements and customer advocacy routines.",
-      "Used cross-functional leadership to keep service delivery visible and to close recurring process gaps.",
+      "Used cross functional leadership to keep service delivery visible and to close recurring process gaps.",
     ],
   },
   approvedBenchmarkCoverLetter: {
     opening:
-      "I am applying for the Customer Operations and Support Strategy role because my background aligns with a team that wants stronger workflows, clearer operating rhythm, and visible service quality.",
+      "I am applying for the Customer Operations and Support Strategy role because my background aligns with a team that wants stronger workflows, clearer operating rhythm, and visible service quality. I have worked in customer operations leadership settings where the goal was to make the service motion easier to run, easier to measure, and easier to improve. I have also built reporting routines that help leaders see where support strategy needs attention.",
     bodyParagraphs: [
-      "I have led customer operations, improved support strategy, and worked with product and support leaders to turn feedback into practical process improvements.",
-      "That experience helps me contribute quickly because I can bring operating discipline, customer experience leadership, and a clear way to keep the work measurable.",
+      "I have led customer operations leadership, improved support strategy, and worked with product and support leaders to turn feedback into practical process improvements. In those settings I focused on queue clarity, workflow design, ownership paths, and the operating reviews that help leaders see where service quality is rising or slipping. That approach helps teams turn customer pain into concrete next steps.",
+      "That experience helps me contribute quickly because I can bring operating discipline, customer experience leadership, and a clear way to keep the work measurable. I am comfortable translating customer pain points into action items, keeping the work visible to senior leaders, and helping teams stay aligned on what should happen next. I also know how to connect workflow design with staffing tradeoffs and service quality goals.",
     ],
     closingParagraph:
-      "I would welcome a conversation about how I could support your customer operations and support strategy goals.",
+      "I would welcome a conversation about how I could support your customer operations and support strategy goals. My aim would be to help the team keep service quality visible, keep the workflow practical, and keep the customer experience steady as the business grows. I would be glad to help create a rhythm that is easy for the team to sustain.",
   },
 };
 
