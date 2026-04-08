@@ -123,31 +123,88 @@ export interface UpdateBaselineBlocksResponse {
 
 const BASELINE_API_PATH = "/api/baselines";
 
-async function ensureJsonPayload<T>(response: Response, action: string) {
-  if (!response.ok) {
-    const statusText = response.statusText?.trim();
-    const statusLabel = statusText
-      ? `${response.status} ${statusText}`
-      : `${response.status}`;
-    const text = await response.text().catch(() => "");
-    let message = `${action} failed (${statusLabel})`;
+export class BaselineMutationError extends Error {
+  status: number;
+  payload: unknown;
+  action: string;
 
-    if (text) {
-      try {
-        const parsed = JSON.parse(text);
-        const parsedMessage =
-          (parsed?.message as string | undefined) ??
-          (parsed?.error as string | undefined);
+  constructor(action: string, status: number, message: string, payload: unknown) {
+    super(message);
+    this.name = "BaselineMutationError";
+    this.action = action;
+    this.status = status;
+    this.payload = payload;
+  }
+}
 
-        if (parsedMessage?.trim()) {
-          message = parsedMessage.trim();
-        }
-      } catch {
-        // Ignore non-JSON responses to avoid showing HTML in the UI.
-      }
+export function describeBaselineMutationError(
+  error: unknown,
+  actionLabel: string,
+) {
+  if (error instanceof BaselineMutationError) {
+    if (error.status === 401 || error.status === 403) {
+      return "Your session expired. Refresh and try again.";
     }
 
-    throw new Error(message);
+    if (error.status === 404) {
+      return "We couldn't find that baseline.";
+    }
+
+    if (error.status === 409 || error.status === 422) {
+      return error.message;
+    }
+
+    if (error.status >= 500) {
+      return `We couldn't ${actionLabel} this baseline. Try again.`;
+    }
+
+    return error.message;
+  }
+
+  const message = error instanceof Error ? error.message : "";
+  if (message.toLowerCase().includes("fetch failed")) {
+    return "We couldn't reach the baseline service. Check your connection and try again.";
+  }
+
+  if (message.trim()) {
+    return message;
+  }
+
+  return `We couldn't ${actionLabel} this baseline. Try again.`;
+}
+
+function parseMutationErrorMessage(response: Response, action: string) {
+  const statusText = response.statusText?.trim();
+  const statusLabel = statusText
+    ? `${response.status} ${statusText}`
+    : `${response.status}`;
+  const fallback = `${action} failed (${statusLabel})`;
+  return response.text().then((text) => {
+    if (!text) {
+      return { message: fallback, payload: null as unknown };
+    }
+
+    try {
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const parsedMessage =
+        (parsed?.message as string | undefined)?.trim() ||
+        (parsed?.error as string | undefined)?.trim() ||
+        null;
+
+      return {
+        message: parsedMessage || fallback,
+        payload: parsed,
+      };
+    } catch {
+      return { message: fallback, payload: text };
+    }
+  });
+}
+
+async function ensureJsonPayload<T>(response: Response, action: string) {
+  if (!response.ok) {
+    const { message, payload } = await parseMutationErrorMessage(response, action);
+    throw new BaselineMutationError(action, response.status, message, payload);
   }
 
   const contentType = response.headers.get("content-type") ?? "";

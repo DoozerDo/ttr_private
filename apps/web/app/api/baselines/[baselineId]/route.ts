@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../helpers";
+import {
+  getApiBaseUrl,
+  relayApiResponse,
+  requireAuthToken,
+} from "../helpers";
+import {
+  backendFetch,
+  isBackendUnavailableResponse,
+} from "../../_lib/backendFetch";
+
+export const runtime = "nodejs";
 
 export async function GET(
   req: NextRequest,
@@ -22,13 +32,17 @@ export async function GET(
     return error;
   }
 
-    const response = await fetch(`${baseUrl}/baselines/${baselineId}`, {
+  const response = await backendFetch(`${baseUrl}/baselines/${baselineId}`, {
     method: "GET",
     cache: "no-store",
     headers: {
       Authorization: `Bearer ${token}`,
     },
   });
+
+  if (await isBackendUnavailableResponse(response)) {
+    return response;
+  }
 
   return relayApiResponse(response);
 }

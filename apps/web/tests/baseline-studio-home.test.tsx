@@ -140,6 +140,75 @@ describe("BaselineStudioHome", () => {
     expect(container.querySelectorAll('input[type="file"]').length).toBe(1);
   });
 
+  it("archives a non-primary baseline with the canonical id and keeps the active baseline stable", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+
+      if (url.includes("/api/baselines/base-1/archive") && init?.method === "PATCH") {
+        return createJsonResponse({
+          ...createAnalyzedBaseline("base-1", "resume-1.pdf", 79),
+          status: "ARCHIVED",
+          archivedAt: "2026-04-01T00:00:00.000Z",
+          isActive: false,
+        });
+      }
+
+      if (url.includes("/api/baselines/base-1")) {
+        return createJsonResponse(createAnalyzedBaseline("base-1", "resume-1.pdf", 79));
+      }
+
+      if (url.includes("/api/baselines/base-2")) {
+        return createJsonResponse(createAnalyzedBaseline("base-2", "resume-2.pdf", 84));
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    setFetchImplementation(fetchMock);
+
+    render(
+      <BaselineStudioHome
+        baselines={[
+          createAnalyzedBaseline("base-2", "resume-2.pdf", 84),
+          createAnalyzedBaseline("base-1", "resume-1.pdf", 79),
+        ]}
+      />,
+    );
+
+    const targetRoleLink = () => screen.getAllByRole("link", { name: /target a role/i })[0];
+
+    await screen.findByRole("heading", { name: "Your baseline" });
+    await waitFor(() => {
+      expect(targetRoleLink()).toHaveAttribute(
+        "href",
+        "/target?baselineId=base-2",
+      );
+    });
+
+    const sourceSection = screen.getByRole("heading", { name: "Source resumes" }).closest("section");
+    expect(sourceSection).toBeTruthy();
+    const archivedCard = within(sourceSection as HTMLElement).getByText("resume-1.pdf").closest("article");
+    expect(archivedCard).toBeTruthy();
+    fireEvent.click(within(archivedCard as HTMLElement).getByRole("button", { name: /archive/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/baselines/base-1/archive",
+        expect.objectContaining({ method: "PATCH" }),
+      );
+    });
+    await waitFor(() => {
+      expect(targetRoleLink()).toHaveAttribute(
+        "href",
+        "/target?baselineId=base-2",
+      );
+      expect(within(archivedCard as HTMLElement).getByRole("button", { name: /archived/i })).toBeDisabled();
+    });
+  });
+
   it("shows the per-card targeting CTA when a baseline exists but no analysis is complete", async () => {
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
 

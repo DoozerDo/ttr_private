@@ -1,31 +1,37 @@
+import { headers } from "next/headers";
 import Link from "next/link";
-import { cookies, headers } from "next/headers";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
-import { EmptyState } from "@/components/EmptyState";
 import { RetryButton } from "@/components/RetryButton";
-import { AUTH_COOKIE_NAME } from "@/lib/auth";
-
-import type {
-  BaselineDto,
-  BaselineSectionDto,
-} from "@/lib/baselines";
+import type { BaselineDto, BaselineSectionDto } from "@/lib/baselines";
 import { formatDateTime } from "@/lib/format-date";
 import { getBaselineDetailsHref } from "@/src/navigation/routes";
 
-function isNextRedirectError(error: unknown) {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-  if (!("digest" in error)) {
-    return false;
-  }
+type BaselineDetailErrorKind =
+  | "not_found"
+  | "unauthorized_or_session_expired"
+  | "server_error"
+  | "network_error";
 
-  const digest = (error as { digest?: string }).digest;
-  return typeof digest === "string" && digest.startsWith("NEXT_REDIRECT");
-}
+type BaselineDetailResult =
+  | {
+      kind: "success";
+      baseline: BaselineDto;
+      requestedId: string;
+      resolvedId: string;
+    }
+  | {
+      kind: "error";
+      errorKind: BaselineDetailErrorKind;
+      requestedId: string;
+      resolvedId: string;
+      status: number | null;
+      internalMessage: string | null;
+    };
 
 function computeBaseUrl({
   protocol,
@@ -50,68 +56,128 @@ function computeBaseUrl({
   return "http://localhost:3000";
 }
 
-async function buildInternalApiUrl(path: string) {
+async function getRequestContext() {
   const headerList = await headers();
   const protocol = headerList.get("x-forwarded-proto") ?? "http";
   const host = headerList.get("x-forwarded-host") ?? headerList.get("host");
   const fallbackBase = process.env.NEXT_PUBLIC_BASE_URL;
-
-  const baseUrl = computeBaseUrl({ protocol, host, fallbackBase });
-
-  return new URL(path, baseUrl).toString();
-}
-
-async function buildInternalFetchOptions(): Promise<RequestInit> {
-  const headerList = await headers();
   const cookieHeader = headerList.get("cookie");
 
-  const headersInit = cookieHeader ? { cookie: cookieHeader } : undefined;
-
   return {
-    cache: "no-store",
-    credentials: "include",
-    headers: headersInit,
+    baseUrl: computeBaseUrl({ protocol, host, fallbackBase }),
+    fetchOptions: {
+      cache: "no-store" as const,
+      credentials: "include" as const,
+      headers: cookieHeader ? { cookie: cookieHeader } : undefined,
+    },
+    authState: (cookieHeader ? "present" : "missing") as "present" | "missing",
   };
 }
 
-type BaselineFetchResult = {
-  baseline: BaselineDto | null;
-  error: string | null;
-  notFound: boolean;
-};
+function extractErrorMessage(bodyText: string, status: number) {
+  if (!bodyText.trim()) {
+    return null;
+  }
 
-async function fetchBaseline(id: string): Promise<BaselineFetchResult> {
+  try {
+    const parsed = JSON.parse(bodyText) as {
+      message?: unknown;
+      error?: unknown;
+    };
+    const parsedMessage =
+      typeof parsed.message === "string"
+        ? parsed.message.trim()
+        : typeof parsed.error === "string"
+          ? parsed.error.trim()
+          : null;
+    if (parsedMessage) {
+      return parsedMessage;
+    }
+  } catch {
+    // Non-JSON error bodies are expected from some proxy layers.
+  }
+
+  return bodyText.trim().slice(0, status >= 500 ? 240 : 120);
+}
+
+function logDetailLoadFailure(entry: {
+  requestedId: string;
+  resolvedId: string;
+  status: number | null;
+  failureClass: BaselineDetailErrorKind;
+  authState: "present" | "missing";
+  message: string | null;
+}) {
+  console.error("baseline_detail_load_failed", entry);
+}
+
+async function fetchBaseline(id: string): Promise<BaselineDetailResult> {
+  const requestedId = id.trim();
+  const resolvedId = requestedId;
+  const { baseUrl, fetchOptions, authState } = await getRequestContext();
+
   try {
     const response = await fetch(
-      await buildInternalApiUrl(`/api/baselines/${id}`),
-      await buildInternalFetchOptions(),
+      new URL(`/api/baselines/${encodeURIComponent(resolvedId)}`, baseUrl).toString(),
+      fetchOptions,
     );
 
-    if (response.status === 401 || response.status === 403) {
-      redirect("/auth/login");
+    if (response.ok) {
+      const data = (await response.json()) as BaselineDto;
+      return {
+        kind: "success",
+        baseline: data,
+        requestedId,
+        resolvedId,
+      };
     }
 
+    const bodyText = await response.text().catch(() => "");
+    const internalMessage = extractErrorMessage(bodyText, response.status);
+
+    let errorKind: BaselineDetailErrorKind = "server_error";
     if (response.status === 404) {
-      return { baseline: null, error: null, notFound: true };
+      errorKind = "not_found";
+    } else if (response.status === 401 || response.status === 403) {
+      errorKind = "unauthorized_or_session_expired";
     }
 
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "");
-      const message = errorText || "Unable to load baseline.";
-      return { baseline: null, error: message, notFound: false };
-    }
+    logDetailLoadFailure({
+      requestedId,
+      resolvedId,
+      status: response.status,
+      failureClass: errorKind,
+      authState,
+      message: internalMessage,
+    });
 
-    const data = (await response.json()) as BaselineDto;
-    return { baseline: data, error: null, notFound: false };
+    return {
+      kind: "error",
+      errorKind,
+      requestedId,
+      resolvedId,
+      status: response.status,
+      internalMessage,
+    };
   } catch (error) {
-    if (isNextRedirectError(error)) {
-      throw error;
-    }
+    const internalMessage = error instanceof Error ? error.message : String(error);
+    logDetailLoadFailure({
+      requestedId,
+      resolvedId,
+      status: null,
+      failureClass: "network_error",
+      authState,
+      message: internalMessage,
+    });
 
-    console.error("Failed to fetch baseline", error);
-    const message =
-      error instanceof Error ? error.message : "Unable to load baseline.";
-    return { baseline: null, error: message, notFound: false };
+    return {
+      kind: "error",
+      errorKind: "network_error",
+      requestedId,
+      resolvedId,
+      status: null,
+      internalMessage,
+    };
   }
 }
 
@@ -152,9 +218,7 @@ function organizeSections(sections: BaselineSectionDto[]): GroupedSections {
   return grouped;
 }
 
-function renderContentSections(
-  groupedSections: Record<string, BaselineSectionDto[]>,
-) {
+function renderContentSections(groupedSections: Record<string, BaselineSectionDto[]>) {
   const keys = displayOrder.filter((key) => groupedSections[key]?.length);
 
   return keys.map((type) => (
@@ -187,6 +251,47 @@ function renderContentSections(
   ));
 }
 
+function getErrorCopy(errorKind: BaselineDetailErrorKind) {
+  switch (errorKind) {
+    case "not_found":
+      return {
+        title: "We couldn't find this baseline.",
+        body: "The baseline may have been removed, archived in another session, or the link may be outdated.",
+      };
+    case "unauthorized_or_session_expired":
+      return {
+        title: "Your session expired. Refresh and try again.",
+        body: "We couldn't verify your access to this baseline. Refresh the page and try again.",
+      };
+    case "network_error":
+      return {
+        title: "We couldn't reach the baseline service.",
+        body: "Check your connection and try again.",
+      };
+    case "server_error":
+    default:
+      return {
+        title: "We couldn't load this baseline. Try again.",
+        body: "The baseline service returned an unexpected error. Please retry.",
+      };
+  }
+}
+
+function BaselineDetailErrorState({ errorKind }: { errorKind: BaselineDetailErrorKind }) {
+  const copy = getErrorCopy(errorKind);
+
+  return (
+    <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+      <Alert intent="error" title={copy.title}>
+        <p>{copy.body}</p>
+        <div className="flex flex-wrap gap-2 pt-2">
+          <RetryButton label="Retry baseline" />
+        </div>
+      </Alert>
+    </section>
+  );
+}
+
 export default async function BaselineDetailPage({
   params,
   searchParams,
@@ -195,28 +300,14 @@ export default async function BaselineDetailPage({
   searchParams?: { suggestedSections?: string };
 }) {
   const resolvedParams = await params;
-  const cookieStore = await cookies();
-  const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
+  const resolvedId = resolvedParams?.id?.trim() ?? "";
 
-  if (!token) {
-    redirect("/auth/login");
-  }
-
-  if (!resolvedParams?.id) {
+  if (!resolvedId) {
     notFound();
   }
 
-  const baselineResult = await fetchBaseline(resolvedParams.id);
+  const baselineResult = await fetchBaseline(resolvedId);
 
-  if (baselineResult.notFound) {
-    notFound();
-  }
-
-  const baseline = baselineResult.baseline;
-  const baselineFetchError = baselineResult.error;
-  const groupedSections: GroupedSections = baseline
-    ? organizeSections(baseline.sections ?? [])
-    : {};
   const suggestedSectionsRaw = searchParams?.suggestedSections ?? "";
   const filterSet = new Set(
     suggestedSectionsRaw
@@ -224,25 +315,51 @@ export default async function BaselineDetailPage({
       .map((value) => value.trim().toLowerCase())
       .filter(Boolean),
   );
+
+  if (baselineResult.kind !== "success") {
+    return (
+      <main className="min-h-screen px-4 py-8">
+        <div className="mx-auto flex max-w-5xl flex-col gap-6">
+          <div className="flex items-center justify-between">
+            <div className="space-y-2">
+              <p className="text-sm font-semibold uppercase tracking-wide text-gray-600">
+                Baseline details
+              </p>
+              <h1 className="text-3xl font-bold text-gray-900">Baseline details</h1>
+            </div>
+            <Link href="/baseline" className="text-sm font-semibold text-blue-600 hover:underline">
+              Back to baselines
+            </Link>
+          </div>
+
+          <BaselineDetailErrorState errorKind={baselineResult.errorKind} />
+        </div>
+      </main>
+    );
+  }
+
+  const baseline = baselineResult.baseline;
+  const groupedSections: GroupedSections = organizeSections(baseline.sections ?? []);
   const filteredEntries = Object.entries(groupedSections)
-    .map(([key, sections]) => [
-      key,
-      sections.filter((section) => matchesSuggestedSection(section, filterSet)),
-    ] as const)
+    .map(
+      ([key, sections]) =>
+        [
+          key,
+          sections.filter((section) => matchesSuggestedSection(section, filterSet)),
+        ] as const,
+    )
     .filter(([, sections]) => sections.length > 0);
   const filteredGroupedSections = Object.fromEntries(filteredEntries);
   const hasActiveFilter = filterSet.size > 0;
   const displayedGroupedSections: GroupedSections = hasActiveFilter
     ? filteredGroupedSections
     : groupedSections;
-  const hasRenderableSections = baseline
-    ? Object.values(displayedGroupedSections).some((sections) => sections.length > 0)
-    : false;
+  const hasRenderableSections = Object.values(displayedGroupedSections).some(
+    (sections) => sections.length > 0,
+  );
 
   const fallbackContent =
-    baseline && !hasRenderableSections && baseline.sections?.[0]?.content
-      ? baseline.sections[0].content
-      : null;
+    !hasRenderableSections && baseline.sections?.[0]?.content ? baseline.sections[0].content : null;
 
   return (
     <main className="min-h-screen px-4 py-8">
@@ -253,81 +370,46 @@ export default async function BaselineDetailPage({
               Baseline details
             </p>
             <h1 className="text-3xl font-bold text-gray-900">
-              {baseline?.originalFilename ?? "Baseline details"}
+              {baseline.originalFilename ?? "Baseline details"}
             </h1>
-            {baseline ? (
-              <p className="text-sm text-gray-700">
-                Uploaded {formatDateTime(baseline.createdAt)}
-              </p>
-            ) : null}
+            <p className="text-sm text-gray-700">Uploaded {formatDateTime(baseline.createdAt)}</p>
           </div>
-          <Link
-            href="/baseline"
-            className="text-sm font-semibold text-blue-600 hover:underline"
-          >
+          <Link href="/baseline" className="text-sm font-semibold text-blue-600 hover:underline">
             Back to baselines
           </Link>
         </div>
 
-        {baselineFetchError ? (
-          <div className="space-y-3">
-            <Alert intent="error" title="Unable to load baseline">
-              <p>{baselineFetchError}</p>
-              <p className="text-xs text-gray-600">
-                Check your connection or try again, then reload this page.
-              </p>
-              <div className="flex flex-wrap gap-2 pt-2">
-                <RetryButton label="Retry baseline" />
-              </div>
-            </Alert>
-          </div>
-        ) : null}
-
-        {baseline ? (
-          <>
-            <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-              <h2 className="text-xl font-semibold text-gray-900">
-                Parsed sections
-              </h2>
-              {hasActiveFilter ? (
-                <p className="text-sm text-gray-600">
-                  Filtering to suggested areas: {suggestedSectionsRaw || "selected sections"}.
-                  <Link href={getBaselineDetailsHref(resolvedParams.id ?? "")}>Clear filter</Link>
-                </p>
+        <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+          <h2 className="text-xl font-semibold text-gray-900">Parsed sections</h2>
+          {hasActiveFilter ? (
+            <p className="text-sm text-gray-600">
+              Filtering to suggested areas: {suggestedSectionsRaw || "selected sections"}.
+              <Link href={getBaselineDetailsHref(resolvedId)}>Clear filter</Link>
+            </p>
+          ) : null}
+          {!hasRenderableSections && !fallbackContent ? (
+            <p className="text-sm text-gray-700">
+              {hasActiveFilter
+                ? "No sections match the suggested areas."
+                : "No sections parsed for this baseline yet."}
+            </p>
+          ) : (
+            <div className="space-y-6">
+              {hasRenderableSections ? renderContentSections(displayedGroupedSections) : null}
+              {!hasRenderableSections && fallbackContent ? (
+                <article className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900">
+                  <pre className="whitespace-pre-wrap break-words text-sm text-gray-900">
+                    {fallbackContent}
+                  </pre>
+                </article>
               ) : null}
-              {!hasRenderableSections && !fallbackContent ? (
-                <p className="text-sm text-gray-700">
-                  {hasActiveFilter ? "No sections match the suggested areas." : "No sections parsed for this baseline yet."}
-                </p>
-              ) : (
-                <div className="space-y-6">
-                  {hasRenderableSections &&
-                    renderContentSections(displayedGroupedSections)}
-                  {!hasRenderableSections && fallbackContent ? (
-                    <article className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900">
-                      <pre className="whitespace-pre-wrap break-words text-sm text-gray-900">
-                        {fallbackContent}
-                      </pre>
-                    </article>
-                  ) : null}
-                </div>
-              )}
-            </section>
-          </>
-        ) : (
-          <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-            <EmptyState
-              title="Baseline unavailable"
-              body="We couldn't load this baseline. Retry or return to the baseline library."
-              cta={<RetryButton label="Retry baseline" />}
-            />
-          </section>
-        )}
+            </div>
+          )}
+        </section>
       </div>
     </main>
   );
 }
-
 
 function matchesSuggestedSection(
   section: BaselineSectionDto,

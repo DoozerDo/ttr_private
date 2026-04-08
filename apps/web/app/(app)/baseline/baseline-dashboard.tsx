@@ -14,6 +14,7 @@ import { InsufficientExtractedText } from "@/components/compliance/InsufficientE
 import {
   BaselineDto,
   archiveBaseline,
+  describeBaselineMutationError,
   listBaselines,
   restoreBaseline,
   BASELINE_LIBRARY_CAP,
@@ -125,9 +126,6 @@ export function BaselineDashboard({
   const [archivingBaselineId, setArchivingBaselineId] = useState<string | null>(
     null,
   );
-  const [latestUploadedBaselineId, setLatestUploadedBaselineId] = useState<string | null>(
-    null,
-  );
   const [selectedBaselineDetails, setSelectedBaselineDetails] = useState<BaselineDto | null>(null);
   const [loadingSelectedBaselineDetails, setLoadingSelectedBaselineDetails] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -173,12 +171,11 @@ export function BaselineDashboard({
         }
       }
     } catch (archiveError: unknown) {
-      console.error("Unable to archive baseline", archiveError);
-      const message =
-        archiveError instanceof Error
-          ? archiveError.message
-          : "Unable to archive baseline right now.";
-      setError(message);
+      console.error("Unable to archive baseline", {
+        baselineId,
+        archiveError,
+      });
+      setError(describeBaselineMutationError(archiveError, "archive"));
     } finally {
       setArchivingBaselineId(null);
     }
@@ -272,7 +269,7 @@ export function BaselineDashboard({
     selectedBaselineId &&
     activeBaselines.some((baseline) => baseline.id === selectedBaselineId)
       ? selectedBaselineId
-      : getMostRecentActiveBaselineId(sortedBaselines) ?? latestUploadedBaselineId ?? null;
+      : getMostRecentActiveBaselineId(sortedBaselines) ?? null;
 
   useEffect(() => {
     if (!activeBaselineId) {
@@ -447,7 +444,6 @@ export function BaselineDashboard({
       } catch (refreshError) {
         console.error("Unable to refresh baselines after upload", refreshError);
       }
-      setLatestUploadedBaselineId(baselineRecord.id);
       setBaselineSelection(baselineRecord.id);
       setFile(null);
       if (fileInputRef.current) {

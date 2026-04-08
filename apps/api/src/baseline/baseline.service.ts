@@ -1063,23 +1063,27 @@ return {
         return baseline;
       }
 
-    const baselines = await manager.find(Baseline, {
-      where: { userId },
-      order: { createdAt: 'DESC' },
-    });
+      const archiveWasActive = baseline.isActive === true;
 
-    this.logger.debug(
-      `updateBaselineStatus userId=${userId} baselineId=${baselineId} targetStatus=${status} baselineCount=${baselines.length}`,
-    );
+      const baselines = await manager.find(Baseline, {
+        where: { userId },
+        order: { createdAt: 'DESC' },
+      });
 
-    const nextActiveBaselineId =
-      status === BaselineStatus.ACTIVE
-        ? baseline.id
-        : baselines.find((item) => item.id !== baseline.id)?.id ?? baseline.id;
+      this.logger.debug(
+        `updateBaselineStatus userId=${userId} baselineId=${baselineId} currentStatus=${baseline.status} currentIsActive=${archiveWasActive} targetStatus=${status} baselineCount=${baselines.length}`,
+      );
 
-    this.logger.debug(
-      `updateBaselineStatus selectedActiveBaselineId=${nextActiveBaselineId}`,
-    );
+      const nextActiveBaselineId =
+        status === BaselineStatus.ACTIVE
+          ? baseline.id
+          : baselines.find(
+              (item) => item.id !== baseline.id && item.status !== BaselineStatus.ARCHIVED,
+            )?.id ?? null;
+
+      this.logger.debug(
+        `updateBaselineStatus selectedActiveBaselineId=${nextActiveBaselineId ?? 'null'} fallbackApplied=${status === BaselineStatus.ARCHIVED && nextActiveBaselineId !== baseline.id}`,
+      );
 
       const updatedBaselines = baselines.map((item) => {
         const nextStatus =
@@ -1088,6 +1092,9 @@ return {
             : item.id === nextActiveBaselineId
               ? BaselineStatus.ACTIVE
               : item.status;
+        const nextIsActive = nextActiveBaselineId
+          ? item.id === nextActiveBaselineId
+          : false;
 
         return {
           ...item,
@@ -1100,7 +1107,7 @@ return {
               : nextStatus === BaselineStatus.ARCHIVED
                 ? item.archivedAt ?? null
                 : null,
-          isActive: item.id === nextActiveBaselineId,
+          isActive: nextIsActive,
         };
       });
 

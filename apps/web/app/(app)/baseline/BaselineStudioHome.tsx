@@ -16,6 +16,7 @@ import { FormButton } from "@/components/FormButton";
 import { InsufficientExtractedText } from "@/components/compliance/InsufficientExtractedText";
 import {
   archiveBaseline,
+  describeBaselineMutationError,
   isBaselineAnalyzedFromSummary,
   getLatestRoleAnalysisFitScore,
   type BaselineAssessmentSummaryDto,
@@ -1023,12 +1024,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         setUploadSuccessId((current) => (current === baselineId ? null : current));
         setPrimaryBaselineId(nextPrimaryId);
       } catch (archiveError) {
-        console.error("Unable to delete baseline", archiveError);
-        setError(
-          archiveError instanceof Error
-            ? archiveError.message
-            : "Unable to delete this resume right now.",
-        );
+        console.error("Unable to archive baseline", {
+          baselineId,
+          archiveError,
+        });
+        setError(describeBaselineMutationError(archiveError, "archive"));
       } finally {
         setArchivingBaselineId(null);
       }
