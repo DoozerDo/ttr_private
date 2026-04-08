@@ -44,16 +44,21 @@ describe("document strategy plan", () => {
     expect(plan.fitBand).toBe("strong");
     expect(plan.roleLens.titleFamily).toBe("Customer Operations / Support Strategy");
     expect(plan.roleLens.seniority).toBe("senior leadership");
-    expect(plan.positioningFrame).toBe("Incident and service delivery leader");
+    expect(plan.positioningFrame).toBe("Service delivery and incident operations leader");
     expect(plan.selectedEvidence.length).toBeGreaterThan(0);
     expect(plan.selectedEvidence[0].baselineSection).toBe("Support Operations");
     expect(plan.selectedEvidence[0].approvedClaims.join(" ")).toContain("support operations");
-    expect(plan.summaryStrategy).toContain("lead with Incident and service delivery leader");
+    expect(plan.qualityPass.topNarrativeAxes.length).toBeGreaterThan(0);
+    expect(plan.qualityPass.coverLetterDelta.length).toBeGreaterThan(0);
+    expect(plan.summaryStrategy).toContain("lead with Service delivery and incident operations leader");
     expect(plan.suppressionNotes.length).toBeGreaterThan(0);
+    expect(plan.documentQualityScore).toBeGreaterThan(0);
 
     const summary = buildDocumentStrategyPlanSummary(plan);
-    expect(summary.positioning).toBe("Incident and service delivery leader");
+    expect(summary.positioning).toBe("Service delivery and incident operations leader");
+    expect(summary.coverLetter).toContain("Open with");
     expect(summary.evidence).toContain("Support Operations");
+    expect(summary.quality).toContain("Quality");
   });
 
   it("falls back to a human-safe strategy when the baseline is sparse", () => {
@@ -70,5 +75,6 @@ describe("document strategy plan", () => {
     expect(plan.selectedEvidence).toEqual([]);
     expect(plan.summaryStrategy).toContain("keep lower-relevance background out of the opening story");
     expect(plan.suppressionNotes.length).toBeGreaterThan(0);
+    expect(plan.qualityPass.framingStrength).toBe("low");
   });
 });

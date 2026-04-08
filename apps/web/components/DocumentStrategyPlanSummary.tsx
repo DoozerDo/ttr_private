@@ -37,6 +37,18 @@ export function DocumentStrategyPlanSummary({ plan }: DocumentStrategyPlanSummar
         </div>
       </div>
 
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="space-y-1 rounded-xl border border-white/10 bg-slate-950/35 p-3">
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Cover letter</p>
+          <p className="text-sm text-slate-100">{summary.coverLetter || "Strategic fit narrative"}</p>
+        </div>
+
+        <div className="space-y-1 rounded-xl border border-white/10 bg-slate-950/35 p-3">
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Quality</p>
+          <p className="text-sm text-slate-100">{summary.quality}</p>
+        </div>
+      </div>
+
       <div className="space-y-2 rounded-xl border border-white/10 bg-slate-950/35 p-3">
         <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Selected evidence</p>
         {summary.evidence.length ? (

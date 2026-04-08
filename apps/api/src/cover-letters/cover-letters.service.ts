@@ -89,6 +89,8 @@ import { SyntheticMetadataInput } from '../synthetic/synthetic-metadata.types';
 import { applySyntheticMetadata } from '../synthetic/synthetic-metadata.util';
 import type { ArtifactTraceAudit } from '../generation/artifact-trace-audit';
 import { buildArtifactFailurePayload } from '../generation/artifact-failure';
+import { polishCoverLetterGeneration } from '../language-style-pass';
+import type { DocumentStrategyPlanLike } from '../document-strategy-plan.types';
 
 type CoverLetterDraft = {
   baseline: Baseline;
@@ -332,14 +334,21 @@ export class CoverLettersService {
       });
     }
 
-    const text = this.buildNormalizedCoverLetterText(draft.generation);
+    const polished = polishCoverLetterGeneration(draft.generation, {
+      plan:
+        input.documentStrategyPlan ??
+        ({} as DocumentStrategyPlanLike),
+      roleLabel: draft.job.title ?? draft.jobContext.title ?? null,
+    });
+    const generation = polished.generation;
+    const text = this.buildNormalizedCoverLetterText(generation);
     let buffer: Buffer;
     if (format === 'pdf') {
       buffer = this.buildPdfBuffer(text);
     } else {
       const identity = resolveBaselineIdentity(draft.baseline);
       const model = mapCoverLetterResultToModel(
-        draft.generation,
+        generation,
         identity,
         draft.jobContext,
       );
@@ -360,7 +369,7 @@ export class CoverLettersService {
       content: block.content,
     }));
     const generatedSections: ComplianceTextSection[] =
-      this.buildCoverLetterGeneratedSectionsForCompliance(draft.generation);
+      this.buildCoverLetterGeneratedSectionsForCompliance(generation);
 
     const { complianceFlags, blocked, audit } =
       await this.complianceService.validateAndAudit({
@@ -615,6 +624,7 @@ export class CoverLettersService {
         tone: input.tone,
         safeMode: requestSafeMode,
         complianceConstraints,
+        documentStrategyPlan: input.documentStrategyPlan ?? undefined,
         gapAnalysis: {
           strengths: gapInsights.strengths,
           criticalGaps: gapInsights.criticalGaps,
@@ -676,6 +686,7 @@ export class CoverLettersService {
         tone: input.tone,
         safeMode: true,
         complianceConstraints,
+        documentStrategyPlan: input.documentStrategyPlan ?? undefined,
         gapAnalysis: {
           strengths: gapInsights.strengths,
           criticalGaps: gapInsights.criticalGaps,
@@ -708,6 +719,7 @@ export class CoverLettersService {
         tone: input.tone,
         safeMode: true,
         complianceConstraints,
+        documentStrategyPlan: input.documentStrategyPlan ?? undefined,
         gapAnalysis: {
           strengths: gapInsights.strengths,
           criticalGaps: gapInsights.criticalGaps,
@@ -1514,6 +1526,22 @@ export class CoverLettersService {
       )
     ) {
       flags.push('generic_filler');
+    }
+    const paragraphOpeners = contentParagraphs
+      .map((paragraph) => paragraph.split(/\s+/)[0]?.toLowerCase() ?? '')
+      .filter(Boolean);
+    if (new Set(paragraphOpeners).size !== paragraphOpeners.length) {
+      flags.push('repetitive_openings');
+    }
+    const keywordEchoCount = [
+      ...new Set(
+        [...jobContext.responsibilities, ...jobContext.requirements]
+          .flatMap((value) => value.toLowerCase().match(/[a-z0-9]+/g) ?? [])
+          .filter((token) => token.length >= 4),
+      ),
+    ].filter((token) => lowered.includes(token)).length;
+    if (keywordEchoCount > 12) {
+      flags.push('keyword_echo_overuse');
     }
     if (this.detectResumeArtifactLeak(text)) {
       flags.push('resume_artifact');

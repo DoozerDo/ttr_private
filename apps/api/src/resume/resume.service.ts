@@ -66,6 +66,8 @@ import {
   normalizeNormalizedResumeDocument,
   validateNormalizedResumeDocument,
 } from './resume-normalization';
+import { polishNormalizedResumeDocument } from '../language-style-pass';
+import type { DocumentStrategyPlanLike } from '../document-strategy-plan.types';
 import {
   buildBaselineEvidenceTermInventory,
   detectClaimRiskForBullet,
@@ -90,6 +92,7 @@ export type GenerateResumeRequest = {
   analysisId?: string;
   oneTap?: boolean;
   editedResume?: NormalizedResumeDocument;
+  documentStrategyPlan?: DocumentStrategyPlanLike;
 };
 
 export type GenerateResumeOptions = {
@@ -1423,6 +1426,7 @@ export class ResumeService {
       }
       : undefined,
       claimRiskInventory,
+      documentStrategyPlan: request.documentStrategyPlan ?? undefined,
     }));
     const hasExperienceBullets = sections.some(
       (section) =>
@@ -1454,6 +1458,7 @@ export class ResumeService {
     const normalizedDocument = buildNormalizedResumeDocument(
       sections as ResumeExportSection[],
       identity,
+      { documentStrategyPlan: request.documentStrategyPlan ?? undefined },
     );
     let experienceDiagnostics = this.buildExperiencePipelineDiagnostics({
       sectionsWithPolicies,
@@ -1921,8 +1926,14 @@ export class ResumeService {
     const normalizedDocument = normalizeNormalizedResumeDocument(
       normalizedDocumentInput,
     );
+    const polished = polishNormalizedResumeDocument(normalizedDocument, {
+      plan:
+        request.documentStrategyPlan ??
+        ({} as DocumentStrategyPlanLike),
+    });
+    const polishedDocument = polished.document;
     const normalizedValidation = validateNormalizedResumeDocument(
-      normalizedDocument,
+      polishedDocument,
     );
     if (!normalizedValidation.valid) {
       throw new UnprocessableEntityException({
@@ -1939,11 +1950,11 @@ export class ResumeService {
     let buffer: Buffer;
     let pdfText: string | undefined;
     if (format === 'pdf') {
-      pdfText = buildResumePlainText(normalizedDocument);
+      pdfText = buildResumePlainText(polishedDocument);
       buffer = this.buildPdfBuffer(pdfText);
     } else {
       const model = await this.buildDocxModelFromGeneration({
-        normalizedDocument,
+        normalizedDocument: polishedDocument,
       });
       const template = getDocxTemplate<ResumeDocxModel>(
         'resume',
@@ -1993,8 +2004,8 @@ export class ResumeService {
           .update(
             `${format}:${
               format === 'pdf'
-                ? pdfText ?? ''
-                : JSON.stringify(normalizedDocument)
+              ? pdfText ?? ''
+                : JSON.stringify(polishedDocument)
             }`,
           )
           .digest('hex'),

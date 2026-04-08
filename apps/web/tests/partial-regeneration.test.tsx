@@ -107,7 +107,7 @@ function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   };
 }
 
-describe("resume generation from a shared strategy plan", () => {
+describe("partial regeneration", () => {
   beforeEach(() => {
     overrideSearchParams({
       analysisId: "analysis-1",
@@ -117,7 +117,7 @@ describe("resume generation from a shared strategy plan", () => {
     });
   });
 
-  it("sends the shared document strategy plan into resume generation", async () => {
+  it("reruns only the targeted artifact when a refinement is applied", async () => {
     const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       if (url.includes("/api/baselines/base-1/versions")) {
@@ -192,27 +192,45 @@ describe("resume generation from a shared strategy plan", () => {
 
     renderStudio();
 
-    await screen.findByTestId("studio-document-plan-summary");
     const generateResumeButton = await screen.findByRole("button", { name: "Generate Resume" });
     await waitFor(() => expect(generateResumeButton).toBeEnabled());
     fireEvent.click(generateResumeButton);
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/resume"),
-        expect.objectContaining({ method: "POST" }),
-      );
+      expect(screen.getByTestId("studio-refinement-panel")).toBeInTheDocument();
     });
 
-    const resumeCall = fetchMock.mock.calls.find(
+    const initialResumeCalls = fetchMock.mock.calls.filter(
       ([url, init]) => typeof url === "string" && url.endsWith("/api/resume") && init?.method === "POST",
     );
-    expect(resumeCall).toBeTruthy();
-    const body = JSON.parse((resumeCall?.[1]?.body as string) ?? "{}");
-    expect(body.documentStrategyPlan.positioningFrame).toBe("Service delivery and incident operations leader");
-    expect(body.documentStrategyPlan.selectedEvidence.length).toBeGreaterThan(0);
-    expect(body.documentStrategyPlan.summaryStrategy).toContain(
-      "lead with Service delivery and incident operations leader",
+    expect(initialResumeCalls).toHaveLength(1);
+
+    fireEvent.click(screen.getByTestId("refinement-option-tighten-summary"));
+
+    await waitFor(() => {
+      const resumeCalls = fetchMock.mock.calls.filter(
+        ([url, init]) => typeof url === "string" && url.endsWith("/api/resume") && init?.method === "POST",
+      );
+      expect(resumeCalls).toHaveLength(2);
+    });
+
+    const resumeCalls = fetchMock.mock.calls.filter(
+      ([url, init]) => typeof url === "string" && url.endsWith("/api/resume") && init?.method === "POST",
     );
+    const initialBody = JSON.parse((resumeCalls[0]?.[1]?.body as string) ?? "{}");
+    const refinedBody = JSON.parse((resumeCalls[1]?.[1]?.body as string) ?? "{}");
+    expect(refinedBody.documentStrategyPlan.summaryStrategy).not.toEqual(
+      initialBody.documentStrategyPlan.summaryStrategy,
+    );
+    expect(refinedBody.documentStrategyPlan.summaryStrategy.toLowerCase()).toContain("tight");
+    expect(refinedBody.documentStrategyPlan.positioningFrame).toBe(
+      initialBody.documentStrategyPlan.positioningFrame,
+    );
+
+    const coverCalls = fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        typeof url === "string" && url.endsWith("/api/cover-letters") && init?.method === "POST",
+    );
+    expect(coverCalls).toHaveLength(0);
   });
 });

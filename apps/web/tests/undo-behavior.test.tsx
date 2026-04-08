@@ -107,7 +107,7 @@ function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   };
 }
 
-describe("resume generation from a shared strategy plan", () => {
+describe("undo behavior", () => {
   beforeEach(() => {
     overrideSearchParams({
       analysisId: "analysis-1",
@@ -117,7 +117,7 @@ describe("resume generation from a shared strategy plan", () => {
     });
   });
 
-  it("sends the shared document strategy plan into resume generation", async () => {
+  it("reverts to the prior version cleanly", async () => {
     const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       if (url.includes("/api/baselines/base-1/versions")) {
@@ -164,6 +164,10 @@ describe("resume generation from a shared strategy plan", () => {
         return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
       }
       if (url.endsWith("/api/resume") && init?.method === "POST") {
+        const callCount = fetchMock.mock.calls.filter(
+          ([calledUrl, calledInit]) =>
+            typeof calledUrl === "string" && calledUrl.endsWith("/api/resume") && calledInit?.method === "POST",
+        ).length;
         return Promise.resolve(
           createResponse({
             status: "success",
@@ -173,7 +177,10 @@ describe("resume generation from a shared strategy plan", () => {
             preview: {
               resume: {
                 heading: { name: "Test Candidate", contactLine: "test@example.com" },
-                summary: "Verified support leader aligned to the role.",
+                summary:
+                  callCount >= 1
+                    ? "Refined support leader aligned to the role."
+                    : "Verified support leader aligned to the role.",
                 experience: [
                   {
                     company: "Acme",
@@ -192,27 +199,43 @@ describe("resume generation from a shared strategy plan", () => {
 
     renderStudio();
 
-    await screen.findByTestId("studio-document-plan-summary");
     const generateResumeButton = await screen.findByRole("button", { name: "Generate Resume" });
     await waitFor(() => expect(generateResumeButton).toBeEnabled());
     fireEvent.click(generateResumeButton);
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/resume"),
-        expect.objectContaining({ method: "POST" }),
-      );
+      expect(screen.getByTestId("studio-refinement-panel")).toBeInTheDocument();
     });
 
-    const resumeCall = fetchMock.mock.calls.find(
+    fireEvent.click(screen.getByTestId("refinement-option-tighten-summary"));
+
+    await waitFor(() => {
+      const resumeCalls = fetchMock.mock.calls.filter(
+        ([url, init]) => typeof url === "string" && url.endsWith("/api/resume") && init?.method === "POST",
+      );
+      expect(resumeCalls).toHaveLength(2);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo last refinement" }));
+
+    await waitFor(() => {
+      const resumeCalls = fetchMock.mock.calls.filter(
+        ([url, init]) => typeof url === "string" && url.endsWith("/api/resume") && init?.method === "POST",
+      );
+      expect(resumeCalls).toHaveLength(3);
+    });
+
+    const resumeCalls = fetchMock.mock.calls.filter(
       ([url, init]) => typeof url === "string" && url.endsWith("/api/resume") && init?.method === "POST",
     );
-    expect(resumeCall).toBeTruthy();
-    const body = JSON.parse((resumeCall?.[1]?.body as string) ?? "{}");
-    expect(body.documentStrategyPlan.positioningFrame).toBe("Service delivery and incident operations leader");
-    expect(body.documentStrategyPlan.selectedEvidence.length).toBeGreaterThan(0);
-    expect(body.documentStrategyPlan.summaryStrategy).toContain(
-      "lead with Service delivery and incident operations leader",
+    const initialBody = JSON.parse((resumeCalls[0]?.[1]?.body as string) ?? "{}");
+    const refinedBody = JSON.parse((resumeCalls[1]?.[1]?.body as string) ?? "{}");
+    const revertedBody = JSON.parse((resumeCalls[2]?.[1]?.body as string) ?? "{}");
+    expect(refinedBody.documentStrategyPlan.summaryStrategy).not.toEqual(
+      initialBody.documentStrategyPlan.summaryStrategy,
+    );
+    expect(revertedBody.documentStrategyPlan.summaryStrategy).toEqual(
+      initialBody.documentStrategyPlan.summaryStrategy,
     );
   });
 });

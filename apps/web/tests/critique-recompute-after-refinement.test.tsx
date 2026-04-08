@@ -18,8 +18,9 @@ vi.mock("@/lib/jobsClient", () => ({
       rawDescription:
         "Lead support operations, workflow design, and cross-functional coordination for a SaaS platform.",
       normalizedRequirements: [
-        "Own process and workflow improvements.",
+        "Own support operations strategy.",
         "Partner with product and engineering.",
+        "Improve workflow quality and service delivery.",
       ],
       normalizedResponsibilities: [
         "Lead support operations programs.",
@@ -32,7 +33,7 @@ vi.mock("@/lib/jobsClient", () => ({
 }));
 
 vi.mock("@/lib/baselines", async () => {
-  const actual = await vi.importActual("@/lib/baselines");
+  const actual = await vi.importActual<typeof import("@/lib/baselines")>("@/lib/baselines");
   return {
     ...(actual as object),
     listBaselines: vi.fn(async () => [
@@ -107,7 +108,7 @@ function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   };
 }
 
-describe("resume generation from a shared strategy plan", () => {
+describe("critique recompute after refinement", () => {
   beforeEach(() => {
     overrideSearchParams({
       analysisId: "analysis-1",
@@ -117,13 +118,12 @@ describe("resume generation from a shared strategy plan", () => {
     });
   });
 
-  it("sends the shared document strategy plan into resume generation", async () => {
+  it("updates the critique after the suggested refinement is applied", async () => {
+    let resumeGenerationCount = 0;
     const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       if (url.includes("/api/baselines/base-1/versions")) {
-        return Promise.resolve(
-          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
-        );
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
       }
       if (url.includes("/api/baselines/base-1") && !url.includes("/versions")) {
         return Promise.resolve(
@@ -164,6 +164,7 @@ describe("resume generation from a shared strategy plan", () => {
         return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
       }
       if (url.endsWith("/api/resume") && init?.method === "POST") {
+        resumeGenerationCount += 1;
         return Promise.resolve(
           createResponse({
             status: "success",
@@ -173,13 +174,45 @@ describe("resume generation from a shared strategy plan", () => {
             preview: {
               resume: {
                 heading: { name: "Test Candidate", contactLine: "test@example.com" },
-                summary: "Verified support leader aligned to the role.",
+                summary:
+                  resumeGenerationCount >= 2
+                    ? "Customer Operations and Support Strategy leader who scales support systems, improves service workflows, and partners across product and engineering."
+                    : "Results-driven leader with a proven track record of delivering results across teams in fast-paced environments.",
                 experience: [
                   {
                     company: "Acme",
                     roleTitle: "Director of Support",
-                    bullets: ["Led support operations and improved team performance."],
+                    bullets:
+                      resumeGenerationCount >= 2
+                        ? [
+                            "Led support operations programs and reduced response time by 24%.",
+                            "Designed workflow automation that improved SLA adherence and removed duplicate work.",
+                          ]
+                        : [
+                            "Led support initiatives and delivered results across teams.",
+                            "Worked across teams to improve outcomes and drive results.",
+                          ],
                   },
+                ],
+              },
+            },
+          }),
+        );
+      }
+      if (url.endsWith("/api/cover-letters") && init?.method === "POST") {
+        return Promise.resolve(
+          createResponse({
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: {
+              coverLetter: {
+                paragraphs: [
+                  "Dear Hiring Team,",
+                  "I am excited to apply and believe my background includes leading teams and delivering results.",
+                  "My resume shows that I have experience in support, operations, and leadership across teams.",
+                  "Sincerely,",
                 ],
               },
             },
@@ -192,27 +225,41 @@ describe("resume generation from a shared strategy plan", () => {
 
     renderStudio();
 
-    await screen.findByTestId("studio-document-plan-summary");
     const generateResumeButton = await screen.findByRole("button", { name: "Generate Resume" });
-    await waitFor(() => expect(generateResumeButton).toBeEnabled());
-    fireEvent.click(generateResumeButton);
+    const generateCoverButton = await screen.findByTestId("studio-cover-generate-button");
 
+    await waitFor(() => expect(generateResumeButton).toBeEnabled());
+    await waitFor(() => expect(generateCoverButton).toBeEnabled());
+
+    fireEvent.click(generateResumeButton);
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/resume"),
-        expect.objectContaining({ method: "POST" }),
-      );
+      expect(screen.getByTestId("studio-critique-panel")).toBeInTheDocument();
     });
 
-    const resumeCall = fetchMock.mock.calls.find(
-      ([url, init]) => typeof url === "string" && url.endsWith("/api/resume") && init?.method === "POST",
-    );
-    expect(resumeCall).toBeTruthy();
-    const body = JSON.parse((resumeCall?.[1]?.body as string) ?? "{}");
-    expect(body.documentStrategyPlan.positioningFrame).toBe("Service delivery and incident operations leader");
-    expect(body.documentStrategyPlan.selectedEvidence.length).toBeGreaterThan(0);
-    expect(body.documentStrategyPlan.summaryStrategy).toContain(
-      "lead with Service delivery and incident operations leader",
-    );
+    fireEvent.click(generateCoverButton);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("critique-issue-summary_generic")).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId("studio-critique-panel")).toHaveTextContent("Tighten the summary");
+
+    fireEvent.click(screen.getByTestId("critique-best-next-action"));
+
+    await waitFor(() => {
+      const resumeCalls = fetchMock.mock.calls.filter(
+        ([url, requestInit]) =>
+          typeof url === "string" && url.endsWith("/api/resume") && requestInit?.method === "POST",
+      );
+      expect(resumeCalls).toHaveLength(2);
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          "Customer Operations and Support Strategy leader who scales support systems, improves service workflows, and partners across product and engineering.",
+        ),
+      ).toBeInTheDocument();
+    });
   });
 });

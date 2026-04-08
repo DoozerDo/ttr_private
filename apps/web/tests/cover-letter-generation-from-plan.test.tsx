@@ -197,8 +197,9 @@ describe("cover letter generation from a shared strategy plan", () => {
     );
     expect(generateCall).toBeTruthy();
     const body = JSON.parse((generateCall?.[1]?.body as string) ?? "{}");
-    expect(body.documentStrategyPlan.positioningFrame).toBe("Incident and service delivery leader");
+    expect(body.documentStrategyPlan.positioningFrame).toBe("Service delivery and incident operations leader");
     expect(body.documentStrategyPlan.selectedEvidence.length).toBeGreaterThan(0);
     expect(body.documentStrategyPlan.coverLetterThemes.length).toBeGreaterThan(0);
+    expect(body.documentStrategyPlan.qualityPass.coverLetterDelta.length).toBeGreaterThan(0);
   });
 });

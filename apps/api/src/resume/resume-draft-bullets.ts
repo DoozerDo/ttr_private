@@ -4,6 +4,9 @@ import {
   ClaimRiskResult,
   detectClaimRiskForBullet,
 } from './claim-risk';
+import type {
+  DocumentStrategyPlanLike as SharedDocumentStrategyPlanLike,
+} from '../document-strategy-plan.types';
 
 export type ResumeDraftBulletConfidence = 'High' | 'Medium' | 'Low';
 
@@ -911,11 +914,56 @@ type BulletScoreResult = {
   matchedCategories: string[];
 };
 
+type DocumentStrategySignalSet = {
+  priorityTokens: Set<string>;
+  emphasisTokens: Set<string>;
+  suppressionTokens: Set<string>;
+  leadTokens: Set<string>;
+};
+
+function normalizeStrategyTokens(values?: string[] | null): Set<string> {
+  return new Set(
+    (values ?? [])
+      .flatMap((value) => tokenize(String(value ?? '')))
+      .filter((token) => token.length > 0),
+  );
+}
+
+function buildDocumentStrategySignalSet(
+  plan?: SharedDocumentStrategyPlanLike | null,
+): DocumentStrategySignalSet {
+  const priorityTokens = normalizeStrategyTokens([
+    ...(plan?.roleLens?.priorities ?? []),
+    ...(plan?.roleLens?.requiredSignals ?? []),
+    ...(plan?.roleLens?.targetKeywords ?? []),
+  ]);
+  const emphasisTokens = normalizeStrategyTokens([
+    ...(plan?.qualityPass?.topNarrativeAxes ?? []),
+    ...(plan?.selectedEvidence ?? []).flatMap((evidence) => [
+      ...(evidence.matchedSignals ?? []),
+      ...(evidence.approvedClaims ?? []),
+    ]),
+  ]);
+  const suppressionTokens = normalizeStrategyTokens([
+    ...(plan?.qualityPass?.cutCandidates ?? []),
+    ...(plan?.suppressionNotes ?? []),
+  ]);
+  const leadTokens = normalizeStrategyTokens(plan?.qualityPass?.mustLeadWith ?? []);
+
+  return {
+    priorityTokens,
+    emphasisTokens,
+    suppressionTokens,
+    leadTokens,
+  };
+}
+
 function scoreBulletRelevance(
   text: string,
   signals: JobSignalSet | null,
   strengthSignals: Set<string> | null,
   gapSignals: Set<string> | null,
+  strategySignals?: DocumentStrategySignalSet | null,
 ): BulletScoreResult {
   const matchedTerms: string[] = [];
   const matchedPhrases: string[] = [];
@@ -959,6 +1007,17 @@ function scoreBulletRelevance(
   const gapOverlap = gapSignals ? countSignalOverlap(text, gapSignals) : 0;
   totalScore += strengthOverlap * 0.8;
   totalScore += gapOverlap * 0.6;
+  if (strategySignals) {
+    const strategyTokens = new Set(tokenize(text));
+    const priorityOverlap = [...strategySignals.priorityTokens].filter((token) => strategyTokens.has(token)).length;
+    const emphasisOverlap = [...strategySignals.emphasisTokens].filter((token) => strategyTokens.has(token)).length;
+    const leadOverlap = [...strategySignals.leadTokens].filter((token) => strategyTokens.has(token)).length;
+    const suppressionOverlap = [...strategySignals.suppressionTokens].filter((token) => strategyTokens.has(token)).length;
+    totalScore += priorityOverlap * 0.75;
+    totalScore += emphasisOverlap * 0.6;
+    totalScore += leadOverlap * 0.9;
+    totalScore -= suppressionOverlap * 0.55;
+  }
 
   return {
     totalScore,
@@ -1000,6 +1059,7 @@ type DraftBulletBuildOptions =
       gapGuidance?: ResumeDraftGapGuidance;
       claimRiskInventory?: BaselineEvidenceTermInventory;
       jobSignals?: JobSignalSet;
+      documentStrategyPlan?: SharedDocumentStrategyPlanLike | null;
     }
   | Set<string>
   | undefined;
@@ -1011,6 +1071,7 @@ function normalizeBuildOptions(options?: DraftBulletBuildOptions) {
       gapGuidance: undefined,
       claimRiskInventory: undefined,
       jobSignals: undefined,
+      documentStrategyPlan: undefined,
     };
   }
 
@@ -1019,6 +1080,7 @@ function normalizeBuildOptions(options?: DraftBulletBuildOptions) {
     gapGuidance: options?.gapGuidance,
     claimRiskInventory: options?.claimRiskInventory,
     jobSignals: options?.jobSignals,
+    documentStrategyPlan: options?.documentStrategyPlan,
   };
 }
 
@@ -1046,10 +1108,19 @@ export function buildDraftBulletsForSection(
     : null;
   const jobSignals = normalizedOptions.jobSignals ?? null;
   const keywordFallback = normalizedOptions.keywords;
+  const strategySignals = buildDocumentStrategySignalSet(normalizedOptions.documentStrategyPlan);
   const shouldRank = Boolean(
     (jobSignals && !jobSignals.isWeak) ||
-      (keywordFallback && keywordFallback.size >= 5),
+      (keywordFallback && keywordFallback.size >= 5) ||
+      strategySignals.priorityTokens.size > 0 ||
+      strategySignals.emphasisTokens.size > 0,
   );
+  const maxExperienceBullets =
+    normalizedOptions.documentStrategyPlan?.qualityPass?.emphasisConfidence === 'high'
+      ? 4
+      : normalizedOptions.documentStrategyPlan?.qualityPass?.emphasisConfidence === 'medium'
+        ? 5
+        : MAX_EXPERIENCE_BULLETS_PER_ROLE;
 
   const buildBullet = (
     entry: ResumeDraftBulletCandidate,
@@ -1065,6 +1136,7 @@ export function buildDraftBulletsForSection(
       jobSignals,
       strengthSignals,
       gapSignals,
+      strategySignals,
     );
     const keywordOverlapFallback = keywordFallback
       ? countKeywordOverlap(sanitizedText, keywordFallback)
@@ -1125,7 +1197,7 @@ export function buildDraftBulletsForSection(
         }).filter((entry): entry is ScoredDraftBullet => Boolean(entry));
         return orderBulletsByRelevance(withScores, shouldRank).slice(
           0,
-          MAX_EXPERIENCE_BULLETS_PER_ROLE,
+          maxExperienceBullets,
         );
       });
       return ordered.map(({ relevanceScore: _relevanceScore, stableIndex: _stableIndex, ...bullet }) => bullet);
@@ -1403,6 +1475,7 @@ export function buildResumeDraftSections(
     jobText?: string | null;
     gapGuidance?: ResumeDraftGapGuidance;
     claimRiskInventory?: BaselineEvidenceTermInventory;
+    documentStrategyPlan?: SharedDocumentStrategyPlanLike | null;
   },
 ): ResumeDraftSection[] {
   const keywords = extractJobKeywords(options?.jobText);
@@ -1416,6 +1489,7 @@ export function buildResumeDraftSections(
       gapGuidance: options?.gapGuidance,
       claimRiskInventory: options?.claimRiskInventory,
       jobSignals,
+      documentStrategyPlan: options?.documentStrategyPlan ?? undefined,
     });
     const content = formatDraftSectionContent(
       section.sectionType,

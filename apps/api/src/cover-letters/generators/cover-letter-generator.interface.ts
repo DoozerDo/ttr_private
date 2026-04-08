@@ -27,6 +27,7 @@ export type CoverLetterClosingTemplate = {
 
 import type { CoverLetterComplianceConstraints } from '../types/cover-letter-compliance-constraints';
 import type { NormalizedCoverLetterDocument } from '../../documents/normalized-document.models';
+import type { DocumentStrategyPlanLike } from '../../document-strategy-plan.types';
 
 export type CoverLetterGenerationInput = {
   baselineId: string;
@@ -39,6 +40,7 @@ export type CoverLetterGenerationInput = {
   tone?: string;
   safeMode?: boolean;
   complianceConstraints?: CoverLetterComplianceConstraints;
+  documentStrategyPlan?: DocumentStrategyPlanLike;
   gapAnalysis?: {
     strengths: string[];
     criticalGaps: Array<{

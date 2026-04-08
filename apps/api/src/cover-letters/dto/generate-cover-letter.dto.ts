@@ -1,5 +1,6 @@
 import { DocumentType, JobApplicationContext } from '../../compliance/compliance.types';
 import { CoverLetterComplianceConstraints } from '../types/cover-letter-compliance-constraints';
+import type { DocumentStrategyPlanLike } from '../../document-strategy-plan.types';
 
 export class GenerateCoverLetterDto {
   baselineId!: string;
@@ -22,4 +23,5 @@ export class GenerateCoverLetterDto {
 
   tone?: string;
   complianceConstraints?: CoverLetterComplianceConstraints;
+  documentStrategyPlan?: DocumentStrategyPlanLike;
 }

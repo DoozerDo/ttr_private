@@ -15,6 +15,9 @@ import type {
   NormalizedResumeEducationEntry,
   NormalizedResumeExperienceEntry,
 } from '../documents/normalized-document.models';
+import type {
+  DocumentStrategyPlanLike,
+} from '../document-strategy-plan.types';
 
 const BULLET_PATTERN = /^\s*(?:[\u2022\u25CF\u25E6*-]|(?:\(?\d{1,3}\)?[.)]))\s+/;
 const PAGE_MARKER_PATTERN =
@@ -48,6 +51,20 @@ const GENERIC_ROLE_INLINE_PATTERN = new RegExp(
   `\\s*[-\\u2013\\u2014]\\s*${GENERIC_ROLE_PHRASE_SOURCE}\\s*[-\\u2013\\u2014]\\s*`,
   'gi',
 );
+const GENERIC_SUMMARY_PHRASES = [
+  'results-driven',
+  'proven track record',
+  'dynamic leader',
+  'strong fit',
+  'passionate',
+  'detail-oriented',
+  'self-starter',
+  'team player',
+  'fast-paced',
+  'driven by outcomes',
+  'led with impact',
+  'delivered results',
+];
 
 function cleanText(value?: string | null): string {
   return (value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\u00a0/g, ' ').trim();
@@ -241,6 +258,57 @@ function tightenBulletForSeniority(bullet: string): string {
     .trim();
 
   return tightened;
+}
+
+function containsAnyPhrase(value: string, phrases: string[]): boolean {
+  const lowered = normalizeLine(value).toLowerCase();
+  return phrases.some((phrase) => lowered.includes(phrase.toLowerCase()));
+}
+
+function buildStrategicResumeSummary(
+  plan: DocumentStrategyPlanLike,
+  existingSummary: string | undefined,
+): string | undefined {
+  const position = normalizeLine(plan.positioningFrame ?? '').trim();
+  if (!position) return existingSummary;
+
+  const topAxes = Array.from(
+    new Set([
+      ...(plan.roleLens?.priorities ?? []).slice(0, 3),
+      ...((plan.qualityPass?.topNarrativeAxes ?? []).slice(0, 2)),
+    ]),
+  ).filter(Boolean);
+  const topEvidence = (plan.selectedEvidence ?? []).slice(0, 3);
+  const evidenceThemes = topEvidence
+    .flatMap((entry) => [...(entry.matchedSignals ?? []), ...(entry.approvedClaims ?? [])])
+    .map((value) => normalizeLine(value))
+    .filter(Boolean);
+
+  const openingThemes = topAxes.slice(0, 2).join(', ');
+  const evidencePhrase = evidenceThemes.slice(0, 2).join(', ');
+  const firstLine = openingThemes
+    ? `${position} focused on ${openingThemes}.`
+    : `${position} focused on role-relevant execution.`;
+  const secondLine = evidencePhrase
+    ? `Strongest evidence centers on ${evidencePhrase}.`
+    : 'Strongest evidence stays centered on the highest-priority baseline signals.';
+  const thirdLine = 'Lower-relevance background stays out of the opening story.';
+
+  const summary = [firstLine, secondLine, thirdLine].join(' ');
+  if (containsAnyPhrase(summary, GENERIC_SUMMARY_PHRASES)) {
+    return existingSummary;
+  }
+  return summary;
+}
+
+function isWeakResumeSummary(value?: string | null): boolean {
+  const normalized = normalizeLine(value ?? '');
+  if (!normalized) return true;
+  if (normalized.length < 40) return true;
+  if (containsAnyPhrase(normalized, GENERIC_SUMMARY_PHRASES)) return true;
+  return !/\b(operations|strategy|delivery|support|incident|workflow|process|leadership|execution|scale)\b/i.test(
+    normalized,
+  );
 }
 
 function mergeWrappedBulletFragments(bullets: string[]): string[] {
@@ -899,6 +967,9 @@ function dedupeEducationEntries(
 export function buildNormalizedResumeDocument(
   sections: ResumeExportSection[],
   identity?: BaselineIdentity,
+  options?: {
+    documentStrategyPlan?: DocumentStrategyPlanLike | null;
+  },
 ): NormalizedResumeDocument {
   let summary: string | undefined;
   const coreCompetencies: string[] = [];
@@ -989,6 +1060,15 @@ export function buildNormalizedResumeDocument(
 
   const links: string[] = [];
   const dedupeEducation = dedupeEducationEntries(education);
+  const strategicSummary = options?.documentStrategyPlan
+    ? buildStrategicResumeSummary(options.documentStrategyPlan, summary)
+    : summary;
+  const normalizedSummary =
+    options?.documentStrategyPlan && isWeakResumeSummary(summary)
+      ? strategicSummary
+      : strategicSummary && containsAnyPhrase(strategicSummary, GENERIC_SUMMARY_PHRASES)
+        ? summary
+        : strategicSummary;
 
   const normalized: NormalizedResumeDocument = {
     heading: {
@@ -996,7 +1076,7 @@ export function buildNormalizedResumeDocument(
       contactLine: contactParts.join(' | '),
       ...(links.length ? { links } : {}),
     },
-    ...(summary ? { summary } : {}),
+    ...(normalizedSummary ? { summary: normalizedSummary } : {}),
     ...(coreCompetencies.length ? { competencies: coreCompetencies } : {}),
     ...(coreCompetencies.length ? { coreCompetencies } : {}),
     experience,

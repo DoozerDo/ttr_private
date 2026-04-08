@@ -24,6 +24,7 @@ import {
 } from '../../resume/resume-draft-bullets';
 import { validateGenerationTrace } from '../../generation/generation-validation';
 import { buildArtifactFailurePayload } from '../../generation/artifact-failure';
+import type { DocumentStrategyPlanLike } from '../../document-strategy-plan.types';
 
 type NormalizedJob = CoverLetterJobContext & {
   title: string | null;
@@ -62,14 +63,18 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       baselineBlocks,
       input.complianceConstraints,
     );
+    const strategyPlan = input.documentStrategyPlan ?? null;
     const selectedEvidence = this.selectEvidenceUnits(
       allEvidence,
       normalizedJob,
       input.safeMode === true,
+      strategyPlan,
     );
 
     const roleDescriptor = this.describeRole(normalizedJob);
     const paragraphEvidence = this.selectParagraphEvidence(selectedEvidence);
+    const strategyFrame = this.cleanText(strategyPlan?.positioningFrame ?? roleDescriptor);
+    const strategyDelta = strategyPlan?.qualityPass?.coverLetterDelta ?? [];
     const traceMap: Record<string, string[]> = {};
     const usedEvidenceIds = new Set<string>();
     const addTrace = (lineId: string, evidence: ResumeEvidenceUnit[]) => {
@@ -78,26 +83,47 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       ids.forEach((id) => usedEvidenceIds.add(id));
     };
 
-    if (!paragraphEvidence.opening.length || !paragraphEvidence.body1.length || !paragraphEvidence.body2.length) {
+    if (!paragraphEvidence.opening.length) {
       throw new Error('Cover letter generation failed validation: insufficient baseline evidence.');
     }
+    const openingEvidence = paragraphEvidence.opening.slice(0, 1);
+    const body1Evidence = paragraphEvidence.body1.length
+      ? paragraphEvidence.body1.slice(0, 1)
+      : openingEvidence;
+    const body2Evidence = paragraphEvidence.body2.length
+      ? paragraphEvidence.body2.slice(0, 1)
+      : body1Evidence;
+    const closingEvidence = paragraphEvidence.closing.length
+      ? paragraphEvidence.closing.slice(0, 1)
+      : body2Evidence;
 
     const opening = this.joinSentences([
       this.ensureSentence(`I am applying for ${roleDescriptor}.`),
-      ...paragraphEvidence.opening.map((entry) => this.ensureSentence(entry.normalizedText)),
+      this.ensureSentence(strategyDelta[0] ?? `I am bringing a ${strategyFrame.toLowerCase()} lens to this work.`),
+      ...openingEvidence.map((entry) => this.ensureSentence(entry.normalizedText)),
     ]);
     const bodyParagraphs = [
-      this.joinSentences(paragraphEvidence.body1.map((entry) => this.ensureSentence(entry.normalizedText))),
-      this.joinSentences(paragraphEvidence.body2.map((entry) => this.ensureSentence(entry.normalizedText))),
+      this.joinSentences([
+        this.ensureSentence(strategyDelta[1] ?? "The strongest fit comes from the operating context I have already handled."),
+        ...body1Evidence.map((entry) => this.ensureSentence(entry.normalizedText)),
+      ]),
+      this.joinSentences([
+        this.ensureSentence(strategyDelta[2] ?? "That background gives me a practical way to contribute without rehashing the resume."),
+        ...body2Evidence.map((entry) => this.ensureSentence(entry.normalizedText)),
+      ]),
     ];
     const closing = this.joinSentences([
-      paragraphEvidence.closing.length
-        ? this.joinSentences(paragraphEvidence.closing.map((entry) => this.ensureSentence(entry.normalizedText)))
-        : this.ensureSentence('I welcome the opportunity to discuss how this experience can support the role.'),
+      this.ensureSentence(
+        strategyDelta[3] ??
+          (closingEvidence.length
+            ? closingEvidence[0]?.normalizedText ??
+              'I welcome the opportunity to discuss how this experience can support the role.'
+            : 'I welcome the opportunity to discuss how this experience can support the role.'),
+      ),
     ]);
-    addTrace('opening', paragraphEvidence.opening);
-    addTrace('body_1', paragraphEvidence.body1);
-    addTrace('body_2', paragraphEvidence.body2);
+    addTrace('opening', openingEvidence);
+    addTrace('body_1', body1Evidence);
+    addTrace('body_2', body2Evidence);
 
     const document: NormalizedCoverLetterDocument = {
       senderHeading: {
@@ -114,12 +140,12 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     const paragraphEvidenceMetadata: CoverLetterGenerationResult['paragraphEvidence'] = [
       {
         paragraphKey: 'opening',
-        sourceEvidenceIds: paragraphEvidence.opening.map((entry) => entry.id),
-        anchorTexts: paragraphEvidence.opening.map((entry) => entry.sourceText),
+        sourceEvidenceIds: openingEvidence.map((entry) => entry.id),
+        anchorTexts: openingEvidence.map((entry) => entry.sourceText),
       },
       ...bodyParagraphs.map((paragraph, index) => {
         void paragraph;
-        const source = [paragraphEvidence.body1, paragraphEvidence.body2][index] ?? [];
+        const source = [body1Evidence, body2Evidence][index] ?? [];
         return {
           paragraphKey: (`body_${index + 1}` as 'body_1' | 'body_2' | 'body_3'),
           sourceEvidenceIds: source.map((entry) => entry.id),
@@ -128,15 +154,15 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       }),
       {
         paragraphKey: 'closing',
-        sourceEvidenceIds: paragraphEvidence.closing.map((entry) => entry.id),
-        anchorTexts: paragraphEvidence.closing.map((entry) => entry.sourceText),
+        sourceEvidenceIds: closingEvidence.map((entry) => entry.id),
+        anchorTexts: closingEvidence.map((entry) => entry.sourceText),
       },
     ];
     const validation = validateGenerationTrace(
       [
-        { id: 'opening', text: opening, sourceEvidenceIds: paragraphEvidence.opening.map((entry) => entry.id) },
-        { id: 'body_1', text: bodyParagraphs[0] ?? '', sourceEvidenceIds: paragraphEvidence.body1.map((entry) => entry.id) },
-        { id: 'body_2', text: bodyParagraphs[1] ?? '', sourceEvidenceIds: paragraphEvidence.body2.map((entry) => entry.id) },
+        { id: 'opening', text: opening, sourceEvidenceIds: openingEvidence.map((entry) => entry.id) },
+        { id: 'body_1', text: bodyParagraphs[0] ?? '', sourceEvidenceIds: body1Evidence.map((entry) => entry.id) },
+        { id: 'body_2', text: bodyParagraphs[1] ?? '', sourceEvidenceIds: body2Evidence.map((entry) => entry.id) },
       ],
       allEvidence.map((entry) => entry.id),
     );
@@ -149,6 +175,9 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     content = this.removeJobDescriptionEcho(content, normalizedJob);
     content = this.normalizeWritingStyle(content);
     content = this.trimToWordLimit(content, targetWords);
+    if (this.countWords(content) < COVER_LETTER_MIN_WORDS) {
+      content = this.ensureMinimumWordCount(content, document, targetWords);
+    }
     const reparsed = this.parseContentToDocument(content, document);
     const finalContent = this.composeTextContent(reparsed);
     const finalWordCount = this.countWords(finalContent);
@@ -264,6 +293,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     evidence: ResumeEvidenceUnit[],
     job: NormalizedJob,
     safeMode: boolean,
+    strategyPlan?: DocumentStrategyPlanLike | null,
   ): ResumeEvidenceUnit[] {
     const jobSignals = new Set(
       this.tokenize(
@@ -272,11 +302,37 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
           .join(' '),
       ),
     );
+    const strategyTokens = new Set(
+      [
+        ...(strategyPlan?.roleLens?.priorities ?? []),
+        ...(strategyPlan?.roleLens?.requiredSignals ?? []),
+        ...(strategyPlan?.roleLens?.targetKeywords ?? []),
+        ...(strategyPlan?.qualityPass?.topNarrativeAxes ?? []),
+        ...(strategyPlan?.qualityPass?.mustLeadWith ?? []),
+        ...(strategyPlan?.coverLetterThemes ?? []),
+      ]
+        .flatMap((value) => this.tokenize(value))
+        .filter(Boolean),
+    );
+    const suppressionTokens = new Set(
+      [
+        ...(strategyPlan?.qualityPass?.cutCandidates ?? []),
+        ...(strategyPlan?.suppressionNotes ?? []),
+      ]
+        .flatMap((value) => this.tokenize(value))
+        .filter(Boolean),
+    );
 
     const scored: ScoredEvidence[] = evidence.map((entry, index) => {
       const tokens = this.tokenize(entry.normalizedText);
       const overlap = tokens.filter((token) => jobSignals.has(token)).length;
-      const score = overlap * (safeMode ? 1 : 2) + Math.min(tokens.length / 14, 2);
+      const strategyOverlap = tokens.filter((token) => strategyTokens.has(token)).length;
+      const suppressionOverlap = tokens.filter((token) => suppressionTokens.has(token)).length;
+      const score =
+        overlap * (safeMode ? 1 : 2) +
+        strategyOverlap * 1.1 +
+        Math.min(tokens.length / 14, 2) -
+        suppressionOverlap * 0.65;
       return {
         evidence: entry,
         score,

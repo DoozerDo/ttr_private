@@ -43,7 +43,26 @@ import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import { BaselineDto, BaselineVersionDto, listBaselines } from "@/lib/baselines";
 import { appendStrengtheningAddition } from "@/lib/baselines";
 import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
-import { buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
+import {
+  buildDocumentStrategyPlan,
+  type RefinementPreset,
+  type RefinementTarget,
+  resolveRefinementTargets,
+} from "@/lib/documentStrategyPlan";
+import {
+  buildDocumentCritique,
+  type DocumentCritique,
+  type DocumentCritiqueIssue,
+} from "@/lib/documentCritique";
+import {
+  buildRoleMatchFinalPass,
+  resolveRoleMatchFinalAdjustmentPreset,
+  type RoleMatchFinalAdjustment,
+  type RoleMatchFinalPass,
+} from "@/lib/roleMatchFinalPass";
+import {
+  buildLanguageStylePass,
+} from "@/lib/languageStylePass";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
 import { getCanonicalNextAction, getGenerationCompletionStorageKey } from "@/lib/nextAction";
 import { deriveEvidenceLedger } from "@/lib/evidenceLedger";
@@ -80,6 +99,9 @@ import {
 import { BaselineBlockPolicyPanel } from "./BaselineBlockPolicyPanel";
 import { readResumeModel, ResumePreview, type ResumeModel } from "./ResumePreview";
 import { StudioArtifactQualityPanel } from "./StudioArtifactQualityPanel";
+import { StudioCritiquePanel } from "./StudioCritiquePanel";
+import { StudioRoleMatchPanel } from "./StudioRoleMatchPanel";
+import { StudioRefinementPanel } from "./StudioRefinementPanel";
 import { listJobs } from "@/lib/jobsClient";
 import { useEntitlements } from "@/src/lib/entitlements";
 import { trackEvent } from "@/src/lib/analytics";
@@ -708,6 +730,15 @@ export default function StudioPage() {
   const [, setCoverAuditId] = useState<string | undefined>();
   const [coverLetterComplianceBlocked, setCoverLetterComplianceBlocked] =
     useState<CoverLetterComplianceBlocked | null>(null);
+  const [refinementInstructions, setRefinementInstructions] = useState<RefinementPreset[]>([]);
+  const [refinementApplying, setRefinementApplying] = useState(false);
+  const [refinementStatusMessage, setRefinementStatusMessage] = useState<string | null>(null);
+  const [pendingRefinementAction, setPendingRefinementAction] = useState<{
+    action: "apply" | "undo" | "reset";
+    instruction?: RefinementPreset | null;
+    targets: RefinementTarget[];
+    summary: string;
+  } | null>(null);
   const [hasGeneratedOnce, setHasGeneratedOnce] = useState(false);
   const [unlockGenerationConfirmation, setUnlockGenerationConfirmation] = useState<string | null>(
     null,
@@ -720,6 +751,11 @@ export default function StudioPage() {
   const processedVerificationRef = useRef<string | null>(null);
   const confidencePanelTrackedRef = useRef<string | null>(null);
   const previousArtifactQualityRef = useRef<ArtifactQualityModel | null>(null);
+  const critiquePanelTrackedRef = useRef<string | null>(null);
+  const previousCritiqueSignatureRef = useRef<string | null>(null);
+  const previousCritiqueIssuesRef = useRef<DocumentCritiqueIssue[]>([]);
+  const finalRoleCheckTrackedRef = useRef<string | null>(null);
+  const finalRoleAdjustmentClickedRef = useRef<string | null>(null);
   const [applicationInsights, setApplicationInsights] = useState<ApplicationInsight[]>([]);
   const [opportunityContext, setOpportunityContext] = useState<{
     status: string;
@@ -1021,21 +1057,20 @@ export default function StudioPage() {
   const coverLetterJobDescriptionText = useMemo(() => {
     return extractJobDescription(selectedJob ?? null);
   }, [selectedJob]);
-  const documentStrategyPlan = useMemo(
-    () =>
-      buildDocumentStrategyPlan({
-        fitScore: analysisScore,
-        jobTitle: selectedJob?.title ?? analysis?.title ?? analysis?.jobTitle ?? null,
-        jobCompany: selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? null,
-        jobDescription: coverLetterJobDescriptionText,
-        jobRequirements: selectedJob?.normalizedRequirements ?? [],
-        jobResponsibilities: selectedJob?.normalizedResponsibilities ?? [],
-        analysisSummary: analysis?.summary ?? null,
-        analysisStrengths: analysis?.strengths ?? null,
-        analysisGaps: analysis?.gaps ?? null,
-        analysisRecommendedActions: analysis?.recommendedActions ?? null,
-        baselineSections: baselineDetail?.sections ?? selectedBaseline?.sections ?? [],
-      }),
+  const documentStrategyPlanInput = useMemo(
+    () => ({
+      fitScore: analysisScore,
+      jobTitle: selectedJob?.title ?? analysis?.title ?? analysis?.jobTitle ?? null,
+      jobCompany: selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? null,
+      jobDescription: coverLetterJobDescriptionText,
+      jobRequirements: selectedJob?.normalizedRequirements ?? [],
+      jobResponsibilities: selectedJob?.normalizedResponsibilities ?? [],
+      analysisSummary: analysis?.summary ?? null,
+      analysisStrengths: analysis?.strengths ?? null,
+      analysisGaps: analysis?.gaps ?? null,
+      analysisRecommendedActions: analysis?.recommendedActions ?? null,
+      baselineSections: baselineDetail?.sections ?? selectedBaseline?.sections ?? [],
+    }),
     [
       analysis?.gaps,
       analysis?.recommendedActions,
@@ -1054,6 +1089,14 @@ export default function StudioPage() {
       selectedJob?.normalizedResponsibilities,
       selectedJob?.title,
     ],
+  );
+  const documentStrategyPlan = useMemo(
+    () =>
+      buildDocumentStrategyPlan({
+        ...documentStrategyPlanInput,
+        refinements: refinementInstructions,
+      }),
+    [documentStrategyPlanInput, refinementInstructions],
   );
   const scoreBand = useMemo(() => {
     if (analysisScore === null) return null;
@@ -1536,6 +1579,63 @@ export default function StudioPage() {
     () => presentCoverLetterGeneration(coverState.response),
     [coverState.response],
   );
+  const documentCritique = useMemo(
+    () =>
+      buildDocumentCritique({
+        plan: documentStrategyPlan,
+        resumeModel: generatedResumeModel,
+        coverLetterParagraphs,
+      }),
+    [coverLetterParagraphs, documentStrategyPlan, generatedResumeModel],
+  );
+  const roleMatchFinalPass = useMemo(
+    () =>
+      buildRoleMatchFinalPass({
+        plan: documentStrategyPlan,
+        resumeModel: generatedResumeModel,
+        coverLetterParagraphs,
+        jobDescription:
+          selectedJob?.rawDescription ?? coverLetterJobDescriptionText ?? null,
+      }),
+    [
+      coverLetterJobDescriptionText,
+      coverLetterParagraphs,
+      documentStrategyPlan,
+      generatedResumeModel,
+      selectedJob?.rawDescription,
+    ],
+  );
+  const languageStylePass = useMemo(
+    () =>
+      buildLanguageStylePass({
+        plan: documentStrategyPlan,
+        roleLabel: selectedJob?.title ?? null,
+        resumeSummary: generatedResumeModel?.summary ?? null,
+        resumeBullets:
+          generatedResumeModel?.experience?.flatMap((entry) => entry.bullets ?? []) ?? [],
+        coverOpening: coverLetterParagraphs[0] ?? null,
+        coverParagraphs: coverLetterParagraphs,
+      }),
+    [
+      coverLetterParagraphs,
+      documentStrategyPlan,
+      generatedResumeModel?.experience,
+      generatedResumeModel?.summary,
+      selectedJob?.title,
+    ],
+  );
+  const roleMatchFinalSignature = useMemo(
+    () =>
+      [
+        roleMatchFinalPass.overallMatchReadiness,
+        roleMatchFinalPass.priorityCoverage.map((entry) => `${entry.priority}:${entry.strength}`).join(","),
+        roleMatchFinalPass.recruiterScanRisks.map((risk) => `${risk.type}:${risk.severity}`).join(","),
+        roleMatchFinalPass.recommendedFinalAdjustments
+          .map((adjustment) => `${adjustment.type}:${adjustment.target}`)
+          .join(","),
+      ].join("|"),
+    [roleMatchFinalPass],
+  );
   const artifactQuality = useMemo(
     () =>
       buildArtifactQualityModel({
@@ -1650,6 +1750,120 @@ export default function StudioPage() {
     return () => window.clearTimeout(timeout);
   }, [confidenceUpgradeMessage]);
   const hasCompletedGeneration = hasResumeArtifact || hasCoverLetterArtifact;
+  const hasGeneratedDocumentPair =
+    resumePresenter.status === "success" &&
+    coverPresenter.status === "success" &&
+    Boolean(resumeState.response && coverState.response);
+  useEffect(() => {
+    if (!documentCritique || !hasCompletedGeneration) return;
+    const signature = [
+      documentCritique.overallAssessment,
+      documentCritique.topIssues.map((issue) => `${issue.type}:${issue.severity}`).join(","),
+      documentCritique.recommendedNextAction?.refinementType ?? "none",
+    ].join("|");
+    const previousSignature = previousCritiqueSignatureRef.current;
+    const previousIssues = previousCritiqueIssuesRef.current;
+
+    if (critiquePanelTrackedRef.current !== signature) {
+      if (!critiquePanelTrackedRef.current) {
+        trackEvent("critique_panel_viewed", {
+          source: "studio",
+          baselineId: effectiveBaselineId || null,
+          jobId: effectiveJobId || null,
+          overallAssessment: documentCritique.overallAssessment,
+          issueCount: documentCritique.topIssues.length,
+          hasRecommendedAction: Boolean(documentCritique.recommendedNextAction),
+        });
+        if (
+          documentCritique.overallAssessment === "strong" &&
+          !documentCritique.topIssues.some((issue) => issue.severity === "high")
+        ) {
+          trackEvent("critique_stopping_state_reached", {
+            source: "studio",
+            baselineId: effectiveBaselineId || null,
+            jobId: effectiveJobId || null,
+            overallAssessment: documentCritique.overallAssessment,
+            issueCount: documentCritique.topIssues.length,
+          });
+        }
+      } else {
+        const changedIssueTypes = previousIssues
+          .map((issue) => issue.type)
+          .filter((issueType) => !documentCritique.topIssues.some((issue) => issue.type === issueType));
+        trackEvent("critique_recomputed", {
+          source: "studio",
+          baselineId: effectiveBaselineId || null,
+          jobId: effectiveJobId || null,
+          overallAssessment: documentCritique.overallAssessment,
+          issueCount: documentCritique.topIssues.length,
+          changedIssueTypes,
+        });
+
+        const resolvedIssues = previousIssues.filter(
+          (issue) => !documentCritique.topIssues.some((current) => current.type === issue.type),
+        );
+        for (const issue of resolvedIssues) {
+          trackEvent("critique_issue_resolved", {
+            source: "studio",
+            baselineId: effectiveBaselineId || null,
+            jobId: effectiveJobId || null,
+            issueType: issue.type,
+            severity: issue.severity,
+          });
+        }
+
+        if (
+          documentCritique.overallAssessment === "strong" &&
+          !documentCritique.topIssues.some((issue) => issue.severity === "high")
+        ) {
+          trackEvent("critique_stopping_state_reached", {
+            source: "studio",
+            baselineId: effectiveBaselineId || null,
+            jobId: effectiveJobId || null,
+            overallAssessment: documentCritique.overallAssessment,
+            issueCount: documentCritique.topIssues.length,
+          });
+        }
+      }
+      critiquePanelTrackedRef.current = signature;
+      previousCritiqueSignatureRef.current = signature;
+      previousCritiqueIssuesRef.current = documentCritique.topIssues;
+      return;
+    }
+
+    if (previousSignature !== signature) {
+      previousCritiqueSignatureRef.current = signature;
+      previousCritiqueIssuesRef.current = documentCritique.topIssues;
+    }
+  }, [documentCritique, effectiveBaselineId, effectiveJobId, hasCompletedGeneration]);
+  useEffect(() => {
+    if (!roleMatchFinalPass || !hasGeneratedDocumentPair) return;
+    if (finalRoleCheckTrackedRef.current === roleMatchFinalSignature) {
+      return;
+    }
+    finalRoleCheckTrackedRef.current = roleMatchFinalSignature;
+    trackEvent("final_role_check_viewed", {
+      source: "studio",
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      overallMatchReadiness: roleMatchFinalPass.overallMatchReadiness,
+      priorityCoverageCount: roleMatchFinalPass.priorityCoverage.length,
+      recruiterScanRiskCount: roleMatchFinalPass.recruiterScanRisks.length,
+      hasRecommendedAdjustments: roleMatchFinalPass.recommendedFinalAdjustments.length > 0,
+    });
+    if (
+      roleMatchFinalPass.overallMatchReadiness === "ready" &&
+      roleMatchFinalPass.recommendedFinalAdjustments.length === 0
+    ) {
+      trackEvent("final_role_check_passed", {
+        source: "studio",
+        baselineId: effectiveBaselineId || null,
+        jobId: effectiveJobId || null,
+        overallMatchReadiness: roleMatchFinalPass.overallMatchReadiness,
+        priorityCoverageCount: roleMatchFinalPass.priorityCoverage.length,
+      });
+    }
+  }, [effectiveBaselineId, effectiveJobId, hasGeneratedDocumentPair, roleMatchFinalPass, roleMatchFinalSignature]);
   const studioGenerationRenderState = useMemo(() => {
     const isGenerating = resumeGenerating || coverGenerating;
     const artifactType =
@@ -2110,6 +2324,177 @@ export default function StudioPage() {
       },
     });
   }
+
+  const queueRefinement = useCallback((preset: RefinementPreset) => {
+    if (!resumeState.response && !coverState.response) {
+      setRefinementStatusMessage("Generate a resume or cover letter before refining the output.");
+      return;
+    }
+
+    const nextRefinements = [...refinementInstructions, preset];
+    setRefinementInstructions(nextRefinements);
+    setPendingRefinementAction({
+      action: "apply",
+      instruction: preset,
+      targets: resolveRefinementTargets(preset),
+      summary: `Applied ${preset.label}.`,
+    });
+    setRefinementStatusMessage(`Applying ${preset.label}.`);
+    trackEvent("refinement_started", {
+      source: "studio",
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      refinementType: preset.type,
+      refinementTarget: preset.target,
+      refinementCount: nextRefinements.length,
+    });
+    trackEvent("refinement_type_used", {
+      source: "studio",
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      refinementType: preset.type,
+      refinementTarget: preset.target,
+    });
+  }, [
+    coverState.response,
+    effectiveBaselineId,
+    effectiveJobId,
+    refinementInstructions,
+    resumeState.response,
+  ]);
+  const applyFinalRoleAdjustment = useCallback(
+    (adjustment: RoleMatchFinalAdjustment) => {
+      const preset = resolveRoleMatchFinalAdjustmentPreset(
+        {
+          plan: documentStrategyPlan,
+          resumeModel: generatedResumeModel,
+          coverLetterParagraphs,
+          jobDescription:
+            selectedJob?.rawDescription ?? coverLetterJobDescriptionText ?? null,
+        },
+        adjustment,
+      );
+      if (!preset) {
+        setRefinementStatusMessage("This final tightening option is not available for the current draft.");
+        return;
+      }
+
+      finalRoleAdjustmentClickedRef.current = roleMatchFinalSignature;
+      trackEvent("final_role_adjustment_clicked", {
+        source: "studio",
+        baselineId: effectiveBaselineId || null,
+        jobId: effectiveJobId || null,
+        adjustmentType: adjustment.type,
+        adjustmentTarget: adjustment.target,
+      });
+      queueRefinement(preset);
+    },
+    [
+      coverLetterJobDescriptionText,
+      coverLetterParagraphs,
+      documentStrategyPlan,
+      effectiveBaselineId,
+      effectiveJobId,
+      generatedResumeModel,
+      queueRefinement,
+      roleMatchFinalSignature,
+      selectedJob?.rawDescription,
+    ],
+  );
+  const trackFinalRoleExportTelemetry = useCallback(
+    (artifactType: "resume" | "cover_letter") => {
+      if (!roleMatchFinalPass || !hasGeneratedDocumentPair) return;
+      if (finalRoleCheckTrackedRef.current !== roleMatchFinalSignature) return;
+
+      const followedAdjustment = finalRoleAdjustmentClickedRef.current === roleMatchFinalSignature;
+      trackEvent(
+        followedAdjustment ? "final_role_check_followed_by_export" : "final_role_check_ignored_then_exported",
+        {
+          source: "studio",
+          baselineId: effectiveBaselineId || null,
+          jobId: effectiveJobId || null,
+          artifactType,
+          adjustmentCount: followedAdjustment ? 1 : 0,
+          overallMatchReadiness: roleMatchFinalPass.overallMatchReadiness,
+          priorityCoverageCount: roleMatchFinalPass.priorityCoverage.length,
+          recruiterScanRiskCount: roleMatchFinalPass.recruiterScanRisks.length,
+        },
+      );
+    },
+    [
+      effectiveBaselineId,
+      effectiveJobId,
+      hasGeneratedDocumentPair,
+      roleMatchFinalPass,
+      roleMatchFinalSignature,
+    ],
+  );
+  const applyCritiqueRecommendation = useCallback(
+    (preset: RefinementPreset, issueType: DocumentCritiqueIssue["type"], placement: "best_next" | "issue") => {
+      trackEvent("critique_recommendation_clicked", {
+        source: "studio",
+        baselineId: effectiveBaselineId || null,
+        jobId: effectiveJobId || null,
+        issueType,
+        severity:
+          documentCritique?.topIssues.find((issue) => issue.type === issueType)?.severity ?? "medium",
+        refinementType: preset.type,
+        refinementTarget: preset.target,
+        placement,
+      });
+      queueRefinement(preset);
+    },
+    [documentCritique?.topIssues, effectiveBaselineId, effectiveJobId, queueRefinement],
+  );
+
+  const undoLastRefinement = useCallback(() => {
+    if (!refinementInstructions.length) return;
+    const undone = refinementInstructions[refinementInstructions.length - 1];
+    const nextRefinements = refinementInstructions.slice(0, -1);
+    setRefinementInstructions(nextRefinements);
+    setPendingRefinementAction({
+      action: "undo",
+      instruction: undone,
+      targets:
+        undone.target === "both"
+          ? ["resume", "cover_letter"]
+          : [undone.target],
+      summary: `Undoing ${undone.label ?? undone.type}.`,
+    });
+    setRefinementStatusMessage(`Undoing ${undone.label ?? undone.type}.`);
+    trackEvent("refinement_undone", {
+      source: "studio",
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      refinementType: undone.type,
+      refinementTarget: undone.target,
+      refinementCount: nextRefinements.length,
+    });
+  }, [effectiveBaselineId, effectiveJobId, refinementInstructions]);
+
+  const revertToOriginalRefinement = useCallback(() => {
+    if (!refinementInstructions.length) return;
+    const targets: RefinementTarget[] = [
+      ...(resumeState.response ? ["resume" as const] : []),
+      ...(coverState.response ? ["cover_letter" as const] : []),
+    ];
+    setRefinementInstructions([]);
+    setPendingRefinementAction({
+      action: "reset",
+      instruction: null,
+      targets,
+      summary: "Reverted to the original generation.",
+    });
+    setRefinementStatusMessage("Reverting to the original generation.");
+    trackEvent("refinement_undone", {
+      source: "studio",
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      refinementType: "reset",
+      refinementTarget: "both",
+      refinementCount: 0,
+    });
+  }, [coverState.response, effectiveBaselineId, effectiveJobId, refinementInstructions.length, resumeState.response]);
 
   const applyTargetingAdjustment = useCallback((labels: string[]) => {
     const normalizedLabels = labels
@@ -2925,6 +3310,16 @@ export default function StudioPage() {
         format,
         status: completionCopy.title,
       });
+      trackFinalRoleExportTelemetry("resume");
+      if (refinementInstructions.length > 0) {
+        trackEvent("refinement_followed_by_export", {
+          source: "studio",
+          baselineId: effectiveBaselineId || null,
+          jobId: effectiveJobId || null,
+          artifactType: "resume",
+          refinementCount: refinementInstructions.length,
+        });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Resume export failed.";
       setResumeState((current) => ({ ...current, error: message }));
@@ -3153,10 +3548,49 @@ export default function StudioPage() {
           code: "generation_failed",
         },
       }));
-    } finally {
+  } finally {
       setCoverGenerating(false);
     }
   };
+
+  useEffect(() => {
+    if (!pendingRefinementAction) return;
+    let cancelled = false;
+
+    const run = async () => {
+      setRefinementApplying(true);
+      try {
+        if (pendingRefinementAction.targets.includes("resume")) {
+          await handleResumeDraft();
+        }
+        if (pendingRefinementAction.targets.includes("cover_letter")) {
+          await handleCoverDraft();
+        }
+        if (!cancelled) {
+          setRefinementStatusMessage(pendingRefinementAction.summary);
+        }
+        trackEvent("refinement_applied", {
+          source: "studio",
+          baselineId: effectiveBaselineId || null,
+          jobId: effectiveJobId || null,
+          refinementAction: pendingRefinementAction.action,
+          refinementType: pendingRefinementAction.instruction?.type ?? "reset",
+          refinementTarget: pendingRefinementAction.instruction?.target ?? "both",
+          refinementCount: refinementInstructions.length,
+        });
+      } finally {
+        if (!cancelled) {
+          setPendingRefinementAction(null);
+          setRefinementApplying(false);
+        }
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveBaselineId, effectiveJobId, pendingRefinementAction, refinementInstructions.length]);
 
   const buildClaimVerificationHref = useCallback(
     (claimText: string) => {
@@ -3444,6 +3878,16 @@ export default function StudioPage() {
         format,
         status: completionCopy.title,
       });
+      trackFinalRoleExportTelemetry("cover_letter");
+      if (refinementInstructions.length > 0) {
+        trackEvent("refinement_followed_by_export", {
+          source: "studio",
+          baselineId: effectiveBaselineId || null,
+          jobId: effectiveJobId || null,
+          artifactType: "cover_letter",
+          refinementCount: refinementInstructions.length,
+        });
+      }
     } catch (error) {
       console.error("Cover letter export failed", error);
       const message = error instanceof Error ? error.message : "Cover letter export failed.";
@@ -3639,6 +4083,38 @@ export default function StudioPage() {
           onEditClaim={openClaimEditModal}
           onDismissClaim={dismissClaim}
         />
+        {hasCompletedGeneration ? (
+          <>
+            {documentCritique ? (
+              <StudioCritiquePanel
+                critique={documentCritique}
+                isApplying={refinementApplying}
+                onApplyRecommendation={applyCritiqueRecommendation}
+              />
+            ) : null}
+            <StudioRefinementPanel
+              plan={documentStrategyPlan}
+              refinementCount={refinementInstructions.length}
+              statusMessage={refinementStatusMessage}
+              isApplying={refinementApplying}
+              onApplyRefinement={queueRefinement}
+              onUndo={undoLastRefinement}
+              onReset={revertToOriginalRefinement}
+            />
+            {hasGeneratedDocumentPair ? (
+              <StudioRoleMatchPanel
+                finalPass={roleMatchFinalPass}
+                isApplying={refinementApplying}
+                stylePolishNote={
+                  languageStylePass.transformationsApplied.length > 0
+                    ? "Language polished for clarity and readability."
+                    : null
+                }
+                onApplyAdjustment={applyFinalRoleAdjustment}
+              />
+            ) : null}
+          </>
+        ) : null}
         <div className="flex flex-wrap items-center gap-3">
           {generationSupportState === "partial" ? (
             <>

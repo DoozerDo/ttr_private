@@ -29,6 +29,8 @@ describe("studio document plan summary", () => {
     );
     expect(screen.getByText("Positioning")).toBeInTheDocument();
     expect(screen.getByText("Emphasis")).toBeInTheDocument();
+    expect(screen.getByText("Cover letter")).toBeInTheDocument();
+    expect(screen.getByText("Quality")).toBeInTheDocument();
     expect(screen.getByText("Selected evidence")).toBeInTheDocument();
     expect(screen.queryByText(/sourceId/i)).toBeNull();
     expect(screen.queryByText(/section-1/i)).toBeNull();

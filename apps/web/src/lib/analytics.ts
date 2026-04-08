@@ -22,6 +22,11 @@ export const ANALYTICS_EVENT_NAMES = [
   "resume_generation_blocked_compliance",
   "artifact_used_intent",
   "artifact_refine_intent",
+  "refinement_started",
+  "refinement_type_used",
+  "refinement_applied",
+  "refinement_undone",
+  "refinement_followed_by_export",
   "opportunity_commit_intent",
   "cover_letter_generation_attempted",
   "cover_letter_generation_succeeded",
@@ -41,6 +46,16 @@ export const ANALYTICS_EVENT_NAMES = [
   "results_primary_cta_clicked",
   "artifact_viewed_with_confidence_level",
   "improve_output_panel_viewed",
+  "critique_panel_viewed",
+  "critique_recommendation_clicked",
+  "critique_issue_resolved",
+  "critique_recomputed",
+  "critique_stopping_state_reached",
+  "final_role_check_viewed",
+  "final_role_adjustment_clicked",
+  "final_role_check_passed",
+  "final_role_check_ignored_then_exported",
+  "final_role_check_followed_by_export",
   "claim_verify_clicked",
   "claim_edit_clicked",
   "claim_dismissed",
@@ -139,6 +154,45 @@ export type AnalyticsEventMap = {
     source: "studio" | "unknown";
     analysisId?: string;
     reason?: string;
+  };
+  refinement_started: {
+    source: "studio" | "unknown";
+    baselineId: string | null;
+    jobId: string | null;
+    refinementType: string;
+    refinementTarget: "resume" | "cover_letter" | "both";
+    refinementCount: number;
+  };
+  refinement_type_used: {
+    source: "studio" | "unknown";
+    baselineId: string | null;
+    jobId: string | null;
+    refinementType: string;
+    refinementTarget: "resume" | "cover_letter" | "both";
+  };
+  refinement_applied: {
+    source: "studio" | "unknown";
+    baselineId: string | null;
+    jobId: string | null;
+    refinementAction: "apply" | "undo" | "reset";
+    refinementType: string;
+    refinementTarget: "resume" | "cover_letter" | "both";
+    refinementCount: number;
+  };
+  refinement_undone: {
+    source: "studio" | "unknown";
+    baselineId: string | null;
+    jobId: string | null;
+    refinementType: string;
+    refinementTarget: "resume" | "cover_letter" | "both";
+    refinementCount: number;
+  };
+  refinement_followed_by_export: {
+    source: "studio" | "unknown";
+    baselineId: string | null;
+    jobId: string | null;
+    artifactType: "resume" | "cover_letter";
+    refinementCount: number;
   };
   opportunity_commit_intent: {
     source: "studio" | "unknown";
@@ -241,6 +295,89 @@ export type AnalyticsEventMap = {
     finalConfidence: "HIGH" | "MEDIUM" | "LOW";
     artifactScore: number;
     improvableClaimCount: number;
+  };
+  critique_panel_viewed: {
+    source: "studio";
+    baselineId: string | null;
+    jobId: string | null;
+    overallAssessment: "strong" | "mixed" | "weak";
+    issueCount: number;
+    hasRecommendedAction: boolean;
+  };
+  critique_recommendation_clicked: {
+    source: "studio";
+    baselineId: string | null;
+    jobId: string | null;
+    issueType: string;
+    severity: "high" | "medium" | "low";
+    refinementType: string;
+    refinementTarget: "resume" | "cover_letter" | "both";
+    placement: "best_next" | "issue";
+  };
+  critique_issue_resolved: {
+    source: "studio";
+    baselineId: string | null;
+    jobId: string | null;
+    issueType: string;
+    severity: "high" | "medium" | "low";
+  };
+  critique_recomputed: {
+    source: "studio";
+    baselineId: string | null;
+    jobId: string | null;
+    overallAssessment: "strong" | "mixed" | "weak";
+    issueCount: number;
+    changedIssueTypes: string[];
+  };
+  critique_stopping_state_reached: {
+    source: "studio";
+    baselineId: string | null;
+    jobId: string | null;
+    overallAssessment: "strong" | "mixed" | "weak";
+    issueCount: number;
+  };
+  final_role_check_viewed: {
+    source: "studio";
+    baselineId: string | null;
+    jobId: string | null;
+    overallMatchReadiness: "ready" | "needs_tightening" | "misaligned";
+    priorityCoverageCount: number;
+    recruiterScanRiskCount: number;
+    hasRecommendedAdjustments: boolean;
+  };
+  final_role_adjustment_clicked: {
+    source: "studio";
+    baselineId: string | null;
+    jobId: string | null;
+    adjustmentType: "summary_tighten" | "bullet_reorder" | "keyword_tighten" | "cover_letter_role_focus";
+    adjustmentTarget: "resume" | "cover_letter" | "both";
+  };
+  final_role_check_passed: {
+    source: "studio";
+    baselineId: string | null;
+    jobId: string | null;
+    overallMatchReadiness: "ready" | "needs_tightening" | "misaligned";
+    priorityCoverageCount: number;
+  };
+  final_role_check_ignored_then_exported: {
+    source: "studio";
+    baselineId: string | null;
+    jobId: string | null;
+    artifactType: "resume" | "cover_letter";
+    adjustmentCount: number;
+    overallMatchReadiness: "ready" | "needs_tightening" | "misaligned";
+    priorityCoverageCount: number;
+    recruiterScanRiskCount: number;
+  };
+  final_role_check_followed_by_export: {
+    source: "studio";
+    baselineId: string | null;
+    jobId: string | null;
+    artifactType: "resume" | "cover_letter";
+    adjustmentCount: number;
+    overallMatchReadiness: "ready" | "needs_tightening" | "misaligned";
+    priorityCoverageCount: number;
+    recruiterScanRiskCount: number;
   };
   claim_verify_clicked: {
     source: "studio";
