@@ -28,6 +28,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          cache: npm
+          node-version: 18
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run synthetic generation gate
+        run: npm run validate:synthetic
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 

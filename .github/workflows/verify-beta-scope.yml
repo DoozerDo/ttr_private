@@ -24,5 +24,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Run synthetic generation gate
+        run: npm run validate:synthetic
+
       - name: Run beta verification
         run: npm run verify:ci
