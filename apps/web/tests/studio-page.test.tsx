@@ -208,7 +208,7 @@ describe("Studio page UX", () => {
     expect(screen.queryByTestId("studio-evidence-blocked-panel")).toBeNull();
   });
 
-  it("shows a draft banner on first-run studio entry with incomplete evidence", async () => {
+  it("shows the strong artifact banner when the plan is high confidence", async () => {
     overrideSearchParams({
       analysisId: "analysis-1",
       jobId: "job-1",
@@ -254,10 +254,14 @@ describe("Studio page UX", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Draft")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Ready to generate" })).toBeInTheDocument();
     });
-    expect(screen.getByRole("heading", { name: "Generation is usable." })).toBeInTheDocument();
-    expect(screen.getByTestId("studio-evidence-allowed-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("studio-artifact-quality-panel")).toHaveTextContent("Strong Output");
+    expect(screen.getByTestId("studio-artifact-quality-panel")).toHaveTextContent(
+      "Built from verified experience",
+    );
+    expect(screen.getByTestId("studio-artifact-quality-panel")).toHaveTextContent("Confidence: High");
+    expect(screen.getByText("Improve this output")).toBeInTheDocument();
   });
 
   it("shows verified-evidence messaging for the first generation after unlock only", async () => {
@@ -673,9 +677,11 @@ describe("Studio page UX", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Draft output: usable now, stronger with refinement." })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Generation blocked" })).toBeInTheDocument();
     });
-    expect(screen.getByRole("link", { name: "Improve baseline" })).toHaveAttribute(
+    expect(screen.getByTestId("studio-decision-panel")).toHaveTextContent("Limited output: not ready yet.");
+    expect(screen.getByTestId("studio-artifact-quality-panel")).toHaveTextContent("Output needs work");
+    expect(screen.getByRole("link", { name: "Start Fit Review" })).toHaveAttribute(
       "href",
       "/resolve-gaps?jobId=job-1&baselineId=base-1",
     );
@@ -718,11 +724,14 @@ describe("Studio page UX", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Draft")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Ready to generate" })).toBeInTheDocument();
     });
-    expect(screen.getByRole("heading", { name: "Generation is usable." })).toBeInTheDocument();
-    expect(screen.getByTestId("studio-auto-adjust-panel")).toBeInTheDocument();
-    expect(screen.getByTestId("studio-one-step-unverified-list")).toHaveTextContent("- Salesforce Service Cloud administration");
+    expect(screen.getByTestId("studio-artifact-quality-panel")).toHaveTextContent("Usable Output");
+    expect(screen.getByTestId("studio-artifact-quality-panel")).toHaveTextContent(
+      "Some claims are unverified. Strengthen for best results.",
+    );
+    expect(screen.getByTestId("studio-artifact-quality-panel")).toHaveTextContent("Confidence: Medium");
+    expect(screen.getByText("Improve this output")).toBeInTheDocument();
   });
 
   it("generates a resume and exposes downloads after success", async () => {

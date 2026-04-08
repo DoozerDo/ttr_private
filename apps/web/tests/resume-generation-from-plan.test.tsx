@@ -1,0 +1,218 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, vi } from "vitest";
+
+import StudioPage from "@/app/(app)/studio/page";
+import { EntitlementsProvider } from "@/src/lib/entitlements";
+import { overrideSearchParams, setFetchImplementation } from "./setup";
+
+vi.mock("@/app/(app)/studio/BaselineBlockPolicyPanel", () => ({
+  BaselineBlockPolicyPanel: () => null,
+}));
+
+vi.mock("@/lib/jobsClient", () => ({
+  listJobs: vi.fn(async () => [
+    {
+      id: "job-1",
+      company: "Acme",
+      title: "Director of Support",
+      rawDescription:
+        "Lead support operations, workflow design, and cross-functional coordination for a SaaS platform.",
+      normalizedRequirements: [
+        "Own process and workflow improvements.",
+        "Partner with product and engineering.",
+      ],
+      normalizedResponsibilities: [
+        "Lead support operations programs.",
+        "Coordinate service delivery across teams.",
+      ],
+      archivedAt: null,
+      isArchived: false,
+    },
+  ]),
+}));
+
+vi.mock("@/lib/baselines", async () => {
+  const actual = await vi.importActual("@/lib/baselines");
+  return {
+    ...(actual as object),
+    listBaselines: vi.fn(async () => [
+      {
+        id: "base-1",
+        originalFilename: "Leadership Resume",
+        version: 1,
+      },
+    ]),
+  };
+});
+
+vi.mock("@/lib/generationProductReadiness", () => ({
+  buildGenerationProductReadiness: vi.fn(() => ({
+    generation_readiness: {
+      canGenerate: true,
+      canExport: true,
+      reasons: [],
+      verificationIssues: [],
+      blocked: false,
+    },
+    state: "ALLOWED",
+    confidence: "HIGH",
+    needsVerification: false,
+    tier: "generation_export_allowed",
+    canOpenStudio: true,
+    generationMode: "verified",
+  })),
+}));
+
+vi.mock("@/lib/studioTrustGate", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/studioTrustGate")>("@/lib/studioTrustGate");
+  return {
+    ...actual,
+    evaluateStudioTrustGate: vi.fn(() => ({
+      allowed: true,
+      reason: null,
+    })),
+  };
+});
+
+function renderStudio() {
+  return render(
+    <EntitlementsProvider
+      entitlements={{
+        id: "u-1",
+        email: "test@example.com",
+        subscriptionTier: "PRO",
+        role: "user",
+        entitlements: null,
+      }}
+    >
+      <StudioPage />
+    </EntitlementsProvider>,
+  );
+}
+
+function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
+  const text = typeof body === "string" ? body : JSON.stringify(body ?? {});
+  return {
+    ok,
+    status,
+    headers: {
+      get: (name: string) => {
+        if (name.toLowerCase() === "content-type") return "application/json";
+        return null;
+      },
+    },
+    json: () => Promise.resolve(body),
+    text: () => Promise.resolve(text),
+    blob: () => Promise.resolve(new Blob([text], { type: "application/json" })),
+  };
+}
+
+describe("resume generation from a shared strategy plan", () => {
+  beforeEach(() => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+  });
+
+  it("sends the shared document strategy plan into resume generation", async () => {
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/baselines/base-1") && !url.includes("/versions")) {
+        return Promise.resolve(
+          createResponse({
+            id: "base-1",
+            originalFilename: "Leadership Resume",
+            version: 1,
+            sections: [
+              {
+                id: "section-1",
+                title: "Support Operations",
+                sectionType: "EXPERIENCE",
+                content:
+                  "Led support operations programs, improved workflows, and partnered with engineering on service delivery.",
+              },
+            ],
+          }),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            scoring_v2: { score: 84 },
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+            summary: "Strong fit for support operations leadership.",
+            strengths: ["Support operations rigor", "Cross-functional leadership"],
+            gaps: [],
+            recommendedActions: [],
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.endsWith("/api/resume") && init?.method === "POST") {
+        return Promise.resolve(
+          createResponse({
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: {
+              resume: {
+                heading: { name: "Test Candidate", contactLine: "test@example.com" },
+                summary: "Verified support leader aligned to the role.",
+                experience: [
+                  {
+                    company: "Acme",
+                    roleTitle: "Director of Support",
+                    bullets: ["Led support operations and improved team performance."],
+                  },
+                ],
+              },
+            },
+          }),
+        );
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await screen.findByTestId("studio-document-plan-summary");
+    const generateResumeButton = await screen.findByRole("button", { name: "Generate Resume" });
+    await waitFor(() => expect(generateResumeButton).toBeEnabled());
+    fireEvent.click(generateResumeButton);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/resume"),
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    const resumeCall = fetchMock.mock.calls.find(
+      ([url, init]) => typeof url === "string" && url.endsWith("/api/resume") && init?.method === "POST",
+    );
+    expect(resumeCall).toBeTruthy();
+    const body = JSON.parse((resumeCall?.[1]?.body as string) ?? "{}");
+    expect(body.documentStrategyPlan.positioningFrame).toBe("Incident and service delivery leader");
+    expect(body.documentStrategyPlan.selectedEvidence.length).toBeGreaterThan(0);
+    expect(body.documentStrategyPlan.summaryStrategy).toContain(
+      "lead with Incident and service delivery leader",
+    );
+  });
+});

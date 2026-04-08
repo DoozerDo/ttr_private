@@ -14,7 +14,9 @@ import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
+import { DocumentStrategyPlanSummary } from "@/components/DocumentStrategyPlanSummary";
 import { buildExportPayload } from "../lib/exportPayload";
+import { buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
 import {
   formatErrorMessage,
   parseComplianceError,
@@ -24,6 +26,9 @@ import {
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import { readLastAnalysis, type StoredAnalysisRecord } from "../lib/session";
 import { useEntitlements } from "@/src/lib/entitlements";
+import { listJobs } from "@/lib/jobsClient";
+import type { JobDto } from "@/lib/jobs";
+import type { BaselineDto } from "@/lib/baselines";
 
 type AnyObject = Record<string, unknown>;
 
@@ -82,6 +87,8 @@ export default function CoverLettersPage() {
   const [documentState, setDocumentState] = useState<DocumentState>(() => createDocumentState());
   const [loadingDraft, setLoadingDraft] = useState(false);
   const [exportState, setExportState] = useState<{ format: "docx" | "pdf" } | null>(null);
+  const [jobs, setJobs] = useState<JobDto[]>([]);
+  const [baselineDetail, setBaselineDetail] = useState<BaselineDto | null>(null);
   const { isPro } = useEntitlements();
 
   useEffect(() => {
@@ -90,6 +97,26 @@ export default function CoverLettersPage() {
       setAnalysisRecord(stored);
       setRestoredAt(stored.savedAt);
     }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadJobs = async () => {
+      try {
+        const fetched = await listJobs({ includeArchived: true });
+        if (!cancelled) {
+          setJobs(Array.isArray(fetched) ? fetched : []);
+        }
+      } catch {
+        if (!cancelled) {
+          setJobs([]);
+        }
+      }
+    };
+    void loadJobs();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const jobId = useMemo(
@@ -148,6 +175,43 @@ export default function CoverLettersPage() {
     [analysisRecord],
   );
 
+  const resolvedJob = useMemo(() => {
+    if (!jobId) return null;
+    return jobs.find((job) => job.id === jobId) ?? null;
+  }, [jobId, jobs]);
+
+  useEffect(() => {
+    const activeBaselineId = baselineId || analysisRecord?.baselineId;
+    if (!activeBaselineId) {
+      setBaselineDetail(null);
+      return;
+    }
+    let cancelled = false;
+    const loadBaselineDetail = async () => {
+      try {
+        const response = await fetch(`/api/baselines/${encodeURIComponent(activeBaselineId)}`, {
+          cache: "no-store",
+          credentials: "include",
+        });
+        const payload = await response.json().catch(() => null);
+        if (cancelled) return;
+        if (!response.ok || !payload || typeof payload !== "object" || Array.isArray(payload)) {
+          setBaselineDetail(null);
+          return;
+        }
+        setBaselineDetail(payload as BaselineDto);
+      } catch {
+        if (!cancelled) {
+          setBaselineDetail(null);
+        }
+      }
+    };
+    void loadBaselineDetail();
+    return () => {
+      cancelled = true;
+    };
+  }, [analysisRecord?.baselineId, baselineId]);
+
   const jobContextPayload = useMemo(() => {
     const title = normalizeJobContextValue(jobTitle);
     const company = normalizeJobContextValue(jobCompany);
@@ -164,7 +228,10 @@ export default function CoverLettersPage() {
       jobId,
       baselineId,
       baselineVersionId,
-      extra: jobContextPayload ? { jobContext: jobContextPayload } : undefined,
+      extra: {
+        documentStrategyPlan,
+        ...(jobContextPayload ? { jobContext: jobContextPayload } : {}),
+      },
     }) as CoverLetterPayload;
   }
 
@@ -186,6 +253,39 @@ export default function CoverLettersPage() {
   const analysisSummary = useMemo(
     () => readStringFromPaths(analysisRecord, [["summary"], ["analysis", "summary"]]),
     [analysisRecord],
+  );
+  const documentStrategyPlan = useMemo(
+    () =>
+      buildDocumentStrategyPlan({
+        fitScore: latestScore,
+        jobTitle: resolvedJob?.title ?? jobTitle ?? null,
+        jobCompany: resolvedJob?.company ?? jobCompany ?? null,
+        jobDescription: resolvedJob?.rawDescription ?? resolvedJob?.description ?? null,
+        jobRequirements: resolvedJob?.normalizedRequirements ?? [],
+        jobResponsibilities: resolvedJob?.normalizedResponsibilities ?? [],
+        analysisSummary,
+        analysisStrengths: Array.isArray(analysisRecord?.analysis?.strengths)
+          ? analysisRecord.analysis.strengths
+          : null,
+        analysisGaps: Array.isArray(analysisRecord?.analysis?.gaps)
+          ? analysisRecord.analysis.gaps
+          : null,
+        analysisRecommendedActions: Array.isArray(analysisRecord?.analysis?.recommendedActions)
+          ? analysisRecord.analysis.recommendedActions
+          : null,
+        baselineSections: baselineDetail?.sections ?? [],
+      }),
+    [
+      analysisRecord?.analysis?.gaps,
+      analysisRecord?.analysis?.recommendedActions,
+      analysisRecord?.analysis?.strengths,
+      analysisSummary,
+      baselineDetail,
+      jobCompany,
+      jobTitle,
+      latestScore,
+      resolvedJob,
+    ],
   );
 
   const documentResponse = (documentState.response as AnyObject | null) ?? null;
@@ -401,9 +501,9 @@ export default function CoverLettersPage() {
             <p className="text-xs text-slate-400">Restored from your last session: {new Date(restoredAt).toLocaleString()}</p>
           ) : null}
 
-          {!analysisRecord ? (
-            <EmptyState
-              title="No analysis yet"
+        {!analysisRecord ? (
+          <EmptyState
+            title="No analysis yet"
               body={
                 <>
                   Load the latest analysis in the{" "}
@@ -417,13 +517,15 @@ export default function CoverLettersPage() {
               className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
             />
           ) : (
-            <p className="text-sm text-slate-300">
-              {readyForDocument
-                ? "The latest analysis is ready for cover letter drafting."
-                : "Generate the latest analysis in the Resume builder to unlock downloads."}
-            </p>
-          )}
-        </section>
+          <p className="text-sm text-slate-300">
+            {readyForDocument
+              ? "The latest analysis is ready for cover letter drafting."
+              : "Generate the latest analysis in the Resume builder to unlock downloads."}
+          </p>
+        )}
+
+        {analysisRecord ? <DocumentStrategyPlanSummary plan={documentStrategyPlan} /> : null}
+      </section>
 
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
           <div className="flex flex-wrap gap-3">

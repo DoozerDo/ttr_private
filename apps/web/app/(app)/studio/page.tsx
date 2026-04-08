@@ -7,6 +7,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
 import { ArtifactFailureState } from "@/components/ArtifactFailureState";
+import { DocumentStrategyPlanSummary } from "@/components/DocumentStrategyPlanSummary";
 import { GuidedOverlay } from "@/components/GuidedOverlay";
 import { type ComplianceFlag } from "@/components/ComplianceViolationPanel";
 import { EmptyState } from "@/components/EmptyState";
@@ -42,6 +43,7 @@ import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import { BaselineDto, BaselineVersionDto, listBaselines } from "@/lib/baselines";
 import { appendStrengtheningAddition } from "@/lib/baselines";
 import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
+import { buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
 import { getCanonicalNextAction, getGenerationCompletionStorageKey } from "@/lib/nextAction";
 import { deriveEvidenceLedger } from "@/lib/evidenceLedger";
@@ -132,6 +134,9 @@ type LatestAnalysis = {
   overallScore?: number | string | null;
   verdict?: string | null;
   summary?: string | null;
+  strengths?: string[] | null;
+  gaps?: string[] | null;
+  recommendedActions?: string[] | null;
   baselineId?: string;
   baselineVersionId?: string;
   supportingSignals?: unknown;
@@ -594,6 +599,7 @@ export default function StudioPage() {
   const [baselines, setBaselines] = useState<BaselineDto[]>([]);
   const [baselinesLoading, setBaselinesLoading] = useState(false);
   const [baselinesError, setBaselinesError] = useState<string | null>(null);
+  const [baselineDetail, setBaselineDetail] = useState<BaselineDto | null>(null);
 
   const [selectedJobId, setSelectedJobId] = useState("");
   const [selectedBaselineId, setSelectedBaselineId] = useState("");
@@ -861,6 +867,36 @@ export default function StudioPage() {
     () => baselines.find((baseline) => baseline.id === selectedBaselineId),
     [baselines, selectedBaselineId],
   );
+  useEffect(() => {
+    const activeBaselineId = selectedBaselineId || trimString(analysis?.baselineId);
+    if (!activeBaselineId) {
+      setBaselineDetail(null);
+      return;
+    }
+    let canceled = false;
+    const loadBaselineDetail = async () => {
+      try {
+        const response = await fetch(`/api/baselines/${encodeURIComponent(activeBaselineId)}`, {
+          cache: "no-store",
+        });
+        const payload = await readResponsePayload(response);
+        if (canceled) return;
+        if (!response.ok || !payload || typeof payload !== "object" || Array.isArray(payload)) {
+          setBaselineDetail(selectedBaseline ?? null);
+          return;
+        }
+        setBaselineDetail(payload as BaselineDto);
+      } catch {
+        if (!canceled) {
+          setBaselineDetail(selectedBaseline ?? null);
+        }
+      }
+    };
+    void loadBaselineDetail();
+    return () => {
+      canceled = true;
+    };
+  }, [analysis?.baselineId, selectedBaseline, selectedBaselineId]);
   const sourceResumeLabel = useMemo(() => {
     const raw =
       selectedBaseline?.originalFilename ||
@@ -953,6 +989,12 @@ export default function StudioPage() {
     setVersionRefreshSignal((prev) => prev + 1);
   }, []);
 
+  const analysisScore = useMemo(() => {
+    const value = analysis?.scoring_v2?.score;
+    if (typeof value === "number") return value;
+    return null;
+  }, [analysis]);
+
   const coverLetterJobContext = useMemo(() => {
     const jobWithExtras = selectedJob as Job & {
       companyName?: string | null;
@@ -979,12 +1021,40 @@ export default function StudioPage() {
   const coverLetterJobDescriptionText = useMemo(() => {
     return extractJobDescription(selectedJob ?? null);
   }, [selectedJob]);
-
-  const analysisScore = useMemo(() => {
-    const value = analysis?.scoring_v2?.score;
-    if (typeof value === "number") return value;
-    return null;
-  }, [analysis]);
+  const documentStrategyPlan = useMemo(
+    () =>
+      buildDocumentStrategyPlan({
+        fitScore: analysisScore,
+        jobTitle: selectedJob?.title ?? analysis?.title ?? analysis?.jobTitle ?? null,
+        jobCompany: selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? null,
+        jobDescription: coverLetterJobDescriptionText,
+        jobRequirements: selectedJob?.normalizedRequirements ?? [],
+        jobResponsibilities: selectedJob?.normalizedResponsibilities ?? [],
+        analysisSummary: analysis?.summary ?? null,
+        analysisStrengths: analysis?.strengths ?? null,
+        analysisGaps: analysis?.gaps ?? null,
+        analysisRecommendedActions: analysis?.recommendedActions ?? null,
+        baselineSections: baselineDetail?.sections ?? selectedBaseline?.sections ?? [],
+      }),
+    [
+      analysis?.gaps,
+      analysis?.recommendedActions,
+      analysis?.strengths,
+      analysis?.summary,
+      analysis?.company,
+      analysis?.companyName,
+      analysis?.jobTitle,
+      analysis?.title,
+      analysisScore,
+      baselineDetail?.sections,
+      coverLetterJobDescriptionText,
+      selectedBaseline?.sections,
+      selectedJob?.company,
+      selectedJob?.normalizedRequirements,
+      selectedJob?.normalizedResponsibilities,
+      selectedJob?.title,
+    ],
+  );
   const scoreBand = useMemo(() => {
     if (analysisScore === null) return null;
     return getScoreBand(analysisScore);
@@ -2012,6 +2082,7 @@ export default function StudioPage() {
       baselineVersionId: effectiveBaselineVersionId,
       analysisId: requestedAnalysisId,
       extra: {
+        documentStrategyPlan,
         closingTemplateKey: defaultClosingTemplateKey,
         ...(coverLetterJobContext ? { jobContext: coverLetterJobContext } : {}),
         ...(excludedTargetingLabels.size > 0
@@ -2030,6 +2101,7 @@ export default function StudioPage() {
       baselineVersionId: effectiveBaselineVersionId,
       analysisId: requestedAnalysisId,
       extra: {
+        documentStrategyPlan,
         ...(resumeFocus !== "Auto (recommended)" ? { resumeFocus } : {}),
         ...(savedEditedResumeModel ? { editedResume: savedEditedResumeModel } : {}),
         ...(excludedTargetingLabels.size > 0
@@ -3951,6 +4023,7 @@ export default function StudioPage() {
       ) : null}
 
       <StudioNextMove move={studioNextMove} />
+      <DocumentStrategyPlanSummary plan={documentStrategyPlan} />
 
       {!studioGenerationRenderState.isBlocked && !studioBlockedByNextAction ? (
       <>
