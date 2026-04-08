@@ -105,6 +105,8 @@ describe("Results fit improvement opportunities", () => {
 
     await waitFor(() => expect(screen.queryByText("Support Operations")).toBeNull());
     expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeTruthy();
+    expect(screen.queryByText(/Category:/i)).toBeNull();
+    expect(screen.queryByText(/Domain:/i)).toBeNull();
   });
 
   it("keeps change leadership out of What to fix when leadership-at-scale evidence is already present", async () => {
@@ -143,6 +145,8 @@ describe("Results fit improvement opportunities", () => {
     );
 
     await waitFor(() => expect(screen.queryByText("Change Leadership and Customer Advocacy")).toBeNull());
+    expect(screen.queryByText(/Category:/i)).toBeNull();
+    expect(screen.queryByText(/Domain:/i)).toBeNull();
   });
 
   it("keeps unsupported categories visible when no equivalent evidence exists", async () => {
@@ -177,7 +181,10 @@ describe("Results fit improvement opportunities", () => {
       />,
     );
 
-    await waitFor(() => expect(screen.getByText("Analytics Strategy")).toBeTruthy());
-    expect(screen.getByText("Verify the missing evidence")).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Strengthen this example", level: 3 })).toBeTruthy());
+    expect(screen.queryByText("Analytics Strategy")).toBeNull();
+    expect(screen.queryByText(/Category:/i)).toBeNull();
+    expect(screen.queryByText(/Domain:/i)).toBeNull();
+    expect(screen.queryByText("Verify the missing evidence")).toBeNull();
   });
 });

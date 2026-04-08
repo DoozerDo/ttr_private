@@ -164,6 +164,7 @@ export default function FitReviewClient() {
   const jobId = searchParams.get("jobId") ?? "";
   const requestedAnalysisId =
     searchParams.get("analysisId")?.trim() ?? searchParams.get("assessmentId")?.trim() ?? "";
+  const highlightedClaim = searchParams.get("highlightClaim")?.trim() ?? "";
   const [storedAnalysis, setStoredAnalysis] = useState<StoredAnalysisRecord | null>(null);
   const [assessment, setAssessment] = useState<FitAssessment | null>(null);
   const [loading, setLoading] = useState(false);
@@ -585,12 +586,37 @@ export default function FitReviewClient() {
     }
   };
 
+  const returnToStudioHref = useMemo(() => {
+    const params = new URLSearchParams();
+    if (startJobId) params.set("jobId", startJobId);
+    if (baselineId) params.set("baselineId", baselineId);
+    if (baselineVersionId) params.set("baselineVersionId", baselineVersionId);
+    if (fitAssessmentId) {
+      params.set("analysisId", fitAssessmentId);
+      params.set("assessmentId", fitAssessmentId);
+    }
+    if (highlightedClaim) params.set("verifiedClaim", highlightedClaim);
+    return `/studio?${params.toString()}`;
+  }, [baselineId, baselineVersionId, fitAssessmentId, highlightedClaim, startJobId]);
+
   return (
     <InstrumentShell
       kicker="Fit Review"
       title="Fit Review"
       subtitle={HERO_MESSAGE}
     >
+      {highlightedClaim ? (
+        <div className="px-6 pt-6">
+          <Alert intent="info" title="Claim to verify">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="max-w-3xl text-sm text-slate-100">{highlightedClaim}</p>
+              <FormButton onClick={() => void router.push(returnToStudioHref)}>
+                Confirm and return to Studio
+              </FormButton>
+            </div>
+          </Alert>
+        </div>
+      ) : null}
           {!hasAnalysis ? (
             <div className="px-6 py-10">
               <EmptyState

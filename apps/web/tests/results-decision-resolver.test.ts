@@ -3,42 +3,55 @@ import { describe, expect, it } from "vitest";
 import { resolveResultsDecision } from "@/lib/resultsDecisionResolver";
 
 describe("resolveResultsDecision", () => {
-  it("blocks strong fit when readiness is blocked", () => {
+  it("routes strong fit to Studio even when confidence is medium", () => {
     expect(
       resolveResultsDecision({
         score: 92,
-        generationReadinessStatus: "blocked",
-      }),
-    ).toMatchObject({
-      state: "BLOCKED",
-      primaryCta: "START_FIT_REVIEW",
-      headline: "Strong fit. Not ready to generate yet.",
-    });
-  });
-
-  it("opens Studio in draft mode when readiness is limited", () => {
-    expect(
-      resolveResultsDecision({
-        score: 92,
-        generationReadinessStatus: "limited",
+        generationReadiness: {
+          state: "ALLOWED",
+          confidence: "MEDIUM",
+          needsVerification: true,
+        },
       }),
     ).toMatchObject({
       state: "DRAFT",
       primaryCta: "OPEN_STUDIO",
-      headline: "Strong fit. Studio is available, but evidence is still thin.",
+      headline: "You're a strong match. You can generate now.",
+      subtext: "Some claims are unverified. You can strengthen your output in Studio.",
     });
   });
 
-  it("opens Studio when readiness is ready", () => {
+  it("opens Studio when strong fit is backed by verified evidence", () => {
     expect(
       resolveResultsDecision({
         score: 84,
-        generationReadinessStatus: "ready",
+        generationReadiness: {
+          state: "ALLOWED",
+          confidence: "HIGH",
+          needsVerification: false,
+        },
       }),
     ).toMatchObject({
       state: "READY",
       primaryCta: "OPEN_STUDIO",
-      headline: "Strong fit. Studio is ready.",
+      headline: "You're a strong match. You can generate now.",
+    });
+  });
+
+  it("opens Studio when readiness is ready for a competitive fit", () => {
+    expect(
+      resolveResultsDecision({
+        score: 84,
+        generationReadiness: {
+          state: "ALLOWED",
+          confidence: "HIGH",
+          needsVerification: false,
+        },
+      }),
+    ).toMatchObject({
+      state: "READY",
+      primaryCta: "OPEN_STUDIO",
+      headline: "You're a strong match. You can generate now.",
     });
   });
 
@@ -46,7 +59,11 @@ describe("resolveResultsDecision", () => {
     expect(
       resolveResultsDecision({
         score: 62,
-        generationReadinessStatus: "blocked",
+        generationReadiness: {
+          state: "BLOCKED",
+          confidence: "LOW",
+          needsVerification: true,
+        },
       }),
     ).toMatchObject({
       state: "IMPROVE",

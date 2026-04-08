@@ -79,6 +79,14 @@ export interface BaselineDto {
   versions?: BaselineVersionDto[];
 }
 
+export function getActiveBaselines(baselines: BaselineDto[]): BaselineDto[] {
+  return baselines.filter((baseline) => baseline.status !== "ARCHIVED");
+}
+
+export function hasActiveBaselines(baselines: BaselineDto[]): boolean {
+  return getActiveBaselines(baselines).length > 0;
+}
+
 export interface BaselineBlockDto {
   id: string;
   section_type: BaselineSectionType;

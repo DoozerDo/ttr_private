@@ -1136,6 +1136,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={onDrop}
                 data-testid="baseline-upload-surface"
+                id="baseline-upload"
               >
                 <div className="space-y-3">
                   <FormButton

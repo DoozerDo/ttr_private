@@ -44,6 +44,12 @@ vi.mock("@/lib/generationProductReadiness", () => ({
       verificationIssues: [],
       blocked: false,
     },
+    state: "ALLOWED",
+    confidence: "HIGH",
+    needsVerification: false,
+    tier: "generation_export_allowed",
+    canOpenStudio: true,
+    generationMode: "verified",
   })),
 }));
 

@@ -1,170 +1,73 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 
-import { normalizeAnalysisResult, saveLastAnalysis } from "../(app)/lib/session";
-import { resolveScoreBucket, trackEvent } from "@/src/lib/analytics";
+type FirstRunClientProps = {
+  archivedBaselineCount?: number;
+};
 
-export function FirstRunClient() {
-  const router = useRouter();
-  const [resumeFilename, setResumeFilename] = useState<string | null>(null);
-  const [resumeText, setResumeText] = useState("");
-  const [jobDescription, setJobDescription] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [progressIndex, setProgressIndex] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-
-  const progressMessage = useMemo(
-    () => ["Analyzing your experience...", "Comparing against role requirements..."][progressIndex] ?? "",
-    [progressIndex],
-  );
-
-  const canSubmit = jobDescription.trim().length > 0;
-
-  const handleSubmit = async () => {
-    if (!canSubmit || isSubmitting) return;
-    setError(null);
-    setIsSubmitting(true);
-    setProgressIndex(0);
-    trackEvent("compatibility_analysis_started", {
-      source: "app",
-      jobDescriptionLength: jobDescription.trim().length,
-      hasResume: resumeText.trim().length > 0,
-      analysisNumber: 1,
-    });
-
-    const timer = window.setInterval(() => {
-      setProgressIndex((current) => Math.min(current + 1, 1));
-    }, 1400);
-
-    try {
-      const response = await fetch("/api/preview/compatibility-score", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...(resumeText.trim() ? { resumeText: resumeText.trim() } : {}),
-          jobDescriptionText: jobDescription.trim(),
-          mode: "final-preview",
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Unable to analyze this role right now.");
-      }
-
-      const payload = (await response.json().catch(() => null)) as { score?: unknown } | null;
-      const score = typeof payload?.score === "number" ? payload.score : null;
-      if (score === null) {
-        throw new Error("Unable to analyze this role right now.");
-      }
-
-      const analysis = normalizeAnalysisResult({
-        score,
-        scoring_v2: { score },
-        strengths: [],
-        gaps: [],
-        summary: "First-run analysis completed.",
-      });
-
-      saveLastAnalysis({
-        savedAt: new Date().toISOString(),
-        analysis,
-        fitScore: score,
-        jobSource: { type: "pasted" },
-      });
-
-      trackEvent("compatibility_analysis_completed", {
-        source: "landing",
-        score,
-        scoreBucket: resolveScoreBucket(score),
-      });
-
-      await router.replace("/results");
-      await router.refresh();
-    } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Unable to analyze this role right now.");
-    } finally {
-      clearInterval(timer);
-      setIsSubmitting(false);
-    }
-  };
-
+export function FirstRunClient({ archivedBaselineCount = 0 }: FirstRunClientProps) {
   return (
-    <main className="min-h-screen bg-[linear-gradient(180deg,_#050816_0%,_#070b14_60%,_#050816_100%)] px-4 py-5 text-slate-100 md:px-6 md:py-6">
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-3">
-        <section className="space-y-2 pt-1 md:pt-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-slate-500">Target This Role</p>
-          <h1 className="text-3xl font-semibold tracking-tighter text-white md:text-4xl">Let&apos;s check a role.</h1>
-          <p className="max-w-xl text-[0.98rem] leading-7 text-slate-200 md:text-base">
-            Upload your resume and paste a job description to see where you actually stand.
-          </p>
-          <p className="text-sm text-slate-400">This takes about a minute and gives you a real answer.</p>
-        </section>
+    <main className="min-h-screen bg-[linear-gradient(180deg,_#050816_0%,_#070b14_60%,_#050816_100%)] px-4 py-6 text-slate-100 md:px-6 md:py-8">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+        <section className="space-y-4 rounded-[28px] border border-white/10 bg-slate-950/80 p-6 shadow-[0_18px_50px_rgba(2,6,23,0.28)] md:p-8">
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-slate-500">
+              Welcome
+            </p>
+            <h1 className="text-3xl font-semibold tracking-tight text-white md:text-4xl">
+              Start with your active baseline
+            </h1>
+            <p className="max-w-2xl text-base leading-7 text-slate-200">
+              Upload the resume you want to work from. We’ll turn it into your active baseline so you can
+              analyze roles, generate documents, and keep momentum in one place.
+            </p>
+          </div>
 
-        <section className="rounded-[24px] border border-slate-700/80 bg-slate-950/80 p-4 shadow-[0_18px_50px_rgba(2,6,23,0.28)] md:p-5">
-          <div className="space-y-4">
-            <div className="rounded-xl border border-slate-700/70 bg-slate-900/60 p-4">
-              <label className="block text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
-                Resume upload
-              </label>
-              <div className="mt-3 flex flex-wrap items-center gap-3">
-                <label className="inline-flex cursor-pointer items-center justify-center rounded-lg bg-[var(--accent-primary)] px-5 py-3 text-sm font-semibold text-slate-950">
-                  <input
-                    type="file"
-                    accept=".pdf,.doc,.docx"
-                    className="hidden"
-                    onChange={async (event) => {
-                      const file = event.target.files?.[0] ?? null;
-                      if (!file) return;
-                      setResumeFilename(file.name);
-                      setResumeText((await file.text().catch(() => "")).trim());
-                    }}
-                  />
-                  Select resume
-                </label>
-                <p className="text-sm text-slate-200">{resumeFilename ? resumeFilename : "PDF or DOCX"}</p>
-              </div>
+          {archivedBaselineCount > 0 ? (
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-300">
+              You already have {archivedBaselineCount} archived baseline
+              {archivedBaselineCount === 1 ? "" : "s"} in your library. You can restore them later from
+              Baseline Studio if needed.
             </div>
+          ) : null}
 
-            <div>
-              <label className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
-                Job description
-              </label>
-              <textarea
-                value={jobDescription}
-                onChange={(event) => setJobDescription(event.target.value)}
-                placeholder="Paste the full job description here"
-                className="mt-2 h-48 w-full resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 focus:border-slate-500 focus:outline-none"
-              />
-            </div>
-
-            <p className="text-sm text-slate-400">Grounded in your actual experience. Built to show where you match and where you do not.</p>
-
-            {isSubmitting ? (
-              <div className="space-y-2 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-200">
-                <p>{progressMessage}</p>
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
-                  <div
-                    className="h-full w-1/2 rounded-full bg-[var(--accent-primary)] transition-transform duration-300"
-                    style={{ transform: progressIndex > 0 ? "translateX(100%)" : "translateX(0)" }}
-                  />
-                </div>
-              </div>
-            ) : null}
-
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={!canSubmit || isSubmitting}
-              className="inline-flex w-full items-center justify-center rounded-lg bg-[var(--accent-primary)] px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/baseline#baseline-upload"
+              className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] bg-[var(--accent-primary)] px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-[var(--accent-primary-hover)]"
             >
-              {isSubmitting ? "Checking..." : "Check this role"}
-            </button>
+              Start baseline upload
+            </Link>
+            <Link
+              href="/baseline"
+              className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-white/15 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:border-white/30 hover:bg-white/[0.04]"
+            >
+              Open Baseline Studio
+            </Link>
           </div>
         </section>
 
-        {error ? <p className="px-1 text-sm text-rose-300">{error}</p> : null}
+        <section className="grid gap-4 rounded-[24px] border border-white/10 bg-white/[0.03] p-6 md:grid-cols-3">
+          <div>
+            <p className="text-sm font-semibold text-white">1. Upload</p>
+            <p className="mt-2 text-sm leading-6 text-slate-300">
+              Add the resume you want TTR to use as your working baseline.
+            </p>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-white">2. Create</p>
+            <p className="mt-2 text-sm leading-6 text-slate-300">
+              The baseline becomes your active workspace for scoring and generation.
+            </p>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-white">3. Continue</p>
+            <p className="mt-2 text-sm leading-6 text-slate-300">
+              Once the baseline exists, you’ll move into the normal baseline flow automatically.
+            </p>
+          </div>
+        </section>
       </div>
     </main>
   );

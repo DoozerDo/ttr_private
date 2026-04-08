@@ -39,6 +39,13 @@ export const ANALYTICS_EVENT_NAMES = [
   "results_improvement_module_viewed",
   "results_improvement_cta_clicked",
   "results_primary_cta_clicked",
+  "artifact_viewed_with_confidence_level",
+  "improve_output_panel_viewed",
+  "claim_verify_clicked",
+  "claim_edit_clicked",
+  "claim_dismissed",
+  "artifact_regenerated",
+  "confidence_upgraded",
 ] as const;
 
 export type AnalyticsEventName = (typeof ANALYTICS_EVENT_NAMES)[number];
@@ -216,6 +223,67 @@ export type AnalyticsEventMap = {
     action: "fit_review" | "verify_examples" | "open_studio_draft" | "open_studio";
     scoreBucket: ScoreBand | null;
     readinessStatus: ResultsPrimaryCtaReadinessStatus;
+  };
+  artifact_viewed_with_confidence_level: {
+    source: "studio";
+    baselineId: string | null;
+    jobId: string | null;
+    artifactType: "resume" | "cover_letter";
+    confidence: "HIGH" | "MEDIUM" | "LOW";
+    artifactScore: number;
+    missingEvidenceCount: number;
+  };
+  improve_output_panel_viewed: {
+    source: "studio";
+    baselineId: string | null;
+    jobId: string | null;
+    initialConfidence: "HIGH" | "MEDIUM" | "LOW";
+    finalConfidence: "HIGH" | "MEDIUM" | "LOW";
+    artifactScore: number;
+    improvableClaimCount: number;
+  };
+  claim_verify_clicked: {
+    source: "studio";
+    baselineId: string | null;
+    jobId: string | null;
+    claimText: string;
+    artifactType: "resume" | "cover_letter";
+    confidence: "HIGH" | "MEDIUM" | "LOW";
+    artifactScore: number;
+  };
+  claim_edit_clicked: {
+    source: "studio";
+    baselineId: string | null;
+    jobId: string | null;
+    claimText: string;
+    artifactType: "resume" | "cover_letter";
+    confidence: "HIGH" | "MEDIUM" | "LOW";
+    artifactScore: number;
+  };
+  claim_dismissed: {
+    source: "studio";
+    baselineId: string | null;
+    jobId: string | null;
+    claimText: string;
+    artifactType: "resume" | "cover_letter";
+    confidence: "HIGH" | "MEDIUM" | "LOW";
+    artifactScore: number;
+  };
+  artifact_regenerated: {
+    source: "studio";
+    baselineId: string | null;
+    jobId: string | null;
+    initialConfidence: "HIGH" | "MEDIUM" | "LOW";
+    finalConfidence: "HIGH" | "MEDIUM" | "LOW";
+    artifactScoreDelta: number;
+  };
+  confidence_upgraded: {
+    source: "studio";
+    baselineId: string | null;
+    jobId: string | null;
+    initialConfidence: "HIGH" | "MEDIUM" | "LOW";
+    finalConfidence: "HIGH" | "MEDIUM" | "LOW";
+    artifactScoreDelta: number;
   };
 };
 

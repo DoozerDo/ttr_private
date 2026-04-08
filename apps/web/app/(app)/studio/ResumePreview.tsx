@@ -35,6 +35,12 @@ type Props = {
   payload?: unknown;
   model?: ResumeModel | null;
   fallbackText?: string;
+  claimHighlights?: Array<{
+    id: string;
+    text: string;
+    baselineItem: string;
+    verificationStatus: "VERIFIED" | "INFERRED" | "UNVERIFIED";
+  }>;
   isEditing?: boolean;
   hasUnsavedChanges?: boolean;
   onEnterEditMode?: () => void;
@@ -54,6 +60,15 @@ function isNoiseCompetency(value: string): boolean {
   if (/^(?:summary|skills|competencies|experience|education)$/i.test(normalized)) return true;
   if (/^[|,;:\-\s]+$/.test(normalized)) return true;
   return normalized.length < 3;
+}
+
+function matchesHighlightedClaim(text: string, highlights: Props["claimHighlights"]): boolean {
+  if (!highlights?.length) return false;
+  const normalized = text.toLowerCase();
+  return highlights.some((claim) => {
+    const claimText = claim.text.toLowerCase();
+    return claimText.length > 0 && (normalized === claimText || normalized.includes(claimText));
+  });
 }
 
 export function readResumeModel(payload: unknown): ResumeModel | null {
@@ -137,6 +152,7 @@ export function ResumePreview({
   payload,
   model: modelOverride,
   fallbackText,
+  claimHighlights,
   isEditing = false,
   hasUnsavedChanges = false,
   onEnterEditMode,
@@ -317,7 +333,20 @@ export function ResumePreview({
                           className="min-h-[72px] w-full rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2 text-sm leading-7 text-slate-100 outline-none transition focus:border-sky-300/40"
                         />
                       ) : (
-                        <span>{bullet}</span>
+                        <span
+                          className={
+                            matchesHighlightedClaim(bullet, claimHighlights)
+                              ? "rounded-sm border-b border-dotted border-amber-300/80 pb-0.5 text-slate-50"
+                              : undefined
+                          }
+                          title={
+                            matchesHighlightedClaim(bullet, claimHighlights)
+                              ? "Not yet verified"
+                              : undefined
+                          }
+                        >
+                          {bullet}
+                        </span>
                       )}
                     </li>
                   ))}

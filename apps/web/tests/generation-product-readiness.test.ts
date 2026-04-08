@@ -13,6 +13,9 @@ describe("generation product readiness contract", () => {
     expect(readiness.canOpenStudio).toBe(false);
     expect(readiness.generation_readiness.canGenerate).toBe(false);
     expect(readiness.generation_readiness.canExport).toBe(false);
+    expect(readiness.state).toBe("BLOCKED");
+    expect(readiness.confidence).toBe("LOW");
+    expect(readiness.needsVerification).toBe(true);
     expect(readiness.tier).toBe("fit_review_only");
   });
 
@@ -28,13 +31,16 @@ describe("generation product readiness contract", () => {
     expect(readiness.canOpenStudio).toBe(true);
     expect(readiness.generation_readiness.canGenerate).toBe(true);
     expect(readiness.generation_readiness.canExport).toBe(true);
+    expect(readiness.state).toBe("ALLOWED");
+    expect(readiness.confidence).toBe("HIGH");
+    expect(readiness.needsVerification).toBe(false);
     expect(readiness.tier).toBe("generation_export_allowed");
   });
 
-  it("allows a first draft even when required context is incomplete", () => {
+  it("allows strong-fit generation even when verification is weak", () => {
     const readiness = buildGenerationProductReadiness({
       score: 82,
-      authorityState: "LIMITED",
+      authorityState: "BLOCKED",
       hasCanonicalAssessment: true,
       hasRequiredContext: false,
       isPro: true,
@@ -43,6 +49,9 @@ describe("generation product readiness contract", () => {
 
     expect(readiness.canOpenStudio).toBe(true);
     expect(readiness.generation_readiness.canGenerate).toBe(true);
+    expect(readiness.state).toBe("ALLOWED");
+    expect(readiness.confidence).toBe("MEDIUM");
+    expect(readiness.needsVerification).toBe(true);
     expect(readiness.generationMode).toBe("draft");
   });
 
@@ -71,7 +80,7 @@ describe("generation product readiness contract", () => {
     expect(score76NonPro.tier).toBe("generation_allowed");
   });
 
-  it("fails closed when canonical assessment is missing", () => {
+  it("still allows strong-fit generation when canonical assessment is missing", () => {
     const readiness = buildGenerationProductReadiness({
       score: 94,
       authorityState: "READY",
@@ -80,8 +89,10 @@ describe("generation product readiness contract", () => {
       isPro: true,
     });
 
-    expect(readiness.canOpenStudio).toBe(false);
-    expect(readiness.generation_readiness.canGenerate).toBe(false);
+    expect(readiness.canOpenStudio).toBe(true);
+    expect(readiness.generation_readiness.canGenerate).toBe(true);
+    expect(readiness.state).toBe("ALLOWED");
+    expect(readiness.confidence).toBe("HIGH");
     expect(readiness.generation_readiness.reasonsBlocked).toContain(
       "missing_canonical_assessment",
     );

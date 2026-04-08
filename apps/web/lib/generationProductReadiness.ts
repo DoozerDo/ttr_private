@@ -6,6 +6,9 @@ export type GenerationReadinessContract = {
   reasonsBlocked: string[];
 };
 
+export type GenerationProductReadinessState = "ALLOWED" | "BLOCKED";
+export type GenerationProductConfidence = "HIGH" | "MEDIUM" | "LOW";
+
 export type GenerationProductTier =
   | "fit_review_only"
   | "studio_unlocked"
@@ -14,6 +17,9 @@ export type GenerationProductTier =
 
 export type GenerationProductReadiness = {
   generation_readiness: GenerationReadinessContract;
+  state: GenerationProductReadinessState;
+  confidence: GenerationProductConfidence;
+  needsVerification: boolean;
   tier: GenerationProductTier;
   canOpenStudio: boolean;
   generationMode: "draft" | "verified";
@@ -47,20 +53,33 @@ export function buildGenerationProductReadiness(
   }
 
   const score = typeof input.score === "number" ? input.score : null;
+  const scoreEligibleForGeneration = score !== null && score >= 80;
   const scoreEligibleForStudio = score !== null && score >= 70;
 
   if (!scoreEligibleForStudio) {
     reasonsBlocked.push("score_below_unlock_floor");
   }
 
-  const canOpenStudio =
+  const legacyCanGenerate =
     scoreEligibleForStudio &&
     input.hasCanonicalAssessment &&
-    (input.hasRequiredContext || !input.hasCompletedGeneration);
-  const canGenerate =
-    scoreEligibleForStudio &&
-    input.hasCanonicalAssessment &&
-    (input.hasRequiredContext || !input.hasCompletedGeneration);
+    (input.hasRequiredContext || !input.hasCompletedGeneration) &&
+    input.authorityState === "READY";
+
+  const state: GenerationProductReadinessState = scoreEligibleForGeneration
+    ? "ALLOWED"
+    : legacyCanGenerate
+      ? "ALLOWED"
+      : "BLOCKED";
+  const confidence: GenerationProductConfidence =
+    scoreEligibleForGeneration && input.authorityState !== "READY"
+      ? "MEDIUM"
+      : state === "ALLOWED"
+        ? "HIGH"
+        : "LOW";
+  const needsVerification = state === "ALLOWED" ? confidence !== "HIGH" : true;
+  const canOpenStudio = state === "ALLOWED";
+  const canGenerate = state === "ALLOWED";
   const canExport = canGenerate && input.isPro;
 
   if (!input.isPro) {
@@ -69,9 +88,9 @@ export function buildGenerationProductReadiness(
 
   const uniqueReasonsBlocked = Array.from(new Set(reasonsBlocked));
   const tier: GenerationProductTier =
-    !scoreEligibleForStudio
+    state === "BLOCKED" && !scoreEligibleForStudio
       ? "fit_review_only"
-      : !canGenerate
+      : state === "BLOCKED"
       ? "studio_unlocked"
       : canExport
       ? "generation_export_allowed"
@@ -83,8 +102,11 @@ export function buildGenerationProductReadiness(
       canExport,
       reasonsBlocked: uniqueReasonsBlocked,
     },
+    state,
+    confidence,
+    needsVerification,
     tier,
     canOpenStudio,
-    generationMode: input.hasCompletedGeneration ? "verified" : "draft",
+    generationMode: confidence === "HIGH" ? "verified" : "draft",
   };
 }

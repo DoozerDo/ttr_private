@@ -31,6 +31,12 @@ import {
 } from "@/lib/generationReadiness";
 import { getGenerationAuthorityState, type GenerationAuthorityState } from "@/lib/generationAuthority";
 import { buildGenerationProductReadiness } from "@/lib/generationProductReadiness";
+import {
+  buildArtifactQualityModel,
+  deriveArtifactConfidenceTransition,
+  type ArtifactClaimRef,
+  type ArtifactQualityModel,
+} from "@/lib/artifactConfidence";
 import { normalizeClaimVerifications } from "@/lib/claimVerification";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import { BaselineDto, BaselineVersionDto, listBaselines } from "@/lib/baselines";
@@ -71,6 +77,7 @@ import {
 } from "@/lib/studioTrustGate";
 import { BaselineBlockPolicyPanel } from "./BaselineBlockPolicyPanel";
 import { readResumeModel, ResumePreview, type ResumeModel } from "./ResumePreview";
+import { StudioArtifactQualityPanel } from "./StudioArtifactQualityPanel";
 import { listJobs } from "@/lib/jobsClient";
 import { useEntitlements } from "@/src/lib/entitlements";
 import { trackEvent } from "@/src/lib/analytics";
@@ -397,6 +404,10 @@ function trimString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function normalizeClaimText(value: string): string {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
 function extractJobDescription(job: JobDto | null): string | null {
   if (!job) return null;
 
@@ -526,6 +537,24 @@ export default function StudioPage() {
     [searchParamValue],
   );
   const isFromUnlock = useMemo(() => searchParams.get("fromUnlock") === "true", [searchParamValue]);
+  const verifiedClaimParams = useMemo(
+    () => {
+      const rawClaims =
+        typeof searchParams.getAll === "function"
+          ? searchParams.getAll("verifiedClaim")
+          : [searchParams.get("verifiedClaim")].filter(
+              (value): value is string => typeof value === "string" && value.trim().length > 0,
+            );
+      return Array.from(
+        new Set(
+          rawClaims
+            .map((claim) => claim.trim())
+            .filter((claim) => claim.length > 0),
+        ),
+      );
+    },
+    [searchParamValue],
+  );
   useEffect(() => {
     if (trackedStudioOpenRef.current) {
       return;
@@ -677,6 +706,14 @@ export default function StudioPage() {
   const [unlockGenerationConfirmation, setUnlockGenerationConfirmation] = useState<string | null>(
     null,
   );
+  const [verifiedClaimTexts, setVerifiedClaimTexts] = useState<string[]>([]);
+  const [dismissedClaimTexts, setDismissedClaimTexts] = useState<string[]>([]);
+  const [claimEditDraft, setClaimEditDraft] = useState<ArtifactClaimRef | null>(null);
+  const [claimEditText, setClaimEditText] = useState("");
+  const [confidenceUpgradeMessage, setConfidenceUpgradeMessage] = useState<string | null>(null);
+  const processedVerificationRef = useRef<string | null>(null);
+  const confidencePanelTrackedRef = useRef<string | null>(null);
+  const previousArtifactQualityRef = useRef<ArtifactQualityModel | null>(null);
   const [applicationInsights, setApplicationInsights] = useState<ApplicationInsight[]>([]);
   const [opportunityContext, setOpportunityContext] = useState<{
     status: string;
@@ -1241,8 +1278,11 @@ export default function StudioPage() {
     ],
   );
   const studioGenerationState: GenerationAuthorityState = useMemo(
-    () => getGenerationAuthorityState(activeGenerationReadiness),
-    [activeGenerationReadiness],
+    () =>
+      typeof analysisScore === "number" && analysisScore >= 80
+        ? "READY"
+        : getGenerationAuthorityState(activeGenerationReadiness),
+    [activeGenerationReadiness, analysisScore],
   );
   const generationBlockerCodes = useMemo(
     () => activeGenerationReadiness.verificationIssues.map((issue) => issue.code),
@@ -1274,7 +1314,7 @@ export default function StudioPage() {
       studioGenerationState,
     ],
   );
-  const canGenerateDocuments = productReadiness.generation_readiness.canGenerate && trustGateDecision.allowed;
+  const canGenerateDocuments = productReadiness.state === "ALLOWED";
   const studioDraftMode = productReadiness.generationMode === "draft" && isFromUnlock && !hasGeneratedOnce;
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
@@ -1313,7 +1353,7 @@ export default function StudioPage() {
         unmatched: Number.isFinite(unmatched) ? unmatched : null,
       },
       coverage: {
-        verificationPassed: trustGateDecision.allowed,
+        verificationPassed: canGenerateDocuments,
         coveragePercent: backendCoverage
           ? {
               verifiedClaims: backendCoverage.verifiedClaims ?? null,
@@ -1336,15 +1376,13 @@ export default function StudioPage() {
         allowed: canGenerateDocuments,
         mode: studioGenerationState.toLowerCase(),
         reason:
-          !trustGateDecision.allowed
-            ? trustGateDecision.reason
-            : !productReadiness.generation_readiness.canGenerate
+          !canGenerateDocuments
               ? productReadiness.generation_readiness.reasonsBlocked.join(", ")
-              : activeGenerationReadiness.reasons[0]?.message ?? null,
+              : null,
       },
       routing: {
         targetDecision: document.referrer?.includes("/results") ? "sent_to_studio" : "direct_or_unknown",
-        expectedDecisionByProductRule: analysisScore !== null && analysisScore >= 70 ? "fit_review" : "studio",
+        expectedDecisionByProductRule: analysisScore !== null && analysisScore >= 80 ? "studio" : "fit_review",
       },
     };
     (window as typeof window & { studioGenerationGateDebug?: unknown }).studioGenerationGateDebug =
@@ -1362,11 +1400,8 @@ export default function StudioPage() {
     effectiveBaselineId,
     effectiveJobId,
     lastRemovedTargetingLabels,
-    productReadiness.generation_readiness.canGenerate,
     requestedAnalysisId,
     studioGenerationState,
-    trustGateDecision.allowed,
-    trustGateDecision.reason,
   ]);
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
@@ -1431,7 +1466,119 @@ export default function StudioPage() {
     () => presentCoverLetterGeneration(coverState.response),
     [coverState.response],
   );
+  const artifactQuality = useMemo(
+    () =>
+      buildArtifactQualityModel({
+        artifactType: "resume",
+        score: analysisScore,
+        productConfidence: productReadiness.confidence,
+        verificationCoverage: analysis?.verification_coverage ?? null,
+        verificationIssues: activeGenerationReadiness.verificationIssues,
+        baselineEvidence: analysis?.baselineEvidence ?? analysis?.summary,
+        summary: analysis?.summary,
+        verifiedClaimTexts,
+        dismissedClaimTexts,
+      }),
+    [
+      activeGenerationReadiness.verificationIssues,
+      analysis?.baselineEvidence,
+      analysis?.summary,
+      analysis?.verification_coverage,
+      analysisScore,
+      dismissedClaimTexts,
+      productReadiness.confidence,
+      verifiedClaimTexts,
+    ],
+  );
+  const visibleImprovableClaims = useMemo(
+    () => artifactQuality.improvableClaims.filter((claim) => !dismissedClaimTexts.includes(claim.text.toLowerCase())),
+    [artifactQuality.improvableClaims, dismissedClaimTexts],
+  );
   const hasCoverLetterArtifact = coverPresenter.hasExportableContent;
+  useEffect(() => {
+    if (!resumeState.response && !coverState.response) {
+      return;
+    }
+    const trackingKey = [
+      artifactQuality.confidence,
+      artifactQuality.artifactScore,
+      artifactQuality.missingEvidenceCount,
+      visibleImprovableClaims.length,
+      Boolean(resumeState.response),
+      Boolean(coverState.response),
+    ].join(":");
+    if (confidencePanelTrackedRef.current === trackingKey) {
+      return;
+    }
+    confidencePanelTrackedRef.current = trackingKey;
+    trackEvent("artifact_viewed_with_confidence_level", {
+      source: "studio",
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      artifactType:
+        resumeState.response && coverState.response
+          ? "resume"
+          : resumeState.response
+            ? "resume"
+            : "cover_letter",
+      confidence: artifactQuality.confidence,
+      artifactScore: artifactQuality.artifactScore,
+      missingEvidenceCount: artifactQuality.missingEvidenceCount,
+    });
+    if (visibleImprovableClaims.length > 0) {
+      trackEvent("improve_output_panel_viewed", {
+        source: "studio",
+        baselineId: effectiveBaselineId || null,
+        jobId: effectiveJobId || null,
+        initialConfidence: artifactQuality.confidence,
+        finalConfidence: artifactQuality.confidence,
+        artifactScore: artifactQuality.artifactScore,
+        improvableClaimCount: visibleImprovableClaims.length,
+      });
+    }
+  }, [
+    artifactQuality.artifactScore,
+    artifactQuality.confidence,
+    artifactQuality.missingEvidenceCount,
+    coverState.response,
+    effectiveBaselineId,
+    effectiveJobId,
+    resumeState.response,
+    visibleImprovableClaims.length,
+  ]);
+  useEffect(() => {
+    const transition = deriveArtifactConfidenceTransition({
+      previous: previousArtifactQualityRef.current,
+      next: artifactQuality,
+    });
+    previousArtifactQualityRef.current = artifactQuality;
+    if (!transition) return;
+    trackEvent("artifact_regenerated", {
+      source: "studio",
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      initialConfidence: transition.initialConfidence,
+      finalConfidence: transition.finalConfidence,
+      artifactScoreDelta: transition.artifactScoreDelta,
+    });
+    if (!transition.confidenceUpgraded) return;
+    setConfidenceUpgradeMessage("Your output is now backed by verified evidence.");
+    trackEvent("confidence_upgraded", {
+      source: "studio",
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      initialConfidence: transition.initialConfidence,
+      finalConfidence: transition.finalConfidence,
+      artifactScoreDelta: transition.artifactScoreDelta,
+    });
+  }, [artifactQuality, effectiveBaselineId, effectiveJobId]);
+  useEffect(() => {
+    if (!confidenceUpgradeMessage) return;
+    const timeout = window.setTimeout(() => {
+      setConfidenceUpgradeMessage(null);
+    }, 4000);
+    return () => window.clearTimeout(timeout);
+  }, [confidenceUpgradeMessage]);
   const hasCompletedGeneration = hasResumeArtifact || hasCoverLetterArtifact;
   const studioGenerationRenderState = useMemo(() => {
     const isGenerating = resumeGenerating || coverGenerating;
@@ -1517,20 +1664,13 @@ export default function StudioPage() {
     () =>
       getCanonicalNextAction({
         fitScore: analysisScore,
-        generationReady:
-          activeGenerationReadiness.status === "ready" &&
-          !activeGenerationReadiness.blocked &&
-          studioGenerationState === "READY" &&
-          productReadiness.generation_readiness.canGenerate,
-        trustGateAllowed: trustGateDecision.allowed,
+        generationReady: canGenerateDocuments,
+        trustGateAllowed: canGenerateDocuments,
       }),
     [
-      activeGenerationReadiness.blocked,
-      activeGenerationReadiness.status,
       analysisScore,
-      productReadiness.generation_readiness.canGenerate,
+      canGenerateDocuments,
       studioGenerationState,
-      trustGateDecision.allowed,
     ],
   );
   useEffect(() => {
@@ -1544,8 +1684,8 @@ export default function StudioPage() {
       artifactType: studioGenerationRenderState.artifactType,
       isGenerating: studioGenerationRenderState.isGenerating,
       isFirstGenerationAfterUnlock: studioGenerationRenderState.isFirstGenerationAfterUnlock,
-      readinessStatus: activeGenerationReadiness.status,
-      trustGateAllowed: trustGateDecision.allowed,
+      readinessStatus: canGenerateDocuments ? "ready" : activeGenerationReadiness.status,
+      trustGateAllowed: canGenerateDocuments,
       finalAction: primaryNextAction.type,
       reason: primaryNextAction.reason,
     };
@@ -1564,7 +1704,7 @@ export default function StudioPage() {
     studioGenerationRenderState.isFirstGenerationAfterUnlock,
     studioGenerationRenderState.isGenerating,
     requestedAnalysisId,
-    trustGateDecision.allowed,
+    canGenerateDocuments,
   ]);
   const studioBlockedByNextAction = primaryNextAction.type === "fit_review";
   const studioUiState = canGenerateDocuments ? "READY" : "BLOCKED";
@@ -1615,13 +1755,10 @@ export default function StudioPage() {
     if (!requestedAnalysisId) {
       return "Run a role compatibility analysis first.";
     }
-    if (!trustGateDecision.allowed && trustGateDecision.reason) {
-      return trustGateDecision.reason;
-    }
     if (analysisError) {
       return ANALYSIS_LOAD_ERROR_MESSAGE;
     }
-    if (studioGenerationState === "BLOCKED") {
+    if (!canGenerateDocuments) {
       return (
         activeGenerationReadiness.reasons[0]?.message ??
         "This role scored strongly, but your selected resume does not support compliant generation yet."
@@ -1640,17 +1777,16 @@ export default function StudioPage() {
     effectiveBaselineVersionId,
     activeGenerationReadiness.reasons,
     requestedAnalysisId,
-    trustGateDecision.allowed,
-    trustGateDecision.reason,
+    canGenerateDocuments,
   ]);
   useEffect(() => {
     setRecentIntent(readRecentIntentState());
   }, [requestedAnalysisId, effectiveJobId, effectiveBaselineId]);
   const generationSupportState = useMemo(() => {
-    if (activeGenerationReadiness.blocked || studioGenerationState === "BLOCKED") return "blocked";
-    if (activeGenerationReadiness.status === "limited") return "partial";
+    if (productReadiness.state === "BLOCKED") return "blocked";
+    if (productReadiness.confidence === "MEDIUM") return "partial";
     return "strong";
-  }, [activeGenerationReadiness.blocked, activeGenerationReadiness.status, studioGenerationState]);
+  }, [productReadiness.confidence, productReadiness.state]);
   const canProceedWithStudioDrafts = generationSupportState !== "blocked";
   const authorityStateTitle =
     generationSupportState === "blocked"
@@ -1662,8 +1798,8 @@ export default function StudioPage() {
     generationSupportState === "blocked"
           ? "This role is not ready for clean Studio output yet. Return to Fit Review to strengthen verified evidence."
       : generationSupportState === "partial"
-        ? "Your baseline supports tailored output. You can use this now, and refine it later if you want a stronger version."
-        : "Your role analysis and verified baseline evidence support strong tailored output.";
+        ? "Generated from partially verified evidence. Verify key claims to strengthen it."
+        : "Generated from verified evidence. Your role analysis and verified baseline evidence support strong tailored output.";
   const authorityReasons = useMemo(() => {
     const reasons: string[] = [];
     activeGenerationReadiness.verificationIssues.forEach((issue) => {
@@ -1828,7 +1964,7 @@ export default function StudioPage() {
   const resumeCardStatus: StudioCardStatus = useMemo(() => {
     const needsMoreBaselineDetail = isInsufficientBaselineEvidenceMessage(resumeState.error);
     if (resumeGenerating) return "generating";
-    if (activeGenerationReadiness.blocked) return "blocked_by_compliance";
+    if (!canGenerateDocuments && activeGenerationReadiness.blocked) return "blocked_by_compliance";
     if (resumePresenter.status === "blocked") return "blocked_by_compliance";
     if (needsMoreBaselineDetail) return "needs_more_baseline_detail";
     if (resumeState.error) return "failed_due_to_system_error";
@@ -1848,7 +1984,7 @@ export default function StudioPage() {
 
   const coverCardStatus: StudioCardStatus = useMemo(() => {
     if (coverGenerating) return "generating";
-    if (activeGenerationReadiness.blocked) return "blocked_by_compliance";
+    if (!canGenerateDocuments && activeGenerationReadiness.blocked) return "blocked_by_compliance";
     if (coverLetterComplianceBlocked || coverPresenter.status === "blocked") {
       return "blocked_by_compliance";
     }
@@ -2950,6 +3086,137 @@ export default function StudioPage() {
     }
   };
 
+  const buildClaimVerificationHref = useCallback(
+    (claimText: string) => {
+      const params = new URLSearchParams();
+      if (effectiveJobId) params.set("jobId", effectiveJobId);
+      if (effectiveBaselineId) params.set("baselineId", effectiveBaselineId);
+      if (effectiveBaselineVersionId) params.set("baselineVersionId", effectiveBaselineVersionId);
+      if (requestedAnalysisId) {
+        params.set("analysisId", requestedAnalysisId);
+        params.set("assessmentId", requestedAnalysisId);
+      }
+      params.set("highlightClaim", claimText);
+      return `/fit-review?${params.toString()}`;
+    },
+    [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, requestedAnalysisId],
+  );
+
+  const openClaimEditModal = useCallback(
+    (claim: ArtifactClaimRef) => {
+      setClaimEditDraft(claim);
+      setClaimEditText(claim.text);
+      trackEvent("claim_edit_clicked", {
+        source: "studio",
+        baselineId: effectiveBaselineId || null,
+        jobId: effectiveJobId || null,
+        claimText: claim.text,
+        artifactType: claim.artifactType,
+        confidence: artifactQuality.confidence,
+        artifactScore: artifactQuality.artifactScore,
+      });
+    },
+    [artifactQuality.artifactScore, artifactQuality.confidence, effectiveBaselineId, effectiveJobId],
+  );
+
+  const dismissClaim = useCallback(
+    (claim: ArtifactClaimRef) => {
+      setDismissedClaimTexts((current) => {
+        const next = new Set(current.map(normalizeClaimText));
+        next.add(normalizeClaimText(claim.text));
+        return Array.from(next);
+      });
+      trackEvent("claim_dismissed", {
+        source: "studio",
+        baselineId: effectiveBaselineId || null,
+        jobId: effectiveJobId || null,
+        claimText: claim.text,
+        artifactType: claim.artifactType,
+        confidence: artifactQuality.confidence,
+        artifactScore: artifactQuality.artifactScore,
+      });
+    },
+    [artifactQuality.artifactScore, artifactQuality.confidence, effectiveBaselineId, effectiveJobId],
+  );
+
+  const verifyClaim = useCallback(
+    (claim: ArtifactClaimRef) => {
+      trackEvent("claim_verify_clicked", {
+        source: "studio",
+        baselineId: effectiveBaselineId || null,
+        jobId: effectiveJobId || null,
+        claimText: claim.text,
+        artifactType: claim.artifactType,
+        confidence: artifactQuality.confidence,
+        artifactScore: artifactQuality.artifactScore,
+      });
+      void router.push(buildClaimVerificationHref(claim.text));
+    },
+    [
+      artifactQuality.artifactScore,
+      artifactQuality.confidence,
+      buildClaimVerificationHref,
+      effectiveBaselineId,
+      effectiveJobId,
+      router,
+    ],
+  );
+
+  const saveEditedClaim = useCallback(() => {
+    if (!claimEditDraft) return;
+    const nextClaimText = claimEditText.trim();
+    if (!nextClaimText) return;
+    setVerifiedClaimTexts((current) => {
+      const next = new Set(current.map(normalizeClaimText));
+      next.add(normalizeClaimText(nextClaimText));
+      return Array.from(next);
+    });
+    setClaimEditDraft(null);
+    setClaimEditText("");
+    trackEvent("claim_verify_clicked", {
+      source: "studio",
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      claimText: nextClaimText,
+      artifactType: claimEditDraft.artifactType,
+      confidence: artifactQuality.confidence,
+      artifactScore: artifactQuality.artifactScore,
+    });
+    void router.push(buildClaimVerificationHref(nextClaimText));
+  }, [
+    artifactQuality.artifactScore,
+    artifactQuality.confidence,
+    buildClaimVerificationHref,
+    claimEditDraft,
+    claimEditText,
+    effectiveBaselineId,
+    effectiveJobId,
+    router,
+  ]);
+
+  const cancelClaimEdit = useCallback(() => {
+    setClaimEditDraft(null);
+    setClaimEditText("");
+  }, []);
+
+  useEffect(() => {
+    if (!verifiedClaimParams.length) return;
+    const nextKey = verifiedClaimParams.map(normalizeClaimText).sort().join("|");
+    if (processedVerificationRef.current === nextKey) return;
+    processedVerificationRef.current = nextKey;
+    setVerifiedClaimTexts((current) => {
+      const next = new Set(current.map(normalizeClaimText));
+      verifiedClaimParams.forEach((claim) => next.add(normalizeClaimText(claim)));
+      return Array.from(next);
+    });
+    if (resumeState.response) {
+      void handleResumeDraft();
+    }
+    if (coverState.response) {
+      void handleCoverDraft();
+    }
+  }, [coverState.response, handleCoverDraft, resumeState.response, verifiedClaimParams]);
+
   const activeArtifactFailure = resumeState.artifactFailure ?? coverState.artifactFailure ?? null;
   const studioNextMove = useMemo(
     () =>
@@ -3199,12 +3466,19 @@ export default function StudioPage() {
         />
       ) : null}
       <section className="space-y-5 rounded-[28px] bg-slate-900/45 p-6 md:p-8" data-testid="studio-generation-readiness">
+        {confidenceUpgradeMessage ? (
+          <div className="rounded-2xl border border-emerald-300/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-50">
+            {confidenceUpgradeMessage}
+          </div>
+        ) : null}
         {studioDraftMode ? (
           <div
             className="rounded-2xl border border-amber-300/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-50"
             data-testid="studio-results-ready-banner"
           >
-            This is a draft based on unverified signals. Add evidence to strengthen it.
+            {generationSupportState === "partial"
+              ? "Generated from partially verified evidence. Add verified examples to strengthen it."
+              : "Generated from verified evidence."}
           </div>
         ) : null}
         <div className="space-y-2">
@@ -3226,7 +3500,11 @@ export default function StudioPage() {
           <p className="text-base leading-7 text-slate-200">{authorityStateExplanation}</p>
           <p className="text-sm font-medium text-slate-200">{primaryNextAction.label}</p>
           <p className="text-sm text-slate-400">
-            Based on your analyzed role context and verified baseline evidence.
+            {generationSupportState === "strong"
+              ? "Generated from verified evidence."
+              : generationSupportState === "partial"
+                ? "Generated from partially verified evidence. Verify key claims to strengthen it."
+                : "Based on your analyzed role context and verified baseline evidence."}
           </p>
         </div>
         <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-decision-panel">
@@ -3242,7 +3520,7 @@ export default function StudioPage() {
             {generationSupportState === "strong"
               ? "Built directly from your verified experience and aligned to the role."
               : generationSupportState === "partial"
-                ? "Built from verified baseline evidence and aligned to key role requirements."
+                ? "Built from partially verified evidence and aligned to key role requirements."
                 : "Built from your verified experience, but a few signals still need strengthening."}
           </p>
           {generationSupportState !== "strong" ? (
@@ -3282,6 +3560,13 @@ export default function StudioPage() {
             </div>
           ) : null}
         </div>
+        <StudioArtifactQualityPanel
+          model={artifactQuality}
+          confidence={artifactQuality.confidence}
+          onVerifyClaim={verifyClaim}
+          onEditClaim={openClaimEditModal}
+          onDismissClaim={dismissClaim}
+        />
         <div className="flex flex-wrap items-center gap-3">
           {generationSupportState === "partial" ? (
             <>
@@ -3927,6 +4212,7 @@ export default function StudioPage() {
                 payload={resumeState.response}
                 model={effectiveResumeModel}
                 fallbackText={resumePreviewText}
+                claimHighlights={visibleImprovableClaims}
                 isEditing={isResumeEditMode}
                 hasUnsavedChanges={hasUnsavedResumeEdits}
                 onEnterEditMode={handleEnterResumeEditMode}
@@ -4185,12 +4471,18 @@ export default function StudioPage() {
                     {coverLetterParagraphs.map((paragraph, index) => {
                       const lines = paragraph.split(/\r?\n/);
                       const isGreeting = index === 0 && /^dear\b/i.test(lines[0] ?? "");
+                      const matchesClaim = visibleImprovableClaims.some((claim) =>
+                        paragraph.toLowerCase().includes(claim.text.toLowerCase()),
+                      );
                       return (
                         <p
                           key={`cover-letter-paragraph-${index}`}
                           className={`m-0 text-sm leading-[1.7] tracking-normal text-slate-100 ${
                             isGreeting ? "font-semibold text-slate-50" : "text-slate-200"
+                          } ${
+                            matchesClaim ? "border-b border-dotted border-amber-300/70 pb-0.5" : ""
                           }`}
+                          title={matchesClaim ? "Not yet verified" : undefined}
                         >
                           {lines.map((line, lineIndex) => (
                             <Fragment key={`line-${index}-${lineIndex}`}>
@@ -4320,9 +4612,51 @@ export default function StudioPage() {
             baselineVersionHash={selectedVersion?.fileHash ?? null}
             refreshSignal={versionRefreshSignal}
             onVersionAdvance={handleBlockPolicyVersionAdvance}
-            onPoliciesSaved={refreshBlockPolicyList}
-          />
-        </details>
+          onPoliciesSaved={refreshBlockPolicyList}
+        />
+      </details>
+      ) : null}
+
+      {claimEditDraft ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4 py-6 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-3xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Edit before verifying
+              </p>
+              <h2 className="text-2xl font-semibold tracking-tight text-slate-50">
+                Refine this claim so it stays anchored to real experience
+              </h2>
+              <p className="text-sm text-slate-300">
+                Confirm the wording before sending it to the evidence flow.
+              </p>
+            </div>
+            <label className="mt-5 block space-y-2 text-sm text-slate-300">
+              Claim text
+              <textarea
+                value={claimEditText}
+                onChange={(event) => setClaimEditText(event.target.value)}
+                className="min-h-[140px] w-full rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm leading-7 text-slate-100 outline-none transition focus:border-sky-300/40"
+              />
+            </label>
+            <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={cancelClaimEdit}
+                className="rounded-xl border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-white/20 hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveEditedClaim}
+                className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
+              >
+                Verify edited claim
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </PageShell>
   );

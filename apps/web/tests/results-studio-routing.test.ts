@@ -1,4 +1,5 @@
 import { buildStudioHrefFromResultsContext } from "@/app/(app)/results/page";
+import { resolveResultsDecision } from "@/lib/resultsDecisionResolver";
 
 describe("Results to Studio routing", () => {
   it("routes to Studio with role analysis and explicit baseline context", () => {
@@ -20,5 +21,18 @@ describe("Results to Studio routing", () => {
         analysisId: "analysis-42",
       }),
     ).toBe("/studio?analysisId=analysis-42");
+  });
+
+  it("keeps strong-fit users routed to Studio even when evidence is only medium confidence", () => {
+    expect(
+      resolveResultsDecision({
+        score: 82,
+        generationReadiness: {
+          state: "ALLOWED",
+          confidence: "MEDIUM",
+          needsVerification: true,
+        },
+      }).primaryCta,
+    ).toBe("OPEN_STUDIO");
   });
 });

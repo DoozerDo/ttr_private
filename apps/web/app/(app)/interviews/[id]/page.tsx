@@ -42,6 +42,7 @@ import {
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
+import { mapGapToUserGuidance } from "@/lib/userGuidance";
 import { publishBaselineUpdated } from "@/src/lib/baseline-sync";
 
 type ComplianceFlag = {
@@ -165,19 +166,10 @@ function formatTimestamp(value?: string | null): string | null {
 }
 
 function describeAdditionSource(addition: RecommendedAddition): string {
+  if (!addition) return "Suggested from your interview review";
   const sources = Array.isArray(addition.sources) ? addition.sources : [];
-  const labels: string[] = [];
-
-  sources.forEach((source) => {
-    if (source.gapId) labels.push(`Gap ${source.gapId}`);
-    if (typeof source.questionIndex === "number")
-      labels.push(`Question ${source.questionIndex + 1}`);
-    if (source.questionPrompt) labels.push(`Prompt: ${source.questionPrompt}`);
-  });
-
-  if (!labels.length) return "General addition";
-
-  return labels.slice(0, 2).join(" | ");
+  if (sources.length === 0) return "Suggested from your interview review";
+  return "Suggested from your interview review";
 }
 
 const COMPLETION_STATUS_VALUES = ["complete", "completed", "done", "closed", "finished"];
@@ -1069,19 +1061,21 @@ export default function InterviewSessionPage() {
                     <div className="space-y-3">
                       {Array.from(recommendedAdditionsByGap.entries()).map(([gapId, additions]) => {
                         const gap = gapMap.get(gapId);
+                        const guidance = mapGapToUserGuidance({
+                          requirement: gap?.jdExcerpt ?? gap?.baselineExcerpt ?? gapId,
+                          baselineEvidence: gap?.baselineExcerpt ?? null,
+                          summary: gap?.jdExcerpt ?? null,
+                          fallbackTitle: "Strengthen this example",
+                        });
                         return (
                           <div
                             key={gapId}
                             className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/60 p-4"
                           >
-                            <div className="flex items-center justify-between">
+                            <div className="flex items-start justify-between gap-3">
                               <div className="space-y-1">
-                                <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                                  {gap ? `Gap ${gap.gapId}` : `Gap ${gapId}`}
-                                </p>
-                                <p className="text-xs text-slate-400">
-                                  {gap ? `Domain: ${gap.domain}` : "General addition"}
-                                </p>
+                                <p className="text-sm font-semibold text-slate-100">{guidance.title}</p>
+                                <p className="text-sm text-slate-300">{guidance.description}</p>
                               </div>
                               <span className="text-xs text-slate-400">
                                 {additions.length} suggestion{additions.length === 1 ? "" : "s"}
@@ -1147,38 +1141,24 @@ export default function InterviewSessionPage() {
                   {questions.map((question, index) => {
                     const gap = gapMap.get(question.gapId);
                     const complianceFlags = complianceLookup.questions[index] ?? [];
+                    const guidance = mapGapToUserGuidance({
+                      requirement: question.prompt ?? gap?.jdExcerpt ?? question.gapId,
+                      baselineEvidence: gap?.baselineExcerpt ?? null,
+                      summary: gap?.jdExcerpt ?? null,
+                      fallbackTitle: "Add context to this example",
+                    });
                     return (
                       <div key={(question.prompt ?? index) + "-" + index} className="space-y-4">
                         <div className="space-y-3">
                           <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
-                            {question.prompt}
+                            {guidance.title}
                           </label>
-                          <div className="flex flex-wrap gap-2 text-xs text-slate-400">
-                            <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1">
-                              Category: {question.category}
-                            </span>
-                            <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1">
-                              Gap: {question.gapId}
-                            </span>
-                            {gap ? (
-                              <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1">
-                                Domain: {gap.domain} | Confidence: {gap.confidence}
-                              </span>
-                            ) : null}
-                          </div>
-                          {gap ? (
-                            <p className="text-xs text-slate-400">
-                              JD excerpt: <em>{gap.jdExcerpt}</em>
-                              {gap.baselineExcerpt ? (
-                                <span className="text-xs text-slate-400">
-                                  {" "}
-                                  | Baseline: <em>{gap.baselineExcerpt}</em>
-                                </span>
-                              ) : null}
-                            </p>
+                          <p className="text-sm text-slate-300">{guidance.description}</p>
+                          {guidance.whyItMatters ? (
+                            <p className="text-xs text-slate-400">{guidance.whyItMatters}</p>
                           ) : null}
                           <p className="text-[11px] text-slate-400">
-                            Built from gap {question.gapId}.
+                            Add one concrete example from your experience and keep it factual.
                           </p>
                         </div>
                         <div className="rounded-2xl border border-white/15 bg-slate-900/70 p-3">
@@ -1187,7 +1167,7 @@ export default function InterviewSessionPage() {
                             onChange={(event) => handleChange(index, event.target.value)}
                             className="w-full rounded-xl border border-white/20 bg-slate-900/60 px-3 py-3 text-sm text-slate-100 outline-none focus:border-amber-400 focus:bg-white/10"
                             rows={6}
-                            placeholder="Write a specific, evidence-based response."
+                            placeholder={guidance.examplePrompt}
                           />
                         </div>
                         {complianceFlags.length ? (

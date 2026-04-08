@@ -761,6 +761,7 @@ export function OpportunityMapSection({
   );
   const blockedByEvidence = readiness.status === "blocked";
   const lowFitScore = typeof score === "number" && score < 70;
+  const strongFitScore = typeof score === "number" && score >= 80;
   const readinessToneClass =
     readiness.status === "blocked"
       ? "border-rose-300/30 bg-rose-500/8 text-rose-100"
@@ -775,20 +776,33 @@ export function OpportunityMapSection({
         ? "Competitive fit"
         : "This role needs more work";
   const readinessMessage =
-    readiness.status === "blocked"
-      ? lowFitScore
-        ? "This role needs stronger fit before Studio can generate safely. Start with Fit Review."
-        : "Your experience aligns with this role, but key claims still need verified evidence before Studio can generate safely."
-      : readiness.status === "limited"
+    strongFitScore
+      ? readiness.status === "ready"
+        ? "Your output is backed by verified evidence."
+        : "Some claims are unverified. You can strengthen your output in Studio."
+      : readiness.status === "blocked"
         ? lowFitScore
-          ? "Studio can open in draft mode, but the fit still needs improvement."
-          : "Studio can open in draft mode, but the evidence is still thin."
-        : "Your evidence is verified enough to generate safely.";
+          ? "This role needs stronger fit before Studio can generate safely. Start with Fit Review."
+          : "Your experience aligns with this role, but key claims still need verified evidence before Studio can generate safely."
+        : readiness.status === "limited"
+          ? lowFitScore
+            ? "Studio can open in draft mode, but the fit still needs improvement."
+            : "You can generate now. Verify key examples to strengthen your output."
+          : "Your evidence is verified enough to generate safely.";
   const decisionNarrative = useMemo(() => {
     if (lowFitScore) {
       return {
         headline: "This role may not be a fit.",
         body: "The score is below the fit threshold, so the role looks weaker overall.",
+      };
+    }
+    if (strongFitScore) {
+      return {
+        headline: "Strong fit. Studio is available.",
+        body:
+          readiness.status === "ready"
+            ? "Your output is backed by verified evidence."
+            : "Some claims are unverified. You can strengthen your output in Studio.",
       };
     }
     if (readiness.status === "blocked") {
@@ -799,8 +813,11 @@ export function OpportunityMapSection({
     }
     if (readiness.status === "limited") {
       return {
-        headline: `${fitDescriptor}. Studio is available, but evidence is still thin.`,
-        body: "Studio can open in draft mode now, and stronger verification will improve confidence and output quality.",
+        headline: `${fitDescriptor}. Studio is available.`,
+        body:
+          score !== null && score >= 80
+            ? "You can generate now. Add verified examples to strengthen your results."
+            : "Studio can open in draft mode now, and stronger verification will improve confidence and output quality.",
       };
     }
     if (readiness.status === "ready") {
@@ -813,7 +830,7 @@ export function OpportunityMapSection({
       headline: "This role is ready for review.",
       body: "Use the next step that matches the evidence state so Studio only uses trusted signals.",
     };
-  }, [fitDescriptor, lowFitScore, readiness.status]);
+  }, [fitDescriptor, lowFitScore, readiness.status, score, strongFitScore]);
   const baselineEvidencePreview = useMemo(
     () =>
       buildBaselineEvidencePreview({
@@ -826,7 +843,7 @@ export function OpportunityMapSection({
   return (
     <section className="rounded-3xl bg-slate-900/65 px-5 py-7 sm:px-6 sm:py-8">
       <div className="max-w-4xl space-y-6">
-        {blockedByEvidence && !lowFitScore ? (
+        {blockedByEvidence && !lowFitScore && !strongFitScore ? (
           <RouteStateShell
             testId="results-blocked-evidence-panel"
             tone="warning"
@@ -912,45 +929,49 @@ export function OpportunityMapSection({
         </div>
         {!lowFitScore ? (
           <>
-            <div className="space-y-3">
-              <h2 className="max-w-3xl text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl xl:text-5xl">
-                {decisionNarrative.headline}
-              </h2>
-              <p className="max-w-2xl text-sm leading-6 text-slate-100 md:text-base">
-                {decisionNarrative.body}
-              </p>
-            </div>
-            <CareerGravity />
-            <section className="space-y-3 rounded-[24px] border border-white/10 bg-slate-900/30 p-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-                Strategic Next Move
-              </p>
-              <div className="space-y-3">
-                <h3 className="text-xl font-semibold tracking-tight text-slate-100">
-                  {decisionNarrative.headline}
-                </h3>
-                <p className="max-w-2xl text-sm leading-6 text-slate-100 md:text-base">
-                  {decisionNarrative.body}
-                </p>
-                <div className="flex flex-wrap gap-3 text-sm">
-                  <a
-                    data-testid="results-hero-secondary-action"
-                    href={secondaryAction?.href ?? scoreAnalysisHref}
-                    className="font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
-                  >
-                    {secondaryAction?.label ?? "View top drivers"}
-                  </a>
-                  {nextAction.type === "studio_with_save" ? (
-                    <a
-                      href="#opportunity-save"
-                      className="font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
-                    >
-                      Save to Opportunities
-                    </a>
-                  ) : null}
+            {!strongFitScore ? (
+              <>
+                <div className="space-y-3">
+                  <h2 className="max-w-3xl text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl xl:text-5xl">
+                    {decisionNarrative.headline}
+                  </h2>
+                  <p className="max-w-2xl text-sm leading-6 text-slate-100 md:text-base">
+                    {decisionNarrative.body}
+                  </p>
                 </div>
-              </div>
-            </section>
+                <CareerGravity />
+                <section className="space-y-3 rounded-[24px] border border-white/10 bg-slate-900/30 p-5">
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                    Strategic Next Move
+                  </p>
+                  <div className="space-y-3">
+                    <h3 className="text-xl font-semibold tracking-tight text-slate-100">
+                      {decisionNarrative.headline}
+                    </h3>
+                    <p className="max-w-2xl text-sm leading-6 text-slate-100 md:text-base">
+                      {decisionNarrative.body}
+                    </p>
+                    <div className="flex flex-wrap gap-3 text-sm">
+                      <a
+                        data-testid="results-hero-secondary-action"
+                        href={secondaryAction?.href ?? scoreAnalysisHref}
+                        className="font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
+                      >
+                        {secondaryAction?.label ?? "View top drivers"}
+                      </a>
+                      {nextAction.type === "studio_with_save" ? (
+                        <a
+                          href="#opportunity-save"
+                          className="font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
+                        >
+                          Save to Opportunities
+                        </a>
+                      ) : null}
+                    </div>
+                  </div>
+                </section>
+              </>
+            ) : null}
           </>
         ) : null}
         {lowFitScore && weakFitRecovery ? (
@@ -958,25 +979,37 @@ export function OpportunityMapSection({
         ) : null}
         <div
           id="generation-readiness-details"
-          className={`rounded-xl border px-4 py-2.5 text-sm ${readinessToneClass}`}
+          className={`rounded-xl border px-4 py-2.5 text-sm ${
+            strongFitScore
+              ? "border-emerald-300/30 bg-emerald-500/10 text-emerald-50"
+              : readinessToneClass
+          }`}
         >
-          <p className="text-xs font-medium tracking-[0.08em] text-slate-300">
-            Generation readiness: {readinessBadgeLabel}
+          <p className={`text-xs font-medium tracking-[0.08em] ${strongFitScore ? "text-emerald-100" : "text-slate-300"}`}>
+            {strongFitScore
+              ? `Confidence: ${readiness.status === "ready" ? "High" : "Medium"}`
+              : `Generation readiness: ${readinessBadgeLabel}`}
           </p>
-          <p className="mt-1 text-slate-100">
+          <p className={`mt-1 ${strongFitScore ? "text-emerald-50" : "text-slate-100"}`}>
             {readinessMessage}
           </p>
-          {readiness.reasons[0]?.message ? (
+          {!strongFitScore && readiness.reasons[0]?.message ? (
             <p className="mt-1 text-xs text-slate-300">{readiness.reasons[0].message}</p>
           ) : null}
-          <p className="mt-1 text-xs text-slate-400">
-            Verification coverage: {verificationCoverage.status.toUpperCase()} - {verificationCoverage.verifiedClaims} /{" "}
-            {verificationCoverage.totalClaims > 0 ? verificationCoverage.totalClaims : "?"} verified claims
-          </p>
-          {unverifiedSignals.length > 0 ? (
+          {!strongFitScore ? (
+            <p className="mt-1 text-xs text-slate-400">
+              Verification coverage: {verificationCoverage.status.toUpperCase()} - {verificationCoverage.verifiedClaims} /{" "}
+              {verificationCoverage.totalClaims > 0 ? verificationCoverage.totalClaims : "?"} verified claims
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-emerald-100/80">
+              You can improve unverified claims after generation in Studio.
+            </p>
+          )}
+          {!strongFitScore && unverifiedSignals.length > 0 ? (
             <p className="mt-1 text-xs text-slate-300">Needs stronger verification: {unverifiedSignals.join(", ")}</p>
           ) : null}
-          {predictiveUnlock ? (
+          {!strongFitScore && predictiveUnlock ? (
             <p className="mt-2 text-xs text-slate-300">
               Removing unsupported requirements from targeting can{" "}
               {predictiveUnlock.predictedOutcome === "full"
@@ -985,7 +1018,8 @@ export function OpportunityMapSection({
             </p>
           ) : null}
         </div>
-        <section className="rounded-xl border border-white/10 bg-white/5 p-4">
+        {!strongFitScore ? (
+          <section className="rounded-xl border border-white/10 bg-white/5 p-4">
           <h3 className="text-sm font-semibold text-slate-100">Evidence used for this role</h3>
           {resolvedEvidenceLedger.entries.length ? (
             <ul className="mt-3 space-y-2">
@@ -1012,7 +1046,8 @@ export function OpportunityMapSection({
               We’re still assembling the strongest baseline signals for this run.
             </p>
           )}
-        </section>
+          </section>
+        ) : null}
       </div>
     </section>
   );
@@ -1745,8 +1780,7 @@ export default function ResultsPage() {
   const isQualified =
     typeof activeScore === "number" &&
     activeScore >= 70 &&
-    generationReadiness.status === "ready" &&
-    !generationReadiness.blocked;
+    (!generationReadiness.blocked || activeScore >= 80);
   const studioLocked = searchParams?.get("locked") === "1";
 
   const scoreBreakdown = useMemo(() => {
@@ -2073,6 +2107,31 @@ export default function ResultsPage() {
       }),
     [activeScore, generationReadiness, latest?.assessmentId, latest?.jobId, latestBaselineId],
   );
+  const resultsReadiness = useMemo<GenerationReadiness>(
+    () => ({
+      ...generationReadiness,
+      status:
+        productReadiness.state === "BLOCKED"
+          ? "blocked"
+          : productReadiness.confidence === "HIGH"
+            ? "ready"
+            : "limited",
+      blocked: productReadiness.state === "BLOCKED",
+      badgeLabel:
+        productReadiness.state === "BLOCKED"
+          ? "BLOCKED"
+          : productReadiness.confidence === "HIGH"
+            ? "READY"
+            : "LIMITED",
+      summary:
+        productReadiness.state === "BLOCKED"
+          ? "Your experience aligns with the role, but some claims still need verification."
+          : productReadiness.confidence === "HIGH"
+            ? "Your verified evidence is complete enough to generate safely in Studio."
+            : "Generate now. Then strengthen your output by verifying key claims in Studio.",
+    }),
+    [generationReadiness, productReadiness.confidence, productReadiness.state],
+  );
   const canOpenStudio = productReadiness.canOpenStudio;
   const claimVerifications = useMemo(
     () => normalizeClaimVerifications(debugFields?.toolingCoverage?.claims),
@@ -2129,7 +2188,7 @@ export default function ResultsPage() {
   const predictiveUnlock = useMemo(() => {
     const scoreValue = typeof activeScore === "number" ? activeScore : null;
     const readinessIsConstrained =
-      generationReadiness.status === "limited" || generationReadiness.status === "blocked";
+      resultsReadiness.status === "limited" || resultsReadiness.status === "blocked";
     if (!scoreValue || scoreValue < 85 || !readinessIsConstrained || canonicalUnverifiedRequirements.length === 0) {
       return null;
     }
@@ -2166,7 +2225,8 @@ export default function ResultsPage() {
     () =>
       typeof activeScore === "number" &&
       activeScore >= 70 &&
-      canonicalUnverifiedRequirements.length > 0,
+      canonicalUnverifiedRequirements.length > 0 &&
+      activeScore < 80,
     [activeScore, canonicalUnverifiedRequirements.length],
   );
   const resetExpansionForm = useCallback(() => {
@@ -2250,10 +2310,7 @@ export default function ResultsPage() {
     const shouldShowRefinementGuidance =
       recentIntent === "refine_intent" || recentIntent === "used_not_committed";
     if (
-      !(
-        (typeof activeScore === "number" && activeScore >= 70 && generationReadiness.status !== "ready") ||
-        shouldShowRefinementGuidance
-      )
+      !((typeof activeScore === "number" && activeScore >= 70 && resultsReadiness.status !== "ready") || shouldShowRefinementGuidance)
     ) {
       return [];
     }
@@ -2288,7 +2345,7 @@ export default function ResultsPage() {
     activeScore,
     canonicalUnverifiedRequirements,
     criticalGapDetails,
-    generationReadiness.status,
+    resultsReadiness.status,
     recentIntent,
     latest?.baselineEvidence,
     latest?.summary,
@@ -2330,7 +2387,8 @@ export default function ResultsPage() {
     latest?.supportingSignals,
     recentIntent,
   ]);
-  const showImprovementModule = improvementSuggestions.length > 0;
+  const isStrongFitScore = typeof activeScore === "number" && activeScore >= 80;
+  const showImprovementModule = !isStrongFitScore && improvementSuggestions.length > 0;
   const discoveredRoles = useMemo(
     () =>
       discoverCompetitiveRoles({
@@ -2341,6 +2399,9 @@ export default function ResultsPage() {
     [activeScore, applicationInsights, latest],
   );
   const resultsReturnCue = useMemo(() => {
+    if (isStrongFitScore) {
+      return "You're a match. Go generate.";
+    }
     if (recentIntent === "used_and_committed") {
       return "You're actively pursuing this role. Keep momentum in Opportunities.";
     }
@@ -2351,14 +2412,13 @@ export default function ResultsPage() {
       return "You signaled refinement, so Fit Review is the fastest path to a sharper result.";
     }
     return null;
-  }, [recentIntent]);
+  }, [isStrongFitScore, recentIntent]);
   const resultsScoreBucket = useMemo(
     () => (typeof activeScore === "number" ? getScoreBand(activeScore) : undefined),
     [activeScore],
   );
-  const isGenerationBlocked = generationReadiness.blocked || generationReadiness.status === "blocked";
-  const effectiveReadinessStatus: GenerationReadiness["status"] =
-    isGenerationBlocked ? "blocked" : generationReadiness.status;
+  const isGenerationBlocked = resultsReadiness.status === "blocked" && !isStrongFitScore;
+  const effectiveReadinessStatus: GenerationReadiness["status"] = resultsReadiness.status;
   useEffect(() => {
     if (!showImprovementModule) return;
     trackEvent("results_improvement_module_viewed", {
@@ -2368,7 +2428,7 @@ export default function ResultsPage() {
       scoreBucket: resultsScoreBucket ?? null,
     });
   }, [improvementSuggestions.length, recentIntent, resultsScoreBucket, showImprovementModule]);
-  const showGenerationUnlockedPanel = Boolean(latest) && justUnlocked && !isGenerationBlocked;
+  const showGenerationUnlockedPanel = Boolean(latest) && justUnlocked && !isGenerationBlocked && !isStrongFitScore;
   const evidenceLedger = useMemo(
     () =>
       deriveEvidenceLedger(latest, {
@@ -2378,22 +2438,23 @@ export default function ResultsPage() {
   );
   const primaryNextAction = useMemo(
     () =>
-      isFixFirstMode
-        ? {
-            type: "fit_review" as const,
-            label: "Start Fit Review",
-            route: fitReviewPath,
-            reason: "low_confidence_fix_first",
-          }
+          isFixFirstMode
+            ? {
+                type: "fit_review" as const,
+                label: "Start Fit Review",
+                route: fitReviewPath,
+                reason: "low_confidence_fix_first",
+              }
         : getCanonicalNextAction({
             fitScore: typeof activeScore === "number" ? activeScore : null,
-            generationReady: effectiveReadinessStatus !== "blocked",
+            generationReady: isStrongFitScore || resultsReadiness.status !== "blocked",
             trustGateAllowed: true,
           }),
     [
       activeScore,
-      effectiveReadinessStatus,
+      resultsReadiness.status,
       isFixFirstMode,
+      isStrongFitScore,
       fitReviewPath,
       studioHref,
     ],
@@ -2401,7 +2462,7 @@ export default function ResultsPage() {
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
     if (!latest) return;
-    const canonicalGenerationReady = effectiveReadinessStatus !== "blocked";
+    const canonicalGenerationReady = isStrongFitScore || resultsReadiness.status !== "blocked";
     const canonicalFinalAction = isFixFirstMode
       ? "fit_review"
       : getCanonicalNextAction({
@@ -2421,7 +2482,7 @@ export default function ResultsPage() {
       jobId: latest.jobId ?? null,
       baselineId: latest.baselineId ?? null,
       score: typeof activeScore === "number" ? activeScore : null,
-      readinessStatus: generationReadiness.status,
+      readinessStatus: resultsReadiness.status,
       effectiveReadinessStatus,
       trustGateAllowed: true,
       finalAction: canonicalFinalAction,
@@ -2432,8 +2493,9 @@ export default function ResultsPage() {
     console.info("canonicalGenerationRouteDebug", canonicalGenerationRouteDebug);
   }, [
     activeScore,
-    effectiveReadinessStatus,
+    resultsReadiness.status,
     isFixFirstMode,
+    isStrongFitScore,
     latest,
   ]);
   const isWeakFitScore = typeof activeScore === "number" && activeScore < 70;
@@ -2498,6 +2560,26 @@ export default function ResultsPage() {
   }, [advancedInsightsHref, effectiveReadinessStatus, fitReviewPath]);
   const oneClickResultsCta = useMemo(() => {
     if (!latest) return null;
+    if (isStrongFitScore) {
+      return {
+        label: "Open Studio",
+        href: studioHref,
+        disabled: !canOpenStudio,
+        description:
+          productReadiness.confidence === "HIGH"
+            ? "Open Studio to generate tailored materials now."
+            : "Open Studio now. Some claims are unverified, but you can strengthen them after generation.",
+        onClick: () => {
+          trackEvent("results_primary_cta_clicked", {
+            source: "results",
+            intentState: recentIntent ?? "none",
+            action: "open_studio",
+            scoreBucket: resultsScoreBucket ?? null,
+            readinessStatus: resultsReadiness.status,
+          });
+        },
+      };
+    }
     if (isWeakFitScore) {
       return {
         label: "Start Fit Review",
@@ -2513,7 +2595,7 @@ export default function ResultsPage() {
             intentState: recentIntent ?? "none",
             action: "fit_review",
             scoreBucket: resultsScoreBucket ?? null,
-            readinessStatus: generationReadiness.status,
+            readinessStatus: resultsReadiness.status,
           });
         },
         };
@@ -2533,7 +2615,7 @@ export default function ResultsPage() {
             intentState: recentIntent ?? "none",
             action: "verify_examples",
             scoreBucket: resultsScoreBucket ?? null,
-            readinessStatus: generationReadiness.status,
+            readinessStatus: resultsReadiness.status,
           });
         },
         };
@@ -2553,7 +2635,7 @@ export default function ResultsPage() {
             intentState: recentIntent ?? "none",
             action: "open_studio_draft",
             scoreBucket: resultsScoreBucket ?? null,
-            readinessStatus: generationReadiness.status,
+            readinessStatus: resultsReadiness.status,
           });
         },
       };
@@ -2572,29 +2654,35 @@ export default function ResultsPage() {
           intentState: recentIntent ?? "none",
           action: "open_studio",
           scoreBucket: resultsScoreBucket ?? null,
-          readinessStatus: generationReadiness.status,
+          readinessStatus: resultsReadiness.status,
         });
       },
     };
   }, [
     canOpenStudio,
     fitReviewPath,
-    generationReadiness.status,
+    resultsReadiness.status,
     latest,
     isWeakFitScore,
+    isStrongFitScore,
     effectiveReadinessStatus,
     recentIntent,
     resultsScoreBucket,
     studioHref,
     verificationUnlockLabel,
+    productReadiness.confidence,
   ]);
   const resultsDecision = useMemo(
     () =>
       resolveResultsDecision({
         score: typeof activeScore === "number" ? activeScore : null,
-        generationReadinessStatus: effectiveReadinessStatus,
+        generationReadiness: {
+          state: productReadiness.state,
+          confidence: productReadiness.confidence,
+          needsVerification: productReadiness.needsVerification,
+        },
       }),
-    [activeScore, effectiveReadinessStatus],
+    [activeScore, productReadiness.confidence, productReadiness.needsVerification, productReadiness.state],
   );
   const isReadyResultsState = resultsDecision.state === "READY";
   const formatDriverValue = (value?: number | null) =>
@@ -3398,39 +3486,79 @@ export default function ResultsPage() {
         ) : null}
         <section
           className={`rounded-2xl border p-4 ${
-            scorePresentationMode === "fix_first"
-              ? "border-amber-300/30 bg-amber-500/10"
-              : resultsDecision.state === "BLOCKED"
-              ? "border-amber-300/30 bg-amber-500/10"
-              : resultsDecision.state === "READY"
-                ? "border-emerald-300/30 bg-emerald-500/10"
-                : resultsDecision.state === "DRAFT"
+            isStrongFitScore
+              ? "border-emerald-300/30 bg-emerald-500/10"
+              : scorePresentationMode === "fix_first"
+                ? "border-amber-300/30 bg-amber-500/10"
+                : resultsDecision.state === "BLOCKED"
                   ? "border-amber-300/30 bg-amber-500/10"
-                : "border-slate-700/60 bg-slate-900/45"
+                  : resultsDecision.state === "READY"
+                    ? "border-emerald-300/30 bg-emerald-500/10"
+                    : resultsDecision.state === "DRAFT"
+                      ? "border-amber-300/30 bg-amber-500/10"
+                      : "border-slate-700/60 bg-slate-900/45"
           }`}
         >
           <p
             className={`text-sm font-semibold ${
-              scorePresentationMode === "fix_first"
-                ? "text-amber-100"
-                : resultsDecision.state === "BLOCKED"
-                ? "text-amber-100"
-                : resultsDecision.state === "READY"
-                  ? "text-emerald-100"
-                  : resultsDecision.state === "DRAFT"
+              isStrongFitScore
+                ? "text-emerald-100"
+                : scorePresentationMode === "fix_first"
+                  ? "text-amber-100"
+                  : resultsDecision.state === "BLOCKED"
                     ? "text-amber-100"
-                  : "text-slate-100"
+                    : resultsDecision.state === "READY"
+                      ? "text-emerald-100"
+                      : resultsDecision.state === "DRAFT"
+                        ? "text-amber-100"
+                        : "text-slate-100"
             }`}
           >
-            {scorePresentationMode === "fix_first"
-              ? "We may be underestimating your fit."
-              : resultsDecision.headline}
+            {isStrongFitScore
+              ? "You're a strong match. You can generate now."
+              : scorePresentationMode === "fix_first"
+                ? "We may be underestimating your fit."
+                : resultsDecision.headline}
           </p>
           <p className="mt-1 text-sm text-slate-100">
-            {scorePresentationMode === "fix_first"
-              ? "This score looks low confidence. Fix the evidence story first, then rerun generation."
-              : resultsDecision.subtext}
+            {isStrongFitScore
+              ? resultsDecision.subtext
+              : scorePresentationMode === "fix_first"
+                ? "This score looks low confidence. Fix the evidence story first, then rerun generation."
+                : resultsDecision.subtext}
           </p>
+          {isStrongFitScore ? (
+            <>
+              <p className="mt-2 text-sm font-medium text-emerald-100">
+                Confidence: {productReadiness.confidence === "HIGH" ? "High" : "Medium"}
+              </p>
+              <p className="mt-1 text-sm text-emerald-50">
+                {productReadiness.confidence === "HIGH"
+                  ? "Your results are backed by verified evidence."
+                  : "Some claims are unverified. You can strengthen your output in Studio."}
+              </p>
+              <p className="mt-1 text-xs text-emerald-100/80">
+                You can improve unverified claims after generation in Studio.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="mt-2 text-sm font-medium text-slate-200">
+                {productReadiness.confidence === "HIGH"
+                  ? "Confidence: High"
+                  : productReadiness.confidence === "MEDIUM"
+                    ? "Confidence: Medium"
+                    : "Confidence: Low"}
+              </p>
+              <p className="mt-1 text-sm text-slate-300">
+                {productReadiness.confidence === "HIGH"
+                  ? "Your results are backed by verified evidence."
+                  : productReadiness.confidence === "MEDIUM"
+                    ? "Some claims are not yet verified. You can improve output by confirming them."
+                    : "This result still needs stronger evidence before it can be trusted for generation."}
+              </p>
+            </>
+          )}
           <div className="mt-3">
             {oneClickResultsCta ? (
               oneClickResultsCta.disabled ? (
@@ -3453,14 +3581,16 @@ export default function ResultsPage() {
             ) : null}
           </div>
         </section>
-        {showGenerationUnlockedPanel ? (
+        {showGenerationUnlockedPanel && !isStrongFitScore ? (
           <section
             className="rounded-2xl border border-emerald-300/30 bg-emerald-500/10 p-4"
             data-testid="results-generation-unlocked-panel"
           >
             <p className="text-sm font-semibold text-emerald-100">GENERATION UNLOCKED</p>
             <p className="mt-1 text-sm text-slate-100">
-              Your evidence now supports this role. You can move into Studio with this result.
+              {productReadiness.confidence === "HIGH"
+                ? "Your evidence now supports this role. You can move into Studio with this result."
+                : "Generate now. Then strengthen your output by verifying key claims in Studio."}
             </p>
             {typeof reanalysisDelta.delta === "number" ? (
               <p className="mt-2 text-xs text-emerald-200">
@@ -3534,7 +3664,7 @@ export default function ResultsPage() {
             ) : null}
           </section>
         ) : null}
-        {isQualified ? (
+        {isQualified && !isStrongFitScore ? (
           <section className="rounded-2xl border border-emerald-300/30 bg-emerald-500/10 p-4">
             <h2 className="text-base font-semibold text-emerald-100">Apply moment</h2>
             <p className="mt-1 text-sm text-slate-100">
@@ -3603,7 +3733,7 @@ export default function ResultsPage() {
                     primaryCta={oneClickResultsCta}
                     evidenceLedger={evidenceLedger}
                     scoreAnalysisHref="#advanced-insights"
-                    readiness={generationReadiness}
+                    readiness={resultsReadiness}
                     verificationCoverage={verificationCoverage}
                     canonicalCoverage={latest?.verification_coverage ?? null}
                     predictiveUnlock={predictiveUnlock}
@@ -3886,7 +4016,7 @@ export default function ResultsPage() {
                       </ul>
                     ) : null}
                   </section>
-                  {!isReadyResultsState &&
+                  {!isReadyResultsState && !isStrongFitScore &&
                   (!isWeakFitScore || recentIntent === "refine_intent" || recentIntent === "used_not_committed") &&
                   scoreBand !== ScoreBand.TOP ? (
                     <section id="fit-improvement-opportunities" className="rounded-2xl border border-slate-700/50 bg-slate-900/35 p-3">
@@ -3941,7 +4071,7 @@ export default function ResultsPage() {
                       </div>
                     </section>
                   ) : null}
-                  {!isReadyResultsState ? (
+                  {!isReadyResultsState && !isStrongFitScore ? (
                     <section className="rounded-2xl border border-slate-700/50 bg-slate-900/35 p-3">
                       <CareerAlignmentProgress showProgressSection={false} />
                     </section>

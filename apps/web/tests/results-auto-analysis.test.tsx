@@ -168,12 +168,16 @@ describe("results auto analysis loading", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getAllByText("Strong fit. Studio is ready.").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("You're a strong match. You can generate now.").length).toBeGreaterThan(0);
     });
+    expect(screen.getByTestId("results-hero-primary-cta").closest("section")).toHaveTextContent(
+      "Confidence: Medium",
+    );
     expect(screen.queryByTestId("results-generation-unlocked-panel")).toBeNull();
-    expect(screen.getAllByText("Strong fit. Studio is ready.").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("You're a strong match. You can generate now.").length).toBeGreaterThan(0);
     expect(screen.queryByText("This role may not be a fit.")).toBeNull();
     expect(screen.queryByText("No compatibility analysis yet")).toBeNull();
+    expect(screen.queryByText("Start Fit Review")).toBeNull();
     await waitFor(() => {
       expect(screen.getByTestId("results-hero-primary-cta")).toHaveAttribute(
         "href",
@@ -235,7 +239,7 @@ describe("results auto analysis loading", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getAllByText("Competitive fit. Not ready to generate yet.").length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Competitive fit\. Not ready to generate yet\./).length).toBeGreaterThan(0);
     });
     expect(screen.getByTestId("results-blocked-evidence-panel")).toBeInTheDocument();
     expect(screen.getByTestId("results-score-verdict-card")).toBeInTheDocument();
@@ -245,7 +249,7 @@ describe("results auto analysis loading", () => {
         screen.getByTestId("results-score-verdict-card"),
       ) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    expect(screen.getAllByText("Missing verified evidence is blocking Studio.").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Competitive fit\. Not ready to generate yet\./).length).toBeGreaterThan(0);
     expect(screen.queryByText("No material gaps were identified in this run.")).toBeNull();
     expect(screen.getAllByTestId("results-hero-primary-cta")[0]).toHaveTextContent(
       "Verify 2 examples to unlock Studio",
@@ -304,10 +308,11 @@ describe("results auto analysis loading", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("results-generation-unlocked-panel")).toBeInTheDocument();
+      expect(screen.getByTestId("results-hero-primary-cta").closest("section")).toHaveTextContent(
+        "Confidence: High",
+      );
     });
-    expect(screen.getByText("GENERATION UNLOCKED")).toBeInTheDocument();
-    expect(screen.getByText("Your evidence now supports this role. You can move into Studio with this result.")).toBeInTheDocument();
+    expect(screen.queryByTestId("results-generation-unlocked-panel")).toBeNull();
     expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("Open Studio");
     expect(screen.getByRole("link", { name: "Open Studio" })).toBeInTheDocument();
   });
@@ -360,7 +365,7 @@ describe("results auto analysis loading", () => {
     render(<ResultsPage />);
 
     await screen.findByText("Strengthen your fit before generating.");
-    expect(screen.queryByTestId("results-hero-primary-cta")).not.toHaveTextContent("Open Studio");
+    expect(screen.getByTestId("results-hero-primary-cta")).not.toHaveTextContent("Open Studio");
     expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("Start Fit Review");
   });
 

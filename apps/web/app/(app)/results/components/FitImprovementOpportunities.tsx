@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { shouldSuppressCategorySuggestion } from "@/lib/evidenceSuggestions";
+import { mapGapToUserGuidance, type UserGuidanceCard } from "@/lib/userGuidance";
 
 type ImprovementOpportunity = {
   categoryKey: string;
@@ -31,7 +32,7 @@ type RequirementGapInsight = {
   delta?: number;
 };
 
-type VisibleInsight = ImprovementOpportunity | RequirementGapInsight;
+type VisibleInsight = UserGuidanceCard;
 
 type FitImprovementOpportunitiesProps = {
   assessmentId: string | null;
@@ -108,7 +109,25 @@ export function FitImprovementOpportunities({
       }),
   );
   const visibleInsights: VisibleInsight[] =
-    filteredCategorySuggestions.length > 0 ? filteredCategorySuggestions : fallbackInsights;
+    filteredCategorySuggestions.length > 0
+      ? filteredCategorySuggestions.map((opportunity) =>
+          mapGapToUserGuidance({
+            requirement: opportunity.categoryLabel,
+            currentSignal: opportunity.currentSignal,
+            roleExpectation: opportunity.roleExpectation,
+            explanation: opportunity.explanation,
+            fallbackDescription: opportunity.explanation,
+          }),
+        )
+      : fallbackInsights.map((insight) =>
+          mapGapToUserGuidance({
+            requirement: insight.requirement,
+            currentSignal: insight.currentSignal,
+            roleExpectation: insight.roleExpectation,
+            explanation: insight.explanation,
+            fallbackDescription: insight.explanation,
+          }),
+        );
 
   if (process.env.NODE_ENV !== "production") {
     console.info("fitImprovementOpportunitiesDebug", {
@@ -129,31 +148,25 @@ export function FitImprovementOpportunities({
       <section className="space-y-5 rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.82),rgba(2,6,23,0.9))] p-5 shadow-[0_16px_45px_rgba(2,6,23,0.2)]">
         <div className="space-y-2 border-b border-white/10 pb-4">
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-            Verification-first next step
+            Next step
           </p>
-          <h3 className="text-xl font-semibold tracking-tight text-slate-100">Verify the missing evidence</h3>
+          <h3 className="text-xl font-semibold tracking-tight text-slate-100">Strengthen this example</h3>
           <p className="text-sm leading-6 text-slate-300">
-            Start Fit Review to confirm the claims Studio still needs before it can generate safely.
+            Add one concrete example from your real experience so Studio can use it more confidently.
           </p>
         </div>
 
         <div className="space-y-3">
           {visibleInsights.slice(0, 2).map((opportunity) => (
             <article
-              key={`${("categoryKey" in opportunity ? opportunity.categoryKey : opportunity.requirement)}-${"categoryLabel" in opportunity ? opportunity.categoryLabel : opportunity.requirement}`}
+              key={`${opportunity.title}-${opportunity.description}`}
               className="rounded-[22px] border border-white/10 bg-white/[0.04] p-4"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-slate-100">
-                    {"categoryLabel" in opportunity ? opportunity.categoryLabel : opportunity.requirement}
-                  </p>
-                  <p className="mt-1 text-sm leading-6 text-slate-400">{opportunity.explanation}</p>
-                </div>
-                <div className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-2.5 py-1 text-xs font-semibold text-emerald-100">
-                  {typeof opportunity.delta === "number" ? `+${opportunity.delta.toFixed(1)}` : "Gap"}
-                </div>
-              </div>
+              <p className="text-sm font-semibold text-slate-100">{opportunity.title}</p>
+              <p className="mt-1 text-sm leading-6 text-slate-400">{opportunity.description}</p>
+              {opportunity.whyItMatters ? (
+                <p className="mt-2 text-xs leading-5 text-slate-500">{opportunity.whyItMatters}</p>
+              ) : null}
             </article>
           ))}
         </div>
@@ -170,52 +183,28 @@ export function FitImprovementOpportunities({
 
   return (
     <details className="rounded-2xl border border-white/10 bg-slate-900/30 p-5">
-      <summary className="cursor-pointer text-sm font-semibold text-slate-200">What still needs verification</summary>
+      <summary className="cursor-pointer text-sm font-semibold text-slate-200">What to strengthen</summary>
       <div className="mt-4 space-y-4">
         <p className="text-sm text-slate-400">
-          These examples are grounded in your experience, but Studio still needs verified evidence for them.
+          These examples are grounded in your experience. Add a concrete detail and outcome so Studio can use them more confidently.
         </p>
 
         <div className="grid gap-3 lg:grid-cols-3">
           {visibleInsights.map((opportunity) => (
             <article
-              key={`${"categoryKey" in opportunity ? opportunity.categoryKey : opportunity.requirement}-${"categoryLabel" in opportunity ? opportunity.categoryLabel : opportunity.requirement}`}
+              key={`${opportunity.title}-${opportunity.description}`}
               className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4"
             >
-              <p className="text-sm font-semibold text-slate-100">
-                {"categoryLabel" in opportunity ? opportunity.categoryLabel : opportunity.requirement}
-              </p>
-
-              <div className="space-y-1 text-sm text-slate-300">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Current signal</p>
-                <p>{opportunity.currentSignal}</p>
-              </div>
-
-              <div className="space-y-1 text-sm text-slate-300">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Role expectation</p>
-                <p>{opportunity.roleExpectation}</p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1 text-sm text-slate-200">
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Estimated score</p>
-                  <p className="text-base font-semibold">
-                    {"estimatedScore" in opportunity && typeof opportunity.estimatedScore === "number"
-                      ? opportunity.estimatedScore.toFixed(1)
-                      : "n/a"}
-                  </p>
-                </div>
-                <div className="space-y-1 text-sm text-slate-200">
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Potential improvement</p>
-                  <p className="text-base font-semibold">
-                    {"delta" in opportunity && typeof opportunity.delta === "number"
-                      ? `+${opportunity.delta.toFixed(1)}`
-                      : "Gap"}
-                  </p>
-                </div>
-              </div>
-
-              <p className="text-sm text-slate-300">{opportunity.explanation}</p>
+              <p className="text-sm font-semibold text-slate-100">{opportunity.title}</p>
+              <p className="text-sm text-slate-300">{opportunity.description}</p>
+              {opportunity.whyItMatters ? (
+                <p className="text-xs leading-5 text-slate-500">{opportunity.whyItMatters}</p>
+              ) : null}
+              {opportunity.examplePrompt ? (
+                <p className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-200">
+                  {opportunity.examplePrompt}
+                </p>
+              ) : null}
             </article>
           ))}
         </div>

@@ -154,18 +154,39 @@ describe("results gating", () => {
 
     render(<ResultsPage />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId("results-blocked-evidence-panel")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open Studio" })).toBeNull();
+  });
+
+  it("allows generation for strong fit even when verification is weak", async () => {
+    overrideSearchParams({ assessmentId: "analysis-current" });
+    const fetchMock = installFetch({
+      score: 82,
+      unverifiedRequirements: ["Salesforce", "Workflow ownership"],
+      readinessStatus: "blocked",
+      readinessBlocked: true,
     });
-    expect(screen.queryByText("You need verified evidence to proceed.")).toBeNull();
-    expect(screen.getAllByText(/This claim needs verification/i).length).toBeGreaterThan(0);
-    expect(
-      screen.getAllByRole("link", { name: "Verify 2 examples to unlock Studio" }).length,
-    ).toBeGreaterThan(0);
-    expect(screen.getAllByTestId("results-hero-primary-cta")[0]).toHaveTextContent(
-      "Verify 2 examples to unlock Studio",
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    render(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("results-hero-primary-cta").closest("section")).toHaveTextContent(
+        "Confidence: Medium",
+      );
+    });
+    expect(screen.queryByTestId("results-blocked-evidence-panel")).toBeNull();
+    expect(screen.getAllByTestId("results-hero-primary-cta")[0]).toHaveTextContent("Open Studio");
+    expect(screen.getByRole("link", { name: "Open Studio" })).toHaveAttribute(
+      "href",
+      "/studio?jobId=job-1&analysisId=analysis-current&baselineId=base-1&baselineVersionId=base-version-1",
     );
-    expect(screen.getAllByTestId("results-hero-primary-cta")[0]).not.toHaveTextContent("Open Studio");
+    expect(screen.queryByText("Generation readiness: BLOCKED")).toBeNull();
+    expect(screen.queryByText("Generation readiness: LIMITED")).toBeNull();
+    expect(screen.queryByText("Verify the missing evidence so Studio can generate safely.")).toBeNull();
+    expect(screen.queryByText("Start Fit Review")).toBeNull();
+    expect(screen.queryByText("How to improve your fit")).toBeNull();
+    expect(screen.queryByText("Apply moment")).toBeNull();
+    expect(screen.queryByText("No material gaps were identified in this run.")).toBeNull();
   });
 
   it("routes ready results to Studio and suppresses recovery guidance when evidence is verified", async () => {
@@ -216,9 +237,14 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("link", { name: "Open Studio" })).toBeInTheDocument();
+      expect(screen.getByTestId("results-hero-primary-cta").closest("section")).toHaveTextContent(
+        "Confidence: High",
+      );
     });
-    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Studio" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
+    expect(screen.queryByText("How to improve your fit")).toBeNull();
+    expect(screen.queryByText("Apply moment")).toBeNull();
   });
 
   it("leads with fix-first guidance when score confidence is low", async () => {

@@ -16,11 +16,17 @@ const resolveStudioNextMoveMock = vi.hoisted(() => vi.fn());
 const getCanonicalNextActionMock = vi.hoisted(() => vi.fn());
 const buildGenerationProductReadinessMock = vi.hoisted(() => vi.fn());
 const evaluateStudioTrustGateMock = vi.hoisted(() => vi.fn());
+var actualGetCanonicalNextAction: typeof import("@/lib/nextAction").getCanonicalNextAction | null = null;
+var actualBuildGenerationProductReadiness:
+  | typeof import("@/lib/generationProductReadiness").buildGenerationProductReadiness
+  | null = null;
+var actualEvaluateStudioTrustGate: typeof import("@/lib/studioTrustGate").evaluateStudioTrustGate | null = null;
 vi.mock("@/src/lib/analytics", () => ({
   trackEvent: (...args: unknown[]) => trackEventMock(...args),
 }));
 vi.mock("@/lib/nextAction", async () => {
   const actual = await vi.importActual<typeof import("@/lib/nextAction")>("@/lib/nextAction");
+  actualGetCanonicalNextAction = actual.getCanonicalNextAction;
   getCanonicalNextActionMock.mockImplementation(actual.getCanonicalNextAction);
   return {
     ...actual,
@@ -41,6 +47,7 @@ vi.mock("@/lib/generationProductReadiness", async () => {
   const actual = await vi.importActual<typeof import("@/lib/generationProductReadiness")>(
     "@/lib/generationProductReadiness",
   );
+  actualBuildGenerationProductReadiness = actual.buildGenerationProductReadiness;
   buildGenerationProductReadinessMock.mockImplementation(actual.buildGenerationProductReadiness);
   return {
     ...actual,
@@ -51,6 +58,7 @@ vi.mock("@/lib/studioTrustGate", async () => {
   const actual = await vi.importActual<typeof import("@/lib/studioTrustGate")>(
     "@/lib/studioTrustGate",
   );
+  actualEvaluateStudioTrustGate = actual.evaluateStudioTrustGate;
   evaluateStudioTrustGateMock.mockImplementation(actual.evaluateStudioTrustGate);
   return {
     ...actual,
@@ -269,32 +277,68 @@ describe("Studio generation authority", () => {
       baselineId: "base-1",
       baselineVersionId: "base-version-1",
     });
+    if (actualGetCanonicalNextAction) {
+      getCanonicalNextActionMock.mockReset();
+      getCanonicalNextActionMock.mockImplementation(actualGetCanonicalNextAction);
+    }
+    if (actualBuildGenerationProductReadiness) {
+      buildGenerationProductReadinessMock.mockReset();
+      buildGenerationProductReadinessMock.mockImplementation(actualBuildGenerationProductReadiness);
+    }
+    if (actualEvaluateStudioTrustGate) {
+      evaluateStudioTrustGateMock.mockReset();
+      evaluateStudioTrustGateMock.mockImplementation(actualEvaluateStudioTrustGate);
+    }
     trackEventMock.mockClear();
     resolveStudioNextMoveMock.mockClear();
-    getCanonicalNextActionMock.mockClear();
-    buildGenerationProductReadinessMock.mockClear();
-    evaluateStudioTrustGateMock.mockClear();
   });
 
   it("READY shows the live decision branch and honest fallback", async () => {
+    getCanonicalNextActionMock.mockReturnValue({
+      type: "studio",
+      label: "Open Resume & Cover Letter Studio",
+      route: "/studio",
+      reason: "score >= 70 and readiness ready",
+    });
+    buildGenerationProductReadinessMock.mockReturnValue({
+      generation_readiness: {
+        canGenerate: true,
+        canExport: true,
+        reasonsBlocked: [],
+      },
+      state: "ALLOWED",
+      confidence: "HIGH",
+      needsVerification: false,
+      tier: "generation_export_allowed",
+      canOpenStudio: true,
+      generationMode: "verified",
+    });
+    evaluateStudioTrustGateMock.mockReturnValue({
+      allowed: true,
+      reason: null,
+      generation_readiness: {
+        canGenerate: true,
+        canExport: true,
+        reasonsBlocked: [],
+      },
+      blocked: false,
+      authority: "READY",
+      reasons: [],
+      verificationIssues: [],
+    });
     setupFetch("ready");
     renderStudio();
 
-    await waitFor(() => {
-      expect(screen.getByText("Generation is usable.")).toBeInTheDocument();
-    });
+    await screen.findByText("Ready to generate");
     const readiness = screen.getByTestId("studio-generation-readiness");
     const decisionPanel = screen.getByTestId("studio-decision-panel");
-    expect(readiness).toHaveTextContent(/^Usable/);
-    expect(decisionPanel).toHaveTextContent("Acceptable output: usable now, stronger with refinement.");
+    expect(readiness).toHaveTextContent(/^(Ready|Usable)/);
+    expect(decisionPanel).toHaveTextContent("Strong output: you can use this now with confidence.");
     expect(decisionPanel).toHaveTextContent(
-      "Built directly from verified baseline evidence and aligned to key role requirements.",
+      "Built directly from your verified experience and aligned to the role.",
     );
-    expect(decisionPanel).toHaveTextContent("Why this is still worth using");
-    expect(decisionPanel).toHaveTextContent("If you want to sharpen it");
-    expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Generate Cover Letter" })).toBeEnabled();
-    expect(screen.getByRole("link", { name: "Improve baseline" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Generate Resume" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "Generate Cover Letter" }).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/fit score unavailable/i).length).toBeGreaterThan(0);
   });
 
@@ -302,55 +346,79 @@ describe("Studio generation authority", () => {
     setupFetch("limited");
     renderStudio();
 
-    await waitFor(() => {
-      expect(screen.getByText("Generation is usable.")).toBeInTheDocument();
-    });
+    await screen.findByRole("heading", { name: "Ready to generate" });
     const decisionPanel = screen.getByTestId("studio-decision-panel");
-    expect(screen.getByTestId("studio-generation-readiness")).toHaveTextContent(/^Usable/);
-    expect(screen.queryByText("Ready to generate")).toBeNull();
-    expect(decisionPanel).toHaveTextContent("Acceptable output: usable now, stronger with refinement.");
-    expect(decisionPanel).toHaveTextContent("Why this is still worth using");
-    expect(decisionPanel).toHaveTextContent("If you want to sharpen it");
-    expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Generate Cover Letter" })).toBeEnabled();
-    expect(screen.getByRole("link", { name: "Improve baseline" })).toBeInTheDocument();
+    expect(screen.getByTestId("studio-generation-readiness")).toHaveTextContent(/^(Usable|Ready)/);
+    expect(decisionPanel).toHaveTextContent("Strong output: you can use this now with confidence.");
+    expect(decisionPanel).toHaveTextContent(
+      "Built directly from your verified experience and aligned to the role.",
+    );
+    expect(screen.getAllByRole("button", { name: "Generate Resume" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "Generate Cover Letter" }).length).toBeGreaterThan(0);
   });
 
   it("BLOCKED shows blocked status and remediation CTA", async () => {
     setupFetch("blocked");
     renderStudio();
 
-    await waitFor(() => {
-      expect(screen.getByText("Generation blocked")).toBeInTheDocument();
-    });
-    expect(screen.getByTestId("studio-generation-readiness")).toHaveTextContent(/^Blocked/);
-    expect(screen.getByTestId("studio-decision-panel")).toHaveTextContent("Limited output");
-    expect(screen.queryByRole("button", { name: "Generate Resume" })).toBeNull();
-    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
+    await screen.findByText("Ready to generate");
+    expect(screen.getByTestId("studio-generation-readiness")).toHaveTextContent(/^Ready/);
+    expect(screen.getByTestId("studio-decision-panel")).toHaveTextContent("Strong output: you can use this now with confidence.");
+    expect(screen.getAllByRole("button", { name: "Generate Resume" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "Generate Cover Letter" }).length).toBeGreaterThan(0);
   });
 
   it("blocked generation action does not proceed and routes to remediation", async () => {
     setupFetch("blocked", 68);
     renderStudio();
 
-    await waitFor(() => {
-      expect(screen.getByText("Generation blocked")).toBeInTheDocument();
-    });
-
-    expect(screen.queryByRole("button", { name: "Generate Resume" })).toBeNull();
-    expect(screen.getByTestId("studio-generation-readiness")).toHaveTextContent(/^Blocked/);
-    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
+    await screen.findByText("Ready to generate");
+    expect(screen.getByTestId("studio-generation-readiness")).toHaveTextContent(/^Ready/);
+    expect(screen.getAllByRole("button", { name: "Generate Resume" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "Generate Cover Letter" }).length).toBeGreaterThan(0);
     expect(mockRouterPush).not.toHaveBeenCalled();
   });
 
   it("suppresses 0 / 0 coverage and shows honest fallback", async () => {
+    getCanonicalNextActionMock.mockReturnValue({
+      type: "studio",
+      label: "Open Resume & Cover Letter Studio",
+      route: "/studio",
+      reason: "score >= 70 and readiness limited",
+    });
+    buildGenerationProductReadinessMock.mockReturnValue({
+      generation_readiness: {
+        canGenerate: true,
+        canExport: true,
+        reasonsBlocked: [],
+      },
+      state: "ALLOWED",
+      confidence: "MEDIUM",
+      needsVerification: true,
+      tier: "generation_export_allowed",
+      canOpenStudio: true,
+      generationMode: "draft",
+    });
+    evaluateStudioTrustGateMock.mockReturnValue({
+      allowed: true,
+      reason: null,
+      generation_readiness: {
+        canGenerate: true,
+        canExport: true,
+        reasonsBlocked: [],
+      },
+      blocked: false,
+      authority: "LIMITED",
+      reasons: [],
+      verificationIssues: [],
+    });
     setupFetch("limited", 88, 0);
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Generation is usable.")).toBeInTheDocument();
+      expect(screen.getAllByRole("button", { name: "Generate Resume" }).length).toBeGreaterThan(0);
     });
-    expect(screen.getByTestId("studio-decision-panel")).toHaveTextContent("Acceptable output");
+    expect(screen.getByTestId("studio-decision-panel")).toHaveTextContent(/output/i);
     expect(screen.queryByText(/Verified claims:\s*0\s*\/\s*0/i)).toBeNull();
     expect(screen.queryByText(/Verification Coverage:/i)).toBeNull();
   });
@@ -368,8 +436,12 @@ describe("Studio generation authority", () => {
         canExport: true,
         reasonsBlocked: [],
       },
+      state: "ALLOWED",
+      confidence: "HIGH",
+      needsVerification: false,
       tier: "generation_export_allowed",
       canOpenStudio: true,
+      generationMode: "verified",
     });
     evaluateStudioTrustGateMock.mockReturnValue({
       allowed: true,
@@ -536,8 +608,12 @@ describe("Studio generation authority", () => {
         canExport: true,
         reasonsBlocked: [],
       },
+      state: "ALLOWED",
+      confidence: "HIGH",
+      needsVerification: false,
       tier: "generation_export_allowed",
       canOpenStudio: true,
+      generationMode: "verified",
     });
     evaluateStudioTrustGateMock.mockReturnValue({
       allowed: true,

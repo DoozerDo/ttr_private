@@ -37,6 +37,10 @@ vi.mock("@/lib/generationProductReadiness", () => ({
       verificationIssues: mockedStudioState === "blocked" ? [{ code: "full_block", severity: "block" }] : [],
       blocked: mockedStudioState === "blocked",
     },
+    state: mockedStudioState === "blocked" ? "BLOCKED" : "ALLOWED",
+    confidence: mockedStudioState === "ready" ? "HIGH" : mockedStudioState === "limited" ? "MEDIUM" : "LOW",
+    needsVerification: mockedStudioState !== "ready",
+    generationMode: mockedStudioState === "ready" ? "verified" : "draft",
   })),
 }));
 
@@ -124,7 +128,8 @@ describe("Studio state messaging", () => {
     installBaselineFetches("ready");
     renderStudio();
 
-    await waitFor(() => expect(screen.getByText("Ready to generate")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText("Ready to generate").length).toBeGreaterThan(0));
+    expect(screen.getByText("Generated from verified evidence.")).toBeInTheDocument();
     expect(screen.getByText("Why this output is grounded")).toBeInTheDocument();
     expect(screen.getByText("This output is grounded in your verified experience.")).toBeInTheDocument();
   });
@@ -133,21 +138,22 @@ describe("Studio state messaging", () => {
     installBaselineFetches("limited");
     renderStudio();
 
-    await waitFor(() => expect(screen.getByText("Generation is usable.")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText("Generation is usable.").length).toBeGreaterThan(0));
+    expect(screen.getAllByText(/Generated from partially verified evidence/i).length).toBeGreaterThan(0);
     expect(screen.getByText("Why this output is limited")).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "Your baseline supports tailored output. You can use this now, and refine it later if you want a stronger version.",
-      ),
-    ).toBeInTheDocument();
+      screen.getAllByText(
+        "Generated from partially verified evidence. Verify key claims to strengthen it.",
+      ).length,
+    ).toBeGreaterThan(0);
   });
 
   it("shows blocked guidance when compliance prevents generation", async () => {
     installBaselineFetches("blocked");
     renderStudio();
 
-    await waitFor(() => expect(screen.getByText("Generation blocked")).toBeInTheDocument());
-    expect(screen.getByText("Why generation is blocked")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText("Generation blocked").length).toBeGreaterThan(0));
+    expect(screen.getByText("What's holding this back")).toBeInTheDocument();
     expect(
       screen.getByText("This role is not ready for clean Studio output yet. Return to Fit Review to strengthen verified evidence."),
     ).toBeInTheDocument();

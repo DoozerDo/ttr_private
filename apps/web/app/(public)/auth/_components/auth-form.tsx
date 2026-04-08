@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { sanitizeReturnPath } from "@/src/lib/safe-redirect";
+import { hasActiveBaselines, listBaselines } from "@/lib/baselines";
 
 interface AuthFormProps {
   mode: "login" | "register";
@@ -109,32 +110,13 @@ function isAccessRequiredError(message: string | undefined, status: number): boo
   );
 }
 
-async function hasPriorAnalysis(): Promise<boolean> {
-  const response = await fetch("/api/users/me/last-assessment", {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
+async function hasActiveBaseline(): Promise<boolean> {
+  try {
+    const baselines = await listBaselines(true);
+    return hasActiveBaselines(baselines);
+  } catch {
     return false;
   }
-
-  const payload = await response.json().catch(() => null);
-  if (!payload || typeof payload !== "object") {
-    return false;
-  }
-
-  const candidate = payload as { assessmentId?: unknown; id?: unknown; lastAssessmentId?: unknown };
-  const assessmentId =
-    typeof candidate.assessmentId === "string"
-      ? candidate.assessmentId.trim()
-      : typeof candidate.id === "string"
-        ? candidate.id.trim()
-        : typeof candidate.lastAssessmentId === "string"
-          ? candidate.lastAssessmentId.trim()
-          : "";
-  return Boolean(assessmentId);
 }
 
 export function AuthForm({ mode, returnPath }: AuthFormProps) {
@@ -206,7 +188,12 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
       return;
     }
 
-    const targetPath = (await hasPriorAnalysis()) ? sanitizeReturnPath(returnPath) ?? "/baseline" : "/first-run";
+    const preferredTarget = sanitizeReturnPath(returnPath);
+    const targetPath = (await hasActiveBaseline())
+      ? preferredTarget && preferredTarget !== "/first-run"
+        ? preferredTarget
+        : "/baseline"
+      : "/first-run";
     await router.replace(targetPath);
     await router.refresh();
   };

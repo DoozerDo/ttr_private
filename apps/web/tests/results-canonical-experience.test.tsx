@@ -148,10 +148,10 @@ describe("results canonical experience", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getAllByText(/you can win this role/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/You're a strong match\. You can generate now\./i).length).toBeGreaterThan(0);
     });
 
-    expect(screen.getAllByText(/You can win this role with focused tailoring/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Confidence: Medium/i).length).toBeGreaterThan(0);
     expect(screen.queryByText("You're not ready to apply yet.")).toBeNull();
     expect(screen.queryAllByText(/confidence/i).length).toBeGreaterThan(0);
   });

@@ -91,6 +91,80 @@ describe("auth entry flow", () => {
     });
   });
 
+  it("routes returning users with an active baseline to baseline instead of first-run", async () => {
+    setFetchImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/auth/login")) {
+        return jsonResponse({ ok: true }, 200);
+      }
+      if (url.includes("/api/users/me")) {
+        return jsonResponse({
+          email: "user@example.com",
+          profileCompletedAt: "2025-03-01T00:00:00.000Z",
+          roleTitle: "Director of Support",
+          intendedUse: "beta",
+        });
+      }
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return jsonResponse([
+          {
+            id: "baseline-1",
+            status: "ACTIVE",
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+        ]);
+      }
+      return jsonResponse({}, 200);
+    });
+
+    render(<AuthForm mode="login" returnPath="/first-run" />);
+
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "user@example.com" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Log in" }));
+
+    await waitFor(() => {
+      expect(mockRouterReplace).toHaveBeenCalledWith("/baseline");
+    });
+  });
+
+  it("routes returning users with archived baselines only to first-run", async () => {
+    setFetchImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/auth/login")) {
+        return jsonResponse({ ok: true }, 200);
+      }
+      if (url.includes("/api/users/me")) {
+        return jsonResponse({
+          email: "user@example.com",
+          profileCompletedAt: "2025-03-01T00:00:00.000Z",
+          roleTitle: "Director of Support",
+          intendedUse: "beta",
+        });
+      }
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return jsonResponse([
+          {
+            id: "baseline-archived",
+            status: "ARCHIVED",
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+        ]);
+      }
+      return jsonResponse({}, 200);
+    });
+
+    render(<AuthForm mode="login" returnPath="/baseline" />);
+
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "user@example.com" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Log in" }));
+
+    await waitFor(() => {
+      expect(mockRouterReplace).toHaveBeenCalledWith("/first-run");
+    });
+  });
+
   it("shows the awaiting-access handoff as a normal invite step", async () => {
     const page = await AwaitingAccessPage({
       searchParams: Promise.resolve({ email: "user@example.com", next: "/baseline" }),

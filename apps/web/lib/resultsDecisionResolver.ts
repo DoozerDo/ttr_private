@@ -1,8 +1,17 @@
+import type {
+  GenerationProductConfidence,
+  GenerationProductReadinessState,
+} from "@/lib/generationProductReadiness";
+
 export type ResultsDecisionState = "BLOCKED" | "READY" | "IMPROVE" | "DRAFT";
 
 export interface ResultsDecisionInput {
   score: number | null;
-  generationReadinessStatus: "ready" | "limited" | "blocked";
+  generationReadiness: {
+    state: GenerationProductReadinessState;
+    confidence: GenerationProductConfidence;
+    needsVerification: boolean;
+  };
 }
 
 export interface ResultsDecision {
@@ -13,7 +22,7 @@ export interface ResultsDecision {
 }
 
 export function resolveResultsDecision(input: ResultsDecisionInput): ResultsDecision {
-  const { score, generationReadinessStatus } = input;
+  const { score, generationReadiness } = input;
   const fitLabel =
     typeof score === "number" && score >= 80
       ? "Strong fit"
@@ -41,7 +50,19 @@ export function resolveResultsDecision(input: ResultsDecisionInput): ResultsDeci
     };
   }
 
-  if (generationReadinessStatus === "blocked") {
+  if (score >= 80) {
+    return {
+      state: generationReadiness.confidence === "HIGH" ? "READY" : "DRAFT",
+      primaryCta: "OPEN_STUDIO",
+      headline: "You're a strong match. You can generate now.",
+      subtext:
+        generationReadiness.confidence === "HIGH"
+          ? "Your results are backed by verified evidence."
+          : "Some claims are unverified. You can strengthen your output in Studio.",
+    };
+  }
+
+  if (generationReadiness.state === "BLOCKED") {
     return {
       state: "BLOCKED",
       primaryCta: "START_FIT_REVIEW",
@@ -51,23 +72,15 @@ export function resolveResultsDecision(input: ResultsDecisionInput): ResultsDeci
     };
   }
 
-  if (generationReadinessStatus === "limited") {
-    return {
-      state: "DRAFT",
-      primaryCta: "OPEN_STUDIO",
-      headline: `${fitLabel}. Studio is available, but evidence is still thin.`,
-      subtext:
-        "Studio can open in draft mode now, and stronger verification will improve confidence and output quality.",
-    };
-  }
-
-  if (score >= 70) {
+  if (generationReadiness.state === "ALLOWED") {
     return {
       state: "READY",
       primaryCta: "OPEN_STUDIO",
       headline: `${fitLabel}. Studio is ready.`,
       subtext:
-        "Your verified evidence is complete enough to generate safely in Studio.",
+        generationReadiness.confidence === "HIGH"
+          ? "Your verified evidence is complete enough to generate safely in Studio."
+          : "Studio can open now while you strengthen evidence for better output quality.",
     };
   }
 
