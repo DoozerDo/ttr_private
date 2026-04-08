@@ -712,6 +712,7 @@ export default function StudioPage() {
 
   const [resumeState, setResumeState] = useState<DocumentState>(() => createDocumentState());
   const [resumeGenerating, setResumeGenerating] = useState(false);
+  const [autoGenerationInFlight, setAutoGenerationInFlight] = useState(false);
   const [resumeExportFormat, setResumeExportFormat] =
     useState<"docx" | "pdf" | null>(null);
   const [recentIntent, setRecentIntent] = useState<RecentIntentState>(() => readRecentIntentState());
@@ -756,6 +757,7 @@ export default function StudioPage() {
   const previousCritiqueIssuesRef = useRef<DocumentCritiqueIssue[]>([]);
   const finalRoleCheckTrackedRef = useRef<string | null>(null);
   const finalRoleAdjustmentClickedRef = useRef<string | null>(null);
+  const autoGenerationSignatureRef = useRef<string | null>(null);
   const [applicationInsights, setApplicationInsights] = useState<ApplicationInsight[]>([]);
   const [opportunityContext, setOpportunityContext] = useState<{
     status: string;
@@ -1865,7 +1867,7 @@ export default function StudioPage() {
     }
   }, [effectiveBaselineId, effectiveJobId, hasGeneratedDocumentPair, roleMatchFinalPass, roleMatchFinalSignature]);
   const studioGenerationRenderState = useMemo(() => {
-    const isGenerating = resumeGenerating || coverGenerating;
+    const isGenerating = resumeGenerating || coverGenerating || autoGenerationInFlight;
     const artifactType =
       coverGenerating || (coverPresenter.status === "success" && Boolean(coverState.response))
         ? "cover_letter"
@@ -1891,6 +1893,7 @@ export default function StudioPage() {
   }, [
     canGenerateDocuments,
     coverGenerating,
+    autoGenerationInFlight,
     coverPresenter.status,
     coverState.response,
     hasCompletedGeneration,
@@ -1912,6 +1915,8 @@ export default function StudioPage() {
   const unlockGenerationLoadingMessage = studioGenerationRenderState.shouldShowEnhancedLoadingCopy
     ? "Generating from your verified evidence..."
     : null;
+  const autoGenerationLoadingMessage =
+    autoGenerationInFlight && !hasCompletedGeneration ? "Generating your documents..." : null;
   const generationStorageKey = useMemo(
     () => getGenerationCompletionStorageKey(effectiveJobId, effectiveBaselineId),
     [effectiveBaselineId, effectiveJobId],
@@ -2072,6 +2077,32 @@ export default function StudioPage() {
     return "strong";
   }, [productReadiness.confidence, productReadiness.state]);
   const canProceedWithStudioDrafts = generationSupportState !== "blocked";
+  const autoGenerationSignature = useMemo(() => {
+    if (!canGenerateDocuments) return null;
+    if (typeof analysisScore !== "number" || analysisScore < 80) return null;
+    if (
+      !requestedAnalysisId ||
+      !effectiveJobId ||
+      !effectiveBaselineId ||
+      !effectiveBaselineVersionId
+    ) {
+      return null;
+    }
+    return [
+      requestedAnalysisId,
+      effectiveJobId,
+      effectiveBaselineId,
+      effectiveBaselineVersionId,
+      Math.round(analysisScore),
+    ].join("|");
+  }, [
+    analysisScore,
+    canGenerateDocuments,
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    requestedAnalysisId,
+  ]);
   const authorityStateTitle =
     generationSupportState === "blocked"
       ? "Generation blocked"
@@ -3723,6 +3754,34 @@ export default function StudioPage() {
     }
   }, [coverState.response, handleCoverDraft, resumeState.response, verifiedClaimParams]);
 
+  useEffect(() => {
+    if (!autoGenerationSignature) return;
+    if (autoGenerationSignatureRef.current === autoGenerationSignature) return;
+    if (resumeGenerating || coverGenerating || autoGenerationInFlight) return;
+    if (!canProceedWithStudioDrafts) return;
+
+    autoGenerationSignatureRef.current = autoGenerationSignature;
+    setAutoGenerationInFlight(true);
+
+    const runAutoGeneration = async () => {
+      try {
+        await Promise.all([handleResumeDraft(), handleCoverDraft()]);
+      } finally {
+        setAutoGenerationInFlight(false);
+      }
+    };
+
+    void runAutoGeneration();
+  }, [
+    autoGenerationInFlight,
+    autoGenerationSignature,
+    canProceedWithStudioDrafts,
+    coverGenerating,
+    handleCoverDraft,
+    handleResumeDraft,
+    resumeGenerating,
+  ]);
+
   const activeArtifactFailure = resumeState.artifactFailure ?? coverState.artifactFailure ?? null;
   const studioNextMove = useMemo(
     () =>
@@ -3969,6 +4028,24 @@ export default function StudioPage() {
       {unlockGenerationLoadingMessage && studioGenerationRenderState.isGenerating ? (
         <Alert intent="info" title="Verified evidence in use">
           {unlockGenerationLoadingMessage}
+        </Alert>
+      ) : null}
+      {autoGenerationLoadingMessage ? (
+        <Alert intent="info" title="Generating your documents...">
+          {autoGenerationLoadingMessage}
+        </Alert>
+      ) : null}
+      {!studioGenerationRenderState.isGenerating &&
+      !hasCompletedGeneration &&
+      (resumeState.error || coverState.error || resumeState.artifactFailure || coverState.artifactFailure) ? (
+        <Alert intent="warning" title="Document generation needs attention">
+          {toConstraintMessage(
+            resumeState.error ??
+              coverState.error ??
+              resumeState.artifactFailure?.explanation ??
+              coverState.artifactFailure?.explanation ??
+              "Generation failed. Please try again.",
+          )}
         </Alert>
       ) : null}
       {isGuidedActive && guidedStep === "GENERATE" && !studioBlockedByNextAction ? (

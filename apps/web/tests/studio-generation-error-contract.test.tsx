@@ -270,7 +270,7 @@ describe("Studio generation error contract", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Fix Input")).toBeInTheDocument();
     expect(screen.getByText(/Learn What.*Supported/i)).toBeInTheDocument();
-    expect(screen.getByText("We could not extract enough text from that resume.")).toBeInTheDocument();
+    expect(screen.getAllByText("We could not extract enough text from that resume.").length).toBeGreaterThan(0);
     expect(
       screen.getByText("The current cover letter input cannot be grounded into a supported artifact."),
     ).toBeInTheDocument();

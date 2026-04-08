@@ -90,6 +90,58 @@ function createExportResponse(filename: string) {
   };
 }
 
+function resolveStudioGenerationFallback(input: RequestInfo) {
+  const url = typeof input === "string" ? input : input?.url ?? "";
+  if (url.endsWith("/api/resume")) {
+    return Promise.resolve(
+      createResponse({
+        status: "success",
+        generationStatus: "success",
+        exportReady: true,
+        exports: { docx: true, pdf: true },
+        preview: {
+          resume: {
+            heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+            summary: "Support leader focused on scalable operations.",
+            experience: [
+              {
+                company: "Cat Daddy Games",
+                roleTitle: "Senior Producer",
+                location: "Los Angeles, CA",
+                dateRange: "2020 - Present",
+                bullets: ["Led support operations programs."],
+              },
+            ],
+            education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+            competencies: ["Customer strategy", "Operational leadership"],
+          },
+        },
+      }),
+    );
+  }
+  if (url.endsWith("/api/cover-letters")) {
+    return Promise.resolve(
+      createResponse({
+        status: "success",
+        generationStatus: "success",
+        exportReady: true,
+        exports: { docx: true, pdf: true },
+        preview: {
+          coverLetter: {
+            paragraphs: [
+              "Dear Hiring Team,",
+              "I bring verified leadership and operational experience aligned to this role.",
+              "Sincerely,",
+              "Alex Candidate",
+            ],
+          },
+        },
+      }),
+    );
+  }
+  return Promise.resolve(createResponse({}));
+}
+
 describe("Studio page UX", () => {
   beforeEach(() => {
     overrideSearchParams({
@@ -132,7 +184,7 @@ describe("Studio page UX", () => {
       if (url.includes("/api/cover-letters/readiness")) {
         return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
       }
-      return Promise.resolve(createResponse({}));
+      return resolveStudioGenerationFallback(input);
     });
     setFetchImplementation(fetchMock);
 
@@ -187,7 +239,7 @@ describe("Studio page UX", () => {
       if (url.includes("/api/cover-letters/readiness")) {
         return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
       }
-      return Promise.resolve(createResponse({}));
+      return resolveStudioGenerationFallback(input);
     });
     setFetchImplementation(fetchMock);
 
@@ -247,7 +299,7 @@ describe("Studio page UX", () => {
       if (url.includes("/api/cover-letters/readiness")) {
         return Promise.resolve(createResponse({ status: "limited", reasons: [], compliance_flags: [] }));
       }
-      return Promise.resolve(createResponse({}));
+      return resolveStudioGenerationFallback(input);
     });
     setFetchImplementation(fetchMock);
 
@@ -320,19 +372,14 @@ describe("Studio page UX", () => {
         resumeGenerationRequestCount += 1;
         return resumeGenerationRequestCount === 1 ? firstResumeGeneration : secondResumeGeneration;
       }
-      return Promise.resolve(createResponse({}));
+      return resolveStudioGenerationFallback(input);
     });
     setFetchImplementation(fetchMock);
 
     renderStudio();
 
-    const generateResumeButton = await screen.findByRole("button", { name: "GENERATE RESUME" });
-    await waitFor(() => expect(generateResumeButton).toBeEnabled());
-
-    fireEvent.click(generateResumeButton);
-
     await waitFor(() => {
-      expect(screen.getAllByText(/Generating from your verified evidence\.\.\./).length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Generating your documents...").length).toBeGreaterThan(0);
     });
 
     await act(async () => {
@@ -362,10 +409,16 @@ describe("Studio page UX", () => {
     });
 
     await waitFor(() => {
+      expect(screen.getByTestId("resume-preview")).toBeInTheDocument();
+    });
+    await waitFor(() => {
       expect(screen.getByTestId("studio-unlock-generation-confirmation")).toHaveTextContent(
         "Generated from verified evidence aligned to this role.",
       );
     });
+
+    const generateResumeButton = await screen.findByRole("button", { name: "Generate Resume" });
+    await waitFor(() => expect(generateResumeButton).toBeEnabled());
 
     fireEvent.click(generateResumeButton);
 
@@ -461,7 +514,7 @@ describe("Studio page UX", () => {
           }),
         );
       }
-      return Promise.resolve(createResponse({}));
+      return resolveStudioGenerationFallback(input);
     });
     setFetchImplementation(fetchMock);
 
@@ -518,7 +571,7 @@ describe("Studio page UX", () => {
       if (url.includes("/api/cover-letters/readiness")) {
         return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
       }
-      return Promise.resolve(createResponse({}));
+      return resolveStudioGenerationFallback(input);
     });
     setFetchImplementation(fetchMock as unknown as typeof fetch);
 
@@ -614,7 +667,7 @@ describe("Studio page UX", () => {
       if (url.includes("/api/resume/export") && init?.method === "POST") {
         return Promise.resolve(createExportResponse("resume Leadership Resume.docx"));
       }
-      return Promise.resolve(createResponse({}));
+      return resolveStudioGenerationFallback(input);
     });
     setFetchImplementation(fetchMock);
 
@@ -670,7 +723,7 @@ describe("Studio page UX", () => {
       if (url.includes("/api/cover-letters/readiness")) {
         return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
       }
-      return Promise.resolve(createResponse({}));
+      return resolveStudioGenerationFallback(input);
     });
     setFetchImplementation(fetchMock);
 
@@ -717,7 +770,7 @@ describe("Studio page UX", () => {
       if (url.includes("/api/cover-letters/readiness")) {
         return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
       }
-      return Promise.resolve(createResponse({}));
+      return resolveStudioGenerationFallback(input);
     });
     setFetchImplementation(fetchMock);
 
@@ -782,7 +835,7 @@ describe("Studio page UX", () => {
           }),
         );
       }
-      return Promise.resolve(createResponse({}));
+      return resolveStudioGenerationFallback(input);
     });
     setFetchImplementation(fetchMock);
 

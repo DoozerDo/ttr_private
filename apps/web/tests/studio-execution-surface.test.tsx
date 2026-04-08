@@ -103,7 +103,7 @@ describe("Studio execution surface", () => {
       expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("Generation is limited")).toBeInTheDocument();
+    expect(screen.getByText("Generation blocked")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
     expect(screen.getAllByText(/fit score unavailable/i).length).toBeGreaterThan(0);
   });
