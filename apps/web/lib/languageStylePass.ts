@@ -1,3 +1,8 @@
+import {
+  calibrationFeedbackHasAdjustment,
+  calibrationFeedbackShouldTightenLanguage,
+  type CalibrationFeedback,
+} from "@/lib/calibrationFeedback";
 import type { DocumentStrategyPlan } from "@/lib/documentStrategyPlan";
 
 export type LanguageStyleIssueType =
@@ -26,6 +31,7 @@ export type LanguageStylePassInput = {
   resumeBullets?: string[] | null;
   coverOpening?: string | null;
   coverParagraphs?: string[] | null;
+  feedback?: CalibrationFeedback | null;
 };
 
 export type ResumeDocumentLike = {
@@ -156,7 +162,10 @@ function polishSummary(summary: string, input: LanguageStylePassInput, pass: Lan
   if (!sentences.length) return summary;
 
   const leadGeneric = countGenericMatches(sentences[0]) > 0;
-  const weakLead = leadGeneric || /^\s*(i am|i'm|results-driven|proven track record|dynamic leader)\b/i.test(sentences[0]);
+  const weakLead =
+    leadGeneric ||
+    calibrationFeedbackShouldTightenLanguage(input.feedback) ||
+    /^\s*(i am|i'm|results-driven|proven track record|dynamic leader)\b/i.test(sentences[0]);
 
   if (weakLead) {
     pass.transformationsApplied.push("summary_opening_reframed");
@@ -178,7 +187,7 @@ function polishSummary(summary: string, input: LanguageStylePassInput, pass: Lan
   return sentences.map((sentence) => sentenceCase(stripGenericPhrases(sentence))).join(" ");
 }
 
-function polishBullets(bullets: string[], pass: LanguageStylePass): string[] {
+function polishBullets(bullets: string[], input: LanguageStylePassInput, pass: LanguageStylePass): string[] {
   const seenOpenings = new Set<string>();
   return bullets.map((bullet, index) => {
     const original = normalizeText(bullet);
@@ -199,7 +208,8 @@ function polishBullets(bullets: string[], pass: LanguageStylePass): string[] {
       seenOpenings.add(opening);
     }
 
-    const verbose = cleaned.split(/\s+/).length > 28;
+    const verboseThreshold = calibrationFeedbackShouldTightenLanguage(input.feedback) ? 24 : 28;
+    const verbose = cleaned.split(/\s+/).length > verboseThreshold;
     if (verbose) {
       pass.issues.push(buildIssue("overly_verbose", "low", `resume.experience[${index}]`));
       pass.transformationsApplied.push("tightened_verbose_bullets");
@@ -213,6 +223,8 @@ function polishCoverOpening(opening: string, input: LanguageStylePassInput, pass
   const cleaned = stripGenericPhrases(opening);
   const weakLead =
     countGenericMatches(opening) > 0 ||
+    calibrationFeedbackShouldTightenLanguage(input.feedback) ||
+    calibrationFeedbackHasAdjustment(input.feedback, "language_style", ["tighten_language"]) ||
     /^\s*(i am|i'm|i'm excited|i am excited|dear)\b/i.test(opening) ||
     cleaned.length < 50;
 
@@ -259,7 +271,12 @@ export function buildLanguageStylePass(input: LanguageStylePassInput): LanguageS
   };
 
   const resumeSummary = normalizeText(input.resumeSummary ?? "");
-  if (resumeSummary && (countGenericMatches(resumeSummary) > 0 || /^\s*(i am|i'm|results-driven|proven track record|dynamic leader)\b/i.test(resumeSummary))) {
+  if (
+    resumeSummary &&
+    (countGenericMatches(resumeSummary) > 0 ||
+      calibrationFeedbackShouldTightenLanguage(input.feedback) ||
+      /^\s*(i am|i'm|results-driven|proven track record|dynamic leader)\b/i.test(resumeSummary))
+  ) {
     pass.issues.push(buildIssue("generic_phrase", "high", "resume.summary"));
   }
 
@@ -273,7 +290,12 @@ export function buildLanguageStylePass(input: LanguageStylePassInput): LanguageS
   }
 
   const coverOpening = normalizeText(input.coverOpening ?? "");
-  if (coverOpening && (countGenericMatches(coverOpening) > 0 || /^\s*(i am|i'm|i am excited|i'm excited|dear)\b/i.test(coverOpening))) {
+  if (
+    coverOpening &&
+    (countGenericMatches(coverOpening) > 0 ||
+      calibrationFeedbackShouldTightenLanguage(input.feedback) ||
+      /^\s*(i am|i'm|i am excited|i'm excited|dear)\b/i.test(coverOpening))
+  ) {
     pass.issues.push(buildIssue("weak_opening", "high", "cover_letter.opening"));
   }
 
@@ -290,6 +312,10 @@ export function buildLanguageStylePass(input: LanguageStylePassInput): LanguageS
     pass.issues.push(buildIssue("redundant_modifier", "low", "language"));
   }
 
+  if (calibrationFeedbackHasAdjustment(input.feedback, "language_style", ["tighten_language"])) {
+    pass.issues.push(buildIssue("generic_phrase", "high", "feedback.language_style"));
+  }
+
   return pass;
 }
 
@@ -301,8 +327,47 @@ export function polishResumeSummaryText(
   return polishSummary(summary, input, pass);
 }
 
-export function polishResumeBulletsText(bullets: string[], pass: LanguageStylePass): string[] {
-  return polishBullets(bullets, pass);
+export function polishResumeBulletsText(
+  bullets: string[],
+  pass: LanguageStylePass,
+  input?: LanguageStylePassInput,
+): string[] {
+  const fallbackInput =
+    input ??
+    ({
+      plan: {
+        positioningFrame: "",
+        roleLens: {
+          titleFamily: null,
+          seniority: null,
+          scope: null,
+          domainContext: null,
+          priorities: [],
+          requiredSignals: [],
+          targetKeywords: [],
+        },
+        selectedEvidence: [],
+        summaryStrategy: "",
+        resumeEmphasis: [],
+        coverLetterThemes: [],
+        suppressionNotes: [],
+        qualityPass: {
+          framingStrength: "medium",
+          emphasisConfidence: "medium",
+          topNarrativeAxes: [],
+          cutCandidates: [],
+          mustLeadWith: [],
+          avoidRepeating: [],
+          coverLetterDelta: [],
+        },
+        fitScore: null,
+        fitBand: null,
+        documentQualityScore: 0,
+      } as DocumentStrategyPlan,
+      feedback: null,
+    } satisfies LanguageStylePassInput);
+
+  return polishBullets(bullets, fallbackInput, pass);
 }
 
 export function polishCoverLetterParagraphsText(

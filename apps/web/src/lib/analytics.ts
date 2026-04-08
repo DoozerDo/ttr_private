@@ -56,6 +56,10 @@ export const ANALYTICS_EVENT_NAMES = [
   "final_role_check_passed",
   "final_role_check_ignored_then_exported",
   "final_role_check_followed_by_export",
+  "calibration_feedback_generated",
+  "feedback_applied",
+  "feedback_regeneration_triggered",
+  "quality_improved_after_feedback",
   "claim_verify_clicked",
   "claim_edit_clicked",
   "claim_dismissed",
@@ -193,6 +197,33 @@ export type AnalyticsEventMap = {
     jobId: string | null;
     artifactType: "resume" | "cover_letter";
     refinementCount: number;
+  };
+  calibration_feedback_generated: {
+    source: "studio" | "unknown";
+    scenarioName?: string;
+    overallCalibration: "aligned" | "close" | "off_target";
+    gapCount: number;
+    adjustmentCount: number;
+  };
+  feedback_applied: {
+    source: "studio" | "unknown";
+    scenarioName?: string;
+    adjustmentCount: number;
+    targetSubsystems: Array<
+      "strategy_plan" | "quality_pass" | "refinement_bias" | "language_style"
+    >;
+  };
+  feedback_regeneration_triggered: {
+    source: "studio" | "unknown";
+    scenarioName?: string;
+    passCount: number;
+  };
+  quality_improved_after_feedback: {
+    source: "studio" | "unknown";
+    scenarioName?: string;
+    beforeOverallCalibration: "aligned" | "close" | "off_target";
+    afterOverallCalibration: "aligned" | "close" | "off_target";
+    improvedDimensionCount: number;
   };
   opportunity_commit_intent: {
     source: "studio" | "unknown";

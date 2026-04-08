@@ -1,3 +1,9 @@
+import {
+  calibrationFeedbackBoostForText,
+  calibrationFeedbackHasAdjustment,
+  type CalibrationFeedback,
+} from "@/lib/calibrationFeedback";
+
 export type DocumentStrategyFitBand = "strong" | "moderate" | "borderline" | null;
 
 export type DocumentQualityFramingStrength = "high" | "medium" | "low";
@@ -409,6 +415,29 @@ function tokenize(value: string): string[] {
     ?.filter((token) => token.length > 2 && !STOPWORDS.has(token)) ?? [];
 }
 
+function calibrationFeedbackAdjustmentFocus(adjustment: {
+  focus: string;
+  targetSubsystem: string;
+  action: string;
+  strength: string;
+}): string {
+  return normalizeText(adjustment.focus).toLowerCase();
+}
+
+function calibrationFeedbackHasFocus(
+  feedback: CalibrationFeedback | null | undefined,
+  candidate: string,
+  targetSubsystem?: CalibrationFeedback["adjustments"][number]["targetSubsystem"],
+): boolean {
+  if (!feedback) return false;
+  const loweredCandidate = normalizeText(candidate).toLowerCase();
+  return feedback.adjustments.some((adjustment) => {
+    if (targetSubsystem && adjustment.targetSubsystem !== targetSubsystem) return false;
+    const focus = calibrationFeedbackAdjustmentFocus(adjustment);
+    return focus.length > 0 && (loweredCandidate.includes(focus) || focus.split(/\s+/).some((token) => token.length > 3 && loweredCandidate.includes(token)));
+  });
+}
+
 function countKeywordMatches(corpus: string, keywords: string[]): number {
   let total = 0;
   for (const keyword of keywords) {
@@ -472,10 +501,12 @@ function chooseDomainContext(corpus: string, jobCompany?: string | null): string
   return company || null;
 }
 
-function choosePriorities(corpus: string): string[] {
+function choosePriorities(corpus: string, feedback?: CalibrationFeedback | null): string[] {
   const scored = SIGNAL_DEFINITIONS.map((signal) => ({
     label: signal.label,
-    score: countKeywordMatches(corpus, signal.keywords),
+    score:
+      countKeywordMatches(corpus, signal.keywords) +
+      calibrationFeedbackBoostForText(feedback, signal.label, "strategy_plan"),
   }))
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score || a.label.localeCompare(b.label))
@@ -495,7 +526,11 @@ function chooseFitBand(fitScore: number | null): DocumentStrategyFitBand {
   return "borderline";
 }
 
-function choosePositioningFrame(corpus: string, priorities: string[]): string {
+function choosePositioningFrame(
+  corpus: string,
+  priorities: string[],
+  feedback?: CalibrationFeedback | null,
+): string {
   if (/\b(incident|outage|triage|service delivery|reliability|sla)\b/i.test(corpus)) {
     return "Service delivery and incident operations leader";
   }
@@ -517,7 +552,9 @@ function choosePositioningFrame(corpus: string, priorities: string[]): string {
 
   const scored = POSITIONING_FRAME_RULES.map((rule) => ({
     frame: rule.frame,
-    score: countKeywordMatches(corpus, rule.keywords),
+    score:
+      countKeywordMatches(corpus, rule.keywords) +
+      calibrationFeedbackBoostForText(feedback, rule.frame, "strategy_plan"),
   })).sort((a, b) => b.score - a.score || a.frame.localeCompare(b.frame));
 
   return scored[0]?.frame ?? "Operations leader";
@@ -529,11 +566,18 @@ function buildQualityPass(plan: {
   roleLens: DocumentStrategyRoleLens;
   selectedEvidence: DocumentStrategyEvidence[];
   suppressionNotes: string[];
-}): DocumentQualityPass {
+}, feedback?: CalibrationFeedback | null): DocumentQualityPass {
   const topEvidence = plan.selectedEvidence.slice(0, 3);
+  const prioritizedAxes = [...plan.roleLens.priorities].sort(
+    (a, b) =>
+      calibrationFeedbackBoostForText(feedback, b, "refinement_bias") -
+        calibrationFeedbackBoostForText(feedback, a, "refinement_bias") ||
+      calibrationFeedbackBoostForText(feedback, b, "strategy_plan") -
+        calibrationFeedbackBoostForText(feedback, a, "strategy_plan"),
+  );
   const topNarrativeAxes = Array.from(
     new Set([
-      ...plan.roleLens.priorities.slice(0, 3),
+      ...prioritizedAxes.slice(0, 3),
       ...topEvidence.flatMap((evidence) => evidence.matchedSignals.slice(0, 2)),
     ]),
   ).slice(0, 4);
@@ -548,16 +592,19 @@ function buildQualityPass(plan: {
       plan.suppressionNotes
         .flatMap((note) => note.split(/[.;]/))
         .map((value) => normalizeText(value))
-        .filter((value) => value.length > 0)
-        .filter((value) => /lower-relevance|weaker overlap|opening frame|background/i.test(value)),
+      .filter((value) => value.length > 0)
+      .filter((value) => /lower-relevance|weaker overlap|opening frame|background/i.test(value)),
     ),
-  ).slice(0, 4);
+  ).slice(0, calibrationFeedbackHasAdjustment(feedback, "quality_pass", ["suppress_signal"]) ? 5 : 4);
 
   const mustLeadWith = Array.from(
     new Set([
       plan.positioningFrame,
       ...(topNarrativeAxes[0] ? [topNarrativeAxes[0]] : []),
       ...(topEvidence[0]?.baselineSection ? [topEvidence[0].baselineSection] : []),
+      ...(calibrationFeedbackHasAdjustment(feedback, "strategy_plan", ["promote_signal"])
+        ? [topNarrativeAxes[0] ?? plan.positioningFrame]
+        : []),
     ]),
   ).filter(Boolean).slice(0, 3);
 
@@ -579,6 +626,9 @@ function buildQualityPass(plan: {
         ? `Use ${topNarrativeAxes[1]} as a secondary theme instead of restating the resume.`
         : "Keep the second paragraph additive to the resume.",
       "Show motivation and fit, not a line-by-line recap of experience.",
+      ...(calibrationFeedbackHasAdjustment(feedback, "quality_pass", ["increase_weight"])
+        ? ["Keep the cover letter tightly focused on the strongest role-specific signal."]
+        : []),
     ]),
   ).slice(0, 4);
 
@@ -659,7 +709,12 @@ function buildMatchedSignals(sectionText: string): string[] {
     .slice(0, 4);
 }
 
-function scoreSection(sectionText: string, corpus: string, priorities: string[]): number {
+function scoreSection(
+  sectionText: string,
+  corpus: string,
+  priorities: string[],
+  feedback?: CalibrationFeedback | null,
+): number {
   const normalized = sectionText.toLowerCase();
   const signalScore = SIGNAL_DEFINITIONS.reduce((total, signal) => {
     const labelHit = priorities.some((priority) => priority === signal.label) ? 2 : 0;
@@ -678,13 +733,22 @@ function scoreSection(sectionText: string, corpus: string, priorities: string[])
   )
     ? 2
     : 0;
-  return signalScore * 3 + corpusOverlap + outcomeSignals + quantifiedSignals + strategicSignals;
+  const feedbackBoost =
+    calibrationFeedbackBoostForText(feedback, sectionText, "strategy_plan") +
+    calibrationFeedbackBoostForText(feedback, sectionText, "refinement_bias");
+  const feedbackPenalty =
+    calibrationFeedbackHasAdjustment(feedback, "strategy_plan", ["suppress_signal"]) &&
+    !priorities.some((priority) => normalized.includes(priority))
+      ? 2
+      : 0;
+  return signalScore * 3 + corpusOverlap + outcomeSignals + quantifiedSignals + strategicSignals + feedbackBoost - feedbackPenalty;
 }
 
 function buildEvidenceSelection(
   sections: NonNullable<DocumentStrategyPlanInput["baselineSections"]>,
   corpus: string,
   priorities: string[],
+  feedback?: CalibrationFeedback | null,
 ): { selectedEvidence: DocumentStrategyEvidence[]; suppressionNotes: string[] } {
   const scored = sections
     .map((section, index) => {
@@ -693,12 +757,14 @@ function buildEvidenceSelection(
         section,
         index,
         sectionText,
-        score: scoreSection(sectionText, corpus, priorities),
+        score: scoreSection(sectionText, corpus, priorities, feedback),
       };
     })
     .sort((a, b) => b.score - a.score || a.index - b.index);
 
-  const selected = scored.filter((entry) => entry.score > 0).slice(0, 4);
+  const minimumScore = calibrationFeedbackHasAdjustment(feedback, "strategy_plan", ["suppress_signal"]) ? 2 : 0;
+  const selectedLimit = calibrationFeedbackHasAdjustment(feedback, "refinement_bias", ["promote_signal", "increase_weight"]) ? 3 : 4;
+  const selected = scored.filter((entry) => entry.score > minimumScore).slice(0, selectedLimit);
   const selectedIds = new Set(selected.map((entry) => entry.index));
   const selectedEvidence = selected.map(({ section, sectionText, index }, rank) => {
     const matchedSignals = buildMatchedSignals(sectionText);
@@ -729,6 +795,9 @@ function buildEvidenceSelection(
     omittedRelevant.length > 0
       ? `Supporting sections with weaker overlap were kept out of the opening frame to preserve a tighter story.`
       : "No meaningful background needed suppression beyond the selected evidence clusters.",
+    ...(calibrationFeedbackHasAdjustment(feedback, "strategy_plan", ["suppress_signal"])
+      ? ["Feedback tightened the evidence bar so weaker background stays suppressed."]
+      : []),
   ];
 
   return { selectedEvidence, suppressionNotes };
@@ -1136,7 +1205,10 @@ function applyRefinementInstructions(
   return workingPlan;
 }
 
-export function buildDocumentStrategyPlan(input: DocumentStrategyPlanInput): DocumentStrategyPlan {
+export function buildDocumentStrategyPlan(
+  input: DocumentStrategyPlanInput,
+  feedback?: CalibrationFeedback | null,
+): DocumentStrategyPlan {
   const corpus = normalizeSourceParts([
     input.jobTitle,
     input.jobCompany,
@@ -1153,7 +1225,8 @@ export function buildDocumentStrategyPlan(input: DocumentStrategyPlanInput): Doc
   const seniority = chooseSeniority(corpus);
   const scope = chooseScope(corpus);
   const domainContext = chooseDomainContext(corpus, input.jobCompany);
-  const priorities = choosePriorities(corpus);
+  const activeFeedback = feedback ?? null;
+  const priorities = choosePriorities(corpus, activeFeedback);
   const requiredSignals = chooseRequiredSignals(priorities);
   const targetKeywords = extractKeywords(
     [
@@ -1176,9 +1249,9 @@ export function buildDocumentStrategyPlan(input: DocumentStrategyPlanInput): Doc
     targetKeywords,
   };
 
-  const positioningFrame = choosePositioningFrame(corpus, priorities);
+  const positioningFrame = choosePositioningFrame(corpus, priorities, activeFeedback);
   const selectedEvidenceInput = input.baselineSections ?? [];
-  const evidenceSelection = buildEvidenceSelection(selectedEvidenceInput, corpus, priorities);
+  const evidenceSelection = buildEvidenceSelection(selectedEvidenceInput, corpus, priorities, activeFeedback);
   const selectedEvidence = evidenceSelection.selectedEvidence;
   const summaryStrategy = buildSummaryStrategy(positioningFrame, priorities, fitBand);
   const resumeEmphasis = buildResumeEmphasis(priorities, selectedEvidence);
@@ -1190,7 +1263,7 @@ export function buildDocumentStrategyPlan(input: DocumentStrategyPlanInput): Doc
     roleLens,
     selectedEvidence,
     suppressionNotes,
-  });
+  }, activeFeedback);
   const documentQualityScore = computeDocumentQualityScore({
     fitBand,
     positioningFrame,
