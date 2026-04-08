@@ -19,10 +19,33 @@ function findBundleForPlan(plan: { roleLens?: { requiredSignals?: string[]; prio
   );
 }
 
+function findBundleForRequest(request: {
+  baselineId?: string;
+  jobId?: string;
+  documentStrategyPlan?: { roleLens?: { requiredSignals?: string[]; priorities?: string[] }; positioningFrame?: string };
+}) {
+  const bundles = listSyntheticGenerationScenarioBundles();
+  const exact = bundles.find(
+    (bundle) => bundle.baseline.id === request.baselineId && bundle.job.id === request.jobId,
+  );
+  if (exact) return exact;
+  return findBundleForPlan(request.documentStrategyPlan ?? {});
+}
+
 function buildResumePayload(
   bundle: ReturnType<typeof listSyntheticGenerationScenarioBundles>[number],
   plan: { roleLens?: { priorities?: string[]; requiredSignals?: string[] } } = {},
 ) {
+  if (bundle.scenario.name === 'Support operations director' && bundle.benchmark) {
+    return {
+      summary: bundle.benchmark.approvedBenchmarkResume.summary,
+      experience: [
+        {
+          bullets: [...bundle.benchmark.approvedBenchmarkResume.bullets],
+        },
+      ],
+    };
+  }
   const signals = [
     ...(plan.roleLens?.priorities ?? []),
     ...(plan.roleLens?.requiredSignals ?? []),
@@ -46,6 +69,13 @@ function buildCoverLetterPayload(
   bundle: ReturnType<typeof listSyntheticGenerationScenarioBundles>[number],
   plan: { roleLens?: { priorities?: string[]; requiredSignals?: string[] } } = {},
 ) {
+  if (bundle.scenario.name === 'Support operations director' && bundle.benchmark) {
+    return {
+      opening: bundle.benchmark.approvedBenchmarkCoverLetter.opening,
+      bodyParagraphs: [...bundle.benchmark.approvedBenchmarkCoverLetter.bodyParagraphs],
+      closingParagraph: bundle.benchmark.approvedBenchmarkCoverLetter.closingParagraph,
+    };
+  }
   const signals = [
     ...(plan.roleLens?.priorities ?? []),
     ...(plan.roleLens?.requiredSignals ?? []),
@@ -170,8 +200,25 @@ describe('SyntheticGenerationHarness', () => {
       recommendedActions: [],
     }));
 
-    resumeService.generateResume.mockImplementation(async (_userId: string, options: { documentStrategyPlan?: { roleLens?: { requiredSignals?: string[]; priorities?: string[] }; positioningFrame?: string } }) => {
-      const bundle = findBundleForPlan(options.documentStrategyPlan ?? {});
+    resumeService.generateResume.mockImplementation(async (_userId: string, options: { baselineId?: string; jobId?: string; documentStrategyPlan?: { roleLens?: { requiredSignals?: string[]; priorities?: string[] }; positioningFrame?: string } }) => {
+      const bundle = findBundleForRequest(options);
+      if (bundle.scenario.name === 'Support operations director' && bundle.benchmark) {
+        return {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          preview: {
+            resume: {
+              summary: bundle.benchmark.approvedBenchmarkResume.summary,
+              experience: [
+                {
+                  bullets: [...bundle.benchmark.approvedBenchmarkResume.bullets],
+                },
+              ],
+            },
+          },
+        };
+      }
       return {
         status: 'success',
         generationStatus: 'success',
@@ -182,8 +229,33 @@ describe('SyntheticGenerationHarness', () => {
       };
     });
 
-    coverLettersService.generateCoverLetter.mockImplementation(async (_userId: string, options: { documentStrategyPlan?: { roleLens?: { requiredSignals?: string[]; priorities?: string[] }; positioningFrame?: string } }) => {
-      const bundle = findBundleForPlan(options.documentStrategyPlan ?? {});
+    coverLettersService.generateCoverLetter.mockImplementation(async (_userId: string, options: { baselineId?: string; jobId?: string; documentStrategyPlan?: { roleLens?: { requiredSignals?: string[]; priorities?: string[] }; positioningFrame?: string } }) => {
+      const bundle = findBundleForRequest(options);
+      if (bundle.scenario.name === 'Support operations director' && bundle.benchmark) {
+        return {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          preview: {
+            coverLetter: {
+              opening:
+                `${bundle.benchmark.approvedBenchmarkCoverLetter.opening} ` +
+                "I am especially aligned to roles that need steady support operations rigor, service delivery discipline, and clearer incident response across teams. " +
+                "My background has centered on making the operating rhythm easier to run, easier to explain, and easier to sustain when volume rises.",
+              bodyParagraphs: [
+                "In my recent work, I have led intake, triage, and escalation routines that improved queue visibility and reduced repeat work. I partnered closely with product and engineering to close recurring issues, and I used weekly operating reviews to keep the service motion visible for leadership. That work made it easier for frontline managers to understand where the queue was stuck and what actions would help most.",
+                "That combination lets me contribute without simply restating the resume: I bring process architecture, cross-functional execution, and practical follow-through that help a team stay organized when volume rises. I also know how to keep customer-facing details close enough to make quick decisions with confidence, especially when a support team needs to keep quality high without slowing the response cycle.",
+                "I would expect to support this role by making ownership clearer, improving handoffs, and keeping the operating rhythm steady when the queue gets noisy. That is the kind of service delivery and incident response context I have brought before, and it is why this opportunity feels directly relevant to my background. The work is strongest when the team can see the path from issue to owner to resolution.",
+                "I would also bring a calm, practical approach to coordination across support, product, and engineering. When those groups stay aligned, it becomes easier to remove repeat pain points, keep customers informed, and build a more predictable operating model. That is the kind of contribution I would aim to make in the first weeks on the job.",
+              ],
+              closingParagraph:
+                `${bundle.benchmark.approvedBenchmarkCoverLetter.closingParagraph} ` +
+                "I would welcome the chance to discuss how I can help keep the team predictable, responsive, and tightly aligned to the work that matters most.",
+            },
+          },
+        };
+      }
       return {
         status: 'success',
         generationStatus: 'success',
@@ -198,17 +270,31 @@ describe('SyntheticGenerationHarness', () => {
     const result = await service.runDocumentGenerationHarnessSuite();
     const scenarioBundles = listSyntheticGenerationScenarioBundles();
 
-    expect(result.status).toBe('pass');
-    expect(result.passCount).toBe(scenarioBundles.length);
-    expect(result.failCount).toBe(0);
+    expect(result.status).toBe('fail');
+    expect(result.passCount).toBe(1);
+    expect(result.failCount).toBe(scenarioBundles.length - 1);
     expect(result.scenarioResults).toHaveLength(scenarioBundles.length);
     for (const scenario of result.scenarioResults) {
-      expect(scenario.status).toBe('pass');
       expect(scenario.fitScore).toBeGreaterThanOrEqual(80);
       expect(scenario.resumeGenerated).toBe(true);
       expect(scenario.coverLetterGenerated).toBe(true);
-      expect(scenario.roleMatchReadiness).toBe("needs_tightening");
-      expect(scenario.failureReasons).toEqual([]);
+      if (scenario.scenario === 'Support operations director') {
+        expect(scenario.status).toBe('pass');
+        expect(scenario.resumeUsable).toBe(true);
+        expect(scenario.coverLetterUsable).toBe(true);
+        expect(scenario.roleMatchReadiness).toBe("ready");
+        expect(scenario.calibrationBarPassed).toBe(true);
+        expect(scenario.overallCalibration).toBe('aligned');
+        expect(scenario.failureReasons).toHaveLength(0);
+      } else {
+        expect(scenario.status).toBe('fail');
+        expect(scenario.resumeUsable).toBe(true);
+        expect(scenario.coverLetterUsable).toBe(false);
+        expect(scenario.roleMatchReadiness).toBe("ready");
+        expect(scenario.calibrationBarPassed).toBe(false);
+        expect(scenario.overallCalibration).toBe('off_target');
+        expect(scenario.failureReasons.length).toBeGreaterThan(0);
+      }
     }
     expect(syntheticRunRepository.save).toHaveBeenCalled();
     expect(syntheticRunRepository.update).toHaveBeenCalled();

@@ -90,6 +90,8 @@ export type SyntheticGenerationResult = {
   fitScore: number | null;
   resumeGenerated: boolean;
   coverLetterGenerated: boolean;
+  resumeUsable: boolean | null;
+  coverLetterUsable: boolean | null;
   roleMatchReadiness: SyntheticGenerationRoleMatchReadiness | null;
   overallCalibration: GoldStandardCalibration["overallCalibration"] | null;
   calibrationBarPassed: boolean | null;

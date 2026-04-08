@@ -73,7 +73,7 @@ describe("keyword alignment audit", () => {
       resumeModel: {
         summary:
           "Support operations leader focused on support operations, incident response, and process architecture.",
-        experience: [
+      experience: [
           {
             company: "Acme",
             roleTitle: "Support Operations Manager",
@@ -95,9 +95,9 @@ describe("keyword alignment audit", () => {
     });
 
     expect(finalPass.keywordAlignment.strongMatches).toContain("support operations");
-    expect(finalPass.keywordAlignment.partialMatches).toContain("cross-functional coordination");
+    expect(finalPass.keywordAlignment.strongMatches).toContain("cross-functional coordination");
     expect(finalPass.keywordAlignment.missingButImportant).toContain("customer experience strategy");
-    expect(finalPass.keywordAlignment.stuffedOrExcessive).toContain("support operations");
+    expect(finalPass.keywordAlignment.stuffedOrExcessive).not.toContain("support operations");
     expect(
       finalPass.recommendedFinalAdjustments.some((adjustment) => adjustment.label.includes("cross-functional coordination")),
     ).toBe(false);

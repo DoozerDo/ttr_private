@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
 import { buildRoleMatchFinalPass } from "@/lib/roleMatchFinalPass";
+import { listSyntheticGenerationScenarioBundles } from "../../api/src/synthetic/generation/synthetic-generation.fixtures";
 
 function buildSamplePlan() {
   const plan = buildDocumentStrategyPlan({
@@ -141,5 +142,54 @@ describe("role match final pass", () => {
     });
     expect(finalPass.recruiterScanRisks.some((risk) => risk.type === "top_third_too_generic")).toBe(true);
     expect(finalPass.recommendedFinalAdjustments[0]?.type).toBe("summary_tighten");
+  });
+
+  it("treats benchmark-like support operations phrasing as role-ready instead of excessively repetitive", () => {
+    const bundle = listSyntheticGenerationScenarioBundles().find(
+      (entry) => entry.scenario.name === "Support operations director",
+    );
+    expect(bundle).toBeTruthy();
+    const benchmark = bundle?.benchmark;
+    expect(benchmark).toBeTruthy();
+    const plan = buildDocumentStrategyPlan({
+      fitScore: 82,
+      jobTitle: bundle?.job.title ?? "",
+      jobCompany: bundle?.job.company ?? "",
+      jobDescription: bundle?.job.rawDescription ?? "",
+      jobRequirements: bundle?.job.normalizedRequirements ?? [],
+      jobResponsibilities: bundle?.job.normalizedResponsibilities ?? [],
+      baselineSections: (bundle?.baseline.sections ?? []).map((section) => ({
+        id: section.id,
+        title: section.title,
+        sectionType: section.sectionType,
+        content: section.content,
+      })),
+    });
+    const finalPass = buildRoleMatchFinalPass({
+      plan,
+      resumeModel: {
+        summary: benchmark?.approvedBenchmarkResume.summary ?? "",
+        experience: [
+          {
+            company: "Acme",
+            roleTitle: "Support Operations Director",
+            bullets: benchmark?.approvedBenchmarkResume.bullets ?? [],
+          },
+        ],
+      },
+      coverLetterParagraphs: [
+        benchmark?.approvedBenchmarkCoverLetter.opening ?? "",
+        ...(benchmark?.approvedBenchmarkCoverLetter.bodyParagraphs ?? []),
+        benchmark?.approvedBenchmarkCoverLetter.closingParagraph ?? "",
+      ],
+      jobDescription:
+        bundle?.job.rawDescription ?? "",
+    });
+
+    expect(finalPass.overallMatchReadiness).toBe("ready");
+    expect(finalPass.keywordAlignment.missingButImportant).toHaveLength(0);
+    expect(finalPass.keywordAlignment.stuffedOrExcessive).toHaveLength(0);
+    expect(finalPass.recruiterScanRisks.some((risk) => risk.type === "weak_keyword_presence")).toBe(false);
+    expect(finalPass.recruiterScanRisks.some((risk) => risk.type === "cover_letter_not_role_specific")).toBe(false);
   });
 });

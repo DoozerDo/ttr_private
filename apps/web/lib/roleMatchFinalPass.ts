@@ -254,6 +254,33 @@ function hasRoleSpecificLanguage(text: string, priorities: string[]): boolean {
   });
 }
 
+function isCoreRoleTerm(input: RoleMatchFinalPassInput, term: string): boolean {
+  const normalizedTerm = normalizeLower(term);
+  const termTokens = tokenize(term).filter((token) => token.length > 0);
+  if (!termTokens.length) return false;
+
+  const coreSources = [
+    ...input.plan.roleLens.priorities,
+    ...input.plan.roleLens.requiredSignals,
+    input.plan.positioningFrame,
+  ]
+    .map(normalizeLower)
+    .filter(Boolean);
+
+  return coreSources.some((source) => {
+    if (source === normalizedTerm) return true;
+    return termTokens.every((token) => source.includes(token));
+  });
+}
+
+function tokenCoverage(text: string, term: string): number {
+  const normalized = normalizeLower(text);
+  const tokens = tokenize(term).filter((token) => token.length > 2);
+  if (!tokens.length) return 0;
+  const hits = tokens.filter((token) => normalized.includes(token)).length;
+  return hits / tokens.length;
+}
+
 function priorityEvidenceSource(
   input: RoleMatchFinalPassInput,
   priority: string,
@@ -309,7 +336,14 @@ function evaluateKeywordAlignment(
     ...input.plan.roleLens.targetKeywords,
     ...input.plan.roleLens.requiredSignals,
     ...input.plan.roleLens.priorities,
-  ]).filter((term) => tokenize(term).some((token) => token.length > 3));
+  ]).filter((term) => {
+    const tokens = tokenize(term).filter((token) => token.length > 0);
+    if (!tokens.length) return false;
+    if (tokens.length > 1) return true;
+
+    const acronymLike = /^[A-Z0-9%]{2,}$/.test(term.replace(/\s+/g, ""));
+    return acronymLike || isCoreRoleTerm(input, term);
+  });
 
   const strongMatches: string[] = [];
   const partialMatches: string[] = [];
@@ -322,10 +356,13 @@ function evaluateKeywordAlignment(
     const coverCount = countOccurrences(buckets.coverText, normalized);
     const jobCount = countOccurrences(normalizeText(input.jobDescription ?? ""), normalized);
     const totalCount = resumeCount + coverCount;
+    const coverage = tokenCoverage(joinText([buckets.resumeText, buckets.coverText, input.jobDescription ?? ""]), term);
+    const isCoreTerm = isCoreRoleTerm(input, term);
+    const tokenCount = tokenize(term).filter((token) => token.length > 2).length;
 
-    if (totalCount >= 2) {
+    if (totalCount >= 2 || coverage >= 0.85 || (isCoreTerm && coverage >= 0.66)) {
       strongMatches.push(term);
-    } else if (totalCount === 1 || jobCount > 0) {
+    } else if (totalCount === 1 || jobCount > 0 || coverage >= 0.5 || (isCoreTerm && coverage > 0)) {
       partialMatches.push(term);
     } else {
       missingButImportant.push(term);
@@ -333,7 +370,8 @@ function evaluateKeywordAlignment(
 
     const totalSentenceHits =
       countSentenceHits(buckets.resumeText, term) + countSentenceHits(buckets.coverText, term);
-    if (totalCount >= 4 || (totalCount >= 3 && totalSentenceHits <= 2)) {
+    const spreadAcrossArtifacts = Number(resumeCount > 0) + Number(coverCount > 0);
+    if (!isCoreTerm && tokenCount > 1 && (totalCount >= 4 || (totalCount >= 3 && totalSentenceHits <= 2)) && spreadAcrossArtifacts <= 1) {
       stuffedOrExcessive.push(term);
     }
   }

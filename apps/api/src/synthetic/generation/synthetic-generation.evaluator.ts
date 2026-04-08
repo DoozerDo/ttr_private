@@ -89,6 +89,91 @@ function countHighSeverityCalibrationGaps(calibration: GoldStandardCalibration |
   return calibration?.topGaps.filter((gap) => gap.severity === "high").length ?? 0;
 }
 
+function countWords(text: string): number {
+  return normalizeText(text)
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean).length;
+}
+
+function looksPlaceholderLike(text: string): boolean {
+  return /\b(placeholder|lorem ipsum|todo|tbd|sample text|fake company|fake role)\b/i.test(text);
+}
+
+function evaluateArtifactUsability(
+  resume: NonNullable<SyntheticGenerationEvaluationInput["generatedResume"]> | null,
+  coverLetter: NonNullable<SyntheticGenerationEvaluationInput["generatedCoverLetter"]> | null,
+  jobDescription: string | null,
+): {
+  resumeUsable: boolean;
+  coverLetterUsable: boolean;
+  resumeReasons: string[];
+  coverLetterReasons: string[];
+} {
+  const resumeReasons: string[] = [];
+  const coverLetterReasons: string[] = [];
+
+  if (!resume) {
+    resumeReasons.push("Resume preview data is missing.");
+  } else {
+    const summary = normalizeText(resume.summary ?? "");
+    const bullets = (resume.experience ?? []).flatMap((entry) => entry.bullets ?? []).map((bullet) => normalizeText(String(bullet ?? ""))).filter(Boolean);
+    const hasCompleteExperience = (resume.experience ?? []).some((entry) => {
+      const bullets = (entry.bullets ?? []).map((bullet) => normalizeText(String(bullet ?? ""))).filter(Boolean);
+      return Boolean(bullets.length);
+    });
+
+    if (!summary) {
+      resumeReasons.push("Resume summary is missing.");
+    }
+    if (!bullets.length) {
+      resumeReasons.push("Resume must include at least one experience section with bullets.");
+    }
+    if (!hasCompleteExperience) {
+      resumeReasons.push("Resume experience sections are incomplete.");
+    }
+    if (looksPlaceholderLike(summary) || bullets.some(looksPlaceholderLike)) {
+      resumeReasons.push("Resume contains placeholder-like content.");
+    }
+  }
+
+  if (!coverLetter) {
+    coverLetterReasons.push("Cover letter preview data is missing.");
+  } else {
+    const paragraphs = normalizeCoverLetterParagraphs([
+      coverLetter.salutation ?? "",
+      coverLetter.opening ?? "",
+      ...(coverLetter.bodyParagraphs ?? []),
+      coverLetter.closingParagraph ?? "",
+      coverLetter.signoff ?? "",
+      coverLetter.signatureName ?? "",
+    ]);
+    const coverText = paragraphs.join(" ");
+    if (!paragraphs.length) {
+      coverLetterReasons.push("Cover letter paragraphs are missing.");
+    }
+    if (paragraphs.length < 4) {
+      coverLetterReasons.push("Cover letter should contain properly structured paragraphs.");
+    }
+    if (countWords(coverText) < 250 || countWords(coverText) > 400) {
+      coverLetterReasons.push("Cover letter word count must be between 250 and 400 words.");
+    }
+    if (looksPlaceholderLike(coverText)) {
+      coverLetterReasons.push("Cover letter contains placeholder-like content.");
+    }
+    if (!jobDescription || !normalizeText(jobDescription)) {
+      coverLetterReasons.push("Cover letter could not be compared against the role description.");
+    }
+  }
+
+  return {
+    resumeUsable: resumeReasons.length === 0,
+    coverLetterUsable: coverLetterReasons.length === 0,
+    resumeReasons,
+    coverLetterReasons,
+  };
+}
+
 function buildRoleMatchSummary(
   input: SyntheticGenerationEvaluationInput,
   plan: DocumentStrategyPlan,
@@ -164,6 +249,7 @@ export function evaluateSyntheticGenerationScenario(
     coverParagraphs,
   });
   const roleMatch = resume && coverLetter ? buildRoleMatchSummary(input, plan, resume, coverLetter) : null;
+  const artifactUsability = evaluateArtifactUsability(resume, coverLetter, input.jobDescription);
   const calibration = input.benchmark
     ? buildGoldStandardCalibration({
         plan,
@@ -194,12 +280,18 @@ export function evaluateSyntheticGenerationScenario(
   } else if (!resumeGenerated) {
     failures.push("Resume was not generated or is empty.");
   }
+  if (resume && !artifactUsability.resumeUsable) {
+    failures.push(`Resume output is not usable: ${artifactUsability.resumeReasons.join(" ")}`);
+  }
 
   const coverLetterGenerated = Boolean(coverLetter && coverParagraphs.length > 0);
   if (!input.scenario.expected.requiresCoverLetter) {
     failures.push("Scenario contract is missing the cover letter requirement.");
   } else if (!coverLetterGenerated) {
     failures.push("Cover letter was not generated or is empty.");
+  }
+  if (coverLetter && !artifactUsability.coverLetterUsable) {
+    failures.push(`Cover letter output is not usable: ${artifactUsability.coverLetterReasons.join(" ")}`);
   }
 
   const bannedStates = matchesBannedFailureState(
@@ -276,6 +368,8 @@ export function evaluateSyntheticGenerationScenario(
     fitScore,
     resumeGenerated,
     coverLetterGenerated,
+    resumeUsable: resume ? artifactUsability.resumeUsable : null,
+    coverLetterUsable: coverLetter ? artifactUsability.coverLetterUsable : null,
     roleMatchReadiness,
     overallCalibration,
     calibrationBarPassed,

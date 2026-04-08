@@ -274,8 +274,8 @@ export const SYNTHETIC_GENERATION_FIXTURES: SyntheticGenerationFixtureBundle[] =
         minFitScore: 80,
         requiresResume: true,
         requiresCoverLetter: true,
-        minRoleMatchReadiness: "needs_tightening",
-        mustPassCalibrationBar: false,
+        minRoleMatchReadiness: "ready",
+        mustPassCalibrationBar: true,
         maxHighSeverityCalibrationGaps: 1,
         requiredRoleSignals: [
           "support operations rigor",
@@ -300,8 +300,8 @@ export const SYNTHETIC_GENERATION_FIXTURES: SyntheticGenerationFixtureBundle[] =
         minFitScore: 80,
         requiresResume: true,
         requiresCoverLetter: true,
-        minRoleMatchReadiness: "needs_tightening",
-        mustPassCalibrationBar: false,
+        minRoleMatchReadiness: "ready",
+        mustPassCalibrationBar: true,
         maxHighSeverityCalibrationGaps: 1,
         requiredRoleSignals: [
           "service delivery leadership",
@@ -326,8 +326,8 @@ export const SYNTHETIC_GENERATION_FIXTURES: SyntheticGenerationFixtureBundle[] =
         minFitScore: 80,
         requiresResume: true,
         requiresCoverLetter: true,
-        minRoleMatchReadiness: "needs_tightening",
-        mustPassCalibrationBar: false,
+        minRoleMatchReadiness: "ready",
+        mustPassCalibrationBar: true,
         maxHighSeverityCalibrationGaps: 1,
         requiredRoleSignals: [
           "customer operations leadership",
