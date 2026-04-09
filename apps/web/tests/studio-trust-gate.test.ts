@@ -34,6 +34,21 @@ describe("Studio trust gate", () => {
     expect(decision.reason).toBe("Your baseline is incomplete. Add more experience before generating.");
   });
 
+  it("blocks generation even for a high score when compliance is not genuinely ready", () => {
+    const decision = evaluateStudioTrustGate({
+      score: 84,
+      baselineId: "base-1",
+      baselineVersionId: "ver-1",
+      evidenceUnits: ["signal 1", "signal 2"],
+      hasActiveComplianceViolations: true,
+    });
+
+    expect(decision.allowed).toBe(false);
+    expect(decision.reason).toBe(
+      "Generation is blocked until compliance violations are resolved (invented role, company, or metrics).",
+    );
+  });
+
   it("resume validation catches formatting and structure issues", () => {
     const result = validateResumeOutput({
       preview: {

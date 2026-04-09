@@ -1429,7 +1429,7 @@ export default function StudioPage() {
       studioGenerationState,
     ],
   );
-  const canGenerateDocuments = productReadiness.state === "ALLOWED";
+  const canGenerateDocuments = productReadiness.state === "ALLOWED" && trustGateDecision.allowed;
   const studioDraftMode = productReadiness.generationMode === "draft" && isFromUnlock && !hasGeneratedOnce;
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
@@ -2072,11 +2072,11 @@ export default function StudioPage() {
     setRecentIntent(readRecentIntentState());
   }, [requestedAnalysisId, effectiveJobId, effectiveBaselineId]);
   const generationSupportState = useMemo(() => {
-    if (productReadiness.state === "BLOCKED") return "blocked";
+    if (!canGenerateDocuments || productReadiness.state === "BLOCKED") return "blocked";
     if (productReadiness.confidence === "MEDIUM") return "partial";
     return "strong";
-  }, [productReadiness.confidence, productReadiness.state]);
-  const canProceedWithStudioDrafts = generationSupportState !== "blocked";
+  }, [canGenerateDocuments, productReadiness.confidence, productReadiness.state]);
+  const canProceedWithStudioDrafts = canGenerateDocuments;
   const autoGenerationSignature = useMemo(() => {
     if (!canGenerateDocuments) return null;
     if (typeof analysisScore !== "number" || analysisScore < 80) return null;

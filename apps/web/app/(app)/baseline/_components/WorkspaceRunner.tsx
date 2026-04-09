@@ -16,6 +16,10 @@ import { buildEvidenceLines, type ScoreBreakdown } from "@/lib/evidenceLines";
 import { getGenerationReadiness } from "@/lib/generationReadiness";
 import { getGenerationAuthorityState } from "@/lib/generationAuthority";
 import { buildGenerationProductReadiness } from "@/lib/generationProductReadiness";
+import {
+  buildTargetCtaContract,
+  resolveTargetDisplayResult,
+} from "@/lib/targetGenerationContract";
 import { sanitizeScoreExplanationLine, sanitizeScoreExplanationList } from "@/lib/scoreExplanationCopy";
 import { trackEvent } from "@/src/lib/analytics";
 import { SetupModuleCard } from "./SetupModuleCard";
@@ -695,8 +699,17 @@ export function WorkspaceRunner({
 
   const showLoadLastRun = Boolean(baselineId) && Boolean(jobId);
   const latestCompletedScorePair = resolveResultPair(latestCompletedScore);
-  const showResult = isMatchingPair(latestCompletedScorePair, baselineId, jobId);
-  const displayResult = showResult ? latestCompletedScore ?? result : null;
+  const currentResultPair = resolveResultPair(result);
+  const resolvedDisplayResult = resolveTargetDisplayResult({
+    currentResult: isMatchingPair(currentResultPair, baselineId, jobId) ? result : null,
+    persistedResult: isMatchingPair(latestCompletedScorePair, baselineId, jobId)
+      ? latestCompletedScore
+      : null,
+    baselineId,
+    jobId,
+  });
+  const displayResult = resolvedDisplayResult.result;
+  const showResult = Boolean(displayResult);
   const score = typeof displayResult?.score === "number" ? displayResult.score : null;
   const scoreBreakdown = extractScoreBreakdown(displayResult);
   const evidenceLinesFromBreakdown = buildEvidenceLines(scoreBreakdown);
@@ -726,12 +739,6 @@ export function WorkspaceRunner({
   const strongMatchSignals = sanitizeScoreExplanationList(visibleStrengthSignals, "supporting", 3);
   const scoreDisplayValue = showResult ? formatScoreValue(revealedScoreValue ?? score) : "--";
   const scoreBand = typeof score === "number" ? resolveScoreBandPresentation(score) : null;
-  const resultsHref =
-    buildResultsUrl({
-      assessmentId: asString((displayResult as { assessmentId?: unknown } | null)?.assessmentId) ?? null,
-      jobId: latestJobId,
-      baselineId: latestBaselineId,
-    }) ?? "/results";
   const studioHref = buildStudioUrl({
     assessmentId: asString((displayResult as { assessmentId?: unknown } | null)?.assessmentId) ?? null,
     jobId: latestJobId,
@@ -739,6 +746,28 @@ export function WorkspaceRunner({
     baselineVersionId:
       asString((displayResult as { baselineVersionId?: unknown } | null)?.baselineVersionId) ?? null,
   });
+  const resolveGapsHref = useMemo(() => {
+    const params = new URLSearchParams();
+    if (latestJobId?.trim()) {
+      params.set("jobId", latestJobId.trim());
+    }
+    if (latestBaselineId?.trim()) {
+      params.set("baselineId", latestBaselineId.trim());
+    }
+    const analysisId = asString((displayResult as { assessmentId?: unknown } | null)?.assessmentId);
+    if (analysisId?.trim()) {
+      params.set("analysisId", analysisId.trim());
+    }
+    const baselineVersionId = asString(
+      (displayResult as { baselineVersionId?: unknown } | null)?.baselineVersionId,
+    );
+    if (baselineVersionId?.trim()) {
+      params.set("baselineVersionId", baselineVersionId.trim());
+    }
+
+    const query = params.toString();
+    return query ? `/resolve-gaps?${query}` : "/resolve-gaps";
+  }, [displayResult, latestBaselineId, latestJobId]);
   const generationReadiness = useMemo(
     () => getGenerationReadiness(displayResult, runState),
     [displayResult, runState],
@@ -760,19 +789,33 @@ export function WorkspaceRunner({
       }),
     [displayResult, latestBaselineId, latestJobId, score, targetGenerationState],
   );
-  const isHighFit = productReadiness.canOpenStudio;
-  const isGenerationLimited = targetGenerationState === "LIMITED";
-  const isGenerationBlocked = targetGenerationState === "BLOCKED";
-  const isLimitedHighFit =
-    isHighFit && !productReadiness.generation_readiness.canGenerate && isGenerationLimited;
-  const isBlockedHighFit =
-    isHighFit && !productReadiness.generation_readiness.canGenerate && isGenerationBlocked;
+  const targetCta = useMemo(
+    () =>
+      buildTargetCtaContract({
+        score,
+        generationReadiness,
+        productReadiness,
+        studioHref,
+        resolveGapsHref,
+        scoreSource: resolvedDisplayResult.source,
+      }),
+    [
+      generationReadiness,
+      latestCompletedScore,
+      productReadiness,
+      resolveGapsHref,
+      resolvedDisplayResult.source,
+      result,
+      score,
+      studioHref,
+    ],
+  );
   const scoreBandSummary =
-    isBlockedHighFit
-      ? "This role scored well, but your selected resume does not support compliant generation yet."
-      : isLimitedHighFit
-      ? "This role scored well, but generation is constrained by current verification limits."
-      : scoreBand?.summary ?? "";
+    targetCta.state === "READY"
+      ? "This role is ready for Studio."
+      : targetCta.state === "LIMITED"
+        ? "This role is close, but still needs more verified evidence before Studio."
+        : scoreBand?.summary ?? "";
   const blockingReasons = generationReadiness.verificationIssues.slice(0, 3);
   const showPreAnalysisState = !showResult && !isRunning && !isRevealAnalyzing && !error;
   const showMismatchRecovery = isSelectionMismatchMessage(error);
@@ -803,44 +846,29 @@ export function WorkspaceRunner({
   const resultCardClasses = [
     "score-summary-card space-y-3 rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.12),transparent_42%),linear-gradient(180deg,rgba(15,23,42,0.95),rgba(2,6,23,0.98))] p-4 text-[13px] text-slate-200 shadow-[0_24px_80px_rgba(2,6,23,0.45)]",
   ].join(" ");
-  const primaryTargetCtaLabel = productReadiness.canOpenStudio
-    ? "Open Studio"
-    : "Generate Compatibility Score";
   useEffect(() => {
     if (typeof score !== "number" || !latestBaselineId || !latestJobId) return;
     const assessmentId = asString((displayResult as { assessmentId?: unknown } | null)?.assessmentId) ?? "none";
-    const eventKey = `${assessmentId}:${targetGenerationState}:${Math.round(score)}`;
+    const eventKey = `${assessmentId}:${targetCta.state}:${Math.round(score)}`;
     if (stateViewedEventKeyRef.current === eventKey) return;
     stateViewedEventKeyRef.current = eventKey;
     trackEvent("target_generation_state_viewed", {
-      state: targetGenerationState,
+      state: targetCta.state,
       score,
       baselineId: latestBaselineId,
       jobId: latestJobId,
     });
-  }, [displayResult, latestBaselineId, latestJobId, score, targetGenerationState]);
+  }, [displayResult, latestBaselineId, latestJobId, score, targetCta.state]);
 
   const handleGenerateClick = useCallback(
-    (event: MouseEvent<HTMLAnchorElement>) => {
-      trackEvent("target_cta_clicked", {
-        state: targetGenerationState,
+    (_event: MouseEvent<HTMLAnchorElement>) => {
+      const analyticsPayload = {
+        state: targetCta.state,
         score,
-        actionType: productReadiness.canOpenStudio
-          ? "open_studio_generate"
-          : isLimitedHighFit
-            ? "open_studio_limited"
-            : "open_studio_generate",
-      });
-      if (isBlockedHighFit || !productReadiness.canOpenStudio) {
-        event.preventDefault();
-        if (!productReadiness.canOpenStudio) {
-          return;
-        }
-        trackEvent("target_cta_clicked", {
-          state: targetGenerationState,
-          score,
-          actionType: "blocked_redirect",
-        });
+        actionType: targetCta.actionType,
+      } as const;
+      trackEvent("target_cta_clicked", analyticsPayload);
+      if (targetCta.actionType === "resolve_gaps") {
         trackEvent("target_generation_blocked_redirect", {
           score,
           blockerCodes: generationReadiness.verificationIssues.map((issue) => issue.code),
@@ -849,13 +877,48 @@ export function WorkspaceRunner({
     },
     [
       generationReadiness.verificationIssues,
-      isBlockedHighFit,
-      isLimitedHighFit,
-      productReadiness.canOpenStudio,
       score,
-      targetGenerationState,
+      targetCta.actionType,
+      targetCta.state,
     ],
   );
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_DEBUG_TARGET_FLOW !== "true") {
+      return;
+    }
+    if (!latestBaselineId || !latestJobId) return;
+    console.info("[target] cta_contract", {
+      baselineId: latestBaselineId,
+      jobId: latestJobId,
+      score,
+      scoreSource: targetCta.scoreSource,
+      readinessSource: targetCta.readinessSource,
+      ctaLabel: targetCta.label,
+      ctaHref: targetCta.href,
+      analyticsPayload: {
+        state: targetCta.state,
+        score: targetCta.score,
+        actionType: targetCta.actionType,
+      },
+      persistedLatestAssessment: resolvedDisplayResult.source === "persisted_latest_assessment",
+      freshComputation: resolvedDisplayResult.source === "fresh_computation",
+    });
+  }, [
+    latestBaselineId,
+    latestCompletedScore,
+    latestJobId,
+    resolvedDisplayResult.source,
+    result,
+    score,
+    targetCta.actionType,
+    targetCta.href,
+    targetCta.label,
+    targetCta.readinessSource,
+    targetCta.score,
+    targetCta.scoreSource,
+    targetCta.state,
+  ]);
 
   const runAssessment = useCallback(async () => {
     const baselineForRun = selectedBaselineId;
@@ -1487,18 +1550,31 @@ export function WorkspaceRunner({
                 </div>
               </div>
             ) : null}
-            {isHighFit ? (
+            {score !== null ? (
               <div
                 className={`rounded-2xl border p-4 text-sm ${
-                  targetGenerationState === "BLOCKED"
-                    ? "border-rose-300/35 bg-rose-500/10 text-rose-100"
-                    : targetGenerationState === "LIMITED"
-                    ? "border-cyan-300/35 bg-cyan-500/10 text-cyan-100"
-                    : "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
+                  targetCta.state === "READY"
+                    ? "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
+                    : targetCta.state === "LIMITED"
+                      ? "border-cyan-300/35 bg-cyan-500/10 text-cyan-100"
+                      : "border-rose-300/35 bg-rose-500/10 text-rose-100"
                 }`}
               >
-                <p className="text-xs font-semibold uppercase tracking-[0.2em]">Generation Ready</p>
-                {targetGenerationState !== "READY" && blockingReasons.length ? (
+                <p className="text-xs font-semibold uppercase tracking-[0.2em]">
+                  {targetCta.state === "READY"
+                    ? "Generation Ready"
+                    : targetCta.state === "LIMITED"
+                      ? "Generation Limited"
+                      : "Fit Review Needed"}
+                </p>
+                <p className="mt-1 text-sm">
+                  {targetCta.state === "READY"
+                    ? "This role is ready for Studio."
+                    : targetCta.state === "LIMITED"
+                      ? "This role needs more verified evidence before Studio."
+                      : "This role is not ready for Studio yet. Start Fit Review to strengthen the analysis."}
+                </p>
+                {blockingReasons.length && targetCta.state !== "READY" ? (
                   <ul className="mt-2 space-y-1 text-slate-200">
                     {blockingReasons.map((reason, index) => (
                       <li key={`target-readiness-reason-${reason.code}-${index}`}>- {reason.explanation}</li>
@@ -1507,54 +1583,20 @@ export function WorkspaceRunner({
                 ) : null}
               </div>
             ) : null}
-            {isStrongScore ? (
+            {score !== null ? (
               <p className="text-sm font-medium text-slate-100">
-                {isBlockedHighFit
-                  ? "You are a strong match, but your materials need refinement before applying."
-                  : isLimitedHighFit
-                    ? "You are a strong match, but generation is constrained until verification is stronger."
-                    : "You are well aligned with this role and ready to generate tailored materials."}
+                {targetCta.state === "READY"
+                  ? "You are well aligned with this role and ready to generate tailored materials."
+                  : "You are not ready for Studio yet. Improve the fit before generating."}
               </p>
             ) : null}
-            {isBlockedHighFit ? (
-              <div className="space-y-3 rounded-2xl border border-cyan-300/30 bg-cyan-500/10 p-4">
-                <h3 className="text-base font-semibold text-cyan-100">
-                  Strong match, but not ready to generate
-                </h3>
-                <p className="text-sm text-cyan-50/90">
-                  Your experience aligns with this role. But your baseline does not yet support compliant
-                  document generation.
-                </p>
-                {blockingReasons.length ? (
-                  <ul className="space-y-2 text-sm text-cyan-50/90">
-                    {blockingReasons.map((reason, index) => (
-                      <li key={`${reason.code}-${index}`}>&bull; {reason.explanation}</li>
-                    ))}
-                  </ul>
-                ) : null}
-                <a
-                  href={resultsHref}
-                  onClick={() =>
-                    trackEvent("target_cta_clicked", {
-                      state: targetGenerationState,
-                      score,
-                      actionType: "resolve_gaps",
-                    })
-                  }
-                  className="inline-flex w-full items-center justify-center whitespace-nowrap rounded-2xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
-                >
-                  ADD EVIDENCE
-                </a>
-              </div>
-            ) : (
-              <a
-                href={productReadiness.canOpenStudio ? studioHref : resultsHref}
-                onClick={handleGenerateClick}
-                className="inline-flex items-center justify-center whitespace-nowrap rounded-2xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
-              >
-                {primaryTargetCtaLabel}
-              </a>
-            )}
+            <a
+              href={targetCta.href}
+              onClick={handleGenerateClick}
+              className="inline-flex items-center justify-center whitespace-nowrap rounded-2xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
+            >
+              {targetCta.label}
+            </a>
           </div>
         </div>
       ) : null}
