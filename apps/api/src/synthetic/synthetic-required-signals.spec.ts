@@ -38,12 +38,15 @@ describe('synthetic required role signals', () => {
       generatedCoverLetter: {
         salutation: 'Dear Hiring Team,',
         opening:
-          `I am applying because I bring ${signals.join(', ')}.`,
+          `I am applying because I bring ${signals.join(', ')} and I know how to translate those strengths into steady customer operations. I have worked in environments where the day to day work needed clear ownership, reliable workflow design, and direct follow through so leaders could see progress without guessing. That is the operating style I would bring here.`,
         bodyParagraphs: [
-          'I keep service delivery visible and measurable.',
-          'I connect the team around clear ownership and follow-through.',
+          `I keep ${signals[0]} visible and measurable by pairing operating reviews with practical reporting and straightforward ownership paths. That keeps the work moving and gives managers a clearer picture of what needs attention.`,
+          `I connect the team around ${signals[1]} and ${signals[2]} by keeping the next owner, the next action, and the next check-in easy to see. That kind of follow through is how I help teams stay aligned when the pace changes.`,
+          `I also rely on ${signals[3]} to make sure the work does not drift away from the customer or the business. When the team can see the process clearly, it becomes easier to reduce confusion, improve service quality, and keep improvement work practical.`,
+          `Across all of that, I try to keep the writing and the operating rhythm simple enough that frontline managers can use it immediately. I have found that the best process changes are the ones people can repeat without extra translation, and that is where steady customer operations work creates the most value.`,
         ],
-        closingParagraph: 'I would welcome the chance to discuss the role.',
+        closingParagraph:
+          'I would welcome the chance to discuss the role and how this background could support a steadier operating rhythm, clearer ownership, and better customer outcomes over time.',
         signoff: 'Sincerely,',
         signatureName: 'Synthetic Candidate',
       },

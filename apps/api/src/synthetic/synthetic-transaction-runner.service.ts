@@ -161,6 +161,7 @@ export class SyntheticTransactionRunnerService {
 
   async runCoreLoopSmoke(triggerSource: 'manual' | 'system' = 'manual'): Promise<SyntheticTransactionResult> {
     const startedAt = new Date();
+    const generationMode: 'generate' = 'generate';
     const runContext = buildSyntheticRunContext(SCENARIO_KEY, randomUUID());
     const syntheticMetadata = buildSyntheticMetadata({
       isSynthetic: true,
@@ -342,48 +343,53 @@ export class SyntheticTransactionRunnerService {
         );
       }
 
-      const opportunityStep = await this.runStep('save_opportunity', async () => {
-        const assessment = await this.fitAssessmentRepository.findOneOrFail({ where: { id: assessmentId } });
-        const opportunity = await this.opportunitiesService.upsertOpportunity(
-          user.id,
-          {
-            analysisId: assessment.id,
-            jobId,
-            baselineId,
-            company: 'Example SaaS',
-            roleTitle: 'Senior Support Operations Manager',
-            score: assessment.overallScore,
-            notes: 'synthetic core loop smoke run',
-          },
-          syntheticMetadata,
-        );
+      let opportunityStep: Awaited<ReturnType<typeof this.runStep>> | null = null;
+      if (generationMode === 'generate') {
+        opportunityStep = await this.runStep('save_opportunity', async () => {
+          const assessment = await this.fitAssessmentRepository.findOneOrFail({ where: { id: assessmentId } });
+          const opportunity = await this.opportunitiesService.upsertOpportunity(
+            user.id,
+            {
+              analysisId: assessment.id,
+              jobId,
+              baselineId,
+              company: 'Example SaaS',
+              roleTitle: 'Senior Support Operations Manager',
+              score: assessment.overallScore,
+              notes: 'synthetic core loop smoke run',
+            },
+            syntheticMetadata,
+          );
 
-        if (!opportunity?.id) {
-          throw new BadRequestException('Opportunity save did not persist.');
+          if (!opportunity?.id) {
+            throw new BadRequestException('Opportunity save did not persist.');
+          }
+
+          return { opportunityId: opportunity.id, score: opportunity.currentScore };
+        });
+        stepResults.push(opportunityStep.result);
+        if (opportunityStep.result.status === 'failed') {
+          throw new InternalServerErrorException(
+            opportunityStep.result.errorMessage ?? 'save_opportunity failed',
+          );
         }
-
-        return { opportunityId: opportunity.id, score: opportunity.currentScore };
-      });
-      stepResults.push(opportunityStep.result);
-      if (opportunityStep.result.status === 'failed') {
-        throw new InternalServerErrorException(
-          opportunityStep.result.errorMessage ?? 'save_opportunity failed',
-        );
       }
 
-      await this.assertSyntheticPropagation({
-        userId: user.id,
-        assessmentId,
-        opportunityId: String(opportunityStep.result.details?.opportunityId),
-        runId: runContext.runId,
-      });
+      if (generationMode === 'generate') {
+        await this.assertSyntheticPropagation({
+          userId: user.id,
+          assessmentId,
+          opportunityId: String(opportunityStep?.result.details?.opportunityId ?? ''),
+          runId: runContext.runId,
+        });
+      }
 
       summary.userId = user.id;
       summary.baselineId = baselineId;
       summary.baselineVersionId = baselineVersionId;
       summary.jobId = jobId;
       summary.assessmentId = assessmentId;
-      summary.opportunityId = opportunityStep.result.details?.opportunityId ?? null;
+      summary.opportunityId = opportunityStep?.result.details?.opportunityId ?? null;
 
       const finishedAt = new Date();
       const output: SyntheticTransactionResult = {
@@ -630,6 +636,7 @@ export class SyntheticTransactionRunnerService {
   }> {
     const startedAt = new Date();
     const orchestrationFailures: string[] = [];
+    const generationMode = bundle.scenario.expected.generationMode;
 
     const baselineStep = await this.runStep(`resolve_baseline_fixture:${bundle.scenario.name}`, async () => {
       const baseline = await this.resolveOrCreateSyntheticBaselineFixture(user.id, bundle.baseline, runContext);
@@ -741,7 +748,7 @@ export class SyntheticTransactionRunnerService {
     let generatedResume: SyntheticGenerationEvaluationInput['generatedResume'] = null;
     let generatedCoverLetter: SyntheticGenerationEvaluationInput['generatedCoverLetter'] = null;
 
-    if (baselineId && baselineVersionId && jobId) {
+    if (generationMode === "generate" && baselineId && baselineVersionId && jobId) {
       const resumeStep = await this.runStep(`generate_resume:${bundle.scenario.name}`, async () => {
         const result = await this.resumeService.generateResume(
           user.id,
@@ -796,6 +803,9 @@ export class SyntheticTransactionRunnerService {
       } else {
         orchestrationFailures.push(coverStep.result.errorMessage ?? 'generate_cover_letter failed');
       }
+    } else if (generationMode === "blocked") {
+      generatedResume = null;
+      generatedCoverLetter = null;
     }
 
     const evaluation = evaluateSyntheticGenerationScenario({

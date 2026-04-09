@@ -230,6 +230,7 @@ export function evaluateSyntheticGenerationScenario(
 ): SyntheticGenerationResult {
   const failures: string[] = [];
   const fitScore = input.fitScore ?? null;
+  const generationMode = input.scenario.expected.generationMode;
   const requiredSignals = input.scenario.expected.requiredRoleSignals;
   const plan = input.plan;
   const resume = input.generatedResume;
@@ -251,9 +252,13 @@ export function evaluateSyntheticGenerationScenario(
     coverOpening: coverParagraphs[0] ?? null,
     coverParagraphs,
   });
-  const roleMatch = resume && coverLetter ? buildRoleMatchSummary(input, plan, resume, coverLetter) : null;
+  const roleMatch =
+    generationMode === "generate" && resume && coverLetter
+      ? buildRoleMatchSummary(input, plan, resume, coverLetter)
+      : null;
   const artifactUsability = evaluateArtifactUsability(resume, coverLetter, input.jobDescription);
   const calibration = input.benchmark
+    && generationMode === "generate"
     ? buildGoldStandardCalibration({
         plan,
         generatedResume: {
@@ -278,23 +283,25 @@ export function evaluateSyntheticGenerationScenario(
   }
 
   const resumeGenerated = Boolean(resume && resumeSummary.length > 0 && resumeBullets.length > 0);
-  if (!input.scenario.expected.requiresResume) {
-    failures.push("Scenario contract is missing the resume requirement.");
-  } else if (!resumeGenerated) {
+  if (input.scenario.expected.requiresResume && !resumeGenerated) {
     failures.push("Resume was not generated or is empty.");
   }
-  if (resume && !artifactUsability.resumeUsable) {
+  if (generationMode === "generate" && resume && !artifactUsability.resumeUsable) {
     failures.push(`Resume output is not usable: ${artifactUsability.resumeReasons.join(" ")}`);
+  }
+  if (generationMode === "blocked" && resumeGenerated) {
+    failures.push("Generation should have been blocked, but a resume was produced.");
   }
 
   const coverLetterGenerated = Boolean(coverLetter && coverParagraphs.length > 0);
-  if (!input.scenario.expected.requiresCoverLetter) {
-    failures.push("Scenario contract is missing the cover letter requirement.");
-  } else if (!coverLetterGenerated) {
+  if (input.scenario.expected.requiresCoverLetter && !coverLetterGenerated) {
     failures.push("Cover letter was not generated or is empty.");
   }
-  if (coverLetter && !artifactUsability.coverLetterUsable) {
+  if (generationMode === "generate" && coverLetter && !artifactUsability.coverLetterUsable) {
     failures.push(`Cover letter output is not usable: ${artifactUsability.coverLetterReasons.join(" ")}`);
+  }
+  if (generationMode === "blocked" && coverLetterGenerated) {
+    failures.push("Generation should have been blocked, but a cover letter was produced.");
   }
 
   const bannedStates = matchesBannedFailureState(
@@ -310,30 +317,34 @@ export function evaluateSyntheticGenerationScenario(
   }
 
   const roleMatchReadiness = roleMatch?.roleMatchReadiness ?? null;
-  if (!roleMatchReadiness) {
-    failures.push("Role match readiness was not produced.");
-  } else {
-    const readinessRank: Record<NonNullable<SyntheticGenerationResult["roleMatchReadiness"]>, number> = {
-      ready: 2,
-      needs_tightening: 1,
-      misaligned: 0,
-    };
-    if (
-      readinessRank[roleMatchReadiness] <
-      readinessRank[input.scenario.expected.minRoleMatchReadiness]
-    ) {
-      failures.push(
-        `Role match readiness ${roleMatchReadiness} did not meet the minimum threshold of ${input.scenario.expected.minRoleMatchReadiness}.`,
-      );
+  if (generationMode === "generate") {
+    if (!roleMatchReadiness) {
+      failures.push("Role match readiness was not produced.");
+    } else {
+      const readinessRank: Record<NonNullable<SyntheticGenerationResult["roleMatchReadiness"]>, number> = {
+        ready: 2,
+        needs_tightening: 1,
+        misaligned: 0,
+      };
+      if (
+        readinessRank[roleMatchReadiness] <
+        readinessRank[input.scenario.expected.minRoleMatchReadiness]
+      ) {
+        failures.push(
+          `Role match readiness ${roleMatchReadiness} did not meet the minimum threshold of ${input.scenario.expected.minRoleMatchReadiness}.`,
+        );
+      }
     }
   }
 
   const detectedRoleSignals = roleMatch?.detectedRoleSignals ?? [];
-  const missingRequiredSignals = requiredSignals.filter(
-    (signal) => !detectedRoleSignals.some((detected) => normalizeLower(detected) === normalizeLower(signal)),
-  );
-  if (missingRequiredSignals.length > 0) {
-    failures.push(`Required role signals were not detected: ${missingRequiredSignals.join(", ")}.`);
+  if (generationMode === "generate") {
+    const missingRequiredSignals = requiredSignals.filter(
+      (signal) => !detectedRoleSignals.some((detected) => normalizeLower(detected) === normalizeLower(signal)),
+    );
+    if (missingRequiredSignals.length > 0) {
+      failures.push(`Required role signals were not detected: ${missingRequiredSignals.join(", ")}.`);
+    }
   }
 
   let overallCalibration: SyntheticGenerationResult["overallCalibration"] = null;
@@ -367,6 +378,12 @@ export function evaluateSyntheticGenerationScenario(
 
   return {
     scenario: input.scenario.name,
+    scenarioId: input.scenario.id,
+    scenarioTitle: input.scenario.title,
+    personaKey: input.scenario.personaKey,
+    tags: input.scenario.tags,
+    baselineFixtureId: input.scenario.baselineFixtureId,
+    jobFixtureId: input.scenario.jobFixtureId,
     status: failures.length === 0 ? "pass" : "fail",
     fitScore,
     resumeGenerated,

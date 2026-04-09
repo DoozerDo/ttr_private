@@ -14,6 +14,14 @@ const BANNED_FAILURE_STATES = [
   "empty artifact payload",
 ];
 
+function fixtureSourceArtifact(fixtureId: string, label: string) {
+  return {
+    kind: "fixture" as const,
+    fixtureId,
+    label,
+  };
+}
+
 const SUPPORT_OPS_BASELINE: SyntheticGenerationBaselineFixture = {
   id: "baseline-support-ops-director-v1",
   originalFilename: "support-ops-director-baseline.txt",
@@ -136,6 +144,26 @@ const SUPPORT_OPS_JOB: SyntheticGenerationJobFixture = {
   ],
 };
 
+const SUPPORT_MODERATE_JOB: SyntheticGenerationJobFixture = {
+  id: "job-support-ops-manager-v1",
+  title: "Support Operations Manager",
+  company: "Example SaaS",
+  rawDescription:
+    "Own support workflow design, queue health, coaching rhythms, and weekly reporting for a growing customer support team. Improve service quality, handoffs, and cross-functional follow-through.",
+  normalizedResponsibilities: [
+    "Own daily support operations and queue health.",
+    "Improve workflow design and coaching routines.",
+    "Partner with product and engineering on issue follow-through.",
+    "Keep leadership reporting clear and reliable.",
+  ],
+  normalizedRequirements: [
+    "Support operations rigor",
+    "Workflow design",
+    "Queue health management",
+    "Cross-functional execution",
+  ],
+};
+
 const INCIDENT_JOB: SyntheticGenerationJobFixture = {
   id: "job-incident-service-leader-v1",
   title: "Service Delivery and Incident Operations Leader",
@@ -156,6 +184,26 @@ const INCIDENT_JOB: SyntheticGenerationJobFixture = {
   ],
 };
 
+const INCIDENT_BLOCKED_JOB: SyntheticGenerationJobFixture = {
+  id: "job-incident-response-coordinator-v1",
+  title: "Incident Response Coordinator",
+  company: "Example SaaS",
+  rawDescription:
+    "Coordinate incident triage, escalation routing, and service notes for a customer facing support team. Keep owners informed, document the next steps, and support the operating rhythm during active issues.",
+  normalizedResponsibilities: [
+    "Coordinate incident triage and owner routing.",
+    "Maintain service notes and escalation tracking.",
+    "Support the operating rhythm during active issues.",
+    "Keep cross-functional updates current.",
+  ],
+  normalizedRequirements: [
+    "Incident coordination",
+    "Escalation tracking",
+    "Service notes",
+    "Cross-functional communication",
+  ],
+};
+
 const CUSTOMER_OPS_JOB: SyntheticGenerationJobFixture = {
   id: "job-customer-ops-strategy-v1",
   title: "Customer Operations and Support Strategy Director",
@@ -172,6 +220,26 @@ const CUSTOMER_OPS_JOB: SyntheticGenerationJobFixture = {
     "Customer operations leadership",
     "Support strategy",
     "Workflow design",
+    "Customer experience leadership",
+  ],
+};
+
+const CUSTOMER_MODERATE_JOB: SyntheticGenerationJobFixture = {
+  id: "job-customer-ops-manager-v1",
+  title: "Customer Operations Manager",
+  company: "Example SaaS",
+  rawDescription:
+    "Own customer operations reporting, workflow design, and service quality routines for a scaling SaaS team. Help leaders see backlog trends, staffing tradeoffs, and customer pain points more clearly.",
+  normalizedResponsibilities: [
+    "Own customer operations reporting and cadence.",
+    "Improve workflow design and service quality routines.",
+    "Help leaders understand backlog trends and staffing tradeoffs.",
+    "Translate customer pain points into practical follow-up.",
+  ],
+  normalizedRequirements: [
+    "Customer operations leadership",
+    "Workflow design",
+    "Service quality management",
     "Customer experience leadership",
   ],
 };
@@ -266,12 +334,27 @@ const CUSTOMER_OPS_BENCHMARK = {
 export const SYNTHETIC_GENERATION_FIXTURES: SyntheticGenerationFixtureBundle[] = [
   {
     scenario: {
+      id: "support-ops-director-strong-fit",
+      title: "Support operations director",
       name: "Support operations director",
+      personaKey: "support-ops-director",
       baselineFixtureId: SUPPORT_OPS_BASELINE.id,
       jobFixtureId: SUPPORT_OPS_JOB.id,
       benchmarkFixtureId: SUPPORT_OPS_BENCHMARK.fixtureId,
+      baselineSourceArtifact: fixtureSourceArtifact(
+        SUPPORT_OPS_BASELINE.id,
+        "support operations baseline resume",
+      ),
+      targetSourceArtifact: fixtureSourceArtifact(
+        SUPPORT_OPS_JOB.id,
+        "support operations job description",
+      ),
+      tags: ["strong-fit", "generation-ready", "opportunity-handoff", "calibration-backed"],
+      notes: ["Canonical support operations fit scenario."],
       expected: {
         minFitScore: 80,
+        fitBand: "strong",
+        generationMode: "generate",
         requiresResume: true,
         requiresCoverLetter: true,
         minRoleMatchReadiness: "ready",
@@ -284,6 +367,11 @@ export const SYNTHETIC_GENERATION_FIXTURES: SyntheticGenerationFixtureBundle[] =
           "cross-functional execution",
         ],
         bannedFailureStates: BANNED_FAILURE_STATES,
+        journey: {
+          results: "review",
+          studio: "open",
+          opportunity: "save",
+        },
       },
     },
     baseline: SUPPORT_OPS_BASELINE,
@@ -292,12 +380,27 @@ export const SYNTHETIC_GENERATION_FIXTURES: SyntheticGenerationFixtureBundle[] =
   },
   {
     scenario: {
+      id: "incident-service-leader-strong-fit",
+      title: "Incident and service delivery leader",
       name: "Incident and service delivery leader",
+      personaKey: "incident-service-leader",
       baselineFixtureId: INCIDENT_BASELINE.id,
       jobFixtureId: INCIDENT_JOB.id,
       benchmarkFixtureId: INCIDENT_BENCHMARK.fixtureId,
+      baselineSourceArtifact: fixtureSourceArtifact(
+        INCIDENT_BASELINE.id,
+        "incident response baseline resume",
+      ),
+      targetSourceArtifact: fixtureSourceArtifact(
+        INCIDENT_JOB.id,
+        "incident operations job description",
+      ),
+      tags: ["strong-fit", "generation-ready", "calibration-backed"],
+      notes: ["Canonical incident operations fit scenario."],
       expected: {
         minFitScore: 80,
+        fitBand: "strong",
+        generationMode: "generate",
         requiresResume: true,
         requiresCoverLetter: true,
         minRoleMatchReadiness: "ready",
@@ -310,6 +413,11 @@ export const SYNTHETIC_GENERATION_FIXTURES: SyntheticGenerationFixtureBundle[] =
           "cross-functional leadership",
         ],
         bannedFailureStates: BANNED_FAILURE_STATES,
+        journey: {
+          results: "review",
+          studio: "open",
+          opportunity: "save",
+        },
       },
     },
     baseline: INCIDENT_BASELINE,
@@ -318,12 +426,27 @@ export const SYNTHETIC_GENERATION_FIXTURES: SyntheticGenerationFixtureBundle[] =
   },
   {
     scenario: {
+      id: "customer-ops-strategy-strong-fit",
+      title: "Customer operations and support strategy",
       name: "Customer operations and support strategy",
+      personaKey: "customer-ops-strategy",
       baselineFixtureId: CUSTOMER_OPS_BASELINE.id,
       jobFixtureId: CUSTOMER_OPS_JOB.id,
       benchmarkFixtureId: CUSTOMER_OPS_BENCHMARK.fixtureId,
+      baselineSourceArtifact: fixtureSourceArtifact(
+        CUSTOMER_OPS_BASELINE.id,
+        "customer operations baseline resume",
+      ),
+      targetSourceArtifact: fixtureSourceArtifact(
+        CUSTOMER_OPS_JOB.id,
+        "customer operations job description",
+      ),
+      tags: ["strong-fit", "generation-ready", "calibration-backed"],
+      notes: ["Canonical customer operations fit scenario."],
       expected: {
         minFitScore: 80,
+        fitBand: "strong",
+        generationMode: "generate",
         requiresResume: true,
         requiresCoverLetter: true,
         minRoleMatchReadiness: "ready",
@@ -336,11 +459,154 @@ export const SYNTHETIC_GENERATION_FIXTURES: SyntheticGenerationFixtureBundle[] =
           "customer experience leadership",
         ],
         bannedFailureStates: BANNED_FAILURE_STATES,
+        journey: {
+          results: "review",
+          studio: "open",
+          opportunity: "save",
+        },
       },
     },
     baseline: CUSTOMER_OPS_BASELINE,
     job: CUSTOMER_OPS_JOB,
     benchmark: CUSTOMER_OPS_BENCHMARK,
+  },
+  {
+    scenario: {
+      id: "support-ops-manager-moderate-fit",
+      title: "Support operations manager",
+      name: "Support operations manager",
+      personaKey: "support-ops-director",
+      baselineFixtureId: SUPPORT_OPS_BASELINE.id,
+      jobFixtureId: SUPPORT_MODERATE_JOB.id,
+      benchmarkFixtureId: null,
+      baselineSourceArtifact: fixtureSourceArtifact(
+        SUPPORT_OPS_BASELINE.id,
+        "support operations baseline resume",
+      ),
+      targetSourceArtifact: fixtureSourceArtifact(
+        SUPPORT_MODERATE_JOB.id,
+        "support operations manager job description",
+      ),
+      tags: ["moderate-fit", "generation-ready", "studio-open"],
+      notes: ["A moderate-fit support operations scenario for broader coverage."],
+      expected: {
+        minFitScore: 70,
+        fitBand: "moderate",
+        generationMode: "generate",
+        requiresResume: true,
+        requiresCoverLetter: true,
+        minRoleMatchReadiness: "needs_tightening",
+        mustPassCalibrationBar: false,
+        maxHighSeverityCalibrationGaps: 2,
+        requiredRoleSignals: [
+          "support operations rigor",
+          "workflow design",
+          "queue health management",
+          "cross-functional execution",
+        ],
+        bannedFailureStates: BANNED_FAILURE_STATES,
+        journey: {
+          results: "open",
+          studio: "open",
+          opportunity: "save",
+        },
+      },
+    },
+    baseline: SUPPORT_OPS_BASELINE,
+    job: SUPPORT_MODERATE_JOB,
+    benchmark: null,
+  },
+  {
+    scenario: {
+      id: "incident-response-coordinator-blocked",
+      title: "Incident response coordinator",
+      name: "Incident response coordinator",
+      personaKey: "incident-service-leader",
+      baselineFixtureId: INCIDENT_BASELINE.id,
+      jobFixtureId: INCIDENT_BLOCKED_JOB.id,
+      benchmarkFixtureId: null,
+      baselineSourceArtifact: fixtureSourceArtifact(
+        INCIDENT_BASELINE.id,
+        "incident response baseline resume",
+      ),
+      targetSourceArtifact: fixtureSourceArtifact(
+        INCIDENT_BLOCKED_JOB.id,
+        "incident response coordinator job description",
+      ),
+      tags: ["blocked", "limited", "baseline-readiness"],
+      notes: ["Intentional blocked scenario for baseline and studio readiness coverage."],
+      expected: {
+        minFitScore: 0,
+        fitBand: "blocked",
+        generationMode: "blocked",
+        requiresResume: false,
+        requiresCoverLetter: false,
+        minRoleMatchReadiness: "misaligned",
+        mustPassCalibrationBar: false,
+        maxHighSeverityCalibrationGaps: 0,
+        requiredRoleSignals: [
+          "incident coordination",
+          "escalation tracking",
+          "service notes",
+          "cross-functional communication",
+        ],
+        bannedFailureStates: BANNED_FAILURE_STATES,
+        journey: {
+          results: "blocked",
+          studio: "blocked",
+          opportunity: "not_applicable",
+        },
+      },
+    },
+    baseline: INCIDENT_BASELINE,
+    job: INCIDENT_BLOCKED_JOB,
+    benchmark: null,
+  },
+  {
+    scenario: {
+      id: "customer-operations-manager-weak-fit",
+      title: "Customer operations manager",
+      name: "Customer operations manager",
+      personaKey: "customer-ops-strategy",
+      baselineFixtureId: CUSTOMER_OPS_BASELINE.id,
+      jobFixtureId: CUSTOMER_MODERATE_JOB.id,
+      benchmarkFixtureId: null,
+      baselineSourceArtifact: fixtureSourceArtifact(
+        CUSTOMER_OPS_BASELINE.id,
+        "customer operations baseline resume",
+      ),
+      targetSourceArtifact: fixtureSourceArtifact(
+        CUSTOMER_MODERATE_JOB.id,
+        "customer operations manager job description",
+      ),
+      tags: ["weak-fit", "generation-ready", "studio-limited"],
+      notes: ["A weaker-fit customer operations scenario to cover the lower band."],
+      expected: {
+        minFitScore: 62,
+        fitBand: "weak",
+        generationMode: "generate",
+        requiresResume: true,
+        requiresCoverLetter: true,
+        minRoleMatchReadiness: "needs_tightening",
+        mustPassCalibrationBar: false,
+        maxHighSeverityCalibrationGaps: 2,
+        requiredRoleSignals: [
+          "customer operations leadership",
+          "workflow design",
+          "service quality management",
+          "customer experience leadership",
+        ],
+        bannedFailureStates: BANNED_FAILURE_STATES,
+        journey: {
+          results: "review",
+          studio: "limited",
+          opportunity: "save",
+        },
+      },
+    },
+    baseline: CUSTOMER_OPS_BASELINE,
+    job: CUSTOMER_MODERATE_JOB,
+    benchmark: null,
   },
 ];
 

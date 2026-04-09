@@ -8,22 +8,57 @@ export type SyntheticGenerationRoleMatchReadiness =
   | "needs_tightening"
   | "misaligned";
 
+export type SyntheticGenerationJourneyResultsBehavior =
+  | "open"
+  | "review"
+  | "blocked";
+
+export type SyntheticGenerationStudioBehavior =
+  | "open"
+  | "limited"
+  | "blocked";
+
+export type SyntheticGenerationOpportunityBehavior =
+  | "save"
+  | "blocked"
+  | "not_applicable";
+
+export type SyntheticGenerationSourceArtifact = {
+  kind: "fixture";
+  fixtureId: string;
+  label?: string;
+};
+
 export type SyntheticGenerationScenarioExpected = {
   minFitScore: number;
-  requiresResume: true;
-  requiresCoverLetter: true;
+  fitBand?: "strong" | "moderate" | "weak" | "blocked";
+  generationMode: "generate" | "blocked";
+  requiresResume: boolean;
+  requiresCoverLetter: boolean;
   minRoleMatchReadiness: "ready" | "needs_tightening" | "misaligned";
   mustPassCalibrationBar: boolean;
   maxHighSeverityCalibrationGaps: number;
   requiredRoleSignals: string[];
   bannedFailureStates: string[];
+  journey?: {
+    results: SyntheticGenerationJourneyResultsBehavior;
+    studio: SyntheticGenerationStudioBehavior;
+    opportunity: SyntheticGenerationOpportunityBehavior;
+  };
 };
 
 export type SyntheticGenerationScenario = {
+  id: string;
+  title: string;
   name: string;
+  personaKey: string;
   baselineFixtureId: string;
   jobFixtureId: string;
   benchmarkFixtureId?: string | null;
+  baselineSourceArtifact: SyntheticGenerationSourceArtifact;
+  targetSourceArtifact: SyntheticGenerationSourceArtifact;
+  tags: string[];
+  notes?: string[];
   expected: SyntheticGenerationScenarioExpected;
 };
 
@@ -85,7 +120,13 @@ export type SyntheticGenerationEvaluationInput = {
 };
 
 export type SyntheticGenerationResult = {
+  scenarioId: string;
   scenario: string;
+  scenarioTitle: string;
+  personaKey: string;
+  tags: string[];
+  baselineFixtureId: string;
+  jobFixtureId: string;
   status: "pass" | "fail";
   fitScore: number | null;
   resumeGenerated: boolean;
@@ -153,11 +194,33 @@ export function validateSyntheticGenerationScenario(
   if (typeof scenario.name !== "string" || !scenario.name.trim()) {
     pushIssue(issues, "name", "Scenario name is required.");
   }
+  if (typeof scenario.id !== "string" || !scenario.id.trim()) {
+    pushIssue(issues, "id", "scenario id is required.");
+  }
+  if (typeof scenario.title !== "string" || !scenario.title.trim()) {
+    pushIssue(issues, "title", "scenario title is required.");
+  }
+  if (typeof scenario.personaKey !== "string" || !scenario.personaKey.trim()) {
+    pushIssue(issues, "personaKey", "personaKey is required.");
+  }
   if (typeof scenario.baselineFixtureId !== "string" || !scenario.baselineFixtureId.trim()) {
     pushIssue(issues, "baselineFixtureId", "baselineFixtureId is required.");
   }
   if (typeof scenario.jobFixtureId !== "string" || !scenario.jobFixtureId.trim()) {
     pushIssue(issues, "jobFixtureId", "jobFixtureId is required.");
+  }
+  if (!isObject(scenario.baselineSourceArtifact)) {
+    pushIssue(issues, "baselineSourceArtifact", "baselineSourceArtifact is required.");
+  } else if (scenario.baselineSourceArtifact.kind !== "fixture" || typeof scenario.baselineSourceArtifact.fixtureId !== "string" || !scenario.baselineSourceArtifact.fixtureId.trim()) {
+    pushIssue(issues, "baselineSourceArtifact.fixtureId", "baselineSourceArtifact.fixtureId must reference a fixture.");
+  }
+  if (!isObject(scenario.targetSourceArtifact)) {
+    pushIssue(issues, "targetSourceArtifact", "targetSourceArtifact is required.");
+  } else if (scenario.targetSourceArtifact.kind !== "fixture" || typeof scenario.targetSourceArtifact.fixtureId !== "string" || !scenario.targetSourceArtifact.fixtureId.trim()) {
+    pushIssue(issues, "targetSourceArtifact.fixtureId", "targetSourceArtifact.fixtureId must reference a fixture.");
+  }
+  if (!Array.isArray(scenario.tags)) {
+    pushIssue(issues, "tags", "tags must be an array.");
   }
 
   if (!isObject(scenario.expected)) {
@@ -168,11 +231,42 @@ export function validateSyntheticGenerationScenario(
   if (typeof scenario.expected.minFitScore !== "number" || Number.isNaN(scenario.expected.minFitScore)) {
     pushIssue(issues, "expected.minFitScore", "minFitScore must be a number.");
   }
-  if (scenario.expected.requiresResume !== true) {
-    pushIssue(issues, "expected.requiresResume", "requiresResume must be true.");
+  if (typeof scenario.expected.requiresResume !== "boolean") {
+    pushIssue(issues, "expected.requiresResume", "requiresResume must be boolean.");
   }
-  if (scenario.expected.requiresCoverLetter !== true) {
-    pushIssue(issues, "expected.requiresCoverLetter", "requiresCoverLetter must be true.");
+  if (typeof scenario.expected.requiresCoverLetter !== "boolean") {
+    pushIssue(issues, "expected.requiresCoverLetter", "requiresCoverLetter must be boolean.");
+  }
+  if (
+    scenario.expected.fitBand !== undefined &&
+    scenario.expected.fitBand !== "strong" &&
+    scenario.expected.fitBand !== "moderate" &&
+    scenario.expected.fitBand !== "weak" &&
+    scenario.expected.fitBand !== "blocked"
+  ) {
+    pushIssue(issues, "expected.fitBand", 'fitBand must be "strong", "moderate", "weak", or "blocked".');
+  }
+  if (
+    scenario.expected.generationMode !== "generate" &&
+    scenario.expected.generationMode !== "blocked"
+  ) {
+    pushIssue(issues, "expected.generationMode", 'generationMode must be "generate" or "blocked".');
+  }
+  if (scenario.expected.generationMode === "generate") {
+    if (scenario.expected.requiresResume !== true) {
+      pushIssue(issues, "expected.requiresResume", "generate scenarios must require a resume.");
+    }
+    if (scenario.expected.requiresCoverLetter !== true) {
+      pushIssue(issues, "expected.requiresCoverLetter", "generate scenarios must require a cover letter.");
+    }
+  }
+  if (scenario.expected.generationMode === "blocked") {
+    if (scenario.expected.requiresResume !== false) {
+      pushIssue(issues, "expected.requiresResume", "blocked scenarios must not require a resume.");
+    }
+    if (scenario.expected.requiresCoverLetter !== false) {
+      pushIssue(issues, "expected.requiresCoverLetter", "blocked scenarios must not require a cover letter.");
+    }
   }
   if (
     scenario.expected.minRoleMatchReadiness !== "ready" &&
@@ -211,6 +305,29 @@ export function validateSyntheticGenerationScenario(
       "expected.bannedFailureStates",
       "bannedFailureStates must contain at least one failure state.",
     );
+  }
+  if (scenario.expected.journey) {
+    if (
+      scenario.expected.journey.results !== "open" &&
+      scenario.expected.journey.results !== "review" &&
+      scenario.expected.journey.results !== "blocked"
+    ) {
+      pushIssue(issues, "expected.journey.results", 'results must be "open", "review", or "blocked".');
+    }
+    if (
+      scenario.expected.journey.studio !== "open" &&
+      scenario.expected.journey.studio !== "limited" &&
+      scenario.expected.journey.studio !== "blocked"
+    ) {
+      pushIssue(issues, "expected.journey.studio", 'studio must be "open", "limited", or "blocked".');
+    }
+    if (
+      scenario.expected.journey.opportunity !== "save" &&
+      scenario.expected.journey.opportunity !== "blocked" &&
+      scenario.expected.journey.opportunity !== "not_applicable"
+    ) {
+      pushIssue(issues, "expected.journey.opportunity", 'opportunity must be "save", "blocked", or "not_applicable".');
+    }
   }
 
   return {

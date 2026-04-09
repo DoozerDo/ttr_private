@@ -19,7 +19,14 @@ describe('synthetic scenario validation', () => {
       name: 'Broken scenario',
       baselineFixtureId: 'baseline-broken',
       jobFixtureId: 'job-broken',
+      id: 'broken-scenario',
+      title: 'Broken scenario',
+      personaKey: 'broken-persona',
+      baselineSourceArtifact: { kind: 'fixture', fixtureId: 'baseline-broken' },
+      targetSourceArtifact: { kind: 'fixture', fixtureId: 'job-broken' },
+      tags: [],
       expected: {
+        generationMode: 'generate',
         requiresResume: true,
         requiresCoverLetter: true,
         minRoleMatchReadiness: 'ready',
@@ -32,7 +39,11 @@ describe('synthetic scenario validation', () => {
 
     expect(validation.valid).toBe(false);
     expect(validation.issues.map((issue) => issue.field)).toEqual(
-      expect.arrayContaining(['expected.minFitScore', 'expected.requiredRoleSignals', 'expected.bannedFailureStates']),
+      expect.arrayContaining([
+        'expected.minFitScore',
+        'expected.requiredRoleSignals',
+        'expected.bannedFailureStates',
+      ]),
     );
   });
 });

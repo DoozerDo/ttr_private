@@ -32,44 +32,55 @@ function findBundleForRequest(request: {
   return findBundleForPlan(request.documentStrategyPlan ?? {});
 }
 
+function getScenarioFitScore(
+  bundle: ReturnType<typeof listSyntheticGenerationScenarioBundles>[number],
+): number {
+  switch (bundle.scenario.expected.fitBand) {
+    case 'strong':
+      return Math.max(bundle.scenario.expected.minFitScore, 86);
+    case 'moderate':
+      return Math.max(bundle.scenario.expected.minFitScore, 74);
+    case 'weak':
+      return Math.max(bundle.scenario.expected.minFitScore, 64);
+    case 'blocked':
+      return 42;
+    default:
+      return bundle.scenario.expected.minFitScore;
+  }
+}
+
 function buildResumePayload(
   bundle: ReturnType<typeof listSyntheticGenerationScenarioBundles>[number],
   plan: { roleLens?: { priorities?: string[]; requiredSignals?: string[] } } = {},
 ) {
-  if (bundle.benchmark && bundle.scenario.name !== 'Support operations director') {
-    return {
-      summary: bundle.benchmark.approvedBenchmarkResume.summary,
-      experience: [
-        {
-          bullets: [...bundle.benchmark.approvedBenchmarkResume.bullets],
-        },
-      ],
-    };
-  }
-  if (bundle.scenario.name === 'Support operations director' && bundle.benchmark) {
-    return {
-      summary: bundle.benchmark.approvedBenchmarkResume.summary,
-      experience: [
-        {
-          bullets: [...bundle.benchmark.approvedBenchmarkResume.bullets],
-        },
-      ],
-    };
-  }
   const signals = [
     ...(plan.roleLens?.priorities ?? []),
     ...(plan.roleLens?.requiredSignals ?? []),
   ].filter(Boolean);
-  const highlightSignals = signals.length > 0 ? signals : bundle.scenario.expected.requiredRoleSignals;
+  const highlightSignals = Array.from(
+    new Set([
+      ...bundle.scenario.expected.requiredRoleSignals,
+      ...(signals.length > 0 ? signals : []),
+    ]),
+  );
+  if (bundle.benchmark && bundle.scenario.expected.generationMode === 'generate') {
+    return {
+      summary: bundle.benchmark.approvedBenchmarkResume.summary,
+      experience: [
+        {
+          bullets: [...bundle.benchmark.approvedBenchmarkResume.bullets],
+        },
+      ],
+    };
+  }
   return {
-    summary: `${bundle.benchmark?.approvedBenchmarkResume.summary ?? ''} Focused on ${highlightSignals.join(', ')}.`,
+    summary: `${bundle.scenario.title} focused on ${highlightSignals.slice(0, 4).join(', ')} and practical cross-functional execution.`,
     experience: [
       {
-        bullets: [
-          `${bundle.benchmark?.approvedBenchmarkResume.bullets[0] ?? ''} Built around ${highlightSignals[0]} and ${highlightSignals[1] ?? highlightSignals[0]}.`,
-          `${bundle.benchmark?.approvedBenchmarkResume.bullets[1] ?? ''} Reinforced ${highlightSignals[1] ?? highlightSignals[0]} and ${highlightSignals[2] ?? highlightSignals[0]}.`,
-          `${bundle.benchmark?.approvedBenchmarkResume.bullets[2] ?? ''} Kept ${highlightSignals[2] ?? highlightSignals[0]} and ${highlightSignals[3] ?? highlightSignals[0]} visible for leadership.`,
-        ].filter(Boolean),
+        bullets: bundle.baseline.sections.slice(0, 3).map(
+          (section, index) =>
+            `${section.content} This keeps ${highlightSignals[index] ?? highlightSignals[0]} visible for the team while reinforcing ${highlightSignals.join(', ')} across the work.`,
+        ),
       },
     ],
   };
@@ -79,33 +90,32 @@ function buildCoverLetterPayload(
   bundle: ReturnType<typeof listSyntheticGenerationScenarioBundles>[number],
   plan: { roleLens?: { priorities?: string[]; requiredSignals?: string[] } } = {},
 ) {
-  if (bundle.benchmark && bundle.scenario.name !== 'Support operations director') {
-    return {
-      opening: bundle.benchmark.approvedBenchmarkCoverLetter.opening,
-      bodyParagraphs: [...bundle.benchmark.approvedBenchmarkCoverLetter.bodyParagraphs],
-      closingParagraph: bundle.benchmark.approvedBenchmarkCoverLetter.closingParagraph,
-    };
-  }
-  if (bundle.scenario.name === 'Support operations director' && bundle.benchmark) {
-    return {
-      opening: bundle.benchmark.approvedBenchmarkCoverLetter.opening,
-      bodyParagraphs: [...bundle.benchmark.approvedBenchmarkCoverLetter.bodyParagraphs],
-      closingParagraph: bundle.benchmark.approvedBenchmarkCoverLetter.closingParagraph,
-    };
-  }
   const signals = [
     ...(plan.roleLens?.priorities ?? []),
     ...(plan.roleLens?.requiredSignals ?? []),
   ].filter(Boolean);
-  const highlightSignals = signals.length > 0 ? signals : bundle.scenario.expected.requiredRoleSignals;
+  const highlightSignals = Array.from(
+    new Set([
+      ...bundle.scenario.expected.requiredRoleSignals,
+      ...(signals.length > 0 ? signals : []),
+    ]),
+  );
+  if (bundle.benchmark && bundle.scenario.expected.generationMode === 'generate') {
+    return {
+      opening: bundle.benchmark.approvedBenchmarkCoverLetter.opening,
+      bodyParagraphs: [...bundle.benchmark.approvedBenchmarkCoverLetter.bodyParagraphs],
+      closingParagraph: bundle.benchmark.approvedBenchmarkCoverLetter.closingParagraph,
+    };
+  }
   return {
     salutation: 'Dear Hiring Team,',
-    opening: `${bundle.benchmark?.approvedBenchmarkCoverLetter.opening ?? ''} I would bring ${highlightSignals.join(', ')} to the team.`,
+    opening: `I am applying for the ${bundle.job.title} role at ${bundle.job.company} because my background lines up with the work described here. I have led customer facing operations where the goal was to keep workflow clear, make ownership visible, and help teams stay steady when demand changes. That mix of practical leadership and service discipline is what I would bring to this role.`,
     bodyParagraphs: [
-      `${bundle.benchmark?.approvedBenchmarkCoverLetter.bodyParagraphs[0] ?? ''} That work centered on ${highlightSignals[0]} and ${highlightSignals[1] ?? highlightSignals[0]}.`,
-      `${bundle.benchmark?.approvedBenchmarkCoverLetter.bodyParagraphs[1] ?? ''} It also required ${highlightSignals[2] ?? highlightSignals[0]} and ${highlightSignals[3] ?? highlightSignals[0]} every day.`,
-    ].filter(Boolean),
-    closingParagraph: `${bundle.benchmark?.approvedBenchmarkCoverLetter.closingParagraph ?? ''} I would welcome the chance to keep delivering ${highlightSignals[0]} and ${highlightSignals[1] ?? highlightSignals[0]}.`,
+      `In my recent work, I have focused on ${highlightSignals[0]} and ${highlightSignals[1] ?? highlightSignals[0]}. I have used operating reviews, escalation paths, and clear reporting to make it easier for leaders to see what needs attention. I also like work that connects the day to day execution with a longer term improvement plan, because that is how teams get more predictable over time.`,
+      `I would also bring a collaborative style across support, product, and engineering. When those groups share the same picture of the work, it becomes easier to remove recurring issues, keep customers informed, and improve the experience for the people doing the work. I try to be direct, calm, and practical so the team can keep moving while keeping ${highlightSignals.slice(0, 3).join(', ')} visible in the operating rhythm.`,
+      `The opportunity is appealing because it combines service quality, operational rhythm, and cross functional follow through. That combination matches the way I like to work and the kind of value I expect to add. I would welcome the chance to contribute to a team that wants measurable improvement and clear ownership.`,
+    ],
+    closingParagraph: `I would welcome the opportunity to discuss how I can help your team keep service quality visible and the workflow practical. I would aim to bring steady execution, clear communication, and a reliable operating rhythm from the first weeks on the job.`,
     signoff: 'Sincerely,',
     signatureName: 'Synthetic Candidate',
   };
@@ -113,12 +123,25 @@ function buildCoverLetterPayload(
 
 describe('SyntheticGenerationHarness', () => {
   const buildService = () => {
+    const bundles = listSyntheticGenerationScenarioBundles();
+    const bundlesByJobId = new Map(bundles.map((bundle) => [bundle.job.id, bundle]));
     const usersService = {
       findByEmail: jest.fn(),
       create: jest.fn(),
     } as any;
     const jobsService = { createJob: jest.fn() } as any;
-    const analysisService = { runFitAssessment: jest.fn() } as any;
+    const analysisService = {
+      runFitAssessment: jest.fn(async (_userId: string, input: { jobId: string }) => ({
+        status: 'ok',
+        assessmentId: `analysis-${input.jobId}`,
+        score: getScenarioFitScore(bundlesByJobId.get(input.jobId) ?? bundles[0]),
+        verdict: 'APPLY',
+        summary: 'Synthetic fit evaluation.',
+        strengths: ['Support operations rigor', 'Cross-functional leadership'],
+        gaps: [],
+        recommendedActions: [],
+      })),
+    } as any;
     const resumeService = { generateResume: jest.fn() } as any;
     const coverLettersService = { generateCoverLetter: jest.fn() } as any;
     const opportunitiesService = { upsertOpportunity: jest.fn() } as any;
@@ -173,10 +196,9 @@ describe('SyntheticGenerationHarness', () => {
     };
   };
 
-  it('runs all curated scenarios and returns a structured pass result', async () => {
+  it('runs the catalog-driven scenarios and returns a structured pass result', async () => {
     const {
       service,
-      analysisService,
       resumeService,
       coverLettersService,
       userRepository,
@@ -206,20 +228,9 @@ describe('SyntheticGenerationHarness', () => {
       }),
     );
 
-    analysisService.runFitAssessment.mockImplementation(async (_userId: string, input: { jobId: string }) => ({
-      status: 'ok',
-      assessmentId: `analysis-${input.jobId}`,
-      score: 86,
-      verdict: 'APPLY',
-      summary: 'Strong fit for support operations leadership and service delivery.',
-      strengths: ['Support operations rigor', 'Cross-functional leadership'],
-      gaps: [],
-      recommendedActions: [],
-    }));
-
     resumeService.generateResume.mockImplementation(async (_userId: string, options: { baselineId?: string; jobId?: string; documentStrategyPlan?: { roleLens?: { requiredSignals?: string[]; priorities?: string[] }; positioningFrame?: string } }) => {
       const bundle = findBundleForRequest(options);
-      if (bundle.scenario.name === 'Support operations director' && bundle.benchmark) {
+      if (bundle.benchmark && bundle.scenario.expected.generationMode === 'generate') {
         return {
           status: 'success',
           generationStatus: 'success',
@@ -234,6 +245,14 @@ describe('SyntheticGenerationHarness', () => {
               ],
             },
           },
+        };
+      }
+      if (bundle.scenario.expected.generationMode === 'blocked') {
+        return {
+          status: 'success',
+          generationStatus: 'blocked',
+          exportReady: false,
+          preview: { resume: null },
         };
       }
       return {
@@ -273,6 +292,30 @@ describe('SyntheticGenerationHarness', () => {
           },
         };
       }
+      if (bundle.benchmark && bundle.scenario.expected.generationMode === 'generate') {
+        return {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          preview: {
+            coverLetter: {
+              opening: bundle.benchmark.approvedBenchmarkCoverLetter.opening,
+              bodyParagraphs: [...bundle.benchmark.approvedBenchmarkCoverLetter.bodyParagraphs],
+              closingParagraph: bundle.benchmark.approvedBenchmarkCoverLetter.closingParagraph,
+            },
+          },
+        };
+      }
+      if (bundle.scenario.expected.generationMode === 'blocked') {
+        return {
+          status: 'success',
+          generationStatus: 'blocked',
+          exportReady: false,
+          exports: { docx: false, pdf: false },
+          preview: { coverLetter: null },
+        };
+      }
       return {
         status: 'success',
         generationStatus: 'success',
@@ -292,16 +335,35 @@ describe('SyntheticGenerationHarness', () => {
     expect(result.failCount).toBe(0);
     expect(result.scenarioResults).toHaveLength(scenarioBundles.length);
     for (const scenario of result.scenarioResults) {
-      expect(scenario.fitScore).toBeGreaterThanOrEqual(80);
-      expect(scenario.resumeGenerated).toBe(true);
-      expect(scenario.coverLetterGenerated).toBe(true);
-      expect(scenario.status).toBe('pass');
-      expect(scenario.resumeUsable).toBe(true);
-      expect(scenario.coverLetterUsable).toBe(true);
-      expect(scenario.roleMatchReadiness).toBe("ready");
-      expect(scenario.calibrationBarPassed).toBe(true);
-      expect(scenario.overallCalibration).toBe('aligned');
+      expect(scenario.scenarioId).toBeTruthy();
+      expect(scenario.scenarioTitle).toBeTruthy();
+      expect(scenario.personaKey).toBeTruthy();
+      expect(Array.isArray(scenario.tags)).toBe(true);
+      expect(scenario.fitScore).not.toBeNull();
       expect(scenario.failureReasons).toHaveLength(0);
+
+      if (scenario.tags.includes('blocked')) {
+        expect(scenario.resumeGenerated).toBe(false);
+        expect(scenario.coverLetterGenerated).toBe(false);
+        expect(scenario.resumeUsable).toBeNull();
+        expect(scenario.coverLetterUsable).toBeNull();
+        expect(scenario.roleMatchReadiness).toBeNull();
+        expect(scenario.overallCalibration).toBeNull();
+        expect(scenario.calibrationBarPassed).toBeNull();
+      } else {
+        expect(scenario.resumeGenerated).toBe(true);
+        expect(scenario.coverLetterGenerated).toBe(true);
+        expect(scenario.resumeUsable).toBe(true);
+        expect(scenario.coverLetterUsable).toBe(true);
+        expect(scenario.roleMatchReadiness).toMatch(/ready|needs_tightening/);
+        if (scenario.tags.includes('calibration-backed')) {
+          expect(scenario.calibrationBarPassed).toBe(true);
+          expect(scenario.overallCalibration).toBe('aligned');
+        } else {
+          expect(scenario.calibrationBarPassed).toBeNull();
+          expect(scenario.overallCalibration).toBeNull();
+        }
+      }
     }
     expect(syntheticRunRepository.save).toHaveBeenCalled();
     expect(syntheticRunRepository.update).toHaveBeenCalled();
