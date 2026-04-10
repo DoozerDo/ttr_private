@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildGoldStandardCalibration,
   listGoldStandardBenchmarkFixtures,
-} from "@/lib/goldStandardCalibration";
+} from "@shared/goldStandardCalibration";
 import {
   buildSupportOpsCalibrationPlan,
   buildWeakSupportOpsCoverLetter,
@@ -39,3 +39,4 @@ describe("gold standard calibration", () => {
     expect(calibration.topGaps.some((gap) => gap.type === "cover_letter_too_generic")).toBe(true);
   });
 });
+

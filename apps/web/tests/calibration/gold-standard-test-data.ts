@@ -1,4 +1,4 @@
-import { buildDocumentStrategyPlan, type DocumentStrategyPlan } from "@/lib/documentStrategyPlan";
+import { buildDocumentStrategyPlan, type DocumentStrategyPlan } from "@shared/documentStrategyPlan";
 
 export function buildSupportOpsCalibrationPlan(): DocumentStrategyPlan {
   const plan = buildDocumentStrategyPlan({
@@ -118,3 +118,4 @@ export function buildWeakSupportOpsCoverLetter() {
     closingParagraph: "Thank you for your time and consideration.",
   };
 }
+

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { runGoldStandardSelfImprovementCycle } from "@/lib/selfImprovementLoop";
-import { GOLD_STANDARD_BENCHMARK_FIXTURES } from "@/lib/goldStandardCalibration";
+import { GOLD_STANDARD_BENCHMARK_FIXTURES } from "@shared/goldStandardCalibration";
 
 describe("feedback safety", () => {
   it("preserves baseline truth and does not invent new claims", () => {
@@ -77,3 +77,4 @@ describe("feedback safety", () => {
     expect(cycle.refinedCoverLetter.opening).toContain("applying for");
   });
 });
+

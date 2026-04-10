@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
+import { buildDocumentStrategyPlan } from "@shared/documentStrategyPlan";
 
 describe("document quality pass", () => {
   it("tightens a weak plan into a single dominant frame with clear suppression guidance", () => {
@@ -38,3 +38,4 @@ describe("document quality pass", () => {
     expect(plan.documentQualityScore).toBeGreaterThan(0);
   });
 });
+

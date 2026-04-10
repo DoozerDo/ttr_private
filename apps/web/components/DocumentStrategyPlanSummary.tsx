@@ -1,4 +1,4 @@
-import { buildDocumentStrategyPlanSummary, type DocumentStrategyPlan } from "@/lib/documentStrategyPlan";
+import { buildDocumentStrategyPlanSummary, type DocumentStrategyPlan } from "@shared/documentStrategyPlan";
 
 type DocumentStrategyPlanSummaryProps = {
   plan: DocumentStrategyPlan;
@@ -77,3 +77,4 @@ export function DocumentStrategyPlanSummary({ plan }: DocumentStrategyPlanSummar
     </section>
   );
 }
+

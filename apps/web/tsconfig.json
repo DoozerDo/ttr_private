@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "baseUrl": ".",
     "target": "ES2017",
     "lib": [
       "dom",
@@ -23,6 +24,9 @@
       }
     ],
     "paths": {
+      "@shared/*": [
+        "../../packages/shared/*"
+      ],
       "@/*": [
         "./*"
       ]

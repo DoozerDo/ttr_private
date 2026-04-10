@@ -16,8 +16,11 @@ import { buildEvidenceLines, type ScoreBreakdown } from "@/lib/evidenceLines";
 import { getGenerationReadiness } from "@/lib/generationReadiness";
 import { getGenerationAuthorityState } from "@/lib/generationAuthority";
 import { buildGenerationProductReadiness } from "@/lib/generationProductReadiness";
+import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
 import {
   buildTargetCtaContract,
+  buildTargetCtaClickedAnalyticsPayload,
+  assertTargetCtaAnalyticsMatchesRenderedCta,
   resolveTargetDisplayResult,
 } from "@/lib/targetGenerationContract";
 import { sanitizeScoreExplanationLine, sanitizeScoreExplanationList } from "@/lib/scoreExplanationCopy";
@@ -769,8 +772,8 @@ export function WorkspaceRunner({
     return query ? `/resolve-gaps?${query}` : "/resolve-gaps";
   }, [displayResult, latestBaselineId, latestJobId]);
   const generationReadiness = useMemo(
-    () => getGenerationReadiness(displayResult, runState),
-    [displayResult, runState],
+    () => getGenerationReadiness(displayResult, runState, score),
+    [displayResult, runState, score],
   );
   const targetGenerationState = useMemo(
     () => getGenerationAuthorityState(generationReadiness),
@@ -781,24 +784,44 @@ export function WorkspaceRunner({
       buildGenerationProductReadiness({
         score,
         authorityState: targetGenerationState,
-        hasCanonicalAssessment: Boolean(
-          asString((displayResult as { assessmentId?: unknown } | null)?.assessmentId),
-        ),
-        hasRequiredContext: Boolean(latestBaselineId && latestJobId),
+        hasCanonicalAssessment: Boolean(displayResult),
+        hasRequiredContext: Boolean(baselineId && jobId),
         isPro: true,
       }),
-    [displayResult, latestBaselineId, latestJobId, score, targetGenerationState],
+    [baselineId, displayResult, jobId, score, targetGenerationState],
   );
   const targetCta = useMemo(
-    () =>
-      buildTargetCtaContract({
+    () => {
+      if (process.env.NODE_ENV !== "production") {
+        console.debug("[target] cta_resolution_inputs", {
+          baselineId,
+          jobId,
+          score,
+          generationReadiness: {
+            status: generationReadiness.status,
+            blocked: generationReadiness.blocked,
+            badgeLabel: generationReadiness.badgeLabel,
+          },
+          productReadiness: {
+            state: productReadiness.state,
+            confidence: productReadiness.confidence,
+            canOpenStudio: productReadiness.canOpenStudio,
+            tier: productReadiness.tier,
+          },
+          displayResultSource: resolvedDisplayResult.source,
+        });
+      }
+      return buildTargetCtaContract({
+        baselineId,
+        jobId,
         score,
         generationReadiness,
         productReadiness,
         studioHref,
         resolveGapsHref,
         scoreSource: resolvedDisplayResult.source,
-      }),
+      });
+    },
     [
       generationReadiness,
       latestCompletedScore,
@@ -810,6 +833,14 @@ export function WorkspaceRunner({
       studioHref,
     ],
   );
+  const targetCtaAnalyticsPayload = useMemo(
+    () => buildTargetCtaClickedAnalyticsPayload(targetCta),
+    [targetCta],
+  );
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    assertTargetCtaAnalyticsMatchesRenderedCta(targetCta, targetCtaAnalyticsPayload);
+  }, [targetCta, targetCtaAnalyticsPayload]);
   const scoreBandSummary =
     targetCta.state === "READY"
       ? "This role is ready for Studio."
@@ -862,12 +893,7 @@ export function WorkspaceRunner({
 
   const handleGenerateClick = useCallback(
     (_event: MouseEvent<HTMLAnchorElement>) => {
-      const analyticsPayload = {
-        state: targetCta.state,
-        score,
-        actionType: targetCta.actionType,
-      } as const;
-      trackEvent("target_cta_clicked", analyticsPayload);
+      trackEvent("target_cta_clicked", targetCtaAnalyticsPayload);
       if (targetCta.actionType === "resolve_gaps") {
         trackEvent("target_generation_blocked_redirect", {
           score,
@@ -879,45 +905,47 @@ export function WorkspaceRunner({
       generationReadiness.verificationIssues,
       score,
       targetCta.actionType,
-      targetCta.state,
+      targetCtaAnalyticsPayload,
     ],
   );
 
   useEffect(() => {
-    if (process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_DEBUG_TARGET_FLOW !== "true") {
-      return;
-    }
     if (!latestBaselineId || !latestJobId) return;
-    console.info("[target] cta_contract", {
+    const persistedAssessmentId =
+      resolvedDisplayResult.source === "persisted_latest_assessment"
+        ? asString((displayResult as { assessmentId?: unknown } | null)?.assessmentId) ?? null
+        : null;
+    const dataSource =
+      resolvedDisplayResult.source === "fresh_computation"
+        ? "fresh"
+        : resolvedDisplayResult.source === "persisted_latest_assessment"
+          ? "persisted"
+          : "mixed";
+    logDecisionFlowEvent({
+      event: "target_cta_resolved",
       baselineId: latestBaselineId,
       jobId: latestJobId,
       score,
-      scoreSource: targetCta.scoreSource,
-      readinessSource: targetCta.readinessSource,
+      readinessState: targetCta.state,
+      contractSource: "resolveTargetDisplayResult+buildTargetCtaContract",
       ctaLabel: targetCta.label,
       ctaHref: targetCta.href,
-      analyticsPayload: {
-        state: targetCta.state,
-        score: targetCta.score,
-        actionType: targetCta.actionType,
-      },
-      persistedLatestAssessment: resolvedDisplayResult.source === "persisted_latest_assessment",
-      freshComputation: resolvedDisplayResult.source === "fresh_computation",
+      actionType: targetCta.actionType,
+      analyticsPayload: targetCtaAnalyticsPayload,
+      dataSource,
+      persistedAssessmentId,
     });
   }, [
+    displayResult,
     latestBaselineId,
-    latestCompletedScore,
     latestJobId,
     resolvedDisplayResult.source,
-    result,
     score,
     targetCta.actionType,
     targetCta.href,
     targetCta.label,
-    targetCta.readinessSource,
-    targetCta.score,
-    targetCta.scoreSource,
     targetCta.state,
+    targetCtaAnalyticsPayload,
   ]);
 
   const runAssessment = useCallback(async () => {

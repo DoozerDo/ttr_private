@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
+import { buildDocumentStrategyPlan } from "@shared/documentStrategyPlan";
 import {
   buildLanguageStylePass,
   polishResumeBulletsText,
   polishResumeSummaryText,
-} from "@/lib/languageStylePass";
+} from "@shared/languageStylePass";
 
 describe("constraint preservation", () => {
   it("preserves positioning, chronology, and factual content while polishing language", () => {
@@ -57,3 +57,4 @@ describe("constraint preservation", () => {
     expect(bullets.join(" ")).not.toContain("50%");
   });
 });
+

@@ -4,7 +4,7 @@ import {
   type ToolRequirementClaim,
 } from '../scoring/fit-score/tool-extractor';
 import { getCharCount, safeSnippet, sha256 } from '../common/text-metrics';
-import { getCapabilityClusterRegistry } from '../scoring-v2/config/capability-clusters.ts';
+import { getCapabilityClusterRegistry } from '../scoring-v2/config/capability-clusters';
 import { extractCapabilityClusters } from '../scoring-v2/extractors/capability-cluster-extractor';
 
 type BaselineSection = { type?: string; content: string };

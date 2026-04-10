@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { buildCalibrationFeedback } from "@/lib/calibrationFeedback";
-import { buildGoldStandardCalibration, listGoldStandardBenchmarkFixtures } from "@/lib/goldStandardCalibration";
+import { buildCalibrationFeedback } from "@shared/calibrationFeedback";
+import { buildGoldStandardCalibration, listGoldStandardBenchmarkFixtures } from "@shared/goldStandardCalibration";
 import { buildSupportOpsCalibrationPlan, buildWeakSupportOpsCoverLetter, buildWeakSupportOpsResume } from "./gold-standard-test-data";
 
 describe("calibration feedback mapping", () => {
@@ -31,3 +31,4 @@ describe("calibration feedback mapping", () => {
     );
   });
 });
+

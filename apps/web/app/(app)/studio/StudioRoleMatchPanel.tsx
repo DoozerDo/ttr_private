@@ -5,7 +5,7 @@ import type {
   RoleMatchFinalPass,
   RoleMatchFinalPassPriorityCoverage,
   RoleMatchFinalPassRisk,
-} from "@/lib/roleMatchFinalPass";
+} from "@shared/roleMatchFinalPass";
 
 type Props = {
   finalPass: RoleMatchFinalPass;
@@ -199,3 +199,4 @@ export function StudioRoleMatchPanel({ finalPass, isApplying, onApplyAdjustment,
     </section>
   );
 }
+

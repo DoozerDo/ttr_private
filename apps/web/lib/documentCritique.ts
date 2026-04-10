@@ -1,10 +1,10 @@
-import type { ResumeModel } from "@/app/(app)/studio/ResumePreview";
+import type { ResumeModel } from "@shared/resumeModel";
 
 import {
   REFINEMENT_PRESETS,
   type DocumentStrategyPlan,
   type RefinementPreset,
-} from "@/lib/documentStrategyPlan";
+} from "@shared/documentStrategyPlan";
 
 export type DocumentCritiqueIssueType =
   | "summary_generic"
@@ -633,3 +633,4 @@ export function buildDocumentCritique(input: CritiqueInput): DocumentCritique | 
 export function getCritiqueIssueLabel(type: DocumentCritiqueIssueType): string {
   return ISSUE_LABELS[type];
 }
+

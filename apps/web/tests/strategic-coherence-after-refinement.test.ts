@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { REFINEMENT_PRESETS, buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
+import { REFINEMENT_PRESETS, buildDocumentStrategyPlan } from "@shared/documentStrategyPlan";
 
 describe("strategic coherence after refinement", () => {
   it("keeps resume and cover letter on the same strategic frame", () => {
@@ -40,3 +40,4 @@ describe("strategic coherence after refinement", () => {
     expect(plan.selectedEvidence.length).toBeGreaterThan(0);
   });
 });
+

@@ -35,6 +35,7 @@ export const ANALYTICS_EVENT_NAMES = [
   "analysis_load_failed",
   "scroll_depth_reached",
   "target_generation_blocked",
+  "baseline_readiness_viewed",
   "studio_generation_state_viewed",
   "studio_generate_blocked",
   "studio_generate_limited",
@@ -260,6 +261,14 @@ export type AnalyticsEventMap = {
     score: number;
     blockers: string[];
   };
+  baseline_readiness_viewed: {
+    source: "baseline";
+    baselineId: string | null;
+    readinessState: "NOT_ANALYZED" | "ANALYZING" | "READY";
+    latestAssessmentId: string | null;
+    latestFitScore: number | null;
+    dataSource: "fresh" | "persisted" | "mixed";
+  };
   studio_generation_state_viewed: {
     state: "READY" | "LIMITED" | "BLOCKED";
     score: number | null;
@@ -284,6 +293,8 @@ export type AnalyticsEventMap = {
   target_cta_clicked: {
     state: "READY" | "LIMITED" | "BLOCKED";
     score: number | null;
+    label: string;
+    href: string;
     actionType: "open_studio_generate" | "open_studio_limited" | "blocked_redirect" | "resolve_gaps";
   };
   target_generation_blocked_redirect: {

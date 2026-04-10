@@ -22,6 +22,7 @@ import {
   type BaselineAssessmentSummaryDto,
   type BaselineDto,
 } from "@/lib/baselines";
+import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
 import {
   parseComplianceError,
   readResponsePayload,
@@ -33,6 +34,7 @@ import {
   buildBaselineScoreHistoryFromBaseline,
   toBaselineScoreHistoryCardViewModel,
 } from "@/lib/baselineScoreHistory";
+import { resolveCanonicalState } from "@/lib/canonicalDecision";
 import {
   buildBaselineSignalGraph,
   type ProfessionalSignalId,
@@ -41,6 +43,7 @@ import {
 import { publishBaselineUpdated, subscribeBaselineUpdated } from "@/src/lib/baseline-sync";
 import { BETA_BASELINE_UPLOAD_LIMIT } from "@/src/features/baseline/constants";
 import { getBaselineDetailsHref } from "@/src/navigation/routes";
+import { trackEvent } from "@/src/lib/analytics";
 import { CareerGravity } from "../results/components/CareerGravity";
 import { ResumeWithBaselineStatus } from "./_components/ResumeWithBaselineStatus";
 
@@ -64,6 +67,11 @@ type BaselinePageReadinessContract = {
   latestAssessmentCreatedAt: string | null;
   latestFitScore: number | null;
   readinessState: BaselineReadinessState;
+  ctaLabel: string;
+  ctaHref: string;
+  actionType: "target_role" | "view_results" | "upload_resume";
+  dataSource: "fresh" | "persisted" | "mixed";
+  persistedAssessmentId: string | null;
 };
 
 type StrengtheningPrompt = {
@@ -201,18 +209,6 @@ function getAssessmentSummaryStatusTone(state: BaselineReadinessState) {
     : "border-white/10 bg-white/[0.05] text-slate-300";
 }
 
-function getBaselineReadinessState({
-  hasCompletedAssessment,
-  isAnalyzing,
-}: {
-  hasCompletedAssessment: boolean;
-  isAnalyzing: boolean;
-}): BaselineReadinessState {
-  if (isAnalyzing) return "ANALYZING";
-  if (hasCompletedAssessment) return "READY";
-  return "NOT_ANALYZED";
-}
-
 function getBaselineReadinessLabel(state: BaselineReadinessState) {
   if (state === "ANALYZING") return "Analyzing";
   if (state === "READY") return "Ready for targeting";
@@ -250,23 +246,36 @@ function buildBaselineReadinessContract({
   summary?: BaselineAssessmentSummaryDto | null;
   isAnalyzing?: boolean;
 }): BaselinePageReadinessContract {
-  const hasCompletedAssessment = isBaselineAnalyzedFromSummary(summary);
   const latestAssessmentId = summary?.latestAssessmentId?.trim() ?? null;
-  const latestAssessmentCreatedAt = summary?.latestAssessmentCreatedAt?.trim() ?? null;
-  const latestFitScore = getLatestRoleAnalysisFitScore(summary);
-  const readinessState = getBaselineReadinessState({
-    hasCompletedAssessment,
+  const routes = {
+    baseline: "/baseline",
+    target: baselineId ? `/target?baselineId=${encodeURIComponent(baselineId)}` : "/target",
+    results: latestAssessmentId ? `/results?assessmentId=${encodeURIComponent(latestAssessmentId)}` : "/results",
+    upload: baselineId ? getBaselineDetailsHref(baselineId) : "/baseline",
+  };
+  const canonical = resolveCanonicalState({
+    surface: "baseline",
+    baselineId,
+    summary,
     isAnalyzing,
+    routes,
+    persistedAssessmentId: latestAssessmentId,
+    dataSource: summary ? "persisted" : "fresh",
   });
 
   return {
     activeBaselineId: baselineId,
     baselineId,
-    hasCompletedAssessment,
+    hasCompletedAssessment: canonical.readinessState === "READY",
     latestAssessmentId,
-    latestAssessmentCreatedAt,
-    latestFitScore,
-    readinessState,
+    latestAssessmentCreatedAt: summary?.latestAssessmentCreatedAt?.trim() ?? null,
+    latestFitScore: canonical.score,
+    readinessState: canonical.readinessState as BaselineReadinessState,
+    ctaLabel: canonical.cta.label,
+    ctaHref: canonical.cta.href,
+    actionType: canonical.cta.actionType as "target_role" | "view_results" | "upload_resume",
+    dataSource: canonical.dataSource,
+    persistedAssessmentId: canonical.persistedAssessmentId,
   };
 }
 
@@ -475,32 +484,77 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
       : "Your resumes"
     : "Uploaded resumes";
   const activeBaselineVersionLabel = `Version ${primaryBaseline?.versionNumber ?? primaryBaseline?.version ?? 1} (current)`;
+  const baselineReadinessDataSource = primaryBaselineReadiness.dataSource;
+  const baselineReadinessAnalyticsPayload = useMemo(
+    () => ({
+      source: "baseline" as const,
+      baselineId: primaryBaseline?.id ?? primaryBaselineId ?? null,
+      readinessState: primaryBaselineReadiness.readinessState,
+      latestAssessmentId: primaryBaselineReadiness.latestAssessmentId,
+      latestFitScore: primaryBaselineReadiness.latestFitScore,
+      dataSource: baselineReadinessDataSource,
+      ctaLabel: primaryBaselineReadiness.ctaLabel,
+      ctaHref: primaryBaselineReadiness.ctaHref,
+      actionType: primaryBaselineReadiness.actionType,
+    }),
+    [
+      baselineReadinessDataSource,
+      primaryBaseline?.id,
+      primaryBaselineId,
+      primaryBaselineReadiness.actionType,
+      primaryBaselineReadiness.ctaHref,
+      primaryBaselineReadiness.ctaLabel,
+      primaryBaselineReadiness.latestAssessmentId,
+      primaryBaselineReadiness.latestFitScore,
+      primaryBaselineReadiness.readinessState,
+    ],
+  );
+  const baselineReadinessKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
     if (!primaryBaseline) return;
-    const baselineRuntimeDebug = {
-      baseline: {
-        id: primaryBaseline.id,
-        fileName: primaryBaseline.originalFilename,
-        isExpectedBaseline: true,
-        selectedAtRuntime: Boolean(primaryBaselineId),
-      },
-      analysis: {
-        id: primaryBaselineReadiness.latestAssessmentId,
-        score: primaryBaselineReadiness.latestFitScore,
-        hasCompletedAssessment: primaryBaselineReadiness.hasCompletedAssessment,
-        readinessState: primaryBaselineReadiness.readinessState,
-      },
-      decision: {
-        finalAction: primaryBaselineReadiness.latestAssessmentId ? "analysis" : "baseline",
-        why: primaryBaselineReadiness.latestAssessmentId
-          ? "baseline has a completed analysis"
-          : "baseline still needs analysis",
-      },
+    const eventKey = [
+      primaryBaseline.id,
+      primaryBaselineReadiness.latestAssessmentId ?? "none",
+      primaryBaselineReadiness.latestFitScore ?? "none",
+      primaryBaselineReadiness.readinessState,
+      baselineReadinessDataSource,
+    ].join(":");
+    if (baselineReadinessKeyRef.current === eventKey) return;
+    baselineReadinessKeyRef.current = eventKey;
+    const cta = {
+      label: primaryBaselineReadiness.ctaLabel,
+      href: primaryBaselineReadiness.ctaHref,
+      actionType: primaryBaselineReadiness.actionType,
     };
-    console.debug("baselineRuntimeDebug", baselineRuntimeDebug);
-  }, [primaryBaseline, primaryBaselineId, primaryBaselineReadiness]);
+
+    trackEvent("baseline_readiness_viewed", baselineReadinessAnalyticsPayload);
+    logDecisionFlowEvent({
+      event: "baseline_readiness_resolved",
+      baselineId: primaryBaseline.id,
+      jobId: null,
+      score: primaryBaselineReadiness.latestFitScore ?? null,
+      readinessState: primaryBaselineReadiness.readinessState,
+      contractSource: "resolveCanonicalState",
+      ctaLabel: cta.label,
+      ctaHref: cta.href,
+      actionType: cta.actionType,
+      analyticsPayload: baselineReadinessAnalyticsPayload,
+      dataSource: baselineReadinessDataSource,
+      persistedAssessmentId: primaryBaselineReadiness.latestAssessmentId,
+    });
+  }, [
+    baselineReadinessAnalyticsPayload,
+    baselineReadinessDataSource,
+    primaryBaseline,
+    primaryBaselineReadiness.actionType,
+    primaryBaselineReadiness.ctaHref,
+    primaryBaselineReadiness.ctaLabel,
+    primaryBaselineReadiness.latestAssessmentId,
+    primaryBaselineReadiness.latestFitScore,
+    primaryBaselineReadiness.readinessState,
+  ]);
   const careerGravity = useMemo(
     () => buildCareerGravityUnlock(completedRoleAnalyses),
     [completedRoleAnalyses],
@@ -1305,18 +1359,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                     : null;
                 const canOpenStudio = latestRoleFitScore !== null && latestRoleFitScore >= 70;
                 const isReadyBaseline = readinessState === "READY" && !isArchived;
-
-                if (process.env.NODE_ENV !== "production") {
-                  console.debug("[BaselineStudioHome] library readiness", {
-                    baselineId: baseline.id,
-                    isPrimary,
-                    activeBaselineId: primaryBaselineReadiness.activeBaselineId,
-                    hasCompletedAssessment: baselineReadiness.hasCompletedAssessment,
-                    readinessState,
-                    latestAssessmentId: baselineReadiness.latestAssessmentId,
-                    latestAssessmentCreatedAt: baselineReadiness.latestAssessmentCreatedAt,
-                  });
-                }
 
                 return (
                   <article

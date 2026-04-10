@@ -17,18 +17,37 @@ export class ResendEmailService {
 
   async sendEmail(input: ResendEmailInput): Promise<void> {
     const apiKey =
-      this.configService.get<string>('RESEND_API_KEY') ?? process.env.RESEND_API_KEY;
-    const from = this.configService.get<string>('MAIL_FROM') ?? process.env.MAIL_FROM;
-    if (!apiKey) {
-      throw new Error(
-        'Missing RESEND_API_KEY environment variable for Resend email delivery.',
-      );
-    }
+      this.configService.get<string>('RESEND_API_KEY')?.trim() ??
+      process.env.RESEND_API_KEY?.trim() ??
+      '';
+    const from =
+      this.configService.get<string>('MAIL_FROM')?.trim() ??
+      process.env.MAIL_FROM?.trim() ??
+      '';
+    const isProduction = this.isProduction();
+    const fallbackUrl = this.extractFirstUrl(input.html ?? input.text ?? '');
 
-    if (!from) {
-      throw new Error(
-        'Missing MAIL_FROM environment variable for Resend email delivery.',
-      );
+    if (!apiKey || !from) {
+      if (!isProduction) {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'email_delivery_skipped',
+            reason: !apiKey ? 'missing_resend_api_key' : 'missing_mail_from',
+            to: input.to,
+            subject: input.subject,
+            url: fallbackUrl,
+          }),
+        );
+        return;
+      }
+
+      if (!apiKey) {
+        throw new Error(
+          'Missing RESEND_API_KEY environment variable for Resend email delivery.',
+        );
+      }
+
+      throw new Error('Missing MAIL_FROM environment variable for Resend email delivery.');
     }
 
     if (!input.html && !input.text) {
@@ -79,11 +98,35 @@ export class ResendEmailService {
       this.logger.log(`Resend email sent to ${input.to} subject="${input.subject}"`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (!isProduction) {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'email_delivery_fallback',
+            to: input.to,
+            subject: input.subject,
+            reason: message,
+            url: fallbackUrl,
+          }),
+        );
+        return;
+      }
       this.logger.error(
         `Failed to send Resend email to ${input.to} subject="${input.subject}": ${message}`,
         error instanceof Error ? error.stack : undefined,
       );
       throw error;
     }
+  }
+
+  private extractFirstUrl(content: string): string | null {
+    const match = content.match(/https?:\/\/[^\s"'<>]+/i);
+    return match?.[0] ?? null;
+  }
+
+  private isProduction(): boolean {
+    return (
+      (this.configService.get<string>('NODE_ENV') ?? process.env.NODE_ENV ?? '').trim() ===
+      'production'
+    );
   }
 }

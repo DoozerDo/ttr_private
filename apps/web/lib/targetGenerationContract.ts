@@ -1,3 +1,7 @@
+import {
+  resolveCanonicalState,
+  resolveTargetDisplayResult as resolveCanonicalTargetDisplayResult,
+} from "@/lib/canonicalDecision";
 import type { GenerationReadiness } from "@/lib/generationReadiness";
 import type { GenerationProductReadiness } from "@/lib/generationProductReadiness";
 
@@ -23,6 +27,14 @@ export type TargetCtaContract = {
   isStudioDestination: boolean;
 };
 
+export type TargetCtaClickedAnalyticsPayload = {
+  state: TargetCtaState;
+  score: number | null;
+  label: string;
+  href: string;
+  actionType: TargetCtaActionType;
+};
+
 export type TargetResultLike = {
   baselineId?: string | null;
   jobId?: string | null;
@@ -30,6 +42,8 @@ export type TargetResultLike = {
 };
 
 type BuildTargetCtaContractInput = {
+  baselineId: string | null;
+  jobId: string | null;
   score: number | null;
   generationReadiness: GenerationReadiness;
   productReadiness: GenerationProductReadiness;
@@ -50,101 +64,110 @@ export type ResolvedTargetDisplayResult = {
   source: TargetAnalysisSource;
 };
 
-function matchesActivePair(
-  candidate: TargetResultLike | null,
-  baselineId: string | null,
-  jobId: string | null,
-): boolean {
-  if (!candidate || !baselineId || !jobId) return false;
-  return candidate.baselineId?.trim() === baselineId.trim() && candidate.jobId?.trim() === jobId.trim();
+function shouldFailOnMismatch() {
+  return process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_DEBUG_DECISION_FLOW === "true";
+}
+
+function serializeTargetValue(value: unknown): string {
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+export function assertTargetCtaAnalyticsMatchesRenderedCta(
+  contract: TargetCtaContract,
+  payload: TargetCtaClickedAnalyticsPayload,
+) {
+  const mismatches = [
+    ["state", contract.state, payload.state],
+    ["score", contract.score, payload.score],
+    ["label", contract.label, payload.label],
+    ["href", contract.href, payload.href],
+    ["actionType", contract.actionType, payload.actionType],
+  ].filter(([, rendered, emitted]) => !Object.is(rendered, emitted));
+
+  if (!mismatches.length) return;
+
+  const message =
+    "[target-cta] analytics payload mismatch: " +
+    mismatches
+      .map(([key, rendered, emitted]) => `${key} rendered=${serializeTargetValue(rendered)} emitted=${serializeTargetValue(emitted)}`)
+      .join(", ");
+
+  if (shouldFailOnMismatch()) {
+    console.error(message, { rendered: contract, emitted: payload });
+    throw new Error(message);
+  }
+  console.error(message, { rendered: contract, emitted: payload });
 }
 
 export function resolveTargetDisplayResult(
   input: ResolveTargetDisplayResultInput,
 ): ResolvedTargetDisplayResult {
-  if (matchesActivePair(input.currentResult, input.baselineId, input.jobId)) {
-    return {
-      result: input.currentResult,
-      source: "fresh_computation",
-    };
-  }
-
-  if (matchesActivePair(input.persistedResult, input.baselineId, input.jobId)) {
-    return {
-      result: input.persistedResult,
-      source: "persisted_latest_assessment",
-    };
-  }
+  const resolved = resolveCanonicalTargetDisplayResult({
+    currentResult: input.currentResult,
+    persistedResult: input.persistedResult,
+    baselineId: input.baselineId,
+    jobId: input.jobId,
+  });
 
   return {
-    result: null,
-    source: "fallback_default",
+    result: resolved.result,
+    source:
+      resolved.source === "fresh"
+        ? "fresh_computation"
+        : resolved.source === "persisted"
+          ? "persisted_latest_assessment"
+          : "fallback_default",
   };
 }
 
 export function buildTargetCtaContract(input: BuildTargetCtaContractInput): TargetCtaContract {
-  const score = typeof input.score === "number" && Number.isFinite(input.score) ? input.score : null;
-
-  if (score === null) {
-    return {
-      state: "BLOCKED",
-      label: "Generate Compatibility Score",
-      href: input.resolveGapsHref,
-      actionType: "resolve_gaps",
-      score,
-      scoreSource: input.scoreSource,
-      readinessSource: "score_floor",
-      isStudioDestination: false,
-    };
-  }
-
-  if (score < 70) {
-    return {
-      state: "BLOCKED",
-      label: "Start Fit Review",
-      href: input.resolveGapsHref,
-      actionType: "resolve_gaps",
-      score,
-      scoreSource: input.scoreSource,
-      readinessSource: "score_floor",
-      isStudioDestination: false,
-    };
-  }
-
-  if (input.generationReadiness.status === "ready" && input.productReadiness.canOpenStudio) {
-    return {
-      state: "READY",
-      label: "Open Studio",
-      href: input.studioHref,
-      actionType: "open_studio_generate",
-      score,
-      scoreSource: input.scoreSource,
-      readinessSource: "generation_ready",
-      isStudioDestination: true,
-    };
-  }
-
-  if (input.generationReadiness.status === "limited") {
-    return {
-      state: "LIMITED",
-      label: "Start Fit Review",
-      href: input.resolveGapsHref,
-      actionType: "resolve_gaps",
-      score,
-      scoreSource: input.scoreSource,
-      readinessSource: "generation_limited",
-      isStudioDestination: false,
-    };
-  }
+  const canonical = resolveCanonicalState({
+    surface: "target",
+    baselineId: input.baselineId,
+    jobId: input.jobId,
+    score: input.score,
+    generationReadiness: input.generationReadiness,
+    productReadiness: input.productReadiness,
+    studioHref: input.studioHref,
+    resolveGapsHref: input.resolveGapsHref,
+    scoreCandidates: [{ source: input.scoreSource, value: input.score }],
+  });
 
   return {
-    state: "BLOCKED",
-    label: "Start Fit Review",
-    href: input.resolveGapsHref,
-    actionType: "resolve_gaps",
-    score,
+    state: canonical.readinessState as TargetCtaState,
+    label: canonical.cta.label,
+    href: canonical.cta.href,
+    actionType: canonical.cta.actionType as TargetCtaActionType,
+    score: canonical.score,
     scoreSource: input.scoreSource,
-    readinessSource: "generation_blocked",
-    isStudioDestination: false,
+    readinessSource:
+      canonical.readinessSource === "generation_ready" ||
+      canonical.readinessSource === "generation_limited" ||
+      canonical.readinessSource === "generation_blocked"
+        ? canonical.readinessSource
+        : "score_floor",
+    isStudioDestination: canonical.cta.actionType === "open_studio_generate",
   };
+}
+
+export function buildTargetCtaClickedAnalyticsPayload(
+  contract: TargetCtaContract,
+): TargetCtaClickedAnalyticsPayload {
+  const payload = {
+    state: contract.state,
+    score: contract.score,
+    label: contract.label,
+    href: contract.href,
+    actionType: contract.actionType,
+  };
+  assertTargetCtaAnalyticsMatchesRenderedCta(contract, payload);
+  return payload;
 }

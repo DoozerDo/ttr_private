@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
-import { buildRoleMatchFinalPass } from "@/lib/roleMatchFinalPass";
+import { buildDocumentStrategyPlan } from "@shared/documentStrategyPlan";
+import { buildRoleMatchFinalPass } from "@shared/roleMatchFinalPass";
 
 function buildScanPlan() {
   const plan = buildDocumentStrategyPlan({
@@ -136,3 +136,4 @@ describe("recruiter scan readiness", () => {
     expect(finalPass.recruiterScanRisks.every((risk) => risk.severity !== "high")).toBe(true);
   });
 });
+

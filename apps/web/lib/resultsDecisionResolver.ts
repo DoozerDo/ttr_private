@@ -1,3 +1,4 @@
+import { resolveCanonicalState } from "@/lib/canonicalDecision";
 import type {
   GenerationProductConfidence,
   GenerationProductReadinessState,
@@ -22,65 +23,74 @@ export interface ResultsDecision {
 }
 
 export function resolveResultsDecision(input: ResultsDecisionInput): ResultsDecision {
-  const { score, generationReadiness } = input;
-  const fitLabel =
-    typeof score === "number" && score >= 80
-      ? "Strong fit"
-      : typeof score === "number" && score >= 70
-        ? "Competitive fit"
-        : "This role needs more work";
+  const score = typeof input.score === "number" && Number.isFinite(input.score) ? input.score : null;
+  const scoreFloorBlocked = score !== null && score < 70;
+  const generationAllowed = input.generationReadiness.state === "ALLOWED" && !scoreFloorBlocked;
+  const canonical = resolveCanonicalState({
+    surface: "results",
+    baselineId: null,
+    jobId: null,
+    score,
+    generationReadiness: {
+      status: generationAllowed ? "ready" : "blocked",
+      blocked: !generationAllowed,
+      reasonCodes:
+        input.generationReadiness.needsVerification || scoreFloorBlocked ? ["needs_verification"] : [],
+      reasons:
+        input.generationReadiness.needsVerification || scoreFloorBlocked
+        ? [{ code: "full_block", message: "verification required" }]
+        : [],
+      badgeLabel: generationAllowed ? "READY" : "BLOCKED",
+      summary: generationAllowed
+        ? "Generation ready"
+        : "Generation blocked",
+      verificationIssues: [],
+    },
+    productReadiness: {
+      generation_readiness: {
+        canGenerate: generationAllowed,
+        canExport: generationAllowed,
+        reasonsBlocked: generationAllowed ? [] : ["generation_blocked"],
+      },
+      state: generationAllowed ? "ALLOWED" : "BLOCKED",
+      confidence: input.generationReadiness.confidence,
+      needsVerification: input.generationReadiness.needsVerification,
+      tier: generationAllowed ? "generation_allowed" : "fit_review_only",
+      canOpenStudio: generationAllowed,
+      generationMode: input.generationReadiness.confidence === "HIGH" ? "verified" : "draft",
+    },
+    studioHref: "/studio",
+    fitReviewHref: "/fit-review",
+    scoreCandidates: [{ source: "primary", value: score }],
+  });
 
-  if (typeof score !== "number" || Number.isNaN(score)) {
-    return {
-      state: "IMPROVE",
-      primaryCta: "START_FIT_REVIEW",
-      headline: "Strengthen your fit before generating.",
-      subtext:
-        "Review the baseline signals first so Studio only uses evidence that is clear and verified.",
-    };
-  }
-
-  if (score < 70) {
-    return {
-      state: "IMPROVE",
-      primaryCta: "START_FIT_REVIEW",
-      headline: "Strengthen your fit before generating.",
-      subtext:
-        "You are close, but improving alignment will make the next generation step safer and more useful.",
-    };
-  }
-
-  if (score >= 80) {
-    return {
-      state: generationReadiness.confidence === "HIGH" ? "READY" : "DRAFT",
-      primaryCta: "OPEN_STUDIO",
-      headline: "You're a strong match. You can generate now.",
-      subtext:
-        generationReadiness.confidence === "HIGH"
-          ? "Your results are backed by verified evidence."
-          : "Some claims are unverified. You can strengthen your output in Studio.",
-    };
-  }
-
-  if (generationReadiness.state === "BLOCKED") {
-    return {
-      state: "BLOCKED",
-      primaryCta: "START_FIT_REVIEW",
-      headline: `${fitLabel}. Not ready to generate yet.`,
-      subtext:
-        "Your experience aligns with this role, but key claims still need verified evidence before Studio can generate safely.",
-    };
-  }
-
-  if (generationReadiness.state === "ALLOWED") {
+  if (canonical.readinessState === "READY") {
     return {
       state: "READY",
       primaryCta: "OPEN_STUDIO",
-      headline: `${fitLabel}. Studio is ready.`,
+      headline: "You're a strong match. You can generate now.",
       subtext:
-        generationReadiness.confidence === "HIGH"
-          ? "Your verified evidence is complete enough to generate safely in Studio."
-          : "Studio can open now while you strengthen evidence for better output quality.",
+        "Your verified evidence is complete enough to generate safely in Studio.",
+    };
+  }
+
+  if (canonical.readinessState === "DRAFT") {
+    return {
+      state: "DRAFT",
+      primaryCta: "OPEN_STUDIO",
+      headline: "You're a strong match. You can generate now.",
+      subtext:
+        "Some claims are unverified. You can strengthen your output in Studio.",
+    };
+  }
+
+  if (canonical.readinessState === "BLOCKED") {
+    return {
+      state: "BLOCKED",
+      primaryCta: "START_FIT_REVIEW",
+      headline: "Competitive fit. Not ready to generate yet.",
+      subtext:
+        "Your experience aligns with this role, but key claims still need verified evidence before Studio can generate safely.",
     };
   }
 

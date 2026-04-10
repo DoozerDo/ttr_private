@@ -1,15 +1,15 @@
 import { buildLanguageStylePass } from "../../language-style-pass";
-import type { DocumentStrategyPlan } from "../../../../web/lib/documentStrategyPlan";
+import type { DocumentStrategyPlan } from "../../shared/documentStrategyPlan";
 import {
   buildRoleMatchFinalPass,
   type RoleMatchFinalPass,
-} from "../../../../web/lib/roleMatchFinalPass";
+} from "../../shared/roleMatchFinalPass";
 import {
   buildGoldStandardCalibration,
   meetsGoldStandardCalibrationMinimumBar,
   type GoldStandardCalibration,
   type GoldStandardBenchmarkFixture,
-} from "../../../../web/lib/goldStandardCalibration";
+} from "../../shared/goldStandardCalibration";
 import type { SyntheticGenerationEvaluationInput, SyntheticGenerationResult } from "./synthetic-generation.types";
 
 function normalizeText(value: string): string {

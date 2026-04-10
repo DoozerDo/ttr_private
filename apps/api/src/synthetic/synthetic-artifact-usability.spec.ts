@@ -1,4 +1,4 @@
-import { buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
+import { buildDocumentStrategyPlan } from "../shared/documentStrategyPlan";
 import { evaluateSyntheticGenerationScenario } from "./generation/synthetic-generation.evaluator";
 import { listSyntheticGenerationScenarioBundles } from "./generation/synthetic-generation.fixtures";
 
@@ -25,7 +25,7 @@ describe("Synthetic artifact usability", () => {
     });
 
     const result = evaluateSyntheticGenerationScenario({
-      scenario: bundle!.scenario,
+      scenario: bundle!,
       fitScore: 82,
       plan,
       generatedResume: {
@@ -74,7 +74,7 @@ describe("Synthetic artifact usability", () => {
     });
 
     const result = evaluateSyntheticGenerationScenario({
-      scenario: bundle!.scenario,
+      scenario: bundle!,
       fitScore: 82,
       plan,
       generatedResume: {

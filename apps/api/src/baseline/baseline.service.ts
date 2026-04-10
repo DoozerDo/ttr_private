@@ -867,15 +867,16 @@ return {
   }
 
   private toBaselineReadinessSummary(
-    baseline: Pick<Baseline, 'latestBaselineScore' | 'lastAnalyzedAt'>,
+    baseline: Pick<Baseline, 'latestBaselineScore' | 'lastAnalyzedAt' | 'latestAssessmentId'>,
   ): BaselineAssessmentSummary {
     const hasReadiness =
       typeof baseline.latestBaselineScore === 'number' ||
-      baseline.lastAnalyzedAt instanceof Date;
+      baseline.lastAnalyzedAt instanceof Date ||
+      Boolean(baseline.latestAssessmentId);
 
     if (!hasReadiness) {
       return {
-        latestAssessmentId: null,
+        latestAssessmentId: baseline.latestAssessmentId ?? null,
         latestAssessmentCreatedAt: null,
         latestFitScore: null,
         hasCompletedAssessment: false,
@@ -883,7 +884,7 @@ return {
     }
 
     return {
-      latestAssessmentId: null,
+      latestAssessmentId: baseline.latestAssessmentId ?? null,
       latestAssessmentCreatedAt: baseline.lastAnalyzedAt ?? null,
       latestFitScore:
         typeof baseline.latestBaselineScore === 'number'

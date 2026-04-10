@@ -3,7 +3,7 @@
 import {
   REFINEMENT_PRESETS,
   type RefinementPreset,
-} from "@/lib/documentStrategyPlan";
+} from "@shared/documentStrategyPlan";
 
 import {
   getCritiqueIssueLabel,
@@ -156,3 +156,4 @@ export function StudioCritiquePanel({ critique, isApplying, onApplyRecommendatio
     </section>
   );
 }
+

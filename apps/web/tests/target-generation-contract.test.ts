@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { getGenerationAuthorityState } from "@/lib/generationAuthority";
 import { buildGenerationProductReadiness } from "@/lib/generationProductReadiness";
 import { getGenerationReadiness } from "@/lib/generationReadiness";
 import {
+  assertTargetCtaAnalyticsMatchesRenderedCta,
   buildTargetCtaContract,
+  buildTargetCtaClickedAnalyticsPayload,
   resolveTargetDisplayResult,
 } from "@/lib/targetGenerationContract";
 
@@ -16,6 +18,7 @@ describe("target generation contract", () => {
         compliance_flags: [],
       },
       null,
+      19,
     );
     const productReadiness = buildGenerationProductReadiness({
       score: 19,
@@ -42,6 +45,16 @@ describe("target generation contract", () => {
       isStudioDestination: false,
       score: 19,
     });
+
+    const analyticsPayload = buildTargetCtaClickedAnalyticsPayload(contract);
+    expect(analyticsPayload).toEqual({
+      state: "BLOCKED",
+      score: 19,
+      label: "Start Fit Review",
+      href: "/resolve-gaps?analysisId=analysis-19&jobId=job-19&baselineId=base-19",
+      actionType: "resolve_gaps",
+    });
+    expect(() => assertTargetCtaAnalyticsMatchesRenderedCta(contract, analyticsPayload)).not.toThrow();
   });
 
   it("renders the studio-ready CTA from one readiness contract", () => {
@@ -51,6 +64,7 @@ describe("target generation contract", () => {
         compliance_flags: [],
       },
       null,
+      82,
     );
     const productReadiness = buildGenerationProductReadiness({
       score: 82,
@@ -77,6 +91,15 @@ describe("target generation contract", () => {
       isStudioDestination: true,
       score: 82,
     });
+
+    const analyticsPayload = buildTargetCtaClickedAnalyticsPayload(contract);
+    expect(analyticsPayload).toEqual({
+      state: "READY",
+      score: 82,
+      label: "Open Studio",
+      href: "/studio?analysisId=analysis-82&jobId=job-82&baselineId=base-82",
+      actionType: "open_studio_generate",
+    });
   });
 
   it("routes limited readiness back to Fit Review instead of Studio", () => {
@@ -86,6 +109,7 @@ describe("target generation contract", () => {
         compliance_flags: [{ code: "limited_personalization", severity: "warn" }],
       },
       null,
+      78,
     );
     const productReadiness = buildGenerationProductReadiness({
       score: 78,
@@ -112,9 +136,103 @@ describe("target generation contract", () => {
       isStudioDestination: false,
       score: 78,
     });
+
+    const analyticsPayload = buildTargetCtaClickedAnalyticsPayload(contract);
+    expect(analyticsPayload).toEqual({
+      state: "LIMITED",
+      score: 78,
+      label: "Start Fit Review",
+      href: "/resolve-gaps?analysisId=analysis-78&jobId=job-78&baselineId=base-78",
+      actionType: "resolve_gaps",
+    });
   });
 
-  it("prefers the fresh computation over a stale persisted assessment", () => {
+  it("keeps trust-gated high scores off the Studio path", () => {
+    const generationReadiness = getGenerationReadiness(
+      {
+        score: 88,
+        compliance_flags: [{ code: "limited_personalization", severity: "warn" }],
+      },
+      null,
+      88,
+    );
+    const productReadiness = {
+      generation_readiness: {
+        canGenerate: false,
+        canExport: false,
+        reasonsBlocked: ["trust_gate_blocked"],
+      },
+      state: "BLOCKED" as const,
+      confidence: "LOW" as const,
+      needsVerification: true,
+      tier: "fit_review_only" as const,
+      canOpenStudio: false,
+      generationMode: "draft" as const,
+    };
+
+    const contract = buildTargetCtaContract({
+      score: 88,
+      generationReadiness,
+      productReadiness,
+      studioHref: "/studio?analysisId=analysis-88&jobId=job-88&baselineId=base-88",
+      resolveGapsHref: "/resolve-gaps?analysisId=analysis-88&jobId=job-88&baselineId=base-88",
+      scoreSource: "fresh_computation",
+    });
+
+    expect(contract.actionType).toBe("resolve_gaps");
+    expect(contract.label).toBe("Start Fit Review");
+    expect(contract.href).toContain("/resolve-gaps");
+    expect(buildTargetCtaClickedAnalyticsPayload(contract)).toEqual({
+      state: contract.state,
+      score: 88,
+      label: "Start Fit Review",
+      href: contract.href,
+      actionType: "resolve_gaps",
+    });
+  });
+
+  it("logs and throws when the emitted analytics payload diverges from the rendered CTA", () => {
+    const generationReadiness = getGenerationReadiness(
+      {
+        score: 19,
+        compliance_flags: [],
+      },
+      null,
+      19,
+    );
+    const productReadiness = buildGenerationProductReadiness({
+      score: 19,
+      authorityState: getGenerationAuthorityState(generationReadiness),
+      hasCanonicalAssessment: true,
+      hasRequiredContext: true,
+      isPro: true,
+    });
+
+    const contract = buildTargetCtaContract({
+      score: 19,
+      generationReadiness,
+      productReadiness,
+      studioHref: "/studio?analysisId=analysis-19&jobId=job-19&baselineId=base-19",
+      resolveGapsHref: "/resolve-gaps?analysisId=analysis-19&jobId=job-19&baselineId=base-19",
+      scoreSource: "fresh_computation",
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect(() =>
+      assertTargetCtaAnalyticsMatchesRenderedCta(contract, {
+        state: "READY",
+        score: 19,
+        label: "Open Studio",
+        href: "/studio?analysisId=analysis-19&jobId=job-19&baselineId=base-19",
+        actionType: "open_studio_generate",
+      }),
+    ).toThrow("[target-cta] analytics payload mismatch");
+
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it("fails loudly when the fresh and persisted active-pair results disagree", () => {
     const freshResult = { baselineId: "base-1", jobId: "job-1", score: 19, assessmentId: "fresh-1" };
     const persistedResult = {
       baselineId: "base-1",
@@ -123,14 +241,13 @@ describe("target generation contract", () => {
       assessmentId: "persisted-1",
     };
 
-    const resolved = resolveTargetDisplayResult({
-      currentResult: freshResult,
-      persistedResult,
-      baselineId: "base-1",
-      jobId: "job-1",
-    });
-
-    expect(resolved.source).toBe("fresh_computation");
-    expect(resolved.result).toBe(freshResult);
+    expect(() =>
+      resolveTargetDisplayResult({
+        currentResult: freshResult,
+        persistedResult,
+        baselineId: "base-1",
+        jobId: "job-1",
+      }),
+    ).toThrow("[canonical-decision] fresh and persisted results disagree for the active pair");
   });
 });

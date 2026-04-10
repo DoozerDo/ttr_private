@@ -1,25 +1,25 @@
 import {
   buildCalibrationFeedback,
   type CalibrationFeedback,
-} from "@/lib/calibrationFeedback";
+} from "@shared/calibrationFeedback";
 import {
   buildGoldStandardCalibration,
   type GoldStandardBenchmarkCoverLetter,
   type GoldStandardBenchmarkFixture,
   type GoldStandardBenchmarkResume,
   type GoldStandardCalibration,
-} from "@/lib/goldStandardCalibration";
+} from "@shared/goldStandardCalibration";
 import {
   buildDocumentStrategyPlan,
   type DocumentStrategyPlan,
   type DocumentStrategyPlanInput,
-} from "@/lib/documentStrategyPlan";
+} from "@shared/documentStrategyPlan";
 import {
   buildLanguageStylePass,
   polishCoverLetterParagraphsText,
   polishResumeBulletsText,
   polishResumeSummaryText,
-} from "@/lib/languageStylePass";
+} from "@shared/languageStylePass";
 
 export type SelfImprovementCycleInput = {
   planInput: DocumentStrategyPlanInput;
@@ -160,3 +160,4 @@ export function runGoldStandardSelfImprovementCycle(
     refinedCoverLetter,
   };
 }
+

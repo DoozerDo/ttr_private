@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDocumentStrategyPlan, REFINEMENT_PRESETS } from "@/lib/documentStrategyPlan";
+import { buildDocumentStrategyPlan, REFINEMENT_PRESETS } from "@shared/documentStrategyPlan";
 import { buildDocumentCritique } from "@/lib/documentCritique";
 
 function buildSamplePlan() {
@@ -70,4 +70,5 @@ describe("critique to refinement mapping", () => {
     }
   });
 });
+
 

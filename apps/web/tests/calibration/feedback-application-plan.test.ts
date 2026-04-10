@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { buildCalibrationFeedback } from "@/lib/calibrationFeedback";
-import { buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
-import { buildGoldStandardCalibration, listGoldStandardBenchmarkFixtures } from "@/lib/goldStandardCalibration";
+import { buildCalibrationFeedback } from "@shared/calibrationFeedback";
+import { buildDocumentStrategyPlan } from "@shared/documentStrategyPlan";
+import { buildGoldStandardCalibration, listGoldStandardBenchmarkFixtures } from "@shared/goldStandardCalibration";
 
 describe("feedback application to the plan", () => {
   it("changes plan weighting and suppression behavior without changing the positioning frame", () => {
@@ -84,3 +84,4 @@ function buildSupportOpsCoverOutput() {
     closingParagraph: "Thank you for your time and consideration.",
   };
 }
+

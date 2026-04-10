@@ -16,7 +16,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { DocumentStrategyPlanSummary } from "@/components/DocumentStrategyPlanSummary";
 import { buildExportPayload } from "../lib/exportPayload";
-import { buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
+import { buildDocumentStrategyPlan } from "@shared/documentStrategyPlan";
 import {
   formatErrorMessage,
   parseComplianceError,
@@ -775,3 +775,4 @@ function extractBestResumeText(payload: unknown): string | null {
   const text = extractSectionText(picked);
   return text.length ? text : null;
 }
+

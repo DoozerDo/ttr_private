@@ -12,12 +12,32 @@ const actions = {
   retryGeneration: vi.fn(),
 };
 
-function createMove(overrides: Partial<Parameters<typeof resolveStudioNextMove>[0]>) {
+type StudioDecision = Parameters<typeof resolveStudioNextMove>[0]["decision"];
+
+function createDecision(
+  readinessState: StudioDecision["readinessState"],
+  nextActionType: StudioDecision["nextAction"]["type"],
+): StudioDecision {
+  return {
+    readinessState,
+    nextAction: {
+      type: nextActionType,
+      label:
+        nextActionType === "studio_with_save"
+          ? "Generate Resume"
+          : nextActionType === "studio"
+            ? "Open Resume & Cover Letter Studio"
+            : "Start Fit Review",
+      route: nextActionType === "fit_review" ? "/fit-review" : "/studio",
+      reason: "test",
+    },
+  } as StudioDecision;
+}
+
+function createMove(overrides: Partial<Parameters<typeof resolveStudioNextMove>[0]> = {}) {
   return resolveStudioNextMove({
+    decision: createDecision("READY", "studio"),
     analysisScore: 82,
-    canGenerateDocuments: true,
-    studioGenerationState: "READY",
-    primaryNextAction: "studio",
     artifactFailure: null,
     actions,
     ...overrides,
@@ -26,30 +46,48 @@ function createMove(overrides: Partial<Parameters<typeof resolveStudioNextMove>[
 
 describe("resolveStudioNextMove", () => {
   it("returns a strong-fit move with generate actions", () => {
-    const move = createMove({ analysisScore: 84, canGenerateDocuments: true });
-    expect(move.title).toBe("You’re ready to generate");
+    const move = createMove({
+      analysisScore: 84,
+      decision: createDecision("READY", "studio"),
+    });
+    expect(move.title).toContain("ready to generate grounded materials");
     expect(move.primaryAction.label).toBe("Generate Resume");
     expect(move.secondaryAction?.label).toBe("Generate Cover Letter");
   });
 
-  it("returns a moderate-fit move with decisive gap-fixing guidance", () => {
-    const move = createMove({ analysisScore: 63, canGenerateDocuments: true });
-    expect(move.title).toBe("Fix the gaps before applying");
-    expect(move.primaryAction.label).toBe("Review Top Gaps");
-    expect(move.secondaryAction?.label).toBe("Generate Anyway");
-  });
-
-  it("returns a low-fit move without hedging", () => {
-    const move = createMove({ analysisScore: 42, canGenerateDocuments: false });
-    expect(move.title).toBe("You’re not competitive for this role");
-    expect(move.primaryAction.label).toBe("Improve Experience");
-    expect(move.secondaryAction?.label).toBe("Analyze Another Role");
-  });
-
-  it("returns a generation-blocked move with one primary action", () => {
-    const move = createMove({ studioGenerationState: "BLOCKED", canGenerateDocuments: false });
+  it("returns a fit-review move when the canonical decision is blocked", () => {
+    const move = createMove({
+      analysisScore: 63,
+      decision: createDecision("BLOCKED", "fit_review"),
+    });
     expect(move.title).toBe("Complete your profile before generating");
     expect(move.primaryAction.label).toBe("Continue Building Experience");
     expect(move.secondaryAction).toBeUndefined();
+  });
+
+  it("returns a generation-blocked move with one primary action", () => {
+    const move = createMove({
+      decision: createDecision("BLOCKED", "fit_review"),
+    });
+    expect(move.title).toBe("Complete your profile before generating");
+    expect(move.primaryAction.label).toBe("Continue Building Experience");
+    expect(move.secondaryAction).toBeUndefined();
+  });
+
+  it("prefers failure-specific messaging when generation fails", () => {
+    const move = resolveStudioNextMove({
+      decision: createDecision("READY", "studio"),
+      analysisScore: 82,
+      artifactFailure: {
+        category: "validation_failure",
+        explanation: "Validation failed",
+        detail: "Invalid output",
+        retryable: true,
+      },
+      actions,
+    });
+
+    expect(move.title).toBe("We couldn’t generate a reliable result");
+    expect(move.primaryAction.label).toBe("Retry Generation");
   });
 });

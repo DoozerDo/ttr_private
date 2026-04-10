@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { runGoldStandardSelfImprovementCycle } from "@/lib/selfImprovementLoop";
 import {
   GOLD_STANDARD_BENCHMARK_FIXTURES,
-} from "@/lib/goldStandardCalibration";
+} from "@shared/goldStandardCalibration";
 import { buildSupportOpsCalibrationPlan } from "./gold-standard-test-data";
 
 describe("feedback improves output", () => {
@@ -84,3 +84,4 @@ describe("feedback improves output", () => {
     expect(cycle.refinedCoverLetter.opening.toLowerCase()).toContain("applying for");
   });
 });
+

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
+import { buildDocumentStrategyPlan } from "@shared/documentStrategyPlan";
 import { buildDocumentCritique } from "@/lib/documentCritique";
 
 function buildSamplePlan() {
@@ -75,3 +75,4 @@ describe("critique stopping signal", () => {
     expect(critique?.topIssues.every((issue) => issue.severity !== "high")).toBe(true);
   });
 });
+

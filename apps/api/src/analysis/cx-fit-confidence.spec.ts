@@ -1,4 +1,4 @@
-jest.mock('../scoring-v2/config/capability-clusters.ts', () => ({
+jest.mock('../scoring-v2/config/capability-clusters', () => ({
   getCapabilityClusterRegistry: () => ({
     clusters: [],
   }),

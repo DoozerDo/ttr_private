@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
+import { buildDocumentStrategyPlan } from "@shared/documentStrategyPlan";
 import {
   resolveRoleMatchFinalAdjustmentPreset,
   type RoleMatchFinalAdjustment,
-} from "@/lib/roleMatchFinalPass";
+} from "@shared/roleMatchFinalPass";
 
 function buildPlan() {
   const plan = buildDocumentStrategyPlan({
@@ -81,3 +81,4 @@ describe("final role adjustment mapping", () => {
     expect(resolveRoleMatchFinalAdjustmentPreset({ plan, resumeModel: null, coverLetterParagraphs: [] }, coverAdjustment)?.key).toBe("cover-role-fit");
   });
 });
+

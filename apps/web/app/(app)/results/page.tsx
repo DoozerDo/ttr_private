@@ -48,8 +48,9 @@ import {
 import { buildScoreDelta, hasBaselineUpdated } from "@/lib/reanalysis";
 import { buildProgressSummary } from "@/lib/progressSummary";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
-import { getCanonicalNextAction, getGenerationCompletionStorageKey } from "@/lib/nextAction";
-import { resolveResultsDecision } from "@/lib/resultsDecisionResolver";
+import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
+import { resolveCanonicalState } from "@/lib/canonicalDecision";
+import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
 import { deriveEvidenceLedger, type EvidenceLedger } from "@/lib/evidenceLedger";
 import { readRecentIntentState } from "@/src/lib/recentIntent";
 import { useGuidedMode } from "@/hooks/useGuidedMode";
@@ -601,7 +602,7 @@ type OpportunityMapSectionProps = {
     label: string;
     explanation: string;
   };
-  nextAction: ReturnType<typeof getCanonicalNextAction>;
+  nextAction: ReturnType<typeof resolveCanonicalState>["nextAction"];
   advantageSignals: string[];
   primaryCta:
     | {
@@ -1683,6 +1684,7 @@ export default function ResultsPage() {
   const [recentIntent, setRecentIntent] = useState(() => readRecentIntentState());
   const lastAssessmentHydrationAttempted = useRef(false);
   const autoLoadPairRef = useRef<string | null>(null);
+  const resultsDecisionLogKeyRef = useRef<string | null>(null);
   const lastReadinessKeyRef = useRef<string | null>(null);
   const failedReadinessKeysRef = useRef<Set<string>>(new Set());
   const [expandingRequirement, setExpandingRequirement] = useState<string | null>(null);
@@ -2107,32 +2109,57 @@ export default function ResultsPage() {
       }),
     [activeScore, generationReadiness, latest?.assessmentId, latest?.jobId, latestBaselineId],
   );
+  const canonicalResultsDecision = useMemo(
+    () =>
+      resolveCanonicalState({
+        surface: "results",
+        baselineId: latest?.baselineId ?? null,
+        jobId: latest?.jobId ?? null,
+        score: typeof activeScore === "number" ? activeScore : null,
+        generationReadiness,
+        productReadiness,
+        studioHref,
+        fitReviewHref: fitReviewPath,
+        forceFitReview: isFixFirstMode,
+        scoreCandidates: [{ source: "primary", value: typeof activeScore === "number" ? activeScore : null }],
+      }),
+    [
+      activeScore,
+      fitReviewPath,
+      generationReadiness,
+      isFixFirstMode,
+      latest?.baselineId,
+      latest?.jobId,
+      productReadiness,
+      studioHref,
+    ],
+  );
   const resultsReadiness = useMemo<GenerationReadiness>(
     () => ({
       ...generationReadiness,
       status:
-        productReadiness.state === "BLOCKED"
-          ? "blocked"
-          : productReadiness.confidence === "HIGH"
-            ? "ready"
-            : "limited",
-      blocked: productReadiness.state === "BLOCKED",
+        canonicalResultsDecision.readinessState === "READY"
+          ? "ready"
+          : canonicalResultsDecision.readinessState === "DRAFT"
+            ? "limited"
+            : "blocked",
+      blocked: canonicalResultsDecision.readinessState !== "READY",
       badgeLabel:
-        productReadiness.state === "BLOCKED"
-          ? "BLOCKED"
-          : productReadiness.confidence === "HIGH"
-            ? "READY"
-            : "LIMITED",
+        canonicalResultsDecision.readinessState === "READY"
+          ? "READY"
+          : canonicalResultsDecision.readinessState === "DRAFT"
+            ? "LIMITED"
+            : "BLOCKED",
       summary:
-        productReadiness.state === "BLOCKED"
-          ? "Your experience aligns with the role, but some claims still need verification."
-          : productReadiness.confidence === "HIGH"
-            ? "Your verified evidence is complete enough to generate safely in Studio."
-            : "Generate now. Then strengthen your output by verifying key claims in Studio.",
+        canonicalResultsDecision.readinessState === "READY"
+          ? "Your verified evidence is complete enough to generate safely in Studio."
+          : canonicalResultsDecision.readinessState === "DRAFT"
+            ? "Generate now. Then strengthen your output by verifying key claims in Studio."
+            : "Your experience aligns with the role, but some claims still need verification.",
     }),
-    [generationReadiness, productReadiness.confidence, productReadiness.state],
+    [canonicalResultsDecision.readinessState, generationReadiness],
   );
-  const canOpenStudio = productReadiness.canOpenStudio;
+  const canOpenStudio = canonicalResultsDecision.readinessState !== "BLOCKED";
   const claimVerifications = useMemo(
     () => normalizeClaimVerifications(debugFields?.toolingCoverage?.claims),
     [debugFields?.toolingCoverage?.claims],
@@ -2436,68 +2463,7 @@ export default function ResultsPage() {
       }),
     [latest],
   );
-  const primaryNextAction = useMemo(
-    () =>
-          isFixFirstMode
-            ? {
-                type: "fit_review" as const,
-                label: "Start Fit Review",
-                route: fitReviewPath,
-                reason: "low_confidence_fix_first",
-              }
-        : getCanonicalNextAction({
-            fitScore: typeof activeScore === "number" ? activeScore : null,
-            generationReady: isStrongFitScore || resultsReadiness.status !== "blocked",
-            trustGateAllowed: true,
-          }),
-    [
-      activeScore,
-      resultsReadiness.status,
-      isFixFirstMode,
-      isStrongFitScore,
-      fitReviewPath,
-      studioHref,
-    ],
-  );
-  useEffect(() => {
-    if (process.env.NODE_ENV === "production") return;
-    if (!latest) return;
-    const canonicalGenerationReady = isStrongFitScore || resultsReadiness.status !== "blocked";
-    const canonicalFinalAction = isFixFirstMode
-      ? "fit_review"
-      : getCanonicalNextAction({
-          fitScore: typeof activeScore === "number" ? activeScore : null,
-          generationReady: canonicalGenerationReady,
-          trustGateAllowed: true,
-        }).type;
-    const canonicalReason = isFixFirstMode
-      ? "low_confidence_fix_first"
-      : getCanonicalNextAction({
-          fitScore: typeof activeScore === "number" ? activeScore : null,
-          generationReady: canonicalGenerationReady,
-          trustGateAllowed: true,
-        }).reason;
-    const canonicalGenerationRouteDebug = {
-      analysisId: latest.assessmentId ?? null,
-      jobId: latest.jobId ?? null,
-      baselineId: latest.baselineId ?? null,
-      score: typeof activeScore === "number" ? activeScore : null,
-      readinessStatus: resultsReadiness.status,
-      effectiveReadinessStatus,
-      trustGateAllowed: true,
-      finalAction: canonicalFinalAction,
-      reason: canonicalReason,
-    };
-    (window as typeof window & { canonicalGenerationRouteDebug?: unknown }).canonicalGenerationRouteDebug =
-      canonicalGenerationRouteDebug;
-    console.info("canonicalGenerationRouteDebug", canonicalGenerationRouteDebug);
-  }, [
-    activeScore,
-    resultsReadiness.status,
-    isFixFirstMode,
-    isStrongFitScore,
-    latest,
-  ]);
+  const primaryNextAction = canonicalResultsDecision.nextAction;
   const isWeakFitScore = typeof activeScore === "number" && activeScore < 70;
   const { isGuidedActive, syncWithNextAction, completeGuidedMode, advanceStep } = useGuidedMode();
   useEffect(() => {
@@ -2507,7 +2473,11 @@ export default function ResultsPage() {
       return;
     }
     advanceStep("RESULTS");
-    syncWithNextAction(primaryNextAction.type);
+    syncWithNextAction(
+      (primaryNextAction.type === "studio" || primaryNextAction.type === "studio_with_save"
+        ? primaryNextAction.type
+        : "fit_review") as "fit_review" | "studio" | "studio_with_save",
+    );
   }, [advanceStep, isGuidedActive, latest, primaryNextAction.type, syncWithNextAction]);
   const resolveGapsHref = useMemo(() => {
     const params = new URLSearchParams();
@@ -2560,131 +2530,162 @@ export default function ResultsPage() {
   }, [advancedInsightsHref, effectiveReadinessStatus, fitReviewPath]);
   const oneClickResultsCta = useMemo(() => {
     if (!latest) return null;
-    if (isStrongFitScore) {
-      return {
-        label: "Open Studio",
-        href: studioHref,
-        disabled: !canOpenStudio,
-        description:
-          productReadiness.confidence === "HIGH"
-            ? "Open Studio to generate tailored materials now."
-            : "Open Studio now. Some claims are unverified, but you can strengthen them after generation.",
-        onClick: () => {
-          trackEvent("results_primary_cta_clicked", {
-            source: "results",
-            intentState: recentIntent ?? "none",
-            action: "open_studio",
-            scoreBucket: resultsScoreBucket ?? null,
-            readinessStatus: resultsReadiness.status,
-          });
-        },
-      };
-    }
-    if (isWeakFitScore) {
-      return {
-        label: "Start Fit Review",
-        href: fitReviewPath,
-        disabled: false,
-        description:
-          recentIntent === "refine_intent"
-            ? "You already signaled refinement, so Fit Review is the fastest way to sharpen this role."
-            : "Use Fit Review to strengthen the baseline for this role.",
-        onClick: () => {
-          trackEvent("results_primary_cta_clicked", {
-            source: "results",
-            intentState: recentIntent ?? "none",
-            action: "fit_review",
-            scoreBucket: resultsScoreBucket ?? null,
-            readinessStatus: resultsReadiness.status,
-          });
-        },
-        };
-    }
-    if (effectiveReadinessStatus === "blocked") {
-      return {
-        label: verificationUnlockLabel,
-        href: fitReviewPath,
-        disabled: false,
-        description:
-          recentIntent === "refine_intent"
-            ? "You already signaled refinement. Verify the missing evidence so Studio can generate safely."
-            : "Verify the missing evidence so Studio can generate safely.",
-        onClick: () => {
-          trackEvent("results_primary_cta_clicked", {
-            source: "results",
-            intentState: recentIntent ?? "none",
-            action: "verify_examples",
-            scoreBucket: resultsScoreBucket ?? null,
-            readinessStatus: resultsReadiness.status,
-          });
-        },
-        };
-    }
-    if (effectiveReadinessStatus === "limited") {
-      return {
-        label: "Open Studio",
-        href: studioHref,
-        disabled: !canOpenStudio,
-        description:
-          recentIntent === "used_and_committed"
-            ? "Your artifact is already in motion. Open Studio in draft mode for follow-up tweaks when needed."
-            : "Open Studio in draft mode. Stronger verification will improve confidence and output quality.",
-        onClick: () => {
-          trackEvent("results_primary_cta_clicked", {
-            source: "results",
-            intentState: recentIntent ?? "none",
-            action: "open_studio_draft",
-            scoreBucket: resultsScoreBucket ?? null,
-            readinessStatus: resultsReadiness.status,
-          });
-        },
-      };
-    }
+
+    const analyticsAction =
+      canonicalResultsDecision.cta.actionType === "open_studio_generate" ||
+      canonicalResultsDecision.cta.actionType === "open_studio"
+        ? "open_studio"
+        : canonicalResultsDecision.cta.actionType === "resolve_gaps"
+          ? "fit_review"
+          : "verify_examples";
+
     return {
-      label: "Open Studio",
-      href: studioHref,
-      disabled: !canOpenStudio,
+      label: canonicalResultsDecision.cta.label,
+      href: canonicalResultsDecision.cta.href,
+      disabled:
+        canonicalResultsDecision.cta.actionType !== "resolve_gaps" &&
+        canonicalResultsDecision.cta.actionType !== "fit_review"
+          ? !canOpenStudio
+          : false,
       description:
-        recentIntent === "used_not_committed"
-          ? "Generate your resume first, then save the role to Opportunities to keep momentum."
-          : "Open Studio to generate tailored materials now.",
+        canonicalResultsDecision.readinessState === "READY"
+          ? "Open Studio to generate tailored materials now."
+          : canonicalResultsDecision.readinessState === "DRAFT"
+            ? "Open Studio now. Some claims are unverified, but you can strengthen them after generation."
+            : canonicalResultsDecision.readinessState === "BLOCKED"
+              ? "Verify the missing evidence so Studio can generate safely."
+              : "Use Fit Review to strengthen the baseline for this role.",
       onClick: () => {
         trackEvent("results_primary_cta_clicked", {
           source: "results",
           intentState: recentIntent ?? "none",
-          action: "open_studio",
+          action: analyticsAction,
           scoreBucket: resultsScoreBucket ?? null,
-          readinessStatus: resultsReadiness.status,
+          readinessStatus:
+            canonicalResultsDecision.readinessState === "READY"
+              ? "ready"
+              : canonicalResultsDecision.readinessState === "DRAFT"
+                ? "limited"
+                : "blocked",
         });
       },
     };
   }, [
     canOpenStudio,
-    fitReviewPath,
-    resultsReadiness.status,
+    canonicalResultsDecision.cta.actionType,
+    canonicalResultsDecision.cta.href,
+    canonicalResultsDecision.cta.label,
+    canonicalResultsDecision.readinessState,
     latest,
-    isWeakFitScore,
-    isStrongFitScore,
-    effectiveReadinessStatus,
     recentIntent,
     resultsScoreBucket,
-    studioHref,
-    verificationUnlockLabel,
-    productReadiness.confidence,
   ]);
+  const isReadyResultsState = canonicalResultsDecision.readinessState === "READY";
   const resultsDecision = useMemo(
-    () =>
-      resolveResultsDecision({
-        score: typeof activeScore === "number" ? activeScore : null,
-        generationReadiness: {
-          state: productReadiness.state,
-          confidence: productReadiness.confidence,
-          needsVerification: productReadiness.needsVerification,
-        },
-      }),
-    [activeScore, productReadiness.confidence, productReadiness.needsVerification, productReadiness.state],
+    () => {
+      if (canonicalResultsDecision.readinessState === "READY") {
+        return {
+          state: "READY" as const,
+          primaryCta: "OPEN_STUDIO" as const,
+          headline: "You're a strong match. You can generate now.",
+          subtext: "Your verified evidence is complete enough to generate safely in Studio.",
+        };
+      }
+
+      if (canonicalResultsDecision.readinessState === "DRAFT") {
+        return {
+          state: "DRAFT" as const,
+          primaryCta: "OPEN_STUDIO" as const,
+          headline: "You're a strong match. You can generate now.",
+          subtext: "Some claims are unverified. You can strengthen your output in Studio.",
+        };
+      }
+
+      if (canonicalResultsDecision.readinessState === "BLOCKED") {
+        return {
+          state: "BLOCKED" as const,
+          primaryCta: "START_FIT_REVIEW" as const,
+          headline: "Competitive fit. Not ready to generate yet.",
+          subtext:
+            "Your experience aligns with this role, but key claims still need verified evidence before Studio can generate safely.",
+        };
+      }
+
+      return {
+        state: "IMPROVE" as const,
+        primaryCta: "START_FIT_REVIEW" as const,
+        headline: "Strengthen your fit before generating.",
+        subtext:
+          "You are close, but improving alignment and evidence will significantly strengthen your materials.",
+      };
+    },
+    [canonicalResultsDecision.readinessState],
   );
-  const isReadyResultsState = resultsDecision.state === "READY";
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_DEBUG_RESULTS_FLOW !== "true") {
+      return;
+    }
+    if (!latest) return;
+    const cta = {
+      label: canonicalResultsDecision.cta.label,
+      href: canonicalResultsDecision.cta.href,
+      actionType: canonicalResultsDecision.cta.actionType as
+        | "open_studio"
+        | "fit_review"
+        | "verify_examples"
+        | "open_studio_draft"
+        | "open_studio_generate",
+      analyticsPayload: {
+        source: "results" as const,
+        intentState: recentIntent ?? "none",
+        action:
+          canonicalResultsDecision.cta.actionType === "resolve_gaps"
+            ? "fit_review"
+            : canonicalResultsDecision.cta.actionType === "open_studio_generate" ||
+                canonicalResultsDecision.cta.actionType === "open_studio"
+              ? "open_studio"
+              : "verify_examples",
+        scoreBucket: resultsScoreBucket ?? null,
+        readinessStatus: canonicalResultsDecision.readinessState,
+      },
+    };
+    const decisionKey = [
+      latest.assessmentId ?? "none",
+      canonicalResultsDecision.readinessState,
+      cta.label,
+      cta.href,
+      cta.actionType,
+      resultsScoreBucket ?? "none",
+    ].join(":");
+    if (resultsDecisionLogKeyRef.current === decisionKey) return;
+    resultsDecisionLogKeyRef.current = decisionKey;
+
+    logDecisionFlowEvent({
+      event: "results_decision_resolved",
+      baselineId: latest.baselineId ?? null,
+      jobId: latest.jobId ?? null,
+      score: typeof activeScore === "number" ? activeScore : null,
+      readinessState: canonicalResultsDecision.readinessState,
+      contractSource: "resolveCanonicalState",
+      ctaLabel: cta.label,
+      ctaHref: cta.href,
+      actionType: cta.actionType,
+      analyticsPayload: cta.analyticsPayload,
+      dataSource: "mixed",
+      persistedAssessmentId: latest.assessmentId ?? null,
+    });
+  }, [
+    activeScore,
+    canonicalResultsDecision.cta.actionType,
+    canonicalResultsDecision.cta.href,
+    canonicalResultsDecision.cta.label,
+    canonicalResultsDecision.readinessState,
+    latest,
+    recentIntent,
+    canonicalResultsDecision.readinessState,
+    resultsScoreBucket,
+    studioHref,
+  ]);
   const formatDriverValue = (value?: number | null) =>
     typeof value === "number" ? value.toFixed(1) : "n/a";
   const summarySnippet = typeof latest?.summary === "string" ? latest.summary.trim() : null;
@@ -3243,20 +3244,6 @@ export default function ResultsPage() {
   }, [runIdentifier, searchParams]);
 
   useEffect(() => {
-    if (process.env.NODE_ENV === "production") return;
-    if (!latest?.baselineId || !latest?.assessmentId) return;
-    console.info("[results] assessment_truth_snapshot", {
-      baselineId: latest.baselineId,
-      assessmentId: latest.assessmentId,
-      readiness: {
-        status: generationReadiness.status,
-        authority: getGenerationAuthorityState(generationReadiness),
-        generation_readiness: productReadiness.generation_readiness,
-      },
-    });
-  }, [generationReadiness, latest?.assessmentId, latest?.baselineId, productReadiness]);
-
-  useEffect(() => {
     if (runIdentifier || lastAssessmentHydrationAttempted.current) return;
     if (typeof window === "undefined") return;
     const queryJobId = searchParams?.get("jobId")?.trim() ?? "";
@@ -3486,48 +3473,36 @@ export default function ResultsPage() {
         ) : null}
         <section
           className={`rounded-2xl border p-4 ${
-            isStrongFitScore
-              ? "border-emerald-300/30 bg-emerald-500/10"
-              : scorePresentationMode === "fix_first"
+            scorePresentationMode === "fix_first"
                 ? "border-amber-300/30 bg-amber-500/10"
-                : resultsDecision.state === "BLOCKED"
-                  ? "border-amber-300/30 bg-amber-500/10"
-                  : resultsDecision.state === "READY"
-                    ? "border-emerald-300/30 bg-emerald-500/10"
-                    : resultsDecision.state === "DRAFT"
-                      ? "border-amber-300/30 bg-amber-500/10"
-                      : "border-slate-700/60 bg-slate-900/45"
+                : canonicalResultsDecision.readinessState === "READY"
+                  ? "border-emerald-300/30 bg-emerald-500/10"
+                  : canonicalResultsDecision.readinessState === "DRAFT"
+                    ? "border-amber-300/30 bg-amber-500/10"
+                    : "border-slate-700/60 bg-slate-900/45"
           }`}
         >
           <p
             className={`text-sm font-semibold ${
-              isStrongFitScore
-                ? "text-emerald-100"
-                : scorePresentationMode === "fix_first"
+              scorePresentationMode === "fix_first"
                   ? "text-amber-100"
-                  : resultsDecision.state === "BLOCKED"
-                    ? "text-amber-100"
-                    : resultsDecision.state === "READY"
-                      ? "text-emerald-100"
-                      : resultsDecision.state === "DRAFT"
-                        ? "text-amber-100"
-                        : "text-slate-100"
+                  : canonicalResultsDecision.readinessState === "READY"
+                    ? "text-emerald-100"
+                    : canonicalResultsDecision.readinessState === "DRAFT"
+                      ? "text-amber-100"
+                      : "text-amber-100"
             }`}
           >
-            {isStrongFitScore
-              ? "You're a strong match. You can generate now."
-              : scorePresentationMode === "fix_first"
+            {scorePresentationMode === "fix_first"
                 ? "We may be underestimating your fit."
                 : resultsDecision.headline}
           </p>
           <p className="mt-1 text-sm text-slate-100">
-            {isStrongFitScore
-              ? resultsDecision.subtext
-              : scorePresentationMode === "fix_first"
+            {scorePresentationMode === "fix_first"
                 ? "This score looks low confidence. Fix the evidence story first, then rerun generation."
                 : resultsDecision.subtext}
           </p>
-          {isStrongFitScore ? (
+          {canonicalResultsDecision.readinessState === "READY" ? (
             <>
               <p className="mt-2 text-sm font-medium text-emerald-100">
                 Confidence: {productReadiness.confidence === "HIGH" ? "High" : "Medium"}

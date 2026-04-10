@@ -48,7 +48,7 @@ import {
   type RefinementPreset,
   type RefinementTarget,
   resolveRefinementTargets,
-} from "@/lib/documentStrategyPlan";
+} from "@shared/documentStrategyPlan";
 import {
   buildDocumentCritique,
   type DocumentCritique,
@@ -59,13 +59,15 @@ import {
   resolveRoleMatchFinalAdjustmentPreset,
   type RoleMatchFinalAdjustment,
   type RoleMatchFinalPass,
-} from "@/lib/roleMatchFinalPass";
+} from "@shared/roleMatchFinalPass";
 import {
   buildLanguageStylePass,
-} from "@/lib/languageStylePass";
+} from "@shared/languageStylePass";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
-import { getCanonicalNextAction, getGenerationCompletionStorageKey } from "@/lib/nextAction";
+import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
+import { resolveCanonicalState } from "@/lib/canonicalDecision";
 import { deriveEvidenceLedger } from "@/lib/evidenceLedger";
+import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
 import { useGuidedMode } from "@/hooks/useGuidedMode";
 import { type JobDto } from "@/lib/jobs";
 import {
@@ -97,7 +99,8 @@ import {
   validateResumeOutput,
 } from "@/lib/studioTrustGate";
 import { BaselineBlockPolicyPanel } from "./BaselineBlockPolicyPanel";
-import { readResumeModel, ResumePreview, type ResumeModel } from "./ResumePreview";
+import { readResumeModel, ResumePreview } from "./ResumePreview";
+import type { ResumeModel } from "@shared/resumeModel";
 import { StudioArtifactQualityPanel } from "./StudioArtifactQualityPanel";
 import { StudioCritiquePanel } from "./StudioCritiquePanel";
 import { StudioRoleMatchPanel } from "./StudioRoleMatchPanel";
@@ -542,6 +545,7 @@ export default function StudioPage() {
   const searchParamValue = searchParams.toString();
   const trackedStudioOpenRef = useRef(false);
   const lastReadinessKeyRef = useRef<string | null>(null);
+  const studioDecisionLogKeyRef = useRef<string | null>(null);
   const failedReadinessKeysRef = useRef<Set<string>>(new Set());
   const generationSectionRef = useRef<HTMLElement | null>(null);
   const requestedJobId = useMemo(
@@ -1393,11 +1397,8 @@ export default function StudioPage() {
     ],
   );
   const studioGenerationState: GenerationAuthorityState = useMemo(
-    () =>
-      typeof analysisScore === "number" && analysisScore >= 80
-        ? "READY"
-        : getGenerationAuthorityState(activeGenerationReadiness),
-    [activeGenerationReadiness, analysisScore],
+    () => getGenerationAuthorityState(activeGenerationReadiness),
+    [activeGenerationReadiness],
   );
   const generationBlockerCodes = useMemo(
     () => activeGenerationReadiness.verificationIssues.map((issue) => issue.code),
@@ -1431,112 +1432,6 @@ export default function StudioPage() {
   );
   const canGenerateDocuments = productReadiness.state === "ALLOWED" && trustGateDecision.allowed;
   const studioDraftMode = productReadiness.generationMode === "draft" && isFromUnlock && !hasGeneratedOnce;
-  useEffect(() => {
-    if (process.env.NODE_ENV === "production") return;
-    if (!analysis || !requestedAnalysisId) return;
-
-    const backendCoverage = analysis.verification_coverage as
-      | {
-          totalClaims?: number | null;
-          verifiedClaims?: number | null;
-          inferredClaims?: number | null;
-          unverifiedClaims?: number | null;
-          supportedClaims?: number | null;
-        }
-      | null;
-    const requirementTotal =
-      Number(backendCoverage?.totalClaims ?? NaN) ||
-      activeClaimVerifications.length ||
-      activeGenerationReadiness.verificationIssues.length;
-    const matchedPreFilter =
-      Number(backendCoverage?.verifiedClaims ?? NaN) + Number(backendCoverage?.inferredClaims ?? NaN) ||
-      claimVerifications.filter((claim) => claim.status !== "UNVERIFIED").length;
-    const matchedPostFilter = activeClaimVerifications.filter((claim) => claim.status !== "UNVERIFIED").length;
-    const unmatched =
-      Number(backendCoverage?.unverifiedClaims ?? NaN) ||
-      Math.max(requirementTotal - matchedPostFilter, 0);
-    const studioGenerationGateDebug = {
-      analysisId: requestedAnalysisId,
-      jobId: effectiveJobId || null,
-      baselineId: effectiveBaselineId || null,
-      score: analysisScore,
-      scoreBreakdown: (analysis as { score_breakdown?: unknown }).score_breakdown ?? null,
-      requirements: {
-        total: Number.isFinite(requirementTotal) ? requirementTotal : null,
-        matchedPreFilter: Number.isFinite(matchedPreFilter) ? matchedPreFilter : null,
-        matchedPostFilter: Number.isFinite(matchedPostFilter) ? matchedPostFilter : null,
-        unmatched: Number.isFinite(unmatched) ? unmatched : null,
-      },
-      coverage: {
-        verificationPassed: canGenerateDocuments,
-        coveragePercent: backendCoverage
-          ? {
-              verifiedClaims: backendCoverage.verifiedClaims ?? null,
-              inferredClaims: backendCoverage.inferredClaims ?? null,
-              unverifiedClaims: backendCoverage.unverifiedClaims ?? null,
-              supportedClaims: backendCoverage.supportedClaims ?? null,
-              totalClaims: backendCoverage.totalClaims ?? null,
-            }
-          : null,
-        threshold: 70,
-        failureReasons: activeGenerationReadiness.reasons.map((reason) => reason.code),
-      },
-      filters: {
-        complianceFlags: activeGenerationReadiness.verificationIssues.map((issue) => issue.code),
-        evidenceDrops: excludedTargetingLabels.size ? Array.from(excludedTargetingLabels) : [],
-        fragmentDrops: canonicalCoverageIssues.map((issue) => issue.claim ?? issue.explanation),
-        otherExclusions: lastRemovedTargetingLabels,
-      },
-      studioGate: {
-        allowed: canGenerateDocuments,
-        mode: studioGenerationState.toLowerCase(),
-        reason:
-          !canGenerateDocuments
-              ? productReadiness.generation_readiness.reasonsBlocked.join(", ")
-              : null,
-      },
-      routing: {
-        targetDecision: document.referrer?.includes("/results") ? "sent_to_studio" : "direct_or_unknown",
-        expectedDecisionByProductRule: analysisScore !== null && analysisScore >= 80 ? "studio" : "fit_review",
-      },
-    };
-    (window as typeof window & { studioGenerationGateDebug?: unknown }).studioGenerationGateDebug =
-      studioGenerationGateDebug;
-    console.info("studioGenerationGateDebug", studioGenerationGateDebug);
-  }, [
-    activeClaimVerifications.length,
-    activeGenerationReadiness.reasons,
-    activeGenerationReadiness.verificationIssues,
-    analysis,
-    analysisScore,
-    canGenerateDocuments,
-    canonicalCoverageIssues,
-    excludedTargetingLabels,
-    effectiveBaselineId,
-    effectiveJobId,
-    lastRemovedTargetingLabels,
-    requestedAnalysisId,
-    studioGenerationState,
-  ]);
-  useEffect(() => {
-    if (process.env.NODE_ENV === "production") return;
-    if (!effectiveBaselineId || !requestedAnalysisId) return;
-    console.info("[studio] assessment_truth_snapshot", {
-      baselineId: effectiveBaselineId,
-      assessmentId: requestedAnalysisId,
-      readiness: {
-        status: activeGenerationReadiness.status,
-        authority: studioGenerationState,
-        generation_readiness: productReadiness.generation_readiness,
-      },
-    });
-  }, [
-    activeGenerationReadiness.status,
-    effectiveBaselineId,
-    productReadiness.generation_readiness,
-    requestedAnalysisId,
-    studioGenerationState,
-  ]);
   const improveBaselineHref = useMemo(() => {
     const params = new URLSearchParams();
     if (requestedAnalysisId) params.set("analysisId", requestedAnalysisId);
@@ -1949,54 +1844,100 @@ export default function StudioPage() {
     return query ? `/results?${query}` : "/results";
   }, [effectiveBaselineId, effectiveJobId, requestedAnalysisId]);
   const remediationHref = `${resultsHref}#advanced-insights`;
-  const primaryNextAction = useMemo(
+  const studioCanonicalDecision = useMemo(
     () =>
-      getCanonicalNextAction({
-        fitScore: analysisScore,
-        generationReady: canGenerateDocuments,
-        trustGateAllowed: canGenerateDocuments,
+      resolveCanonicalState({
+        surface: "studio",
+        baselineId: effectiveBaselineId ?? null,
+        jobId: effectiveJobId ?? null,
+        score: analysisScore,
+        generationReadiness: activeGenerationReadiness,
+        productReadiness,
+        resultsHref,
+        fitReviewHref: remediationHref,
+        canGenerateDocuments,
+        opportunityAlreadySaved: hasCompletedGeneration,
+        scoreCandidates: [{ source: "primary", value: analysisScore }],
       }),
     [
+      activeGenerationReadiness,
       analysisScore,
       canGenerateDocuments,
-      studioGenerationState,
+      effectiveBaselineId,
+      effectiveJobId,
+      hasCompletedGeneration,
+      productReadiness,
+      remediationHref,
+      resultsHref,
     ],
   );
+  const primaryNextAction = studioCanonicalDecision.nextAction;
   useEffect(() => {
-    if (process.env.NODE_ENV === "production") return;
+    if (process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_DEBUG_STUDIO_FLOW !== "true") {
+      return;
+    }
     if (!analysis || !requestedAnalysisId) return;
-    const canonicalGenerationRouteDebug = {
-      analysisId: requestedAnalysisId,
-      jobId: effectiveJobId || null,
-      baselineId: effectiveBaselineId || null,
+    const readinessState = studioCanonicalDecision.readinessState;
+    const ctaHref = studioCanonicalDecision.cta.href;
+    const analyticsPayload: {
+      state: "READY" | "LIMITED" | "BLOCKED";
+      score: number | null;
+      blockerCount: number;
+    } = {
+      state:
+        readinessState === "READY"
+          ? "READY"
+          : readinessState === "LIMITED"
+            ? "LIMITED"
+            : "BLOCKED",
       score: analysisScore,
-      artifactType: studioGenerationRenderState.artifactType,
-      isGenerating: studioGenerationRenderState.isGenerating,
-      isFirstGenerationAfterUnlock: studioGenerationRenderState.isFirstGenerationAfterUnlock,
-      readinessStatus: canGenerateDocuments ? "ready" : activeGenerationReadiness.status,
-      trustGateAllowed: canGenerateDocuments,
-      finalAction: primaryNextAction.type,
-      reason: primaryNextAction.reason,
+      blockerCount: activeGenerationReadiness.verificationIssues.length,
     };
-    (window as typeof window & { canonicalGenerationRouteDebug?: unknown }).canonicalGenerationRouteDebug =
-      canonicalGenerationRouteDebug;
-    console.info("canonicalGenerationRouteDebug", canonicalGenerationRouteDebug);
+    const decisionKey = [
+      requestedAnalysisId,
+      effectiveBaselineId ?? "none",
+      effectiveJobId ?? "none",
+      readinessState,
+      primaryNextAction.type,
+      ctaHref,
+      analysisScore ?? "none",
+    ].join(":");
+    if (studioDecisionLogKeyRef.current === decisionKey) return;
+    studioDecisionLogKeyRef.current = decisionKey;
+
+    trackEvent("studio_generation_state_viewed", analyticsPayload);
+    logDecisionFlowEvent({
+      event: "studio_generation_readiness_resolved",
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      score: analysisScore,
+      readinessState,
+      contractSource: "resolveCanonicalState",
+      ctaLabel: primaryNextAction.label,
+      ctaHref,
+      actionType: primaryNextAction.type,
+      analyticsPayload,
+      dataSource: "mixed",
+      persistedAssessmentId: requestedAnalysisId || null,
+    });
   }, [
-    activeGenerationReadiness.status,
+    activeGenerationReadiness.verificationIssues.length,
     analysis,
     analysisScore,
+    canGenerateDocuments,
     effectiveBaselineId,
     effectiveJobId,
-    primaryNextAction.reason,
+    effectiveBaselineVersionId,
+    isFromUnlock,
+    studioCanonicalDecision.cta.href,
+    primaryNextAction.label,
     primaryNextAction.type,
-    studioGenerationRenderState.artifactType,
-    studioGenerationRenderState.isFirstGenerationAfterUnlock,
-    studioGenerationRenderState.isGenerating,
+    remediationHref,
     requestedAnalysisId,
-    canGenerateDocuments,
+    studioCanonicalDecision.readinessState,
   ]);
   const studioBlockedByNextAction = primaryNextAction.type === "fit_review";
-  const studioUiState = canGenerateDocuments ? "READY" : "BLOCKED";
+  const studioUiState = studioCanonicalDecision.readinessState;
   useEffect(() => {
     if (studioBlockedByNextAction && requestedAnalysisId) {
       void router.replace(remediationHref);
@@ -2072,11 +2013,13 @@ export default function StudioPage() {
     setRecentIntent(readRecentIntentState());
   }, [requestedAnalysisId, effectiveJobId, effectiveBaselineId]);
   const generationSupportState = useMemo(() => {
-    if (!canGenerateDocuments || productReadiness.state === "BLOCKED") return "blocked";
-    if (productReadiness.confidence === "MEDIUM") return "partial";
+    if (studioCanonicalDecision.readinessState === "BLOCKED") return "blocked";
+    if (studioCanonicalDecision.readinessState === "LIMITED" || studioCanonicalDecision.readinessState === "DRAFT") {
+      return "partial";
+    }
     return "strong";
-  }, [canGenerateDocuments, productReadiness.confidence, productReadiness.state]);
-  const canProceedWithStudioDrafts = canGenerateDocuments;
+  }, [studioCanonicalDecision.readinessState]);
+  const canProceedWithStudioDrafts = generationSupportState !== "blocked";
   const autoGenerationSignature = useMemo(() => {
     if (!canGenerateDocuments) return null;
     if (typeof analysisScore !== "number" || analysisScore < 80) return null;
@@ -3786,10 +3729,8 @@ export default function StudioPage() {
   const studioNextMove = useMemo(
     () =>
       resolveStudioNextMove({
+        decision: studioCanonicalDecision,
         analysisScore,
-        canGenerateDocuments,
-        studioGenerationState,
-        primaryNextAction: primaryNextAction.type,
         artifactFailure: activeArtifactFailure,
         actions: {
           generateResume: () => {
@@ -3825,8 +3766,8 @@ export default function StudioPage() {
       }),
     [
       activeArtifactFailure,
+      studioCanonicalDecision,
       analysisScore,
-      canGenerateDocuments,
       coverState.artifactFailure,
       handleCoverDraft,
       handleResumeDraft,
@@ -3834,8 +3775,6 @@ export default function StudioPage() {
       resolveGapsHref,
       resultsHref,
       router,
-      primaryNextAction.type,
-      studioGenerationState,
     ],
   );
 
@@ -4300,7 +4239,7 @@ export default function StudioPage() {
             </p>
           ) : null}
         </section>
-      ) : studioGenerationState === "BLOCKED" && !studioDraftMode ? (
+      ) : studioUiState === "BLOCKED" && !studioDraftMode ? (
         <RouteStateShell
           testId="studio-evidence-blocked-panel"
           tone="warning"
@@ -5287,6 +5226,7 @@ export default function StudioPage() {
     </PageShell>
   );
 }
+
 
 
 

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
+import { buildDocumentStrategyPlan } from "@shared/documentStrategyPlan";
 import {
   buildLanguageStylePass,
   polishCoverLetterParagraphsText,
   polishResumeBulletsText,
   polishResumeSummaryText,
-} from "@/lib/languageStylePass";
+} from "@shared/languageStylePass";
 
 function buildSamplePlan() {
   const plan = buildDocumentStrategyPlan({
@@ -77,3 +77,4 @@ describe("language style pass", () => {
     expect(pass.transformationsApplied.length).toBeGreaterThan(0);
   });
 });
+

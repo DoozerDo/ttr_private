@@ -53,4 +53,78 @@ describe("analytics contract", () => {
       }),
     );
   });
+
+  it("accepts baseline_readiness_viewed with the baseline payload shape", async () => {
+    trackEvent("baseline_readiness_viewed", {
+      source: "baseline",
+      baselineId: "base-1",
+      readinessState: "READY",
+      latestAssessmentId: "assessment-1",
+      latestFitScore: 78,
+      dataSource: "persisted",
+    }, { userId: "user-1" });
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/analytics/event",
+        expect.objectContaining({
+          method: "POST",
+        }),
+      );
+    });
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+    const body = JSON.parse(String(init?.body ?? "{}")) as {
+      eventName: string;
+      properties: Record<string, unknown>;
+    };
+
+    expect(body.eventName).toBe("baseline_readiness_viewed");
+    expect(body.properties).toEqual(
+      expect.objectContaining({
+        source: "baseline",
+        baselineId: "base-1",
+        readinessState: "READY",
+        latestAssessmentId: "assessment-1",
+        latestFitScore: 78,
+        dataSource: "persisted",
+      }),
+    );
+  });
+
+  it("accepts target_cta_clicked with the canonical CTA payload shape", async () => {
+    trackEvent("target_cta_clicked", {
+      state: "READY",
+      score: 82,
+      label: "Open Studio",
+      href: "/studio?analysisId=analysis-82&jobId=job-82&baselineId=base-82",
+      actionType: "open_studio_generate",
+    }, { userId: "user-1" });
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/analytics/event",
+        expect.objectContaining({
+          method: "POST",
+        }),
+      );
+    });
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+    const body = JSON.parse(String(init?.body ?? "{}")) as {
+      eventName: string;
+      properties: Record<string, unknown>;
+    };
+
+    expect(body.eventName).toBe("target_cta_clicked");
+    expect(body.properties).toEqual(
+      expect.objectContaining({
+        state: "READY",
+        score: 82,
+        label: "Open Studio",
+        href: "/studio?analysisId=analysis-82&jobId=job-82&baselineId=base-82",
+        actionType: "open_studio_generate",
+      }),
+    );
+  });
 });

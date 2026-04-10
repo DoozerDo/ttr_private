@@ -227,25 +227,7 @@ function buildHarnessService() {
     find: async () => [],
   };
 
-  const service = new SyntheticTransactionRunnerService(
-    usersService as never,
-    jobsService as never,
-    analysisService as never,
-    resumeService as never,
-    coverLettersService as never,
-    opportunitiesService as never,
-    inMemoryRepo as never,
-    inMemoryRepo as never,
-    inMemoryRepo as never,
-    inMemoryRepo as never,
-    inMemoryRepo as never,
-    inMemoryRepo as never,
-    inMemoryRepo as never,
-    inMemoryRepo as never,
-    inMemoryRepo as never,
-    inMemoryRepo as never,
-    inMemoryRepo as never,
-  );
+  const service = new SyntheticTransactionRunnerService();
 
   (service as any).resolveOrCreateSyntheticUser = async () => ({
     id: 'synthetic-user-1',

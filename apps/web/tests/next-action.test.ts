@@ -19,7 +19,7 @@ describe("getCanonicalNextAction", () => {
       trustGateAllowed: true,
     });
     expect(action.type).toBe("fit_review");
-    expect(action.reason).toContain("readiness not ready");
+    expect(action.reason).toContain("generation blocked");
   });
 
   it("routes to studio for 70 to 84 when ready", () => {

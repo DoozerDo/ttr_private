@@ -60,6 +60,9 @@ export class Baseline {
   @Column({ type: 'integer', nullable: true })
   latestBaselineScore!: number | null;
 
+  @Column({ type: 'uuid', nullable: true })
+  latestAssessmentId?: string | null;
+
   @Column({ type: 'timestamptz', nullable: true })
   firstAnalyzedAt!: Date | null;
 

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { StudioCritiquePanel } from "@/app/(app)/studio/StudioCritiquePanel";
 import type { DocumentCritique } from "@/lib/documentCritique";
-import type { RefinementPreset } from "@/lib/documentStrategyPlan";
+import type { RefinementPreset } from "@shared/documentStrategyPlan";
 
 const critique: DocumentCritique = {
   overallAssessment: "mixed",
@@ -60,4 +60,5 @@ describe("StudioCritiquePanel", () => {
     expect(placement).toBe("best_next");
   });
 });
+
 

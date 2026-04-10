@@ -4,7 +4,7 @@ import {
   GOLD_STANDARD_BENCHMARK_FIXTURES,
   buildGoldStandardCalibration,
   meetsGoldStandardCalibrationMinimumBar,
-} from "@/lib/goldStandardCalibration";
+} from "@shared/goldStandardCalibration";
 import { buildSupportOpsCalibrationPlan } from "./gold-standard-test-data";
 
 describe("calibration regression", () => {
@@ -24,3 +24,4 @@ describe("calibration regression", () => {
     expect(calibration.topGaps.filter((gap) => gap.severity === "high")).toHaveLength(0);
   });
 });
+

@@ -4,7 +4,6 @@
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "resolvePackageJsonExports": true,
-    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
@@ -17,10 +16,6 @@
     "sourceMap": true,
     "outDir": "./dist",
     "baseUrl": "./",
-    "paths": {
-      "@/lib/*": ["../web/lib/*"],
-      "@/app/*": ["../web/app/*"]
-    },
     "incremental": true,
     "skipLibCheck": true,
     "strictNullChecks": true,

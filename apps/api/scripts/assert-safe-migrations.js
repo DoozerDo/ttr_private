@@ -1,18 +1,16 @@
 const fs = require('fs');
 const path = require('path');
 
-const migrationPath = path.join(
-  __dirname,
-  '..',
-  'dist',
-  'migrations',
-  '2170000000000-PgvectorEmbeddings.js',
-);
+const migrationPathCandidates = [
+  path.join(__dirname, '..', 'dist', 'migrations', '2170000000000-PgvectorEmbeddings.js'),
+  path.join(__dirname, '..', 'dist', 'apps', 'api', 'src', 'migrations', '2170000000000-PgvectorEmbeddings.js'),
+];
+const migrationPath = migrationPathCandidates.find((candidate) => fs.existsSync(candidate));
 const unsafeSql = 'CREATE EXTENSION IF NOT EXISTS vector';
 
-if (!fs.existsSync(migrationPath)) {
+if (!migrationPath) {
   console.error(
-    `[assert-safe-migrations] Missing compiled migration: ${migrationPath}`,
+    `[assert-safe-migrations] Missing compiled migration: ${migrationPathCandidates.join(' | ')}`,
   );
   process.exit(1);
 }

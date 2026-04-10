@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   REFINEMENT_PRESETS,
   resolveRefinementTargets,
-} from "@/lib/documentStrategyPlan";
+} from "@shared/documentStrategyPlan";
 
 describe("refinement instructions", () => {
   it("maps presets to deterministic targets and constraints", () => {
@@ -25,3 +25,4 @@ describe("refinement instructions", () => {
     expect(resolveRefinementTargets(evidenceSwap!)).toEqual(["resume"]);
   });
 });
+

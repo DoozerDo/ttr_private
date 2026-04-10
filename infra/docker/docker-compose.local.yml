@@ -43,8 +43,8 @@ services:
 
   web:
     build:
-      context: ../../apps/web
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: apps/web/Dockerfile
     restart: unless-stopped
     env_file:
       - ../../apps/web/.env.local

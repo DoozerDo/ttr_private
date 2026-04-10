@@ -1,7 +1,10 @@
-import type { DocumentStrategyPlan } from "../../../../web/lib/documentStrategyPlan";
-import type { GoldStandardCalibration } from "../../../../web/lib/goldStandardCalibration";
+import type { DocumentStrategyPlan } from "../../shared/documentStrategyPlan";
+import type {
+  GoldStandardBenchmarkFixture,
+  GoldStandardCalibration,
+} from "../../shared/goldStandardCalibration";
 
-export type { GoldStandardBenchmarkFixture } from "../../../../web/lib/goldStandardCalibration";
+export type { GoldStandardBenchmarkFixture } from "../../shared/goldStandardCalibration";
 
 export type SyntheticGenerationRoleMatchReadiness =
   | "ready"
@@ -23,6 +26,12 @@ export type SyntheticGenerationOpportunityBehavior =
   | "blocked"
   | "not_applicable";
 
+export type JourneyState = {
+  results: SyntheticGenerationJourneyResultsBehavior;
+  studio: SyntheticGenerationStudioBehavior;
+  opportunity: SyntheticGenerationOpportunityBehavior;
+};
+
 export type SyntheticGenerationSourceArtifact = {
   kind: "fixture";
   fixtureId: string;
@@ -40,11 +49,7 @@ export type SyntheticGenerationScenarioExpected = {
   maxHighSeverityCalibrationGaps: number;
   requiredRoleSignals: string[];
   bannedFailureStates: string[];
-  journey?: {
-    results: SyntheticGenerationJourneyResultsBehavior;
-    studio: SyntheticGenerationStudioBehavior;
-    opportunity: SyntheticGenerationOpportunityBehavior;
-  };
+  journey?: JourneyState;
 };
 
 export type SyntheticGenerationScenario = {
@@ -306,25 +311,26 @@ export function validateSyntheticGenerationScenario(
       "bannedFailureStates must contain at least one failure state.",
     );
   }
-  if (scenario.expected.journey) {
+  const journey = scenario.expected.journey as JourneyState | undefined;
+  if (journey) {
     if (
-      scenario.expected.journey.results !== "open" &&
-      scenario.expected.journey.results !== "review" &&
-      scenario.expected.journey.results !== "blocked"
+      journey.results !== "open" &&
+      journey.results !== "review" &&
+      journey.results !== "blocked"
     ) {
       pushIssue(issues, "expected.journey.results", 'results must be "open", "review", or "blocked".');
     }
     if (
-      scenario.expected.journey.studio !== "open" &&
-      scenario.expected.journey.studio !== "limited" &&
-      scenario.expected.journey.studio !== "blocked"
+      journey.studio !== "open" &&
+      journey.studio !== "limited" &&
+      journey.studio !== "blocked"
     ) {
       pushIssue(issues, "expected.journey.studio", 'studio must be "open", "limited", or "blocked".');
     }
     if (
-      scenario.expected.journey.opportunity !== "save" &&
-      scenario.expected.journey.opportunity !== "blocked" &&
-      scenario.expected.journey.opportunity !== "not_applicable"
+      journey.opportunity !== "save" &&
+      journey.opportunity !== "blocked" &&
+      journey.opportunity !== "not_applicable"
     ) {
       pushIssue(issues, "expected.journey.opportunity", 'opportunity must be "save", "blocked", or "not_applicable".');
     }

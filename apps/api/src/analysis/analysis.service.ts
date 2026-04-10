@@ -324,6 +324,12 @@ type ScoreBreakdown = {
 
 type RunFitAssessmentOkResponse = FitScoreResponse & {
   status: 'ok';
+  latestAssessmentSummary?: {
+    latestAssessmentId: string;
+    latestAssessmentCreatedAt: Date;
+    latestFitScore: number;
+    hasCompletedAssessment: true;
+  };
 };
 
 /**
@@ -2946,6 +2952,32 @@ export class AnalysisService {
         );
       }
 
+      const lastAnalyzedAt = new Date();
+      try {
+        await this.baselineRepository.update(
+          { id: baseline.id, userId },
+          {
+            latestAssessmentId: savedAssessment.id,
+            latestBaselineScore: finalScore,
+            lastAnalyzedAt,
+          },
+        );
+        if (process.env.NODE_ENV !== 'production') {
+          this.logger.log(
+            `runFitAssessment baseline linkage persisted baselineId=${baseline.id} assessmentId=${savedAssessment.id} score=${finalScore} lastAnalyzedAt=${lastAnalyzedAt.toISOString()}`,
+          );
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          `Failed to persist baseline linkage baselineId=${baseline.id} assessmentId=${savedAssessment.id} message=${message}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+        throw new InternalServerErrorException(
+          'Unable to persist baseline assessment linkage',
+        );
+      }
+
       if (process.env.NODE_ENV !== 'production') {
         this.logger.log(
           `runFitAssessment persisted assessment id=${savedAssessment.id} userId=${savedAssessment.userId} baselineId=${savedAssessment.baselineId} createdAt=${savedAssessment.createdAt.toISOString()} score=${savedAssessment.overallScore}`,
@@ -3019,6 +3051,12 @@ export class AnalysisService {
         scorePresentationMode: scoringV2.scorePresentationMode,
         baseline_version_hash:
           compliance.audit.baselineVersionHash ?? baselineVersionHash,
+        latestAssessmentSummary: {
+          latestAssessmentId: savedAssessment.id,
+          latestAssessmentCreatedAt: savedAssessment.createdAt,
+          latestFitScore: finalScore,
+          hasCompletedAssessment: true,
+        },
       };
 
       return successResponse;

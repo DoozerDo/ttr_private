@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDocumentStrategyPlan,
   buildDocumentStrategyPlanSummary,
-} from "@/lib/documentStrategyPlan";
+} from "@shared/documentStrategyPlan";
 
 describe("document strategy plan", () => {
   it("derives a role lens, selects aligned evidence, and records suppression notes", () => {
@@ -78,3 +78,4 @@ describe("document strategy plan", () => {
     expect(plan.qualityPass.framingStrength).toBe("low");
   });
 });
+

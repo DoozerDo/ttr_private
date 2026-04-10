@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { StudioRoleMatchPanel } from "@/app/(app)/studio/StudioRoleMatchPanel";
-import type { RoleMatchFinalPass } from "@/lib/roleMatchFinalPass";
+import type { RoleMatchFinalPass } from "@shared/roleMatchFinalPass";
 
 const strongFinalPass: RoleMatchFinalPass = {
   overallMatchReadiness: "needs_tightening",
@@ -90,3 +90,4 @@ describe("final role check panel", () => {
     expect(screen.getByTestId("studio-role-match-panel")).toHaveTextContent("Ready to export");
   });
 });
+

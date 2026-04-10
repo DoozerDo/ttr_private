@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
-import { buildRoleMatchFinalPass } from "@/lib/roleMatchFinalPass";
+import { buildDocumentStrategyPlan } from "@shared/documentStrategyPlan";
+import { buildRoleMatchFinalPass } from "@shared/roleMatchFinalPass";
 
 function buildKeywordAuditPlan() {
   const plan = buildDocumentStrategyPlan({
@@ -103,3 +103,4 @@ describe("keyword alignment audit", () => {
     ).toBe(false);
   });
 });
+

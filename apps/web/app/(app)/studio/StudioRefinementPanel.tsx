@@ -3,8 +3,8 @@
 import type {
   DocumentStrategyPlan,
   RefinementPreset,
-} from "@/lib/documentStrategyPlan";
-import { REFINEMENT_PRESETS } from "@/lib/documentStrategyPlan";
+} from "@shared/documentStrategyPlan";
+import { REFINEMENT_PRESETS } from "@shared/documentStrategyPlan";
 
 type Props = {
   plan: DocumentStrategyPlan;
@@ -109,3 +109,4 @@ export function StudioRefinementPanel({
     </section>
   );
 }
+

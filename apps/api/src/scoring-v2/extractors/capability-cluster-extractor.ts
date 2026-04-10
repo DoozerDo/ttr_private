@@ -2,7 +2,7 @@ import { normalizeText } from '../../scoring/fit-score/fit-score.utils';
 import type {
   CapabilityClusterDefinition,
   CapabilityClusterRegistry,
-} from '../config/capability-clusters.ts';
+} from '../config/capability-clusters';
 
 const NEGATION_WINDOW = 40;
 

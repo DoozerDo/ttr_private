@@ -2,13 +2,16 @@
   "name": "targetthisrole",
   "private": true,
   "workspaces": [
-    "apps/*"
+    "apps/*",
+    "packages/*"
   ],
   "scripts": {
+    "build:shared": "npm -w packages/shared run build",
     "build:precheck": "npm run build:api && npm -w apps/web run typecheck:app",
     "build:web": "npm -w apps/web run build",
     "build:api": "npm -w apps/api run build:verify",
-    "build:both": "npm run build:api && npm run build:web",
+    "build:both": "npm run build:shared && npm run build:api && npm run build:web",
+    "build": "npm run build:both",
     "lint:web": "npm -w apps/web run lint",
     "lint:api": "npm -w apps/api run lint",
     "lint": "npm run lint:api && npm run lint:web",

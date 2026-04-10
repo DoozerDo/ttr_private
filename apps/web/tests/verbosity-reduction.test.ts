@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
-import { buildLanguageStylePass, polishResumeBulletsText } from "@/lib/languageStylePass";
+import { buildDocumentStrategyPlan } from "@shared/documentStrategyPlan";
+import { buildLanguageStylePass, polishResumeBulletsText } from "@shared/languageStylePass";
 
 describe("verbosity reduction", () => {
   it("shortens verbose phrasing without losing the core meaning", () => {
@@ -43,3 +43,4 @@ describe("verbosity reduction", () => {
     expect(polished[0]?.toLowerCase()).not.toContain("highly");
   });
 });
+

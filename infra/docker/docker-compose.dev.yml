@@ -38,8 +38,8 @@ services:
 
   web:
     build:
-      context: ../../apps/web
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: apps/web/Dockerfile
     working_dir: /usr/src/app
     restart: unless-stopped
     depends_on:

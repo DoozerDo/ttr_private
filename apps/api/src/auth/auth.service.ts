@@ -340,15 +340,6 @@ export class AuthService {
 
     try {
       this.logger.log('[password-reset] attempting email send');
-      const resendApiKey =
-        this.configService.get<string>('RESEND_API_KEY') ??
-        process.env.RESEND_API_KEY ??
-        '';
-
-      if (!resendApiKey.trim()) {
-        throw new Error('Missing RESEND_API_KEY environment variable for password reset email delivery.');
-      }
-
       await this.resendEmailService.sendEmail({
         to: user.email,
         subject: 'Reset your password',
@@ -536,6 +527,17 @@ export class AuthService {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const isProduction =
+        (this.configService.get<string>('NODE_ENV') ?? '').trim() === 'production';
+
+      if (!isProduction) {
+        const confirmUrl = html.match(/https?:\/\/[^\s"'<>]+/i)?.[0] ?? 'unknown';
+        this.logger.warn(
+          `[confirmation-email][dev-fallback] email=${email} url=${confirmUrl} reason=${message}`,
+        );
+        return;
+      }
+
       this.logger.error(
         `Failed to send confirmation email to ${email}: ${message}`,
         error instanceof Error ? error.stack : undefined,

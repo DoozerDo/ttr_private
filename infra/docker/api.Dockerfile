@@ -5,6 +5,7 @@ WORKDIR /usr/src/workspace
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
+COPY packages ./packages
 RUN npm ci --workspace apps/api --include-workspace-root=false --ignore-scripts --no-audit --no-fund
 
 # Build from source and verify compiled migrations
@@ -14,6 +15,7 @@ COPY --from=deps /usr/src/workspace/node_modules ./node_modules
 COPY --from=deps /usr/src/workspace/package.json ./package.json
 COPY --from=deps /usr/src/workspace/package-lock.json ./package-lock.json
 COPY --from=deps /usr/src/workspace/apps ./apps
+COPY --from=deps /usr/src/workspace/packages ./packages
 COPY apps/api ./apps/api
 RUN npm -w apps/api run build:verify
 
@@ -23,6 +25,7 @@ WORKDIR /usr/src/workspace
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
+COPY packages ./packages
 RUN npm ci --workspace apps/api --include-workspace-root=false --omit=dev --ignore-scripts --no-audit --no-fund
 
 # Runtime image

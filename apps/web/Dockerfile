@@ -3,12 +3,18 @@ WORKDIR /usr/src/app
 
 # Install web app dependencies from service-local lockfile
 COPY package*.json ./
+COPY apps/api/package*.json ./apps/api/
+COPY apps/web/package*.json ./apps/web/
+COPY packages ./packages
 RUN npm ci --no-audit --no-fund
 
 FROM node:20.19.5 AS builder
 WORKDIR /usr/src/app
 COPY --from=deps /usr/src/app/node_modules ./node_modules
 COPY --from=deps /usr/src/app/package*.json ./
+COPY --from=deps /usr/src/app/apps/api/package*.json ./apps/api/
+COPY --from=deps /usr/src/app/apps/web/package*.json ./apps/web/
+COPY --from=deps /usr/src/app/packages ./packages
 COPY . .
 RUN npm run build
 

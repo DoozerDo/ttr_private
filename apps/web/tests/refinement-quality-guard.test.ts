@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { REFINEMENT_PRESETS, buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
+import { REFINEMENT_PRESETS, buildDocumentStrategyPlan } from "@shared/documentStrategyPlan";
 
 const GENERIC_FILLER = [
   "results-driven",
@@ -49,3 +49,4 @@ describe("refinement quality guard", () => {
     expect(plan.qualityPass.coverLetterDelta.length).toBeGreaterThan(0);
   });
 });
+

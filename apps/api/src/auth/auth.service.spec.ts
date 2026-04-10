@@ -667,6 +667,63 @@ describe('AuthService', () => {
     expect(emailPayload.html).not.toContain('targetthisrole.ai');
   });
 
+  it('registers a user and falls back to logging when confirmation email send fails in development', async () => {
+    const payload: RegisterDto = {
+      firstName: 'Test',
+      lastName: 'User',
+      email: 'user@example.com',
+      password: 'Password123',
+      confirmPassword: 'Password123',
+    };
+    const savedUser: User = {
+      id: 'user-id',
+      email: payload.email,
+      firstName: payload.firstName,
+      lastName: payload.lastName,
+      emailConfirmed: false,
+      passwordHash: '',
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
+      role: 'user',
+      subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'REQUIRE_EMAIL_CONFIRMATION') return 'true';
+      if (key === 'NODE_ENV') return 'development';
+      if (key === 'APP_PUBLIC_WEB_URL') return 'http://localhost:3000';
+      return undefined;
+    });
+
+    service = new AuthService(
+      usersService,
+      jwtService,
+      resendEmailService,
+      configService as unknown as ConfigService,
+      userTokensRepository as any,
+      accessCodesService as unknown as AccessCodesService,
+      adminUsersService as unknown as AdminUsersService,
+    );
+
+    usersService.findByEmail.mockResolvedValue(null);
+    usersService.create.mockResolvedValue(savedUser);
+    resendEmailService.sendEmail.mockRejectedValue(new Error('upstream unavailable'));
+
+    const result = await service.register(payload);
+
+    expect(result.success).toBe(true);
+    expect(result.emailConfirmationRequired).toBe(true);
+    expect(resendEmailService.sendEmail).toHaveBeenCalledTimes(1);
+  });
+
   it('sends internal registration notification when REGISTRATION_NOTIFY_EMAIL is configured', async () => {
     const payload: RegisterDto = {
       firstName: 'Notify',

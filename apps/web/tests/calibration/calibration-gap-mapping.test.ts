@@ -5,7 +5,7 @@ import {
   buildGoldStandardCalibrationReport,
   listGoldStandardBenchmarkFixtures,
   mapGoldStandardCalibrationGapToSubsystems,
-} from "@/lib/goldStandardCalibration";
+} from "@shared/goldStandardCalibration";
 import {
   buildSupportOpsCalibrationPlan,
   buildWeakSupportOpsCoverLetter,
@@ -35,3 +35,4 @@ describe("calibration gap mapping", () => {
     );
   });
 });
+

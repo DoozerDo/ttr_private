@@ -1,8 +1,69 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
-import { buildRoleMatchFinalPass } from "@/lib/roleMatchFinalPass";
-import { listSyntheticGenerationScenarioBundles } from "../../api/src/synthetic/generation/synthetic-generation.fixtures";
+import { buildDocumentStrategyPlan } from "@shared/documentStrategyPlan";
+import { buildRoleMatchFinalPass } from "@shared/roleMatchFinalPass";
+
+function listSyntheticGenerationScenarioBundles() {
+  return [
+    {
+      scenario: { name: "Support operations director" },
+      job: {
+        title: "Director of Support Operations",
+        company: "Example SaaS",
+        rawDescription:
+          "Lead support operations, incident response, process architecture, and cross-functional execution for a scaling SaaS team. Own queue health, service quality, escalation routines, and operating rhythms that keep support predictable.",
+        normalizedResponsibilities: [
+          "Own support operations strategy and queue health.",
+          "Improve incident response and escalation workflow quality.",
+          "Partner with product and engineering on root cause fixes.",
+          "Lead cross-functional operating reviews.",
+        ],
+        normalizedRequirements: [
+          "Support operations rigor",
+          "Incident management leadership",
+          "Process architecture",
+          "Cross-functional execution",
+        ],
+      },
+      baseline: {
+        sections: [
+          {
+            id: "support-ops-section-1",
+            title: "Support Operations Leadership",
+            sectionType: "EXPERIENCE",
+            content:
+              "Led support operations programs for a SaaS product team, improving SLA adherence, reducing repeat escalations, and building a steadier operating rhythm for frontline managers.",
+          },
+          {
+            id: "support-ops-section-2",
+            title: "Workflow And Incident Design",
+            sectionType: "EXPERIENCE",
+            content:
+              "Built intake, triage, and escalation workflows that clarified ownership across support, product, and engineering.",
+          },
+        ],
+      },
+      benchmark: {
+        approvedBenchmarkResume: {
+          summary:
+            "Customer Operations and Support Strategy leader focused on support operations rigor, workflow design, and cross-functional execution.",
+          bullets: [
+            "Led support operations for a high-volume service team and built intake, triage, and escalation routines that reduced repeat tickets.",
+            "Worked with product and engineering partners to prioritize root-cause fixes and stabilize the most frequent incident paths.",
+          ],
+        },
+        approvedBenchmarkCoverLetter: {
+          opening: "Dear Hiring Team,",
+          bodyParagraphs: [
+            "I am excited to bring support operations rigor, incident management leadership, and process architecture to this role.",
+            "My background includes cross-functional execution across product and engineering partners.",
+          ],
+          closingParagraph: "Sincerely,",
+        },
+      },
+    },
+  ];
+}
 
 function buildSamplePlan() {
   const plan = buildDocumentStrategyPlan({
@@ -193,3 +254,4 @@ describe("role match final pass", () => {
     expect(finalPass.recruiterScanRisks.some((risk) => risk.type === "cover_letter_not_role_specific")).toBe(false);
   });
 });
+

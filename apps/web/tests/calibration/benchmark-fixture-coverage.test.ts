@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   getGoldStandardBenchmarkFixture,
   listGoldStandardBenchmarkFixtures,
-} from "@/lib/goldStandardCalibration";
+} from "@shared/goldStandardCalibration";
 
 describe("benchmark fixture coverage", () => {
   it("loads approved benchmark fixtures with all required fields", () => {
@@ -27,3 +27,4 @@ describe("benchmark fixture coverage", () => {
     }
   });
 });
+

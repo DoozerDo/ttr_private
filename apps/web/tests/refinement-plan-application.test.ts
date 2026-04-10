@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { REFINEMENT_PRESETS, buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
+import { REFINEMENT_PRESETS, buildDocumentStrategyPlan } from "@shared/documentStrategyPlan";
 
 function buildBaseInput() {
   return {
@@ -52,3 +52,4 @@ describe("refinement plan application", () => {
     expect(refinedPlan.documentQualityScore).toBeGreaterThanOrEqual(basePlan.documentQualityScore - 5);
   });
 });
+

@@ -682,6 +682,7 @@ function debugReadinessPayload(label: string, payload: Record<string, unknown>) 
 export function getGenerationReadiness(
   result: unknown,
   runState: "ok" | "compliance_blocked" | null,
+  fitScore: number | null = null,
 ): GenerationReadiness {
   const reasonCodes: string[] = [];
   const reasons: GenerationReadiness["reasons"] = [];
@@ -789,8 +790,22 @@ export function getGenerationReadiness(
       });
     }
   }
+
+  if (fitScore === null || !Number.isFinite(fitScore)) {
+    reasonCodes.push("missing_score");
+    addUniqueReason(reasons, {
+      code: "full_block",
+      message: "Fit score is unavailable for this analysis.",
+    });
+  } else if (fitScore < 70) {
+    reasonCodes.push("score_floor_blocked");
+    addUniqueReason(reasons, {
+      code: "full_block",
+      message: "Fit score is below the Studio readiness floor.",
+    });
+  }
   const blocked = reasonCodes.some((code) =>
-    ["run_state_blocked", "verdict_blocked", "compliance_blocked_flag", "severity_blocker"].includes(code),
+    ["run_state_blocked", "verdict_blocked", "compliance_blocked_flag", "severity_blocker", "score_floor_blocked"].includes(code),
   );
   const status: GenerationReadiness["status"] = blocked
     ? "blocked"

@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { DocumentStrategyPlanSummary } from "@/components/DocumentStrategyPlanSummary";
-import { buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
+import { buildDocumentStrategyPlan } from "@shared/documentStrategyPlan";
 
 describe("studio document plan summary", () => {
   it("renders a user-safe explanation without internal metadata", () => {
@@ -37,3 +37,4 @@ describe("studio document plan summary", () => {
     expect(screen.getByTestId("studio-document-plan-summary")).toHaveTextContent("Support Operations");
   });
 });
+

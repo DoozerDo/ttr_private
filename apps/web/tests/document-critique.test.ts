@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
+import { buildDocumentStrategyPlan } from "@shared/documentStrategyPlan";
 import { buildDocumentCritique } from "@/lib/documentCritique";
 
 function buildSamplePlan() {
@@ -80,3 +80,4 @@ describe("document critique", () => {
     expect(critique?.topIssues.length).toBeGreaterThan(0);
   });
 });
+

@@ -1,4 +1,4 @@
-import { type NextActionType } from "@/lib/nextAction";
+import type { CanonicalDecisionResult } from "@/lib/canonicalDecision";
 import { type StudioArtifactFailurePresentation } from "@/src/lib/studio/helpers";
 
 export type StudioNextMoveAction = {
@@ -15,10 +15,8 @@ export type StudioNextMove = {
 };
 
 export type StudioNextMoveInput = {
+  decision: CanonicalDecisionResult;
   analysisScore: number | null;
-  canGenerateDocuments: boolean;
-  studioGenerationState: "READY" | "LIMITED" | "BLOCKED";
-  primaryNextAction: NextActionType;
   artifactFailure: StudioArtifactFailurePresentation | null;
   actions: {
     generateResume: () => void;
@@ -59,38 +57,6 @@ function strongFitMove(input: StudioNextMoveInput): StudioNextMove {
     secondaryAction: {
       label: "Generate Cover Letter",
       action: input.actions.generateCoverLetter,
-    },
-    context: scoreContext(input.analysisScore),
-  };
-}
-
-function moderateFitMove(input: StudioNextMoveInput): StudioNextMove {
-  return {
-    title: "Close the gaps before you generate",
-    description: "A few evidence gaps still limit output quality. Strengthen them before you produce final materials.",
-    primaryAction: {
-      label: "Review Top Gaps",
-      action: input.actions.reviewTopGaps,
-    },
-    secondaryAction: {
-      label: "Generate Anyway",
-      action: input.actions.generateResume,
-    },
-    context: scoreContext(input.analysisScore),
-  };
-}
-
-function lowFitMove(input: StudioNextMoveInput): StudioNextMove {
-  return {
-    title: "Build stronger evidence before this role",
-    description: "The score is too low for useful output. Strengthen the baseline or analyze another role.",
-    primaryAction: {
-      label: "Improve Experience",
-      action: input.actions.improveExperience,
-    },
-    secondaryAction: {
-      label: "Analyze Another Role",
-      action: input.actions.analyzeAnotherRole,
     },
     context: scoreContext(input.analysisScore),
   };
@@ -178,19 +144,11 @@ export function resolveStudioNextMove(input: StudioNextMoveInput): StudioNextMov
     }
   }
 
-  if (input.studioGenerationState === "BLOCKED") {
+  if (input.decision.readinessState === "BLOCKED") {
     return generationBlockedMove(input);
   }
 
-  if (typeof input.analysisScore === "number" && input.analysisScore < 55) {
-    return lowFitMove(input);
-  }
-
-  if (typeof input.analysisScore === "number" && input.analysisScore < 70) {
-    return moderateFitMove(input);
-  }
-
-  if (input.canGenerateDocuments || input.primaryNextAction === "studio" || input.primaryNextAction === "studio_with_save") {
+  if (input.decision.nextAction.type === "studio" || input.decision.nextAction.type === "studio_with_save") {
     return strongFitMove(input);
   }
 

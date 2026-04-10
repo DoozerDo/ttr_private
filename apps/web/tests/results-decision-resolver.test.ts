@@ -70,4 +70,20 @@ describe("resolveResultsDecision", () => {
       primaryCta: "START_FIT_REVIEW",
     });
   });
+
+  it("keeps score 19 style scenarios out of READY even when readiness says allowed", () => {
+    expect(
+      resolveResultsDecision({
+        score: 19,
+        generationReadiness: {
+          state: "ALLOWED",
+          confidence: "HIGH",
+          needsVerification: false,
+        },
+      }),
+    ).toMatchObject({
+      state: "IMPROVE",
+      primaryCta: "START_FIT_REVIEW",
+    });
+  });
 });

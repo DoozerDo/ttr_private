@@ -1,3 +1,5 @@
+import { resolveCanonicalState } from "@/lib/canonicalDecision";
+
 export type NextActionType =
   | "fit_review"
   | "studio"
@@ -17,48 +19,51 @@ export type NextAction = {
   reason: string;
 };
 
-function buildAction(type: NextActionType, reason: string): NextAction {
-  if (type === "fit_review") {
-    return {
-      type,
-      label: "Start Fit Review",
-      route: "/fit-review",
-      reason,
-    };
-  }
-  if (type === "studio") {
-    return {
-      type,
-      label: "Open Resume & Cover Letter Studio",
-      route: "/studio",
-      reason,
-    };
-  }
-  return {
-    type,
-    label: "Generate Resume",
-    route: "/studio",
-    reason,
-  };
-}
-
 export function getCanonicalNextAction(input: NextActionInput): NextAction {
-  const score = typeof input.fitScore === "number" ? input.fitScore : 0;
-  if (score < 70) {
-    return buildAction("fit_review", "score below 70");
-  }
-  if (!input.generationReady || !input.trustGateAllowed) {
-    return buildAction(
-      "fit_review",
-      !input.generationReady
-        ? "score >= 70 but readiness not ready"
-        : "score >= 70 but trust gate blocked generation",
-    );
-  }
-  if (score >= 85) {
-    return buildAction("studio_with_save", "score >= 85 and readiness ready");
-  }
-  return buildAction("studio", "score >= 70 and readiness ready");
+  const score = typeof input.fitScore === "number" && Number.isFinite(input.fitScore) ? input.fitScore : null;
+  const generationReady = Boolean(input.generationReady && input.trustGateAllowed && (score === null || score >= 70));
+  const canonical = resolveCanonicalState({
+    surface: "studio",
+    baselineId: null,
+    jobId: null,
+    score,
+    generationReadiness: {
+      status: generationReady ? "ready" : "blocked",
+      blocked: !generationReady,
+      reasonCodes: generationReady ? [] : ["generation_not_ready"],
+      reasons: generationReady
+        ? []
+        : [{ code: "full_block", message: "generation not ready" }],
+      badgeLabel: generationReady ? "READY" : "BLOCKED",
+      summary: generationReady ? "Generation ready" : "Generation blocked",
+      verificationIssues: [],
+    },
+    productReadiness: {
+      generation_readiness: {
+        canGenerate: generationReady,
+        canExport: generationReady,
+        reasonsBlocked: generationReady ? [] : ["trust_gate_blocked"],
+      },
+      state: generationReady ? "ALLOWED" : "BLOCKED",
+      confidence: generationReady ? "HIGH" : "LOW",
+      needsVerification: !input.trustGateAllowed,
+      tier: generationReady ? "generation_allowed" : "fit_review_only",
+      canOpenStudio: generationReady,
+      generationMode: generationReady ? "verified" : "draft",
+    },
+    resultsHref: "/studio",
+    fitReviewHref: "/fit-review",
+    canGenerateDocuments: generationReady,
+    opportunityAlreadySaved: input.opportunityAlreadySaved,
+    scoreCandidates: [{ source: "primary", value: score }],
+  });
+
+  return {
+    type: canonical.nextAction.type as NextActionType,
+    label: canonical.nextAction.label,
+    route: canonical.nextAction.route,
+    reason: canonical.nextAction.reason,
+  };
 }
 
 export function getPrimaryAction(input: NextActionInput | number): NextAction {

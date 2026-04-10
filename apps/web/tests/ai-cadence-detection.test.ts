@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
-import { buildLanguageStylePass, polishCoverLetterParagraphsText } from "@/lib/languageStylePass";
+import { buildDocumentStrategyPlan } from "@shared/documentStrategyPlan";
+import { buildLanguageStylePass, polishCoverLetterParagraphsText } from "@shared/languageStylePass";
 
 describe("ai cadence detection", () => {
   it("flags repetitive sentence structures and rewrites the opening to read more naturally", () => {
@@ -47,3 +47,4 @@ describe("ai cadence detection", () => {
     expect(polished[0]?.toLowerCase()).not.toContain("i am excited");
   });
 });
+
