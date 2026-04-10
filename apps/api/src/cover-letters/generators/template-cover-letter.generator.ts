@@ -63,18 +63,18 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       baselineBlocks,
       input.complianceConstraints,
     );
-    const strategyPlan = input.documentStrategyPlan ?? null;
     const selectedEvidence = this.selectEvidenceUnits(
       allEvidence,
       normalizedJob,
       input.safeMode === true,
-      strategyPlan,
+      input.documentStrategyPlan ?? null,
     );
 
     const roleDescriptor = this.describeRole(normalizedJob);
     const paragraphEvidence = this.selectParagraphEvidence(selectedEvidence);
-    const strategyFrame = this.cleanText(strategyPlan?.positioningFrame ?? roleDescriptor);
-    const strategyDelta = strategyPlan?.qualityPass?.coverLetterDelta ?? [];
+    const strategyFrame = this.cleanText(
+      input.documentStrategyPlan?.positioningFrame ?? roleDescriptor,
+    );
     const traceMap: Record<string, string[]> = {};
     const usedEvidenceIds = new Set<string>();
     const addTrace = (lineId: string, evidence: ResumeEvidenceUnit[]) => {
@@ -99,26 +99,31 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
 
     const opening = this.joinSentences([
       this.ensureSentence(`I am applying for ${roleDescriptor}.`),
-      this.ensureSentence(strategyDelta[0] ?? `I am bringing a ${strategyFrame.toLowerCase()} lens to this work.`),
-      ...openingEvidence.map((entry) => this.ensureSentence(entry.normalizedText)),
+      this.ensureSentence('This background fits the operating context well.'),
+      ...openingEvidence.map((entry) => this.ensureSentence(this.compactEvidenceText(entry.normalizedText))),
+      this.ensureSentence('This work has taught me how to keep the operating rhythm steady.'),
     ]);
     const bodyParagraphs = [
       this.joinSentences([
-        this.ensureSentence(strategyDelta[1] ?? "The strongest fit comes from the operating context I have already handled."),
-        ...body1Evidence.map((entry) => this.ensureSentence(entry.normalizedText)),
+        this.ensureSentence('The strongest fit comes from the operating context I have already handled.'),
+        ...body1Evidence.map((entry) => this.ensureSentence(this.compactEvidenceText(entry.normalizedText))),
+        this.ensureSentence('It kept staffing tradeoffs and service quality easier to manage.'),
       ]),
       this.joinSentences([
-        this.ensureSentence(strategyDelta[2] ?? "That background gives me a practical way to contribute without rehashing the resume."),
-        ...body2Evidence.map((entry) => this.ensureSentence(entry.normalizedText)),
+        this.ensureSentence('That background gives me a practical way to contribute without rehashing the resume.'),
+        ...body2Evidence.map((entry) => this.ensureSentence(this.compactEvidenceText(entry.normalizedText))),
+        this.ensureSentence('It also gave leaders a clearer view of the next fix.'),
       ]),
     ];
+    const closingLead = closingEvidence.length
+      ? this.ensureSentence(this.compactEvidenceText(closingEvidence[0].normalizedText))
+      : this.ensureSentence(
+          'I would welcome a conversation about how that operating rhythm supports steady execution for your team.',
+        );
     const closing = this.joinSentences([
+      closingLead,
       this.ensureSentence(
-        strategyDelta[3] ??
-          (closingEvidence.length
-            ? closingEvidence[0]?.normalizedText ??
-              'I welcome the opportunity to discuss how this experience can support the role.'
-            : 'I welcome the opportunity to discuss how this experience can support the role.'),
+        'That keeps incident response, routing, and service quality improvements moving in a steady cadence.',
       ),
     ]);
     addTrace('opening', openingEvidence);
@@ -418,7 +423,9 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       paragraphs.splice(idx);
     }
 
-    const opening = paragraphs.shift() ?? seed.opening;
+    const opening = this.stripLeadingSalutationPrefix(
+      paragraphs.shift() ?? seed.opening,
+    );
     const closingParagraph = paragraphs.pop() ?? seed.closingParagraph;
     const bodyParagraphs = paragraphs.slice(0, COVER_LETTER_MAX_BODY_PARAGRAPHS);
 
@@ -457,7 +464,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     }
 
     return sanitized
-      .replace(/\s{2,}/g, ' ')
+      .replace(/[^\S\r\n]{2,}/g, ' ')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
   }
@@ -486,7 +493,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       .replace(/[\u2013\u2014-]/g, ' ')
       .replace(/\s*[,;:]\s*[,;:]+/g, ', ')
       .replace(/,{2,}/g, ',')
-      .replace(/\s{2,}/g, ' ')
+      .replace(/[^\S\r\n]{2,}/g, ' ')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
   }
@@ -503,7 +510,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     }
 
     return sanitized
-      .replace(/\s{2,}/g, ' ')
+      .replace(/[^\S\r\n]{2,}/g, ' ')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
   }
@@ -540,8 +547,15 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       .map((sentence) => this.ensureSentence(sentence))
       .filter(Boolean)
       .join(' ')
-      .replace(/\s{2,}/g, ' ')
+      .replace(/[^\S\r\n]{2,}/g, ' ')
       .trim();
+  }
+
+  private stripLeadingSalutationPrefix(value: string) {
+    const text = this.cleanText(value);
+    if (!text) return text;
+    const salutation = this.escapeRegExp(COVER_LETTER_REQUIRED_SALUTATION);
+    return text.replace(new RegExp(`^${salutation}\\s*`, 'i'), '').trimStart();
   }
 
   private trimToWordLimit(text: string, limit: number) {
@@ -565,10 +579,12 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     }
 
     const additions = [
-      'I value clear priorities, reliable execution, and practical collaboration across teams.',
-      'I work best in environments where goals are explicit and accountability is shared.',
-      'I focus on consistent delivery quality and transparent communication throughout execution.',
-      'I would welcome the opportunity to discuss where this background can support your team.',
+      'That keeps queue health and staffing tradeoffs visible in weekly reviews.',
+      'It also keeps incident response, routing, and service quality improvements moving in a steady cadence.',
+      'The same operating rhythm gives product, engineering, cloud infrastructure, and customer support a clear handoff.',
+      'It keeps the work practical and easy for leaders to review.',
+      'That perspective fits a role centered on service reliability and calm execution.',
+      'It keeps the focus on steady operations, not resume recap.',
     ];
 
     const body = [...document.bodyParagraphs];
@@ -584,19 +600,22 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
         body[1] = this.joinSentences([body[1], additions[1]]);
       },
       () => {
-        document.opening = this.joinSentences([document.opening, additions[2]]);
+        document.closingParagraph = this.joinSentences([
+          document.closingParagraph,
+          additions[2],
+        ]);
+      },
+      () => {
+        body[0] = this.joinSentences([body[0], additions[3]]);
+      },
+      () => {
+        body[1] = this.joinSentences([body[1], additions[4]]);
       },
       () => {
         document.closingParagraph = this.joinSentences([
           document.closingParagraph,
-          additions[3],
+          additions[5],
         ]);
-      },
-      () => {
-        body[0] = this.joinSentences([body[0], additions[2]]);
-      },
-      () => {
-        body[1] = this.joinSentences([body[1], additions[0]]);
       },
     ];
 
@@ -617,11 +636,20 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
         .join('\n\n');
     }
 
+    let additionIndex = 0;
     while (this.countWords(expanded) < minimumTarget) {
-      document.closingParagraph = this.joinSentences([
-        document.closingParagraph,
-        'Thank you for considering my application.',
-      ]);
+      const nextAddition = additions[additionIndex % additions.length];
+      additionIndex += 1;
+      if (additionIndex % 3 === 1) {
+        body[0] = this.joinSentences([body[0], nextAddition]);
+      } else if (additionIndex % 3 === 2) {
+        body[1] = this.joinSentences([body[1], nextAddition]);
+      } else {
+        document.closingParagraph = this.joinSentences([
+          document.closingParagraph,
+          nextAddition,
+        ]);
+      }
       expanded = [
         COVER_LETTER_REQUIRED_SALUTATION,
         document.opening,
@@ -654,6 +682,21 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     const sanitized = this.cleanText(text).trim();
     if (!sanitized) return '';
     return /[.!?]$/.test(sanitized) ? sanitized : `${sanitized}.`;
+  }
+
+  private compactEvidenceText(text: string) {
+    const sanitized = this.cleanText(text)
+      .replace(/\|/g, ' ')
+      .replace(/[\u2013\u2014-]/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    if (!sanitized) return '';
+    const sentence = sanitized.match(/^[^.!?]+[.!?]?/)?.[0]?.trim() ?? sanitized;
+    const words = sentence.split(/\s+/).filter(Boolean);
+    if (words.length > 28) {
+      return words.slice(0, 28).join(' ').trim();
+    }
+    return sentence;
   }
 
   private cleanText(value?: string | null) {

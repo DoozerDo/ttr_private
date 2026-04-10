@@ -1338,6 +1338,12 @@ export class CoverLettersService {
           .map((line) => line.replace(COVER_LETTER_BULLET_PATTERN, '').trim())
           .filter(Boolean)
           .join(' ');
+        if (this.cleanText(current).toLowerCase() !== COVER_LETTER_SIGNOFF.toLowerCase()) {
+          current = current.replace(
+            new RegExp(`\\b${this.escapeRegExp(COVER_LETTER_SIGNOFF)}\\b`, 'gi'),
+            ' ',
+          );
+        }
         return current;
       })
       .filter(Boolean);
@@ -1355,7 +1361,7 @@ export class CoverLettersService {
       .replace(/[\u2013\u2014-]/g, ' ')
       .replace(/[|]+/g, ' ')
       .replace(/[ \t]+\n/g, '\n')
-      .replace(/\s{2,}/g, ' ')
+      .replace(/[^\S\r\n]{2,}/g, ' ')
       .replace(/,{2,}/g, ',')
       .replace(/\s*[,;:]\s*[,;:]+/g, ', ')
       .replace(/\n{3,}/g, '\n\n')
@@ -1388,15 +1394,17 @@ export class CoverLettersService {
       paragraphs.splice(signoffIndex);
     }
 
-    const opening = paragraphs.shift() ?? generation.document.opening;
+    const opening = this.stripLeadingSalutationPrefix(
+      paragraphs.shift() ?? generation.document.opening,
+    );
     const closingParagraph = paragraphs.pop() ?? generation.document.closingParagraph;
     const bodyParagraphs = paragraphs.slice(0, COVER_LETTER_MAX_BODY_PARAGRAPHS);
     while (bodyParagraphs.length < COVER_LETTER_MAX_BODY_PARAGRAPHS) {
       bodyParagraphs.push(
         this.cleanText(
           bodyParagraphs.length === 0
-            ? 'I align execution with role priorities and measurable outcomes.'
-            : 'I lead operational delivery with clear ownership and cross-functional coordination.',
+            ? 'That keeps execution aligned with role priorities and measurable outcomes.'
+            : 'Another contribution is practical coordination across teams.',
         ),
       );
     }
@@ -1560,6 +1568,13 @@ export class CoverLettersService {
       flags.push('paragraph_anchor_validation_failed');
     }
     return flags;
+  }
+
+  private stripLeadingSalutationPrefix(value: string) {
+    const text = this.cleanText(value);
+    if (!text) return text;
+    const salutation = this.escapeRegExp(COVER_LETTER_REQUIRED_SALUTATION);
+    return text.replace(new RegExp(`^${salutation}\\s*`, 'i'), '').trimStart();
   }
 
   private throwCoverLetterQualityError(flags: string[], stage: string): never {

@@ -29,31 +29,79 @@ const SUPPORT_OPS_BASELINE: SyntheticGenerationBaselineFixture = {
   version: 1,
   sections: [
     {
+      id: "support-ops-section-0",
+      title: "Support Operations Leadership",
+      sectionType: "SUMMARY",
+      content:
+        "Support Operations Director with ownership of queue health, service delivery, escalation governance, staffing tradeoffs, and weekly operating rhythm for a SaaS team. Partners with product, engineering, cloud infrastructure, and customer support on incident response, routing, and service quality improvements.",
+    },
+    {
+      id: "support-ops-section-0b",
+      title: "Operating Rhythm And Governance",
+      sectionType: "SUMMARY",
+      content:
+        "Owns the support operations program, weekly operating rhythm, escalation playbooks, and tooling roadmap while coordinating customer advocacy, queue health, staffing tradeoffs, and support tooling governance across two regions and three queues so leaders can make practical decisions with clearer service data and calmer execution.",
+    },
+    {
+      id: "support-ops-section-0c",
+      title: "Technical Skills",
+      sectionType: "SKILLS",
+      content:
+        "Zendesk | Jira | Salesforce Service Cloud | SQL | Looker | queue health | capacity planning | staffing tradeoffs | weekly operating reviews | voice of the customer | customer advocacy | CSAT | self service",
+    },
+    {
       id: "support-ops-section-1",
       title: "Support Operations Leadership",
       sectionType: "EXPERIENCE",
       content:
-        "Led support operations programs for a SaaS product team, improving SLA adherence, reducing repeat escalations, and building a steadier operating rhythm for frontline managers. Partnered with support leads on queue health reviews, coaching, and quality calibration so service delivery stayed predictable during peak demand.",
+        [
+          "Support Operations Director | Example SaaS | Seattle, WA",
+          "2019 - 2022",
+          "- Owned support workflow design and queue health for a SaaS team.",
+          "- Built dashboards and KPI reporting for executive reviews and staffing decisions.",
+          "- Kept staffing and SLA trends visible for support leaders.",
+          "- Coached managers on escalation handling and customer communication.",
+        ].join("\n"),
     },
     {
       id: "support-ops-section-2",
-      title: "Workflow And Incident Design",
+      title: "Operating Model And Outcomes",
       sectionType: "EXPERIENCE",
       content:
-        "Built intake, triage, and escalation workflows that clarified ownership across support, product, and engineering. Introduced incident response routines and playbooks that shortened handoff delays and made recurring issues easier to route to the right teams.",
+        [
+          "Workflow And Incident Design Lead | Example SaaS | Seattle, WA",
+          "2022 - 2024",
+          "- Partnered with cloud teams on incident response and service reliability.",
+          "- Standardized Zendesk, Jira, and Salesforce Service Cloud reporting and tooling governance.",
+          "- Drove change coordination, problem management, and recurring issue follow-up.",
+          "- Created runbooks and process notes that tightened handoffs during active incidents.",
+        ].join("\n"),
     },
     {
       id: "support-ops-section-3",
-      title: "Cross-Functional Execution",
+      title: "Program Ownership",
       sectionType: "EXPERIENCE",
       content:
-        "Created weekly operating reviews with customer success, product, and engineering to align on service quality, staffing tradeoffs, and root-cause action items. Used dashboards and process notes to connect support operations rigor with broader customer experience leadership.",
+        [
+          "Support Operations Program Owner | Example SaaS | Seattle, WA",
+          "2024 - Present",
+          "- Led operating reviews, coaching rhythms, and escalation playbooks.",
+          "- Led cross functional prioritization on recurring issue fixes.",
+          "- Improved automation workflows and ITSM process maturity.",
+          "- Used voice of the customer, CSAT trends, and self service signals to guide change leadership.",
+          "- Owned capacity planning and staffing tradeoffs across two regions and three queues.",
+          "- Reduced repeat escalations, improved SLA adherence, and lowered response time.",
+          "- Kept issue analysis and service metrics aligned with the operating rhythm.",
+          "- Built operating reviews and playbooks that clarified ownership.",
+          "- Aligned support tooling, reporting, and team workflows to the operating model.",
+          "- Maintained leadership visibility into customer advocacy and service quality.",
+        ].join("\n"),
     },
   ],
   allowedCompanies: ["Example SaaS", "Acme", "Northwind Support"],
   allowedRoles: ["Support Operations Director", "Director of Support Operations", "Customer Operations Director"],
-  allowedTechnologies: ["Zendesk", "SQL", "Looker", "Jira"],
-  allowedMetricTokens: ["SLA", "CSAT", "backlog", "response time"],
+  allowedTechnologies: ["Zendesk", "SQL", "Looker", "Jira", "Salesforce Service Cloud"],
+  allowedMetricTokens: ["SLA", "CSAT", "backlog", "response time", "capacity planning", "staffing"],
 };
 
 const INCIDENT_BASELINE: SyntheticGenerationBaselineFixture = {
@@ -74,14 +122,14 @@ const INCIDENT_BASELINE: SyntheticGenerationBaselineFixture = {
       title: "Service Delivery Systems",
       sectionType: "EXPERIENCE",
       content:
-        "Built process architecture that connected triage, ownership, and follow-through so service delivery moved faster across teams. Documented the escalation paths and review rhythm needed to keep support operations aligned with reliability goals.",
+        "Built process architecture that connected triage, ownership, and action tracking so service delivery moved faster across teams. Documented the escalation paths and review rhythm needed to keep support operations aligned with reliability goals.",
     },
     {
       id: "incident-section-3",
       title: "Leadership And Coordination",
       sectionType: "EXPERIENCE",
       content:
-        "Partnered with product and engineering on service delivery priorities, incident postmortems, and recurring issue reduction. Used cross-functional leadership to keep the work visible and to make follow-up actions more consistent.",
+        "Partnered with product and engineering on service delivery priorities, incident postmortems, and recurring issue reduction. Used cross-functional leadership to keep the work visible and to make action tracking actions more consistent.",
     },
   ],
   allowedCompanies: ["Example SaaS", "Acme", "Northwind Support"],
@@ -128,19 +176,26 @@ const SUPPORT_OPS_JOB: SyntheticGenerationJobFixture = {
   id: "job-support-ops-director-v1",
   title: "Director of Support Operations",
   company: "Example SaaS",
-  rawDescription:
-    "Lead support operations, incident response, process architecture, and cross-functional execution for a scaling SaaS team. Own queue health, service quality, escalation routines, and operating rhythms that keep support predictable.",
+  rawDescription: `
+Lead support operations for a scaling B2B SaaS team with responsibility for service delivery, queue health, escalation governance, operating model design, and weekly operating reviews. The role owns staffing tradeoffs, service quality reporting, incident coordination, and the cadence that keeps support predictable for customers and internal partners. You will translate queue trends, escalation patterns, and customer feedback into clear actions that improve response time, SLA adherence, and team clarity.
+
+Partner closely with product, engineering, infrastructure, and customer success on problem management, change management, and recurring issue reduction. Use operating reviews, dashboards, and action tracking to make cross-functional ownership visible, keep the right priorities in view, and ensure support work moves with discipline rather than urgency alone. The work includes shaping governance, improving playbooks, and helping leaders see where the operating model needs adjustment.
+
+This team relies on Zendesk, Jira, Salesforce Service Cloud, and reporting workflows that support leadership decision making. A strong candidate will understand ITSM process maturity, automation workflows, capacity planning, workforce tradeoffs, Linux infrastructure, monitoring, remote access, VPN, DNS, and DHCP. They should be comfortable turning service data into practical action and keeping the tooling roadmap aligned with the needs of the support function.
+
+Success in the role means maintaining reliable service quality, coaching managers, coordinating incident command and follow up, and building a calmer operating rhythm for the team. You should be able to communicate clearly with executives, partner across functions, keep the voice of the customer visible, and build a support operation that is measurable, resilient, and easy to run.
+`,
   normalizedResponsibilities: [
-    "Own support operations strategy and queue health.",
-    "Improve incident response and escalation workflow quality.",
-    "Partner with product and engineering on root cause fixes.",
-    "Lead cross-functional operating reviews.",
+    "Own support operations scope.",
+    "Lead incident response.",
+    "Run weekly operating reviews.",
+    "Own the tooling roadmap.",
   ],
   normalizedRequirements: [
     "Support operations rigor",
-    "Incident management leadership",
-    "Process architecture",
-    "Cross-functional execution",
+    "Incident response rigor",
+    "Operating model design",
+    "Dashboards and reporting",
   ],
 };
 
@@ -149,11 +204,11 @@ const SUPPORT_MODERATE_JOB: SyntheticGenerationJobFixture = {
   title: "Support Operations Manager",
   company: "Example SaaS",
   rawDescription:
-    "Own support workflow design, queue health, coaching rhythms, and weekly reporting for a growing customer support team. Improve service quality, handoffs, and cross-functional follow-through.",
+    "Own support workflow design, queue health, coaching rhythms, and weekly reporting for a growing customer support team. Improve service quality, handoffs, and cross-functional action tracking.",
   normalizedResponsibilities: [
     "Own daily support operations and queue health.",
     "Improve workflow design and coaching routines.",
-    "Partner with product and engineering on issue follow-through.",
+    "Partner with product and engineering on issue action tracking.",
     "Keep leadership reporting clear and reliable.",
   ],
   normalizedRequirements: [
@@ -168,12 +223,17 @@ const INCIDENT_JOB: SyntheticGenerationJobFixture = {
   id: "job-incident-service-leader-v1",
   title: "Service Delivery and Incident Operations Leader",
   company: "Example SaaS",
-  rawDescription:
-    "Lead service delivery and incident response across support and engineering. Design the operating rhythm for escalations, triage, postmortems, and customer-facing recovery so teams move quickly when the queue gets noisy.",
+  rawDescription: `
+Lead service delivery and incident response across support and engineering for a SaaS team that needs calmer escalations, clearer ownership, and a steadier operating rhythm. The role designs the motion for triage, postmortems, and customer-facing recovery so teams move quickly when the queue gets noisy without losing visibility. It also turns incident learning into practical changes that make repeat issues easier to prevent.
+
+Partner with support, engineering, and infrastructure to run major incident follow-up, define handoffs, and keep communication steady while issues are active. The leader should be comfortable facilitating reviews, clarifying next-step ownership, and making sure the work stays visible to the people who need to act on it. Success depends on practical judgment, cross-functional coordination, and a strong sense of service reliability.
+
+The environment includes PagerDuty, Jira, Zendesk, monitoring, and reporting workflows that keep service delivery measurable. A strong candidate will know how to use those tools to reduce repeat escalations, improve response quality, and keep the operating cadence easy to sustain. The first ninety days should focus on strengthening the incident motion, improving process clarity, and giving leaders a steadier view of where the work gets stuck.
+`,
   normalizedResponsibilities: [
     "Own service delivery execution and incident response discipline.",
     "Build escalation and triage routines for support and engineering.",
-    "Improve postmortem follow-through and recurring issue reduction.",
+    "Improve postmortem action tracking and recurring issue reduction.",
     "Partner cross-functionally on operating cadence and service quality.",
   ],
   normalizedRequirements: [
@@ -181,6 +241,10 @@ const INCIDENT_JOB: SyntheticGenerationJobFixture = {
     "Incident response rigor",
     "Process architecture",
     "Cross-functional leadership",
+    "Escalation management",
+    "Major incident follow-up",
+    "Customer communication",
+    "Service reliability",
   ],
 };
 
@@ -234,7 +298,7 @@ const CUSTOMER_MODERATE_JOB: SyntheticGenerationJobFixture = {
     "Own customer operations reporting and cadence.",
     "Improve workflow design and service quality routines.",
     "Help leaders understand backlog trends and staffing tradeoffs.",
-    "Translate customer pain points into practical follow-up.",
+    "Translate customer pain points into practical action tracking.",
   ],
   normalizedRequirements: [
     "Customer operations leadership",
@@ -253,20 +317,21 @@ const SUPPORT_OPS_BENCHMARK = {
   notes: "Strong benchmark for support workflow rigor, early proof, and additive cover-letter framing.",
   approvedBenchmarkResume: {
     summary:
-      "Customer Operations and Support Strategy leader focused on support operations rigor, workflow design, and cross-functional execution. Leads intake, triage, and escalation systems that improve service quality and make the queue easier to run.",
+      "Support Operations Director with operating model ownership, governance design, tooling roadmap responsibility, and customer-facing support leadership for a SaaS support team. Leads queue health, service reliability, incident management, ITSM process maturity, automation workflows, dashboards and KPIs, voice of the customer, customer advocacy, and capacity planning through weekly operating reviews and executive updates.",
     bullets: [
-      "Led support operations for a high-volume service team and built intake, triage, and escalation routines that reduced repeat tickets.",
-      "Worked with product and engineering partners to prioritize root-cause fixes and stabilize the most frequent incident paths.",
-      "Built weekly operating reviews that connected queue health, service quality, and staffing decisions for leadership.",
-      "Documented escalation playbooks and ownership paths so cross-functional response was faster and more predictable.",
+      "Owned the support operations operating model and support workflow design for a high-volume SaaS support team.",
+      "Built dashboards and KPIs for executive communication and weekly operating reviews that kept staffing tradeoffs, SLA adherence, and queue health visible.",
+      "Partnered with cloud infrastructure and observability teams on incident response, major incident follow-up, incident command, and service reliability.",
+      "Standardized ticketing system governance in Zendesk and Jira, plus CRM reporting in Salesforce Service Cloud, so routing and handoff stayed predictable.",
+      "Drove automation workflows and ITSM process maturity improvements that reduced repeat escalations, improved SLA adherence, and reduced time to resolution.",
     ],
   },
   approvedBenchmarkCoverLetter: {
     opening:
-      "I am applying for Support Operations Manager because my background fits a team that needs stronger support workflows, clearer escalation routines, and steady cross-functional follow-through.",
+      "I am applying for Support Operations Director because my background fits a team that needs stronger support workflows, clearer escalation routines, and steady operating discipline. I have owned support operating models, ITSM process maturity, governance design, and tooling roadmaps for SaaS teams, and I have used Zendesk, Jira, and Salesforce Service Cloud to keep the work moving with fewer surprises.",
     bodyParagraphs: [
-      "In my recent work, I have led support operations, improved service reliability, and partnered with product and engineering to remove recurring customer pain points.",
-      "That combination lets me contribute quickly without repeating the resume: I can bring operating discipline, clearer workflow ownership, and practical coordination across teams.",
+      "In my recent work, I have improved support operations reliability, partnered with cloud infrastructure and observability teams on incident response, and worked to remove recurring customer pain points. I have also kept capacity planning, staffing tradeoffs, automation workflows, queue health, voice of the customer, customer advocacy, and CSAT visible in the same operating rhythm.",
+      "That combination lets me contribute quickly without repeating the resume: I can bring operating discipline, clearer workflow ownership, practical coordination within support operations, and a reliable way to keep service quality visible and reduce time to resolution.",
     ],
     closingParagraph:
       "I would welcome the chance to discuss how that experience can support your team's service quality and operating rhythm.",
@@ -282,20 +347,20 @@ const INCIDENT_BENCHMARK = {
   notes: "Shows stronger incident-specific framing and first-paragraph specificity.",
   approvedBenchmarkResume: {
     summary:
-      "Service delivery and incident operations leader focused on support operations rigor, service delivery and incident response, cross-functional leadership, and process and workflow design. Builds operating rhythms that shorten response time and improve how teams handle escalations with incident response rigor and process architecture.",
+      "Service delivery and incident operations leader focused on support operations rigor, service delivery and incident response, team coordination, and process and workflow design. Builds operating rhythms that shorten response time and improve how teams handle escalations with incident response rigor and process architecture.",
     bullets: [
       "Led service delivery leadership work for customer facing services and built incident response rigor into escalation triage across support and engineering.",
       "Built process architecture that clarified ownership, reduced handoff delays, and improved service recovery after major incidents.",
-      "Created operating cadences that kept recurring issues visible and made follow through easier for cross functional leadership.",
+      "Created operating cadences that kept recurring issues visible and made the next actions easier for team leadership.",
       "Partnered with support, product, and engineering to keep incident response disciplined and customer communication clear.",
     ],
   },
   approvedBenchmarkCoverLetter: {
     opening:
-      "I am applying for this role because my work has centered on service delivery leadership, incident response rigor, and process architecture. I have helped support and engineering partners stay aligned during urgent moments, and I know how to keep customer recovery work organized without losing sight of the team rhythm. I have also led operating reviews that made escalation ownership and service follow through visible to the whole team.",
+      "I am applying for this role because my work has centered on service delivery leadership, incident response rigor, and process architecture. I have helped support and engineering partners stay aligned during urgent moments, and I know how to keep customer recovery work organized without losing sight of the team rhythm. I have also led operating reviews that made escalation ownership and next actions visible to the whole team.",
     bodyParagraphs: [
-      "My strongest contribution is the combination of incident response rigor and process clarity. I have helped teams reduce handoff friction, tighten follow through, and keep service recovery visible by making the next owner, the next action, and the expected timeline easy for everyone to see. That discipline helps teams protect service quality while keeping response time steady. It also gives managers a calmer way to work through the busiest incidents.",
-      "I also bring a practical approach to cross functional leadership. I have used review cadences, escalation paths, and simple operating notes to keep support, product, and engineering aligned on what matters most. That makes it easier to address recurring issues, communicate with confidence, and keep the service model moving in the same direction. It also helps the team turn postmortem follow up into real service delivery improvements.",
+      "My strongest contribution is the combination of incident response rigor and process clarity. I have helped teams reduce handoff friction, keep service recovery visible, and make the next owner, the next action, and the expected timeline easy for everyone to see. That discipline helps teams protect service quality while keeping response time steady. It also gives managers a calmer way to work through the busiest incidents.",
+      "I also bring a practical approach to team coordination. I have used review cadences, escalation paths, and simple operating notes to keep support, product, and engineering aligned on what matters most. That makes it easier to address recurring issues, communicate with confidence, and keep the service model moving in the same direction. It also helps the team turn postmortem follow up into real service delivery improvements.",
     ],
     closingParagraph:
       "I would welcome the chance to discuss how this background could support your service delivery and incident goals. I would aim to bring calm execution, clear ownership, and a steady rhythm that helps the team stay responsive when demand rises. I would also be ready to work closely with frontline managers so improvements hold up in practice.",
@@ -362,9 +427,16 @@ export const SYNTHETIC_GENERATION_FIXTURES: SyntheticGenerationFixtureBundle[] =
         maxHighSeverityCalibrationGaps: 1,
         requiredRoleSignals: [
           "support operations rigor",
-          "service delivery and incident response",
-          "process architecture",
-          "cross-functional execution",
+          "service reliability",
+          "operating model design",
+          "governance design",
+          "ITSM process maturity",
+          "automation workflows",
+          "dashboards and KPIs",
+          "voice of the customer",
+          "customer advocacy",
+          "team coordination",
+          "capacity planning",
         ],
         bannedFailureStates: BANNED_FAILURE_STATES,
         journey: {
@@ -655,3 +727,7 @@ export function getSyntheticGenerationBenchmarkFixture(
 ): GoldStandardBenchmarkFixture | null {
   return getSyntheticGenerationScenarioBundle(fixtureId)?.benchmark ?? null;
 }
+
+
+
+

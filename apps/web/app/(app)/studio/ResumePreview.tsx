@@ -5,7 +5,7 @@ import type {
   ResumeEducation,
   ResumeExperience,
   ResumeModel,
-} from "@shared/resumeModel";
+} from "@/lib/resumeModel";
 
 type Props = {
   payload?: unknown;

@@ -27,13 +27,14 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/postgres
       JWT_SECRET: ${JWT_SECRET:-dev-local-super-long-random-string}
       APP_PUBLIC_WEB_URL: ${APP_PUBLIC_WEB_URL:-http://localhost:3000}
-      REQUIRE_ACCESS_CODE: ${REQUIRE_ACCESS_CODE:-true}
+      REQUIRE_ACCESS_CODE: ${REQUIRE_ACCESS_CODE:-false}
       TYPEORM_SYNCHRONIZE: "false"
     ports:
       - "3001:3001"
     command: sh -c "npm install && rm -rf dist tsconfig.build.tsbuildinfo && npm run build && npm run migration:run && npm run start:prod"
     volumes:
       - ../../apps/api:/usr/src/app
+      - ../../packages:/usr/src/packages
       - /usr/src/app/node_modules
 
   web:
@@ -55,6 +56,7 @@ services:
     command: sh -c "npm install && npm run dev -- --hostname 0.0.0.0 --port 3000"
     volumes:
       - ../../apps/web:/usr/src/app
+      - ../../packages:/usr/src/packages
       - /usr/src/app/node_modules
 
 volumes:

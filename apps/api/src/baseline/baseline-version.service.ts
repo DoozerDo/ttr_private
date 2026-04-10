@@ -12,6 +12,7 @@ import {
   ComplianceAction,
   ComplianceFlagSeverity,
   ComplianceTextSection,
+  GeneratedTextSourceType,
 } from '../compliance/compliance.types';
 import { ComplianceService } from '../compliance/compliance.service';
 import {
@@ -168,7 +169,14 @@ export class BaselineVersionService {
       }),
     );
     const snapshotSections = [...sections, ...additionSections];
-    const allowlistSnapshot = buildBaselineAllowlistSnapshot(snapshotSections);
+    const allowlistSnapshot = buildBaselineAllowlistSnapshot(
+      snapshotSections.map((section) => ({
+        title: section.title,
+        content: section.content,
+        sectionType: section.sectionType ?? null,
+        sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+      })),
+    );
 
     const normalizedBaselineSections =
       this.complianceService.normalizeSectionsForOutput(sections);

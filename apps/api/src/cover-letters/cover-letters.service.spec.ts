@@ -297,7 +297,7 @@ describe('CoverLettersService contract', () => {
     expect(coverRepo.save).not.toHaveBeenCalled();
   });
 
-  it('returns canonical unsupported_input for unsupported cover letter envelopes', async () => {
+  it('returns generation_failed when the cover letter quality gate rejects the draft', async () => {
     const { service } = buildService();
     const privateService = service as unknown as {
       buildCoverLetterDraft: (userId: string, input: typeof request) => Promise<unknown>;
@@ -309,9 +309,8 @@ describe('CoverLettersService contract', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(UnprocessableEntityException);
       expect((error as UnprocessableEntityException).getResponse()).toMatchObject({
-        code: 'insufficient_extracted_text',
-        category: 'unsupported_input',
-        retryable: false,
+        code: 'generation_failed',
+        message: 'Cover letter generation failed validation.',
       });
     }
   });

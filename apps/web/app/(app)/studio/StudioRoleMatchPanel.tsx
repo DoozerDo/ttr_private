@@ -5,7 +5,7 @@ import type {
   RoleMatchFinalPass,
   RoleMatchFinalPassPriorityCoverage,
   RoleMatchFinalPassRisk,
-} from "@shared/roleMatchFinalPass";
+} from "@/lib/roleMatchFinalPass";
 
 type Props = {
   finalPass: RoleMatchFinalPass;

@@ -200,14 +200,24 @@ export function buildDocumentStrategyPlan(input: DocumentStrategyPlanInput): Doc
   const roleLens = buildRoleLens(input);
   const selectedEvidence = evidenceFromBaseline(input, roleLens);
   const fitBand = bucketFitBand(fitScore);
+  const topNarrativeAxes = unique([positioningFrame, ...(roleLens.priorities.slice(0, 2) ?? [])]);
   const qualityPass: DocumentQualityPass = {
     framingStrength: fitBand === "strong" ? "high" : fitBand === "moderate" ? "medium" : "low",
     emphasisConfidence: fitScore !== null && fitScore >= 75 ? "high" : fitScore !== null && fitScore >= 60 ? "medium" : "low",
-    topNarrativeAxes: unique([positioningFrame, ...(roleLens.priorities.slice(0, 2) ?? [])]),
+    topNarrativeAxes,
     cutCandidates: unique([...(input.analysisGaps ?? []).slice(0, 2)]),
     mustLeadWith: unique([positioningFrame, ...(roleLens.requiredSignals.slice(0, 1) ?? [])]),
     avoidRepeating: unique([...(input.analysisRecommendedActions ?? []).slice(0, 2)]),
-    coverLetterDelta: unique([positioningFrame, ...(input.analysisSummary ? [input.analysisSummary] : [])]).slice(0, 3),
+    coverLetterDelta: unique([
+      `Explain why ${positioningFrame} is the right lens for this role.`,
+      topNarrativeAxes[0]
+        ? `Use ${topNarrativeAxes[0]} once as the opening proof point.`
+        : "Open with the strongest proof point for the role.",
+      topNarrativeAxes[1]
+        ? `Add ${topNarrativeAxes[1]} as a second proof point, not a rewrite of the resume.`
+        : "Keep the second paragraph additive and specific.",
+      "Show motivation and fit without repeating the resume.",
+    ]).slice(0, 4),
   };
 
   const summaryStrategy = normalizeText(

@@ -48,7 +48,7 @@ import {
   type RefinementPreset,
   type RefinementTarget,
   resolveRefinementTargets,
-} from "@shared/documentStrategyPlan";
+} from "@/lib/documentStrategyPlan";
 import {
   buildDocumentCritique,
   type DocumentCritique,
@@ -59,10 +59,10 @@ import {
   resolveRoleMatchFinalAdjustmentPreset,
   type RoleMatchFinalAdjustment,
   type RoleMatchFinalPass,
-} from "@shared/roleMatchFinalPass";
+} from "@/lib/roleMatchFinalPass";
 import {
   buildLanguageStylePass,
-} from "@shared/languageStylePass";
+} from "@/lib/languageStylePass";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
 import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
 import { resolveCanonicalState } from "@/lib/canonicalDecision";
@@ -100,7 +100,7 @@ import {
 } from "@/lib/studioTrustGate";
 import { BaselineBlockPolicyPanel } from "./BaselineBlockPolicyPanel";
 import { readResumeModel, ResumePreview } from "./ResumePreview";
-import type { ResumeModel } from "@shared/resumeModel";
+import type { ResumeModel } from "@/lib/resumeModel";
 import { StudioArtifactQualityPanel } from "./StudioArtifactQualityPanel";
 import { StudioCritiquePanel } from "./StudioCritiquePanel";
 import { StudioRoleMatchPanel } from "./StudioRoleMatchPanel";

@@ -295,6 +295,8 @@ type FitScoreResponse = {
   scorePresentationMode?: 'normal' | 'caution' | 'fix_first';
 
   scoring_v2?: CxFitV2Result;
+  supportingSignals?: string[];
+  baselineEvidence?: string[];
   verification_coverage?: {
     totalClaims: number;
     verifiedClaims: number;
@@ -3444,6 +3446,24 @@ export class AnalysisService {
       assessment,
     );
     const canonicalClaims = refreshedScoringV2?.debug?.toolingCoverage?.claims ?? [];
+    const supportedClaims = canonicalClaims.filter(
+      (claim) => claim.status === 'VERIFIED' || claim.status === 'INFERRED',
+    );
+    const supportingSignals = Array.from(
+      new Set(
+        supportedClaims
+          .map((claim) => claim.label?.trim())
+          .filter((label): label is string => Boolean(label)),
+      ),
+    );
+    const baselineEvidence = Array.from(
+      new Set(
+        supportedClaims
+          .flatMap((claim) => claim.evidenceRefs ?? [])
+          .map((value) => value.trim())
+          .filter((value) => value.length > 0),
+      ),
+    );
     const verificationCoverage =
       this.buildVerificationCoverageFromCanonicalClaims(canonicalClaims);
 
@@ -3470,6 +3490,8 @@ export class AnalysisService {
       confidenceReasons: assessment.confidenceReasons ?? [],
       createdAt: assessment.createdAt,
       scoring_v2: refreshedScoringV2,
+      supportingSignals,
+      baselineEvidence,
       verification_coverage: verificationCoverage,
       score_breakdown: scoreBreakdown,
       narrative,

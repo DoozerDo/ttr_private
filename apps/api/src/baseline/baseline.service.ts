@@ -33,14 +33,17 @@ import {
 import { BaselineVersion } from './baseline-version.entity';
 import { BaselineBlockPolicy } from './baseline-block-policy.entity';
 import { buildBaselineAllowlistSnapshot } from '../compliance/baseline-allowlist';
-import type { ComplianceTextSection } from '../compliance/compliance.types';
+import {
+  GeneratedTextSourceType,
+  type ComplianceTextSection,
+} from '../compliance/compliance.types';
 import {
   getInsufficientExtractedTextDetails,
   INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
   INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
 } from '../compliance/extracted-text.utils';
 import { EmbeddingService } from '../ai/embedding.service';
-import { FitAssessment } from '../analysis/fit-assessment.entity';
+import { FitAssessment, FitAssessmentVerdict } from '../analysis/fit-assessment.entity';
 import {
   FIT_REVIEW_DIMENSION_LABELS,
   type FitReviewDimensionKey,
@@ -605,6 +608,7 @@ export class BaselineService {
           title: section.title,
           content: section.content,
           sectionType: section.sectionType ?? null,
+          sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
         }),
       );
 
@@ -711,7 +715,12 @@ export class BaselineService {
     );
     const versionHash = this.buildVersionHash(fileHash, policyState);
     const allowlistSnapshot = buildBaselineAllowlistSnapshot(
-      savedBaseline.sections ?? [],
+      (savedBaseline.sections ?? []).map((section) => ({
+        title: section.title,
+        content: section.content,
+        sectionType: section.sectionType ?? null,
+        sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+      })),
     );
 
     const versionRecord = manager.create(BaselineVersion, {
@@ -823,7 +832,8 @@ return {
     // persisted fit_assessments row for the same userId + exact baselineId.
     const latestPerBaseline = await this.fitAssessmentRepository
       .createQueryBuilder('assessment')
-      .select('DISTINCT ON (assessment."baselineId") assessment."baselineId"', 'baselineId')
+      .distinctOn(['assessment.baselineId'])
+      .select('assessment."baselineId"', 'baselineId')
       .addSelect('assessment.id', 'id')
       .addSelect('assessment."createdAt"', 'createdAt')
       .addSelect('assessment."overallScore"', 'overallScore')
@@ -1190,8 +1200,78 @@ return {
     }
 
     const readinessScore = this.deriveBaselineReadinessScore(baseline);
-    await this.recordBaselineAnalysisScore(userId, baselineId, readinessScore);
-    return this.getBaselineByIdForUser(baselineId, userId);
+    const analyzedAt = new Date();
+    const readinessAssessment = this.fitAssessmentRepository.create({
+      userId,
+      // Baseline readiness is a baseline-level assessment, so we pin it to the
+      // baseline id to satisfy the fit_assessments jobId requirement.
+      jobId: baseline.id,
+      baselineId,
+      baselineVersion: baseline.version ?? null,
+      overallScore: readinessScore,
+      verdict: this.deriveBaselineReadinessVerdict(readinessScore),
+      dimensionScores: {
+        experienceAlignment: readinessScore,
+        leadershipLevel: readinessScore,
+        technicalPlatformFit: readinessScore,
+        industryContext: readinessScore,
+        strategicTacticalFit: readinessScore,
+      },
+      strengths: [],
+      gaps: [],
+      complianceFlags: [],
+      inputsHash: null,
+    });
+
+    let persistedAssessment: FitAssessment;
+    try {
+      persistedAssessment = await this.baselineRepository.manager.transaction(
+        async (manager) => {
+          const savedAssessment = await manager.save(FitAssessment, readinessAssessment);
+          if (!savedAssessment?.id) {
+            throw new InternalServerErrorException(
+              'Baseline readiness assessment was saved without an id',
+            );
+          }
+
+          await manager.update(
+            Baseline,
+            { id: baselineId, userId },
+            {
+              originalBaselineScore:
+                baseline.originalBaselineScore ?? readinessScore,
+              latestBaselineScore: readinessScore,
+              latestAssessmentId: savedAssessment.id,
+              firstAnalyzedAt: baseline.firstAnalyzedAt ?? analyzedAt,
+              lastAnalyzedAt: analyzedAt,
+            },
+          );
+
+          return savedAssessment;
+        },
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `Failed to persist baseline readiness analysis baselineId=${baselineId} assessmentId=${(readinessAssessment as { id?: string }).id ?? 'pending'} message=${message}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw error;
+    }
+
+    if (process.env.NODE_ENV !== 'production') {
+      this.logger.log(
+        `analyzeBaselineReadiness persisted baseline analysis baselineId=${baselineId} assessmentId=${persistedAssessment.id} score=${readinessScore} analyzedAt=${analyzedAt.toISOString()}`,
+      );
+    }
+
+    const result = await this.getBaselineByIdForUser(baselineId, userId);
+    if (process.env.NODE_ENV !== 'production') {
+      this.logger.log(
+        `analyzeBaselineReadiness mapped summary baselineId=${baselineId} latestAssessmentId=${result.latestAssessmentSummary.latestAssessmentId ?? 'null'} hasCompletedAssessment=${result.latestAssessmentSummary.hasCompletedAssessment} latestFitScore=${result.latestAssessmentSummary.latestFitScore ?? 'null'}`,
+      );
+    }
+    return result;
   }
 
   async recordBaselineAnalysisScore(
@@ -1219,6 +1299,16 @@ return {
     baseline.lastAnalyzedAt = now;
 
     return this.baselineRepository.save(baseline);
+  }
+
+  private deriveBaselineReadinessVerdict(score: number): FitAssessmentVerdict {
+    if (score >= 85) {
+      return FitAssessmentVerdict.APPLY;
+    }
+    if (score >= 70) {
+      return FitAssessmentVerdict.CONSIDER;
+    }
+    return FitAssessmentVerdict.SKIP;
   }
 
   async appendStrengtheningAddition(
@@ -1501,7 +1591,12 @@ return {
         latestVersion?.verifiedAdditions ?? [],
       );
       const allowlistSnapshot = buildBaselineAllowlistSnapshot(
-        baseline.sections ?? [],
+        (baseline.sections ?? []).map((section) => ({
+          title: section.title,
+          content: section.content,
+          sectionType: section.sectionType ?? null,
+          sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+        })),
       );
 
       const versionRecord = manager.create(BaselineVersion, {

@@ -21,5 +21,13 @@ export class CreateOpportunityFromStudioDto {
   @IsOptional()
   @IsString()
   baselineVersionUsed?: string;
+
+  @IsOptional()
+  @IsString()
+  analysisId?: string;
+
+  @IsOptional()
+  @IsString()
+  baselineId?: string;
 }
 

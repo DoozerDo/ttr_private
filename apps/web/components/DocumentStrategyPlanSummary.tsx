@@ -1,4 +1,7 @@
-import { buildDocumentStrategyPlanSummary, type DocumentStrategyPlan } from "@shared/documentStrategyPlan";
+import {
+  buildDocumentStrategyPlanSummary,
+  type DocumentStrategyPlan,
+} from "@/lib/documentStrategyPlan";
 
 type DocumentStrategyPlanSummaryProps = {
   plan: DocumentStrategyPlan;

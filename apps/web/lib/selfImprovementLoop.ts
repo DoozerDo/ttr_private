@@ -1,25 +1,25 @@
 import {
   buildCalibrationFeedback,
   type CalibrationFeedback,
-} from "@shared/calibrationFeedback";
+} from "@/lib/calibrationFeedback";
 import {
   buildGoldStandardCalibration,
   type GoldStandardBenchmarkCoverLetter,
   type GoldStandardBenchmarkFixture,
   type GoldStandardBenchmarkResume,
   type GoldStandardCalibration,
-} from "@shared/goldStandardCalibration";
+} from "@/lib/goldStandardCalibration";
 import {
   buildDocumentStrategyPlan,
   type DocumentStrategyPlan,
   type DocumentStrategyPlanInput,
-} from "@shared/documentStrategyPlan";
+} from "@/lib/documentStrategyPlan";
 import {
   buildLanguageStylePass,
   polishCoverLetterParagraphsText,
   polishResumeBulletsText,
   polishResumeSummaryText,
-} from "@shared/languageStylePass";
+} from "@/lib/languageStylePass";
 
 export type SelfImprovementCycleInput = {
   planInput: DocumentStrategyPlanInput;

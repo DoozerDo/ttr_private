@@ -21,5 +21,13 @@ export class CreateOpportunityFromFitReviewDto {
   @IsOptional()
   @IsString()
   baselineVersionUsed?: string;
+
+  @IsOptional()
+  @IsString()
+  analysisId?: string;
+
+  @IsOptional()
+  @IsString()
+  baselineId?: string;
 }
 

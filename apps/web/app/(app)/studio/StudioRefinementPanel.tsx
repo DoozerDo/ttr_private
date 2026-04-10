@@ -3,8 +3,8 @@
 import type {
   DocumentStrategyPlan,
   RefinementPreset,
-} from "@shared/documentStrategyPlan";
-import { REFINEMENT_PRESETS } from "@shared/documentStrategyPlan";
+} from "@/lib/documentStrategyPlan";
+import { REFINEMENT_PRESETS } from "@/lib/documentStrategyPlan";
 
 type Props = {
   plan: DocumentStrategyPlan;

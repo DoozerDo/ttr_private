@@ -1,4 +1,6 @@
 import { TemplateCoverLetterGenerator } from './template-cover-letter.generator';
+import { buildDocumentStrategyPlan } from '../../shared/documentStrategyPlan';
+import { getSyntheticGenerationScenarioBundle } from '../../synthetic/generation/synthetic-generation.fixtures';
 
 describe('cover letter delta quality', () => {
   it('keeps the letter additive to the resume and leads with a strategic fit narrative', () => {
@@ -66,5 +68,60 @@ describe('cover letter delta quality', () => {
     expect(result.content).toContain('Customer Operations and Support Strategy leader');
     expect(result.content).toContain('support operations rigor');
     expect(result.content).not.toMatch(/results-driven|proven track record/i);
+    expect(result.content).not.toMatch(/Dear Hiring Team,\s*Dear Hiring Team,/i);
+    expect(result.content.split(/\n\s*\n/).length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('generates a clean generation-ready cover letter for the canonical strong-fit support operations scenario', () => {
+    const generator = new TemplateCoverLetterGenerator();
+    const bundle = getSyntheticGenerationScenarioBundle('Support operations director');
+
+    expect(bundle).not.toBeNull();
+    const strongFitBundle = bundle!;
+    const plan = buildDocumentStrategyPlan({
+      fitScore: 87,
+      jobTitle: strongFitBundle.job.title,
+      jobCompany: strongFitBundle.job.company,
+      jobDescription: strongFitBundle.job.rawDescription,
+      jobRequirements: strongFitBundle.job.normalizedRequirements,
+      jobResponsibilities: strongFitBundle.job.normalizedResponsibilities,
+      analysisSummary:
+        'Support operations leader with incident response, staffing tradeoffs, and tooling governance.',
+      analysisStrengths: ['support operations rigor', 'service reliability', 'incident response'],
+      analysisGaps: ['none'],
+      analysisRecommendedActions: ['keep focus'],
+      baselineSections: strongFitBundle.baseline.sections,
+    });
+
+    const result = generator.generate({
+      baselineId: strongFitBundle.baseline.id,
+      jobId: strongFitBundle.job.id,
+      candidateName: 'Synthetic Runner',
+      closingTemplate: { key: 'steady', text: 'Thank you.' },
+      job: {
+        id: strongFitBundle.job.id,
+        title: strongFitBundle.job.title,
+        company: strongFitBundle.job.company,
+        responsibilities: strongFitBundle.job.normalizedResponsibilities,
+        requirements: strongFitBundle.job.normalizedRequirements,
+      },
+      allowedBaselineBlocks: strongFitBundle.baseline.sections.map((section, order) => ({
+        id: section.id,
+        title: section.title,
+        content: section.content,
+        includePolicy: 'ALWAYS',
+        order,
+        sectionType: section.sectionType,
+      })),
+      safeMode: false,
+      documentStrategyPlan: plan,
+      maxWords: 280,
+    });
+
+    expect(result.wordCount).toBeGreaterThan(250);
+    expect(result.wordCount).toBeLessThanOrEqual(400);
+    expect(result.content).toContain('Director of Support Operations opportunity at Example SaaS');
+    expect(result.content).not.toContain('Thank you for considering my application.');
+    expect(result.content).not.toContain('-');
   });
 });

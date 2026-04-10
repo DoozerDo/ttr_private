@@ -168,11 +168,17 @@ describe('AnalysisService Studio verification payload bridge', () => {
     const payload = await service.getFitAssessmentById('user-1', 'fit-1');
     const claims = payload.scoring_v2?.debug?.toolingCoverage?.claims ?? [];
     const salesforce = claims.find((claim: { key: string }) => claim.key === 'salesforce');
+    const supportingSignals = payload.supportingSignals ?? [];
+    const baselineEvidence = payload.baselineEvidence ?? [];
 
     expect(salesforce?.status).toBe('VERIFIED');
     const unresolved = claims.filter((claim: { status: string }) => claim.status !== 'VERIFIED');
     expect(unresolved.some((claim: { key: string }) => claim.key === 'salesforce')).toBe(false);
     const verifiedClaims = claims.filter((claim: { status: string }) => claim.status === 'VERIFIED').length;
     expect(verifiedClaims).toBeGreaterThan(0);
+    expect(supportingSignals.length).toBeGreaterThan(0);
+    expect(baselineEvidence.length).toBeGreaterThan(0);
+    expect(supportingSignals.join(' ')).toContain('salesforce');
+    expect(baselineEvidence.join(' ')).toContain('salesforce');
   });
 });

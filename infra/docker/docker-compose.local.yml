@@ -31,7 +31,7 @@ services:
       ENABLE_LLM_PARITY_SCORE: "true"
       APP_PUBLIC_WEB_URL: ${APP_PUBLIC_WEB_URL:-http://localhost:3000}
       JWT_SECRET: ${JWT_SECRET:-dev-local-super-long-random-string}
-      REQUIRE_ACCESS_CODE: ${REQUIRE_ACCESS_CODE:-true}
+      REQUIRE_ACCESS_CODE: ${REQUIRE_ACCESS_CODE:-false}
     command: sh -c "npm install --no-audit --no-fund && npm run start:dev"
     volumes:
       - ../../apps/api:/usr/src/app
@@ -60,6 +60,7 @@ services:
     command: sh -c "npm install --include=optional --no-audit --no-fund && npm run dev -- --hostname 0.0.0.0 --port 3000"
     volumes:
       - ../../apps/web:/usr/src/app
+      - ../../packages:/usr/src/app/packages
       - /usr/src/app/node_modules
     ports:
       - "3000:3000"

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Logger,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -175,6 +176,8 @@ type ResumeExperiencePipelineDiagnostics = {
 
 @Injectable()
 export class ResumeService {
+  private readonly logger = new Logger(ResumeService.name);
+
   constructor(
     @InjectRepository(Baseline)
     private readonly baselineRepository: Repository<Baseline>,
@@ -1628,6 +1631,12 @@ export class ResumeService {
         resumeGenerationReason: 'compliance_blocked',
         complianceEvaluationPassed: false,
       };
+      this.logger.warn(
+        `[resume-generation] compliance_blocked userId=${userId} baselineId=${baseline.id} baselineVersionId=${baselineVersion.id} jobId=${job?.id ?? jobId ?? 'null'} stage=${experienceDiagnostics.resumeGenerationStage ?? 'unknown'} reason=${experienceDiagnostics.resumeGenerationReason ?? 'unknown'} flags=${complianceFlags
+          .slice(0, 5)
+          .map((flag) => `${flag.code ?? 'unknown'}:${flag.severity ?? 'unknown'}`)
+          .join('|')}`,
+      );
       this.throwGenerationBlockedError(
         complianceFlags.slice(0, 3).map((flag) => ({
           code: flag.code ?? 'generation_blocked',
@@ -1716,6 +1725,8 @@ export class ResumeService {
         jobTitle: job?.title ?? 'Untitled role',
         fitScore: latestAssessment?.overallScore ?? 0,
         baselineVersionUsed: baselineVersion.id,
+        analysisId,
+        baselineId: baseline.id,
       },
       syntheticMetadata,
     );
@@ -2117,6 +2128,27 @@ export class ResumeService {
     );
     const blocked = flags.some((flag) => flag.severity === 'block');
     const warningFlags = flags.filter((flag) => flag.severity === 'warn');
+    if (warningFlags.length > 0 || blocked) {
+      this.logger.warn(
+        `[resume-readiness] userId=${userId} baselineId=${request.baselineId ?? 'null'} baselineVersionId=${request.baselineVersionId ?? 'null'} jobId=${request.jobId ?? 'null'} status=${blocked ? 'blocked' : 'limited'} flags=${flags
+          .slice(0, 5)
+          .map((flag) => {
+            const evidence = Array.isArray(flag.evidence)
+              ? flag.evidence
+                  .slice(0, 2)
+                  .map((item) =>
+                    [item.generatedClaim?.text ?? item.generated ?? '', item.baseline ?? '']
+                      .filter(Boolean)
+                      .join(' <- '),
+                  )
+                  .filter(Boolean)
+                  .join(';')
+              : '';
+            return `${flag.code}:${flag.severity}:${flag.message}${evidence ? ` evidence=${evidence}` : ''}`;
+          })
+          .join(' | ')}`,
+      );
+    }
     return {
       status: blocked ? 'blocked' : warningFlags.length > 0 ? 'limited' : 'ready',
       blocked,

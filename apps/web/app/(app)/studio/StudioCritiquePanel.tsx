@@ -3,7 +3,7 @@
 import {
   REFINEMENT_PRESETS,
   type RefinementPreset,
-} from "@shared/documentStrategyPlan";
+} from "@/lib/documentStrategyPlan";
 
 import {
   getCritiqueIssueLabel,

@@ -16,7 +16,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { DocumentStrategyPlanSummary } from "@/components/DocumentStrategyPlanSummary";
 import { buildExportPayload } from "../lib/exportPayload";
-import { buildDocumentStrategyPlan } from "@shared/documentStrategyPlan";
+import { buildDocumentStrategyPlan } from "@/lib/documentStrategyPlan";
 import {
   formatErrorMessage,
   parseComplianceError,

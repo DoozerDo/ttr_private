@@ -26,6 +26,10 @@ type CreateOpportunityInput = {
   salary?: string | null;
   fitScore: number;
   baselineVersionUsed?: string | null;
+  analysisId?: string | null;
+  baselineId?: string | null;
+  generationCompleted?: boolean;
+  savedEvidenceSummary?: string[] | null;
 };
 
 type GroupedOpportunities = {
@@ -337,23 +341,37 @@ export class OpportunitiesService {
       throw new BadRequestException('jobTitle is required');
     }
 
+    const score = Math.round(input.fitScore);
+    const band = fitBandFromScore(score);
+
     const existing = await this.opportunityRepository.findOne({
       where: { userId, companyName, jobTitle },
       order: { dateCreated: 'DESC' },
     });
 
     if (existing && !TERMINAL_STATUSES.has(existing.status)) {
-      return existing;
+      existing.analysisId = input.analysisId ?? existing.analysisId;
+      existing.baselineId = input.baselineId ?? existing.baselineId;
+      existing.savedBaselineId = input.baselineId ?? existing.savedBaselineId ?? existing.baselineId;
+      existing.baselineVersionUsed = input.baselineVersionUsed ?? existing.baselineVersionUsed;
+      existing.currentScore = score;
+      existing.currentBand = band;
+      existing.savedFitScore = score;
+      existing.initialScore = existing.initialScore ?? score;
+      existing.initialBand = existing.initialBand ?? band;
+      existing.savedGenerationCompleted = Boolean(existing.savedGenerationCompleted || input.generationCompleted);
+      existing.savedEvidenceSummary = this.toSavedEvidenceSummary(input.savedEvidenceSummary) ?? existing.savedEvidenceSummary;
+      return this.opportunityRepository.save(existing);
     }
-
-    const score = Math.round(input.fitScore);
-    const band = fitBandFromScore(score);
 
     const opportunity = this.opportunityRepository.create({
       userId,
       companyName,
       jobTitle,
       salary: input.salary?.trim() || null,
+      analysisId: input.analysisId ?? null,
+      baselineId: input.baselineId ?? null,
+      savedBaselineId: input.baselineId ?? null,
       status,
       initialScore: score,
       savedFitScore: score,

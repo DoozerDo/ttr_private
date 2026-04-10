@@ -138,7 +138,8 @@ const ingestionResult = {
     findOne: jest.fn(),
     find: jest.fn(),
     update: jest.fn(async () => ({ affected: 1 })),
-    save: jest.fn(async (payload: any) => {
+    save: jest.fn(async (...args: any[]) => {
+      const payload = args.length > 1 ? args[1] : args[0];
       if (Array.isArray(payload)) {
         return payload.map((item: any, index: number) => ({
           ...item,
@@ -156,6 +157,7 @@ const ingestionResult = {
 
   beforeEach(async () => {
     fitAssessmentRepository = {
+      create: jest.fn((payload: any) => payload),
       createQueryBuilder: jest.fn(() => ({
         select: jest.fn().mockReturnThis(),
         addSelect: jest.fn().mockReturnThis(),
@@ -313,6 +315,7 @@ const ingestionResult = {
   it('returns hasCompletedAssessment false when no fit assessments exist', async () => {
     baselineRepository.find = jest.fn().mockResolvedValue([baseline]);
     const qb = {
+      distinctOn: jest.fn().mockReturnThis(),
       select: jest.fn().mockReturnThis(),
       addSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
@@ -332,6 +335,7 @@ const ingestionResult = {
   it('returns latest fit assessment summary keyed by exact baseline id', async () => {
     baselineRepository.find = jest.fn().mockResolvedValue([baseline]);
     const qb = {
+      distinctOn: jest.fn().mockReturnThis(),
       select: jest.fn().mockReturnThis(),
       addSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
@@ -360,6 +364,7 @@ const ingestionResult = {
   it('returns baselines with default assessment summary when assessment lookup fails', async () => {
     baselineRepository.find = jest.fn().mockResolvedValue([baseline]);
     const qb = {
+      distinctOn: jest.fn().mockReturnThis(),
       select: jest.fn().mockReturnThis(),
       addSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
@@ -384,6 +389,7 @@ const ingestionResult = {
 
   it('returns analyzed assessment summary on baseline detail when completed assessment exists', async () => {
     const qb = {
+      distinctOn: jest.fn().mockReturnThis(),
       select: jest.fn().mockReturnThis(),
       addSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
@@ -408,8 +414,29 @@ const ingestionResult = {
     expect(result.latestAssessmentSummary.latestFitScore).toBe(91);
   });
 
+  it('uses distinctOn when loading the latest assessment summary', async () => {
+    baselineRepository.find = jest.fn().mockResolvedValue([baseline]);
+    const qb = {
+      distinctOn: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([]),
+    };
+    fitAssessmentRepository.createQueryBuilder.mockReturnValue(qb);
+
+    await service.listBaselinesForUser('user-1');
+
+    expect(qb.distinctOn).toHaveBeenCalledWith(['assessment.baselineId']);
+    expect(qb.select).toHaveBeenCalledWith('assessment."baselineId"', 'baselineId');
+  });
+
   it('returns default not analyzed summary on baseline detail when no completed assessment exists', async () => {
     const qb = {
+      distinctOn: jest.fn().mockReturnThis(),
       select: jest.fn().mockReturnThis(),
       addSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
@@ -822,20 +849,36 @@ describe('BaselineService - reparse ingestion source', () => {
 describe('BaselineService - score history persistence', () => {
   let service: BaselineService;
   let baselineRepository: any;
+  let fitAssessmentRepository: any;
+  let transactionManager: any;
 
   beforeEach(async () => {
+    transactionManager = {
+      create: jest.fn((_: any, payload: any) => payload),
+      save: jest.fn(async (...args: any[]) => {
+        const payload = args.length > 1 ? args[1] : args[0];
+        if (Array.isArray(payload)) {
+          return payload.map((item: any, index: number) => ({
+            ...item,
+            id: item.id ?? `generated-${index}`,
+          }));
+        }
+
+        return {
+          ...payload,
+          id: payload.id ?? 'generated-id',
+        };
+      }),
+      update: jest.fn(async () => ({ affected: 1 })),
+      delete: jest.fn(),
+    };
+
     baselineRepository = {
       findOne: jest.fn(),
       save: jest.fn(async (value: any) => value),
       update: jest.fn(async () => ({ affected: 1 })),
       manager: {
-        transaction: jest.fn(async (cb: any) =>
-          cb({
-            create: jest.fn((_: any, payload: any) => payload),
-            save: jest.fn(async (value: any) => value),
-            delete: jest.fn(),
-          }),
-        ),
+        transaction: jest.fn(async (cb: any) => cb(transactionManager)),
       },
     };
 
@@ -849,7 +892,8 @@ describe('BaselineService - score history persistence', () => {
         { provide: getRepositoryToken(BaselineParsed), useValue: { findOne: jest.fn() } },
         {
           provide: getRepositoryToken(FitAssessment),
-          useValue: {
+          useValue: (fitAssessmentRepository = {
+            create: jest.fn((payload: any) => payload),
             createQueryBuilder: jest.fn(() => ({
               select: jest.fn().mockReturnThis(),
               addSelect: jest.fn().mockReturnThis(),
@@ -859,7 +903,7 @@ describe('BaselineService - score history persistence', () => {
               addOrderBy: jest.fn().mockReturnThis(),
               getRawMany: jest.fn().mockResolvedValue([]),
             })),
-          },
+          }),
         },
         {
           provide: BaselineIngestionService,
@@ -953,6 +997,38 @@ describe('BaselineService - score history persistence', () => {
       ],
     } as Baseline;
 
+    let persistedAssessment: any = null;
+    fitAssessmentRepository.create.mockImplementation((payload: any) => payload);
+    fitAssessmentRepository.createQueryBuilder.mockImplementation(() => ({
+      distinctOn: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue(
+        persistedAssessment
+          ? [
+              {
+                baselineId: 'b-1',
+                id: persistedAssessment.id,
+                createdAt: persistedAssessment.createdAt,
+                overallScore: persistedAssessment.overallScore,
+              },
+            ]
+          : [],
+      ),
+    }));
+    transactionManager.save.mockImplementation(async (...args: any[]) => {
+      const payload = args.length > 1 ? args[1] : args[0];
+      persistedAssessment = {
+        ...payload,
+        id: payload.id ?? 'assessment-readiness-1',
+        createdAt: payload.createdAt ?? new Date('2026-03-25T10:00:00.000Z'),
+      };
+      return persistedAssessment;
+    });
     baselineRepository.findOne.mockImplementation(async () => baselineRecord);
     baselineRepository.save.mockImplementation(async (value: any) => {
       Object.assign(baselineRecord, value);
@@ -961,7 +1037,10 @@ describe('BaselineService - score history persistence', () => {
 
     const result = await service.analyzeBaselineReadiness('user-1', 'b-1');
 
+    expect(transactionManager.save).toHaveBeenCalled();
+    expect(persistedAssessment?.id).toBeDefined();
     expect(result.latestAssessmentSummary.hasCompletedAssessment).toBe(true);
+    expect(result.latestAssessmentSummary.latestAssessmentId).toBe('assessment-readiness-1');
     expect(result.latestAssessmentSummary.latestFitScore).toBeGreaterThanOrEqual(45);
     expect(result.latestAssessmentSummary.latestAssessmentCreatedAt).toBeInstanceOf(Date);
   });

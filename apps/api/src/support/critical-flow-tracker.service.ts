@@ -1,6 +1,5 @@
 import {
   Injectable,
-  InternalServerErrorException,
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -206,7 +205,11 @@ export class CriticalFlowTrackerService {
   }
 
   private async createGitHubIssue(payload: { title: string; body: string; labels: string[] }) {
-    const { owner, repo, token } = this.ensureGitHubConfig();
+    const config = this.ensureGitHubConfig();
+    if (!config) {
+      return null;
+    }
+    const { owner, repo, token } = config;
     try {
       const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues`, {
         method: 'POST',
@@ -251,7 +254,7 @@ export class CriticalFlowTrackerService {
     const token = this.configService.get<string>('GITHUB_BUG_REPORT_TOKEN');
     if (!owner || !repo || !token) {
       this.logger.warn('GitHub bug reporting is not configured.');
-      throw new InternalServerErrorException('Bug reporting is not configured.');
+      return null;
     }
     return { owner, repo, token };
   }
