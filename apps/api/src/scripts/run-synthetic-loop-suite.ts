@@ -230,6 +230,13 @@ async function registerSyntheticUserForEmail(email: string) {
     }),
   });
   const body = await readBody(response);
+  if (response.status === 409) {
+    log('synthetic-loop-user-already-registered', {
+      email,
+      body,
+    });
+    return;
+  }
   assert(
     response.ok,
     `synthetic user registration failed for ${email}: ${body?.message ?? body?.error ?? response.status}`,
@@ -306,6 +313,16 @@ async function tryLoginWithEmail(
     const cookie = setCookie.split(';')[0];
     assert(cookie, 'login did not return an auth cookie');
     return { cookie, email };
+  }
+
+  if (response.status === 401 && !retriedAfterRegistration) {
+    log('synthetic-loop-login-user-missing', {
+      email,
+      status: response.status,
+      body,
+    });
+    await registerSyntheticUserForEmail(email);
+    return tryLoginWithEmail(email, true);
   }
 
   const message = String(body?.message ?? body?.error ?? response.status);
