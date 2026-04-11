@@ -3024,7 +3024,10 @@ export default function StudioPage() {
     setAnalysisLoading(true);
     setAnalysisError(null);
     console.info("[studio] hydration_started", {
-      stage: "studio",
+      area: "studio",
+      operation: "hydrate_analysis",
+      status: "info",
+      code: "hydration_started",
       analysisId: requestedAnalysisId,
     });
     const loadAnalysis = async () => {
@@ -3038,9 +3041,12 @@ export default function StudioPage() {
           setAnalysis(null);
           setAnalysisError(message);
           console.warn("[studio] hydration_failed", {
-            stage: "studio",
+            area: "studio",
+            operation: "hydrate_analysis",
+            status: "warn",
+            code: "hydration_failed",
             analysisId: requestedAnalysisId,
-            status: response.status,
+            responseStatus: response.status,
           });
           return;
         }
@@ -3048,9 +3054,12 @@ export default function StudioPage() {
           setAnalysis(null);
           setAnalysisError(ANALYSIS_LOAD_ERROR_MESSAGE);
           console.warn("[studio] hydration_failed", {
-            stage: "studio",
+            area: "studio",
+            operation: "hydrate_analysis",
+            status: "warn",
+            code: "hydration_failed",
             analysisId: requestedAnalysisId,
-            status: "invalid_payload",
+            responseStatus: "invalid_payload",
           });
           return;
         }
@@ -3061,16 +3070,22 @@ export default function StudioPage() {
           setAnalysis(null);
           setAnalysisError(ANALYSIS_LOAD_ERROR_MESSAGE);
           console.warn("[studio] hydration_failed", {
-            stage: "studio",
+            area: "studio",
+            operation: "hydrate_analysis",
+            status: "warn",
+            code: "hydration_failed",
             analysisId: requestedAnalysisId,
-            status: "missing_required_context",
+            responseStatus: "missing_required_context",
           });
           return;
         }
         setAnalysis(nextAnalysis);
         setAnalysisError(null);
         console.info("[studio] hydration_succeeded", {
-          stage: "studio",
+          area: "studio",
+          operation: "hydrate_analysis",
+          status: "info",
+          code: "hydration_succeeded",
           analysisId: requestedAnalysisId,
           jobId: nextAnalysis?.jobId ?? null,
           baselineId: nextAnalysis?.baselineId ?? null,
@@ -3099,9 +3114,12 @@ export default function StudioPage() {
             : ANALYSIS_LOAD_ERROR_MESSAGE,
         );
         console.error("[studio] hydration_failed", {
-          stage: "studio",
+          area: "studio",
+          operation: "hydrate_analysis",
+          status: "error",
+          code: "hydration_failed",
           analysisId: requestedAnalysisId,
-          status: "exception",
+          responseStatus: "exception",
         });
       } finally {
         if (!canceled) {
@@ -3202,7 +3220,11 @@ export default function StudioPage() {
       analysisId: requestedAnalysisId || undefined,
     });
     console.info("[studio] generation_requested", {
-      documentType: "resume",
+      area: "studio",
+      operation: "generate",
+      status: "info",
+      code: "generation_requested",
+      artifactType: "resume",
       requestId: request.requestId,
       analysisId: requestedAnalysisId || null,
       jobId: effectiveJobId || null,
@@ -3234,8 +3256,12 @@ export default function StudioPage() {
       }
       if (!response.ok) {
         console.warn("[studio] generation_failed", {
-          documentType: "resume",
-          status: response.status,
+          area: "studio",
+          operation: "generate",
+          status: "warn",
+          code: "generation_failed",
+          artifactType: "resume",
+          responseStatus: response.status,
           requestId: request.requestId,
         });
         const tierGate = parseTierGateError({ status: response.status, payload: responsePayload });
@@ -3376,7 +3402,11 @@ export default function StudioPage() {
         setUnlockGenerationConfirmation("Generated from verified evidence aligned to this role.");
       }
       console.info("[studio] generation_succeeded", {
-        documentType: "resume",
+        area: "studio",
+        operation: "generate",
+        status: "info",
+        code: "generation_succeeded",
+        artifactType: "resume",
         requestId: request.requestId,
       });
     } catch (error) {
@@ -3593,7 +3623,11 @@ export default function StudioPage() {
       analysisId: requestedAnalysisId || undefined,
     });
     console.info("[studio] generation_requested", {
-      documentType: "cover_letter",
+      area: "studio",
+      operation: "generate",
+      status: "info",
+      code: "generation_requested",
+      artifactType: "cover_letter",
       requestId: request.requestId,
       analysisId: requestedAnalysisId || null,
       jobId: effectiveJobId || null,
@@ -3626,8 +3660,12 @@ export default function StudioPage() {
       }
       if (!response.ok) {
         console.warn("[studio] generation_failed", {
-          documentType: "cover_letter",
-          status: response.status,
+          area: "studio",
+          operation: "generate",
+          status: "warn",
+          code: "generation_failed",
+          artifactType: "cover_letter",
+          responseStatus: response.status,
           requestId: request.requestId,
         });
         if (response.status === 409) {
@@ -3759,7 +3797,11 @@ export default function StudioPage() {
       setCoverWarningFlags(extractComplianceWarnings(validatedResult.output));
       setCoverAuditId(normalizeAuditId(validatedResult.output));
       console.info("[studio] generation_succeeded", {
-        documentType: "cover_letter",
+        area: "studio",
+        operation: "generate",
+        status: "info",
+        code: "generation_succeeded",
+        artifactType: "cover_letter",
         requestId: request.requestId,
       });
     } catch (error) {

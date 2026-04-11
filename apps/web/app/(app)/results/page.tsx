@@ -3451,7 +3451,10 @@ export default function ResultsPage() {
     setLatest(null);
     setComplianceError(null);
     console.info("[results] hydration_started", {
-      stage: "results",
+      area: "results",
+      operation: "hydrate_latest",
+      status: "info",
+      code: "hydration_started",
       jobId: targetJobId,
       baselineId: targetBaselineId,
       allowCreate,
@@ -3470,7 +3473,10 @@ export default function ResultsPage() {
 
       if (res.status === 404 && allowCreate) {
         console.info("[results] hydration_not_found_running_analysis", {
-          stage: "results",
+          area: "results",
+          operation: "hydrate_latest",
+          status: "info",
+          code: "hydration_not_found_running_analysis",
           jobId: targetJobId,
           baselineId: targetBaselineId,
         });
@@ -3498,8 +3504,11 @@ export default function ResultsPage() {
             return;
           }
           console.warn("[results] hydration_run_failed", {
-            stage: "results",
-            status: runResponse.status,
+            area: "results",
+            operation: "hydrate_latest",
+            status: "warn",
+            code: "hydration_run_failed",
+            responseStatus: runResponse.status,
           });
           const message = formatErrorMessage(runPayload, "Unable to run compatibility analysis.");
           throw new Error(message);
@@ -3530,8 +3539,11 @@ export default function ResultsPage() {
 
       if (!res.ok) {
         console.warn("[results] hydration_failed", {
-          stage: "results",
-          status: res.status,
+          area: "results",
+          operation: "hydrate_latest",
+          status: "warn",
+          code: "hydration_failed",
+          responseStatus: res.status,
         });
         const compliance = parseComplianceError({ status: res.status, payload });
         if (compliance) {
@@ -3569,11 +3581,14 @@ export default function ResultsPage() {
           return;
         }
         console.info("[results] hydration_succeeded", {
-          stage: "results",
+          area: "results",
+          operation: "hydrate_latest",
+          status: "info",
+          code: "hydration_succeeded",
           assessmentId: sanitizedData.assessmentId ?? null,
           jobId: sanitizedData.jobId ?? null,
-        baselineId: sanitizedData.baselineId ?? null,
-      });
+          baselineId: sanitizedData.baselineId ?? null,
+        });
       if (!sanitizedData.assessmentId) {
         throw new Error("Latest assessment is missing an assessment ID.");
       }
@@ -3594,8 +3609,11 @@ export default function ResultsPage() {
           return;
         }
         console.error("[results] hydration_failed", {
-          stage: "results",
-          status: "exception",
+          area: "results",
+          operation: "hydrate_latest",
+          status: "error",
+          code: "hydration_failed",
+          responseStatus: "exception",
         });
         trackEvent("analysis_load_failed", {
         source: "results",

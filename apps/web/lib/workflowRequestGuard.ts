@@ -56,7 +56,11 @@ export function logWorkflowRequestEvent(
   },
 ) {
   const payload = {
+    area: "workflow",
+    operation: input.action,
     event,
+    status: event,
+    code: event,
     action: input.action,
     requestId: input.requestId ?? null,
     expectedPairKey: buildWorkflowPairKey(input.expected),

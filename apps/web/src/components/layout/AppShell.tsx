@@ -88,6 +88,11 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
   const isBaseline = pathname.startsWith("/baseline");
   const [, setHasBaseline] = useState(false);
   const [, setHasJob] = useState(false);
+  const [storedContext, setStoredContext] = useState<StoredContext>({
+    hasBaseline: false,
+    hasJob: false,
+    lastAnalysis: null,
+  });
   const lastPath = useRef(pathname);
 
   const refreshContext = useCallback(async () => {
@@ -148,6 +153,7 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
       jobsOk = stored.hasJob;
     }
 
+    setStoredContext(getStoredContext());
     setHasBaseline(Boolean(baselinesOk));
     setHasJob(Boolean(jobsOk));
 
@@ -155,6 +161,7 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    setStoredContext(getStoredContext());
     const timer = window.setTimeout(() => {
       void refreshContext();
     }, 0);
@@ -391,7 +398,6 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
     console.info(`WEB_BUILD_ID=${shortBuildSha}`);
   }, []);
 
-  const storedContext = getStoredContext();
   const lastAnalysis = storedContext.lastAnalysis;
   const analysisPayload = lastAnalysis?.analysis as
     | {

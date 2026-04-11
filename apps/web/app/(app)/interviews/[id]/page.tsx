@@ -612,9 +612,13 @@ export default function InterviewSessionPage() {
           }
 
           if (isDevEnvironment) {
-            console.error("Interview load failed", {
+            console.error("[interviews] load_failed", {
+              area: "interviews",
+              operation: "load_session",
+              status: "error",
+              code: "load_failed",
               sessionId,
-              status: response.status,
+              responseStatus: response.status,
               payload,
             });
           }
@@ -634,7 +638,15 @@ export default function InterviewSessionPage() {
         setLoadMessage(message);
         setError(message);
         if (isDevEnvironment) {
-          console.error("Interview load error", { sessionId, error: loadError });
+          console.error("[interviews] load_failed", {
+            area: "interviews",
+            operation: "load_session",
+            status: "error",
+            code: "load_failed",
+            sessionId,
+            message,
+            error: loadError instanceof Error ? loadError.message : String(loadError),
+          });
         }
       }
     };

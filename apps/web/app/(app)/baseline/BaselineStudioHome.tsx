@@ -751,6 +751,10 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         ) {
           if (process.env.NODE_ENV !== "production") {
             console.info("[BaselineStudioHome] dropped stale baseline detail response", {
+              area: "baseline",
+              operation: "load_details",
+              status: "warn",
+              code: "stale_response_dropped",
               baselineId,
               requestId,
               currentBaselineId: primaryBaselineIdRef.current,
@@ -769,7 +773,14 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         ) {
           return null;
         }
-        console.error("Unable to load baseline details", fetchError);
+        console.error("[BaselineStudioHome] baseline_details_failed", {
+          area: "baseline",
+          operation: "load_details",
+          status: "error",
+          code: "load_failed",
+          baselineId,
+          message: fetchError instanceof Error ? fetchError.message : String(fetchError),
+        });
         setError(
           fetchError instanceof Error
             ? fetchError.message
@@ -837,6 +848,10 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
 
         if (process.env.NODE_ENV !== "production") {
           console.debug("[BaselineStudioHome] canonical analyze complete", {
+            area: "baseline",
+            operation: "analyze",
+            status: "debug",
+            code: "analysis_completed",
             baselineId,
             hasCompletedAssessment:
               payload?.latestAssessmentSummary?.hasCompletedAssessment ?? false,
@@ -857,7 +872,14 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         ) {
           return;
         }
-        console.error("Unable to run baseline analysis", runError);
+        console.error("[BaselineStudioHome] baseline_analysis_failed", {
+          area: "baseline",
+          operation: "analyze",
+          status: "error",
+          code: "analysis_failed",
+          baselineId,
+          message: runError instanceof Error ? runError.message : String(runError),
+        });
         setError(
           runError instanceof Error
             ? runError.message

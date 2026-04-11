@@ -237,10 +237,15 @@ export class WorkflowIdempotencyService {
     },
   ) {
     if (process.env.NODE_ENV === 'production') return;
-    this.logger.debug('[workflow-idempotency] event', {
-      timestamp: new Date().toISOString(),
-      status,
-      ...input,
-    });
+    this.logger.debug(
+      JSON.stringify({
+        area: 'workflow',
+        operation: 'idempotency',
+        status,
+        code: status,
+        timestamp: new Date().toISOString(),
+        ...input,
+      }),
+    );
   }
 }

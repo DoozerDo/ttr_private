@@ -2507,13 +2507,6 @@ export class AnalysisService {
     let logAttemptEvent:
       | ((event: string, details?: Record<string, unknown>) => void)
       | null = null;
-    const safeStringify = (value: unknown) => {
-      try {
-        return JSON.stringify(value);
-      } catch {
-        return '"[unserializable]"';
-      }
-    };
     const logStageLifecycle = (
       event: string,
       pipelineStage: PipelineStage | 'run',
@@ -2521,17 +2514,17 @@ export class AnalysisService {
     ) => {
       if (!this.isDevMode() || !attemptContext) return;
       const payload = {
+        area: 'analysis',
+        operation: 'run',
+        status: event,
+        code: event,
         runId: attemptContext.attemptId,
         baselineId: attemptContext.baselineId,
         jobId: attemptContext.jobId,
         pipelineStage,
         ...details,
       };
-      console.log(
-        `[SCORING][runId=${attemptContext.attemptId}] stage=${event} details=${safeStringify(
-          payload,
-        )}`,
-      );
+      this.logger.debug(JSON.stringify(payload));
     };
     try {
       const normalizedPayload = payload as RunFitAssessmentPayload;
@@ -3251,18 +3244,35 @@ export class AnalysisService {
             lastAnalyzedAt,
           },
         );
-        if (process.env.NODE_ENV !== 'production') {
-          this.logger.log(
-            `runFitAssessment baseline linkage persisted baselineId=${baseline.id} assessmentId=${savedAssessment.id} score=${finalScore} lastAnalyzedAt=${lastAnalyzedAt.toISOString()}`,
-          );
-        }
         this.logger.log(
-          `[fit-score] analysis.run result_persisted runId=${attemptContext.attemptId} userId=${userId} baselineId=${baseline.id} jobId=${resolvedJobId} assessmentId=${savedAssessment.id} dedupeKey=${analysisDedupeKey}`,
+          JSON.stringify({
+            area: 'analysis',
+            operation: 'run',
+            status: 'completed',
+            code: 'result_persisted',
+            runId: attemptContext.attemptId,
+            userId,
+            baselineId: baseline.id,
+            jobId: resolvedJobId,
+            assessmentId: savedAssessment.id,
+            dedupeKey: analysisDedupeKey,
+            score: finalScore,
+          }),
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.error(
-          `Failed to persist baseline linkage baselineId=${baseline.id} assessmentId=${savedAssessment.id} message=${message}`,
+          JSON.stringify({
+            area: 'analysis',
+            operation: 'run',
+            status: 'error',
+            code: 'artifact_write_conflict',
+            runId: attemptContext.attemptId,
+            baselineId: baseline.id,
+            jobId: resolvedJobId,
+            assessmentId: savedAssessment.id,
+            message,
+          }),
           error instanceof Error ? error.stack : undefined,
         );
         await this.workflowIdempotencyService.markFailure({
@@ -3276,12 +3286,6 @@ export class AnalysisService {
         });
         throw new InternalServerErrorException(
           'Unable to persist baseline assessment linkage',
-        );
-      }
-
-      if (process.env.NODE_ENV !== 'production') {
-        this.logger.log(
-          `runFitAssessment persisted assessment id=${savedAssessment.id} userId=${savedAssessment.userId} baselineId=${savedAssessment.baselineId} createdAt=${savedAssessment.createdAt.toISOString()} score=${savedAssessment.overallScore}`,
         );
       }
 
@@ -3730,7 +3734,17 @@ export class AnalysisService {
 
       const runId = shortTextWarningKey ?? this.nextShortTextWarningRequestRunId();
       this.logger.error(
-        `Expanded fit assessment failed [${runId}] for user ${userId}, baseline ${payload.baselineId ?? 'unknown'}, job ${payload.jobId ?? 'unknown'}`,
+        JSON.stringify({
+          area: 'analysis',
+          operation: 'expanded_fit',
+          status: 'error',
+          code: 'computation_failed',
+          runId,
+          userId,
+          baselineId: payload.baselineId ?? 'unknown',
+          jobId: payload.jobId ?? 'unknown',
+          message: error instanceof Error ? error.message : String(error),
+        }),
         error instanceof Error ? error.stack ?? error.message : String(error),
       );
 

@@ -1144,16 +1144,22 @@ const showInterruptionState =
     const requestTimeoutMs = SCORING_REQUEST_TIMEOUT_MS;
     const pairKey = `${baselineForRun}:${jobForRun}`;
     const isDuplicateSamePairRequest = inFlightPairKey === pairKey;
-    console.info("[target] scoring_request_invoked", {
-      timestamp: new Date(requestStartMs).toISOString(),
-      requestId,
-      requestKey,
-      pairKey,
-      baselineId: baselineForRun,
-      jobId: jobForRun,
-      reason: options?.reason ?? "initial_manual",
-      isDuplicateSamePairRequest,
-    });
+    if (process.env.NODE_ENV !== "production") {
+      console.debug("[target] scoring_request_invoked", {
+        area: "analysis",
+        operation: "run",
+        status: "debug",
+        code: "request_invoked",
+        timestamp: new Date(requestStartMs).toISOString(),
+        requestId,
+        requestKey,
+        pairKey,
+        baselineId: baselineForRun,
+        jobId: jobForRun,
+        reason: options?.reason ?? "initial_manual",
+        isDuplicateSamePairRequest,
+      });
+    }
     const requestTimeoutId = window.setTimeout(() => {
       if (activeRunRequestIdRef.current !== requestId) return;
       const currentScope: WorkflowRequestScope = {
@@ -1166,6 +1172,10 @@ const showInterruptionState =
         "stale",
       );
       console.warn("[target] scoring_request_timeout", {
+        area: "analysis",
+        operation: "run",
+        status: "warn",
+        code: "request_timeout",
         requestId,
         requestKey,
         pairKey,
@@ -1217,17 +1227,11 @@ const showInterruptionState =
       : "manual";
 
     if (inFlightPairKey === pairKey) return;
-    if (process.env.NODE_ENV !== "production") {
-      console.info("[target] run_scoring_started", {
-        baselineId: baselineForRun,
-        jobId: jobForRun,
-        triggerType: runTriggerType,
-        requestId,
-        requestKey,
-        inputsHash: requestKey,
-      });
-    }
     console.info("[target] scoring_request_start", {
+      area: "analysis",
+      operation: "run",
+      status: "info",
+      code: "request_started",
       requestId,
       requestKey,
       pairKey,
@@ -1297,16 +1301,26 @@ const showInterruptionState =
         triggerType: runTriggerType,
       }),
     });
-    console.info("[target] scoring_api_response_received", {
-      requestId,
-      requestKey,
-      pairKey,
-      status: response.status,
-      ok: response.ok,
-    });
+    if (process.env.NODE_ENV !== "production") {
+      console.debug("[target] scoring_api_response_received", {
+        area: "analysis",
+        operation: "run",
+        status: "debug",
+        code: "api_response_received",
+        requestId,
+        requestKey,
+        pairKey,
+        responseStatus: response.status,
+        ok: response.ok,
+      });
+    }
 
       const { payload: nextResult, runState } = await parseAnalysisRunResponse(response);
       console.info("[target] scoring_api_response_type", {
+        area: "analysis",
+        operation: "run",
+        status: runState === "ok" ? "info" : "warn",
+        code: runState,
         requestId,
         requestKey,
         pairKey,
@@ -1370,6 +1384,10 @@ const showInterruptionState =
 
         if (process.env.NODE_ENV !== "production") {
           console.debug("[target] analysis interruption decision", {
+            area: "analysis",
+            operation: "run",
+            status: "debug",
+            code: "interruption_decision",
             baselineId: baselineForRun,
             jobId: jobForRun,
             currentBaselineId,
@@ -1390,7 +1408,12 @@ const showInterruptionState =
             : currentJobId !== jobForRun
               ? "jobId changed"
               : "request marked interrupted";
-        console.warn(`SCORING INVALIDATED - REASON: ${invalidationReason}`, {
+        console.warn("[target] scoring_interrupted", {
+          area: "analysis",
+          operation: "run",
+          status: "warn",
+          code: "stale_request_ignored",
+          reason: invalidationReason,
           baselineIdBeforeRequest: baselineForRun,
           baselineIdAfterInterruption: currentBaselineId,
           jobIdBeforeRequest: jobForRun,
@@ -1517,23 +1540,15 @@ const showInterruptionState =
         resultJobId = pair.jobId;
       }
       if (!isMatchingPair(pair, baselineForRun, jobForRun)) {
-        if (process.env.NODE_ENV !== "production") {
-          console.debug("[target] run rejected", {
-            baselineId: baselineForRun,
-            jobId: jobForRun,
-            resultBaselineId,
-            resultJobId,
-          });
-        }
         throw new Error("Analysis result does not match the active baseline and job selection.");
       }
 
       if (process.env.NODE_ENV !== "production") {
-        console.debug("[target] run accepted", {
-          baselineId: baselineForRun,
-          jobId: jobForRun,
-        });
         console.info("[target] run_scoring_completed", {
+          area: "analysis",
+          operation: "run",
+          status: "info",
+          code: "completed",
           baselineId: baselineForRun,
           jobId: jobForRun,
           score: numericScore,
@@ -1668,6 +1683,10 @@ const showInterruptionState =
     if (!currentPairKey) {
       if (process.env.NODE_ENV !== "production") {
         console.debug("[target] scoring_auto_retry_skipped", {
+          area: "analysis",
+          operation: "run",
+          status: "debug",
+          code: "auto_retry_skipped",
           reason: "missing_pair",
           baselineId: currentBaseline,
           jobId: currentJob,
@@ -1680,6 +1699,10 @@ const showInterruptionState =
     if (interruptedPairKeyRetryRef.current === currentPairKey) {
       if (process.env.NODE_ENV !== "production") {
         console.debug("[target] scoring_auto_retry_skipped", {
+          area: "analysis",
+          operation: "run",
+          status: "debug",
+          code: "auto_retry_skipped",
           reason: "already_retried_current_pair",
           baselineId: currentBaseline,
           jobId: currentJob,
@@ -1693,6 +1716,10 @@ const showInterruptionState =
     if (isRunning || inFlightPairKey === currentPairKey) {
       if (process.env.NODE_ENV !== "production") {
         console.debug("[target] scoring_auto_retry_waiting", {
+          area: "analysis",
+          operation: "run",
+          status: "debug",
+          code: "auto_retry_waiting",
           reason: isRunning ? "request_running" : "pair_already_in_flight",
           baselineId: currentBaseline,
           jobId: currentJob,
@@ -1705,6 +1732,10 @@ const showInterruptionState =
 
     interruptedPairKeyRetryRef.current = currentPairKey;
     console.info("[target] scoring_auto_retry_triggered", {
+      area: "analysis",
+      operation: "run",
+      status: "info",
+      code: "auto_retry",
       baselineId: currentBaseline,
       jobId: currentJob,
       pairKey: currentPairKey,
