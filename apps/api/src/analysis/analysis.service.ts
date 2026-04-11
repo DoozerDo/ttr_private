@@ -1342,12 +1342,17 @@ export class AnalysisService {
     userId: string,
     job: Job,
     baseline: Baseline,
+    baselineVersion?: number | null,
   ) {
-      const { canonical: canonicalBaseline } =
-        this.getCanonicalBaselineForScoring(baseline);
+    const { canonical: canonicalBaseline } =
+      this.getCanonicalBaselineForScoring(baseline);
     const canonicalSections = this.buildCanonicalSectionPayload(
       canonicalBaseline,
     );
+    const baselineSelection = selectBaselineTextForScoring({
+      baseline,
+      canonicalSections,
+    });
     const calibration = await this.getCalibration(userId);
     const dimensionWeights = this.mapCalibrationToDimensionWeights(
       calibration.weights,
@@ -1360,14 +1365,29 @@ export class AnalysisService {
       company: job.company ?? null,
       sourceUrl: job.sourceUrl ?? null,
     });
+    const jobTextForScoring = buildJobTextForScoring({
+      rawDescription: canonicalJobForHash.rawDescription,
+      normalizedResponsibilities: canonicalJobForHash.normalizedResponsibilities,
+      normalizedRequirements: canonicalJobForHash.normalizedRequirements,
+    });
+    const normalizedJob = normalizeJobDescription(jobTextForScoring.jobText);
+    const validatedRequirements = this.gapAnalysisService.validateRequirements(
+      normalizedJob.normalized.requirements,
+    );
+    const baselineVersionValue = baselineVersion ?? baseline.version ?? 0;
+    const canonicalJobForHashWithValidation: FitScoreInput['job'] = {
+      ...canonicalJobForHash,
+      normalizedRequirements: validatedRequirements,
+    };
     const baselineForHash: Baseline = {
       ...baseline,
-      version: baseline.version ?? 0,
+      sections: baselineSelection.selectedSections,
+      version: baselineVersionValue,
     };
     return this.buildInputsHash(
-      canonicalJobForHash,
+      canonicalJobForHashWithValidation,
       baselineForHash,
-      canonicalSections,
+      baselineSelection.sectionsForScoring,
       dimensionWeights,
     );
   }
@@ -3074,9 +3094,51 @@ export class AnalysisService {
         userId,
         freshJob,
         freshBaseline,
+        baselineVersion ?? baseline.version ?? null,
       );
 
       if (freshInputsHash !== inputsHash) {
+        if (process.env.NODE_ENV !== 'production') {
+          const freshCanonicalBaseline =
+            this.getCanonicalBaselineForScoring(freshBaseline);
+          const freshCanonicalSections = this.buildCanonicalSectionPayload(
+            freshCanonicalBaseline.canonical,
+          );
+          const freshBaselineSelection = selectBaselineTextForScoring({
+            baseline: freshBaseline,
+            canonicalSections: freshCanonicalSections,
+          });
+          const freshJobTextForScoring = buildJobTextForScoring({
+            rawDescription: freshJob.rawDescription,
+            normalizedResponsibilities: freshJob.normalizedResponsibilities ?? [],
+            normalizedRequirements: freshJob.normalizedRequirements ?? [],
+          });
+          const freshNormalizedJob = normalizeJobDescription(
+            freshJobTextForScoring.jobText,
+          );
+          const freshValidatedRequirements =
+            this.gapAnalysisService.validateRequirements(
+              freshNormalizedJob.normalized.requirements,
+            );
+          const freshBaselineVersionValue =
+            baselineVersion ?? freshBaseline.version ?? 0;
+          const freshInputsHashDebug = this.buildInputsHash(
+            {
+              ...canonicalJobForHash,
+              normalizedRequirements: freshValidatedRequirements,
+            },
+            {
+              ...freshBaseline,
+              sections: freshBaselineSelection.selectedSections,
+              version: freshBaselineVersionValue,
+            },
+            freshBaselineSelection.sectionsForScoring,
+            dimensionWeights,
+          );
+          this.logger.warn(
+            `[fit-score] analysis.run stale_recheck_mismatch runId=${attemptContext.attemptId} userId=${userId} baselineId=${baseline.id} jobId=${resolvedJobId} initialInputsHash=${inputsHash} freshInputsHash=${freshInputsHashDebug} initialBaselineSelectionSource=${baselineSelection.source} freshBaselineSelectionSource=${freshBaselineSelection.source} initialBaselineSelectionCount=${baselineSelection.selectedSectionCount} freshBaselineSelectionCount=${freshBaselineSelection.selectedSectionCount} initialBaselineVersion=${baselineForHash.version} freshBaselineVersion=${freshBaselineVersionValue} initialValidatedRequirementsCount=${validatedRequirements.length} freshValidatedRequirementsCount=${freshValidatedRequirements.length}`,
+          );
+        }
         await this.workflowIdempotencyService.markFailure({
           userId,
           operationName: 'analysis.run',
@@ -3933,6 +3995,7 @@ export class AnalysisService {
       userId,
       job,
       baseline,
+      baseline.version ?? null,
     );
 
     if (assessment.inputsHash !== expectedHash) {
@@ -4017,6 +4080,7 @@ export class AnalysisService {
       userId,
       job,
       baseline,
+      baseline.version ?? null,
     );
 
     if (assessment.inputsHash !== expectedHash) {

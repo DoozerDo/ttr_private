@@ -73,7 +73,6 @@ describe("WorkspaceRunner autorun lifecycle", () => {
       (globalThis.fetch as typeof window.fetch) = originalFetch;
     }
   }, 20000);
-
   it("restarts analysis once when the active pair changes during scoring", async () => {
     const originalFetch = globalThis.fetch;
     const runCallCounts: Record<string, number> = {};

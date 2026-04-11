@@ -12,6 +12,7 @@ export type WorkflowRequestEvent =
   | "request_failed"
   | "request_timeout"
   | "request_blocked"
+  | "request_in_flight"
   | "stale_response_dropped"
   | "duplicate_request_ignored"
   | "pair_mismatch_dropped";
@@ -85,4 +86,3 @@ export function isWorkflowRequestStale(
 ): boolean {
   return !matchesWorkflowScope(expected, current);
 }
-

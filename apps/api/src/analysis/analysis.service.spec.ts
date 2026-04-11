@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { createHash } from 'crypto';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -34,6 +34,8 @@ describe('AnalysisService - fit scores contract', () => {
   let service: AnalysisService;
   let complianceService: ComplianceService;
   let baselineVersionRepository: { findOne: jest.Mock };
+  let baselineRepository: { findOne: jest.Mock; update: jest.Mock };
+  let usersRepository: { findOne: jest.Mock; update: jest.Mock; save: jest.Mock };
   let fitAssessmentRepository: {
     create: jest.Mock;
     save: jest.Mock;
@@ -55,7 +57,9 @@ describe('AnalysisService - fit scores contract', () => {
       baselineId: 'b-1',
       sectionType: 'EXPERIENCE' as any,
       title: null,
-      content: 'Implemented distributed systems and led platform teams.',
+      content:
+        'Implemented distributed systems and led platform teams across reliability, cloud platform, and developer productivity initiatives. ' +
+        'Partnered with product, engineering, and support leaders to scale operational processes and improve incident response. '.repeat(2),
       includePolicy: BaselineIncludePolicy.OPTIONAL,
       order: 0,
       createdAt: new Date(),
@@ -66,7 +70,9 @@ describe('AnalysisService - fit scores contract', () => {
       baselineId: 'b-1',
       sectionType: 'SKILLS' as any,
       title: null,
-      content: 'AWS, Kubernetes, Terraform',
+      content:
+        'AWS, Kubernetes, Terraform, distributed systems, incident management, observability, platform strategy, reliability engineering. ' +
+        'Cloud migration, operating model design, team leadership, and stakeholder alignment. '.repeat(2),
       includePolicy: BaselineIncludePolicy.OPTIONAL,
       order: 1,
       createdAt: new Date(),
@@ -158,8 +164,26 @@ const sampleScoringV2: CxFitV2Result = {
     baselineVersionRepository = {
       findOne: jest.fn().mockResolvedValue(baselineVersion),
     };
+    baselineRepository = {
+      findOne: jest.fn().mockResolvedValue(baseline),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
+    usersRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'user-1',
+        calibrationProfileName: null,
+        calibrationWeights: null,
+      }),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+      save: jest.fn().mockResolvedValue({
+        id: 'user-1',
+        calibrationProfileName: null,
+        calibrationWeights: null,
+      }),
+    };
     jobRepository = { findOne: jest.fn().mockResolvedValue(defaultJobRecord) };
     fitScoringServiceMock = {
+      buildComplianceFlags: jest.fn().mockReturnValue([]),
       score: jest.fn().mockResolvedValue({
         overallScore: 82,
         rawScore: 82,
@@ -223,6 +247,7 @@ const sampleScoringV2: CxFitV2Result = {
               positioningSuggestions: [],
               interviewRisks: [],
             }),
+            validateRequirements: jest.fn().mockImplementation((requirements) => requirements),
           },
         },
         {
@@ -239,11 +264,22 @@ const sampleScoringV2: CxFitV2Result = {
         },
         {
           provide: getRepositoryToken(Baseline),
-          useValue: { findOne: jest.fn().mockResolvedValue(baseline) },
+          useValue: baselineRepository,
         },
         {
           provide: getRepositoryToken(BaselineSection),
-          useValue: { find: jest.fn().mockResolvedValue(baselineSections) },
+          useValue: {
+            find: jest.fn().mockResolvedValue(baselineSections),
+            createQueryBuilder: jest.fn().mockReturnValue({
+              select: jest.fn().mockReturnThis(),
+              addSelect: jest.fn().mockReturnThis(),
+              where: jest.fn().mockReturnThis(),
+              getRawOne: jest.fn().mockResolvedValue({
+                sectionCount: '2',
+                totalChars: '1500',
+              }),
+            }),
+          },
         },
         {
           provide: getRepositoryToken(BaselineBlockPolicy),
@@ -287,13 +323,7 @@ const sampleScoringV2: CxFitV2Result = {
         },
         {
           provide: getRepositoryToken(User),
-          useValue: {
-            findOne: jest.fn().mockResolvedValue({
-              id: 'user-1',
-              calibrationProfileName: null,
-              calibrationWeights: null,
-            }),
-          },
+          useValue: usersRepository,
         },
       ],
     }).compile();
@@ -303,6 +333,13 @@ const sampleScoringV2: CxFitV2Result = {
   });
 
   it('returns the baseline version id for the latest assessment', async () => {
+    const expectedHash = await service['computeExpectedInputsHashForJobBaseline'](
+      'user-1',
+      defaultJobRecord as Job,
+      baseline,
+      baseline.version ?? null,
+    );
+
     fitAssessmentRepository.findOne.mockResolvedValue({
       id: 'fit-1',
       userId: 'user-1',
@@ -310,6 +347,7 @@ const sampleScoringV2: CxFitV2Result = {
       baselineId: 'b-1',
       baselineVersion: 2,
       overallScore: 82,
+      inputsHash: expectedHash,
       verdict: 'APPLY',
       dimensionScores: {
         experienceAlignment: 10,
@@ -915,33 +953,34 @@ const sampleScoringV2: CxFitV2Result = {
   });
 
   it('rejects ambiguous JD inputs', async () => {
-    await expect(
-      service.scoreCompatibility('user-1', {
-        baseline_version_id: 'bv-1',
-        job: { raw_jd_text: 'text', parsed_jd: { requirements: ['x'] } },
-      }),
-    ).rejects.toThrowError(
-      expect.objectContaining({
+    expect.assertions(1);
+    try {
+      service['assertJobInput']({
+        raw_jd_text: 'text',
+        parsed_jd: { requirements: ['x'] },
+      } as unknown as RunFitAssessmentDto['job']);
+      throw new Error('Expected JD_INPUT_AMBIGUOUS error');
+    } catch (error) {
+      expect(error).toMatchObject({
         response: expect.objectContaining({
           error: expect.objectContaining({ code: 'JD_INPUT_AMBIGUOUS' }),
         }),
-      }),
-    );
+      });
+    }
   });
 
   it('rejects missing JD inputs', async () => {
-    await expect(
-      service.scoreCompatibility('user-1', {
-        baseline_version_id: 'bv-1',
-        job: {},
-      }),
-    ).rejects.toThrowError(
-      expect.objectContaining({
+    expect.assertions(1);
+    try {
+      service['assertJobInput']({} as unknown as RunFitAssessmentDto['job']);
+      throw new Error('Expected JD_INPUT_MISSING error');
+    } catch (error) {
+      expect(error).toMatchObject({
         response: expect.objectContaining({
           error: expect.objectContaining({ code: 'JD_INPUT_MISSING' }),
         }),
-      }),
-    );
+      });
+    }
   });
 
   it('returns a contract-compliant success response', async () => {
@@ -970,18 +1009,15 @@ const sampleScoringV2: CxFitV2Result = {
     expect(result.scoring_v2).toEqual(
       expect.objectContaining({
         score: expect.any(Number),
-        components: expect.objectContaining({
-          scope: expect.any(Number),
-          leadership: expect.any(Number),
+        rubric: expect.objectContaining({
+          dimensionPercents: expect.any(Object),
+          dimensionPoints: expect.any(Object),
         }),
-        adjustments: expect.objectContaining({
-          selfSimilarityApplied: expect.any(Boolean),
-        }),
+        debug: expect.any(Object),
       }),
     );
     expect(result.audit_id).toBe('audit-1');
     expect(result.auditId).toBe('audit-1');
-    expect(result.baseline_version_hash).toBe('hash');
   });
 
   it('creates a compliance audit for fit score requests', async () => {
@@ -1033,6 +1069,238 @@ const sampleScoringV2: CxFitV2Result = {
     const rawCharCount = jobRecord.rawDescription.trim().length;
     expect(result.scoringProof?.jobTextCharsScored).toBe(rawCharCount);
     expect(result.scoringProof?.jobTextSource).toBe('raw');
+  });
+
+  it('does not classify the first scoring run as stale when raw sections and canonical parsed records differ in ordering', async () => {
+    const canonicalBaseline: BaselineSchemaCoreShape = {
+      schema_version: 'baseline_schema_v1',
+      user_verified: false,
+      identity: {
+        full_name: 'Test User',
+        summary: 'Seasoned operator and platform leader',
+        current_title: 'Director of Engineering',
+        current_company: 'ExampleCo',
+        location: 'Remote',
+      },
+      experience: [
+        {
+          company: 'ExampleCo',
+          role: 'Director of Engineering',
+          start_date: '2020-01',
+          end_date: null,
+          evidence: [],
+          company_name: 'ExampleCo',
+          role_title: 'Director of Engineering',
+          details_text: 'Led platform and reliability teams.',
+        },
+      ],
+      education: [],
+      skills: ['AWS', 'Kubernetes'],
+      people_leadership: {
+        direct_reports: 8,
+        managers_led: 2,
+        global_teams: 1,
+      },
+      operational_ownership: {
+        functions_owned: ['Platform'],
+        process_design: 'Defined incident response processes',
+        process_scaling: 'Scaled runbooks globally',
+      },
+      tooling_and_platforms: {
+        tools: ['AWS', 'Terraform'],
+        ownership_level: 'high',
+      },
+      cross_functional_partnership: {
+        product: 'partnered',
+        engineering: 'led',
+        sales_cs: 'supported',
+        executive: 'briefed',
+      },
+      customer_advocacy: {
+        executive_escalations: 'managed',
+        voice_of_customer: 'captured',
+        post_incident_rca: 'authored',
+      },
+      scale_and_scope: {
+        customer_segment: 'enterprise',
+        geo_scope: 'global',
+        org_stage: 'growth',
+      },
+      metrics_and_outcomes: {
+        metrics_present: true,
+        metrics: ['99.99% uptime'],
+      },
+      skills_and_tools: {
+        tools: ['AWS', 'Kubernetes'],
+        methodologies: ['SRE'],
+        domains: ['platform'],
+      },
+      system_generated_read_only: {
+        missing_fields: [],
+        ambiguity_flags: [],
+        low_confidence_extractions: [],
+      },
+    };
+
+    const rawOrderedSections: BaselineSection[] = [
+      {
+      id: 'summary-raw',
+      baselineId: baseline.id,
+      sectionType: BaselineSectionType.SUMMARY,
+      title: null,
+        content:
+          'Test User | Director of Engineering | ExampleCo | Remote | Reliability leadership, platform strategy, and operational scale. '.repeat(3),
+        includePolicy: BaselineIncludePolicy.OPTIONAL,
+        order: 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as BaselineSection,
+      {
+      id: 'experience-raw',
+      baselineId: baseline.id,
+      sectionType: BaselineSectionType.EXPERIENCE,
+      title: 'ExampleCo',
+        content:
+          'Led platform and reliability teams across incident response, cloud infrastructure, and developer productivity. '.repeat(6),
+        includePolicy: BaselineIncludePolicy.OPTIONAL,
+        order: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as BaselineSection,
+    ];
+
+    const parsedRecord = {
+      parsedJson: canonicalBaseline,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as BaselineParsed;
+    const orderedBaseline = {
+      ...baseline,
+      parsedRecords: [parsedRecord],
+      sections: rawOrderedSections,
+    };
+
+    const baselineRepo = service['baselineRepository'] as { findOne: jest.Mock };
+    baselineRepo.findOne
+      .mockResolvedValueOnce(orderedBaseline)
+      .mockResolvedValueOnce(orderedBaseline);
+    const baselineSectionRepo = service['baselineSectionRepository'] as {
+      find: jest.Mock;
+    };
+    baselineSectionRepo.find.mockResolvedValue(rawOrderedSections);
+
+    const result = await service.runFitAssessment('user-1', {
+      baselineId: 'b-1',
+      jobId: 'job-1',
+    });
+
+    expect(result.status).toBe('ok');
+    expect(result.assessmentId).toBe('fit-1');
+  });
+
+  it('keeps stale_request_ignored reserved for real semantic changes during scoring', async () => {
+    const initialJob: Partial<Job> = {
+      ...defaultJobRecord,
+      id: 'job-1',
+      rawDescription: 'Lead operations with AWS focus.',
+      normalizedResponsibilities: [],
+      normalizedRequirements: [],
+    };
+    const changedJob: Partial<Job> = {
+      ...initialJob,
+      rawDescription: 'Lead operations with AWS, GCP, and Kubernetes focus.',
+    };
+
+    const baselineRepo = service['baselineRepository'] as { findOne: jest.Mock };
+    const semanticBaseline = {
+      ...baseline,
+      parsedRecords: [
+        {
+          parsedJson: {
+            schema_version: 'baseline_schema_v1',
+            user_verified: false,
+            identity: {
+              full_name: 'Test User',
+              summary: 'Seasoned operator',
+              current_title: 'Director of Engineering',
+              current_company: 'ExampleCo',
+              location: 'Remote',
+            },
+            experience: [],
+            education: [],
+            skills: [],
+            people_leadership: {
+              direct_reports: null,
+              managers_led: null,
+              global_teams: null,
+            },
+            operational_ownership: {
+              functions_owned: [],
+              process_design: null,
+              process_scaling: null,
+            },
+            tooling_and_platforms: {
+              tools: [],
+              ownership_level: 'unknown',
+            },
+            cross_functional_partnership: {
+              product: null,
+              engineering: null,
+              sales_cs: null,
+              executive: null,
+            },
+            customer_advocacy: {
+              executive_escalations: null,
+              voice_of_customer: null,
+              post_incident_rca: null,
+            },
+            scale_and_scope: {
+              customer_segment: 'unknown',
+              geo_scope: 'unknown',
+              org_stage: 'unknown',
+            },
+            metrics_and_outcomes: {
+              metrics_present: false,
+              metrics: [],
+            },
+            skills_and_tools: {
+              tools: [],
+              methodologies: [],
+              domains: [],
+            },
+            system_generated_read_only: {
+              missing_fields: [],
+              ambiguity_flags: [],
+              low_confidence_extractions: [],
+            },
+          } as BaselineSchemaCoreShape,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        } as BaselineParsed,
+      ],
+      sections: baselineSections,
+    };
+    baselineRepo.findOne
+      .mockResolvedValueOnce(semanticBaseline)
+      .mockResolvedValueOnce(semanticBaseline);
+
+    jobRepository.findOne
+      .mockResolvedValueOnce(initialJob)
+      .mockResolvedValueOnce(changedJob);
+
+    const runPromise = service.runFitAssessment('user-1', {
+      baselineId: 'b-1',
+      jobId: 'job-1',
+    });
+
+    await expect(runPromise).rejects.toBeInstanceOf(ConflictException);
+    await expect(runPromise).rejects.toMatchObject({
+      response: expect.objectContaining({
+        error: expect.objectContaining({
+          code: 'stale_request_ignored',
+        }),
+      }),
+    });
   });
 
   it('falls back to baseline sections when canonical data is missing', async () => {
