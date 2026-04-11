@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MutableRefObject,
   type MouseEvent,
 } from "react";
 
@@ -144,6 +145,9 @@ type ActivePairLifecycleState =
   | "mismatch_rejected";
 
 type AnalysisRunResponseState = "ok" | "compliance_blocked" | "interrupted_due_to_changes";
+
+const SCORING_REQUEST_TIMEOUT_MS = 15000;
+const SCORING_LOOP_LIMIT = 2;
 
 export function resolveScoreBandPresentation(score: number): ScoreBandPresentation {
   if (score >= 90) {
@@ -445,10 +449,20 @@ const MISMATCH_RECOVERY_RETRY =
 const ANALYSIS_INTERRUPTION_TITLE = "Analysis restarted due to changes";
 const ANALYSIS_INTERRUPTION_BODY =
   "You updated your baseline or job while scoring was in progress. We stopped the earlier run to keep your result accurate.";
+const ANALYSIS_PREPARING_TITLE = "Preparing your analysis…";
+const ANALYSIS_PREPARING_BODY =
+  "We’re checking the latest baseline and job details before scoring continues.";
 const ANALYSIS_RETRY_TITLE = "Updating your score";
 const ANALYSIS_RETRY_BODY =
   "Your baseline or job changed, so we’re re-running the analysis with the latest inputs.";
 const ANALYSIS_RETRY_CTA = "Analyze current selection";
+const SCORING_TIMEOUT_MESSAGE = "We couldn’t complete scoring. Please run again.";
+
+function normalizeSelectionValue(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : null;
+}
 
 function isSelectionMismatchMessage(message: string | null): boolean {
   if (!message) return false;
@@ -457,6 +471,34 @@ function isSelectionMismatchMessage(message: string | null): boolean {
     normalized.includes("does not match the active baseline and job selection") ||
     normalized.includes("does not match the active baseline and job")
   );
+}
+
+function noteScoringLoop(
+  countsRef: MutableRefObject<Record<string, number>>,
+  pairKey: string | null,
+  reason: "interrupted" | "stale",
+) {
+  if (!pairKey) return;
+  const nextCount = (countsRef.current[pairKey] ?? 0) + 1;
+  countsRef.current[pairKey] = nextCount;
+  if (nextCount > SCORING_LOOP_LIMIT) {
+    console.warn("SCORING LOOP DETECTED", {
+      pairKey,
+      reason,
+      count: nextCount,
+    });
+  }
+}
+
+function clearScoringLoopCounts(
+  countsRef: MutableRefObject<Record<string, number>>,
+  pairKey?: string | null,
+) {
+  if (!pairKey) {
+    countsRef.current = {};
+    return;
+  }
+  delete countsRef.current[pairKey];
 }
 
 export function buildStudioUrl({
@@ -669,8 +711,10 @@ export function WorkspaceRunner({
   const [latestBaselineId, setLatestBaselineId] = useState<string | null>(null);
   const [runState, setRunState] = useState<"ok" | "compliance_blocked" | null>(null);
   const [showUploadAgainCTA, setShowUploadAgainCTA] = useState(false);
-  const [selectedBaselineId, setSelectedBaselineId] = useState<string | null>(baselineId);
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(jobId);
+  const [selectedBaselineId, setSelectedBaselineId] = useState<string | null>(
+    normalizeSelectionValue(baselineId),
+  );
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(normalizeSelectionValue(jobId));
   const [inFlightPairKey, setInFlightPairKey] = useState<string | null>(null);
   const [latestCompletedScore, setLatestCompletedScore] = useState<FitResultPayload | null>(
     null,
@@ -689,11 +733,15 @@ export function WorkspaceRunner({
   const revealRunIdRef = useRef(0);
   const activeRunRequestIdRef = useRef<string | null>(null);
   const interruptedPairKeyRetryRef = useRef<string | null>(null);
-  const selectedBaselineIdRef = useRef<string | null>(baselineId);
-  const selectedJobIdRef = useRef<string | null>(jobId);
+  const scoringLoopCountsRef = useRef<Record<string, number>>({});
+  const selectedBaselineIdRef = useRef<string | null>(normalizeSelectionValue(baselineId));
+  const selectedJobIdRef = useRef<string | null>(normalizeSelectionValue(jobId));
   const [isPreparingMatch, setIsPreparingMatch] = useState(false);
-  const activePairKey = baselineId && jobId ? `${baselineId}:${jobId}` : null;
+  const normalizedBaselineId = normalizeSelectionValue(baselineId);
+  const normalizedJobId = normalizeSelectionValue(jobId);
+  const activePairKey = normalizedBaselineId && normalizedJobId ? `${normalizedBaselineId}:${normalizedJobId}` : null;
   const [activePairState, setActivePairState] = useState<ActivePairLifecycleState>("idle");
+  const [showPreparingAnalysisCopy, setShowPreparingAnalysisCopy] = useState(false);
   const activePairLifecycleKeyRef = useRef<string | null>(null);
   const AUTO_RUN_DELAY_MS = 320;
   const reportProgressState = useCallback(
@@ -727,8 +775,9 @@ export function WorkspaceRunner({
   }, [isRevealAnalyzing]);
 
   useLayoutEffect(() => {
-    setSelectedBaselineId(baselineId);
-    selectedBaselineIdRef.current = baselineId;
+    const normalized = normalizeSelectionValue(baselineId);
+    setSelectedBaselineId(normalized);
+    selectedBaselineIdRef.current = normalized;
   }, [baselineId]);
 
   // DEV CHECKLIST (manual verification paths):
@@ -743,8 +792,9 @@ export function WorkspaceRunner({
   // 9) Loading last run via the link populates latestCompletedScore and keeps the card visible without auto-running.
 
   useLayoutEffect(() => {
-    setSelectedJobId(jobId);
-    selectedJobIdRef.current = jobId;
+    const normalized = normalizeSelectionValue(jobId);
+    setSelectedJobId(normalized);
+    selectedJobIdRef.current = normalized;
   }, [jobId]);
 
   useEffect(() => {
@@ -752,6 +802,7 @@ export function WorkspaceRunner({
     autoRunInitiatedRef.current = false;
     pendingCompletionKeyRef.current = null;
     interruptedPairKeyRetryRef.current = null;
+    setShowPreparingAnalysisCopy(false);
     activeRunRequestIdRef.current = null;
     if (autoRunTriggerTimerRef.current !== null) {
       window.clearTimeout(autoRunTriggerTimerRef.current);
@@ -1053,8 +1104,8 @@ export function WorkspaceRunner({
     jobId?: string | null;
     preserveInterruptionState?: boolean;
   }) => {
-    const baselineForRun = options?.baselineId ?? selectedBaselineId;
-    const jobForRun = options?.jobId ?? selectedJobId;
+    const baselineForRun = normalizeSelectionValue(options?.baselineId ?? selectedBaselineId);
+    const jobForRun = normalizeSelectionValue(options?.jobId ?? selectedJobId);
     if (!baselineForRun || !jobForRun || (isRunning && !options?.allowWhenRunning)) return;
 
     const requestScope: WorkflowRequestScope = {
@@ -1065,6 +1116,58 @@ export function WorkspaceRunner({
     const requestKey = buildWorkflowRequestKey("analysis.run", requestScope);
     const requestStartMs = Date.now();
     activeRunRequestIdRef.current = requestId;
+    const requestTimeoutMs = SCORING_REQUEST_TIMEOUT_MS;
+    const requestTimeoutId = window.setTimeout(() => {
+      if (activeRunRequestIdRef.current !== requestId) return;
+      const currentScope: WorkflowRequestScope = {
+        baselineId: selectedBaselineIdRef.current,
+        jobId: selectedJobIdRef.current,
+      };
+      noteScoringLoop(
+        scoringLoopCountsRef,
+        requestKey,
+        "stale",
+      );
+      console.warn("[target] scoring_request_timeout", {
+        requestId,
+        requestKey,
+        pairKey,
+        baselineId: baselineForRun,
+        jobId: jobForRun,
+        timeoutMs: requestTimeoutMs,
+      });
+      setResult(null);
+      setLatestCompletedScore(null);
+      reportMatchingScore(null);
+      setRevealedScoreValue(null);
+      setError(SCORING_TIMEOUT_MESSAGE);
+      setShowUploadAgainCTA(false);
+      setLatestJobId(null);
+      setLatestBaselineId(null);
+      setRunState(null);
+      setActivePairState("failed");
+      setIsRevealAnalyzing(false);
+      setIsRunning(false);
+      setShowPreparingAnalysisCopy(false);
+      setInFlightPairKey((current) => (current === pairKey ? null : current));
+      activeRunRequestIdRef.current = null;
+      logWorkflowRequestEvent("request_timeout", {
+        action: "analysis.run",
+        expected: requestScope,
+        current: currentScope,
+        requestId,
+        reason: SCORING_TIMEOUT_MESSAGE,
+        source: "target",
+        durationMs: Date.now() - requestStartMs,
+      });
+      trackEvent("scoring_hard_failure", {
+        source: "target",
+        baselineId: baselineForRun,
+        jobId: jobForRun,
+        requestId,
+        message: SCORING_TIMEOUT_MESSAGE,
+      });
+    }, requestTimeoutMs);
 
     const isRetry =
       options?.preserveInterruptionState === true ||
@@ -1085,8 +1188,18 @@ export function WorkspaceRunner({
         triggerType: runTriggerType,
         requestId,
         requestKey,
+        inputsHash: requestKey,
       });
     }
+    console.info("[target] scoring_request_start", {
+      requestId,
+      requestKey,
+      pairKey,
+      baselineIdBeforeRequest: baselineForRun,
+      jobIdBeforeRequest: jobForRun,
+      inputsHash: requestKey,
+      requestHash: requestKey,
+    });
     logWorkflowRequestEvent("request_started", {
       action: "analysis.run",
       expected: requestScope,
@@ -1123,6 +1236,13 @@ export function WorkspaceRunner({
     setShowUploadAgainCTA(false);
     setRevealedScoreValue(0);
     setIsRevealAnalyzing(true);
+    if (
+      !options?.preserveInterruptionState &&
+      activePairState !== "auto_retrying" &&
+      activePairState !== "interrupted_due_to_changes"
+    ) {
+      setShowPreparingAnalysisCopy(false);
+    }
     revealStartMsRef.current = Date.now();
     const runId = revealRunIdRef.current + 1;
     revealRunIdRef.current = runId;
@@ -1132,15 +1252,29 @@ export function WorkspaceRunner({
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          baselineId: baselineForRun,
-          jobId: jobForRun,
-          debug: debugUiEnabled,
-          triggerType: runTriggerType,
-        }),
-      });
+      body: JSON.stringify({
+        baselineId: baselineForRun,
+        jobId: jobForRun,
+        debug: debugUiEnabled,
+        triggerType: runTriggerType,
+      }),
+    });
+    console.info("[target] scoring_api_response_received", {
+      requestId,
+      requestKey,
+      pairKey,
+      status: response.status,
+      ok: response.ok,
+    });
 
       const { payload: nextResult, runState } = await parseAnalysisRunResponse(response);
+      console.info("[target] scoring_api_response_type", {
+        requestId,
+        requestKey,
+        pairKey,
+        responseType: runState,
+        accepted: runState !== "interrupted_due_to_changes",
+      });
       const isInterruptedResponse = runState === "interrupted_due_to_changes";
       const isSupersededRequest = activeRunRequestIdRef.current !== requestId;
       if (isSupersededRequest && !isInterruptedResponse) {
@@ -1159,6 +1293,7 @@ export function WorkspaceRunner({
       }
 
       if (isInterruptedResponse) {
+        const interruptedElapsedMs = Date.now() - requestStartMs;
         const currentBaselineId = selectedBaselineIdRef.current;
         const currentJobId = selectedJobIdRef.current;
         const currentPairKey =
@@ -1181,10 +1316,34 @@ export function WorkspaceRunner({
             currentJobId,
             currentPairKey,
             requestPairKey: pairKey,
+            requestHash: requestKey,
+            inputsHash: requestKey,
+            interruptedElapsedMs,
             shouldAutoRetry,
             isSupersededRequest,
           });
         }
+
+        const invalidationReason =
+          currentBaselineId !== baselineForRun
+            ? "baselineId changed"
+            : currentJobId !== jobForRun
+              ? "jobId changed"
+              : "request marked interrupted";
+        console.warn(`SCORING INVALIDATED - REASON: ${invalidationReason}`, {
+          baselineIdBeforeRequest: baselineForRun,
+          baselineIdAfterInterruption: currentBaselineId,
+          jobIdBeforeRequest: jobForRun,
+          jobIdAfterInterruption: currentJobId,
+          pairKeyBeforeRequest: pairKey,
+          pairKeyAfterInterruption: currentPairKey,
+          requestKey,
+          requestHash: requestKey,
+          inputsHash: requestKey,
+        });
+
+        noteScoringLoop(scoringLoopCountsRef, currentPairKey ?? pairKey, "interrupted");
+        setShowPreparingAnalysisCopy(interruptedElapsedMs < 1000);
 
         setResult(null);
         setLatestCompletedScore(null);
@@ -1223,29 +1382,6 @@ export function WorkspaceRunner({
           source: "target",
           durationMs: Date.now() - requestStartMs,
         });
-
-        if (shouldAutoRetry) {
-          interruptedPairKeyRetryRef.current = currentPairKey;
-          trackEvent("scoring_auto_retried", {
-            source: "target",
-            baselineId: currentBaselineId,
-            jobId: currentJobId,
-            previousBaselineId: baselineForRun,
-            previousJobId: jobForRun,
-            requestId,
-          });
-          const retryBaselineId = currentBaselineId;
-          const retryJobId = currentJobId;
-          activeRunRequestIdRef.current = requestId;
-          if (retryBaselineId && retryJobId && currentPairKey) {
-            void runAssessment({
-              allowWhenRunning: true,
-              baselineId: retryBaselineId,
-              jobId: retryJobId,
-              preserveInterruptionState: true,
-            });
-          }
-        }
 
         return;
       }
@@ -1356,6 +1492,8 @@ export function WorkspaceRunner({
       if (activePairLifecycleKeyRef.current === pairKey) {
         setActivePairState(runState === "compliance_blocked" ? "blocked" : "score_ready");
       }
+      setShowPreparingAnalysisCopy(false);
+      clearScoringLoopCounts(scoringLoopCountsRef, pairKey);
 
       const completionText =
         runState === "compliance_blocked" ? "Assessment blocked" : "Compatibility scored";
@@ -1394,6 +1532,8 @@ export function WorkspaceRunner({
       const message =
         extractErrorMessage(runError) ?? "Unable to run compatibility scoring right now.";
       const shouldShowUploadCTA = isMissingCanonicalRunError(runError, message);
+      noteScoringLoop(scoringLoopCountsRef, pairKey, "stale");
+      clearScoringLoopCounts(scoringLoopCountsRef, pairKey);
       trackEvent("scoring_hard_failure", {
         source: "target",
         baselineId: baselineForRun,
@@ -1413,6 +1553,7 @@ export function WorkspaceRunner({
       if (activePairLifecycleKeyRef.current === pairKey) {
         setActivePairState("failed");
       }
+      setShowPreparingAnalysisCopy(false);
       autoRunInitiatedRef.current = false;
       setIsRevealAnalyzing(false);
       reportProgressState({
@@ -1434,6 +1575,7 @@ export function WorkspaceRunner({
         durationMs: Date.now() - requestStartMs,
       });
     } finally {
+      window.clearTimeout(requestTimeoutId);
       setInFlightPairKey((current) => (current === pairKey ? null : current));
       setIsRunning(false);
       if (activeRunRequestIdRef.current === requestId) {
@@ -1450,6 +1592,79 @@ export function WorkspaceRunner({
     selectedBaselineId,
     selectedJobId,
   ]);
+
+  useEffect(() => {
+    if (
+      activePairState !== "interrupted_due_to_changes" &&
+      activePairState !== "auto_retrying"
+    ) {
+      return;
+    }
+
+    const currentBaseline = selectedBaselineIdRef.current;
+    const currentJob = selectedJobIdRef.current;
+    const currentPairKey =
+      currentBaseline && currentJob ? `${currentBaseline}:${currentJob}` : null;
+    if (!currentPairKey) {
+      if (process.env.NODE_ENV !== "production") {
+        console.debug("[target] scoring_auto_retry_skipped", {
+          reason: "missing_pair",
+          baselineId: currentBaseline,
+          jobId: currentJob,
+          activePairState,
+        });
+      }
+      return;
+    }
+
+    if (interruptedPairKeyRetryRef.current === currentPairKey) {
+      if (process.env.NODE_ENV !== "production") {
+        console.debug("[target] scoring_auto_retry_skipped", {
+          reason: "already_retried_current_pair",
+          baselineId: currentBaseline,
+          jobId: currentJob,
+          pairKey: currentPairKey,
+          activePairState,
+        });
+      }
+      return;
+    }
+
+    if (isRunning || inFlightPairKey === currentPairKey) {
+      if (process.env.NODE_ENV !== "production") {
+        console.debug("[target] scoring_auto_retry_waiting", {
+          reason: isRunning ? "request_running" : "pair_already_in_flight",
+          baselineId: currentBaseline,
+          jobId: currentJob,
+          pairKey: currentPairKey,
+          activePairState,
+        });
+      }
+      return;
+    }
+
+    interruptedPairKeyRetryRef.current = currentPairKey;
+    console.info("[target] scoring_auto_retry_triggered", {
+      baselineId: currentBaseline,
+      jobId: currentJob,
+      pairKey: currentPairKey,
+      activePairState,
+    });
+    trackEvent("scoring_auto_retried", {
+      source: "target",
+      baselineId: currentBaseline,
+      jobId: currentJob,
+      previousBaselineId: selectedBaselineIdRef.current,
+      previousJobId: selectedJobIdRef.current,
+      requestId: activeRunRequestIdRef.current ?? crypto.randomUUID(),
+    });
+    void runAssessment({
+      allowWhenRunning: true,
+      baselineId: currentBaseline,
+      jobId: currentJob,
+      preserveInterruptionState: true,
+    });
+  }, [activePairState, inFlightPairKey, isRunning, runAssessment]);
 
   const handleInterruptedRetry = useCallback(() => {
     trackEvent("scoring_manual_rerun_after_interruption", {
@@ -1721,10 +1936,20 @@ export function WorkspaceRunner({
         <div className="space-y-3">
           <Alert
             intent="warning"
-            title={activePairState === "auto_retrying" ? ANALYSIS_RETRY_TITLE : ANALYSIS_INTERRUPTION_TITLE}
+            title={
+              showPreparingAnalysisCopy
+                ? ANALYSIS_PREPARING_TITLE
+                : activePairState === "auto_retrying"
+                  ? ANALYSIS_RETRY_TITLE
+                  : ANALYSIS_INTERRUPTION_TITLE
+            }
           >
             <p className="text-sm text-current">
-              {activePairState === "auto_retrying" ? ANALYSIS_RETRY_BODY : ANALYSIS_INTERRUPTION_BODY}
+              {showPreparingAnalysisCopy
+                ? ANALYSIS_PREPARING_BODY
+                : activePairState === "auto_retrying"
+                  ? ANALYSIS_RETRY_BODY
+                  : ANALYSIS_INTERRUPTION_BODY}
             </p>
           </Alert>
           <div className="flex flex-wrap justify-end gap-2">
@@ -1732,7 +1957,11 @@ export function WorkspaceRunner({
               onClick={activePairState === "auto_retrying" ? undefined : handleInterruptedRetry}
               disabled={isRunning || !selectedBaselineId || !selectedJobId}
             >
-              {activePairState === "auto_retrying" ? "Re-running current selection..." : ANALYSIS_RETRY_CTA}
+              {showPreparingAnalysisCopy
+                ? "Preparing current selection..."
+                : activePairState === "auto_retrying"
+                  ? "Re-running current selection..."
+                  : ANALYSIS_RETRY_CTA}
             </FormButton>
           </div>
         </div>

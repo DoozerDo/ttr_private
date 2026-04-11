@@ -30,6 +30,50 @@ function createDeferred<T>() {
 }
 
 describe("WorkspaceRunner autorun lifecycle", () => {
+  it("does not interrupt a stable initial scoring pair across rerenders", async () => {
+    const originalFetch = globalThis.fetch;
+    const runCallCounts: Record<string, number> = {};
+
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.url;
+      if (!url.includes("/api/analysis/run")) {
+        return Promise.resolve(createResponse({}));
+      }
+
+      const payload = init?.body ? JSON.parse(init.body as string) : {};
+      const pairKey = `${payload.baselineId}:${payload.jobId}`;
+      runCallCounts[pairKey] = (runCallCounts[pairKey] ?? 0) + 1;
+
+      return Promise.resolve(
+        createResponse({
+          assessmentId: "assessment-stable",
+          baselineId: payload.baselineId,
+          jobId: payload.jobId,
+          score: 83,
+        }),
+      );
+    });
+
+    (globalThis.fetch as typeof window.fetch) = fetchMock as typeof window.fetch;
+
+    try {
+      const { rerender } = render(<WorkspaceRunner baselineId="base-a" jobId="job-a" />);
+
+      await act(async () => {
+        rerender(<WorkspaceRunner baselineId="base-a" jobId="job-a" />);
+      });
+
+      await waitFor(() => expect(runCallCounts["base-a:job-a"]).toBe(1), { timeout: 5000 });
+      await waitFor(() => expect(screen.getByText("Strong Match")).toBeInTheDocument(), {
+        timeout: 5000,
+      });
+      expect(screen.queryByText("Analysis restarted due to changes")).not.toBeInTheDocument();
+      expect(screen.queryByText("Updating your score")).not.toBeInTheDocument();
+    } finally {
+      (globalThis.fetch as typeof window.fetch) = originalFetch;
+    }
+  }, 20000);
+
   it("restarts analysis once when the active pair changes during scoring", async () => {
     const originalFetch = globalThis.fetch;
     const runCallCounts: Record<string, number> = {};
@@ -90,7 +134,7 @@ describe("WorkspaceRunner autorun lifecycle", () => {
         );
       });
 
-      await waitFor(() => expect(screen.getByText("Updating your score")).toBeInTheDocument(), {
+      await waitFor(() => expect(screen.getByText("Preparing your analysis…")).toBeInTheDocument(), {
         timeout: 5000,
       });
       await waitFor(() => expect(runCallCounts["base-b:job-b"]).toBe(1), { timeout: 5000 });
@@ -172,15 +216,15 @@ describe("WorkspaceRunner autorun lifecycle", () => {
         );
       });
 
-      await waitFor(() => expect(screen.getByText("Analysis restarted due to changes")).toBeInTheDocument(), {
+      await waitFor(() => expect(screen.getByText("Preparing your analysis…")).toBeInTheDocument(), {
         timeout: 5000,
       });
       expect(
         screen.getByText(
-          "You updated your baseline or job while scoring was in progress. We stopped the earlier run to keep your result accurate.",
+          "We’re checking the latest baseline and job details before scoring continues.",
         ),
       ).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Analyze current selection" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Preparing current selection..." })).toBeDisabled();
       expect(runCallCounts["base-a:job-a"]).toBe(1);
       expect(runCallCounts["base-b:job-b"] ?? 0).toBe(0);
     } finally {

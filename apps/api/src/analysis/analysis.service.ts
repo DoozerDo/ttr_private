@@ -2727,12 +2727,20 @@ export class AnalysisService {
         inputsHash,
       });
 
+      this.logger.log(
+        `[fit-score] analysis.run request runId=${attemptContext.attemptId} userId=${userId} baselineId=${baseline.id} jobId=${job.id} inputsHash=${inputsHash} dedupeKey=${analysisDedupeKey}`,
+      );
+
       const reservation = await this.workflowIdempotencyService.reserve<RunAssessmentResult>({
         userId,
         operationName: 'analysis.run',
         dedupeKey: analysisDedupeKey,
         runId: attemptContext.attemptId,
       });
+
+      this.logger.log(
+        `[fit-score] analysis.run idempotency_decision runId=${reservation.runId} status=${reservation.status} userId=${userId} baselineId=${baseline.id} jobId=${job.id} dedupeKey=${analysisDedupeKey}`,
+      );
 
       if (reservation.status === 'existing_completed' && reservation.responseBody) {
         if (this.isDevMode()) {
@@ -2777,6 +2785,9 @@ export class AnalysisService {
 
       currentStage = "generation";
       logStageLifecycle("generation_started", currentStage);
+      this.logger.log(
+        `[fit-score] analysis.run scoring_started runId=${attemptContext.attemptId} userId=${userId} baselineId=${baseline.id} jobId=${resolvedJobId} dedupeKey=${analysisDedupeKey}`,
+      );
       const promptFlags = this.fitScoringService.buildComplianceFlags(
         jobText,
         baselineText,
@@ -2827,6 +2838,9 @@ export class AnalysisService {
           `[fit-score] scoring_v2_completed baselineId=${baseline.id} jobId=${resolvedJobId} score=${scoringV2.score} heuristicUsed=${scoringV2.debug.heuristicInference.usedHeuristicInference} heuristicLiftTotal=${scoringV2.debug.heuristicInference.heuristicLiftTotal} scoreConfidence=${scoringV2.scoreConfidence} scorePresentationMode=${scoringV2.scorePresentationMode}`,
         );
       }
+      this.logger.log(
+        `[fit-score] analysis.run scoring_completed runId=${attemptContext.attemptId} userId=${userId} baselineId=${baseline.id} jobId=${resolvedJobId} dedupeKey=${analysisDedupeKey} score=${scoringV2.score}`,
+      );
 
       this.applyBaselineCoverageDetails(
         scoringV2,
@@ -3180,6 +3194,9 @@ export class AnalysisService {
             `runFitAssessment baseline linkage persisted baselineId=${baseline.id} assessmentId=${savedAssessment.id} score=${finalScore} lastAnalyzedAt=${lastAnalyzedAt.toISOString()}`,
           );
         }
+        this.logger.log(
+          `[fit-score] analysis.run result_persisted runId=${attemptContext.attemptId} userId=${userId} baselineId=${baseline.id} jobId=${resolvedJobId} assessmentId=${savedAssessment.id} dedupeKey=${analysisDedupeKey}`,
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.error(
