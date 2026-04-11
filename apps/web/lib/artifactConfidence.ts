@@ -1,5 +1,6 @@
 import type { GenerationProductConfidence } from "@/lib/generationProductReadiness";
 import { normalizeUserFacingRequirementLabel } from "@/lib/generationReadiness";
+import { FALLBACK_RENDERED_TEXT, sanitizeRenderedTextList, sanitizeRenderedTextValue } from "@/lib/renderedText";
 
 export type ArtifactType = "resume" | "cover_letter";
 export type ArtifactConfidence = "HIGH" | "MEDIUM" | "LOW";
@@ -60,15 +61,23 @@ export type ArtifactQualityInput = {
 };
 
 function cleanText(value: unknown): string {
-  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  if (typeof value !== "string") return "";
+  const cleaned = sanitizeRenderedTextValue(value, {
+    endpoint: "artifactConfidence",
+    field: "cleanText",
+  });
+  return cleaned === FALLBACK_RENDERED_TEXT ? "" : cleaned;
 }
 
 function cleanList(values: unknown): string[] {
   if (!Array.isArray(values)) return [];
-  return values
-    .filter((value): value is string => typeof value === "string")
-    .map((value) => value.replace(/\s+/g, " ").trim())
-    .filter((value) => value.length > 0);
+  return sanitizeRenderedTextList(
+    values.filter((value): value is string => typeof value === "string"),
+    {
+      endpoint: "artifactConfidence",
+      field: "cleanList",
+    },
+  ).filter((value) => value !== FALLBACK_RENDERED_TEXT);
 }
 
 function normalizeKey(value: string): string {
@@ -77,7 +86,11 @@ function normalizeKey(value: string): string {
 
 function readBaselineItem(baselineEvidence: unknown, summary: unknown): string {
   if (typeof baselineEvidence === "string" && baselineEvidence.trim()) {
-    return baselineEvidence.trim();
+    const cleaned = sanitizeRenderedTextValue(baselineEvidence, {
+      endpoint: "artifactConfidence",
+      field: "baselineEvidence",
+    });
+    return cleaned === FALLBACK_RENDERED_TEXT ? "" : cleaned;
   }
   if (Array.isArray(baselineEvidence)) {
     for (const entry of baselineEvidence) {
@@ -119,8 +132,14 @@ function buildClaimRef(input: {
   const normalized = normalizeKey(input.text);
   return {
     id: `${input.artifactType}:${normalized}`,
-    text: input.text,
-    baselineItem: input.baselineItem,
+    text: sanitizeRenderedTextValue(input.text, {
+      endpoint: "artifactConfidence",
+      field: "claim.text",
+    }),
+    baselineItem: sanitizeRenderedTextValue(input.baselineItem, {
+      endpoint: "artifactConfidence",
+      field: "claim.baselineItem",
+    }),
     verificationStatus: input.status,
     artifactType: input.artifactType,
   };

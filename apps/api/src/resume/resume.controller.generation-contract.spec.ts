@@ -3,7 +3,7 @@ import { ResumeController } from './resume.controller';
 import { ResumeService } from './resume.service';
 
 describe('ResumeController generation contract', () => {
-  it('surfaces generation_blocked as HTTP 422 payload', async () => {
+  it('returns a typed generation_blocked outcome', async () => {
     const service = {
       generateResume: jest.fn().mockRejectedValue(
         new UnprocessableEntityException({
@@ -27,11 +27,12 @@ describe('ResumeController generation contract', () => {
         },
         { user: { id: 'user-1' } } as any,
       ),
-    ).rejects.toMatchObject({
-      response: {
-        code: 'generation_blocked',
-      },
-      status: 422,
+    ).resolves.toMatchObject({
+      status: 'error',
+      code: 'generation_blocked',
+      retryable: false,
+      nextAction: 'review_results',
+      artifactType: 'resume',
     });
   });
 });

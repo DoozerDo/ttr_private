@@ -39,7 +39,9 @@ export class SupportController {
   async reportBug(@Body() payload: ReportBugDto, @Req() request: SupportRequest) {
     const result = await this.supportService.reportBug(payload, request.user);
     return {
+      status: 'submission_success',
       message: 'Bug reported successfully.',
+      reportId: String(result.issueNumber),
       issueNumber: result.issueNumber,
       issueUrl: result.issueUrl,
       sentryEventId: result.sentryEventId,

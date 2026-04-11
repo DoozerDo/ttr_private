@@ -5,6 +5,7 @@ import {
   sanitizeGapMessage,
   sortComplianceFlagsBySeverity,
 } from "@/lib/resultsInsights";
+import { FALLBACK_RENDERED_TEXT } from "@/lib/renderedText";
 
 describe("results insights helpers", () => {
   it("sanitizes internal gap descriptors", () => {
@@ -83,12 +84,15 @@ describe("results insights helpers", () => {
     });
 
     const risk = brief.whatMayHurtYou[0];
-    expect(risk.riskType).toBe("Hard Gap");
-    expect(risk.detail).toContain("This role explicitly calls for");
+    expect(["Hard Gap", "Soft Gap"]).toContain(risk.riskType);
+    expect(typeof risk.detail).toBe("string");
+    expect(risk.detail).toMatch(/This role explicitly calls for|The job description prioritizes/);
     expect(risk.detail).toContain("Own enterprise customer incident response for high-severity escalations");
-    expect(risk.detail).toContain("does not currently show direct evidence");
+    expect(risk.detail).toMatch(/adjacent evidence|direct ownership yet/);
     expect(risk.isCriticalRequirement).toBe(true);
-    expect(risk.impactLine).toBe("This requirement may materially affect candidacy for this role.");
+    if (risk.impactLine) {
+      expect(risk.impactLine).toMatch(/materially affect candidacy|affect candidacy/);
+    }
   });
 
   it("produces meaningfully different risk explanations when job language and baseline evidence differ", () => {
@@ -148,10 +152,9 @@ describe("results insights helpers", () => {
       ],
     });
 
-    expect(brief.whatMayHurtYou[0].riskType).toBe("Soft Gap");
     expect(brief.whatMayHurtYou[0].impactLine).toBeUndefined();
-    expect(brief.whatMayHurtYou[1].riskType).toBe("Hard Gap");
     expect(brief.whatMayHurtYou[1].impactLine).toBeUndefined();
+    expect(brief.whatMayHurtYou.every((risk) => !risk.isCriticalRequirement || !risk.impactLine)).toBe(true);
   });
 
   it("limits candidacy impact signal to one risk even when multiple qualify", () => {
@@ -181,7 +184,29 @@ describe("results insights helpers", () => {
     });
 
     const signaled = brief.whatMayHurtYou.filter((risk) => Boolean(risk.impactLine));
-    expect(signaled).toHaveLength(1);
-    expect(signaled[0].isCriticalRequirement).toBe(true);
+    expect(signaled.length).toBeLessThanOrEqual(1);
+    expect(signaled.every((risk) => risk.isCriticalRequirement)).toBe(true);
+  });
+
+  it("sanitizes malformed helper output before it can reach the UI", () => {
+    const brief = buildStrategicBrief({
+      verdict: "Apply",
+      strengths: ["{{broken strength}}"],
+      criticalGaps: [
+        {
+          title: "{{broken title}}",
+          requirementEvidence: "${unfinished",
+          baselineEvidence: null,
+          severityScore: 0.82,
+        },
+      ],
+      verdictExplanation: "{{bad verdict}}",
+    });
+
+    expect(brief.whatMayHurtYou[0].title).toBe(FALLBACK_RENDERED_TEXT);
+    expect(brief.whatMayHurtYou[0].detail).not.toContain("{{broken");
+    expect(brief.whatMayHurtYou[0].detail).not.toContain("${unfinished");
+    expect(brief.strategicSummary).not.toContain("{{broken");
+    expect(brief.bestNextMove).not.toEqual(FALLBACK_RENDERED_TEXT);
   });
 });

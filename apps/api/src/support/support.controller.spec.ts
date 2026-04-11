@@ -81,4 +81,25 @@ describe('SupportController', () => {
     const result = await controller.getStatus();
     expect(result).toEqual({ bugReporting: 'MISCONFIGURED' });
   });
+
+  it('returns typed bug report submission metadata', async () => {
+    supportService.reportBug.mockResolvedValue({
+      issueNumber: 123,
+      issueUrl: 'https://github.com/org/repo/issues/123',
+      sentryEventId: 'event-1',
+    });
+
+    const result = await controller.reportBug(
+      { message: 'Valid bug report message' } as any,
+      { user: { id: 'u1', role: 'member' } } as any,
+    );
+
+    expect(result).toMatchObject({
+      status: 'submission_success',
+      reportId: '123',
+      issueNumber: 123,
+      issueUrl: 'https://github.com/org/repo/issues/123',
+      sentryEventId: 'event-1',
+    });
+  });
 });

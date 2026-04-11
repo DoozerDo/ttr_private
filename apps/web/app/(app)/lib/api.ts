@@ -6,6 +6,10 @@ import {
   getPayloadErrorCode,
   readResponsePayload,
 } from "@/lib/compliance/parseComplianceError";
+import {
+  ClientRequestTimeoutError,
+  fetchWithTimeout,
+} from "@/lib/fetchWithTimeout";
 
 export class ApiResponseError extends Error {
   status: number;
@@ -20,6 +24,10 @@ export class ApiResponseError extends Error {
   }
 }
 
+type TimeoutCapableRequestInit = RequestInit & {
+  timeoutMs?: number;
+};
+
 function redirectToLoginIfNeeded(res: Response) {
   if (res.status !== 401) return;
 
@@ -30,16 +38,31 @@ function redirectToLoginIfNeeded(res: Response) {
 
 export async function apiFetchJson<T>(
   input: RequestInfo | URL,
-  init?: RequestInit,
+  init?: TimeoutCapableRequestInit,
 ): Promise<T> {
-  const res = await fetch(input, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-    cache: 'no-store',
-  });
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(input, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init?.headers ?? {}),
+      },
+      cache: 'no-store',
+    }, {
+      timeoutMs: init?.timeoutMs,
+    });
+  } catch (error) {
+    if (error instanceof ClientRequestTimeoutError) {
+      throw new ApiResponseError(
+        error.message,
+        error.status,
+        error.payload,
+        'timeout',
+      );
+    }
+    throw error;
+  }
 
   if (!res.ok) {
     redirectToLoginIfNeeded(res);
@@ -63,15 +86,32 @@ export async function apiFetchJson<T>(
 export async function apiFetchFileOrJson(
   url: string,
   body: unknown,
+  init?: TimeoutCapableRequestInit,
 ): Promise<
   { kind: 'file'; blob: Blob; contentType: string } | { kind: 'json'; data: unknown }
 > {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body ?? {}),
-    cache: 'no-store',
-  });
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body ?? {}),
+      cache: 'no-store',
+      ...init,
+    }, {
+      timeoutMs: init?.timeoutMs,
+    });
+  } catch (error) {
+    if (error instanceof ClientRequestTimeoutError) {
+      throw new ApiResponseError(
+        error.message,
+        error.status,
+        error.payload,
+        'timeout',
+      );
+    }
+    throw error;
+  }
 
   if (!res.ok) {
     redirectToLoginIfNeeded(res);

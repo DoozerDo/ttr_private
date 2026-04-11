@@ -28,6 +28,7 @@ import { InterviewsService } from './interviews.service';
 import { StarStory } from '../star-stories/star-story.entity';
 import { BaselineVersionService } from '../baseline/baseline-version.service';
 import { SupportModule } from '../support/support.module';
+import { WorkflowIdempotencyModule } from '../common/workflow-idempotency.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { SupportModule } from '../support/support.module';
     ]),
     ComplianceModule,
     SupportModule,
+    WorkflowIdempotencyModule,
   ],
   controllers: [
     InterviewsController,

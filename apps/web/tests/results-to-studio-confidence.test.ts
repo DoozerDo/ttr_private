@@ -16,7 +16,7 @@ describe("results to studio confidence", () => {
     expect(decision.primaryCta).toBe("OPEN_STUDIO");
     expect(decision.headline).toBe("You're a strong match. You can generate now.");
     expect(decision.subtext).toBe(
-      "Generate now. Then strengthen your output by verifying key claims in Studio.",
+      "Open Studio now. You can tighten a few details after generation.",
     );
   });
 });

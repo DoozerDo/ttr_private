@@ -29,6 +29,7 @@ import { useEntitlements } from "@/src/lib/entitlements";
 import { listJobs } from "@/lib/jobsClient";
 import type { JobDto } from "@/lib/jobs";
 import type { BaselineDto } from "@/lib/baselines";
+import { sanitizeRenderedTextValue } from "@/lib/renderedText";
 
 type AnyObject = Record<string, unknown>;
 
@@ -71,13 +72,39 @@ function extractUnknownMessage(value: unknown): string | undefined {
     return undefined;
   }
   const candidate = value as { message?: unknown; error?: unknown; msg?: unknown; description?: unknown };
-  if (typeof candidate.message === "string" && candidate.message.trim().length) return candidate.message;
-  if (Array.isArray(candidate.message) && candidate.message.length) {
-    return candidate.message.filter((item): item is string => typeof item === "string").join(", ");
+  if (typeof candidate.message === "string" && candidate.message.trim().length) {
+    return sanitizeRenderedTextValue(candidate.message, {
+      endpoint: "cover-letters",
+      field: "message",
+    });
   }
-  if (typeof candidate.error === "string") return candidate.error;
-  if (typeof candidate.msg === "string") return candidate.msg;
-  if (typeof candidate.description === "string") return candidate.description;
+  if (Array.isArray(candidate.message) && candidate.message.length) {
+    return sanitizeRenderedTextValue(
+      candidate.message.filter((item): item is string => typeof item === "string").join(", "),
+      {
+        endpoint: "cover-letters",
+        field: "message[]",
+      },
+    );
+  }
+  if (typeof candidate.error === "string") {
+    return sanitizeRenderedTextValue(candidate.error, {
+      endpoint: "cover-letters",
+      field: "error",
+    });
+  }
+  if (typeof candidate.msg === "string") {
+    return sanitizeRenderedTextValue(candidate.msg, {
+      endpoint: "cover-letters",
+      field: "msg",
+    });
+  }
+  if (typeof candidate.description === "string") {
+    return sanitizeRenderedTextValue(candidate.description, {
+      endpoint: "cover-letters",
+      field: "description",
+    });
+  }
   return undefined;
 }
 
@@ -637,7 +664,10 @@ function readStringFromPaths(record: StoredAnalysisRecord | null, paths: string[
   for (const path of paths) {
     const value = getValueAtPath(record as AnyObject, path);
     if (typeof value === "string" && value.trim()) {
-      return value.trim();
+      return sanitizeRenderedTextValue(value, {
+        endpoint: "cover-letters",
+        field: path.join("."),
+      });
     }
   }
   return null;
@@ -730,10 +760,10 @@ function stringsOnly(arr: unknown): string[] {
 function normalizeJobContextValue(value?: string | null): string | undefined {
   if (!value) return undefined;
 
-  const cleaned = value
-    .trim()
-    .replace(/\s+/g, ' ')
-    .toLowerCase();
+  const cleaned = sanitizeRenderedTextValue(value, {
+    endpoint: "cover-letters",
+    field: "jobContext",
+  }).toLowerCase();
 
   return cleaned.length ? cleaned : undefined;
 }
@@ -742,7 +772,12 @@ function extractSectionText(section: ResumeSectionLike): string {
   const directCandidates: unknown[] = [section.content, section.text];
 
   for (const candidate of directCandidates) {
-    if (typeof candidate === "string" && candidate.trim().length) return candidate.trim();
+    if (typeof candidate === "string" && candidate.trim().length) {
+      return sanitizeRenderedTextValue(candidate, {
+        endpoint: "cover-letters",
+        field: "section.content",
+      });
+    }
   }
 
   const lines = stringsOnly(section.lines);

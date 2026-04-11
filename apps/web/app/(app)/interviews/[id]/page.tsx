@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 
@@ -41,9 +41,20 @@ import {
   readResponsePayload,
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
+import {
+  buildWorkflowRequestKey,
+  isWorkflowRequestStale,
+  logWorkflowRequestEvent,
+  type WorkflowRequestScope,
+} from "@/lib/workflowRequestGuard";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import { mapGapToUserGuidance } from "@/lib/userGuidance";
 import { publishBaselineUpdated } from "@/src/lib/baseline-sync";
+import { InterviewApiError } from "@/lib/interviewsClient";
+import {
+  sanitizeRenderedTextList,
+  sanitizeRenderedTextValue,
+} from "@/lib/renderedText";
 
 type ComplianceFlag = {
   code?: string;
@@ -123,6 +134,77 @@ function normalizeCompliance(
   return lookup;
 }
 
+function sanitizeInterviewSessionDto(
+  session: InterviewSessionDto,
+  endpoint: string,
+): InterviewSessionDto {
+  const context = { endpoint, payload: session };
+  const sanitizeText = (value: unknown, field: string) =>
+    sanitizeRenderedTextValue(value, { ...context, field });
+  const sanitizeList = (value: unknown, field: string) =>
+    Array.isArray(value)
+      ? sanitizeRenderedTextList(
+          value.filter((entry): entry is string => typeof entry === "string"),
+          { ...context, field },
+        )
+      : [];
+
+  return {
+    ...session,
+    gapList: Array.isArray(session.gapList)
+      ? session.gapList.map((gap, index) => ({
+          ...gap,
+          jdExcerpt: sanitizeText(gap.jdExcerpt, `gapList[${index}].jdExcerpt`),
+          baselineExcerpt: gap.baselineExcerpt
+            ? sanitizeText(gap.baselineExcerpt, `gapList[${index}].baselineExcerpt`)
+            : gap.baselineExcerpt,
+        }))
+      : session.gapList,
+    questions: Array.isArray(session.questions)
+      ? session.questions.map((question, index) => ({
+          ...question,
+          prompt: sanitizeText(question.prompt, `questions[${index}].prompt`),
+          jdReference: sanitizeText(question.jdReference, `questions[${index}].jdReference`),
+        }))
+      : session.questions,
+    responses: Array.isArray(session.responses)
+      ? sanitizeRenderedTextList(
+          session.responses.filter((entry): entry is string => typeof entry === "string"),
+          { ...context, field: "responses" },
+        )
+      : session.responses,
+    recommendedAdditions: Array.isArray(session.recommendedAdditions)
+      ? session.recommendedAdditions.map((addition, index) => ({
+          ...addition,
+          text: sanitizeText(addition.text, `recommendedAdditions[${index}].text`),
+          sources: Array.isArray(addition.sources)
+            ? addition.sources.map((source, sourceIndex) => ({
+                ...source,
+                questionPrompt: source.questionPrompt
+                  ? sanitizeText(
+                      source.questionPrompt,
+                      `recommendedAdditions[${index}].sources[${sourceIndex}].questionPrompt`,
+                    )
+                  : source.questionPrompt,
+              }))
+            : addition.sources,
+        }))
+      : session.recommendedAdditions,
+    expandedFitAssessment: session.expandedFitAssessment
+      ? {
+          ...session.expandedFitAssessment,
+          originalVerdict: session.expandedFitAssessment.originalVerdict
+            ? sanitizeText(session.expandedFitAssessment.originalVerdict, "expandedFitAssessment.originalVerdict")
+            : session.expandedFitAssessment.originalVerdict,
+          expandedVerdict: session.expandedFitAssessment.expandedVerdict
+            ? sanitizeText(session.expandedFitAssessment.expandedVerdict, "expandedFitAssessment.expandedVerdict")
+            : session.expandedFitAssessment.expandedVerdict,
+        }
+      : session.expandedFitAssessment,
+    validationResults: session.validationResults,
+  };
+}
+
 function readNumericField(payload: unknown, keys: string[]): number | null {
   if (!payload || typeof payload !== "object") return null;
 
@@ -172,9 +254,104 @@ function describeAdditionSource(addition: RecommendedAddition): string {
   return "Suggested from your interview review";
 }
 
+function resolveExpandedComputeFailure(error: unknown): ExpandedComputeFailure {
+  if (error instanceof InterviewApiError) {
+    switch (error.code) {
+      case "interview_not_found":
+        return {
+          message: error.message,
+          nextActionLabel: "Back to Results",
+          nextActionHref: "/results",
+          action: "navigate",
+        };
+      case "baseline_not_found":
+      case "baseline_version_mismatch":
+        return {
+          message: error.message,
+          nextActionLabel: "Back to Baseline",
+          nextActionHref: "/baseline",
+          action: "navigate",
+        };
+      case "target_context_missing":
+        return {
+          message: error.message,
+          nextActionLabel: "Back to Results",
+          nextActionHref: "/results",
+          action: "navigate",
+        };
+      case "incomplete_answers":
+      case "insufficient_answers":
+        return {
+          message: error.message,
+          nextActionLabel: "Save responses",
+          nextActionHref: null,
+          action: "save",
+        };
+      case "missing_baseline_link":
+      case "missing_job_context":
+      case "invalid_baseline_linkage":
+        return {
+          message: error.message,
+          nextActionLabel:
+            error.code === "missing_baseline_link" || error.code === "invalid_baseline_linkage"
+              ? "Back to Baseline"
+              : "Back to Results",
+          nextActionHref:
+            error.code === "missing_baseline_link" || error.code === "invalid_baseline_linkage"
+              ? "/baseline"
+              : "/results",
+          action: "navigate",
+        };
+      case "computation_timeout":
+        return {
+          message: error.message,
+          nextActionLabel: "Retry compute",
+          nextActionHref: null,
+          action: "retry",
+        };
+      case "computation_failed":
+      case "expanded_fit_analysis_failed":
+      case "temporarily_unavailable":
+      default:
+        return {
+          message: error.message,
+          nextActionLabel: "Retry compute",
+          nextActionHref: null,
+          action: "retry",
+        };
+    }
+  }
+
+  const message = error instanceof Error ? error.message : "Unable to compute expanded fit.";
+  return {
+    message,
+    nextActionLabel: "Retry compute",
+    nextActionHref: null,
+    action: "retry",
+  };
+}
+
 const COMPLETION_STATUS_VALUES = ["complete", "completed", "done", "closed", "finished"];
 
 type ComputeStatus = "idle" | "loading" | "success" | "error";
+
+type InterviewWorkflowState =
+  | "drafting_answers"
+  | "answers_saved"
+  | "validating_additions"
+  | "ready_to_compute"
+  | "computing"
+  | "expanded_fit_ready"
+  | "needs_more_input"
+  | "blocked"
+  | "failed";
+
+type ExpandedComputeFailure = {
+  message: string;
+  nextActionLabel: string;
+  nextActionHref: string | null;
+  action: "save" | "retry" | "navigate";
+};
 
 const debugUiEnabled =
   typeof process !== "undefined" && process.env.NEXT_PUBLIC_DEBUG_UI === "true";
@@ -201,6 +378,7 @@ export default function InterviewSessionPage() {
   const [acceptedError, setAcceptedError] = useState<string | null>(null);
   const [expandedComputing, setExpandedComputing] = useState(false);
   const [expandedComputeError, setExpandedComputeError] = useState<string | null>(null);
+  const [expandedComputeFailure, setExpandedComputeFailure] = useState<ExpandedComputeFailure | null>(null);
   const [lastComputeStatus, setLastComputeStatus] = useState<ComputeStatus>("idle");
   const [lastComputeAt, setLastComputeAt] = useState<string | null>(null);
   const [hasExpandedFitData, setHasExpandedFitData] = useState(false);
@@ -226,19 +404,43 @@ export default function InterviewSessionPage() {
   const [acceptedFetchStatus, setAcceptedFetchStatus] = useState<ComputeStatus>("idle");
   const [acceptedFetchError, setAcceptedFetchError] = useState<string | null>(null);
   const [acceptingAdditionId, setAcceptingAdditionId] = useState<string | null>(null);
+  const currentAcceptedAdditionIdsRef = useRef<string[]>([]);
+  const currentSessionScopeRef = useRef<WorkflowRequestScope>({
+    baselineId: null,
+    jobId: null,
+    baselineVersionId: null,
+    analysisId: null,
+    sessionId: null,
+  });
+  const currentSessionIdRef = useRef<string | null>(sessionId ?? null);
+  const saveRequestRef = useRef<{ requestId: string; sessionId: string } | null>(null);
+  const decisionRequestRef = useRef<Record<string, { requestId: string; sessionId: string }>>({});
+  const acceptedSaveRequestRef = useRef<{ requestId: string; sessionId: string } | null>(null);
+  const computeRequestRef = useRef<{ requestId: string; sessionId: string } | null>(null);
+  const promotionRequestRef = useRef<{ requestId: string; sessionId: string } | null>(null);
+  const interviewDraftStorageKey = useMemo(
+    () => (sessionId ? `ttr.interview-draft:${sessionId}` : null),
+    [sessionId],
+  );
+
+  const createRequestId = () =>
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   const applySessionUpdate = useCallback(
     (data: InterviewSessionDto, options?: { preserveAnswers?: boolean }) => {
-      setSession(data);
+      const sanitizedData = sanitizeInterviewSessionDto(data, "/api/interviews/:id");
+      setSession(sanitizedData);
 
       if (options?.preserveAnswers) {
         return;
       }
 
-      const questionCount = data?.questions?.length ?? 0;
+      const questionCount = sanitizedData?.questions?.length ?? 0;
       const existingResponses =
-        Array.isArray(data?.responses) && data.responses.length
-          ? data.responses.map((entry) => entry?.toString() ?? "")
+        Array.isArray(sanitizedData?.responses) && sanitizedData.responses.length
+          ? sanitizedData.responses.map((entry) => entry?.toString() ?? "")
           : [];
 
       setAnswers((prev) => {
@@ -254,28 +456,78 @@ export default function InterviewSessionPage() {
     [],
   );
 
+  useEffect(() => {
+    currentSessionIdRef.current = sessionId ?? null;
+    currentSessionScopeRef.current = {
+      baselineId: session?.baselineId ?? null,
+      jobId: session?.jobId ?? null,
+      baselineVersionId: session?.baselineVersionId ?? null,
+      analysisId: session?.expandedFitAssessment?.assessmentId ?? null,
+      sessionId: sessionId ?? null,
+    };
+  }, [session?.baselineId, session?.baselineVersionId, session?.expandedFitAssessment?.assessmentId, session?.jobId, sessionId]);
+
+  useEffect(() => {
+    currentAcceptedAdditionIdsRef.current = acceptedAdditionIds;
+  }, [acceptedAdditionIds]);
+
   // Moved up: this must be declared before any callbacks that reference it.
   const saveAcceptedAdditions = useCallback(
     async (nextAcceptedIds: string[]) => {
       if (!sessionId) return;
+      if (acceptedSaveRequestRef.current?.sessionId === sessionId && acceptedSaving) return;
 
+      const requestId = createRequestId();
+      acceptedSaveRequestRef.current = { requestId, sessionId };
       setAcceptedSaving(true);
       setAcceptedError(null);
       setReviewMessage(null);
 
       try {
         const updatedSession = await updateInterviewAcceptedAdditions(sessionId, nextAcceptedIds);
+        if (
+          acceptedSaveRequestRef.current?.requestId !== requestId ||
+          currentSessionIdRef.current !== sessionId
+        ) {
+          logWorkflowRequestEvent("stale_response_dropped", {
+            action: "save_accepted_additions",
+            expected: {
+              baselineId: session?.baselineId ?? null,
+              jobId: session?.jobId ?? null,
+              baselineVersionId: session?.baselineVersionId ?? null,
+              sessionId,
+            },
+            current: currentSessionScopeRef.current,
+            requestId,
+            source: "interview",
+          });
+          return;
+        }
         applySessionUpdate(updatedSession, { preserveAnswers: true });
         setReviewMessage("Accepted additions updated.");
       } catch (saveError) {
+        if (
+          acceptedSaveRequestRef.current?.requestId !== requestId ||
+          currentSessionIdRef.current !== sessionId
+        ) {
+          return;
+        }
         setAcceptedError(
           saveError instanceof Error ? saveError.message : "Unable to save accepted additions.",
         );
       } finally {
-        setAcceptedSaving(false);
+        if (acceptedSaveRequestRef.current?.requestId === requestId) {
+          setAcceptedSaving(false);
+          acceptedSaveRequestRef.current = null;
+          if (
+            currentAcceptedAdditionIdsRef.current.join("|") !== nextAcceptedIds.join("|")
+          ) {
+            void saveAcceptedAdditions(currentAcceptedAdditionIdsRef.current);
+          }
+        }
       }
     },
-    [applySessionUpdate, sessionId],
+    [acceptedSaving, applySessionUpdate, session?.baselineId, session?.baselineVersionId, session?.jobId, sessionId],
   );
 
   useEffect(() => {
@@ -369,6 +621,55 @@ export default function InterviewSessionPage() {
   useEffect(() => {
     setAcceptedAdditionIds(session?.acceptedAdditionIds ?? []);
   }, [session?.acceptedAdditionIds]);
+
+  useEffect(() => {
+    if (!sessionId || loadStatus !== "success" || !interviewDraftStorageKey || typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      const raw = window.localStorage.getItem(interviewDraftStorageKey);
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw) as { answers?: unknown };
+      if (!Array.isArray(parsed.answers)) return;
+
+      const questionCount = session?.questions?.length ?? 0;
+      const nextAnswers = parsed.answers
+        .map((value) => (typeof value === "string" ? value : ""))
+        .slice(0, questionCount);
+
+      if (nextAnswers.some((entry) => entry.trim().length > 0)) {
+        setAnswers((current) => {
+          if (current.some((entry) => entry.trim().length > 0)) {
+            return current;
+          }
+          return Array.from({ length: questionCount }, (_, index) => nextAnswers[index] ?? "");
+        });
+      }
+    } catch {
+      // Draft restore is best effort.
+    }
+  }, [interviewDraftStorageKey, loadStatus, session?.questions?.length, sessionId]);
+
+  useEffect(() => {
+    if (!interviewDraftStorageKey || loadStatus !== "success" || typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      const trimmedAnswers = answers.map((answer) => (answer ?? "").trim());
+      window.localStorage.setItem(
+        interviewDraftStorageKey,
+        JSON.stringify({
+          answers: trimmedAnswers,
+          updatedAt: new Date().toISOString(),
+        }),
+      );
+    } catch {
+      // Draft persistence is best effort.
+    }
+  }, [answers, interviewDraftStorageKey, loadStatus]);
 
   useEffect(() => {
     if (!session?.expandedFitAssessment) {
@@ -726,24 +1027,48 @@ export default function InterviewSessionPage() {
 
   const handleSave = async () => {
     if (!sessionId) return;
+    if (saving) return;
 
     if (answeredCount === 0) {
       setError("Add at least one response before saving.");
       return;
     }
 
+    const requestId = createRequestId();
+    saveRequestRef.current = { requestId, sessionId };
     setSaving(true);
     setError(null);
     setMessage(null);
 
     try {
       const updatedSession = await saveInterviewResponses(sessionId, trimmedResponses);
+      if (saveRequestRef.current?.requestId !== requestId || currentSessionIdRef.current !== sessionId) {
+        logWorkflowRequestEvent("stale_response_dropped", {
+          action: "save_responses",
+          expected: {
+            baselineId: session?.baselineId ?? null,
+            jobId: session?.jobId ?? null,
+            baselineVersionId: session?.baselineVersionId ?? null,
+            sessionId,
+          },
+          current: currentSessionScopeRef.current,
+          requestId,
+          source: "interview",
+        });
+        return;
+      }
       applySessionUpdate(updatedSession, { preserveAnswers: true });
       setMessage("Responses saved. You can revisit this page anytime.");
     } catch (saveError) {
+      if (saveRequestRef.current?.requestId !== requestId || currentSessionIdRef.current !== sessionId) {
+        return;
+      }
       setError(saveError instanceof Error ? saveError.message : "Unable to save responses.");
     } finally {
-      setSaving(false);
+      if (saveRequestRef.current?.requestId === requestId) {
+        setSaving(false);
+        saveRequestRef.current = null;
+      }
     }
   };
 
@@ -752,7 +1077,10 @@ export default function InterviewSessionPage() {
     decision: RecommendedAdditionDecision,
   ) => {
     if (!sessionId || !addition?.id) return;
+    if (decisionSavingId === addition.id) return;
 
+    const requestId = createRequestId();
+    decisionRequestRef.current[addition.id] = { requestId, sessionId };
     setDecisionSavingId(addition.id);
     setError(null);
     setMessage(null);
@@ -761,6 +1089,24 @@ export default function InterviewSessionPage() {
       const updatedSession = await submitInterviewAdditionDecisions(sessionId, [
         { additionId: addition.id, decision },
       ]);
+      if (
+        decisionRequestRef.current[addition.id]?.requestId !== requestId ||
+        currentSessionIdRef.current !== sessionId
+      ) {
+        logWorkflowRequestEvent("stale_response_dropped", {
+          action: "save_decision",
+          expected: {
+            baselineId: session?.baselineId ?? null,
+            jobId: session?.jobId ?? null,
+            baselineVersionId: session?.baselineVersionId ?? null,
+            sessionId,
+          },
+          current: currentSessionScopeRef.current,
+          requestId,
+          source: "interview",
+        });
+        return;
+      }
       applySessionUpdate(updatedSession, { preserveAnswers: true });
       setRecommendedAdditionsState((prev) =>
         prev.map((entry) =>
@@ -779,9 +1125,18 @@ export default function InterviewSessionPage() {
       );
       setMessage("Decision saved.");
     } catch (decisionError) {
+      if (
+        decisionRequestRef.current[addition.id]?.requestId !== requestId ||
+        currentSessionIdRef.current !== sessionId
+      ) {
+        return;
+      }
       setError(decisionError instanceof Error ? decisionError.message : "Unable to save decision.");
     } finally {
-      setDecisionSavingId(null);
+      if (decisionRequestRef.current[addition.id]?.requestId === requestId) {
+        setDecisionSavingId(null);
+        delete decisionRequestRef.current[addition.id];
+      }
     }
   };
 
@@ -812,14 +1167,36 @@ export default function InterviewSessionPage() {
 
   const handleRecomputeExpandedFit = async () => {
     if (!sessionId) return;
+    if (expandedComputing) return;
 
+    const requestId = createRequestId();
+    computeRequestRef.current = { requestId, sessionId };
     setExpandedComputing(true);
     setExpandedComputeError(null);
+    setExpandedComputeFailure(null);
     setReviewMessage(null);
     setLastComputeStatus("loading");
 
     try {
       const updatedSession = await computeInterviewExpandedFit(sessionId);
+      if (
+        computeRequestRef.current?.requestId !== requestId ||
+        currentSessionIdRef.current !== sessionId
+      ) {
+        logWorkflowRequestEvent("stale_response_dropped", {
+          action: "compute_expanded_fit",
+          expected: {
+            baselineId: session?.baselineId ?? null,
+            jobId: session?.jobId ?? null,
+            baselineVersionId: session?.baselineVersionId ?? null,
+            sessionId,
+          },
+          current: currentSessionScopeRef.current,
+          requestId,
+          source: "interview",
+        });
+        return;
+      }
       const completedAt = new Date().toISOString();
 
       if (!updatedSession || !updatedSession.expandedFitAssessment) {
@@ -842,19 +1219,28 @@ export default function InterviewSessionPage() {
         setReviewMessage("Expanded fit score updated");
       }
     } catch (computeError) {
-      const message =
-        computeError instanceof Error ? computeError.message : "Unable to compute expanded fit.";
-      setExpandedComputeError(message);
+      if (
+        computeRequestRef.current?.requestId !== requestId ||
+        currentSessionIdRef.current !== sessionId
+      ) {
+        return;
+      }
+      const failure = resolveExpandedComputeFailure(computeError);
+      setExpandedComputeError(failure.message);
+      setExpandedComputeFailure(failure);
       setLastComputeStatus("error");
       setLastComputeAt(new Date().toISOString());
-      setHasExpandedFitData(false);
     } finally {
-      setExpandedComputing(false);
+      if (computeRequestRef.current?.requestId === requestId) {
+        setExpandedComputing(false);
+        computeRequestRef.current = null;
+      }
     }
   };
 
   const handlePromoteAcceptedAdditions = async () => {
     if (!sessionId) return;
+    if (promotionSaving) return;
 
     if (acceptedAdditionIds.length === 0) {
       setPromotionError("Select at least one addition to promote.");
@@ -876,12 +1262,32 @@ export default function InterviewSessionPage() {
       return;
     }
 
+    const requestId = createRequestId();
+    promotionRequestRef.current = { requestId, sessionId };
     setPromotionSaving(true);
     setPromotionError(null);
     setReviewMessage(null);
 
     try {
       const promotion = await promoteInterviewAcceptedAdditions(sessionId);
+      if (
+        promotionRequestRef.current?.requestId !== requestId ||
+        currentSessionIdRef.current !== sessionId
+      ) {
+        logWorkflowRequestEvent("stale_response_dropped", {
+          action: "promote_baseline",
+          expected: {
+            baselineId: session?.baselineId ?? null,
+            jobId: session?.jobId ?? null,
+            baselineVersionId: session?.baselineVersionId ?? null,
+            sessionId,
+          },
+          current: currentSessionScopeRef.current,
+          requestId,
+          source: "interview",
+        });
+        return;
+      }
       const baselineVersionId = promotion.baselineVersionId ?? "";
       const baselineVersionHash = promotion.baselineVersionHash ?? null;
 
@@ -908,11 +1314,20 @@ export default function InterviewSessionPage() {
       setReviewMessage("Accepted additions promoted to a new baseline version.");
       publishBaselineUpdated({ baselineId: session?.baselineId ?? null, source: "interview" });
     } catch (promoteError) {
+      if (
+        promotionRequestRef.current?.requestId !== requestId ||
+        currentSessionIdRef.current !== sessionId
+      ) {
+        return;
+      }
       setPromotionError(
         promoteError instanceof Error ? promoteError.message : "Unable to promote additions.",
       );
     } finally {
-      setPromotionSaving(false);
+      if (promotionRequestRef.current?.requestId === requestId) {
+        setPromotionSaving(false);
+        promotionRequestRef.current = null;
+      }
     }
   };
 
@@ -934,7 +1349,6 @@ export default function InterviewSessionPage() {
   const allQuestionsAnswered = questions.length > 0 && answeredCount >= questions.length;
   const interviewComplete = backendIndicatesCompletion || allQuestionsAnswered;
   const expandedFitComputed = Boolean(expandedFitDetails);
-  const canPromote = baselineAvailable && expandedFitComputed && acceptedAdditionIds.length > 0;
   const analyzeBaselineVersionId =
     promotionResult?.baselineVersionId ??
     session?.promotedBaselineVersionId ??
@@ -957,21 +1371,29 @@ export default function InterviewSessionPage() {
     const query = params.toString();
     return query ? `/studio?${query}` : "/studio";
   }, [analyzeBaselineVersionId, session?.jobId]);
+  const persistedResponseCount = useMemo(
+    () =>
+      Array.isArray(session?.responses)
+        ? session.responses.filter((entry) => Boolean(entry?.trim?.())).length
+        : 0,
+    [session?.responses],
+  );
+  const persistedAcceptedAdditionCount = persistedAcceptedAdditions.length;
   const completionReason = backendIndicatesCompletion
     ? "Backend marked this interview as complete."
-    : allQuestionsAnswered
-      ? "All questions now have recorded responses."
+    : persistedResponseCount > 0
+      ? "Responses are saved. Validate additions or compute expanded fit when the flow is ready."
       : "Use the actions below to move forward.";
   const loopSteps = [
     {
       key: "responses",
       label: "1. Save responses",
-      complete: allQuestionsAnswered,
+      complete: persistedResponseCount > 0,
     },
     {
       key: "decisions",
       label: "2. Validate additions",
-      complete: acceptedAdditionIds.length > 0,
+      complete: persistedAcceptedAdditionCount > 0,
     },
     {
       key: "expandedFit",
@@ -985,13 +1407,132 @@ export default function InterviewSessionPage() {
     },
   ] as const;
 
+  const hasUnsavedResponseDraft = useMemo(
+    () =>
+      trimmedResponses.some(
+        (response, index) =>
+          response !== (session?.responses?.[index]?.trim?.() ?? ""),
+      ),
+    [session?.responses, trimmedResponses],
+  );
+  const canComputeExpandedFit =
+    baselineAvailable &&
+    Boolean(session?.jobId) &&
+    persistedResponseCount > 0 &&
+    persistedAcceptedAdditionCount > 0 &&
+    !saving &&
+    !acceptedSaving &&
+    !decisionSavingId &&
+    !expandedComputing;
+  const canPromoteExpandedFit =
+    baselineAvailable &&
+    expandedFitComputed &&
+    persistedAcceptedAdditionCount > 0 &&
+    !saving &&
+    !acceptedSaving &&
+    !decisionSavingId &&
+    !expandedComputing;
+  const workflowState: InterviewWorkflowState = useMemo(() => {
+    if (expandedComputing) return "computing";
+    if (expandedFitDetails) return "expanded_fit_ready";
+    if (expandedComputeFailure) {
+      return expandedComputeFailure.action === "save" ? "needs_more_input" : "failed";
+    }
+    if (promotionError || acceptedError || error) return "failed";
+    if (baselineMissingForSession || tierGateError || loadComplianceError) return "blocked";
+    if (!session?.jobId) return "blocked";
+    if (acceptedSaving || Boolean(decisionSavingId)) return "validating_additions";
+    if (saving) return "drafting_answers";
+    if (hasUnsavedResponseDraft) return "drafting_answers";
+    if (persistedAcceptedAdditionCount > 0 && persistedResponseCount > 0) return "ready_to_compute";
+    if (persistedResponseCount > 0) return "answers_saved";
+    return "needs_more_input";
+  }, [
+    acceptedError,
+    acceptedSaving,
+    baselineMissingForSession,
+    decisionSavingId,
+    error,
+    expandedComputing,
+    expandedComputeFailure,
+    expandedFitDetails,
+    hasUnsavedResponseDraft,
+    loadComplianceError,
+    persistedAcceptedAdditionCount,
+    persistedResponseCount,
+    promotionError,
+    saving,
+    session?.jobId,
+    tierGateError,
+  ]);
+
+  const workflowSummary = useMemo(() => {
+    switch (workflowState) {
+      case "computing":
+        return {
+          title: "Computing expanded fit",
+          body:
+            "We are scoring the saved interview against the linked baseline. Your responses stay preserved while this runs.",
+        };
+      case "expanded_fit_ready":
+        return {
+          title: "Expanded fit is ready",
+          body:
+            "Review the result below, then promote accepted additions or return to Results when you are ready.",
+        };
+      case "blocked":
+        return {
+          title: "Workflow blocked",
+          body:
+            "This interview is missing required context. Use the exit links below to reconnect the baseline or role before computing.",
+        };
+      case "failed":
+        return {
+          title: "Last step failed",
+          body:
+            "Your work is still on the page. Use the recovery action below or return to Baseline/Results and try again.",
+        };
+      case "validating_additions":
+        return {
+          title: "Validating additions",
+          body:
+            "Your decisions are syncing to the interview record. Keep going once the save finishes.",
+        };
+      case "ready_to_compute":
+        return {
+          title: "Ready to compute",
+          body:
+            "Saved responses and accepted additions are in place. Compute expanded fit when you are ready.",
+        };
+      case "answers_saved":
+        return {
+          title: "Answers saved",
+          body:
+            "Responses are saved. Validate the additions that matter, then compute expanded fit.",
+        };
+      case "drafting_answers":
+        return {
+          title: "Drafting answers",
+          body:
+            "You have unsaved changes. Save the answers you want to keep before validating additions.",
+        };
+      case "needs_more_input":
+      default:
+        return {
+          title: "More input needed",
+          body:
+            "Add at least one useful response, save it, then validate additions so expanded fit can run.",
+        };
+    }
+  }, [workflowState]);
+
   return (
     <PageShell>
       <div className="space-y-6 pb-10">
         <PageHeader
           kicker="Interview session"
           title="Baseline Expansion Interview"
-          description="Capture evidence, validate additions, compute expanded fit, and promote your next baseline version."
+          description="Short guided review to sharpen evidence, save progress, and compute expanded fit without trapping you in an endless questionnaire."
         />
         {baselineMissingForSession ? (
           <Alert intent="warning">
@@ -1039,6 +1580,9 @@ export default function InterviewSessionPage() {
                   Session details
                 </p>
                 <h2 className="text-lg font-semibold text-slate-100">Interview questions and evidence</h2>
+                <p className="mt-1 text-sm text-slate-300">
+                  Focus on the highest-signal details: scope, impact, and the facts that strengthen expanded fit.
+                </p>
               </div>
               <div className="space-y-3">
                 <div className="space-y-2">
@@ -1199,6 +1743,29 @@ export default function InterviewSessionPage() {
             </section>
 
             <section className="space-y-6 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
+              <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/60 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                  Workflow state
+                </p>
+                <div className="space-y-1">
+                  <h3 className="text-lg font-semibold text-slate-100">{workflowSummary.title}</h3>
+                  <p className="text-sm text-slate-300">{workflowSummary.body}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Link
+                    href="/results"
+                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition hover:border-white/30 hover:bg-white/10"
+                  >
+                    Back to Results
+                  </Link>
+                  <Link
+                    href="/baseline"
+                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition hover:border-white/30 hover:bg-white/10"
+                  >
+                    Back to Baseline
+                  </Link>
+                </div>
+              </div>
               <div className="space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Progress</p>
                 <h3 className="text-lg font-semibold text-slate-100">Where you are</h3>
@@ -1227,7 +1794,29 @@ export default function InterviewSessionPage() {
 
               {reviewMessage ? <Alert intent="success">{reviewMessage}</Alert> : null}
               {acceptedError ? <Alert intent="error">{acceptedError}</Alert> : null}
-              {expandedComputeError ? <Alert intent="error">{expandedComputeError}</Alert> : null}
+              {expandedComputeError ? (
+                <div className="space-y-2">
+                  <Alert intent="error">{expandedComputeError}</Alert>
+                  {expandedComputeFailure ? (
+                    <div className="flex flex-wrap gap-2">
+                      {expandedComputeFailure.nextActionHref ? (
+                        <Link
+                          href={expandedComputeFailure.nextActionHref}
+                          className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition hover:border-white/30 hover:bg-white/10"
+                        >
+                          {expandedComputeFailure.nextActionLabel}
+                        </Link>
+                      ) : expandedComputeFailure.action === "save" ? (
+                        <FormButton onClick={handleSave}>{expandedComputeFailure.nextActionLabel}</FormButton>
+                      ) : (
+                        <FormButton onClick={handleRecomputeExpandedFit}>
+                          {expandedComputing ? "Computing..." : expandedComputeFailure.nextActionLabel}
+                        </FormButton>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               {promotionError ? <Alert intent="error">{promotionError}</Alert> : null}
 
               <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/50 p-4">
@@ -1322,7 +1911,7 @@ export default function InterviewSessionPage() {
                 )}
                 <FormButton
                   onClick={handleRecomputeExpandedFit}
-                  disabled={expandedComputing || persistedAcceptedAdditions.length === 0}
+                  disabled={expandedComputing || !canComputeExpandedFit}
                 >
                   {expandedComputing ? "Computing..." : "Compute expanded fit now"}
                 </FormButton>
@@ -1349,7 +1938,7 @@ export default function InterviewSessionPage() {
                 </p>
                 <FormButton
                   onClick={handlePromoteAcceptedAdditions}
-                  disabled={promotionSaving || !canPromote}
+                  disabled={promotionSaving || !canPromoteExpandedFit}
                 >
                   {promotionSaving ? "Promoting..." : "Promote accepted additions to baseline"}
                 </FormButton>

@@ -34,6 +34,11 @@ import {
 import { getGenerationAuthorityState } from "@/lib/generationAuthority";
 import { buildGenerationProductReadiness } from "@/lib/generationProductReadiness";
 import { normalizeClaimVerifications } from "@/lib/claimVerification";
+import {
+  buildCompetitiveBlockedResultsState,
+  buildResultsDecisionCopy,
+  type ResultsBlockedState,
+} from "@/lib/resultsMessaging";
 import { sanitizeScoreExplanationLine, sanitizeScoreExplanationList } from "@/lib/scoreExplanationCopy";
 import { getDecisionFromFitScore } from "@/lib/fit-verdict";
 import { buildStrategicBrief } from "@/lib/resultsInsights";
@@ -46,11 +51,22 @@ import {
   buildActionableImprovementSuggestion,
 } from "@/lib/evidenceSuggestions";
 import { buildScoreDelta, hasBaselineUpdated } from "@/lib/reanalysis";
+import {
+  FALLBACK_RENDERED_TEXT,
+  sanitizeRenderedTextList,
+  sanitizeRenderedTextValue,
+} from "@/lib/renderedText";
 import { buildProgressSummary } from "@/lib/progressSummary";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
 import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
 import { resolveCanonicalState } from "@/lib/canonicalDecision";
 import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
+import {
+  buildWorkflowRequestKey,
+  isWorkflowRequestStale,
+  logWorkflowRequestEvent,
+  type WorkflowRequestScope,
+} from "@/lib/workflowRequestGuard";
 import { deriveEvidenceLedger, type EvidenceLedger } from "@/lib/evidenceLedger";
 import { readRecentIntentState } from "@/src/lib/recentIntent";
 import { useGuidedMode } from "@/hooks/useGuidedMode";
@@ -260,21 +276,149 @@ function toSignalText(supportingSignals: unknown, baselineEvidence: unknown): st
   const parts: string[] = [];
   if (Array.isArray(supportingSignals)) {
     supportingSignals.forEach((entry) => {
-      if (typeof entry === "string" && entry.trim()) parts.push(entry.trim());
+      if (typeof entry === "string" && entry.trim()) {
+        const cleaned = sanitizeRenderedTextValue(entry, {
+          endpoint: "results",
+          field: "supportingSignals[]",
+        });
+        if (cleaned && cleaned !== FALLBACK_RENDERED_TEXT) parts.push(cleaned);
+      }
       if (entry && typeof entry === "object") {
         const record = entry as Record<string, unknown>;
-        if (typeof record.label === "string" && record.label.trim()) parts.push(record.label.trim());
-        if (typeof record.name === "string" && record.name.trim()) parts.push(record.name.trim());
+        if (typeof record.label === "string" && record.label.trim()) {
+          const cleanedLabel = sanitizeRenderedTextValue(record.label, {
+            endpoint: "results",
+            field: "supportingSignals[].label",
+          });
+          if (cleanedLabel && cleanedLabel !== FALLBACK_RENDERED_TEXT) parts.push(cleanedLabel);
+        }
+        if (typeof record.name === "string" && record.name.trim()) {
+          const cleanedName = sanitizeRenderedTextValue(record.name, {
+            endpoint: "results",
+            field: "supportingSignals[].name",
+          });
+          if (cleanedName && cleanedName !== FALLBACK_RENDERED_TEXT) parts.push(cleanedName);
+        }
       }
     });
   }
-  if (typeof baselineEvidence === "string" && baselineEvidence.trim()) parts.push(baselineEvidence.trim());
+  if (typeof baselineEvidence === "string" && baselineEvidence.trim()) {
+    const cleaned = sanitizeRenderedTextValue(baselineEvidence, {
+      endpoint: "results",
+      field: "baselineEvidence",
+    });
+    if (cleaned && cleaned !== FALLBACK_RENDERED_TEXT) parts.push(cleaned);
+  }
   if (Array.isArray(baselineEvidence)) {
     baselineEvidence.forEach((entry) => {
-      if (typeof entry === "string" && entry.trim()) parts.push(entry.trim());
+      if (typeof entry === "string" && entry.trim()) {
+        const cleaned = sanitizeRenderedTextValue(entry, {
+          endpoint: "results",
+          field: "baselineEvidence[]",
+        });
+        if (cleaned && cleaned !== FALLBACK_RENDERED_TEXT) parts.push(cleaned);
+      }
     });
   }
   return parts.join(" ").toLowerCase();
+}
+
+function sanitizeAnalysisTextSource(
+  value: unknown,
+  context: { endpoint: string; field: string; payload: unknown },
+): unknown {
+  if (typeof value === "string") {
+    return sanitizeRenderedTextValue(value, context);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry, index) => {
+      if (typeof entry === "string") {
+        return sanitizeRenderedTextValue(entry, {
+          ...context,
+          field: `${context.field}[${index}]`,
+        });
+      }
+      if (!entry || typeof entry !== "object") {
+        return entry;
+      }
+      const record = { ...(entry as Record<string, unknown>) };
+      for (const key of ["label", "name", "message", "text", "description"] as const) {
+        if (typeof record[key] === "string") {
+          record[key] = sanitizeRenderedTextValue(record[key], {
+            ...context,
+            field: `${context.field}[${index}].${key}`,
+          });
+        }
+      }
+      return record;
+    });
+  }
+
+  return value;
+}
+
+function sanitizeLatestAnalysisResponse(data: LatestAnalysis, endpoint: string): LatestAnalysis {
+  const context = { endpoint, payload: data };
+  const sanitizeText = (value: unknown, field: string) =>
+    sanitizeRenderedTextValue(value, { ...context, field });
+  const sanitizeList = (value: unknown, field: string) =>
+    Array.isArray(value)
+      ? sanitizeRenderedTextList(
+          value.filter((entry): entry is string => typeof entry === "string"),
+          { ...context, field },
+        )
+      : [];
+
+  return {
+    ...data,
+    jobTitle: sanitizeText(data.jobTitle, "jobTitle"),
+    title: sanitizeText(data.title, "title"),
+    companyName: sanitizeText(data.companyName, "companyName"),
+    company: sanitizeText(data.company, "company"),
+    verdict: sanitizeText(data.verdict, "verdict"),
+    note: sanitizeText(data.note, "note"),
+    summary: sanitizeText(data.summary, "summary"),
+    strengths: sanitizeList(data.strengths, "strengths"),
+    gaps: sanitizeList(data.gaps, "gaps"),
+    recommendedActions: sanitizeList(data.recommendedActions, "recommendedActions"),
+    evaluationNotes: sanitizeList(data.evaluationNotes, "evaluationNotes"),
+    systemConstraints: sanitizeList(data.systemConstraints, "systemConstraints"),
+    scoreConfidenceReasons: sanitizeList(data.scoreConfidenceReasons, "scoreConfidenceReasons"),
+    scoreSanityFlags: sanitizeList(data.scoreSanityFlags, "scoreSanityFlags"),
+    criticalGaps: Array.isArray(data.criticalGaps)
+      ? data.criticalGaps.map((gap, index) => ({
+          ...gap,
+          title: sanitizeText(gap.title, `criticalGaps[${index}].title`),
+          description: sanitizeText(gap.description, `criticalGaps[${index}].description`),
+          requirementEvidence: sanitizeText(
+            gap.requirementEvidence,
+            `criticalGaps[${index}].requirementEvidence`,
+          ),
+          baselineEvidence: sanitizeText(
+            gap.baselineEvidence,
+            `criticalGaps[${index}].baselineEvidence`,
+          ),
+          reasoning: sanitizeText(gap.reasoning, `criticalGaps[${index}].reasoning`),
+        }))
+      : data.criticalGaps,
+    narrative: data.narrative
+      ? {
+          headline: sanitizeText(data.narrative.headline, "narrative.headline"),
+          summary: sanitizeText(data.narrative.summary, "narrative.summary"),
+          strengths: sanitizeList(data.narrative.strengths, "narrative.strengths"),
+          gaps: sanitizeList(data.narrative.gaps, "narrative.gaps"),
+        }
+      : data.narrative,
+    supportingSignals: sanitizeAnalysisTextSource(data.supportingSignals, {
+      ...context,
+      field: "supportingSignals",
+    }),
+    baselineEvidence: sanitizeAnalysisTextSource(data.baselineEvidence, {
+      ...context,
+      field: "baselineEvidence",
+    }),
+  };
 }
 
 function deriveVerificationCoverageLevel(missingGapCount: number): DiscoveredRole["verificationCoverageLevel"] {
@@ -385,8 +529,15 @@ const EVIDENCE_LABEL_BY_KEY: Record<string, string> = {
 };
 
 function trimEvidenceLine(line: string, maxLength = 80): string {
-  if (line.length <= maxLength) return line;
-  return `${line.slice(0, maxLength - 1).trimEnd()}...`;
+  const cleaned = sanitizeRenderedTextValue(line, {
+    endpoint: "results",
+    field: "evidenceLine",
+  });
+  if (cleaned.length <= maxLength) return cleaned;
+  return sanitizeRenderedTextValue(`${cleaned.slice(0, maxLength - 1).trimEnd()}...`, {
+    endpoint: "results",
+    field: "evidenceLineTruncated",
+  });
 }
 
 function buildEvidenceLines(scoreBreakdown: ScoreBreakdownShape | null): string[] {
@@ -622,6 +773,7 @@ type OpportunityMapSectionProps = {
   readiness: GenerationReadiness;
   verificationCoverage: VerificationCoverage;
   canonicalCoverage: LatestAnalysis["verification_coverage"];
+  blockedState?: ResultsBlockedState | null;
   predictiveUnlock:
     | {
         unverifiedRequirements: string[];
@@ -733,6 +885,7 @@ export function OpportunityMapSection({
   verificationCoverage,
   secondaryAction,
   canonicalCoverage,
+  blockedState,
   predictiveUnlock,
   weakFitRecovery,
 }: OpportunityMapSectionProps) {
@@ -763,6 +916,7 @@ export function OpportunityMapSection({
   const blockedByEvidence = readiness.status === "blocked";
   const lowFitScore = typeof score === "number" && score < 70;
   const strongFitScore = typeof score === "number" && score >= 80;
+  const isCompetitiveBlocked = Boolean(blockedState && blockedByEvidence && !lowFitScore && !strongFitScore);
   const readinessToneClass =
     readiness.status === "blocked"
       ? "border-rose-300/30 bg-rose-500/8 text-rose-100"
@@ -779,17 +933,17 @@ export function OpportunityMapSection({
   const readinessMessage =
     strongFitScore
       ? readiness.status === "ready"
-        ? "Your output is backed by verified evidence."
-        : "Some claims are unverified. You can strengthen your output in Studio."
+        ? "Your profile is grounded enough to generate in Studio."
+        : "Open Studio now. You can tighten a few details after generation."
       : readiness.status === "blocked"
         ? lowFitScore
-          ? "This role needs stronger fit before Studio can generate safely. Start with Fit Review."
-          : "Your experience aligns with this role, but key claims still need verified evidence before Studio can generate safely."
+          ? "This role needs stronger fit before Studio can open."
+          : blockedState?.supportSummary ?? "Use Fit Review to strengthen the specific areas below."
         : readiness.status === "limited"
           ? lowFitScore
             ? "Studio can open in draft mode, but the fit still needs improvement."
-            : "You can generate now. Verify key examples to strengthen your output."
-          : "Your evidence is verified enough to generate safely.";
+            : "You can generate now. Tighten a few examples to strengthen the output."
+          : "Your profile is grounded enough to generate in Studio.";
   const decisionNarrative = useMemo(() => {
     if (lowFitScore) {
       return {
@@ -802,14 +956,16 @@ export function OpportunityMapSection({
         headline: "Strong fit. Studio is available.",
         body:
           readiness.status === "ready"
-            ? "Your output is backed by verified evidence."
-            : "Some claims are unverified. You can strengthen your output in Studio.",
+            ? "Your profile is grounded enough to generate in Studio."
+            : "Open Studio now. You can tighten a few details after generation.",
       };
     }
     if (readiness.status === "blocked") {
       return {
-        headline: `${fitDescriptor}. Not ready to generate yet.`,
-        body: "Your experience aligns with this role, but key claims still need verified evidence before Studio can generate safely.",
+        headline: blockedState?.headline ?? `${fitDescriptor}. One step left.`,
+        body:
+          blockedState?.body ??
+          "You are aligned with this role. Before Studio can generate, we need to strengthen a few profile details so the output stays accurate and defensible.",
       };
     }
     if (readiness.status === "limited") {
@@ -817,21 +973,28 @@ export function OpportunityMapSection({
         headline: `${fitDescriptor}. Studio is available.`,
         body:
           score !== null && score >= 80
-            ? "You can generate now. Add verified examples to strengthen your results."
-            : "Studio can open in draft mode now, and stronger verification will improve confidence and output quality.",
+            ? "You can generate now. Add a few stronger examples to improve the result."
+            : "Studio can open in draft mode now, and stronger grounding will improve the output.",
       };
     }
     if (readiness.status === "ready") {
       return {
         headline: `${fitDescriptor}. Studio is ready.`,
-        body: "Your verified evidence is complete enough to generate safely in Studio.",
+        body: "Your profile is grounded enough to generate in Studio.",
       };
     }
     return {
       headline: "This role is ready for review.",
-      body: "Use the next step that matches the evidence state so Studio only uses trusted signals.",
+      body: "Use the next step that matches the evidence state so Studio stays aligned with the profile.",
     };
-  }, [fitDescriptor, lowFitScore, readiness.status, score, strongFitScore]);
+  }, [blockedState?.body, blockedState?.headline, fitDescriptor, lowFitScore, readiness.status, score, strongFitScore]);
+  const competitiveBlockedSummary =
+    isCompetitiveBlocked
+      ? blockedState?.supportSummary ?? "Use Fit Review to strengthen the specific areas below."
+      : decisionNarrative.body;
+  const competitiveBlockedScoreCardSummary = isCompetitiveBlocked
+    ? "Generation is still blocked until the profile details below are clearer."
+    : decisionNarrative.body;
   const baselineEvidencePreview = useMemo(
     () =>
       buildBaselineEvidencePreview({
@@ -850,7 +1013,35 @@ export function OpportunityMapSection({
             tone="warning"
             eyebrow="Evidence readiness"
             title={decisionNarrative.headline}
-            body={<p className="max-w-2xl text-base leading-7 text-amber-50 md:text-lg">{decisionNarrative.body}</p>}
+            body={
+              <div className="space-y-4">
+                <p className="max-w-2xl text-base leading-7 text-amber-50 md:text-lg">{decisionNarrative.body}</p>
+                {isCompetitiveBlocked && blockedState?.drivers.length ? (
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {blockedState.drivers.map((driver) => (
+                      <article
+                        key={driver.id}
+                        className="space-y-2 rounded-2xl border border-white/10 bg-slate-950/35 p-4"
+                      >
+                        <p className="text-sm font-semibold text-slate-100">{driver.title}</p>
+                        <p className="text-sm leading-6 text-slate-200">{driver.detail}</p>
+                        <a
+                          href={driver.actionHref}
+                          className="inline-flex text-sm font-semibold text-amber-100 underline decoration-white/25 underline-offset-4 transition hover:text-white hover:decoration-white/55"
+                        >
+                          {driver.actionLabel}
+                        </a>
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
+                {isCompetitiveBlocked ? (
+                  <p className="text-sm text-amber-50/80">
+                    {blockedState?.trustLine ?? "Studio stays locked until the story is grounded enough to defend the output."}
+                  </p>
+                ) : null}
+              </div>
+            }
             cta={
               primaryCta ? (
                 primaryCta.disabled ? (
@@ -892,10 +1083,10 @@ export function OpportunityMapSection({
             <div className="flex flex-wrap gap-4 text-sm">
               <a
                 data-testid="results-hero-secondary-action"
-                href={secondaryAction?.href ?? scoreAnalysisHref}
+                href={blockedState?.secondaryActionHref ?? secondaryAction?.href ?? scoreAnalysisHref}
                 className="font-medium text-slate-100 underline decoration-white/30 underline-offset-4 transition hover:text-white hover:decoration-white/60"
               >
-                {secondaryAction?.label ?? "View top drivers"}
+                {blockedState?.secondaryActionLabel ?? secondaryAction?.label ?? "View top drivers"}
               </a>
               {nextAction.type === "studio_with_save" ? (
                 <a
@@ -922,7 +1113,7 @@ export function OpportunityMapSection({
             {decisionNarrative.headline}
           </h3>
           <p className="max-w-2xl text-sm leading-6 text-slate-300">
-            {decisionNarrative.body}
+            {competitiveBlockedScoreCardSummary}
           </p>
           <p className="max-w-2xl text-xs leading-5 text-slate-400">
             Fit verdict: {verdict.label}. {verdict.explanation}
@@ -936,9 +1127,7 @@ export function OpportunityMapSection({
                   <h2 className="max-w-3xl text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl xl:text-5xl">
                     {decisionNarrative.headline}
                   </h2>
-                  <p className="max-w-2xl text-sm leading-6 text-slate-100 md:text-base">
-                    {decisionNarrative.body}
-                  </p>
+                  <p className="max-w-2xl text-sm leading-6 text-slate-100 md:text-base">{competitiveBlockedSummary}</p>
                 </div>
                 <CareerGravity />
                 <section className="space-y-3 rounded-[24px] border border-white/10 bg-slate-900/30 p-5">
@@ -950,7 +1139,9 @@ export function OpportunityMapSection({
                       {decisionNarrative.headline}
                     </h3>
                     <p className="max-w-2xl text-sm leading-6 text-slate-100 md:text-base">
-                      {decisionNarrative.body}
+                      {isCompetitiveBlocked
+                        ? blockedState?.supportSummary ?? "Use Fit Review to strengthen the specific areas below."
+                        : decisionNarrative.body}
                     </p>
                     <div className="flex flex-wrap gap-3 text-sm">
                       <a
@@ -994,23 +1185,46 @@ export function OpportunityMapSection({
           <p className={`mt-1 ${strongFitScore ? "text-emerald-50" : "text-slate-100"}`}>
             {readinessMessage}
           </p>
-          {!strongFitScore && readiness.reasons[0]?.message ? (
-            <p className="mt-1 text-xs text-slate-300">{readiness.reasons[0].message}</p>
-          ) : null}
-          {!strongFitScore ? (
+          {isCompetitiveBlocked && blockedState?.drivers.length ? (
+            <div id="results-readiness-drivers" className="mt-3 space-y-3 rounded-xl border border-white/10 bg-slate-950/35 p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-100">
+                Top readiness drivers
+              </p>
+              <ul className="space-y-2">
+                {blockedState.drivers.map((driver) => (
+                  <li key={driver.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                    <p className="text-sm font-semibold text-slate-100">{driver.title}</p>
+                    <p className="mt-1 text-sm text-slate-300">{driver.detail}</p>
+                    <a
+                      href={driver.actionHref}
+                      className="mt-2 inline-flex text-sm font-semibold text-amber-100 underline decoration-white/25 underline-offset-4 transition hover:text-white hover:decoration-white/55"
+                    >
+                      {driver.actionLabel}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+              <a
+                href={blockedState.secondaryActionHref}
+                className="inline-flex text-sm font-semibold text-slate-100 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
+              >
+                {blockedState.secondaryActionLabel}
+              </a>
+            </div>
+          ) : !strongFitScore ? (
             <p className="mt-1 text-xs text-slate-400">
-              Verification coverage: {verificationCoverage.status.toUpperCase()} - {verificationCoverage.verifiedClaims} /{" "}
-              {verificationCoverage.totalClaims > 0 ? verificationCoverage.totalClaims : "?"} verified claims
+              Grounding coverage: {verificationCoverage.status.toUpperCase()} - {verificationCoverage.verifiedClaims} /{" "}
+              {verificationCoverage.totalClaims > 0 ? verificationCoverage.totalClaims : "?"} grounded details
             </p>
           ) : (
             <p className="mt-1 text-xs text-emerald-100/80">
-              You can improve unverified claims after generation in Studio.
+              You can tighten a few details after generation in Studio.
             </p>
           )}
-          {!strongFitScore && unverifiedSignals.length > 0 ? (
-            <p className="mt-1 text-xs text-slate-300">Needs stronger verification: {unverifiedSignals.join(", ")}</p>
+          {!strongFitScore && !isCompetitiveBlocked && unverifiedSignals.length > 0 ? (
+            <p className="mt-1 text-xs text-slate-300">Needs stronger grounding: {unverifiedSignals.join(", ")}</p>
           ) : null}
-          {!strongFitScore && predictiveUnlock ? (
+          {!strongFitScore && !isCompetitiveBlocked && predictiveUnlock ? (
             <p className="mt-2 text-xs text-slate-300">
               Removing unsupported requirements from targeting can{" "}
               {predictiveUnlock.predictedOutcome === "full"
@@ -1621,7 +1835,12 @@ function stringsOnly(arr: unknown): string[] {
   if (!Array.isArray(arr)) return [];
   return arr
     .filter((x): x is string => typeof x === "string")
-    .map((s) => s.trim())
+    .map((s) =>
+      sanitizeRenderedTextValue(s, {
+        endpoint: "results",
+        field: "stringsOnly[]",
+      }),
+    )
     .filter((s) => s.length > 0);
 }
 
@@ -1629,7 +1848,12 @@ function extractSectionText(section: ResumeSectionLike): string {
   const candidates: unknown[] = [section.content, section.text];
 
   for (const c of candidates) {
-    if (typeof c === "string" && c.trim().length) return c.trim();
+    if (typeof c === "string" && c.trim().length) {
+      return sanitizeRenderedTextValue(c, {
+        endpoint: "results",
+        field: "sectionText",
+      });
+    }
   }
 
   const lines = stringsOnly(section.lines);
@@ -1687,6 +1911,8 @@ export default function ResultsPage() {
   const resultsDecisionLogKeyRef = useRef<string | null>(null);
   const lastReadinessKeyRef = useRef<string | null>(null);
   const failedReadinessKeysRef = useRef<Set<string>>(new Set());
+  const activeAssessmentLoadRef = useRef<{ requestId: string; requestKey: string } | null>(null);
+  const activeLatestLoadRef = useRef<{ requestId: string; requestKey: string } | null>(null);
   const [expandingRequirement, setExpandingRequirement] = useState<string | null>(null);
   const [expansionContext, setExpansionContext] = useState("");
   const [expansionDescription, setExpansionDescription] = useState("");
@@ -1697,6 +1923,11 @@ export default function ResultsPage() {
   const [expansionError, setExpansionError] = useState<string | null>(null);
   const [expansionSuccessByRequirement, setExpansionSuccessByRequirement] = useState<Record<string, string>>({});
   const [dismissedSuggestionRequirements, setDismissedSuggestionRequirements] = useState<Set<string>>(new Set());
+
+  const createRequestId = () =>
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const [applicationInsights, setApplicationInsights] = useState<ApplicationInsight[]>([]);
   const [opportunitySaved, setOpportunitySaved] = useState(false);
   const [generationCompleted, setGenerationCompleted] = useState(false);
@@ -1985,24 +2216,47 @@ export default function ResultsPage() {
   const strategicStrengths = useMemo(() => {
     const fromNarrative = Array.isArray(latest?.narrative?.strengths) ? latest.narrative.strengths : [];
     const fromLatest = Array.isArray(latest?.strengths) ? latest.strengths : [];
-    return Array.from(new Set([...fromNarrative, ...fromLatest]))
-      .filter((item) => typeof item === "string" && item.trim().length > 0)
-      .slice(0, 4);
+    return sanitizeRenderedTextList(
+      Array.from(new Set([...fromNarrative, ...fromLatest])).filter(
+        (item): item is string => typeof item === "string" && item.trim().length > 0,
+      ),
+      {
+        endpoint: "results",
+        field: "strengths",
+      },
+    ).slice(0, 4);
   }, [latest?.narrative?.strengths, latest?.strengths]);
   const criticalGapDetails = useMemo(() => {
     if (!Array.isArray(latest?.criticalGaps)) return [];
     return latest.criticalGaps
       .filter((gap) => gap && typeof gap.title === "string")
       .map((gap) => ({
-        title: gap.title,
-        requirementEvidence: gap.requirementEvidence,
-        baselineEvidence: gap.baselineEvidence,
+        title: sanitizeRenderedTextValue(gap.title, {
+          endpoint: "results",
+          field: "criticalGaps.title",
+        }),
+        requirementEvidence: sanitizeRenderedTextValue(gap.requirementEvidence, {
+          endpoint: "results",
+          field: "criticalGaps.requirementEvidence",
+        }),
+        baselineEvidence: sanitizeRenderedTextValue(gap.baselineEvidence, {
+          endpoint: "results",
+          field: "criticalGaps.baselineEvidence",
+        }),
         severityScore: gap.severityScore,
       }));
   }, [latest?.criticalGaps]);
   const recommendedActions = useMemo(() => {
     return Array.isArray(latest?.recommendedActions)
-      ? latest.recommendedActions.filter((item) => typeof item === "string" && item.trim().length > 0)
+      ? sanitizeRenderedTextList(
+          latest.recommendedActions.filter(
+            (item): item is string => typeof item === "string" && item.trim().length > 0,
+          ),
+          {
+            endpoint: "results",
+            field: "recommendedActions",
+          },
+        )
       : [];
   }, [latest?.recommendedActions]);
   const advantageSignals = useMemo(() => {
@@ -2016,8 +2270,14 @@ export default function ResultsPage() {
   const strategicBrief = useMemo(
     () =>
       buildStrategicBrief({
-        verdict: activeVerdictDecision.verdict,
-        verdictExplanation: activeVerdictDecision.verdictExplanation,
+        verdict: sanitizeRenderedTextValue(activeVerdictDecision.verdict, {
+          endpoint: "results",
+          field: "verdict",
+        }),
+        verdictExplanation: sanitizeRenderedTextValue(activeVerdictDecision.verdictExplanation, {
+          endpoint: "results",
+          field: "verdictExplanation",
+        }),
         strengths: strategicStrengths,
         criticalGaps: criticalGapDetails,
       }),
@@ -2109,6 +2369,19 @@ export default function ResultsPage() {
       }),
     [activeScore, generationReadiness, latest?.assessmentId, latest?.jobId, latestBaselineId],
   );
+  const generationReadinessForDecision = useMemo<GenerationReadiness>(
+    () =>
+      typeof activeScore === "number" && activeScore < 70 && generationReadiness.status === "ready"
+        ? {
+            ...generationReadiness,
+            status: "blocked",
+            blocked: true,
+            badgeLabel: "BLOCKED",
+            summary: "Use Fit Review to strengthen the specific areas below.",
+          }
+        : generationReadiness,
+    [activeScore, generationReadiness],
+  );
   const canonicalResultsDecision = useMemo(
     () =>
       resolveCanonicalState({
@@ -2116,17 +2389,33 @@ export default function ResultsPage() {
         baselineId: latest?.baselineId ?? null,
         jobId: latest?.jobId ?? null,
         score: typeof activeScore === "number" ? activeScore : null,
-        generationReadiness,
+        generationReadiness: generationReadinessForDecision,
         productReadiness,
         studioHref,
         fitReviewHref: fitReviewPath,
         forceFitReview: isFixFirstMode,
+        persistedAssessmentId: latest?.assessmentId ?? null,
+        analysisCandidates: latest
+          ? [
+              {
+                source: "latest_assessment",
+                value: {
+                  assessmentId: latest.assessmentId ?? null,
+                  baselineId: latest.baselineId ?? null,
+                  jobId: latest.jobId ?? null,
+                  baselineVersionId: latest.baselineVersionId ?? null,
+                  score: typeof activeScore === "number" ? activeScore : null,
+                },
+              },
+            ]
+          : undefined,
         scoreCandidates: [{ source: "primary", value: typeof activeScore === "number" ? activeScore : null }],
       }),
     [
       activeScore,
       fitReviewPath,
       generationReadiness,
+      generationReadinessForDecision,
       isFixFirstMode,
       latest?.baselineId,
       latest?.jobId,
@@ -2152,10 +2441,10 @@ export default function ResultsPage() {
             : "BLOCKED",
       summary:
         canonicalResultsDecision.readinessState === "READY"
-          ? "Your verified evidence is complete enough to generate safely in Studio."
+          ? "Your profile is grounded enough to generate in Studio."
           : canonicalResultsDecision.readinessState === "DRAFT"
-            ? "Generate now. Then strengthen your output by verifying key claims in Studio."
-            : "Your experience aligns with the role, but some claims still need verification.",
+            ? "Open Studio now. You can tighten a few details after generation."
+            : "Use Fit Review to strengthen the specific areas below.",
     }),
     [canonicalResultsDecision.readinessState, generationReadiness],
   );
@@ -2319,6 +2608,13 @@ export default function ResultsPage() {
     loadLatest,
     resetExpansionForm,
   ]);
+  const summarySnippet =
+    typeof latest?.summary === "string"
+      ? sanitizeRenderedTextValue(latest.summary, {
+          endpoint: "results",
+          field: "summary",
+        })
+      : null;
   const autoEvidenceSuggestions = useMemo(() => {
     const map = new Map<string, ReturnType<typeof buildEvidenceSuggestion>>();
     for (const requirement of canonicalUnverifiedRequirements) {
@@ -2327,12 +2623,12 @@ export default function ResultsPage() {
         buildEvidenceSuggestion({
           requirement,
           supportingSignals: latest?.supportingSignals,
-          baselineEvidence: latest?.baselineEvidence ?? latest?.summary,
+          baselineEvidence: latest?.baselineEvidence ?? summarySnippet,
         }),
       );
     }
     return map;
-  }, [canonicalUnverifiedRequirements, latest?.baselineEvidence, latest?.summary, latest?.supportingSignals]);
+  }, [canonicalUnverifiedRequirements, latest?.baselineEvidence, latest?.supportingSignals, summarySnippet]);
   const fallbackRequirementInsights = useMemo(() => {
     const shouldShowRefinementGuidance =
       recentIntent === "refine_intent" || recentIntent === "used_not_committed";
@@ -2361,9 +2657,9 @@ export default function ResultsPage() {
         return buildRequirementGapInsight({
           requirement,
           requirementEvidence: gap?.requirementEvidence ?? requirement,
-          baselineEvidence: gap?.baselineEvidence ?? latest?.baselineEvidence ?? latest?.summary,
+          baselineEvidence: gap?.baselineEvidence ?? latest?.baselineEvidence ?? summarySnippet,
           supportingSignals: latest?.supportingSignals,
-          summary: latest?.summary,
+          summary: summarySnippet,
         });
       })
       .filter((item): item is NonNullable<typeof item> => Boolean(item));
@@ -2375,13 +2671,12 @@ export default function ResultsPage() {
     resultsReadiness.status,
     recentIntent,
     latest?.baselineEvidence,
-    latest?.summary,
     latest?.supportingSignals,
+    summarySnippet,
   ]);
   const improvementSuggestions = useMemo(() => {
     const sourceRequirements = Array.from(
       new Set([
-        ...(latest?.criticalGaps?.map((gap) => gap.title).filter(Boolean) ?? []),
         ...criticalGapDetails.map((gap) => gap.title).filter(Boolean),
         ...canonicalUnverifiedRequirements,
       ]),
@@ -2408,14 +2703,20 @@ export default function ResultsPage() {
   }, [
     canonicalUnverifiedRequirements,
     criticalGapDetails,
-    latest?.criticalGaps,
-    latest?.baselineEvidence,
-    latest?.summary,
     latest?.supportingSignals,
     recentIntent,
+    summarySnippet,
   ]);
   const isStrongFitScore = typeof activeScore === "number" && activeScore >= 80;
-  const showImprovementModule = !isStrongFitScore && improvementSuggestions.length > 0;
+  const showImprovementModule =
+    !isStrongFitScore &&
+    improvementSuggestions.length > 0 &&
+    !(
+      resultsReadiness.status === "blocked" &&
+      typeof activeScore === "number" &&
+      activeScore >= 70 &&
+      activeScore < 80
+    );
   const discoveredRoles = useMemo(
     () =>
       discoverCompetitiveRoles({
@@ -2465,6 +2766,7 @@ export default function ResultsPage() {
   );
   const primaryNextAction = canonicalResultsDecision.nextAction;
   const isWeakFitScore = typeof activeScore === "number" && activeScore < 70;
+  const isCompetitiveBlocked = isGenerationBlocked && !isWeakFitScore;
   const { isGuidedActive, syncWithNextAction, completeGuidedMode, advanceStep } = useGuidedMode();
   useEffect(() => {
     if (!isGuidedActive) return;
@@ -2479,17 +2781,6 @@ export default function ResultsPage() {
         : "fit_review") as "fit_review" | "studio" | "studio_with_save",
     );
   }, [advanceStep, isGuidedActive, latest, primaryNextAction.type, syncWithNextAction]);
-  const resolveGapsHref = useMemo(() => {
-    const params = new URLSearchParams();
-    if (latest?.jobId?.trim()) {
-      params.set("jobId", latest.jobId.trim());
-    }
-    if (latest?.baselineId?.trim()) {
-      params.set("baselineId", latest.baselineId.trim());
-    }
-    const query = params.toString();
-    return query ? `/resolve-gaps?${query}` : "/resolve-gaps";
-  }, [latest?.baselineId, latest?.jobId]);
   const resolveGapPreview = useMemo(
     () =>
       canonicalUnverifiedRequirements.slice(0, 3).map((requirement) => ({
@@ -2502,11 +2793,11 @@ export default function ResultsPage() {
     () =>
       isWeakFitScore
         ? {
-            href: resolveGapsHref,
+            href: fitReviewPath,
             gapPreview: resolveGapPreview,
           }
         : null,
-    [isWeakFitScore, resolveGapPreview, resolveGapsHref],
+    [isWeakFitScore, resolveGapPreview, fitReviewPath],
   );
   const advancedInsightsHref = "#advanced-insights";
   const verificationUnlockLabel = useMemo(() => {
@@ -2528,54 +2819,66 @@ export default function ResultsPage() {
       href: advancedInsightsHref,
     };
   }, [advancedInsightsHref, effectiveReadinessStatus, fitReviewPath]);
+  const blockedResultsState: ResultsBlockedState | null = useMemo(() => {
+    if (!latest || !isGenerationBlocked) return null;
+    return buildCompetitiveBlockedResultsState({
+      score: typeof activeScore === "number" ? activeScore : null,
+      fitReviewHref: fitReviewPath,
+      secondaryActionHref: advancedInsightsHref,
+      criticalGaps: criticalGapDetails,
+      unverifiedRequirements: canonicalUnverifiedRequirements,
+    });
+  }, [
+    activeScore,
+    advancedInsightsHref,
+    canonicalUnverifiedRequirements,
+    criticalGapDetails,
+    fitReviewPath,
+    isGenerationBlocked,
+    latest,
+  ]);
   const oneClickResultsCta = useMemo(() => {
     if (!latest) return null;
 
     const analyticsAction =
-      canonicalResultsDecision.cta.actionType === "open_studio_generate" ||
-      canonicalResultsDecision.cta.actionType === "open_studio"
+      canonicalResultsDecision.primaryAction.type === "open_studio" ||
+      canonicalResultsDecision.primaryAction.type === "generate_documents"
         ? "open_studio"
-        : canonicalResultsDecision.cta.actionType === "resolve_gaps"
+        : canonicalResultsDecision.primaryAction.type === "start_fit_review"
           ? "fit_review"
-          : "verify_examples";
+          : canonicalResultsDecision.primaryAction.type === "generate_score"
+            ? "analyze"
+            : "recover_selection";
 
     return {
-      label: canonicalResultsDecision.cta.label,
-      href: canonicalResultsDecision.cta.href,
-      disabled:
-        canonicalResultsDecision.cta.actionType !== "resolve_gaps" &&
-        canonicalResultsDecision.cta.actionType !== "fit_review"
-          ? !canOpenStudio
-          : false,
+      label: canonicalResultsDecision.primaryAction.label,
+      href: canonicalResultsDecision.primaryAction.destination,
+      disabled: !canonicalResultsDecision.primaryAction.isEnabled || (!canOpenStudio && canonicalResultsDecision.primaryAction.type === "open_studio"),
       description:
-        canonicalResultsDecision.readinessState === "READY"
-          ? "Open Studio to generate tailored materials now."
-          : canonicalResultsDecision.readinessState === "DRAFT"
-            ? "Open Studio now. Some claims are unverified, but you can strengthen them after generation."
-            : canonicalResultsDecision.readinessState === "BLOCKED"
-              ? "Verify the missing evidence so Studio can generate safely."
-              : "Use Fit Review to strengthen the baseline for this role.",
+        canonicalResultsDecision.blockingReason?.message ??
+        canonicalResultsDecision.supportingMessage ??
+        blockedResultsState?.supportSummary ??
+        "Use Fit Review to strengthen the specific areas below.",
       onClick: () => {
         trackEvent("results_primary_cta_clicked", {
           source: "results",
           intentState: recentIntent ?? "none",
           action: analyticsAction,
           scoreBucket: resultsScoreBucket ?? null,
-          readinessStatus:
-            canonicalResultsDecision.readinessState === "READY"
-              ? "ready"
-              : canonicalResultsDecision.readinessState === "DRAFT"
-                ? "limited"
-                : "blocked",
+          readinessStatus: canonicalResultsDecision.workflowState,
         });
       },
     };
   }, [
     canOpenStudio,
-    canonicalResultsDecision.cta.actionType,
-    canonicalResultsDecision.cta.href,
-    canonicalResultsDecision.cta.label,
-    canonicalResultsDecision.readinessState,
+    canonicalResultsDecision.blockingReason?.message,
+    canonicalResultsDecision.primaryAction.destination,
+    canonicalResultsDecision.primaryAction.isEnabled,
+    canonicalResultsDecision.primaryAction.label,
+    canonicalResultsDecision.primaryAction.type,
+    canonicalResultsDecision.supportingMessage,
+    canonicalResultsDecision.workflowState,
+    blockedResultsState?.supportSummary,
     latest,
     recentIntent,
     resultsScoreBucket,
@@ -2583,12 +2886,27 @@ export default function ResultsPage() {
   const isReadyResultsState = canonicalResultsDecision.readinessState === "READY";
   const resultsDecision = useMemo(
     () => {
+      const copy = buildResultsDecisionCopy({
+        score: typeof activeScore === "number" ? activeScore : null,
+        generationReadiness: {
+          state:
+            canonicalResultsDecision.readinessState === "BLOCKED"
+              ? "BLOCKED"
+              : canonicalResultsDecision.readinessState === "READY"
+                ? "ALLOWED"
+                : canonicalResultsDecision.readinessState === "DRAFT"
+                  ? "ALLOWED"
+                  : "BLOCKED",
+          confidence: productReadiness.confidence,
+          needsVerification: productReadiness.needsVerification,
+        },
+      });
       if (canonicalResultsDecision.readinessState === "READY") {
         return {
           state: "READY" as const,
           primaryCta: "OPEN_STUDIO" as const,
-          headline: "You're a strong match. You can generate now.",
-          subtext: "Your verified evidence is complete enough to generate safely in Studio.",
+          headline: copy.headline,
+          subtext: copy.subtext,
         };
       }
 
@@ -2596,8 +2914,8 @@ export default function ResultsPage() {
         return {
           state: "DRAFT" as const,
           primaryCta: "OPEN_STUDIO" as const,
-          headline: "You're a strong match. You can generate now.",
-          subtext: "Some claims are unverified. You can strengthen your output in Studio.",
+          headline: copy.headline,
+          subtext: copy.subtext,
         };
       }
 
@@ -2605,21 +2923,19 @@ export default function ResultsPage() {
         return {
           state: "BLOCKED" as const,
           primaryCta: "START_FIT_REVIEW" as const,
-          headline: "Competitive fit. Not ready to generate yet.",
-          subtext:
-            "Your experience aligns with this role, but key claims still need verified evidence before Studio can generate safely.",
+          headline: copy.headline,
+          subtext: blockedResultsState?.supportSummary ?? copy.subtext,
         };
       }
 
       return {
         state: "IMPROVE" as const,
         primaryCta: "START_FIT_REVIEW" as const,
-        headline: "Strengthen your fit before generating.",
-        subtext:
-          "You are close, but improving alignment and evidence will significantly strengthen your materials.",
+        headline: copy.headline,
+        subtext: copy.subtext,
       };
     },
-    [canonicalResultsDecision.readinessState],
+    [activeScore, blockedResultsState?.body, canonicalResultsDecision.readinessState, productReadiness],
   );
   useEffect(() => {
     if (process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_DEBUG_RESULTS_FLOW !== "true") {
@@ -2627,31 +2943,33 @@ export default function ResultsPage() {
     }
     if (!latest) return;
     const cta = {
-      label: canonicalResultsDecision.cta.label,
-      href: canonicalResultsDecision.cta.href,
-      actionType: canonicalResultsDecision.cta.actionType as
+      label: canonicalResultsDecision.primaryAction.label,
+      href: canonicalResultsDecision.primaryAction.destination,
+      actionType: canonicalResultsDecision.primaryAction.type as
         | "open_studio"
-        | "fit_review"
-        | "verify_examples"
-        | "open_studio_draft"
-        | "open_studio_generate",
+        | "start_fit_review"
+        | "generate_score"
+        | "generate_documents"
+        | "recover_selection",
       analyticsPayload: {
         source: "results" as const,
         intentState: recentIntent ?? "none",
         action:
-          canonicalResultsDecision.cta.actionType === "resolve_gaps"
+          canonicalResultsDecision.primaryAction.type === "start_fit_review"
             ? "fit_review"
-            : canonicalResultsDecision.cta.actionType === "open_studio_generate" ||
-                canonicalResultsDecision.cta.actionType === "open_studio"
+            : canonicalResultsDecision.primaryAction.type === "open_studio" ||
+                canonicalResultsDecision.primaryAction.type === "generate_documents"
               ? "open_studio"
-              : "verify_examples",
+              : canonicalResultsDecision.primaryAction.type === "generate_score"
+                ? "analyze"
+                : "recover_selection",
         scoreBucket: resultsScoreBucket ?? null,
-        readinessStatus: canonicalResultsDecision.readinessState,
+        readinessStatus: canonicalResultsDecision.workflowState,
       },
     };
     const decisionKey = [
       latest.assessmentId ?? "none",
-      canonicalResultsDecision.readinessState,
+      canonicalResultsDecision.workflowState,
       cta.label,
       cta.href,
       cta.actionType,
@@ -2665,7 +2983,7 @@ export default function ResultsPage() {
       baselineId: latest.baselineId ?? null,
       jobId: latest.jobId ?? null,
       score: typeof activeScore === "number" ? activeScore : null,
-      readinessState: canonicalResultsDecision.readinessState,
+      readinessState: canonicalResultsDecision.workflowState,
       contractSource: "resolveCanonicalState",
       ctaLabel: cta.label,
       ctaHref: cta.href,
@@ -2676,19 +2994,17 @@ export default function ResultsPage() {
     });
   }, [
     activeScore,
-    canonicalResultsDecision.cta.actionType,
-    canonicalResultsDecision.cta.href,
-    canonicalResultsDecision.cta.label,
-    canonicalResultsDecision.readinessState,
+    canonicalResultsDecision.primaryAction.destination,
+    canonicalResultsDecision.primaryAction.label,
+    canonicalResultsDecision.primaryAction.type,
+    canonicalResultsDecision.workflowState,
     latest,
     recentIntent,
-    canonicalResultsDecision.readinessState,
     resultsScoreBucket,
     studioHref,
   ]);
   const formatDriverValue = (value?: number | null) =>
     typeof value === "number" ? value.toFixed(1) : "n/a";
-  const summarySnippet = typeof latest?.summary === "string" ? latest.summary.trim() : null;
   const scoreDrivers = useMemo<ScoreDriver[]>(() => {
     if (!scoringRubric) return [];
     return rubricDimensionEntries.map((dimension) => {
@@ -2877,12 +3193,12 @@ export default function ResultsPage() {
     if (!latest) {
       return "Load the latest analysis to surface how the score reflects your context.";
     }
-    const raw = typeof latest.summary === "string" ? latest.summary.trim() : "";
+    const raw = summarySnippet ?? "";
     if (raw.length && !/key term/i.test(raw)) {
       return raw;
     }
     return "Load the latest analysis to surface how the score reflects your context.";
-  }, [latest]);
+  }, [latest, summarySnippet]);
 
   const keyTermDetails = useMemo(() => {
     if (!latest) {
@@ -2940,11 +3256,15 @@ export default function ResultsPage() {
 
   const loadAssessmentById = useCallback(
     async (assessmentId: string) => {
-      if (loadingLatest) return;
       if (!assessmentId) {
         setError("Assessment ID is required to load analysis.");
         return;
       }
+
+      const requestKey = `assessment:${assessmentId.trim()}`;
+      if (activeAssessmentLoadRef.current?.requestKey === requestKey) return;
+      const requestId = createRequestId();
+      activeAssessmentLoadRef.current = { requestId, requestKey };
 
       setLoadingLatest(true);
       setError(null);
@@ -2960,6 +3280,9 @@ export default function ResultsPage() {
         const payload = await readResponsePayload(res.clone());
 
         if (!res.ok) {
+          if (activeAssessmentLoadRef.current?.requestId !== requestId) {
+            return;
+          }
           const compliance = parseComplianceError({ status: res.status, payload });
           if (compliance) {
             setComplianceError(compliance);
@@ -2991,26 +3314,55 @@ export default function ResultsPage() {
         }
 
         const data: LatestAnalysis = await res.json();
-        if (!data.baselineId?.trim()) {
+        const sanitizedData = sanitizeLatestAnalysisResponse(
+          data,
+          "/api/analysis/fit-assessments/:assessmentId",
+        );
+        if (activeAssessmentLoadRef.current?.requestId !== requestId) {
+          logWorkflowRequestEvent("stale_response_dropped", {
+            action: "results_load_assessment",
+            expected: {
+              baselineId: sanitizedData.baselineId ?? null,
+              jobId: sanitizedData.jobId ?? null,
+              baselineVersionId: sanitizedData.baselineVersionId ?? null,
+              analysisId: assessmentId,
+            },
+            current: {
+              baselineId: baselineId || null,
+              jobId: jobId || null,
+              baselineVersionId: latest?.baselineVersionId ?? null,
+              analysisId: latest?.assessmentId ?? null,
+            },
+            requestId,
+            source: "results",
+          });
+          return;
+        }
+        if (!sanitizedData.baselineId?.trim()) {
           throw new Error("This result is no longer linked to an active resume.");
         }
-        setLatest(data);
-        setBaselineId(data.baselineId ?? "");
-        setJobId(data.jobId ?? "");
+        setLatest(sanitizedData);
+        setBaselineId(sanitizedData.baselineId ?? "");
+        setJobId(sanitizedData.jobId ?? "");
         setAnalysisSource("latest");
-        await persistLastAssessmentId(data.assessmentId ?? assessmentId);
+        await persistLastAssessmentId(sanitizedData.assessmentId ?? assessmentId);
       } catch (error: unknown) {
+        if (activeAssessmentLoadRef.current?.requestId !== requestId) {
+          return;
+        }
         trackEvent("analysis_load_failed", {
           source: "results",
           status: "assessment_exception",
         });
         setError(error instanceof Error ? error.message : COMPATIBILITY_ANALYSIS_ERROR);
       } finally {
-        setLoadingLatest(false);
+        if (activeAssessmentLoadRef.current?.requestId === requestId) {
+          setLoadingLatest(false);
+          activeAssessmentLoadRef.current = null;
+        }
       }
     },
     [
-      loadingLatest,
       persistLastAssessmentId,
       clearLastAssessmentId,
       router,
@@ -3023,11 +3375,23 @@ export default function ResultsPage() {
     allowCreate?: boolean;
     interactive?: boolean;
   }) {
-    if (loadingLatest) return;
     const targetJobId = options?.jobIdOverride?.trim() || jobId.trim();
     const targetBaselineId = options?.baselineIdOverride?.trim() || baselineId.trim();
     const allowCreate = options?.allowCreate ?? false;
     const interactive = options?.interactive ?? false;
+    const requestKey = buildWorkflowRequestKey("results_load", {
+      baselineId: targetBaselineId || null,
+      jobId: targetJobId || null,
+      baselineVersionId: latest?.baselineVersionId ?? null,
+      analysisId: latest?.assessmentId ?? null,
+    });
+    if (!requestKey) {
+      setError("Select a baseline and job before loading analysis.");
+      return;
+    }
+    if (activeLatestLoadRef.current?.requestKey === requestKey) return;
+    const requestId = createRequestId();
+    activeLatestLoadRef.current = { requestId, requestKey };
 
     if (!targetJobId) {
       setError("Job ID is required to load analysis.");
@@ -3069,6 +3433,9 @@ export default function ResultsPage() {
       );
 
       const payload = await readResponsePayload(res.clone());
+      if (activeLatestLoadRef.current?.requestId !== requestId) {
+        return;
+      }
 
       if (res.status === 404 && allowCreate) {
         console.info("[results] hydration_not_found_running_analysis", {
@@ -3087,6 +3454,9 @@ export default function ResultsPage() {
         });
 
         const runPayload = await readResponsePayload(runResponse.clone());
+        if (activeLatestLoadRef.current?.requestId !== requestId) {
+          return;
+        }
         if (!runResponse.ok) {
           const compliance = parseComplianceError({
             status: runResponse.status,
@@ -3142,42 +3512,72 @@ export default function ResultsPage() {
         throw new Error(message);
       }
 
-      const data: LatestAnalysis = await res.json();
-      console.info("[results] hydration_succeeded", {
-        stage: "results",
-        assessmentId: data.assessmentId ?? null,
-        jobId: data.jobId ?? null,
-        baselineId: data.baselineId ?? null,
+        const data: LatestAnalysis = await res.json();
+        const sanitizedData = sanitizeLatestAnalysisResponse(
+          data,
+          "/api/analysis/job/:jobId/baseline/:baselineId/latest",
+        );
+        if (activeLatestLoadRef.current?.requestId !== requestId) {
+          logWorkflowRequestEvent("stale_response_dropped", {
+            action: "results_load_latest",
+            expected: {
+              baselineId: targetBaselineId,
+              jobId: targetJobId,
+              baselineVersionId: sanitizedData.baselineVersionId ?? null,
+              analysisId: sanitizedData.assessmentId ?? null,
+            },
+            current: {
+              baselineId: baselineId || null,
+              jobId: jobId || null,
+              baselineVersionId: latest?.baselineVersionId ?? null,
+              analysisId: latest?.assessmentId ?? null,
+            },
+            requestId,
+            source: "results",
+          });
+          return;
+        }
+        console.info("[results] hydration_succeeded", {
+          stage: "results",
+          assessmentId: sanitizedData.assessmentId ?? null,
+          jobId: sanitizedData.jobId ?? null,
+        baselineId: sanitizedData.baselineId ?? null,
       });
-      if (!data.assessmentId) {
+      if (!sanitizedData.assessmentId) {
         throw new Error("Latest assessment is missing an assessment ID.");
       }
-      if (!data.baselineId?.trim()) {
+      if (!sanitizedData.baselineId?.trim()) {
         throw new Error("This result is no longer linked to an active resume.");
       }
 
       const params = new URLSearchParams(searchParams?.toString() ?? "");
       params.delete("jobId");
       params.delete("baselineId");
-      params.set("assessmentId", data.assessmentId);
-      params.set("analysisId", data.assessmentId);
+      params.set("assessmentId", sanitizedData.assessmentId);
+      params.set("analysisId", sanitizedData.assessmentId);
       const query = params.toString();
       const path = query ? `/results?${query}` : "/results";
       await router.replace(path);
-    } catch (error: unknown) {
-      console.error("[results] hydration_failed", {
-        stage: "results",
-        status: "exception",
-      });
-      trackEvent("analysis_load_failed", {
+      } catch (error: unknown) {
+        if (activeLatestLoadRef.current?.requestId !== requestId) {
+          return;
+        }
+        console.error("[results] hydration_failed", {
+          stage: "results",
+          status: "exception",
+        });
+        trackEvent("analysis_load_failed", {
         source: "results",
         status: "latest_exception",
-      });
-      setError(error instanceof Error ? error.message : COMPATIBILITY_ANALYSIS_ERROR);
-    } finally {
-      setLoadingLatest(false);
+        });
+        setError(error instanceof Error ? error.message : COMPATIBILITY_ANALYSIS_ERROR);
+      } finally {
+        if (activeLatestLoadRef.current?.requestId === requestId) {
+          setLoadingLatest(false);
+          activeLatestLoadRef.current = null;
+        }
+      }
     }
-  }
 
   useEffect(() => {
     if (!runIdentifier) {
@@ -3509,11 +3909,11 @@ export default function ResultsPage() {
               </p>
               <p className="mt-1 text-sm text-emerald-50">
                 {productReadiness.confidence === "HIGH"
-                  ? "Your results are backed by verified evidence."
-                  : "Some claims are unverified. You can strengthen your output in Studio."}
+                  ? "Your profile is grounded enough to generate in Studio."
+                  : "Open Studio now. You can tighten a few details after generation."}
               </p>
               <p className="mt-1 text-xs text-emerald-100/80">
-                You can improve unverified claims after generation in Studio.
+                You can tighten a few details after generation in Studio.
               </p>
             </>
           ) : (
@@ -3527,10 +3927,10 @@ export default function ResultsPage() {
               </p>
               <p className="mt-1 text-sm text-slate-300">
                 {productReadiness.confidence === "HIGH"
-                  ? "Your results are backed by verified evidence."
+                  ? "Your profile is grounded enough to generate in Studio."
                   : productReadiness.confidence === "MEDIUM"
-                    ? "Some claims are not yet verified. You can improve output by confirming them."
-                    : "This result still needs stronger evidence before it can be trusted for generation."}
+                    ? "A few details still need sharper grounding."
+                    : "This result still needs stronger grounding before generation."}
               </p>
             </>
           )}
@@ -3564,8 +3964,8 @@ export default function ResultsPage() {
             <p className="text-sm font-semibold text-emerald-100">GENERATION UNLOCKED</p>
             <p className="mt-1 text-sm text-slate-100">
               {productReadiness.confidence === "HIGH"
-                ? "Your evidence now supports this role. You can move into Studio with this result."
-                : "Generate now. Then strengthen your output by verifying key claims in Studio."}
+                ? "Your profile now supports this role. You can move into Studio with this result."
+                : "Open Studio now. You can tighten a few details after generation."}
             </p>
             {typeof reanalysisDelta.delta === "number" ? (
               <p className="mt-2 text-xs text-emerald-200">
@@ -3711,6 +4111,7 @@ export default function ResultsPage() {
                     readiness={resultsReadiness}
                     verificationCoverage={verificationCoverage}
                     canonicalCoverage={latest?.verification_coverage ?? null}
+                    blockedState={blockedResultsState}
                     predictiveUnlock={predictiveUnlock}
                     weakFitRecovery={weakFitRecovery}
                     reliabilityFacts={reliabilityFacts}
@@ -3922,6 +4323,17 @@ export default function ResultsPage() {
                       <p className="mt-1 text-sm leading-6 text-slate-300">{signalAlignment.summary}</p>
                       <p className="mt-3 text-sm text-slate-200">No material gaps were identified in this run.</p>
                     </section>
+                  ) : isCompetitiveBlocked && blockedResultsState ? (
+                    <SignalAlignmentSection
+                      title="Readiness drivers"
+                      strengths={Array.from(
+                        new Set([...advantageSignals, ...signalAlignment.strongForRole]),
+                      ).slice(0, 6)}
+                      gaps={blockedResultsState.drivers.map((driver) => driver.title)}
+                      summary={blockedResultsState.trustLine}
+                      gapHeading="What still needs clarification"
+                      gapEmptyMessage="Use Fit Review to sharpen the same areas listed above."
+                    />
                   ) : (
                     <SignalAlignmentSection
                       title={isGenerationBlocked ? "Evidence gaps" : "Why this role fits you"}
@@ -3937,23 +4349,23 @@ export default function ResultsPage() {
                       }
                       summary={
                         effectiveReadinessStatus === "limited"
-                          ? "Alignment looks strong, but verified evidence is not yet complete."
+                          ? "Alignment looks strong, but a few details still need sharper grounding."
                           : effectiveReadinessStatus === "blocked"
-                            ? "Your experience aligns with the role, but some claims still need verification."
+                            ? "Your experience aligns with the role, but a few details still need sharper grounding."
                             : signalAlignment.summary
                       }
                       gapHeading={
                         effectiveReadinessStatus === "blocked"
-                          ? "Missing verification"
+                          ? "What needs strengthening"
                           : effectiveReadinessStatus === "limited"
-                            ? "Verification still needed"
+                            ? "Still to ground"
                             : "Gaps to be aware of"
                       }
                       gapEmptyMessage={
                         effectiveReadinessStatus === "blocked"
-                          ? "Missing verification is still preventing Studio."
+                          ? "These details are still preventing Studio from opening."
                           : effectiveReadinessStatus === "limited"
-                            ? "Alignment looks strong, but verified evidence is not yet complete."
+                            ? "Alignment looks strong, but a few details still need sharper grounding."
                             : "No material gaps were identified in this run."
                       }
                     />
@@ -4000,8 +4412,8 @@ export default function ResultsPage() {
                         actionHref={fitReviewPath}
                         fallbackInsights={fallbackRequirementInsights}
                         supportingSignals={latest?.supportingSignals}
-                        baselineEvidence={latest?.baselineEvidence ?? latest?.summary}
-                        summary={latest?.summary}
+                        baselineEvidence={latest?.baselineEvidence ?? summarySnippet}
+                        summary={summarySnippet}
                         compact
                       />
                     </section>

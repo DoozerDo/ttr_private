@@ -17,7 +17,7 @@ describe("resolveResultsDecision", () => {
       state: "DRAFT",
       primaryCta: "OPEN_STUDIO",
       headline: "You're a strong match. You can generate now.",
-      subtext: "Some claims are unverified. You can strengthen your output in Studio.",
+      subtext: "Open Studio now. You can tighten a few details after generation.",
     });
   });
 
@@ -35,6 +35,7 @@ describe("resolveResultsDecision", () => {
       state: "READY",
       primaryCta: "OPEN_STUDIO",
       headline: "You're a strong match. You can generate now.",
+      subtext: "Your profile grounding is strong enough to generate in Studio.",
     });
   });
 
@@ -52,6 +53,7 @@ describe("resolveResultsDecision", () => {
       state: "READY",
       primaryCta: "OPEN_STUDIO",
       headline: "You're a strong match. You can generate now.",
+      subtext: "Your profile grounding is strong enough to generate in Studio.",
     });
   });
 

@@ -8,6 +8,7 @@ import { FormButton } from '@/components/FormButton';
 import { PageHeader } from '@/components/PageHeader';
 import { PageShell } from '@/components/PageShell';
 import { TextInput } from '@/components/TextInput';
+import { sanitizeRenderedTextValue } from '@/lib/renderedText';
 
 type JobTrackerEntry = {
   id: string;
@@ -92,14 +93,14 @@ function canonicalStageValue(value?: string | null): CanonicalStageValue | null 
 }
 
 function safeString(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number') return value.toString();
-  if (value === null || value === undefined) return '';
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
+  if (typeof value === 'string' || typeof value === 'number') {
+    return sanitizeRenderedTextValue(String(value), {
+      endpoint: 'job-tracker',
+      field: 'safeString',
+    });
   }
+  if (value === null || value === undefined) return '';
+  return '';
 }
 
 function formatDateDisplay(value: string | null | undefined): string {
@@ -113,7 +114,10 @@ function stageLabel(value: string | undefined | null) {
   if (!value) return 'Unknown';
   const canonical = canonicalStageValue(value);
   if (canonical) return canonical;
-  const trimmed = value.trim();
+  const trimmed = sanitizeRenderedTextValue(value, {
+    endpoint: 'job-tracker',
+    field: 'stage',
+  });
   return trimmed || 'Unknown';
 }
 

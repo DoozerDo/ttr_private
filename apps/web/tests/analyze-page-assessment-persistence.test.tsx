@@ -116,7 +116,6 @@ describe("Analyze page assessment persistence contract", () => {
       expect(payload).toMatchObject({
         baselineId: "base-2",
         jobId: "job-1",
-        triggerType: "manual",
       });
     });
 

@@ -1,3 +1,8 @@
+import {
+  FALLBACK_RENDERED_TEXT,
+  sanitizeRenderedTextValue,
+} from "@/lib/renderedText";
+
 export type FitScoreVerdictLabel = 'Skip' | 'Consider' | 'Apply';
 export type ResultsDecisionVerdict = 'Apply' | 'Borderline' | 'Skip' | 'Pending';
 
@@ -28,7 +33,11 @@ const VERDICT_DETAILS: Record<FitScoreVerdictLabel, VerdictDefinition> = {
 
 const verdictLabelFromString = (value?: string | null): FitScoreVerdictLabel | null => {
   if (!value) return null;
-  const normalized = value.trim().toLowerCase();
+  const normalized = sanitizeRenderedTextValue(value, {
+    endpoint: "fit-verdict",
+    field: "verdict",
+  }).toLowerCase();
+  if (normalized === FALLBACK_RENDERED_TEXT.toLowerCase()) return null;
   if (normalized.startsWith('apply')) return 'Apply';
   if (normalized.startsWith('consider')) return 'Consider';
   if (normalized.includes('skip')) return 'Skip';

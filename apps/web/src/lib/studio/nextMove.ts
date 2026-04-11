@@ -136,7 +136,12 @@ export function resolveStudioNextMove(input: StudioNextMoveInput): StudioNextMov
       case "trace_failure":
         return traceFailureMove(input, failure);
       case "generation_blocked":
+      case "insufficient_verified_evidence":
+      case "invalid_pair_state":
+      case "studio_not_ready":
         return blockedFailureMove(input, failure);
+      case "generation_timeout":
+      case "artifact_persistence_failed":
       case "validation_failure":
       case "generation_failed":
       default:

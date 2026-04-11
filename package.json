@@ -21,6 +21,7 @@
     "synthetic:core-loop": "npm run synthetic:loop",
     "synthetic:core-loop-smoke": "node scripts/synthetic-core-loop.mjs",
     "synthetic:bug-report": "npm -w apps/web run synthetic:bug-report",
+    "synthetic:bug-report:unavailable": "npm -w apps/web run synthetic:bug-report:unavailable",
     "validate:synthetic": "npm -w apps/api run synthetic:generation",
     "verify:ci": "npm run check:beta-scope && npm run lint:api && npm run lint:web && npm run test:api && npm run build:both",
     "smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1",

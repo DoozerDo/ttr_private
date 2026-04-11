@@ -150,6 +150,23 @@ describe("interviews proxy routes", () => {
     );
   });
 
+  it("returns a typed fallback when expanded-fit compute config is missing", async () => {
+    delete process.env.API_BASE_URL;
+    delete process.env.NEXT_PUBLIC_API_BASE_URL;
+
+    const response = await postComputeExpandedFit(
+      request("/api/interviews/int-1/compute-expanded-fit", "POST"),
+      { params: Promise.resolve({ id: "int-1" }) },
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(payload).toMatchObject({
+      status: "temporarily_unavailable",
+      code: "UPSTREAM_API_URL_MISSING",
+    });
+  });
+
   it("runs canonical low-fit recovery loop through promotion and artifact readiness", async () => {
     const interviewId = "int-canary-1";
     const promotedBaselineVersionId = "bv-promoted-2";
@@ -230,8 +247,28 @@ describe("interviews proxy routes", () => {
       ) {
         return new Response(
           JSON.stringify({
-            id: interviewId,
-            expandedFit: { score: 74, verdict: "qualified" },
+            status: "success",
+            code: "expanded_fit_ready",
+            message: "Expanded fit is ready.",
+            retryable: false,
+            nextAction: "review_results",
+            runId: "run-1",
+            payload: {
+              id: interviewId,
+              baselineId: "bv-1",
+              baselineVersionId: "bv-1",
+              jobId: "job-77",
+              status: "open",
+              expandedFitAssessment: {
+                originalScore: 62,
+                expandedScore: 74,
+                delta: 12,
+                originalVerdict: "consider",
+                expandedVerdict: "qualified",
+              },
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
           }),
           { status: 200, headers: { "content-type": "application/json" } },
         );
@@ -258,6 +295,12 @@ describe("interviews proxy routes", () => {
         return new Response(
           JSON.stringify({
             status: "success",
+            code: "draft_generated",
+            message: "A draft is ready.",
+            retryable: false,
+            nextAction: "review_draft",
+            artifactType: "resume",
+            runId: "run-resume-1",
             generationStatus: "success",
             exportReady: true,
             baselineVersionId: payload?.baselineVersionId,
@@ -343,7 +386,15 @@ describe("interviews proxy routes", () => {
       { params: Promise.resolve({ id: interviewId }) },
     );
     const expandedFitPayload = await expandedFitResponse.json();
-    expect(expandedFitPayload.expandedFit).toEqual({ score: 74, verdict: "qualified" });
+    expect(expandedFitPayload).toMatchObject({
+      status: "success",
+      code: "expanded_fit_ready",
+      payload: expect.objectContaining({
+        expandedFitAssessment: expect.objectContaining({
+          expandedScore: 74,
+        }),
+      }),
+    });
 
     const promoteResponse = await postPromoteAcceptedAdditions(
       request(`/api/interviews/${interviewId}/promote-accepted-additions`, "POST", {}),
@@ -356,6 +407,8 @@ describe("interviews proxy routes", () => {
       request("/api/resume", "POST", {
         jobId: "job-77",
         baselineVersionId: promotePayload.promotedBaselineVersionId,
+        analysisId: "fit-1",
+        baselineId: "base-77",
       }),
     );
     const resumePayload = await resumeResponse.json();

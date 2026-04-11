@@ -6,6 +6,7 @@ const ROOT_URL = (process.env.BASE_URL || "http://localhost:3000").replace(/\/+$
 const API_URL = (process.env.API_BASE_URL || ROOT_URL).replace(/\/+$/, "");
 const SYNTHETIC_EMAIL = process.env.SYNTHETIC_USER_EMAIL || "synthetic-core-loop@targetthisrole.local";
 const SYNTHETIC_PASSWORD = process.env.SYNTHETIC_USER_PASSWORD || "SyntheticUserPass!123";
+const SYNTHETIC_MODE = (process.env.SYNTHETIC_BUG_REPORT_MODE || "success").toLowerCase();
 
 function log(message, extra) {
   console.log(
@@ -84,6 +85,20 @@ async function main() {
     const request = route.request();
     const body = request.postDataJSON?.() ?? JSON.parse(request.postData() || "{}");
     payloads.push(body);
+    if (SYNTHETIC_MODE === "unavailable") {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "temporarily_unavailable",
+          code: "support_config_unavailable",
+          message:
+            "Bug reporting is temporarily unavailable right now. Save a draft and check Support history later.",
+          supportPath: "/support/history",
+        }),
+      });
+      return;
+    }
     await route.continue();
   });
 
@@ -96,25 +111,31 @@ async function main() {
 
   await page.getByRole("button", { name: "Send issue report" }).click();
 
-  await page.getByText("Thanks. Your report was submitted successfully.").waitFor({ timeout: 15000 });
-
   assert(payloads.length === 1, `expected one bug report request, saw ${payloads.length}`);
   const payload = payloads[0];
   assert(payload?.message === "Synthetic test bug report submission", "payload message contract mismatch");
   assert(payload?.details === "Triggered from synthetic transaction", "payload details contract mismatch");
   assert(payload?.message?.length >= 10 && payload?.message?.length <= 4000, "message length invalid");
-  assert(responses.some((entry) => entry.ok && entry.status >= 200 && entry.status < 300), "bug report response was not successful");
 
-  const statusText = await page.getByRole("status").textContent();
-  assert(!String(statusText ?? "").includes("Please enter"), "validation error was shown for valid input");
+  if (SYNTHETIC_MODE === "unavailable") {
+    await page.getByText("Bug reporting is temporarily unavailable right now. Save a draft and check Support history later.").waitFor({ timeout: 15000 });
+    await page.getByRole("link", { name: "Support history" }).waitFor({ timeout: 15000 });
+    const draft = await page.evaluate(() => window.localStorage.getItem("ttr.support.bug-report.draft.v1"));
+    assert(Boolean(draft), "bug report draft was not preserved locally");
+  } else {
+    await page.getByText("Thanks. Your report was submitted successfully.").waitFor({ timeout: 15000 });
+    assert(responses.some((entry) => entry.ok && entry.status >= 200 && entry.status < 300), "bug report response was not successful");
+    const statusText = await page.getByRole("status").textContent();
+    assert(!String(statusText ?? "").includes("Please enter"), "validation error was shown for valid input");
+  }
 
   await browser.close();
 
-  log("synthetic-bug-report-success", {
+  log(`synthetic-bug-report-${SYNTHETIC_MODE === "unavailable" ? "unavailable" : "success"}`, {
     requestCount: payloads.length,
     successCount: responses.filter((entry) => entry.ok).length,
     failureCount: responses.filter((entry) => !entry.ok).length,
-    successRatePct: 100,
+    successRatePct: SYNTHETIC_MODE === "unavailable" ? 0 : 100,
     payload: {
       message: payload.message,
       details: payload.details,

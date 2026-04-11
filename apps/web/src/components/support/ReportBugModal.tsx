@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { readLastAnalysis } from "@/app/(app)/lib/session";
@@ -18,9 +19,19 @@ type ReportBugModalProps = {
 };
 
 type BugReportCreateResponse = {
-  ok: boolean;
+  status: "submission_success";
+  message: string;
   reportId: string;
 };
+
+type BugReportFailureResponse = {
+  status?: "temporarily_unavailable" | "configuration_missing" | "validation_failed" | "submission_failed";
+  code?: string;
+  message?: string;
+  supportPath?: string;
+};
+
+const BUG_REPORT_DRAFT_STORAGE_KEY = "ttr.support.bug-report.draft.v1";
 
 type StructuredBugContext = {
   baselineId: string | null;
@@ -39,6 +50,7 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [createdReportId, setCreatedReportId] = useState<string | null>(null);
   const [hasSubmitted, setHasSubmitted] = useState(false);
+  const [supportFallbackPath, setSupportFallbackPath] = useState<string | null>(null);
 
   const structuredContext = useMemo<StructuredBugContext>(() => {
     const stored = readLastAnalysis();
@@ -97,13 +109,60 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
 
   useEffect(() => {
     if (!open) return;
-    setWhatHappened("");
-    setDetails("");
     setStatus("idle");
     setStatusMessage(null);
     setCreatedReportId(null);
     setHasSubmitted(false);
+    setSupportFallbackPath(null);
+
+    if (typeof window === "undefined") {
+      setWhatHappened("");
+      setDetails("");
+      return;
+    }
+
+    try {
+      const raw = window.localStorage.getItem(BUG_REPORT_DRAFT_STORAGE_KEY);
+      if (!raw) {
+        setWhatHappened("");
+        setDetails("");
+        return;
+      }
+
+      const draft = JSON.parse(raw) as { whatHappened?: string; details?: string };
+      setWhatHappened(draft.whatHappened ?? "");
+      setDetails(draft.details ?? "");
+    } catch {
+      setWhatHappened("");
+      setDetails("");
+    }
   }, [open]);
+
+  useEffect(() => {
+    if (!open || typeof window === "undefined") return;
+
+    try {
+      window.localStorage.setItem(
+        BUG_REPORT_DRAFT_STORAGE_KEY,
+        JSON.stringify({
+          whatHappened,
+          details,
+          pathname,
+        }),
+      );
+    } catch {
+      // Draft persistence is best effort only.
+    }
+  }, [details, open, pathname, whatHappened]);
+
+  const clearDraft = useCallback(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.removeItem(BUG_REPORT_DRAFT_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const trimmedMessage = whatHappened.trim();
   const messageLength = trimmedMessage.length;
@@ -118,6 +177,7 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
 
       setStatus("loading");
       setStatusMessage(null);
+      setSupportFallbackPath(null);
 
       const timestamp = new Date().toISOString();
       const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : null;
@@ -145,23 +205,33 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
         });
 
         if (!response.ok) {
-          const errorPayload = (await response.json().catch(() => null)) as { message?: string } | null;
-          throw new Error(errorPayload?.message ?? "Bug report failed to send. Please try again.");
+          const errorPayload = (await response.json().catch(() => null)) as BugReportFailureResponse | null;
+          const message =
+            errorPayload?.message ??
+            (response.status === 503
+              ? "Bug reporting is unavailable right now. Your draft was preserved."
+              : "Bug report failed to send. Your draft was preserved.");
+          setSupportFallbackPath(errorPayload?.supportPath ?? "/support/history");
+          throw new Error(message);
         }
 
         const responsePayload = (await response.json()) as BugReportCreateResponse;
         setStatus("success");
-        setStatusMessage("Thanks. Your report was submitted successfully.");
+        setStatusMessage(responsePayload.message || "Thanks. Your report was submitted successfully.");
         setCreatedReportId(responsePayload.reportId);
         setWhatHappened("");
         setDetails("");
         setHasSubmitted(false);
+        setSupportFallbackPath(null);
+        clearDraft();
       } catch (err) {
         setStatus("error");
-        setStatusMessage(err instanceof Error ? err.message : "Bug report failed to send. Please try again.");
+        setStatusMessage(
+          err instanceof Error ? err.message : "Bug report failed to send. Your draft was preserved.",
+        );
       }
     },
-    [details, messageIsValid, pathname, status, structuredContext, trimmedMessage, userId, whatHappened],
+    [clearDraft, details, messageIsValid, pathname, status, structuredContext, trimmedMessage, userId, whatHappened],
   );
 
   if (!open) return null;
@@ -225,26 +295,41 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="submit"
-          disabled={status === "loading"}
+            disabled={status === "loading"}
             className="flex-1 rounded-2xl border border-amber-400/60 bg-amber-400/20 px-4 py-2 text-sm font-semibold text-amber-100 transition hover:border-amber-400/90 hover:bg-amber-400/30 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {status === "loading" ? "Sending..." : "Send issue report"}
           </button>
           <span
             className={`text-xs ${status === "success" ? "text-emerald-300" : status === "error" ? "text-rose-300" : "text-slate-400"}`}
-          role="status"
-          aria-live="polite"
-        >
-          {statusMessage ??
+            role="status"
+            aria-live="polite"
+          >
+            {statusMessage ??
               (messageIsValid
                 ? createdReportId
                   ? `Report ID: ${createdReportId}`
                   : "Ready to send."
                 : hasSubmitted
                   ? "Please enter a message between 10 and 4000 characters."
-                  : "Message must be 10 to 4000 characters." )}
-        </span>
-      </div>
+                  : "Message must be 10 to 4000 characters.")}
+          </span>
+        </div>
+
+        {status === "error" ? (
+          <div className="space-y-2 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-50">
+            <p>Your report draft is saved locally in this browser.</p>
+            {supportFallbackPath ? (
+              <p>
+                You can review submitted reports and next steps in{" "}
+                <Link href={supportFallbackPath} className="font-semibold underline">
+                  Support history
+                </Link>
+                .
+              </p>
+            ) : null}
+          </div>
+        ) : null}
     </form>
   </div>
   );

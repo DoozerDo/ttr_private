@@ -1,4 +1,8 @@
 import { normalizeUserFacingRequirementLabel } from "@/lib/generationReadiness";
+import {
+  FALLBACK_RENDERED_TEXT,
+  sanitizeRenderedTextValue,
+} from "@/lib/renderedText";
 
 export type UserGuidanceCard = {
   title: string;
@@ -25,7 +29,11 @@ type GapGuidanceInput = {
 
 function cleanText(value: unknown): string {
   if (typeof value !== "string") return "";
-  return value.replace(/\s+/g, " ").trim();
+  const cleaned = sanitizeRenderedTextValue(value, {
+    endpoint: "userGuidance",
+    field: "cleanText",
+  });
+  return cleaned === FALLBACK_RENDERED_TEXT ? "" : cleaned;
 }
 
 function cleanList(values: unknown): string[] {
@@ -154,7 +162,11 @@ export function mapGapToUserGuidance(input: GapGuidanceInput): UserGuidanceCard 
   const roleExpectation = cleanText(input.roleExpectation);
   const explanation = cleanText(input.explanation);
   const topic = requirement ? deriveTopic(requirement) : "generic";
-  const title = input.fallbackTitle?.trim() || titleForTopic(topic);
+  const title =
+    sanitizeRenderedTextValue(input.fallbackTitle?.trim() || titleForTopic(topic), {
+      endpoint: "userGuidance",
+      field: "title",
+    }) || titleForTopic(topic);
   const fallbackDescription =
     input.fallbackDescription?.trim() || "Add a specific example from your real experience that supports this requirement.";
 
@@ -173,9 +185,20 @@ export function mapGapToUserGuidance(input: GapGuidanceInput): UserGuidanceCard 
 
   return {
     title,
-    description,
-    whyItMatters,
+    description: sanitizeRenderedTextValue(description, {
+      endpoint: "userGuidance",
+      field: "description",
+    }),
+    whyItMatters: whyItMatters
+      ? sanitizeRenderedTextValue(whyItMatters, {
+          endpoint: "userGuidance",
+          field: "whyItMatters",
+        })
+      : undefined,
     actionLabel: "Add example",
-    examplePrompt,
+    examplePrompt: sanitizeRenderedTextValue(examplePrompt, {
+      endpoint: "userGuidance",
+      field: "examplePrompt",
+    }),
   };
 }

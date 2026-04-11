@@ -2,6 +2,13 @@ import type { BaselineAssessmentSummaryDto } from "@/lib/baselines";
 import type { GenerationReadiness } from "@/lib/generationReadiness";
 import type { GenerationProductReadiness } from "@/lib/generationProductReadiness";
 import type { DecisionFlowDataSource } from "@/lib/decisionFlowDebug";
+import {
+  resolveWorkflowProgression,
+  type WorkflowBlockingReason,
+  type WorkflowPrimaryAction,
+  type WorkflowProgressionInput,
+  type WorkflowState,
+} from "@/lib/workflowProgression";
 
 export type CanonicalSurface = "baseline" | "target" | "results" | "studio";
 
@@ -66,6 +73,11 @@ export type CanonicalDecisionResult = {
   readinessSource: string;
   nextAction: CanonicalNextAction;
   cta: CanonicalCta;
+  workflowState: WorkflowState;
+  primaryAction: WorkflowPrimaryAction;
+  blockingReason: WorkflowBlockingReason | null;
+  supportingMessage: string;
+  pairKey: string | null;
   dataSource: DecisionFlowDataSource;
   persistedAssessmentId: string | null;
   contractSource: string;
@@ -418,6 +430,28 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
   if (input.surface === "baseline") {
     const score = input.summary?.latestFitScore ?? null;
     const latestAssessmentId = input.summary?.latestAssessmentId?.trim() ?? null;
+    const progression = resolveWorkflowProgression({
+      surface: "baseline",
+      baselineId: input.baselineId,
+      jobId: null,
+      baselineStatus: input.isAnalyzing ? "UPLOADING" : latestAssessmentId ? "READY" : "READY",
+      analysisAssessmentId: latestAssessmentId,
+      analysisStatus: input.isAnalyzing ? "running" : latestAssessmentId ? "complete" : "idle",
+      score,
+      firstRun: !input.baselineId,
+      routes: {
+        baseline: input.routes.baseline,
+        target: input.routes.target,
+        analyze: buildAnalyzeHref(input.baselineId, null),
+        results: input.routes.results,
+        studio: latestAssessmentId ? `/studio?assessmentId=${encodeURIComponent(latestAssessmentId)}` : "/studio",
+        fitReview: latestAssessmentId
+          ? `/fit-review?assessmentId=${encodeURIComponent(latestAssessmentId)}`
+          : "/fit-review",
+      },
+      dataSource: input.dataSource ?? "fresh",
+      persistedAssessmentId: input.persistedAssessmentId ?? latestAssessmentId,
+    });
     const readinessState: CanonicalReadinessState = input.isAnalyzing
       ? "ANALYZING"
       : latestAssessmentId
@@ -432,6 +466,11 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
       readinessSource: input.isAnalyzing ? "fallback_default" : latestAssessmentId ? "persisted_latest_assessment" : "fallback_default",
       nextAction,
       cta: resolveCta(nextAction),
+      workflowState: progression.state,
+      primaryAction: progression.primaryAction,
+      blockingReason: progression.blockingReason,
+      supportingMessage: progression.supportingMessage,
+      pairKey: progression.pairKey,
       dataSource: input.dataSource ?? "fresh",
       persistedAssessmentId: input.persistedAssessmentId ?? latestAssessmentId,
       contractSource: "resolveCanonicalState",
@@ -443,6 +482,47 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
   ]);
   const score = scoreCandidate?.value ?? input.score ?? null;
   verifyAnalysisAgreement(input, score);
+  const analysisCandidate = input.analysisCandidates?.find(
+    (candidate) => candidate.value && typeof candidate.value === "object",
+  )?.value;
+  const routeInput = input as unknown as Record<string, string | undefined>;
+  const progressionRoutes: WorkflowProgressionInput["routes"] = {
+    baseline: input.baselineId ? "/baseline" : "/baseline",
+    target: input.baselineId ? `/target?baselineId=${encodeURIComponent(input.baselineId)}` : "/target",
+    analyze: buildAnalyzeHref(input.baselineId, input.jobId),
+    results:
+      routeInput.resultsHref ??
+      routeInput.studioHref ??
+      "/results",
+    studio:
+      routeInput.studioHref ??
+      routeInput.resultsHref ??
+      "/studio",
+    fitReview: routeInput.fitReviewHref ?? routeInput.resolveGapsHref ?? "/fit-review",
+  };
+  const workflowProgression = resolveWorkflowProgression({
+    surface: input.surface,
+    baselineId: input.baselineId,
+    jobId: input.jobId,
+    score,
+    generationReadiness: input.generationReadiness,
+    productReadiness: input.productReadiness,
+    analysisStatus: input.surface === "results" && input.forceFitReview ? "failed" : "complete",
+    generationStatus: input.surface === "studio" && !input.canGenerateDocuments ? "blocked" : "idle",
+    firstRun: !input.baselineId && !input.jobId,
+    hasJobDescription: Boolean(input.jobId),
+    isGenerationBlocked:
+      input.surface === "results"
+        ? input.forceFitReview || score === null || score < 70 || !input.productReadiness.canOpenStudio || input.generationReadiness.status !== "ready"
+        : !input.canGenerateDocuments || !input.productReadiness.canOpenStudio,
+    routes: progressionRoutes,
+    dataSource: input.dataSource ?? "fresh",
+    analysisAssessmentId: analysisCandidate?.assessmentId ?? input.persistedAssessmentId ?? null,
+    analysisBaselineId: analysisCandidate?.baselineId ?? null,
+    analysisJobId: analysisCandidate?.jobId ?? null,
+    analysisBaselineVersionId: analysisCandidate?.baselineVersionId ?? null,
+    persistedAssessmentId: input.persistedAssessmentId ?? null,
+  });
   const nextAction = resolveNextAction(input);
   return {
     surface: input.surface,
@@ -492,6 +572,11 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
               : "generation_limited",
     nextAction,
     cta: resolveCta(nextAction),
+    workflowState: workflowProgression.state,
+    primaryAction: workflowProgression.primaryAction,
+    blockingReason: workflowProgression.blockingReason,
+    supportingMessage: workflowProgression.supportingMessage,
+    pairKey: workflowProgression.pairKey,
     dataSource: input.dataSource ?? "fresh",
     persistedAssessmentId: input.persistedAssessmentId ?? null,
     contractSource:
@@ -546,4 +631,54 @@ export function resolveTargetDisplayResult(input: {
   }
 
   return { result: null, source: "mixed" };
+}
+
+function buildAnalyzeHref(baselineId: string | null, jobId: string | null): string {
+  const params = new URLSearchParams();
+  if (baselineId?.trim()) params.set("baselineId", baselineId.trim());
+  if (jobId?.trim()) params.set("jobId", jobId.trim());
+  const query = params.toString();
+  return query ? `/analyze?${query}` : "/analyze";
+}
+
+function mapWorkflowStateToReadinessState(
+  workflowState: WorkflowState,
+  score: number | null,
+  productReadiness: GenerationProductReadiness | null | undefined,
+  generationReadiness: GenerationReadiness | null | undefined,
+  forceFitReview?: boolean,
+): CanonicalReadinessState {
+  switch (workflowState) {
+    case "analysis_in_progress":
+    case "generation_running":
+      return "ANALYZING";
+    case "baseline_ready_no_job":
+    case "job_present_analysis_not_started":
+    case "results_unavailable":
+      return "NOT_ANALYZED";
+    case "first_run":
+    case "no_baseline":
+    case "archived_baseline_selected":
+    case "invalid_navigation_state":
+    case "missing_or_mismatched_pair_state":
+    case "generation_failed":
+    case "generation_timeout":
+      return "BLOCKED";
+    case "founder_excluded":
+      return "BLOCKED";
+    case "results_ready_studio_blocked":
+    case "studio_blocked_for_evidence":
+    case "generation_blocked":
+      return score !== null && score >= 70 ? "LIMITED" : "IMPROVE";
+    case "returning_user_persisted_last_assessment":
+      return "READY";
+    case "studio_ready":
+      return score !== null && score >= 85 ? "READY" : productReadiness?.confidence === "HIGH" ? "READY" : "DRAFT";
+    case "results_ready":
+      if (forceFitReview || score === null || score < 70) return "IMPROVE";
+      if (!productReadiness?.canOpenStudio || generationReadiness?.status !== "ready") return "BLOCKED";
+      return productReadiness?.confidence === "HIGH" ? "READY" : "DRAFT";
+    default:
+      return score !== null && score >= 70 ? "READY" : "NOT_ANALYZED";
+  }
 }

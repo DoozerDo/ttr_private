@@ -1,16 +1,18 @@
 // apps/api/src/analysis/analysis.service.ts
 import {
   BadRequestException,
+  ConflictException,
   HttpException,
   Injectable,
-  InternalServerErrorException,
   Logger,
   NotFoundException,
+  InternalServerErrorException,
+  ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'crypto';
-import { Repository } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import { Baseline } from '../baseline/baseline.entity';
 import {
   BaselineIncludePolicy,
@@ -87,6 +89,7 @@ import {
 } from './gap-analysis.service';
 import { SyntheticMetadataInput } from '../synthetic/synthetic-metadata.types';
 import { applySyntheticMetadata } from '../synthetic/synthetic-metadata.util';
+import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
 
 export type AnalysisRequest = {
   baselineId: string;
@@ -332,6 +335,17 @@ type RunFitAssessmentOkResponse = FitScoreResponse & {
     latestFitScore: number;
     hasCompletedAssessment: true;
   };
+  idempotency?: {
+    status:
+      | 'accepted_new'
+      | 'existing_in_flight'
+      | 'existing_completed'
+      | 'rejected_stale'
+      | 'persistence_conflict';
+    runId: string;
+    dedupeKey: string;
+    reused: boolean;
+  };
 };
 
 /**
@@ -386,6 +400,17 @@ type RunFitAssessmentComplianceBlockedResponse = {
   baselineId?: string;
   baselineVersion?: number | null;
   createdAt?: Date;
+  idempotency?: {
+    status:
+      | 'accepted_new'
+      | 'existing_in_flight'
+      | 'existing_completed'
+      | 'rejected_stale'
+      | 'persistence_conflict';
+    runId: string;
+    dedupeKey: string;
+    reused: boolean;
+  };
 };
 
 export type RunAssessmentResult =
@@ -457,6 +482,7 @@ export class AnalysisService {
     private readonly fitScoringService: FitScoringService,
     private readonly complianceService: ComplianceService,
     private readonly gapAnalysisService: GapAnalysisService,
+    private readonly workflowIdempotencyService: WorkflowIdempotencyService,
   ) {}
 
   private readonly logger = new Logger(AnalysisService.name);
@@ -1344,6 +1370,54 @@ export class AnalysisService {
       canonicalSections,
       dimensionWeights,
     );
+  }
+
+  private buildAnalysisDedupeKey(input: {
+    userId: string;
+    baselineId: string;
+    jobId: string;
+    inputsHash: string;
+  }) {
+    return sha256(
+      [
+        'analysis.run',
+        input.userId,
+        input.baselineId,
+        input.jobId,
+        input.inputsHash,
+        SCORING_V2_INPUTS_VERSION,
+      ].join('|'),
+    );
+  }
+
+  private buildExpandedFitDedupeKey(input: {
+    userId: string;
+    interviewId: string;
+    baselineId: string;
+    baselineVersion: number;
+    jobId: string;
+    answerHash: string;
+    decisionHash: string;
+  }) {
+    return sha256(
+      [
+        'analysis.expanded_fit',
+        input.userId,
+        input.interviewId,
+        input.baselineId,
+        String(input.baselineVersion),
+        input.jobId,
+        input.answerHash,
+        input.decisionHash,
+      ].join('|'),
+    );
+  }
+
+  private isUniqueConflictError(error: unknown) {
+    if (error instanceof QueryFailedError) return true;
+    if (!error || typeof error !== 'object') return false;
+    const record = error as Record<string, unknown>;
+    return String(record.code ?? '').trim() === '23505';
   }
 
   private async runAndPersistFitAssessment(
@@ -2404,6 +2478,7 @@ export class AnalysisService {
     syntheticMetadata?: SyntheticMetadataInput,
   ): Promise<RunAssessmentResult> {
     let shortTextWarningKey: string | undefined;
+    let analysisDedupeKey: string | undefined;
     let baselineForLog: string | null = null;
     let jobForLog: string | null = null;
     let triggerTypeForLog: TriggerType = "manual";
@@ -2644,6 +2719,59 @@ export class AnalysisService {
         sectionPayload,
         dimensionWeights,
       );
+
+      analysisDedupeKey = this.buildAnalysisDedupeKey({
+        userId,
+        baselineId: baseline.id,
+        jobId: job.id,
+        inputsHash,
+      });
+
+      const reservation = await this.workflowIdempotencyService.reserve<RunAssessmentResult>({
+        userId,
+        operationName: 'analysis.run',
+        dedupeKey: analysisDedupeKey,
+        runId: attemptContext.attemptId,
+      });
+
+      if (reservation.status === 'existing_completed' && reservation.responseBody) {
+        if (this.isDevMode()) {
+          this.logger.log(
+            `[fit-score] duplicate_request_reused operation=analysis.run runId=${reservation.runId} dedupeKey=${analysisDedupeKey} assessmentId=${(reservation.responseBody as { assessmentId?: string }).assessmentId ?? 'missing'}`,
+          );
+        }
+        return {
+          ...(reservation.responseBody as RunAssessmentResult),
+          idempotency: {
+            status: reservation.status,
+            runId: reservation.runId,
+            dedupeKey: analysisDedupeKey,
+            reused: true,
+          },
+        } as RunAssessmentResult;
+      }
+
+      if (reservation.status === 'existing_in_flight') {
+        throw new ConflictException({
+          error: {
+            code: 'analysis_in_flight',
+            message:
+              'An analysis is already running for this baseline and job. Please wait for it to finish.',
+            retryable: true,
+            nextAction: 'retry_later',
+            runId: reservation.runId,
+            dedupeKey: analysisDedupeKey,
+          },
+        });
+      }
+
+      const idempotencyMeta = {
+        status: reservation.status,
+        runId: reservation.runId,
+        dedupeKey: analysisDedupeKey,
+        reused: reservation.status === 'existing_completed',
+      } as const;
+      const dedupeKey = analysisDedupeKey ?? `${baseline.id}:${resolvedJobId}`;
 
       const allowDebug = Boolean(payload.debug);
 
@@ -2909,8 +3037,15 @@ export class AnalysisService {
           jobId: resolvedJobId,
           baselineId: baseline.id,
           baselineVersion: baselineVersion ?? baseline.version ?? null,
+          idempotency: idempotencyMeta,
         };
-
+        await this.workflowIdempotencyService.complete({
+          userId,
+          operationName: 'analysis.run',
+          dedupeKey: analysisDedupeKey,
+          runId: attemptContext.attemptId,
+          responseBody: blockedResponse,
+        });
         return blockedResponse;
       }
 
@@ -2919,32 +3054,108 @@ export class AnalysisService {
         baselineHashSource,
       });
 
+      const freshBaseline = await this.loadBaselineWithSections(userId, baseline.id);
+      const freshJob = await this.fetchJobForUser(resolvedJobId, userId);
+      const freshInputsHash = await this.computeExpectedInputsHashForJobBaseline(
+        userId,
+        freshJob,
+        freshBaseline,
+      );
+
+      if (freshInputsHash !== inputsHash) {
+        await this.workflowIdempotencyService.markFailure({
+          userId,
+          operationName: 'analysis.run',
+          dedupeKey: analysisDedupeKey,
+          runId: attemptContext.attemptId,
+          status: 'STALE',
+          errorCode: 'stale_request_ignored',
+          errorMessage:
+            'The analysis inputs changed while this request was running. Re-run the current baseline and job pair.',
+        });
+        throw new ConflictException({
+          error: {
+            code: 'stale_request_ignored',
+            message:
+              'The analysis inputs changed while this request was running. Re-run the current baseline and job pair.',
+            retryable: true,
+            nextAction: 'retry_later',
+            runId: attemptContext.attemptId,
+            dedupeKey: analysisDedupeKey,
+          },
+        });
+      }
+
       const assessment = this.fitAssessmentRepository.create({
         userId,
         jobId: resolvedJobId,
         baselineId: baseline.id,
-      baselineVersion: baselineVersion ?? baseline.version ?? null,
-      overallScore: finalScore,
-      verdict: persistenceVerdict,
-      dimensionScores: legacyDimensionScores,
-      strengths,
-      gaps,
-      complianceFlags,
-      scoringV2: scoringV2,
-      inputsHash,
-      confidenceScore: confidenceResult.confidenceScore,
-      confidenceReasons: confidenceResult.confidenceReasons,
-    });
+        baselineVersion: baselineVersion ?? baseline.version ?? null,
+        overallScore: finalScore,
+        verdict: persistenceVerdict,
+        dimensionScores: legacyDimensionScores,
+        strengths,
+        gaps,
+        complianceFlags,
+        scoringV2: scoringV2,
+        inputsHash,
+        confidenceScore: confidenceResult.confidenceScore,
+        confidenceReasons: confidenceResult.confidenceReasons,
+      });
       if (syntheticMetadata?.isSynthetic) {
         applySyntheticMetadata(assessment, syntheticMetadata);
       }
 
-      currentStage = "persistence";
-      logStageLifecycle("persistence_started", currentStage);
-      logAttemptEvent?.("persistence_started", {
+      currentStage = 'persistence';
+      logStageLifecycle('persistence_started', currentStage);
+      logAttemptEvent?.('persistence_started', {
         stage: currentStage,
       });
-      const savedAssessment = await this.fitAssessmentRepository.save(assessment);
+
+      let savedAssessment: FitAssessment;
+      try {
+        savedAssessment = await this.fitAssessmentRepository.save(assessment);
+      } catch (error) {
+        if (!this.isUniqueConflictError(error)) {
+          throw error;
+        }
+
+        const existingAssessment = await this.fitAssessmentRepository.findOne({
+          where: {
+            userId,
+            jobId: resolvedJobId,
+            baselineId: baseline.id,
+            inputsHash,
+          },
+        });
+
+        if (!existingAssessment) {
+            await this.workflowIdempotencyService.markFailure({
+              userId,
+              operationName: 'analysis.run',
+              dedupeKey: analysisDedupeKey,
+              runId: attemptContext.attemptId,
+              status: 'PERSISTENCE_CONFLICT',
+              errorCode: 'artifact_write_conflict',
+            errorMessage:
+              'A concurrent analysis write conflicted with this request.',
+          });
+          throw new ConflictException({
+            error: {
+              code: 'artifact_write_conflict',
+              message:
+                'A concurrent analysis write conflicted with this request.',
+              retryable: true,
+              nextAction: 'retry_later',
+              runId: attemptContext.attemptId,
+              dedupeKey: analysisDedupeKey,
+            },
+          });
+        }
+
+        savedAssessment = existingAssessment;
+      }
+
       if (
         savedAssessment.userId !== userId ||
         savedAssessment.baselineId !== baseline.id
@@ -2975,6 +3186,15 @@ export class AnalysisService {
           `Failed to persist baseline linkage baselineId=${baseline.id} assessmentId=${savedAssessment.id} message=${message}`,
           error instanceof Error ? error.stack : undefined,
         );
+        await this.workflowIdempotencyService.markFailure({
+          userId,
+          operationName: 'analysis.run',
+          dedupeKey: analysisDedupeKey ?? `${baseline.id}:${resolvedJobId}`,
+          runId: attemptContext.attemptId,
+          status: 'PERSISTENCE_CONFLICT',
+          errorCode: 'artifact_write_conflict',
+          errorMessage: message,
+        });
         throw new InternalServerErrorException(
           'Unable to persist baseline assessment linkage',
         );
@@ -3059,8 +3279,15 @@ export class AnalysisService {
           latestFitScore: finalScore,
           hasCompletedAssessment: true,
         },
+        idempotency: idempotencyMeta,
       };
-
+      await this.workflowIdempotencyService.complete({
+          userId,
+          operationName: 'analysis.run',
+          dedupeKey: analysisDedupeKey,
+          runId: attemptContext.attemptId,
+          responseBody: successResponse,
+        });
       return successResponse;
     } catch (error) {
       const context =
@@ -3091,6 +3318,17 @@ export class AnalysisService {
         failureCategory,
         error: this.simplifyErrorMessage(error),
       });
+      if (attemptContext) {
+        await this.workflowIdempotencyService.markFailure({
+          userId,
+          operationName: 'analysis.run',
+          dedupeKey: analysisDedupeKey ?? `${baselineForLog ?? 'unknown'}:${jobForLog ?? 'unknown'}`,
+          runId: attemptContext.attemptId,
+          status: 'FAILED',
+          errorCode: failureCategory,
+          errorMessage: this.simplifyErrorMessage(error),
+        });
+      }
       if (error instanceof HttpException) {
         throw error;
       }
@@ -3176,15 +3414,23 @@ export class AnalysisService {
     const jobId = payload.jobId?.trim();
 
     if (!baselineId || !jobId) {
-      throw new BadRequestException('baselineId and jobId are required');
+      throw new BadRequestException({
+        error: {
+          code: 'target_context_missing',
+          message: 'baselineId and jobId are required',
+        },
+      });
     }
 
     if (payload.baselineVersion !== undefined) {
       const version = Number(payload.baselineVersion);
       if (!Number.isInteger(version) || version < 1) {
-        throw new BadRequestException(
-          'baselineVersion must be a positive integer',
-        );
+        throw new BadRequestException({
+          error: {
+            code: 'baseline_version_mismatch',
+            message: 'baselineVersion must be a positive integer',
+          },
+        });
       }
     }
 
@@ -3195,7 +3441,12 @@ export class AnalysisService {
     });
 
     if (!baseline) {
-      throw new NotFoundException('Baseline not found');
+      throw new NotFoundException({
+        error: {
+          code: 'baseline_not_found',
+          message: 'Baseline not found',
+        },
+      });
     }
 
     if (!baseline.sections?.length) {
@@ -3210,7 +3461,12 @@ export class AnalysisService {
     });
 
     if (!job) {
-      throw new NotFoundException('Job not found');
+      throw new NotFoundException({
+        error: {
+          code: 'target_context_missing',
+          message: 'Job not found',
+        },
+      });
     }
 
     const jobKey = job.id;
@@ -3225,7 +3481,12 @@ export class AnalysisService {
       : null;
 
     if (interviewId && !interview) {
-      throw new NotFoundException('Interview not found');
+      throw new NotFoundException({
+        error: {
+          code: 'interview_not_found',
+          message: 'Interview not found',
+        },
+      });
     }
 
     const additionsFromPayload = this.normalizeAdditions(
@@ -3236,9 +3497,12 @@ export class AnalysisService {
       : this.normalizeAdditions(interview?.recommendedAdditions);
 
     if (!additions.length) {
-      throw new BadRequestException(
-        'verified additions are required for expanded scoring',
-      );
+      throw new BadRequestException({
+        error: {
+          code: 'insufficient_answers',
+          message: 'verified additions are required for expanded scoring',
+        },
+      });
     }
 
     const includedSections =
@@ -3380,6 +3644,25 @@ export class AnalysisService {
       baseline_version_hash:
         compliance.audit.baselineVersionHash ?? baseline.hash ?? null,
     };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      const runId = shortTextWarningKey ?? this.nextShortTextWarningRequestRunId();
+      this.logger.error(
+        `Expanded fit assessment failed [${runId}] for user ${userId}, baseline ${payload.baselineId ?? 'unknown'}, job ${payload.jobId ?? 'unknown'}`,
+        error instanceof Error ? error.stack ?? error.message : String(error),
+      );
+
+      throw new ServiceUnavailableException({
+        error: {
+          code: 'computation_failed',
+          message:
+            'Expanded fit could not be computed right now. Save your answers and try again.',
+          runId,
+        },
+      });
     } finally {
       if (shortTextWarningKey) {
         this.clearShortTextWarningKey(shortTextWarningKey);

@@ -9,6 +9,7 @@ import { Job } from '../jobs/job.entity';
 import { ComplianceAction, ComplianceFlagSeverity } from '../compliance/compliance.types';
 import { GapAnalysisService } from '../analysis/gap-analysis.service';
 import { BaselineIncludePolicy, BaselineSectionType } from '../baseline/baseline-section.entity';
+import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
 
 const baseline: Partial<Baseline> = {
   id: 'baseline-1',
@@ -113,8 +114,23 @@ const buildService = (options?: {
     analyze: jest.fn().mockReturnValue({ strengths: [], criticalGaps: [] }),
   } as unknown as GapAnalysisService;
 
-  const service = new CoverLettersService(dataSource, complianceService as any, gapAnalysis);
-  return { service, complianceService, coverRepo };
+  const workflowIdempotencyService = {
+    reserve: jest.fn().mockResolvedValue({
+      status: 'accepted_new',
+      runId: 'run-1',
+      responseBody: null,
+    }),
+    complete: jest.fn().mockResolvedValue({ status: 'completed' }),
+    markFailure: jest.fn().mockResolvedValue(undefined),
+  } as unknown as jest.Mocked<WorkflowIdempotencyService>;
+
+  const service = new CoverLettersService(
+    dataSource,
+    complianceService as any,
+    gapAnalysis,
+    workflowIdempotencyService,
+  );
+  return { service, complianceService, coverRepo, workflowIdempotencyService };
 };
 
 const request = {
@@ -182,6 +198,86 @@ describe('CoverLettersService contract', () => {
     expect(result.status).toBe('success');
     expect(result.exportReady).toBe(true);
     expect(result.preview?.coverLetter).toBeTruthy();
+    buildDraftSpy.mockRestore();
+  });
+
+  it('reuses a completed generation request instead of creating a duplicate artifact', async () => {
+    const { service, coverRepo, workflowIdempotencyService } = buildService();
+    const buildDraftSpy = jest.spyOn(service as any, 'buildCoverLetterDraft').mockResolvedValue({
+      baseline,
+      baselineVersion,
+      job,
+      analysisAssessment: assessment,
+      allowedBlocks: [],
+      jobContext: {
+        id: 'job-1',
+        title: 'Program Manager',
+        company: 'Example Co',
+        responsibilities: [],
+        requirements: [],
+      },
+      jobContextAllowlist: { allowedCompanies: ['Example Co'], allowedRoleTitles: ['Program Manager'] },
+      closingTemplateKey: 'default',
+      generationInputsHash: 'hash',
+      generation: {
+        document: {
+          senderHeading: { name: 'Jordan Lee' },
+          salutation: 'Dear Hiring Team,',
+          opening: 'Opening.',
+          bodyParagraphs: ['Body one.'],
+          closingParagraph: 'Closing.',
+          signoff: 'Sincerely,',
+          signatureName: 'Jordan Lee',
+        },
+        content: 'Dear Hiring Team',
+        wordCount: 260,
+        greeting: 'Dear Hiring Team,',
+        paragraphs: ['Opening.'],
+        closingParagraphs: ['Closing.'],
+        paragraphEvidence: [],
+      },
+      complianceResult: {
+        normalizedContent: 'valid',
+        complianceFlags: [],
+        blocked: false,
+        audit: { id: 'audit-1', baselineVersionHash: 'hash-1' },
+      },
+    });
+    workflowIdempotencyService.reserve = jest.fn().mockResolvedValueOnce({
+      status: 'existing_completed',
+      runId: 'run-1',
+      responseBody: {
+        status: 'success',
+        generationStatus: 'success',
+        exportReady: true,
+        id: 'cover-existing',
+        userId: 'user-1',
+        baselineId: 'baseline-1',
+        jobId: 'job-1',
+        content: 'cached',
+        generatorType: 'template',
+        generatorVersion: 'v1',
+        closingTemplateKey: 'default',
+        generationInputsHash: 'hash',
+        preview: { coverLetter: { salutation: 'Dear Hiring Team,' } },
+        compliance_flags: [],
+        audit_id: 'audit-1',
+        auditId: 'audit-1',
+        baseline_version_hash: 'hash-1',
+        exports: { docx: true, pdf: true },
+        display: { title: '', description: '', reasons: [], cta: { label: '', href: '' } },
+        safeDisplay: { title: '', description: '', reasons: [], cta: { label: '', href: '' } },
+        traceMap: {},
+        debugTrace: { passed: true, failures: [], traceCoverage: 100, unusedEvidence: [], selectedEvidence: [] },
+        internal: { auditId: 'audit-1', baselineVersionHash: 'hash-1', complianceFlags: [] },
+      },
+    }) as any;
+
+    const result = await service.generateCoverLetter('user-1', request as any);
+
+    expect(result.id).toBe('cover-existing');
+    expect(result.idempotency?.reused).toBe(true);
+    expect(coverRepo.save).not.toHaveBeenCalled();
     buildDraftSpy.mockRestore();
   });
 

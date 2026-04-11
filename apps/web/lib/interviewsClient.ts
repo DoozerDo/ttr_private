@@ -37,6 +37,46 @@ export type InterviewPromotionResponse = {
   versionNumber?: number | null;
 };
 
+export type InterviewComputeErrorCode =
+  | "interview_not_found"
+  | "baseline_not_found"
+  | "target_context_missing"
+  | "missing_baseline_link"
+  | "missing_job_context"
+  | "incomplete_answers"
+  | "invalid_baseline_linkage"
+  | "baseline_version_mismatch"
+  | "computation_timeout"
+  | "computation_failed"
+  | "validation_failed"
+  | "compliance_blocked"
+  | "temporarily_unavailable"
+  | "invalid_promotion_state"
+  | "expanded_fit_analysis_failed";
+
+export type InterviewApiErrorPayload = {
+  code?: string;
+  message?: string;
+  detail?: string;
+  error?: {
+    code?: string;
+    message?: string;
+    detail?: string;
+  };
+};
+
+export class InterviewApiError extends Error {
+  code: InterviewComputeErrorCode | string | null;
+  status: number;
+
+  constructor(message: string, options: { code?: string | null; status: number }) {
+    super(message);
+    this.name = "InterviewApiError";
+    this.code = options.code ?? null;
+    this.status = options.status;
+  }
+}
+
 const debugUiEnabled =
   typeof process !== "undefined" && process.env.NEXT_PUBLIC_DEBUG_UI === "true";
 
@@ -172,6 +212,25 @@ async function parseResponseBody(response: Response): Promise<unknown> {
   }
 }
 
+function readInterviewErrorPayload(payload: unknown): InterviewApiErrorPayload | null {
+  if (!payload || typeof payload !== "object") return null;
+  return payload as InterviewApiErrorPayload;
+}
+
+function isExpandedFitEnvelope(value: unknown): value is {
+  status: "success" | "error";
+  code?: string;
+  message?: string;
+  retryable?: boolean;
+  nextAction?: string;
+  payload?: InterviewExpandedFitResponse;
+  runId?: string;
+} {
+  if (!isRecord(value)) return false;
+  const record = value as Record<string, unknown>;
+  return record.status === "success" || record.status === "error";
+}
+
 function formatError(payload: unknown, fallback: string): string {
   if (typeof payload === "string" && payload.trim()) {
     return payload;
@@ -196,6 +255,17 @@ function formatError(payload: unknown, fallback: string): string {
   }
 
   return fallback;
+}
+
+function getInterviewErrorCode(payload: unknown): string | null {
+  const errorPayload = readInterviewErrorPayload(payload);
+  if (!errorPayload) return null;
+
+  const nestedCode = typeof errorPayload.error?.code === "string" ? errorPayload.error.code.trim() : "";
+  if (nestedCode) return nestedCode;
+
+  const topLevelCode = typeof errorPayload.code === "string" ? errorPayload.code.trim() : "";
+  return topLevelCode || null;
 }
 
 const RECOMMENDED_ADDITION_STATUSES: RecommendedAdditionStatus[] = [
@@ -345,7 +415,14 @@ async function fetchInterview<T>(path: string, init: RequestInit = {}): Promise<
   const payload = await parseResponseBody(response);
 
   if (!response.ok) {
-    throw new Error(formatError(payload, response.statusText || "Interview API error"));
+    const code = getInterviewErrorCode(payload);
+    throw new InterviewApiError(
+      formatError(payload, response.statusText || "Interview API error"),
+      {
+        code,
+        status: response.status,
+      },
+    );
   }
 
   return payload as T;
@@ -480,8 +557,42 @@ export async function computeInterviewExpandedFit(
     }
   }
 
+  if (isExpandedFitEnvelope(parsed)) {
+    if (parsed.status === "error") {
+      throw new InterviewApiError(
+        parsed.message || response.statusText || "Interview API error",
+        {
+          code: parsed.code ?? getInterviewErrorCode(parsed) ?? null,
+          status: response.status,
+        },
+      );
+    }
+
+    if (parsed.payload && isInterviewExpandedFitResponse(parsed.payload)) {
+      if (debugUiEnabled) {
+        console.debug("computeInterviewExpandedFit response", {
+          interviewRecordId: id,
+          status: response.status,
+          hasExpandedFitScore: expandedFitScoreFromResponse(parsed.payload) !== null,
+          runId: parsed.runId ?? null,
+        });
+      }
+
+      return parsed.payload;
+    }
+
+    throw new Error("Expanded fit response payload is incomplete.");
+  }
+
   if (!response.ok) {
-    throw new Error(formatError(parsed ?? rawText, response.statusText || "Interview API error"));
+    const errorCode = getInterviewErrorCode(parsed ?? rawText);
+    throw new InterviewApiError(
+      formatError(parsed ?? rawText, response.statusText || "Interview API error"),
+      {
+        code: errorCode,
+        status: response.status,
+      },
+    );
   }
 
   if (!trimmed) {

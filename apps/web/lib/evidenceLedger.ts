@@ -1,3 +1,5 @@
+import { FALLBACK_RENDERED_TEXT, sanitizeRenderedTextList, sanitizeRenderedTextValue } from "@/lib/renderedText";
+
 export type EvidenceSourceLabel = "Verified baseline" | "Added via gap resolution";
 
 export type EvidenceLedgerEntry = {
@@ -21,7 +23,11 @@ type AnalysisLike = {
 };
 
 function normalizeText(value: string): string {
-  return value.trim().replace(/\s+/g, " ");
+  const cleaned = sanitizeRenderedTextValue(value, {
+    endpoint: "evidenceLedger",
+    field: "normalizeText",
+  });
+  return cleaned === FALLBACK_RENDERED_TEXT ? "" : cleaned;
 }
 
 function maybeAddedViaGapResolution(record: Record<string, unknown>): boolean {
@@ -64,7 +70,18 @@ export function deriveEvidenceLedger(input: AnalysisLike | null, options?: { gen
       }
       if (signal && typeof signal === "object") {
         const record = signal as Record<string, unknown>;
-        const text = typeof record.label === "string" ? record.label : typeof record.name === "string" ? record.name : "";
+        const text =
+          typeof record.label === "string"
+            ? sanitizeRenderedTextValue(record.label, {
+                endpoint: "evidenceLedger",
+                field: "supportingSignals.label",
+              })
+            : typeof record.name === "string"
+              ? sanitizeRenderedTextValue(record.name, {
+                  endpoint: "evidenceLedger",
+                  field: "supportingSignals.name",
+                })
+              : "";
         if (!text) continue;
         pushEntry(
           entries,
@@ -86,7 +103,18 @@ export function deriveEvidenceLedger(input: AnalysisLike | null, options?: { gen
       }
       if (item && typeof item === "object") {
         const record = item as Record<string, unknown>;
-        const text = typeof record.text === "string" ? record.text : typeof record.title === "string" ? record.title : "";
+        const text =
+          typeof record.text === "string"
+            ? sanitizeRenderedTextValue(record.text, {
+                endpoint: "evidenceLedger",
+                field: "baselineEvidence.text",
+              })
+            : typeof record.title === "string"
+              ? sanitizeRenderedTextValue(record.title, {
+                  endpoint: "evidenceLedger",
+                  field: "baselineEvidence.title",
+                })
+              : "";
         if (!text) continue;
         pushEntry(
           entries,

@@ -17,6 +17,7 @@ import { getGenerationReadiness } from "@/lib/generationReadiness";
 import { getGenerationAuthorityState } from "@/lib/generationAuthority";
 import { buildGenerationProductReadiness } from "@/lib/generationProductReadiness";
 import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
+import { sanitizeRenderedTextList, sanitizeRenderedTextValue } from "@/lib/renderedText";
 import {
   buildTargetCtaContract,
   buildTargetCtaClickedAnalyticsPayload,
@@ -184,9 +185,9 @@ export function buildResultsUrl({
   jobId,
   baselineId,
 }: ResultsUrlArgs): string | null {
-  const normalizedAssessmentId = assessmentId?.trim();
-  const normalizedJobId = jobId?.trim();
-  const normalizedBaselineId = baselineId?.trim();
+  const normalizedAssessmentId = normalizeRouteValue(assessmentId, "assessmentId");
+  const normalizedJobId = normalizeRouteValue(jobId, "jobId");
+  const normalizedBaselineId = normalizeRouteValue(baselineId, "baselineId");
   if (normalizedAssessmentId && normalizedBaselineId && normalizedJobId) {
     return `/results?assessmentId=${encodeURIComponent(normalizedAssessmentId)}&analysisId=${encodeURIComponent(
       normalizedAssessmentId,
@@ -243,6 +244,15 @@ function delay(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+function normalizeRouteValue(value: string | null | undefined, field: string): string {
+  if (typeof value !== "string" || !value.trim()) return "";
+  const sanitized = sanitizeRenderedTextValue(value, {
+    endpoint: "target-workspace",
+    field,
+  });
+  return sanitized === "We couldn’t display this result. Please retry." ? "" : sanitized;
+}
+
 function extractScoreBreakdown(value: FitResultPayload | null): ScoreBreakdown | null {
   if (!value) return null;
   const candidates = [
@@ -292,14 +302,16 @@ function extractScoreBreakdown(value: FitResultPayload | null): ScoreBreakdown |
   return null;
 }
 
-function extractFallbackEvidence(value: FitResultPayload | null): string[] {
+export function extractFallbackEvidence(value: FitResultPayload | null): string[] {
   const strengths = (value as { strengths?: unknown } | null)?.strengths;
   if (!Array.isArray(strengths)) return [];
-  return strengths
-    .filter((item): item is string => typeof item === "string")
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, 3);
+  return sanitizeRenderedTextList(
+    strengths.filter((item): item is string => typeof item === "string"),
+    {
+      endpoint: "target-workspace",
+      field: "strengths",
+    },
+  ).slice(0, 3);
 }
 
 type CriticalGapSignal = {
@@ -313,7 +325,7 @@ function normalizeDiagnosticLine(value: string): string {
   return sanitizeScoreExplanationLine(value, "supporting") ?? "";
 }
 
-function extractCriticalGaps(value: FitResultPayload | null): CriticalGapSignal[] {
+export function extractCriticalGaps(value: FitResultPayload | null): CriticalGapSignal[] {
   const criticalGaps = (value as { criticalGaps?: unknown } | null)?.criticalGaps;
   if (!Array.isArray(criticalGaps)) return [];
 
@@ -327,7 +339,10 @@ function extractCriticalGaps(value: FitResultPayload | null): CriticalGapSignal[
       } => Boolean(gap) && typeof (gap as { title?: unknown }).title === "string",
     )
     .map((gap) => ({
-      title: gap.title.trim(),
+      title: sanitizeRenderedTextValue(gap.title, {
+        endpoint: "target-workspace",
+        field: "criticalGaps.title",
+      }),
       requirementEvidence: gap.requirementEvidence,
       baselineEvidence: gap.baselineEvidence,
       severityScore: gap.severityScore,
@@ -378,8 +393,8 @@ function isMatchingPair(
 }
 
 function resolveResultPair(result: FitResultPayload | null): PairKey | null {
-  const baselineId = typeof result?.baselineId === "string" ? result.baselineId.trim() : "";
-  const jobId = typeof result?.jobId === "string" ? result.jobId.trim() : "";
+  const baselineId = normalizeRouteValue(result?.baselineId, "result.baselineId");
+  const jobId = normalizeRouteValue(result?.jobId, "result.jobId");
   if (!baselineId || !jobId) return null;
   return { baselineId, jobId };
 }
@@ -407,20 +422,24 @@ export function buildStudioUrl({
 }: StudioUrlArgs): string {
   const params = new URLSearchParams();
 
-  if (assessmentId?.trim()) {
-    params.set("analysisId", assessmentId.trim());
+  const normalizedAssessmentId = normalizeRouteValue(assessmentId, "analysisId");
+  if (normalizedAssessmentId) {
+    params.set("analysisId", normalizedAssessmentId);
   }
 
-  if (jobId?.trim()) {
-    params.set("jobId", jobId.trim());
+  const normalizedJobId = normalizeRouteValue(jobId, "jobId");
+  if (normalizedJobId) {
+    params.set("jobId", normalizedJobId);
   }
 
-  if (baselineId?.trim()) {
-    params.set("baselineId", baselineId.trim());
+  const normalizedBaselineId = normalizeRouteValue(baselineId, "baselineId");
+  if (normalizedBaselineId) {
+    params.set("baselineId", normalizedBaselineId);
   }
 
-  if (baselineVersionId?.trim()) {
-    params.set("baselineVersionId", baselineVersionId.trim());
+  const normalizedBaselineVersionId = normalizeRouteValue(baselineVersionId, "baselineVersionId");
+  if (normalizedBaselineVersionId) {
+    params.set("baselineVersionId", normalizedBaselineVersionId);
   }
 
   const query = params.toString();
@@ -431,7 +450,10 @@ const extractErrorMessage = (payload: unknown): string | null => {
   if (payload && typeof payload === "object") {
     const candidate = (payload as Record<string, unknown>).message;
     if (typeof candidate === "string" && candidate.trim().length) {
-      return candidate;
+      return sanitizeRenderedTextValue(candidate, {
+        endpoint: "target-workspace",
+        field: "error.message",
+      });
     }
   }
   return null;

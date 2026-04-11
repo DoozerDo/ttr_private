@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   HttpStatus,
+  Logger,
   Param,
   Post,
   Req,
@@ -22,6 +23,13 @@ import {
 } from '../features/feature-gates';
 import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 import { ensureExportTierAvailable } from '../tiers/export-tier-helpers';
+import { withTimeout } from '../common/timeout';
+import {
+  buildGenerationSuccessOutcome,
+  createGenerationRunId,
+  mapGenerationExceptionToOutcome,
+  type GenerationOutcome,
+} from '../generation/generation-outcome';
 
 type ResumeExportFormat = 'docx' | 'pdf';
 
@@ -46,22 +54,28 @@ type TieredResumeRequest = Request & {
 @Controller('resume')
 @UseGuards(AuthGuard('jwt'))
 export class ResumeController {
+  private readonly logger = new Logger(ResumeController.name);
+
   constructor(private readonly resumeService: ResumeService) {}
 
   @Post('generate')
   async generateResume(
     @Body() body: ResumeRequestBody,
     @Req() request: TieredResumeRequest,
-  ): Promise<ResumeGenerationResponse> {
-    return this.handleGenerate(body, request);
+  ): Promise<GenerationOutcome<ResumeGenerationResponse> & ResumeGenerationResponse> {
+    return this.executeGenerationOutcome('resume.generate', body, () =>
+      this.handleGenerate(body, request),
+    );
   }
 
   @Post()
   async createResumeRequest(
     @Body() body: ResumeRequestBody,
     @Req() request: TieredResumeRequest,
-  ): Promise<ResumeGenerationResponse> {
-    return this.handleGenerate(body, request);
+  ): Promise<GenerationOutcome<ResumeGenerationResponse> & ResumeGenerationResponse> {
+    return this.executeGenerationOutcome('resume.create', body, () =>
+      this.handleGenerate(body, request),
+    );
   }
 
   @Post('export')
@@ -71,7 +85,9 @@ export class ResumeController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const format: ResumeExportFormat = body.format ?? 'docx';
-    return this.handleExport(body, request, res, format);
+    return withTimeout('generation', () =>
+      this.handleExport(body, request, res, format),
+    );
   }
 
   @Post('export/:format')
@@ -82,7 +98,9 @@ export class ResumeController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const format = this.normalizeFormat(formatParam);
-    return this.handleExport(body, request, res, format);
+    return withTimeout('generation', () =>
+      this.handleExport(body, request, res, format),
+    );
   }
 
   @Post('readiness')
@@ -92,7 +110,9 @@ export class ResumeController {
   ) {
     const userId = this.getUserId(request);
     const payload = this.parsePayload(body);
-    return this.resumeService.getGenerationReadiness(userId, payload);
+    return withTimeout('generation', () =>
+      this.resumeService.getGenerationReadiness(userId, payload),
+    );
   }
 
   private normalizeFormat(value: string): ResumeExportFormat {
@@ -115,14 +135,34 @@ export class ResumeController {
     const analysisId = body.analysisId?.trim();
     const oneTap = Boolean(body.oneTap);
 
-    if (!baselineId) throw new BadRequestException('baselineId is required');
-    if (!baselineVersionId)
-      throw new BadRequestException('baselineVersionId is required');
-    if (!jobId) throw new BadRequestException('jobId is required');
+    if (!baselineId) {
+      throw new BadRequestException({
+        error: {
+          code: 'studio_not_ready',
+          message: 'baselineId is required',
+        },
+      });
+    }
+    if (!baselineVersionId) {
+      throw new BadRequestException({
+        error: {
+          code: 'studio_not_ready',
+          message: 'baselineVersionId is required',
+        },
+      });
+    }
+    if (!jobId) {
+      throw new BadRequestException({
+        error: {
+          code: 'target_context_missing',
+          message: 'jobId is required',
+        },
+      });
+    }
     if (!analysisId)
       throw new BadRequestException({
         error: {
-          code: 'analysis_context_mismatch',
+          code: 'invalid_pair_state',
           message: 'Generation request does not match the analyzed context.',
           details: {
             expected: {
@@ -157,6 +197,72 @@ export class ResumeController {
     const payload = this.parsePayload(body);
 
     return this.resumeService.generateResume(userId, payload);
+  }
+
+  private async executeGenerationOutcome(
+    entrySource: string,
+    body: ResumeRequestBody,
+    task: () => Promise<ResumeGenerationResponse>,
+  ): Promise<GenerationOutcome<ResumeGenerationResponse> & ResumeGenerationResponse> {
+    const runId = createGenerationRunId();
+    const startedAt = Date.now();
+    const payload = {
+      baselineId: body.baselineId?.trim() ?? 'null',
+      baselineVersionId: body.baselineVersionId?.trim() ?? 'null',
+      jobId: body.jobId?.trim() ?? 'null',
+      analysisId: body.analysisId?.trim() ?? 'null',
+    };
+    this.logger.log(
+      `[generation] start runId=${runId} artifactType=resume entrySource=${entrySource} baselineId=${payload.baselineId} baselineVersionId=${payload.baselineVersionId} jobId=${payload.jobId ?? 'null'} analysisId=${payload.analysisId ?? 'null'}`,
+    );
+
+    try {
+      const result = await withTimeout('generation', task);
+      const outcome = buildGenerationSuccessOutcome({
+        artifactType: 'resume',
+        runId,
+        code: result.idempotency?.status === 'existing_completed' ? 'duplicate_request_reused' : 'draft_generated',
+        message:
+          result.idempotency?.status === 'existing_completed'
+            ? 'An existing draft was reused.'
+            : 'A draft is ready.',
+        nextAction: 'review_draft',
+        payload: result,
+      });
+      const duration = Date.now() - startedAt;
+      this.logger.log(
+        `[generation] success runId=${runId} artifactType=resume entrySource=${entrySource} durationMs=${duration} baselineId=${payload.baselineId} baselineVersionId=${payload.baselineVersionId} jobId=${payload.jobId ?? 'null'} analysisId=${payload.analysisId ?? 'null'}`,
+      );
+      return {
+        ...result,
+        ...outcome,
+        generationStatus: 'success',
+        exportReady: result.exportReady,
+      } as unknown as GenerationOutcome<ResumeGenerationResponse> & ResumeGenerationResponse;
+    } catch (error) {
+      const outcome = mapGenerationExceptionToOutcome({
+        artifactType: 'resume',
+        error,
+        runId,
+      });
+      const duration = Date.now() - startedAt;
+      const logMethod =
+        outcome.code === 'generation_timeout' || outcome.retryable ? 'warn' : 'error';
+      this.logger[logMethod](
+        `[generation] ${outcome.status} runId=${runId} artifactType=resume entrySource=${entrySource} code=${outcome.code} durationMs=${duration} baselineId=${payload.baselineId} baselineVersionId=${payload.baselineVersionId} jobId=${payload.jobId ?? 'null'} analysisId=${payload.analysisId ?? 'null'} message=${outcome.message}`,
+      );
+      return {
+        ...outcome,
+        generationStatus: 'error',
+        exportReady: false,
+        payload: outcome.payload ?? {
+          baselineId: payload.baselineId,
+          baselineVersionId: payload.baselineVersionId,
+          jobId: payload.jobId,
+          analysisId: payload.analysisId,
+        },
+      } as unknown as GenerationOutcome<ResumeGenerationResponse> & ResumeGenerationResponse;
+    }
   }
 
   private async handleExport(

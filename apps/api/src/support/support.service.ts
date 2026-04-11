@@ -125,7 +125,8 @@ function createSupportConfigUnavailableException() {
   return new HttpException(
     {
       code: SUPPORT_CONFIG_UNAVAILABLE_CODE,
-      message: 'Bug reporting is temporarily unavailable due to server configuration.',
+      message:
+        'Bug reporting is temporarily unavailable right now. Save a draft and check Support history later.',
     },
     HttpStatus.SERVICE_UNAVAILABLE,
   );

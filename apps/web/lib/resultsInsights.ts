@@ -1,3 +1,9 @@
+import {
+  FALLBACK_RENDERED_TEXT,
+  sanitizeRenderedTextList,
+  sanitizeRenderedTextValue,
+} from "@/lib/renderedText";
+
 type ReasonItemType = "strength" | "gap";
 
 export type ReasonItem = {
@@ -22,15 +28,26 @@ const PRIMARY_REASON_LIMITS = {
 };
 
 export function sanitizeGapMessage(value: string): string {
-  return GAP_SANITIZATION_MAP[value] ?? value;
+  const cleaned = sanitizeRenderedTextValue(value, {
+    endpoint: "results-insights",
+    field: "gapMessage",
+  });
+  if (cleaned === FALLBACK_RENDERED_TEXT) return cleaned;
+  return GAP_SANITIZATION_MAP[cleaned] ?? cleaned;
 }
 
 export function buildReasonSummary(
   strengths?: string[] | null,
   gaps?: string[] | null,
 ): ReasonSummary {
-  const normalizedStrengths = (strengths ?? []).filter(Boolean);
-  const normalizedGaps = (gaps ?? []).filter(Boolean).map(sanitizeGapMessage);
+  const normalizedStrengths = sanitizeRenderedTextList(strengths ?? [], {
+    endpoint: "results-insights",
+    field: "strengths",
+  });
+  const normalizedGaps = sanitizeRenderedTextList(gaps ?? [], {
+    endpoint: "results-insights",
+    field: "gaps",
+  }).map(sanitizeGapMessage);
 
   const primary: ReasonItem[] = [
     ...normalizedStrengths
@@ -73,7 +90,10 @@ function computeFlagSeverity(message: string): FlagSeverity {
 
 export function mapComplianceFlags(flags?: string[] | null): ComplianceDisplayFlag[] {
   if (!flags?.length) return [];
-  return flags.map((flag, index) => ({
+  return sanitizeRenderedTextList(flags, {
+    endpoint: "results-insights",
+    field: "complianceFlags",
+  }).map((flag, index) => ({
     id: `${flag}-${index}`,
     message: flag,
     severity: computeFlagSeverity(flag),
@@ -127,14 +147,21 @@ export type StrategicBrief = {
 };
 
 function truncateSentence(value: string, limit = 120): string {
-  const compact = value.replace(/\s+/g, " ").trim();
+  const compact = sanitizeRenderedTextValue(value, {
+    endpoint: "results-insights",
+    field: "truncateSentence",
+  });
   if (!compact.length) return "";
   if (compact.length <= limit) return compact;
   return `${compact.slice(0, limit - 3).trimEnd()}...`;
 }
 
 function cleanPhrase(value: string): string {
-  return value.replace(/\s+/g, " ").trim().replace(/[.,;:]+$/, "");
+  const cleaned = sanitizeRenderedTextValue(value, {
+    endpoint: "results-insights",
+    field: "cleanPhrase",
+  });
+  return cleaned.replace(/[.,;:]+$/, "");
 }
 
 function extractQuotedPhrase(value: string): string | null {
@@ -228,7 +255,12 @@ function detectCriticalRequirement(
 }
 
 function classifyRiskType(gap: StrategicGap): RiskType {
-  const hasBaselineEvidence = Boolean(gap.baselineEvidence?.trim());
+  const hasBaselineEvidence = Boolean(
+    sanitizeRenderedTextValue(gap.baselineEvidence ?? "", {
+      endpoint: "results-insights",
+      field: "baselineEvidence",
+    }).trim(),
+  );
   const severity = typeof gap.severityScore === "number" ? gap.severityScore : null;
   if (!hasBaselineEvidence) return "Hard Gap";
   if (severity !== null && severity >= 0.6) return "Soft Gap";
@@ -240,10 +272,20 @@ function buildWinFactors(
   gaps: StrategicGap[],
 ): WinFactor[] {
   const requirementPool = gaps
-    .map((gap) => gap.requirementEvidence?.trim())
+    .map((gap) =>
+      sanitizeRenderedTextValue(gap.requirementEvidence ?? "", {
+        endpoint: "results-insights",
+        field: "requirementEvidence",
+      }),
+    )
     .filter((value): value is string => Boolean(value));
   const baselineEvidencePool = gaps
-    .map((gap) => gap.baselineEvidence?.trim())
+    .map((gap) =>
+      sanitizeRenderedTextValue(gap.baselineEvidence ?? "", {
+        endpoint: "results-insights",
+        field: "baselineEvidence",
+      }),
+    )
     .filter((value): value is string => Boolean(value));
 
   const winsFromStrengths = strengths.slice(0, 3).map((strength, index) => {
@@ -369,10 +411,31 @@ export function buildStrategicBrief(input: {
   criticalGaps?: StrategicGap[] | null;
   verdictExplanation?: string | null;
 }): StrategicBrief {
-  const strengths = (input.strengths ?? [])
-    .map((item) => item.trim())
-    .filter(Boolean);
-  const criticalGaps = (input.criticalGaps ?? []).filter(Boolean);
+  const strengths = sanitizeRenderedTextList(input.strengths ?? [], {
+    endpoint: "results-insights",
+    field: "strengths",
+  });
+  const criticalGaps = (input.criticalGaps ?? [])
+    .filter(Boolean)
+    .map((gap) => ({
+      ...gap,
+      title: sanitizeRenderedTextValue(gap.title, {
+        endpoint: "results-insights",
+        field: "criticalGaps.title",
+      }),
+      requirementEvidence: gap.requirementEvidence
+        ? sanitizeRenderedTextValue(gap.requirementEvidence, {
+            endpoint: "results-insights",
+            field: "criticalGaps.requirementEvidence",
+          })
+        : gap.requirementEvidence,
+      baselineEvidence: gap.baselineEvidence
+        ? sanitizeRenderedTextValue(gap.baselineEvidence, {
+            endpoint: "results-insights",
+            field: "criticalGaps.baselineEvidence",
+          })
+        : gap.baselineEvidence,
+    }));
 
   const whyYouCanWin = buildWinFactors(strengths, criticalGaps);
   const whatMayHurtYou = buildRiskFactors(criticalGaps);
@@ -384,7 +447,10 @@ export function buildStrategicBrief(input: {
     `${input.verdict}.`,
     winTitles.length
       ? `You are competitive because of ${winTitles.join(" and ")}.`
-      : input.verdictExplanation?.trim() || "Review the structured fit signals before applying.",
+      : sanitizeRenderedTextValue(input.verdictExplanation ?? "", {
+          endpoint: "results-insights",
+          field: "verdictExplanation",
+        }) || "Review the structured fit signals before applying.",
     riskTitle ? `You may be challenged on ${riskTitle}.` : null,
   ]
     .filter(Boolean)
@@ -397,3 +463,8 @@ export function buildStrategicBrief(input: {
     bestNextMove,
   };
 }
+import {
+  FALLBACK_RENDERED_TEXT,
+  sanitizeRenderedTextList,
+  sanitizeRenderedTextValue,
+} from "@/lib/renderedText";

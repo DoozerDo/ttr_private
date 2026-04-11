@@ -39,6 +39,7 @@ import type { CxFitScoreSnapshot } from '../applications/applications.service';
 import { OpportunitiesService } from '../opportunities/opportunities.service';
 import { AUTO_GENERATE_THRESHOLD } from '../config/autoGenerateThreshold';
 import { CriticalFlowEventType, CriticalFlowTrackerService } from '../support/critical-flow-tracker.service';
+import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
 import '../docx-templates/templates';
 import {
   ResumeExportSection,
@@ -144,6 +145,17 @@ export type ResumeGenerationResponse = {
   display: UserSafeDisplayPayload;
   safeDisplay: UserSafeDisplayPayload;
   internal: Record<string, unknown>;
+  idempotency?: {
+    status:
+      | 'accepted_new'
+      | 'existing_in_flight'
+      | 'existing_completed'
+      | 'rejected_stale'
+      | 'persistence_conflict';
+    runId: string;
+    dedupeKey: string;
+    reused: boolean;
+  };
 };
 
 type ResumeExperiencePipelineDiagnostics = {
@@ -194,6 +206,7 @@ export class ResumeService {
     private readonly opportunitiesService: OpportunitiesService,
     private readonly gapAnalysisService: GapAnalysisService,
     private readonly criticalFlowTrackerService: CriticalFlowTrackerService,
+    private readonly workflowIdempotencyService: WorkflowIdempotencyService,
   ) {}
 
   private async findLatestAssessment(
@@ -1241,6 +1254,26 @@ export class ResumeService {
     });
   }
 
+  private buildResumeDedupeKey(input: {
+    userId: string;
+    baselineId: string;
+    baselineVersionId: string;
+    jobId: string;
+    analysisId: string;
+    outputHash: string;
+    oneTap: boolean;
+    enforceOneTap: boolean;
+  }) {
+    return createHash('sha256')
+      .update(
+        JSON.stringify({
+          operation: 'generation.resume',
+          ...input,
+        }),
+      )
+      .digest('hex');
+  }
+
   async generateResume(
     userId: string,
     request: GenerateResumeRequest,
@@ -1255,6 +1288,8 @@ export class ResumeService {
         areaOrRoute: 'resume',
       });
     };
+    let dedupeKey: string | undefined;
+    let reservationRunId: string | undefined;
     try {
       const shouldEnforceOneTap = options?.enforceOneTap ?? true;
       const preflightOnly = options?.preflightOnly ?? false;
@@ -1705,6 +1740,50 @@ export class ResumeService {
       };
     }
 
+    dedupeKey = this.buildResumeDedupeKey({
+      userId,
+      baselineId: baseline.id,
+      baselineVersionId: baselineVersion.id,
+      jobId: job?.id ?? jobId,
+      analysisId,
+      outputHash,
+      oneTap: Boolean(request.oneTap),
+      enforceOneTap: shouldEnforceOneTap,
+    });
+    const reservation = await this.workflowIdempotencyService.reserve<ResumeGenerationResponse>({
+      userId,
+      operationName: 'generation.resume',
+      dedupeKey,
+      runId: audit.id,
+    });
+    reservationRunId = reservation.runId;
+
+    if (reservation.status === 'existing_completed' && reservation.responseBody) {
+      return {
+        ...(reservation.responseBody as ResumeGenerationResponse),
+        idempotency: {
+          status: reservation.status,
+          runId: reservation.runId,
+          dedupeKey,
+          reused: true,
+        },
+      } as ResumeGenerationResponse;
+    }
+
+    if (reservation.status === 'existing_in_flight') {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'generation_in_flight',
+          message:
+            'A resume is already being generated for this role. Please wait and try again.',
+          retryable: true,
+          nextAction: 'retry_later',
+          runId: reservation.runId,
+          dedupeKey,
+        },
+      });
+    }
+
     const trackerEntry =
       await this.applicationsService.upsertPreparedFromResumeGeneration({
         userId,
@@ -1740,7 +1819,7 @@ export class ResumeService {
     const display = this.buildSuccessDisplayPayload();
     const exports: DocumentGenerationExports = { docx: true, pdf: true };
     recordResumeEvent(true);
-    return {
+    const response: ResumeGenerationResponse = {
       ok: true,
       status: 'success',
       generationStatus: 'success',
@@ -1779,9 +1858,34 @@ export class ResumeService {
         resumeGenerationDiagnostics: experienceDiagnostics,
         normalizationDiagnostics: experienceDiagnostics,
       },
+      idempotency: {
+        status: reservation.status,
+        runId: reservation.runId,
+        dedupeKey,
+        reused: reservation.status === 'existing_completed',
+      },
     };
+    await this.workflowIdempotencyService.complete({
+      userId,
+      operationName: 'generation.resume',
+      dedupeKey,
+      runId: reservation.runId,
+      responseBody: response,
+    });
+    return response;
     } catch (error) {
       recordResumeEvent(false);
+      if (dedupeKey) {
+        void this.workflowIdempotencyService.markFailure({
+          userId,
+          operationName: 'generation.resume',
+          dedupeKey,
+          runId: reservationRunId ?? 'unknown',
+          status: 'FAILED',
+          errorCode: error instanceof Error ? error.name : 'generation_failed',
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+      }
       throw error;
     }
   }

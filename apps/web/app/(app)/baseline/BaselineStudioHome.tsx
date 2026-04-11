@@ -34,7 +34,6 @@ import {
   buildBaselineScoreHistoryFromBaseline,
   toBaselineScoreHistoryCardViewModel,
 } from "@/lib/baselineScoreHistory";
-import { resolveCanonicalState } from "@/lib/canonicalDecision";
 import {
   buildBaselineSignalGraph,
   type ProfessionalSignalId,
@@ -44,6 +43,8 @@ import { publishBaselineUpdated, subscribeBaselineUpdated } from "@/src/lib/base
 import { BETA_BASELINE_UPLOAD_LIMIT } from "@/src/features/baseline/constants";
 import { getBaselineDetailsHref } from "@/src/navigation/routes";
 import { trackEvent } from "@/src/lib/analytics";
+import { sanitizeRenderedTextList, sanitizeRenderedTextValue } from "@/lib/renderedText";
+import { resolveWorkflowProgression } from "@/lib/workflowProgression";
 import { CareerGravity } from "../results/components/CareerGravity";
 import { ResumeWithBaselineStatus } from "./_components/ResumeWithBaselineStatus";
 
@@ -70,6 +71,7 @@ type BaselinePageReadinessContract = {
   ctaLabel: string;
   ctaHref: string;
   actionType: "target_role" | "view_results" | "upload_resume";
+  workflowState: string;
   dataSource: "fresh" | "persisted" | "mixed";
   persistedAssessmentId: string | null;
 };
@@ -168,7 +170,10 @@ function getDuplicateUploadMessage(data: unknown): string | null {
     (typeof errorBody?.code === "string" ? errorBody.code : undefined);
   const topLevelMessage =
     typeof (data as { message?: unknown }).message === "string"
-      ? ((data as { message?: unknown }).message as string)
+      ? sanitizeRenderedTextValue((data as { message?: unknown }).message as string, {
+          endpoint: "baseline-studio-home",
+          field: "message",
+        })
       : null;
 
   if (
@@ -179,8 +184,14 @@ function getDuplicateUploadMessage(data: unknown): string | null {
     return null;
   }
 
-  return (typeof errorBody?.message === "string" ? errorBody.message : topLevelMessage) ??
-    "This file has already been uploaded.";
+  return (
+    (typeof errorBody?.message === "string"
+      ? sanitizeRenderedTextValue(errorBody.message, {
+          endpoint: "baseline-studio-home",
+          field: "error.message",
+        })
+      : topLevelMessage) ?? "This file has already been uploaded."
+  );
 }
 
 function getUploadedBaselineRecord(data: unknown): BaselineDto | null {
@@ -250,37 +261,52 @@ function buildBaselineReadinessContract({
   const routes = {
     baseline: "/baseline",
     target: baselineId ? `/target?baselineId=${encodeURIComponent(baselineId)}` : "/target",
+    analyze: baselineId ? `/analyze?baselineId=${encodeURIComponent(baselineId)}` : "/analyze",
     results: latestAssessmentId ? `/results?assessmentId=${encodeURIComponent(latestAssessmentId)}` : "/results",
     upload: baselineId ? getBaselineDetailsHref(baselineId) : "/baseline",
+    studio: latestAssessmentId ? `/studio?assessmentId=${encodeURIComponent(latestAssessmentId)}` : "/studio",
+    fitReview: latestAssessmentId ? `/fit-review?assessmentId=${encodeURIComponent(latestAssessmentId)}` : "/fit-review",
   };
-  const canonical = resolveCanonicalState({
+  const progression = resolveWorkflowProgression({
     surface: "baseline",
     baselineId,
-    summary,
-    isAnalyzing,
     routes,
+    baselineStatus: isAnalyzing ? "UPLOADING" : "READY",
+    analysisStatus: isAnalyzing ? "running" : latestAssessmentId ? "complete" : "idle",
+    analysisAssessmentId: latestAssessmentId,
     persistedAssessmentId: latestAssessmentId,
+    score: summary?.latestFitScore ?? null,
+    firstRun: !baselineId,
+    hasJobDescription: false,
     dataSource: summary ? "persisted" : "fresh",
   });
 
   return {
     activeBaselineId: baselineId,
     baselineId,
-    hasCompletedAssessment: canonical.readinessState === "READY",
+    hasCompletedAssessment: Boolean(latestAssessmentId),
     latestAssessmentId,
     latestAssessmentCreatedAt: summary?.latestAssessmentCreatedAt?.trim() ?? null,
-    latestFitScore: canonical.score,
-    readinessState: canonical.readinessState as BaselineReadinessState,
-    ctaLabel: canonical.cta.label,
-    ctaHref: canonical.cta.href,
-    actionType: canonical.cta.actionType as "target_role" | "view_results" | "upload_resume",
-    dataSource: canonical.dataSource,
-    persistedAssessmentId: canonical.persistedAssessmentId,
+    latestFitScore: summary?.latestFitScore ?? null,
+    readinessState: isAnalyzing
+      ? "ANALYZING"
+      : latestAssessmentId
+        ? "READY"
+        : "NOT_ANALYZED",
+    ctaLabel: progression.primaryAction.label,
+    ctaHref: progression.primaryAction.destination,
+    actionType: progression.primaryAction.type as "target_role" | "view_results" | "upload_resume",
+    workflowState: progression.state,
+    dataSource: progression.dataSource,
+    persistedAssessmentId: progression.persistedAssessmentId,
   };
 }
 
 function createBaselineUpdateProposal(signalLabel: string, answer: string) {
-  return `${signalLabel}: ${answer.trim()}`;
+  return sanitizeRenderedTextValue(`${signalLabel}: ${answer.trim()}`, {
+    endpoint: "baseline-studio-home",
+    field: "baselineUpdateProposal",
+  });
 }
 
 function formatCardActionLabel(label: string) {
@@ -290,18 +316,26 @@ function formatCardActionLabel(label: string) {
 function extractApprovedSignalAdditions(baseline: BaselineDto | null): string[] {
   if (!baseline?.sections?.length) return [];
   const refinementSections = baseline.sections
-    .filter((section) => (section.title ?? "").trim().toLowerCase() === "approved signal refinements")
+    .filter(
+      (section) =>
+        sanitizeRenderedTextValue(section.title ?? "", {
+          endpoint: "baseline-studio-home",
+          field: "section.title",
+        }).toLowerCase() === "approved signal refinements",
+    )
     .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
   if (!refinementSections.length) return [];
 
   const lines: string[] = [];
   for (const section of refinementSections) {
     const content = typeof section.content === "string" ? section.content : "";
-    content
-      .split("\n")
-      .map((line) => line.trim())
+    sanitizeRenderedTextList(content.split("\n"), {
+      endpoint: "baseline-studio-home",
+      field: "section.content",
+    })
+      .map((line) => line.replace(/^[-*•]\s*/, ""))
       .filter(Boolean)
-      .forEach((line) => lines.push(line.replace(/^[-*•]\s*/, "")));
+      .forEach((line) => lines.push(line));
   }
   return lines;
 }
@@ -338,6 +372,9 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const analysisSectionRef = useRef<HTMLDivElement | null>(null);
   const analysisHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const primaryBaselineIdRef = useRef<string | null>(primaryBaselineId);
+  const baselineDetailsRequestRef = useRef<{ requestId: string; baselineId: string } | null>(null);
+  const baselineAnalysisRequestRef = useRef<{ requestId: string; baselineId: string } | null>(null);
 
   const allBaselines = useMemo(() => sortBaselinesNewestFirst(baselineList), [baselineList]);
   const activeBaselines = useMemo(
@@ -350,6 +387,10 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   useEffect(() => {
     setIsHydrated(true);
   }, []);
+
+  useEffect(() => {
+    primaryBaselineIdRef.current = primaryBaselineId;
+  }, [primaryBaselineId]);
 
   useEffect(() => {
     if (!activeBaselines.length) {
@@ -679,11 +720,18 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     setPendingStrengtheningProposal(createBaselineUpdateProposal(activeStrengtheningSignal.label, trimmed));
   }, [activeStrengtheningSignal, strengtheningAnswer]);
 
+  const createRequestId = () =>
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
   const fetchBaselineDetails = useCallback(
     async (baselineId: string) => {
+      const requestId = createRequestId();
       setPrimaryBaselineId(baselineId);
       setLoadingBaselineId(baselineId);
       setError(null);
+      baselineDetailsRequestRef.current = { requestId, baselineId };
 
       try {
         const response = await fetch(`/api/baselines/${encodeURIComponent(baselineId)}`, {
@@ -696,18 +744,42 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         }
 
         const payload = (await response.json()) as BaselineDto;
+        if (
+          baselineDetailsRequestRef.current?.requestId !== requestId ||
+          primaryBaselineIdRef.current !== baselineId
+        ) {
+          if (process.env.NODE_ENV !== "production") {
+            console.info("[BaselineStudioHome] dropped stale baseline detail response", {
+              baselineId,
+              requestId,
+              currentBaselineId: primaryBaselineIdRef.current,
+            });
+          }
+          return null;
+        }
         setBaselineDetails((current) => ({ ...current, [baselineId]: payload }));
         setPostUploadCtaBaselineId((current) => (current === baselineId ? null : current));
         scrollToAnalysis();
+        return payload;
       } catch (fetchError) {
+        if (
+          baselineDetailsRequestRef.current?.requestId !== requestId ||
+          primaryBaselineIdRef.current !== baselineId
+        ) {
+          return null;
+        }
         console.error("Unable to load baseline details", fetchError);
         setError(
           fetchError instanceof Error
             ? fetchError.message
             : "Unable to load baseline analysis right now.",
         );
+        return null;
       } finally {
-        setLoadingBaselineId(null);
+        if (baselineDetailsRequestRef.current?.requestId === requestId) {
+          setLoadingBaselineId(null);
+          baselineDetailsRequestRef.current = null;
+        }
       }
     },
     [scrollToAnalysis],
@@ -715,14 +787,23 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
 
   const runCanonicalBaselineAnalysis = useCallback(
     async (baselineId: string) => {
+      const requestId = createRequestId();
       setPrimaryBaselineId(baselineId);
       setLoadingBaselineId(baselineId);
       setError(null);
+      baselineAnalysisRequestRef.current = { requestId, baselineId };
 
       try {
-        await fetchBaselineDetails(baselineId);
+        const loadedBaseline = await fetchBaselineDetails(baselineId);
+        if (
+          baselineAnalysisRequestRef.current?.requestId !== requestId ||
+          primaryBaselineIdRef.current !== baselineId
+        ) {
+          return;
+        }
 
         const currentSummary =
+          loadedBaseline?.latestAssessmentSummary ??
           baselineDetails[baselineId]?.latestAssessmentSummary ??
           baselineList.find((entry) => entry.id === baselineId)?.latestAssessmentSummary;
         if (isBaselineAnalyzedFromSummary(currentSummary)) {
@@ -769,6 +850,12 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         await refreshBaselineLibrary();
         publishBaselineUpdated({ baselineId, source: "analysis" });
       } catch (runError) {
+        if (
+          baselineAnalysisRequestRef.current?.requestId !== requestId ||
+          primaryBaselineIdRef.current !== baselineId
+        ) {
+          return;
+        }
         console.error("Unable to run baseline analysis", runError);
         setError(
           runError instanceof Error
@@ -776,7 +863,10 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             : "Unable to run baseline analysis right now.",
         );
       } finally {
-        setLoadingBaselineId(null);
+        if (baselineAnalysisRequestRef.current?.requestId === requestId) {
+          setLoadingBaselineId(null);
+          baselineAnalysisRequestRef.current = null;
+        }
       }
     },
     [baselineDetails, baselineList, fetchBaselineDetails, refreshBaselineLibrary],

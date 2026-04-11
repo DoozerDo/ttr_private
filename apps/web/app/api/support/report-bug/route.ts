@@ -1,33 +1,45 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../baselines/helpers";
+import { UpstreamApiConfigError } from "../../_lib/serverApiConfig";
+import { fetchWithTimeout } from "@/lib/fetchWithTimeout";
 
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
-  const baseUrl = getApiBaseUrl();
   const { token, error } = requireAuthToken(req);
-
-  if (!baseUrl) {
-    return NextResponse.json(
-      { error: "API base URL is not configured" },
-      { status: 500 },
-    );
-  }
 
   if (!token) {
     return error;
   }
 
-  const body = await req.text();
-  const response = await fetch(`${baseUrl}/support/report-bug`, {
-    method: "POST",
-    cache: "no-store",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": req.headers.get("content-type") ?? "application/json",
-    },
-    body,
-  });
+  try {
+    const baseUrl = getApiBaseUrl();
+    const body = await req.text();
+    const response = await fetchWithTimeout(`${baseUrl}/support/report-bug`, {
+      method: "POST",
+      cache: "no-store",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": req.headers.get("content-type") ?? "application/json",
+      },
+      body,
+    });
 
-  return relayApiResponse(response);
+    return relayApiResponse(response);
+  } catch (error) {
+    if (error instanceof UpstreamApiConfigError) {
+      return NextResponse.json(
+        {
+          status: "temporarily_unavailable",
+          code: error.code,
+          message:
+            "Bug reporting is unavailable in this environment right now. Your draft is preserved in the browser, and you can still review support history from Settings.",
+          supportPath: "/support/history",
+        },
+        { status: 503 },
+      );
+    }
+
+    throw error;
+  }
 }

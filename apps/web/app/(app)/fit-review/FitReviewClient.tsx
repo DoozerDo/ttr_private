@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { ScoreGauge } from "@/components/ScoreGauge";
 import { getVerdictDisplayOrDefault } from "@/lib/fit-verdict";
+import { sanitizeRenderedTextValue } from "@/lib/renderedText";
 import {
   LAST_ANALYSIS_STORAGE_KEY,
   readLastAnalysis,
@@ -151,7 +152,10 @@ function readStringField(
   for (const key of keys) {
     const value = source[key];
     if (typeof value === "string" && value.trim().length > 0) {
-      return value.trim();
+      return sanitizeRenderedTextValue(value, {
+        endpoint: "fit-review",
+        field: key,
+      });
     }
   }
 

@@ -1,7 +1,10 @@
 import {
   buildResultsUrl,
+  extractCriticalGaps,
+  extractFallbackEvidence,
   resolveScoreBandPresentation,
 } from "@/app/(app)/baseline/_components/WorkspaceRunner";
+import { FALLBACK_RENDERED_TEXT } from "@/lib/renderedText";
 
 describe("buildResultsUrl", () => {
   it("prefers assessmentId when available", () => {
@@ -73,5 +76,25 @@ describe("resolveScoreBandPresentation", () => {
       key: "low",
       label: "Low Match",
     });
+  });
+});
+
+describe("workspace runner text normalization", () => {
+  it("sanitizes malformed target payload text before it can be displayed", () => {
+    const gaps = extractCriticalGaps({
+      criticalGaps: [
+        {
+          title: "{{broken target text}}",
+          requirementEvidence: "Own enterprise support tooling",
+          baselineEvidence: "Led support tooling rollout across queues",
+          severityScore: 0.78,
+        },
+      ],
+    } as never);
+
+    expect(gaps[0].title).toBe(FALLBACK_RENDERED_TEXT);
+    expect(extractFallbackEvidence({ strengths: ["{{bad}}", "Delivered measurable support operations"] } as never)).toEqual([
+      "Delivered measurable support operations",
+    ]);
   });
 });

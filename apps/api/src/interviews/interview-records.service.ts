@@ -1,14 +1,17 @@
 import {
   BadRequestException,
+  HttpException,
   Injectable,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { BaselineVersionService } from '../baseline/baseline-version.service';
 import { AnalysisService } from '../analysis/analysis.service';
+import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
 import { FitAssessmentVerdict } from '../analysis/fit-assessment.entity';
 import { ComplianceFlagSeverity } from '../compliance/compliance.types';
 import { GapDetectionService } from './gap-detection.service';
@@ -141,12 +144,85 @@ function normalizeRecommendedAdditions(
         sources,
         status,
       };
-    })
-    .filter((entry): entry is RecommendedAddition => Boolean(entry));
+  })
+  .filter((entry): entry is RecommendedAddition => Boolean(entry));
 }
+
+export type ExpandedFitComputeErrorCode =
+  | 'interview_not_found'
+  | 'baseline_not_found'
+  | 'target_context_missing'
+  | 'insufficient_answers'
+  | 'invalid_promotion_state'
+  | 'baseline_version_mismatch'
+  | 'computation_timeout'
+  | 'computation_failed'
+  | 'expanded_fit_in_flight'
+  | 'stale_request_ignored'
+  | 'artifact_write_conflict';
+
+export type ExpandedFitComputeNextAction =
+  | 'save_more_answers'
+  | 'review_results'
+  | 'return_to_baseline'
+  | 'return_to_results'
+  | 'retry_compute'
+  | 'retry_later'
+  | 'promote_baseline';
+
+export type ExpandedFitComputePayload = Interview & {
+  baselineVersionHash: string | null;
+};
+
+export type ExpandedFitComputeSuccess = {
+  status: 'success';
+  code: 'expanded_fit_ready';
+  message: string;
+  retryable: false;
+  nextAction: 'review_results';
+  payload: ExpandedFitComputePayload;
+  runId: string;
+  idempotency?: {
+    status:
+      | 'accepted_new'
+      | 'existing_in_flight'
+      | 'existing_completed'
+      | 'rejected_stale'
+      | 'persistence_conflict';
+    runId: string;
+    dedupeKey: string;
+    reused: boolean;
+  };
+};
+
+export type ExpandedFitComputeError = {
+  status: 'error';
+  code: ExpandedFitComputeErrorCode;
+  message: string;
+  retryable: boolean;
+  nextAction: ExpandedFitComputeNextAction;
+  runId: string;
+  idempotency?: {
+    status:
+      | 'accepted_new'
+      | 'existing_in_flight'
+      | 'existing_completed'
+      | 'rejected_stale'
+      | 'persistence_conflict';
+    runId: string;
+    dedupeKey: string;
+    reused: boolean;
+  };
+};
+
+export type ExpandedFitComputeOutcome =
+  | ExpandedFitComputeSuccess
+  | ExpandedFitComputeError;
 
 @Injectable()
 export class InterviewRecordsService {
+  private readonly logger = new Logger(InterviewRecordsService.name);
+
   constructor(
     @InjectRepository(Interview)
     private readonly interviewsRepo: Repository<Interview>,
@@ -159,6 +235,7 @@ export class InterviewRecordsService {
     private readonly recommendedAdditionsService: RecommendedAdditionsService,
     private readonly baselineVersionService: BaselineVersionService,
     private readonly analysisService: AnalysisService,
+    private readonly workflowIdempotencyService: WorkflowIdempotencyService,
   ) {}
 
   private requireJobId(jobId?: string): string {
@@ -286,6 +363,253 @@ export class InterviewRecordsService {
       interview.baselineVersionId,
     );
     return { ...interview, baselineVersionHash };
+  }
+
+  private buildExpandedFitError(
+    code: ExpandedFitComputeErrorCode,
+    message: string,
+    nextAction: ExpandedFitComputeNextAction,
+    retryable: boolean,
+    runId: string,
+  ): ExpandedFitComputeError {
+    return {
+      status: 'error',
+      code,
+      message,
+      retryable,
+      nextAction,
+      runId,
+    };
+  }
+
+  private buildExpandedFitRequestHash(input: {
+    interviewId: string;
+    baselineId: string | null;
+    baselineVersionId: string | null;
+    jobId: string;
+    responses: string[];
+    recommendedAdditions: RecommendedAddition[];
+    acceptedAdditionIds: string[];
+  }) {
+    return createHash('sha256')
+      .update(
+        JSON.stringify({
+          interviewId: input.interviewId,
+          baselineId: input.baselineId,
+          baselineVersionId: input.baselineVersionId,
+          jobId: input.jobId,
+          responses: input.responses,
+          recommendedAdditions: input.recommendedAdditions.map((addition) => ({
+            id: addition.id,
+            text: addition.text,
+            status: addition.status,
+          })),
+          acceptedAdditionIds: input.acceptedAdditionIds,
+        }),
+      )
+      .digest('hex');
+  }
+
+  private buildExpandedFitDedupeKey(input: {
+    userId: string;
+    interviewId: string;
+    baselineId: string;
+    baselineVersion: number;
+    jobId: string;
+    requestHash: string;
+  }) {
+    return createHash('sha256')
+      .update(
+        JSON.stringify({
+          operation: 'analysis.expanded_fit',
+          userId: input.userId,
+          interviewId: input.interviewId,
+          baselineId: input.baselineId,
+          baselineVersion: input.baselineVersion,
+          jobId: input.jobId,
+          requestHash: input.requestHash,
+        }),
+      )
+      .digest('hex');
+  }
+
+  private classifyExpandedFitFailure(
+    error: unknown,
+    runId: string,
+  ): ExpandedFitComputeError {
+    if (error instanceof HttpException) {
+      const response = error.getResponse();
+      const responseRecord =
+        response && typeof response === 'object'
+          ? (response as Record<string, unknown>)
+          : null;
+      const nestedError =
+        responseRecord && typeof responseRecord.error === 'object'
+          ? (responseRecord.error as Record<string, unknown>)
+          : null;
+      const code =
+        (typeof nestedError?.code === 'string' && nestedError.code) ||
+        (typeof responseRecord?.code === 'string' && responseRecord.code) ||
+        null;
+      const message =
+        (typeof nestedError?.message === 'string' && nestedError.message) ||
+        (typeof responseRecord?.message === 'string' && responseRecord.message) ||
+        error.message ||
+        'Expanded fit could not be computed right now.';
+      const lowerMessage = message.toLowerCase();
+
+      if (lowerMessage.includes('interview record not found') || lowerMessage.includes('interview not found')) {
+        return this.buildExpandedFitError(
+          'interview_not_found',
+          'This interview could not be found. Return to Results and start a new expansion review.',
+          'return_to_results',
+          true,
+          runId,
+        );
+      }
+
+      if (code === 'interview_not_found') {
+        return this.buildExpandedFitError(
+          'interview_not_found',
+          'This interview could not be found. Return to Results and start a new expansion review.',
+          'return_to_results',
+          true,
+          runId,
+        );
+      }
+
+      if (code === 'baseline_not_found' || lowerMessage.includes('baseline not found')) {
+        return this.buildExpandedFitError(
+          'baseline_not_found',
+          'The linked baseline could not be found. Return to Baseline and pick a current version.',
+          'return_to_baseline',
+          true,
+          runId,
+        );
+      }
+
+      if (
+        code === 'baseline_version_mismatch' ||
+        code === 'invalid_baseline_linkage' ||
+        lowerMessage.includes('missing a valid baseline version') ||
+        lowerMessage.includes('baselineversion must be a positive integer')
+      ) {
+        return this.buildExpandedFitError(
+          'baseline_version_mismatch',
+          'The interview is attached to an outdated or missing baseline version. Re-select the baseline and try again.',
+          'return_to_baseline',
+          true,
+          runId,
+        );
+      }
+
+      if (
+        code === 'missing_baseline_link' ||
+        code === 'missing_job_context' ||
+        code === 'target_context_missing' ||
+        lowerMessage.includes('baselineid and jobid are required') ||
+        lowerMessage.includes('missing a job description')
+      ) {
+        return this.buildExpandedFitError(
+          'target_context_missing',
+          'The interview is missing its linked job or target context. Return to Results, reconnect the role, and try again.',
+          'return_to_results',
+          true,
+          runId,
+        );
+      }
+
+      if (
+        code === 'incomplete_answers' ||
+        code === 'insufficient_answers' ||
+        lowerMessage.includes('verified additions are required') ||
+        lowerMessage.includes('add at least one supported response')
+      ) {
+        return this.buildExpandedFitError(
+          'insufficient_answers',
+          'More responses are needed before expanded fit can be computed.',
+          'save_more_answers',
+          true,
+          runId,
+        );
+      }
+
+      if (code === 'stale_request_ignored') {
+        return this.buildExpandedFitError(
+          'stale_request_ignored',
+          message,
+          'save_more_answers',
+          true,
+          runId,
+        );
+      }
+
+      if (code === 'artifact_write_conflict') {
+        return this.buildExpandedFitError(
+          'artifact_write_conflict',
+          message,
+          'retry_compute',
+          true,
+          runId,
+        );
+      }
+
+      if (code === 'expanded_fit_in_flight') {
+        return this.buildExpandedFitError(
+          'expanded_fit_in_flight',
+          message,
+          'retry_compute',
+          true,
+          runId,
+        );
+      }
+
+      if (code === 'timeout' || code === 'computation_timeout') {
+        return this.buildExpandedFitError(
+          'computation_timeout',
+          'This is taking longer than expected. Please try again.',
+          'retry_compute',
+          true,
+          runId,
+        );
+      }
+
+      if (code === 'invalid_promotion_state') {
+        return this.buildExpandedFitError(
+          'invalid_promotion_state',
+          message,
+          'promote_baseline',
+          false,
+          runId,
+        );
+      }
+
+      return this.buildExpandedFitError(
+        'computation_failed',
+        message || 'Expanded fit could not be computed right now.',
+        'retry_compute',
+        true,
+        runId,
+      );
+    }
+
+    if (error instanceof Error && /timeout/i.test(error.message)) {
+      return this.buildExpandedFitError(
+        'computation_timeout',
+        'This is taking longer than expected. Please try again.',
+        'retry_compute',
+        true,
+        runId,
+      );
+    }
+
+    return this.buildExpandedFitError(
+      'computation_failed',
+      'Expanded fit could not be computed right now. Save your answers and try again.',
+      'retry_compute',
+      true,
+      runId,
+    );
   }
 
   private scoreToVerdict(score?: number | null) {
@@ -444,8 +768,8 @@ export class InterviewRecordsService {
       : [];
 
     const payload = (body ?? {}) as {
-      decisions?: Array<{ id?: string; status?: RecommendedAdditionStatus }>;
-      additions?: Array<{ id?: string; status?: RecommendedAdditionStatus }>;
+      decisions?: Array<Record<string, unknown>>;
+      additions?: Array<Record<string, unknown>>;
       acceptedIds?: string[];
       rejectedIds?: string[];
     };
@@ -465,11 +789,30 @@ export class InterviewRecordsService {
 
     const statusById = new Map<string, RecommendedAdditionStatus>();
     for (const decision of decisionsList) {
-      const idValue = typeof decision?.id === 'string' ? decision.id : '';
-      const statusValue =
-        decision?.status === 'accepted' || decision?.status === 'rejected'
+      const idValue =
+        typeof decision.id === 'string'
+          ? decision.id
+          : typeof decision.additionId === 'string'
+            ? decision.additionId
+            : '';
+      const rawStatus =
+        typeof decision.status === 'string'
           ? decision.status
-          : null;
+          : typeof decision.decision === 'string'
+            ? decision.decision
+            : null;
+      const statusValue =
+        rawStatus === 'accepted' ||
+        rawStatus === 'rejected' ||
+        rawStatus === 'deferred'
+          ? rawStatus
+          : rawStatus === 'accept'
+            ? 'accepted'
+            : rawStatus === 'reject'
+              ? 'rejected'
+              : rawStatus === 'defer'
+                ? 'deferred'
+                : null;
       if (idValue && statusValue) statusById.set(idValue, statusValue);
     }
 
@@ -611,55 +954,305 @@ export class InterviewRecordsService {
     });
   }
 
-  async computeExpandedFit(id: string, userId: string): Promise<Interview> {
-    const interview = await this.getInterviewRecordForUser(id, userId);
-
-    if (!interview.baselineId?.trim()) {
-      throw new BadRequestException('baselineId is required');
-    }
-
-    if (!interview.jobId?.trim()) {
-      throw new BadRequestException('jobId is required');
-    }
-
-    const acceptedAdditions = await this.fetchAcceptedAdditions(interview.id);
-    const verifiedAdditions = Array.from(
-      new Set(
-        acceptedAdditions
-          .map((addition) => addition.suggestion?.trim())
-          .filter((text): text is string => Boolean(text)),
-      ),
+  async computeExpandedFit(
+    id: string,
+    userId: string,
+    options?: { runId?: string },
+  ): Promise<ExpandedFitComputeOutcome> {
+    const runId = options?.runId ?? randomUUID();
+    const startedAt = Date.now();
+    let dedupeKey: string | undefined;
+    this.logger.log(
+      `[expanded-fit] start runId=${runId} interviewRecordId=${id} userId=${userId}`,
     );
 
-    if (!verifiedAdditions.length) {
-      throw new BadRequestException(
-        'No additions available for expanded scoring',
+    try {
+      const interview = await this.getInterviewRecordForUser(id, userId);
+      const answerCount = Array.isArray(interview.responses)
+        ? interview.responses.filter((response) => Boolean(response?.trim?.())).length
+        : 0;
+      const decisionCounts = Array.isArray(interview.recommendedAdditions)
+        ? interview.recommendedAdditions.reduce(
+            (acc, addition) => {
+              if (addition.status === 'accepted') acc.accepted += 1;
+              else if (addition.status === 'rejected') acc.rejected += 1;
+              else if (addition.status === 'deferred') acc.deferred += 1;
+              return acc;
+            },
+            { accepted: 0, rejected: 0, deferred: 0 },
+          )
+        : { accepted: 0, rejected: 0, deferred: 0 };
+
+      this.logger.log(
+        `[expanded-fit] context runId=${runId} interviewRecordId=${id} baselineId=${interview.baselineId ?? 'missing'} baselineVersionId=${interview.baselineVersionId ?? 'missing'} jobId=${interview.jobId ?? 'missing'} answerCount=${answerCount} decisionCounts=${JSON.stringify(decisionCounts)}`,
       );
-    }
+      const fail = (outcome: ExpandedFitComputeError) => {
+        this.logger.warn(
+          `[expanded-fit] failure runId=${runId} interviewRecordId=${id} code=${outcome.code} durationMs=${Date.now() - startedAt}`,
+        );
+        return outcome;
+      };
 
-    const baselineVersionNumber = await this.getBaselineVersionNumber(
-      interview.baselineVersionId,
-    );
+      if (!interview.baselineId?.trim()) {
+        return fail(
+          this.buildExpandedFitError(
+          'target_context_missing',
+          'This interview is missing a linked baseline. Re-open Results and choose a baseline before computing expanded fit.',
+          'return_to_results',
+          true,
+          runId,
+          ),
+        );
+      }
 
-    const expansion = await this.analysisService.runExpandedFitAssessment(
-      userId,
-      {
-        jobId: interview.jobId,
-        baselineId: interview.baselineId,
-        baselineVersion: baselineVersionNumber,
+      if (!interview.jobId?.trim()) {
+        return fail(
+          this.buildExpandedFitError(
+          'target_context_missing',
+          'This interview is missing a job description. Return to Results or Opportunities and attach the role before computing expanded fit.',
+          'return_to_results',
+          true,
+          runId,
+          ),
+        );
+      }
+
+      const acceptedAdditions = await this.fetchAcceptedAdditions(interview.id);
+      const verifiedAdditions = Array.from(
+        new Set(
+          acceptedAdditions
+            .map((addition) => addition.suggestion?.trim())
+            .filter((text): text is string => Boolean(text)),
+        ),
+      );
+
+      if (!verifiedAdditions.length) {
+        return fail(
+          this.buildExpandedFitError(
+          'insufficient_answers',
+          'More responses are needed before expanded fit can be computed.',
+          'save_more_answers',
+          true,
+          runId,
+          ),
+        );
+      }
+
+      const baselineVersionNumber = await this.getBaselineVersionNumber(
+        interview.baselineVersionId,
+      );
+
+      if (!baselineVersionNumber) {
+        return fail(
+          this.buildExpandedFitError(
+          'baseline_version_mismatch',
+          'This interview is missing a valid baseline version. Refresh the baseline selection and try again.',
+          'return_to_baseline',
+          true,
+          runId,
+          ),
+        );
+      }
+
+      const requestHash = this.buildExpandedFitRequestHash({
         interviewId: interview.id,
-        verifiedAdditions,
-      },
-    );
+        baselineId: interview.baselineId,
+        baselineVersionId: interview.baselineVersionId,
+        jobId: interview.jobId,
+        responses: normalizeStringArray(interview.responses).map((response) =>
+          response.trim(),
+        ),
+        recommendedAdditions: normalizeRecommendedAdditions(
+          interview.recommendedAdditions,
+        ),
+        acceptedAdditionIds: this.normalizeAcceptedAdditionIds(
+          interview.acceptedAdditionIds ?? [],
+        ),
+      });
+      dedupeKey = this.buildExpandedFitDedupeKey({
+        userId,
+        interviewId: interview.id,
+        baselineId: interview.baselineId!,
+        baselineVersion: baselineVersionNumber,
+        jobId: interview.jobId!,
+        requestHash,
+      });
+      const reservation = await this.workflowIdempotencyService.reserve<ExpandedFitComputeOutcome>({
+        userId,
+        operationName: 'analysis.expanded_fit',
+        dedupeKey,
+        runId,
+      });
 
-    interview.expandedFitAssessment = {
-      ...expansion,
-      originalVerdict: this.scoreToVerdict(expansion.originalScore),
-      expandedVerdict: this.scoreToVerdict(expansion.expandedScore),
-    };
+      if (reservation.status === 'existing_completed' && reservation.responseBody) {
+        return {
+          ...(reservation.responseBody as ExpandedFitComputeOutcome),
+          idempotency: {
+            status: reservation.status,
+            runId: reservation.runId,
+            dedupeKey,
+            reused: true,
+          },
+        } as ExpandedFitComputeOutcome;
+      }
 
-    const saved = await this.interviewsRepo.save(interview);
-    return this.buildInterviewResponse(saved);
+      if (reservation.status === 'existing_in_flight') {
+        return fail(
+          this.buildExpandedFitError(
+            'expanded_fit_in_flight',
+            'Expanded fit is already running for this interview. Please wait for it to finish.',
+            'retry_compute',
+            true,
+            runId,
+          ),
+        );
+      }
+
+      const idempotencyMeta = {
+        status: reservation.status,
+        runId: reservation.runId,
+        dedupeKey,
+        reused: reservation.status === 'existing_completed',
+      } as const;
+
+      let expansion;
+      try {
+        expansion = await this.analysisService.runExpandedFitAssessment(
+          userId,
+          {
+            jobId: interview.jobId,
+            baselineId: interview.baselineId,
+            baselineVersion: baselineVersionNumber,
+            interviewId: interview.id,
+            verifiedAdditions,
+          },
+        );
+      } catch (error) {
+        const classified = this.classifyExpandedFitFailure(error, runId);
+        await this.workflowIdempotencyService.complete({
+          userId,
+          operationName: 'analysis.expanded_fit',
+          dedupeKey,
+          runId,
+          responseBody: classified,
+        });
+        return fail(classified);
+      }
+
+      const liveInterview = await this.getInterviewRecordForUser(id, userId);
+      const liveRequestHash = this.buildExpandedFitRequestHash({
+        interviewId: liveInterview.id,
+        baselineId: liveInterview.baselineId,
+        baselineVersionId: liveInterview.baselineVersionId,
+        jobId: liveInterview.jobId,
+        responses: normalizeStringArray(liveInterview.responses).map((response) =>
+          response.trim(),
+        ),
+        recommendedAdditions: normalizeRecommendedAdditions(
+          liveInterview.recommendedAdditions,
+        ),
+        acceptedAdditionIds: this.normalizeAcceptedAdditionIds(
+          liveInterview.acceptedAdditionIds ?? [],
+        ),
+      });
+
+      if (liveRequestHash !== requestHash) {
+        const stale = this.buildExpandedFitError(
+          'stale_request_ignored',
+          'The interview changed while expanded fit was computing. Save the latest answers and try again.',
+          'save_more_answers',
+          true,
+          runId,
+        );
+        await this.workflowIdempotencyService.complete({
+          userId,
+          operationName: 'analysis.expanded_fit',
+          dedupeKey,
+          runId,
+          responseBody: stale,
+        });
+        return fail(stale);
+      }
+
+      interview.expandedFitAssessment = {
+        ...expansion,
+        originalVerdict: this.scoreToVerdict(expansion.originalScore),
+        expandedVerdict: this.scoreToVerdict(expansion.expandedScore),
+        requestHash,
+      };
+
+      let saved: Interview;
+      try {
+        saved = await this.interviewsRepo.save(interview);
+      } catch (error) {
+        if (this.isUniqueConflictError(error)) {
+          const existing = await this.interviewsRepo.findOne({
+            where: { id: interview.id, userId },
+          });
+          if (existing) {
+            saved = existing;
+          } else {
+            const conflict = this.buildExpandedFitError(
+              'artifact_write_conflict',
+              'A concurrent expanded fit save conflicted with this request.',
+              'retry_compute',
+              true,
+              runId,
+            );
+            await this.workflowIdempotencyService.complete({
+              userId,
+              operationName: 'analysis.expanded_fit',
+              dedupeKey,
+              runId,
+              responseBody: conflict,
+            });
+            return fail(conflict);
+          }
+        } else {
+          throw error;
+        }
+      }
+      const payload = await this.buildInterviewResponse(saved);
+
+      this.logger.log(
+        `[expanded-fit] success runId=${runId} interviewRecordId=${id} baselineId=${interview.baselineId ?? 'missing'} baselineVersionId=${interview.baselineVersionId ?? 'missing'} jobId=${interview.jobId ?? 'missing'} answerCount=${answerCount} decisionCounts=${JSON.stringify(decisionCounts)} durationMs=${Date.now() - startedAt}`,
+      );
+
+      const success = {
+        status: 'success',
+        code: 'expanded_fit_ready',
+        message: 'Expanded fit is ready.',
+        retryable: false,
+        nextAction: 'review_results',
+        payload,
+        runId,
+        idempotency: idempotencyMeta,
+      } as ExpandedFitComputeSuccess;
+
+      await this.workflowIdempotencyService.complete({
+        userId,
+        operationName: 'analysis.expanded_fit',
+        dedupeKey,
+        runId,
+        responseBody: success,
+      });
+
+      return success;
+    } catch (error) {
+      const classified = this.classifyExpandedFitFailure(error, runId);
+      if (dedupeKey) {
+        await this.workflowIdempotencyService.markFailure({
+          userId,
+          operationName: 'analysis.expanded_fit',
+          dedupeKey,
+          runId,
+          status: classified.code === 'stale_request_ignored' ? 'STALE' : 'FAILED',
+          errorCode: classified.code,
+          errorMessage: classified.message,
+        });
+      }
+      return fail(classified);
+    }
   }
 
   async promoteAcceptedAdditions(
@@ -673,7 +1266,13 @@ export class InterviewRecordsService {
     const interview = await this.getInterviewRecordForUser(id, userId);
 
     if (!interview.baselineId?.trim()) {
-      throw new BadRequestException('baselineId is required');
+      throw new BadRequestException({
+        error: {
+          code: 'invalid_promotion_state',
+          message:
+            'A linked baseline is required before promoted additions can be saved.',
+        },
+      });
     }
 
     const recommendedAdditions = Array.isArray(interview.recommendedAdditions)
@@ -684,9 +1283,13 @@ export class InterviewRecordsService {
     );
 
     if (!acceptedIds.length) {
-      throw new BadRequestException(
-        'At least one accepted addition is required',
-      );
+      throw new BadRequestException({
+        error: {
+          code: 'invalid_promotion_state',
+          message:
+            'Select at least one accepted addition before promoting this baseline.',
+        },
+      });
     }
 
     const acceptedSet = new Set(acceptedIds);
@@ -695,9 +1298,13 @@ export class InterviewRecordsService {
     );
 
     if (!acceptedAdditions.length) {
-      throw new BadRequestException(
-        'Accepted additions were not found on this interview',
-      );
+      throw new BadRequestException({
+        error: {
+          code: 'invalid_promotion_state',
+          message:
+            'The accepted additions are no longer available on this interview. Re-open the review step and try again.',
+        },
+      });
     }
 
     const promotion =
@@ -725,6 +1332,15 @@ export class InterviewRecordsService {
     const interview = await this.getInterviewRecordForUser(id, userId);
     await this.interviewsRepo.remove(interview);
     return { deleted: true, id };
+  }
+
+  private isUniqueConflictError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+
+    const record = error as Record<string, unknown>;
+    return String(record.code ?? '').trim() === '23505';
   }
 
   async createInterview(

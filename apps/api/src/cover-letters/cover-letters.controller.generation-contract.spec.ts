@@ -5,7 +5,7 @@ import { getEntitlementsForTier } from '../features/feature-gates';
 import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 
 describe('CoverLettersController generation contract', () => {
-  it('surfaces generation_failed as HTTP 422 payload', async () => {
+  it('returns a typed generation_failed outcome', async () => {
     const service = {
       generateCoverLetter: jest.fn().mockRejectedValue(
         new UnprocessableEntityException({
@@ -33,12 +33,12 @@ describe('CoverLettersController generation contract', () => {
           },
         } as any,
       ),
-    ).rejects.toMatchObject({
-      response: {
-        code: 'generation_failed',
-        message: 'Cover letter generation failed validation.',
-      },
-      status: 422,
+    ).resolves.toMatchObject({
+      status: 'error',
+      code: 'generation_failed',
+      retryable: true,
+      nextAction: 'retry_generation',
+      artifactType: 'cover_letter',
     });
   });
 

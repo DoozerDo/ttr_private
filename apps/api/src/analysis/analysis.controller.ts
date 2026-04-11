@@ -14,6 +14,7 @@ import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
 import { AnalysisService } from './analysis.service';
 import type { AnalysisRequest } from './analysis.service';
+import { withTimeout } from '../common/timeout';
 import { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
 import { RunExpandedFitAssessmentDto } from './dto/run-expanded-fit-assessment.dto';
 import { AlignmentHistoryService } from './services/alignment-history.service';
@@ -45,13 +46,15 @@ export class AnalysisController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.analysisService.analyzeForUser(userId, {
-      ...body,
-      debugCompliance:
-        debugCompliance === '1' || debugCompliance === 'true' || Boolean(body.debugCompliance),
-      debugMatching:
-        debugMatching === '1' || debugMatching === 'true' || Boolean(body.debugMatching),
-    });
+    return withTimeout('analysis', () =>
+      this.analysisService.analyzeForUser(userId, {
+        ...body,
+        debugCompliance:
+          debugCompliance === '1' || debugCompliance === 'true' || Boolean(body.debugCompliance),
+        debugMatching:
+          debugMatching === '1' || debugMatching === 'true' || Boolean(body.debugMatching),
+      }),
+    );
   }
 
   @Post('run')
@@ -97,7 +100,9 @@ export class AnalysisController {
       );
     }
 
-    const result = await this.analysisService.runFitAssessment(userId, payload);
+    const result = await withTimeout('analysis', () =>
+      this.analysisService.runFitAssessment(userId, payload),
+    );
 
     if (process.env.NODE_ENV !== 'production') {
       const assessmentId =
@@ -130,7 +135,9 @@ export class AnalysisController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.analysisService.runExpandedFitAssessment(userId, body);
+    return withTimeout('analysis', () =>
+      this.analysisService.runExpandedFitAssessment(userId, body),
+    );
   }
 
   @Get('fit-assessments')
@@ -144,7 +151,9 @@ export class AnalysisController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.analysisService.getFitAssessments(userId, jobId);
+    return withTimeout('analysis', () =>
+      this.analysisService.getFitAssessments(userId, jobId),
+    );
   }
 
   @Get('fit-assessments/:assessmentId')
@@ -158,9 +167,11 @@ export class AnalysisController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.analysisService.getFitAssessmentById(userId, assessmentId, {
-      forceFreshRecompute: true,
-    });
+    return withTimeout('analysis', () =>
+      this.analysisService.getFitAssessmentById(userId, assessmentId, {
+        forceFreshRecompute: true,
+      }),
+    );
   }
 
   @Get('fit-scores')
@@ -174,7 +185,9 @@ export class AnalysisController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.analysisService.getFitScores(userId, jobId);
+    return withTimeout('analysis', () =>
+      this.analysisService.getFitScores(userId, jobId),
+    );
   }
 
   @Get('job/:jobId/latest')
@@ -188,7 +201,9 @@ export class AnalysisController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.analysisService.getLatestAssessment(userId, jobId);
+    return withTimeout('analysis', () =>
+      this.analysisService.getLatestAssessment(userId, jobId),
+    );
   }
 
   @Get('job/:jobId/baseline/:baselineId/latest')
@@ -203,10 +218,12 @@ export class AnalysisController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.analysisService.getLatestAssessmentForBaseline(
-      userId,
-      jobId,
-      baselineId,
+    return withTimeout('analysis', () =>
+      this.analysisService.getLatestAssessmentForBaseline(
+        userId,
+        jobId,
+        baselineId,
+      ),
     );
   }
 
@@ -219,7 +236,9 @@ export class AnalysisController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.alignmentHistoryService.getAlignmentHistory(userId);
+    return withTimeout('analysis', () =>
+      this.alignmentHistoryService.getAlignmentHistory(userId),
+    );
   }
 
   @Get('career-gravity')
@@ -231,7 +250,9 @@ export class AnalysisController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.careerGravityService.getCareerGravity(userId);
+    return withTimeout('analysis', () =>
+      this.careerGravityService.getCareerGravity(userId),
+    );
   }
 
   @Get(':assessmentId/simulation')
@@ -244,6 +265,8 @@ export class AnalysisController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.scoreSimulatorService.getSimulation(userId, assessmentId);
+    return withTimeout('analysis', () =>
+      this.scoreSimulatorService.getSimulation(userId, assessmentId),
+    );
   }
 }

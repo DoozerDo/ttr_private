@@ -2,19 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { InterviewGap, InterviewQuestion } from './interview-types';
 
 const QUESTION_TEMPLATES: Record<
-  InterviewQuestion['category'],
+  'Direct Experience' | 'Scope' | 'Impact',
   (gap: InterviewGap) => InterviewQuestion
 > = {
   'Direct Experience': (gap) => ({
     gapId: gap.gapId,
     category: 'Direct Experience',
-    prompt: `The JD highlights "${gap.jdExcerpt}". Can you share any direct experience you have related to this?`,
-    jdReference: gap.jdExcerpt,
-  }),
-  Context: (gap) => ({
-    gapId: gap.gapId,
-    category: 'Context',
-    prompt: `What context surrounded any work you have done related to "${gap.jdExcerpt}", if applicable?`,
+    prompt: `The JD highlights "${gap.jdExcerpt}". If you have direct experience related to this, can you share it?`,
     jdReference: gap.jdExcerpt,
   }),
   Scope: (gap) => ({
@@ -23,16 +17,10 @@ const QUESTION_TEMPLATES: Record<
     prompt: `If you've engaged with "${gap.jdExcerpt}", what was the scope of your involvement?`,
     jdReference: gap.jdExcerpt,
   }),
-  Tooling: (gap) => ({
-    gapId: gap.gapId,
-    category: 'Tooling',
-    prompt: `What tools or platforms have you used, if any, when addressing "${gap.jdExcerpt}"?`,
-    jdReference: gap.jdExcerpt,
-  }),
   Impact: (gap) => ({
     gapId: gap.gapId,
     category: 'Impact',
-    prompt: `What outcomes resulted from efforts related to "${gap.jdExcerpt}", or what impact would you aim for in similar work?`,
+    prompt: `What outcomes resulted from efforts related to "${gap.jdExcerpt}", or if you have similar work, what impact would you aim for?`,
     jdReference: gap.jdExcerpt,
   }),
 };

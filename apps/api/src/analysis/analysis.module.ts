@@ -20,6 +20,7 @@ import { AlignmentHistoryService } from './services/alignment-history.service';
 import { CareerGravityService } from './services/career-gravity.service';
 import { ScoreSimulatorService } from './services/score-simulator.service';
 import { SupportModule } from '../support/support.module';
+import { WorkflowIdempotencyModule } from '../common/workflow-idempotency.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { SupportModule } from '../support/support.module';
     ]),
     ComplianceModule,
     SupportModule,
+    WorkflowIdempotencyModule,
   ],
   controllers: [AnalysisController, CalibrationController, FitScoresController],
   providers: [

@@ -30,7 +30,7 @@ describe("ReportBugModal", () => {
     setFetchImplementation(async (input: RequestInfo) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       if (url.includes("/api/support/report-bug")) {
-        return createResponse({ ok: true, reportId: "bug-123" });
+        return createResponse({ status: "submission_success", message: "Thanks. Your report was submitted successfully.", reportId: "bug-123" });
       }
       return createResponse({});
     });
@@ -47,10 +47,32 @@ describe("ReportBugModal", () => {
   });
 
   it("shows error state when submit fails", async () => {
+    const stored: Record<string, string> = {};
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => stored[key] ?? null,
+        setItem: (key: string, value: string) => {
+          stored[key] = value;
+        },
+        removeItem: (key: string) => {
+          delete stored[key];
+        },
+      },
+    });
     setFetchImplementation(async (input: RequestInfo) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       if (url.includes("/api/support/report-bug")) {
-        return createResponse({ message: "Bug report failed to send. Please try again." }, false, 503);
+        return createResponse(
+          {
+            status: "temporarily_unavailable",
+            code: "support_config_unavailable",
+            message: "Bug reporting is temporarily unavailable right now. Save a draft and check Support history later.",
+            supportPath: "/support/history",
+          },
+          false,
+          503,
+        );
       }
       return createResponse({});
     });
@@ -62,8 +84,14 @@ describe("ReportBugModal", () => {
     fireEvent.click(screen.getByRole("button", { name: /send issue report/i }));
 
     await waitFor(() => {
-      expect(screen.getByText("Bug report failed to send. Please try again.")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "Bug reporting is temporarily unavailable right now. Save a draft and check Support history later.",
+        ),
+      ).toBeInTheDocument();
     });
+    expect(screen.getByRole("link", { name: /support history/i })).toHaveAttribute("href", "/support/history");
+    expect(stored["ttr.support.bug-report.draft.v1"]).toContain("Saving baseline failed unexpectedly");
   });
 
   it("sends the message field expected by the backend", async () => {

@@ -14,7 +14,7 @@ describe('InterviewQuestionGeneratorService', () => {
 
     const questions = service.generateQuestions([gap]);
 
-    expect(questions).toHaveLength(5);
+    expect(questions).toHaveLength(3);
     questions.forEach((question) => {
       expect(question.jdReference).toBe(gap.jdExcerpt);
       expect(question.prompt).toContain(gap.jdExcerpt);
@@ -26,9 +26,7 @@ describe('InterviewQuestionGeneratorService', () => {
     expect(categories).toEqual(
       expect.arrayContaining([
         'Direct Experience',
-        'Context',
         'Scope',
-        'Tooling',
         'Impact',
       ]),
     );

@@ -87,6 +87,7 @@ import { validateAnalysisContext } from '../common/analysis-context-binding';
 import { filterComplianceFlagsByCanonicalClaims } from '../common/readiness-claim-truth';
 import { SyntheticMetadataInput } from '../synthetic/synthetic-metadata.types';
 import { applySyntheticMetadata } from '../synthetic/synthetic-metadata.util';
+import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
 import type { ArtifactTraceAudit } from '../generation/artifact-trace-audit';
 import { buildArtifactFailurePayload } from '../generation/artifact-failure';
 import { polishCoverLetterGeneration } from '../language-style-pass';
@@ -161,6 +162,17 @@ export type CoverLetterGenerationResponse = {
     baselineVersionHash: string | null;
     complianceFlags: ComplianceFlag[];
   };
+  idempotency?: {
+    status:
+      | 'accepted_new'
+      | 'existing_in_flight'
+      | 'existing_completed'
+      | 'rejected_stale'
+      | 'persistence_conflict';
+    runId: string;
+    dedupeKey: string;
+    reused: boolean;
+  };
 };
 
 @Injectable()
@@ -177,6 +189,7 @@ export class CoverLettersService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly complianceService: ComplianceService,
     private readonly gapAnalysisService: GapAnalysisService,
+    private readonly workflowIdempotencyService: WorkflowIdempotencyService,
   ) {
     this.coverLetterRepository = this.dataSource.getRepository(CoverLetter);
     this.baselineRepository = this.dataSource.getRepository(Baseline);
@@ -255,61 +268,155 @@ export class CoverLettersService {
       );
     }
 
-    await this.ensureNoDuplicateCoverLetter(
-      userId,
-      draft.baseline.id,
-      draft.job.id,
-      draft.generationInputsHash,
-    );
-
-    const coverLetter = this.coverLetterRepository.create({
+    const dedupeKey = this.buildGenerationDedupeKey({
       userId,
       baselineId: draft.baseline.id,
+      baselineVersionId: draft.baselineVersion.id,
       jobId: draft.job.id,
-      generatorType: 'template',
-      generatorVersion: 'v1',
-      closingTemplateKey: draft.closingTemplateKey,
-      content: draft.complianceResult.normalizedContent,
       generationInputsHash: draft.generationInputsHash,
+      closingTemplateKey: draft.closingTemplateKey,
+      mode: draft.complianceResult.blocked ? 'blocked' : 'ready',
     });
-    if (syntheticMetadata?.isSynthetic) {
-      applySyntheticMetadata(coverLetter, syntheticMetadata);
+    const reservation = await this.workflowIdempotencyService.reserve<CoverLetterGenerationResponse>({
+      userId,
+      operationName: 'generation.cover_letter',
+      dedupeKey,
+      runId: draft.complianceResult.audit.id,
+    });
+
+    if (reservation.status === 'existing_completed' && reservation.responseBody) {
+      return {
+        ...(reservation.responseBody as CoverLetterGenerationResponse),
+        idempotency: {
+          status: reservation.status,
+          runId: reservation.runId,
+          dedupeKey,
+          reused: true,
+        },
+      } as CoverLetterGenerationResponse;
     }
 
-    const savedCoverLetter = await this.coverLetterRepository.save(coverLetter);
+    if (reservation.status === 'existing_in_flight') {
+      throw new ConflictException({
+        error: {
+          code: 'generation_in_flight',
+          message:
+            'A cover letter is already being generated for this role. Please wait and try again.',
+          retryable: true,
+          nextAction: 'retry_later',
+          runId: reservation.runId,
+          dedupeKey,
+        },
+      });
+    }
 
-    const display = this.buildSuccessDisplayPayload();
-    const exports: DocumentGenerationExports = { docx: true, pdf: true };
-    return {
-      status: 'success',
-      generationStatus: 'success',
-      exportReady: true,
-      ...savedCoverLetter,
-      baselineVersionId: draft.baselineVersion.id,
-      exports,
-      preview: {
-        coverLetter: draft.generation.document,
-      },
-      compliance_flags: draft.complianceResult.complianceFlags,
-      audit_id: draft.complianceResult.audit.id,
-      auditId: draft.complianceResult.audit.id,
-      baseline_version_hash: draft.complianceResult.audit.baselineVersionHash,
-      traceMap: draft.generation.traceMap,
-      debugTrace: draft.generation.debugTrace ?? {
-        passed: true,
-        failures: [],
-        traceCoverage: 100,
-        unusedEvidence: [],
-        selectedEvidence: [],
-      },
-      display,
-      safeDisplay: display,
-      internal: {
+    try {
+      await this.ensureNoDuplicateCoverLetter(
+        userId,
+        draft.baseline.id,
+        draft.job.id,
+        draft.generationInputsHash,
+      );
+
+      const coverLetter = this.coverLetterRepository.create({
+        userId,
+        baselineId: draft.baseline.id,
+        jobId: draft.job.id,
+        generatorType: 'template',
+        generatorVersion: 'v1',
+        closingTemplateKey: draft.closingTemplateKey,
+        content: draft.complianceResult.normalizedContent,
+        generationInputsHash: draft.generationInputsHash,
+      });
+      if (syntheticMetadata?.isSynthetic) {
+        applySyntheticMetadata(coverLetter, syntheticMetadata);
+      }
+
+      let savedCoverLetter: CoverLetter;
+      let reusedExistingCoverLetter = false;
+      try {
+        savedCoverLetter = await this.coverLetterRepository.save(coverLetter);
+      } catch (error) {
+        const record = error && typeof error === 'object' ? (error as Record<string, unknown>) : null;
+        const isUniqueViolation =
+          String(record?.code ?? '').trim() === '23505' ||
+          /duplicate key|unique constraint/i.test(String(record?.message ?? ''));
+        if (!isUniqueViolation) {
+          throw error;
+        }
+        const existingCoverLetter = await this.coverLetterRepository.findOne({
+          where: {
+            userId,
+            baselineId: draft.baseline.id,
+            jobId: draft.job.id,
+            generationInputsHash: draft.generationInputsHash,
+          },
+        });
+        if (!existingCoverLetter) {
+          throw error;
+        }
+        savedCoverLetter = existingCoverLetter;
+        reusedExistingCoverLetter = true;
+      }
+
+      const display = this.buildSuccessDisplayPayload();
+      const exports: DocumentGenerationExports = { docx: true, pdf: true };
+      const response: CoverLetterGenerationResponse = {
+        status: 'success',
+        generationStatus: 'success',
+        exportReady: true,
+        ...savedCoverLetter,
+        baselineVersionId: draft.baselineVersion.id,
+        exports,
+        preview: {
+          coverLetter: draft.generation.document,
+        },
+        compliance_flags: draft.complianceResult.complianceFlags,
+        audit_id: draft.complianceResult.audit.id,
         auditId: draft.complianceResult.audit.id,
-        baselineVersionHash: draft.complianceResult.audit.baselineVersionHash,
-        complianceFlags: draft.complianceResult.complianceFlags,
-      },
-    };
+        baseline_version_hash: draft.complianceResult.audit.baselineVersionHash,
+        traceMap: draft.generation.traceMap,
+        debugTrace: draft.generation.debugTrace ?? {
+          passed: true,
+          failures: [],
+          traceCoverage: 100,
+          unusedEvidence: [],
+          selectedEvidence: [],
+        },
+        display,
+        safeDisplay: display,
+        internal: {
+          auditId: draft.complianceResult.audit.id,
+          baselineVersionHash: draft.complianceResult.audit.baselineVersionHash,
+          complianceFlags: draft.complianceResult.complianceFlags,
+        },
+        idempotency: {
+          status: reusedExistingCoverLetter ? 'existing_completed' : reservation.status,
+          runId: reservation.runId,
+          dedupeKey,
+          reused: reusedExistingCoverLetter || reservation.status === 'existing_completed',
+        },
+      };
+      await this.workflowIdempotencyService.complete({
+        userId,
+        operationName: 'generation.cover_letter',
+        dedupeKey,
+        runId: reservation.runId,
+        responseBody: response,
+      });
+      return response;
+    } catch (error) {
+      void this.workflowIdempotencyService.markFailure({
+        userId,
+        operationName: 'generation.cover_letter',
+        dedupeKey,
+        runId: reservation.runId,
+        status: 'FAILED',
+        errorCode: error instanceof Error ? error.name : 'generation_failed',
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
 
   async exportCoverLetter(
@@ -937,6 +1044,25 @@ export class CoverLettersService {
         href: '/results',
       },
     };
+  }
+
+  private buildGenerationDedupeKey(input: {
+    userId: string;
+    baselineId: string;
+    baselineVersionId: string;
+    jobId: string;
+    generationInputsHash: string | null;
+    closingTemplateKey: string;
+    mode: string;
+  }) {
+    return createHash('sha256')
+      .update(
+        JSON.stringify({
+          operation: 'generation.cover_letter',
+          ...input,
+        }),
+      )
+      .digest('hex');
   }
 
   private mapToAllowedBlocks(

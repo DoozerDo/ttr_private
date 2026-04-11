@@ -1,14 +1,15 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
 
 import ResultsPage from "@/app/(app)/results/page";
+import { FALLBACK_RENDERED_TEXT } from "@/lib/renderedText";
 import {
   clearRecentIntentSignals,
   recordArtifactRefineIntent,
   recordArtifactUsedIntent,
   recordOpportunityCommitIntent,
 } from "@/src/lib/recentIntent";
-import { overrideSearchParams, setFetchImplementation } from "@/tests/setup";
+import { mockRouterReplace, overrideSearchParams, setFetchImplementation } from "@/tests/setup";
 
 const trackEventMock = vi.fn();
 vi.mock("@/src/lib/analytics", () => ({
@@ -98,6 +99,14 @@ function installFetch(score: number) {
   });
 }
 
+function createDeferredResponse<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 describe("results canonical experience", () => {
   beforeEach(() => {
     clearRecentIntentSignals();
@@ -151,7 +160,7 @@ describe("results canonical experience", () => {
       expect(screen.getAllByText(/You're a strong match\. You can generate now\./i).length).toBeGreaterThan(0);
     });
 
-    expect(screen.getAllByText(/Confidence: Medium/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Confidence: High/i).length).toBeGreaterThan(0);
     expect(screen.queryByText("You're not ready to apply yet.")).toBeNull();
     expect(screen.queryAllByText(/confidence/i).length).toBeGreaterThan(0);
   });
@@ -183,9 +192,9 @@ describe("results canonical experience", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText(/You're actively pursuing this role/i)).toBeInTheDocument();
+      expect(screen.getByText("You're a match. Go generate.")).toBeInTheDocument();
     });
-    expect(screen.getByText("You're actively pursuing this role. Keep momentum in Opportunities.")).toBeInTheDocument();
+    expect(screen.getByText("You're a match. Go generate.")).toBeInTheDocument();
   });
 
   it("surfaces Fit Review improvement guidance after a refine intent", async () => {
@@ -199,7 +208,10 @@ describe("results canonical experience", () => {
       expect(screen.getByText(/You signaled refinement, so Fit Review is the fastest path/i)).toBeInTheDocument();
     });
 
-    expect(screen.getByText(/What still needs verification|Verify the missing evidence/i)).toBeInTheDocument();
+    expect(screen.getAllByText("Strengthen this example").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText("Add one concrete example from your real experience so Studio can use it more confidently."),
+    ).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Start Fit Review" })[0]).toHaveAttribute(
       "href",
       "/fit-review?jobId=job-1&analysisId=analysis-current&assessmentId=analysis-current&baselineId=base-1&baselineVersionId=base-version-1",
@@ -225,5 +237,193 @@ describe("results canonical experience", () => {
       );
     });
     expect(trackEventMock.mock.calls.length).toBeGreaterThan(previousCalls);
+  });
+
+  it("ignores a stale pair response when the user switches to a new baseline and job", async () => {
+    const deferredA = createDeferredResponse<Response>();
+    const deferredB = createDeferredResponse<Response>();
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/analysis/job/job-a/baseline/base-a/latest")) {
+        return deferredA.promise;
+      }
+      if (url.includes("/api/analysis/job/job-b/baseline/base-b/latest")) {
+        return deferredB.promise;
+      }
+      if (url.includes("/api/analysis/history")) {
+        return jsonResponse({
+          recentAnalyses: [],
+          alignmentPattern: { strongestAlignmentRoles: [], totalAnalyses: 0, averageScore: 0 },
+          badges: [], generatedAt: new Date().toISOString(),
+        });
+      }
+      if (url.includes("/api/baselines/base-a/versions") || url.includes("/api/baselines/base-b/versions")) {
+        return jsonResponse([{ id: "base-version-1", versionNumber: 1 }]);
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return jsonResponse({
+          status: "ready",
+          blocked: false,
+          reasonCodes: [],
+          reasons: [],
+          badgeLabel: "READY",
+          summary: "Ready.",
+          verificationIssues: [],
+        });
+      }
+      return jsonResponse({});
+    });
+
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+    overrideSearchParams({ baselineId: "base-a", jobId: "job-a" });
+
+    const { rerender } = render(<ResultsPage />);
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/analysis/job/job-a/baseline/base-a/latest"),
+        expect.any(Object),
+      );
+    });
+
+    overrideSearchParams({ baselineId: "base-b", jobId: "job-b" });
+    rerender(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/analysis/job/job-b/baseline/base-b/latest"),
+        expect.any(Object),
+      );
+    });
+
+    await act(async () => {
+      deferredB.resolve(
+        jsonResponse({
+          assessmentId: "analysis-b",
+          jobId: "job-b",
+          baselineId: "base-b",
+          baselineVersionId: "base-version-1",
+          score: 81,
+          strengths: ["Leadership"],
+          criticalGaps: [],
+          gaps: [],
+          summary: "Structured role analysis summary.",
+          verification_coverage: {
+            totalClaims: 3,
+            verifiedClaims: 3,
+            inferredClaims: 0,
+            unverifiedClaims: 0,
+            verifiedRequirements: ["Leadership"],
+            unverifiedRequirements: [],
+            supportedRequirements: ["Leadership"],
+          },
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(mockRouterReplace).toHaveBeenCalledWith(expect.stringContaining("assessmentId=analysis-b"));
+    });
+
+    const callsBeforeStaleResolution = mockRouterReplace.mock.calls.length;
+
+    await act(async () => {
+      deferredA.resolve(
+        jsonResponse({
+          assessmentId: "analysis-a",
+          jobId: "job-a",
+          baselineId: "base-a",
+          baselineVersionId: "base-version-1",
+          score: 78,
+          strengths: ["Operations"],
+          criticalGaps: [],
+          gaps: [],
+          summary: "Structured role analysis summary.",
+          verification_coverage: {
+            totalClaims: 3,
+            verifiedClaims: 2,
+            inferredClaims: 1,
+            unverifiedClaims: 0,
+            verifiedRequirements: ["Operations"],
+            unverifiedRequirements: [],
+            supportedRequirements: ["Operations"],
+          },
+        }),
+      );
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mockRouterReplace.mock.calls.length).toBe(callsBeforeStaleResolution);
+    expect(mockRouterReplace.mock.calls.at(-1)?.[0]).toContain("analysis-b");
+  });
+
+  it("replaces malformed analysis text with a visible fallback instead of leaking tokens", async () => {
+    overrideSearchParams({ assessmentId: "analysis-current", locked: "1" });
+    setFetchImplementation(
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/analysis/fit-assessments/analysis-current")) {
+          return jsonResponse({
+            assessmentId: "analysis-current",
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            score: 74,
+            strengths: ["{{bad}}", "2 + 2 = 4", "\u0000partial"],
+            criticalGaps: [
+              {
+                gapId: "gap-1",
+                title: "{{broken title}}",
+                description: "2 + 2 = 4",
+                severityScore: 0.9,
+                requirementEvidence: "${missing}",
+                baselineEvidence: "undefined",
+                reasoning: "{{reasoning}}",
+              },
+            ],
+            summary: "result {{broken}}",
+            verification_coverage: {
+              totalClaims: 1,
+              verifiedClaims: 0,
+              inferredClaims: 0,
+              unverifiedClaims: 1,
+              unverifiedRequirements: ["Leadership scope"],
+            },
+          });
+        }
+        if (url.includes("/api/analysis/fit-assessments?jobId=job-1")) {
+          return jsonResponse([{ assessmentId: "analysis-current", score: 74 }]);
+        }
+        if (url.includes("/api/baselines/base-1/versions")) {
+          return jsonResponse([{ id: "base-version-1", versionNumber: 1 }]);
+        }
+        if (url.includes("/api/analysis/history")) {
+          return jsonResponse({
+            recentAnalyses: [],
+            alignmentPattern: { strongestAlignmentRoles: [], totalAnalyses: 0, averageScore: 0 },
+            badges: [],
+            generatedAt: new Date().toISOString(),
+          });
+        }
+        if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+          return jsonResponse({ status: "blocked", blocked: true, reasons: [], badgeLabel: "BLOCKED", summary: "Blocked.", verificationIssues: [] });
+        }
+        if (url.includes("/api/opportunities") && input instanceof Request && input.method === "POST") {
+          return jsonResponse({ id: "opp-1" });
+        }
+        return jsonResponse({});
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Competitive fit. One step left.")).toBeInTheDocument();
+    });
+    expect(
+      screen.getAllByText((_, element) => element?.textContent?.includes(FALLBACK_RENDERED_TEXT) ?? false)
+        .length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText(/\{\{broken title\}\}|\$\{missing\}|undefined|2 \+ 2 = 4/i)).toBeNull();
   });
 });

@@ -6,6 +6,7 @@ import { Alert } from "@/components/Alert";
 import { RetryButton } from "@/components/RetryButton";
 import type { BaselineDto, BaselineSectionDto } from "@/lib/baselines";
 import { formatDateTime } from "@/lib/format-date";
+import { sanitizeRenderedTextValue } from "@/lib/renderedText";
 import { getBaselineDetailsHref } from "@/src/navigation/routes";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +44,10 @@ function computeBaseUrl({
   fallbackBase: string | undefined;
 }) {
   if (fallbackBase && fallbackBase.trim().length > 0) {
-    return fallbackBase;
+    return sanitizeRenderedTextValue(fallbackBase, {
+      endpoint: "baseline-detail",
+      field: "fallbackBase",
+    });
   }
 
   if (host) {
@@ -86,9 +90,15 @@ function extractErrorMessage(bodyText: string, status: number) {
     };
     const parsedMessage =
       typeof parsed.message === "string"
-        ? parsed.message.trim()
+        ? sanitizeRenderedTextValue(parsed.message, {
+            endpoint: "baseline-detail",
+            field: "error.message",
+          })
         : typeof parsed.error === "string"
-          ? parsed.error.trim()
+          ? sanitizeRenderedTextValue(parsed.error, {
+              endpoint: "baseline-detail",
+              field: "error.error",
+            })
           : null;
     if (parsedMessage) {
       return parsedMessage;
@@ -97,7 +107,10 @@ function extractErrorMessage(bodyText: string, status: number) {
     // Non-JSON error bodies are expected from some proxy layers.
   }
 
-  return bodyText.trim().slice(0, status >= 500 ? 240 : 120);
+  return sanitizeRenderedTextValue(bodyText, {
+    endpoint: "baseline-detail",
+    field: "error.body",
+  }).slice(0, status >= 500 ? 240 : 120);
 }
 
 function logDetailLoadFailure(entry: {
@@ -112,7 +125,10 @@ function logDetailLoadFailure(entry: {
 }
 
 async function fetchBaseline(id: string): Promise<BaselineDetailResult> {
-  const requestedId = id.trim();
+  const requestedId = sanitizeRenderedTextValue(id, {
+    endpoint: "baseline-detail",
+    field: "params.id",
+  });
   const resolvedId = requestedId;
   const { baseUrl, fetchOptions, authState } = await getRequestContext();
 
@@ -239,10 +255,16 @@ function renderContentSections(groupedSections: Record<string, BaselineSectionDt
             className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900"
           >
             <div className="mb-2 text-xs font-semibold uppercase text-gray-600">
-              {section.title || friendlyTitles[type] || type}
+              {sanitizeRenderedTextValue(section.title || friendlyTitles[type] || type, {
+                endpoint: "baseline-detail",
+                field: `sections.${type}.title`,
+              })}
             </div>
             <pre className="whitespace-pre-wrap break-words text-sm text-gray-900">
-              {section.content}
+              {sanitizeRenderedTextValue(section.content, {
+                endpoint: "baseline-detail",
+                field: `sections.${type}.content`,
+              })}
             </pre>
           </article>
         ))}
@@ -300,7 +322,10 @@ export default async function BaselineDetailPage({
   searchParams?: { suggestedSections?: string };
 }) {
   const resolvedParams = await params;
-  const resolvedId = resolvedParams?.id?.trim() ?? "";
+  const resolvedId = sanitizeRenderedTextValue(resolvedParams?.id ?? "", {
+    endpoint: "baseline-detail",
+    field: "params.id",
+  });
 
   if (!resolvedId) {
     notFound();
@@ -312,7 +337,12 @@ export default async function BaselineDetailPage({
   const filterSet = new Set(
     suggestedSectionsRaw
       .split(",")
-      .map((value) => value.trim().toLowerCase())
+      .map((value) =>
+        sanitizeRenderedTextValue(value, {
+          endpoint: "baseline-detail",
+          field: "suggestedSections",
+        }).toLowerCase(),
+      )
       .filter(Boolean),
   );
 
@@ -359,7 +389,12 @@ export default async function BaselineDetailPage({
   );
 
   const fallbackContent =
-    !hasRenderableSections && baseline.sections?.[0]?.content ? baseline.sections[0].content : null;
+    !hasRenderableSections && baseline.sections?.[0]?.content
+      ? sanitizeRenderedTextValue(baseline.sections[0].content, {
+          endpoint: "baseline-detail",
+          field: "baseline.sections[0].content",
+        })
+      : null;
 
   return (
     <main className="min-h-screen px-4 py-8">
@@ -370,7 +405,10 @@ export default async function BaselineDetailPage({
               Baseline details
             </p>
             <h1 className="text-3xl font-bold text-gray-900">
-              {baseline.originalFilename ?? "Baseline details"}
+              {sanitizeRenderedTextValue(baseline.originalFilename ?? "Baseline details", {
+                endpoint: "baseline-detail",
+                field: "baseline.originalFilename",
+              })}
             </h1>
             <p className="text-sm text-gray-700">Uploaded {formatDateTime(baseline.createdAt)}</p>
           </div>

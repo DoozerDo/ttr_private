@@ -1,4 +1,5 @@
 import { resolveCanonicalState } from "@/lib/canonicalDecision";
+import { buildResultsDecisionCopy } from "@/lib/resultsMessaging";
 import type {
   GenerationProductConfidence,
   GenerationProductReadinessState,
@@ -65,32 +66,53 @@ export function resolveResultsDecision(input: ResultsDecisionInput): ResultsDeci
   });
 
   if (canonical.readinessState === "READY") {
+    const copy = buildResultsDecisionCopy({
+      score,
+      generationReadiness: {
+        state: "ALLOWED",
+        confidence: input.generationReadiness.confidence,
+        needsVerification: input.generationReadiness.needsVerification,
+      },
+    });
     return {
       state: "READY",
       primaryCta: "OPEN_STUDIO",
-      headline: "You're a strong match. You can generate now.",
-      subtext:
-        "Your verified evidence is complete enough to generate safely in Studio.",
+      headline: copy.headline,
+      subtext: copy.subtext,
     };
   }
 
   if (canonical.readinessState === "DRAFT") {
+    const copy = buildResultsDecisionCopy({
+      score,
+      generationReadiness: {
+        state: "ALLOWED",
+        confidence: "MEDIUM",
+        needsVerification: true,
+      },
+    });
     return {
       state: "DRAFT",
       primaryCta: "OPEN_STUDIO",
-      headline: "You're a strong match. You can generate now.",
-      subtext:
-        "Some claims are unverified. You can strengthen your output in Studio.",
+      headline: copy.headline,
+      subtext: copy.subtext,
     };
   }
 
   if (canonical.readinessState === "BLOCKED") {
+    const copy = buildResultsDecisionCopy({
+      score,
+      generationReadiness: {
+        state: "BLOCKED",
+        confidence: input.generationReadiness.confidence,
+        needsVerification: input.generationReadiness.needsVerification,
+      },
+    });
     return {
       state: "BLOCKED",
       primaryCta: "START_FIT_REVIEW",
-      headline: "Competitive fit. Not ready to generate yet.",
-      subtext:
-        "Your experience aligns with this role, but key claims still need verified evidence before Studio can generate safely.",
+      headline: copy.headline,
+      subtext: copy.subtext,
     };
   }
 

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { vi } from "vitest";
 import ResultsPage from "@/app/(app)/results/page";
 import { overrideSearchParams, setFetchImplementation } from "@/tests/setup";
@@ -19,6 +19,15 @@ function installFetch(input: {
   scoreSanityFlags?: string[];
   strengths?: string[];
   unverifiedRequirements?: string[];
+  criticalGaps?: Array<{
+    gapId: string;
+    title: string;
+    description: string;
+    severityScore: number;
+    requirementEvidence: string;
+    baselineEvidence: string | null;
+    reasoning: string;
+  }>;
   readinessStatus?: "ready" | "blocked";
   readinessBlocked?: boolean;
 }) {
@@ -31,6 +40,7 @@ function installFetch(input: {
     scoreSanityFlags = [],
     strengths = ["Incident management", "SLA ownership"],
     unverifiedRequirements = [],
+    criticalGaps = [],
     readinessStatus = "ready",
     readinessBlocked = false,
   } = input;
@@ -52,6 +62,7 @@ function installFetch(input: {
         strengths,
         supportingSignals: strengths,
         baselineEvidence: strengths,
+        criticalGaps,
         verification_coverage: {
           totalClaims: strengths.length + unverifiedRequirements.length,
           verifiedClaims: strengths.length,
@@ -77,6 +88,7 @@ function installFetch(input: {
         strengths,
         supportingSignals: strengths,
         baselineEvidence: strengths,
+        criticalGaps,
         verification_coverage: {
           totalClaims: strengths.length + unverifiedRequirements.length,
           verifiedClaims: strengths.length,
@@ -157,7 +169,7 @@ describe("results gating", () => {
     expect(screen.queryByRole("link", { name: "Open Studio" })).toBeNull();
   });
 
-  it("allows generation for strong fit even when verification is weak", async () => {
+  it("blocks generation for strong fit when verification remains weak", async () => {
     overrideSearchParams({ assessmentId: "analysis-current" });
     const fetchMock = installFetch({
       score: 82,
@@ -170,23 +182,80 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("results-hero-primary-cta").closest("section")).toHaveTextContent(
-        "Confidence: Medium",
-      );
+      expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
     });
+    expect(screen.queryByRole("link", { name: "Open Studio" })).toBeNull();
     expect(screen.queryByTestId("results-blocked-evidence-panel")).toBeNull();
-    expect(screen.getAllByTestId("results-hero-primary-cta")[0]).toHaveTextContent("Open Studio");
-    expect(screen.getByRole("link", { name: "Open Studio" })).toHaveAttribute(
-      "href",
-      "/studio?jobId=job-1&analysisId=analysis-current&baselineId=base-1&baselineVersionId=base-version-1",
-    );
-    expect(screen.queryByText("Generation readiness: BLOCKED")).toBeNull();
-    expect(screen.queryByText("Generation readiness: LIMITED")).toBeNull();
-    expect(screen.queryByText("Verify the missing evidence so Studio can generate safely.")).toBeNull();
-    expect(screen.queryByText("Start Fit Review")).toBeNull();
     expect(screen.queryByText("How to improve your fit")).toBeNull();
     expect(screen.queryByText("Apply moment")).toBeNull();
-    expect(screen.queryByText("No material gaps were identified in this run.")).toBeNull();
+  });
+
+  it("shows a competitive blocked state with concrete readiness drivers", async () => {
+    overrideSearchParams({ assessmentId: "analysis-current" });
+    const fetchMock = installFetch({
+      score: 74,
+      unverifiedRequirements: ["Leadership scope", "Incident ownership", "Measured outcomes"],
+      criticalGaps: [
+        {
+          gapId: "gap-1",
+          title: "Leadership scope",
+          description: "Clarify team size and ownership.",
+          severityScore: 0.9,
+          requirementEvidence: "Clarify team size, ownership span, or operational scope.",
+          baselineEvidence: null,
+          reasoning: "Leadership scope needs stronger grounding.",
+        },
+        {
+          gapId: "gap-2",
+          title: "Incident ownership",
+          description: "Clarify escalation and triage ownership.",
+          severityScore: 0.8,
+          requirementEvidence: "Clarify your role in escalation, triage, restoration, or problem management.",
+          baselineEvidence: null,
+          reasoning: "Incident ownership needs stronger grounding.",
+        },
+        {
+          gapId: "gap-3",
+          title: "Measured outcomes",
+          description: "Add metrics or concrete results.",
+          severityScore: 0.7,
+          requirementEvidence: "Add metrics or concrete results tied to the work.",
+          baselineEvidence: null,
+          reasoning: "Measured outcomes need stronger grounding.",
+        },
+      ],
+      readinessStatus: "blocked",
+      readinessBlocked: true,
+    });
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    render(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Competitive fit. One step left.")).toBeInTheDocument();
+    });
+    const blockedPanel = screen.getByTestId("results-blocked-evidence-panel");
+    expect(
+      within(blockedPanel).getByText(
+        "You are aligned with this role. Before Studio can generate, we need to strengthen a few profile details so the output stays accurate and defensible.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(blockedPanel).getByText("Leadership scope")).toBeInTheDocument();
+    expect(within(blockedPanel).getByText("Clarify team size, ownership span, or operational scope.")).toBeInTheDocument();
+    expect(within(blockedPanel).getByText("Incident ownership")).toBeInTheDocument();
+    expect(
+      within(blockedPanel).getByText("Clarify your role in escalation, triage, restoration, or problem management."),
+    ).toBeInTheDocument();
+    expect(within(blockedPanel).getByText("Measured outcomes")).toBeInTheDocument();
+    expect(within(blockedPanel).getByText("Add metrics or concrete results tied to the work.")).toBeInTheDocument();
+    expect(
+      screen.getAllByText(
+        "You are aligned with this role. Before Studio can generate, we need to strengthen a few profile details so the output stays accurate and defensible.",
+      ).length,
+    ).toBe(1);
+    expect(screen.getAllByRole("link", { name: "View top drivers" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "Start Fit Review" }).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/verified evidence|key claims/i)).toBeNull();
   });
 
   it("routes ready results to Studio and suppresses recovery guidance when evidence is verified", async () => {
@@ -237,9 +306,7 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("results-hero-primary-cta").closest("section")).toHaveTextContent(
-        "Confidence: High",
-      );
+      expect(screen.getByRole("link", { name: "Open Studio" })).toBeInTheDocument();
     });
     expect(screen.getByRole("link", { name: "Open Studio" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();

@@ -11,6 +11,7 @@ import {
 } from './interview-types';
 import { BaselineVersionService } from '../baseline/baseline-version.service';
 import { AnalysisService } from '../analysis/analysis.service';
+import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
 
 describe('InterviewRecordsService', () => {
   const mockInterview: Interview = {
@@ -61,7 +62,7 @@ describe('InterviewRecordsService', () => {
   const createService = (
     repository = createMockRepository(),
     acceptedAdditionsRepository = createAcceptedAdditionsRepository(),
-    baselineVersionRepository = { findOne: jest.fn() },
+    baselineVersionRepository: Partial<{ findOne: jest.Mock }> = {},
     gapDetectionService: Partial<GapDetectionService> = {},
     interviewQuestionGenerator: Partial<InterviewQuestionGeneratorService> = {},
     recommendedAdditionsService: Partial<{
@@ -73,16 +74,41 @@ describe('InterviewRecordsService', () => {
       approveVerifiedAdditions: jest.fn(),
     },
     analysisService?: Partial<AnalysisService>,
+    workflowIdempotencyService: Partial<WorkflowIdempotencyService> = {
+      reserve: jest.fn().mockResolvedValue({
+        status: 'accepted_new',
+        runId: 'run-1',
+        dedupeKey: 'dedupe-1',
+        recordId: 'record-1',
+      }),
+      complete: jest.fn().mockResolvedValue({ status: 'completed' }),
+      markFailure: jest.fn().mockResolvedValue({ status: 'rejected_stale' }),
+    },
   ) =>
     new InterviewRecordsService(
       repository as never,
-      acceptedAdditionsRepository as never,
-      baselineVersionRepository as never,
-      gapDetectionService as GapDetectionService,
-      interviewQuestionGenerator as InterviewQuestionGeneratorService,
+      { ...createAcceptedAdditionsRepository(), ...acceptedAdditionsRepository } as never,
+      {
+        findOne: jest.fn().mockResolvedValue({ versionNumber: 1, fileHash: 'hash' }),
+        ...baselineVersionRepository,
+      } as never,
+      {
+        detectGaps: jest.fn().mockResolvedValue({
+          baselineId: 'baseline-1',
+          baselineVersionId: 'baseline-version-1',
+          jobId: 'job-1',
+          gaps: [],
+        }),
+        ...gapDetectionService,
+      } as GapDetectionService,
+      {
+        generateQuestions: jest.fn().mockReturnValue([]),
+        ...interviewQuestionGenerator,
+      } as InterviewQuestionGeneratorService,
       recommendedAdditionsService as any,
       baselineVersionService as BaselineVersionService,
       analysisService as AnalysisService,
+      workflowIdempotencyService as WorkflowIdempotencyService,
     );
 
   afterEach(() => {
@@ -110,6 +136,7 @@ describe('InterviewRecordsService', () => {
     ];
     const service = createService(
       repository,
+      undefined,
       undefined,
       {
         detectGaps: jest.fn().mockResolvedValue({
@@ -200,8 +227,9 @@ describe('InterviewRecordsService', () => {
     const service = createService(
       repository,
       undefined,
-      {},
-      {},
+      undefined,
+      undefined,
+      undefined,
       {
         generateFromResponses: jest.fn().mockReturnValue(recommendedAdditions),
       },
@@ -250,8 +278,9 @@ describe('InterviewRecordsService', () => {
     const service = createService(
       repository,
       undefined,
-      {},
-      {},
+      undefined,
+      undefined,
+      undefined,
       recommendedAdditionsService,
     );
 
@@ -288,8 +317,9 @@ describe('InterviewRecordsService', () => {
     const service = createService(
       repository,
       undefined,
-      {},
-      {},
+      undefined,
+      undefined,
+      undefined,
       recommendedAdditionsService,
     );
 
@@ -330,8 +360,9 @@ describe('InterviewRecordsService', () => {
     const service = createService(
       repository,
       undefined,
-      {},
-      {},
+      undefined,
+      undefined,
+      undefined,
       undefined,
       baselineVersionService,
     );
@@ -375,15 +406,22 @@ describe('InterviewRecordsService', () => {
     const service = createService(
       repository,
       undefined,
-      {},
-      {},
+      undefined,
+      undefined,
+      undefined,
       undefined,
       baselineVersionService,
     );
 
     await expect(
       service.promoteAcceptedAdditions('interview-1', 'user-1'),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        error: expect.objectContaining({
+          code: 'invalid_promotion_state',
+        }),
+      }),
+    });
 
     expect(
       baselineVersionService.approveVerifiedAdditions,
@@ -404,6 +442,13 @@ describe('InterviewRecordsService', () => {
       ],
       acceptedAdditionIds: ['a1'],
     });
+    const acceptedAdditionsRepository = {
+      find: jest.fn().mockResolvedValue([
+        {
+          suggestion: 'Addition A',
+        },
+      ]),
+    };
     const baselineVersionRepository = {
       findOne: jest
         .fn()
@@ -419,6 +464,7 @@ describe('InterviewRecordsService', () => {
     };
     const service = createService(
       repository,
+      acceptedAdditionsRepository,
       baselineVersionRepository,
       {},
       {},
@@ -439,15 +485,187 @@ describe('InterviewRecordsService', () => {
         verifiedAdditions: ['Addition A'],
       },
     );
-    expect(result.expandedFitAssessment).toEqual(
-      expect.objectContaining({
-        ok: true,
-        originalScore: 72,
-        expandedScore: 90,
-        delta: 18,
+    expect(result).toMatchObject({
+      status: 'success',
+      code: 'expanded_fit_ready',
+      message: 'Expanded fit is ready.',
+      retryable: false,
+      nextAction: 'review_results',
+      payload: expect.objectContaining({
+        expandedFitAssessment: expect.objectContaining({
+          ok: true,
+          originalScore: 72,
+          expandedScore: 90,
+          delta: 18,
+        }),
       }),
-    );
+    });
     expect(repository.save).toHaveBeenCalled();
+  });
+
+  it('reuses a completed expanded fit computation instead of recomputing', async () => {
+    const repository = createMockRepository();
+    repository.findOne.mockResolvedValue({
+      ...mockInterview,
+      recommendedAdditions: [
+        {
+          id: 'a1',
+          text: 'Addition A',
+          sources: [],
+          status: 'proposed' as const,
+        },
+      ],
+      acceptedAdditionIds: ['a1'],
+    });
+    const acceptedAdditionsRepository = {
+      find: jest.fn().mockResolvedValue([
+        {
+          suggestion: 'Addition A',
+        },
+      ]),
+    };
+    const baselineVersionRepository = {
+      findOne: jest.fn().mockResolvedValue({ versionNumber: 4, fileHash: 'hash' }),
+    };
+    const analysisService = {
+      runExpandedFitAssessment: jest.fn(),
+    };
+    const workflowIdempotencyService = {
+      reserve: jest.fn().mockResolvedValue({
+        status: 'existing_completed',
+        runId: 'run-dup',
+        dedupeKey: 'dedupe-dup',
+        recordId: 'workflow-1',
+        responseBody: {
+          status: 'success',
+          code: 'expanded_fit_ready',
+          message: 'Expanded fit is ready.',
+          retryable: false,
+          nextAction: 'review_results',
+          payload: {
+            ...mockInterview,
+            expandedFitAssessment: {
+              ok: true,
+              originalScore: 72,
+              expandedScore: 90,
+              delta: 18,
+              requestHash: 'request-hash',
+            },
+          },
+          runId: 'run-dup',
+          idempotency: {
+            status: 'existing_completed',
+            runId: 'run-dup',
+            dedupeKey: 'dedupe-dup',
+            reused: true,
+          },
+        },
+      }),
+      complete: jest.fn(),
+      markFailure: jest.fn(),
+    };
+    const service = createService(
+      repository,
+      acceptedAdditionsRepository,
+      baselineVersionRepository,
+      {},
+      {},
+      undefined,
+      undefined,
+      analysisService,
+      workflowIdempotencyService as any,
+    );
+
+    const result = await service.computeExpandedFit('interview-1', 'user-1');
+
+    expect(result.status).toBe('success');
+    expect(result.idempotency?.reused).toBe(true);
+    expect(analysisService.runExpandedFitAssessment).not.toHaveBeenCalled();
+  });
+
+  it('returns a typed failure when the baseline linkage is invalid', async () => {
+    const repository = createMockRepository();
+    repository.findOne.mockResolvedValue({
+      ...mockInterview,
+      baselineVersionId: 'missing-version',
+      acceptedAdditionIds: ['a1'],
+      recommendedAdditions: [
+        {
+          id: 'a1',
+          text: 'Addition A',
+          sources: [],
+          status: 'proposed' as const,
+        },
+      ],
+    });
+    const acceptedAdditionsRepository = {
+      find: jest.fn().mockResolvedValue([
+        {
+          suggestion: 'Addition A',
+        },
+      ]),
+    };
+    const baselineVersionRepository = {
+      findOne: jest.fn().mockResolvedValue(null),
+    };
+    const service = createService(repository, acceptedAdditionsRepository, baselineVersionRepository);
+
+    await expect(
+      service.computeExpandedFit('interview-1', 'user-1'),
+    ).resolves.toMatchObject({
+      status: 'error',
+      code: 'baseline_version_mismatch',
+      nextAction: 'return_to_baseline',
+      retryable: true,
+    });
+  });
+
+  it('surfaces a typed failure when expanded fit analysis throws unexpectedly', async () => {
+    const repository = createMockRepository();
+    repository.findOne.mockResolvedValue({
+      ...mockInterview,
+      acceptedAdditionIds: ['a1'],
+      recommendedAdditions: [
+        {
+          id: 'a1',
+          text: 'Addition A',
+          sources: [],
+          status: 'proposed' as const,
+        },
+      ],
+    });
+    const acceptedAdditionsRepository = {
+      find: jest.fn().mockResolvedValue([
+        {
+          suggestion: 'Addition A',
+        },
+      ]),
+    };
+    const baselineVersionRepository = {
+      findOne: jest.fn().mockResolvedValue({ versionNumber: 4, fileHash: 'hash' }),
+    };
+    const analysisService = {
+      runExpandedFitAssessment: jest.fn().mockRejectedValue(new Error('boom')),
+    };
+    const service = createService(
+      repository,
+      acceptedAdditionsRepository,
+      baselineVersionRepository,
+      {},
+      {},
+      undefined,
+      undefined,
+      analysisService,
+    );
+
+    await expect(
+      service.computeExpandedFit('interview-1', 'user-1'),
+    ).resolves.toMatchObject({
+      status: 'error',
+      code: 'computation_failed',
+      nextAction: 'retry_compute',
+      retryable: true,
+    });
   });
 
   it('deletes an interview record', async () => {

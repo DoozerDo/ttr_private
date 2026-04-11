@@ -16,6 +16,10 @@ function readStatus(payload: Record<string, unknown>): string {
   return status;
 }
 
+function readOutcomeCode(payload: Record<string, unknown>): string {
+  return typeof payload.code === "string" ? payload.code.trim().toLowerCase() : "";
+}
+
 function hasPreviewResume(payload: Record<string, unknown>): boolean {
   const preview = payload.preview;
   if (!preview || typeof preview !== "object") {
@@ -33,7 +37,7 @@ function isValidResumeGenerationPayload(payload: unknown): payload is Record<str
   const status = readStatus(record);
 
   if (status === "success") {
-    return hasPreviewResume(record) && record.exportReady === true;
+    return hasPreviewResume(record) && record.exportReady === true && Boolean(readOutcomeCode(record));
   }
 
   if (status === "blocked" || status === "compliance_blocked") {
@@ -41,7 +45,7 @@ function isValidResumeGenerationPayload(payload: unknown): payload is Record<str
   }
 
   if (status === "error") {
-    return record.exportReady === false;
+    return record.exportReady === false && Boolean(readOutcomeCode(record));
   }
 
   return false;

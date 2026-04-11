@@ -16,6 +16,7 @@ import {
   saveLastAnalysis,
 } from "../lib/session";
 import { publishBaselineUpdated } from "@/src/lib/baseline-sync";
+import { sanitizeRenderedTextValue } from "@/lib/renderedText";
 
 const GENERATION_SCORE_THRESHOLD = 70;
 const TIMESTAMP_KEYS = [
@@ -58,7 +59,10 @@ function resolveTimestamp(analysis: AnalysisResult | null, fallback: string | nu
     for (const key of TIMESTAMP_KEYS) {
       const value = (analysis as Record<string, unknown>)[key];
       if (typeof value === "string" && value.trim()) {
-        return value;
+        return sanitizeRenderedTextValue(value, {
+          endpoint: "analyze",
+          field: key,
+        });
       }
     }
   }
@@ -80,8 +84,15 @@ function getAlignmentLabel(score: number | null): string {
 }
 
 function truncateText(value: string, limit = 180) {
-  if (value.length <= limit) return value;
-  return `${value.slice(0, limit).trim()}…`;
+  const cleaned = sanitizeRenderedTextValue(value, {
+    endpoint: "analyze",
+    field: "truncateText",
+  });
+  if (cleaned.length <= limit) return cleaned;
+  return sanitizeRenderedTextValue(`${cleaned.slice(0, limit).trim()}…`, {
+    endpoint: "analyze",
+    field: "truncateText.output",
+  });
 }
 
 type BaselineInputCardProps = {
@@ -450,7 +461,14 @@ export default function AnalyzePage() {
   const [jobsError, setJobsError] = useState<string | null>(null);
 
   const [jobDescription, setJobDescription] = useState("");
-  const suggestedRole = useMemo(() => searchParams?.get("suggestedRole")?.trim() ?? "", [searchParams]);
+  const suggestedRole = useMemo(
+    () =>
+      sanitizeRenderedTextValue(searchParams?.get("suggestedRole") ?? "", {
+        endpoint: "analyze",
+        field: "suggestedRole",
+      }),
+    [searchParams],
+  );
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [restoredAt, setRestoredAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);

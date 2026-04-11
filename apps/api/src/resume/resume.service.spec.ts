@@ -13,6 +13,7 @@ import { ApplicationsService } from '../applications/applications.service';
 import { OpportunitiesService } from '../opportunities/opportunities.service';
 import { GapAnalysisService } from '../analysis/gap-analysis.service';
 import { CriticalFlowTrackerService } from '../support/critical-flow-tracker.service';
+import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
 import { BaselineSectionType } from '../baseline/baseline-section.entity';
 import { extractEvidenceUnitsFromLogicalUnits, reconstructLogicalTextUnits } from './resume-draft-bullets';
 
@@ -181,6 +182,16 @@ const buildService = (options?: {
     recordCriticalFlowEvent: jest.fn().mockResolvedValue(undefined),
   } as unknown as CriticalFlowTrackerService;
 
+  const workflowIdempotencyService = {
+    reserve: jest.fn().mockResolvedValue({
+      status: 'accepted_new',
+      runId: 'run-1',
+      responseBody: null,
+    }),
+    complete: jest.fn().mockResolvedValue({ status: 'completed' }),
+    markFailure: jest.fn().mockResolvedValue(undefined),
+  } as unknown as jest.Mocked<WorkflowIdempotencyService>;
+
   const service = new ResumeService(
     baselineRepo as Repository<Baseline>,
     versionRepo as Repository<BaselineVersion>,
@@ -192,9 +203,10 @@ const buildService = (options?: {
     opportunitiesService,
     gapAnalysisService,
     criticalFlowTrackerService,
+    workflowIdempotencyService,
   );
 
-  return { service, complianceService, applicationsService, opportunitiesService };
+  return { service, complianceService, applicationsService, opportunitiesService, workflowIdempotencyService };
 };
 
 describe('ResumeService contract', () => {

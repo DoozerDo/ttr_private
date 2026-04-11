@@ -1,4 +1,9 @@
 import { normalizeUserFacingRequirementLabel } from "@/lib/generationReadiness";
+import {
+  FALLBACK_RENDERED_TEXT,
+  sanitizeRenderedTextList,
+  sanitizeRenderedTextValue,
+} from "@/lib/renderedText";
 
 export type EvidenceSuggestion = {
   requirement: string;
@@ -24,15 +29,22 @@ export type RequirementGapInsight = {
 
 function cleanList(values: unknown): string[] {
   if (!Array.isArray(values)) return [];
-  return values
-    .filter((value): value is string => typeof value === "string")
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0);
+  return sanitizeRenderedTextList(
+    values.filter((value): value is string => typeof value === "string"),
+    {
+      endpoint: "evidenceSuggestions",
+      field: "cleanList",
+    },
+  ).filter((value) => value !== FALLBACK_RENDERED_TEXT);
 }
 
 function cleanText(value: unknown): string {
   if (typeof value !== "string") return "";
-  return value.replace(/\s+/g, " ").trim();
+  const cleaned = sanitizeRenderedTextValue(value, {
+    endpoint: "evidenceSuggestions",
+    field: "cleanText",
+  });
+  return cleaned === FALLBACK_RENDERED_TEXT ? "" : cleaned;
 }
 
 function sentenceFromSignals(signals: string[]): string {
@@ -253,11 +265,26 @@ export function buildEvidenceSuggestion(input: {
     : "Example anchor: verified support process and customer operations outcomes.";
 
   return {
-    requirement,
-    intro: `This claim needs verification before Studio can use it.`,
-    context,
-    description,
-    scope,
+    requirement: sanitizeRenderedTextValue(requirement, {
+      endpoint: "evidenceSuggestions",
+      field: "requirement",
+    }),
+    intro: sanitizeRenderedTextValue("This claim needs verification before Studio can use it.", {
+      endpoint: "evidenceSuggestions",
+      field: "intro",
+    }),
+    context: sanitizeRenderedTextValue(context, {
+      endpoint: "evidenceSuggestions",
+      field: "context",
+    }),
+    description: sanitizeRenderedTextValue(description, {
+      endpoint: "evidenceSuggestions",
+      field: "description",
+    }),
+    scope: sanitizeRenderedTextValue(scope, {
+      endpoint: "evidenceSuggestions",
+      field: "scope",
+    }),
     groundedSignals,
   };
 }

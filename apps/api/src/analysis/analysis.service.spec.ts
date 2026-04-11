@@ -25,6 +25,7 @@ import { AnalysisService } from './analysis.service';
 import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
 import { FitScoringService } from './fit-scoring.service';
 import { GapAnalysisService } from './gap-analysis.service';
+import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
 import type { CalibrationProfile } from './calibration-profiles';
 import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
 import type { CxFitV2Result } from './cx-fit-scoring-v2';
@@ -222,6 +223,18 @@ const sampleScoringV2: CxFitV2Result = {
               positioningSuggestions: [],
               interviewRisks: [],
             }),
+          },
+        },
+        {
+          provide: WorkflowIdempotencyService,
+          useValue: {
+            reserve: jest.fn().mockResolvedValue({
+              status: 'accepted_new',
+              runId: 'run-1',
+              responseBody: null,
+            }),
+            complete: jest.fn().mockResolvedValue({ status: 'completed' }),
+            markFailure: jest.fn().mockResolvedValue(undefined),
           },
         },
         {

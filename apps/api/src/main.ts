@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import cookieParser from 'cookie-parser';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { requestLoggerMiddleware } from './common/middleware/request-logger.middleware';
+import { requestTimeoutMiddleware } from './common/middleware/request-timeout.middleware';
 import { initSentry } from './common/sentry';
 import { DataSource } from 'typeorm';
 
@@ -89,6 +90,7 @@ async function bootstrap() {
   initSentry(config);
 
   app.use(requestLoggerMiddleware);
+  app.use(requestTimeoutMiddleware);
   app.use(cookieParser());
 
   app.useGlobalFilters(new AllExceptionsFilter());

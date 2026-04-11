@@ -221,6 +221,8 @@ describe('SupportService', () => {
       status: 503,
       response: expect.objectContaining({
         code: 'support_config_unavailable',
+        message:
+          'Bug reporting is temporarily unavailable right now. Save a draft and check Support history later.',
       }),
     });
   });

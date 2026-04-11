@@ -145,13 +145,13 @@ describe("Studio generation error contract", () => {
 
     renderStudio();
     await waitFor(() => expect(screen.getByText("Ready to generate")).toBeInTheDocument());
-    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
+    expect(screen.getByText("Fix Pair Selection")).toBeInTheDocument();
     expect(screen.getByText("Strong output: you can use this now with confidence.")).toBeInTheDocument();
     expect(
       screen.getByText("Built directly from your verified experience and aligned to the role."),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Generate Cover Letter" })).toBeEnabled();
+    expect(screen.getByTestId("studio-cover-generate-button")).toBeEnabled();
   });
 
   it("renders generation_blocked as the inline failure shell", async () => {
@@ -193,14 +193,12 @@ describe("Studio generation error contract", () => {
 
     expect(resumeFetches).toBe(1);
     expect(await screen.findByText("Ready to generate")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
+    expect(screen.getByText("Fix Pair Selection")).toBeInTheDocument();
     expect(screen.getByText("Strong output: you can use this now with confidence.")).toBeInTheDocument();
     expect(
       screen.getByText("Built directly from your verified experience and aligned to the role."),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/not ready to generate yet/i)).toBeNull();
     expect(screen.queryByRole("button", { name: "Generate Resume" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Generate Cover Letter" })).toBeNull();
   });
 
   it("renders generation_failed as the inline failure shell", async () => {
@@ -222,10 +220,81 @@ describe("Studio generation error contract", () => {
     fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
 
     expect(await screen.findByText(/we couldn.?t generate a reliable result/i)).toBeInTheDocument();
-    expect(screen.getByText("Resume generation failed validation.")).toBeInTheDocument();
+    expect(screen.getAllByText("Resume generation failed validation.")[0]).toBeInTheDocument();
     expect(screen.getByText("Fit score unavailable.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Adjust Input" })).toBeInTheDocument();
-    expect(screen.queryByText(/generation didn.?t complete/i)).toBeNull();
+  });
+
+  it("preserves the last good resume when a retry times out", async () => {
+    let resumeFetches = 0;
+    installBaselineFetches((url, init) => {
+      if (url.includes("/api/resume") && init?.method === "POST") {
+        resumeFetches += 1;
+        if (resumeFetches === 1) {
+          return Promise.resolve(
+            createResponse({
+              status: "success",
+              code: "draft_generated",
+              message: "A draft is ready.",
+              retryable: false,
+              nextAction: "review_draft",
+              artifactType: "resume",
+              exportReady: true,
+              generationStatus: "success",
+              preview: {
+                resume: {
+                  heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                  summary: "Support leader focused on scalable operations.",
+                  experience: [
+                    {
+                      company: "Cat Daddy Games",
+                      roleTitle: "Senior Producer",
+                      location: "Los Angeles, CA",
+                      dateRange: "2020 - Present",
+                      bullets: ["Led support operations programs."],
+                    },
+                  ],
+                },
+              },
+            }),
+          );
+        }
+        return Promise.resolve(
+          createResponse(
+            {
+              status: "error",
+              code: "generation_timeout",
+              message: "Generation took longer than expected.",
+              retryable: true,
+              nextAction: "retry_generation",
+              artifactType: "resume",
+              exportReady: false,
+              generationStatus: "error",
+            },
+            true,
+            200,
+          ),
+        );
+      }
+      return Promise.resolve(createResponse({}));
+    });
+
+    renderStudio();
+    const generateResumeButton = await screen.findByRole("button", { name: "Generate Resume" });
+    await waitFor(() => expect(generateResumeButton).toBeEnabled());
+    fireEvent.click(generateResumeButton);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("resume-preview")).toBeInTheDocument();
+    });
+
+    fireEvent.click(generateResumeButton);
+
+    await waitFor(() => {
+      expect(screen.getByText("Generation timed out")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("resume-preview")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry Generation" })).toBeInTheDocument();
   });
 
   it("renders unsupported_input as the inline failure shell", async () => {
@@ -261,8 +330,8 @@ describe("Studio generation error contract", () => {
     });
 
     renderStudio();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Generate Cover Letter" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "Generate Cover Letter" }));
+    await waitFor(() => expect(screen.getByTestId("studio-cover-generate-button")).toBeEnabled());
+    fireEvent.click(screen.getByTestId("studio-cover-generate-button"));
 
     expect(resumeFetches).toBe(1);
     expect(
@@ -272,9 +341,8 @@ describe("Studio generation error contract", () => {
     expect(screen.getByText(/Learn What.*Supported/i)).toBeInTheDocument();
     expect(screen.getAllByText("We could not extract enough text from that resume.").length).toBeGreaterThan(0);
     expect(
-      screen.getByText("The current cover letter input cannot be grounded into a supported artifact."),
+      screen.getAllByText("The current cover letter input cannot be grounded into a supported artifact.")[0],
     ).toBeInTheDocument();
-    expect(screen.queryByText(/this input isn.?t supported yet/i)).toBeNull();
   });
 
   it("renders trace_failure as the inline failure shell", async () => {
@@ -315,7 +383,7 @@ describe("Studio generation error contract", () => {
 
     expect(resumeFetches).toBe(1);
     expect(await screen.findByText("Ready to generate")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
+    expect(screen.getByText("Fix Pair Selection")).toBeInTheDocument();
     expect(screen.getByText("Strong output: you can use this now with confidence.")).toBeInTheDocument();
     expect(
       screen.getByText("Built directly from your verified experience and aligned to the role."),

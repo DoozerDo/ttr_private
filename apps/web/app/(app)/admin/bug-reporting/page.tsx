@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { sanitizeRenderedTextValue } from "@/lib/renderedText";
+
 type BugReportRow = {
   id: string;
   createdAt: string;
@@ -45,12 +47,23 @@ function pickNumber(value: unknown): number | null {
 }
 
 function pickString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
+  if (typeof value !== "string") return null;
+  const sanitized = sanitizeRenderedTextValue(value, {
+    endpoint: "admin-bug-reporting",
+    field: "summary",
+  });
+  return sanitized.length > 0 ? sanitized : null;
 }
 
 function getSyntheticSummaryField(summary: Record<string, unknown> | null | undefined, key: string) {
   if (!summary) return null;
-  return pickString(summary[key]) ?? (pickNumber(summary[key]) !== null ? String(summary[key]) : null);
+  if (pickNumber(summary[key]) !== null) {
+    return sanitizeRenderedTextValue(String(summary[key]), {
+      endpoint: "admin-bug-reporting",
+      field: `summary.${key}`,
+    });
+  }
+  return pickString(summary[key]);
 }
 
 export default function BugReportingAdminPage() {
@@ -147,16 +160,19 @@ export default function BugReportingAdminPage() {
                     </span>
                   </div>
                   <p className="mt-3 text-sm font-semibold text-white">
-                    {report.description ?? report.whatHappened ?? "No description"}
+                    {sanitizeRenderedTextValue(report.description ?? report.whatHappened ?? "No description", {
+                      endpoint: "admin-bug-reporting",
+                      field: "report.description",
+                    })}
                   </p>
                   <div className="mt-3 grid gap-2 text-sm text-slate-300 sm:grid-cols-2">
-                    <p><span className="text-slate-500">Route:</span> {report.route}</p>
-                    <p><span className="text-slate-500">User:</span> {report.userId ?? "n/a"}</p>
-                    <p><span className="text-slate-500">Baseline:</span> {report.baselineId ?? "n/a"}</p>
-                    <p><span className="text-slate-500">Job:</span> {report.jobId ?? "n/a"}</p>
-                    <p><span className="text-slate-500">Assessment:</span> {report.assessmentId ?? "n/a"}</p>
-                    <p><span className="text-slate-500">Score:</span> {report.score ?? "n/a"}</p>
-                    <p className="sm:col-span-2"><span className="text-slate-500">Next action:</span> {report.nextAction ?? "n/a"}</p>
+                    <p><span className="text-slate-500">Route:</span> {sanitizeRenderedTextValue(report.route, { endpoint: "admin-bug-reporting", field: "report.route" })}</p>
+                    <p><span className="text-slate-500">User:</span> {sanitizeRenderedTextValue(report.userId ?? "n/a", { endpoint: "admin-bug-reporting", field: "report.userId" })}</p>
+                    <p><span className="text-slate-500">Baseline:</span> {sanitizeRenderedTextValue(report.baselineId ?? "n/a", { endpoint: "admin-bug-reporting", field: "report.baselineId" })}</p>
+                    <p><span className="text-slate-500">Job:</span> {sanitizeRenderedTextValue(report.jobId ?? "n/a", { endpoint: "admin-bug-reporting", field: "report.jobId" })}</p>
+                    <p><span className="text-slate-500">Assessment:</span> {sanitizeRenderedTextValue(report.assessmentId ?? "n/a", { endpoint: "admin-bug-reporting", field: "report.assessmentId" })}</p>
+                    <p><span className="text-slate-500">Score:</span> {sanitizeRenderedTextValue(String(report.score ?? "n/a"), { endpoint: "admin-bug-reporting", field: "report.score" })}</p>
+                    <p className="sm:col-span-2"><span className="text-slate-500">Next action:</span> {sanitizeRenderedTextValue(report.nextAction ?? "n/a", { endpoint: "admin-bug-reporting", field: "report.nextAction" })}</p>
                   </div>
                 </article>
               ))}
@@ -207,15 +223,18 @@ export default function BugReportingAdminPage() {
                       Core loop smoke run
                     </p>
                     <div className="mt-3 grid gap-2 text-sm text-slate-300 sm:grid-cols-2">
-                      <p><span className="text-slate-500">Baseline:</span> {baselineId ?? "n/a"}</p>
-                      <p><span className="text-slate-500">Job:</span> {jobId ?? "n/a"}</p>
-                      <p><span className="text-slate-500">Assessment:</span> {assessmentId ?? "n/a"}</p>
-                      <p><span className="text-slate-500">Score:</span> {score ?? "n/a"}</p>
-                      <p className="sm:col-span-2"><span className="text-slate-500">Next action:</span> {nextAction ?? "n/a"}</p>
+                      <p><span className="text-slate-500">Baseline:</span> {sanitizeRenderedTextValue(baselineId ?? "n/a", { endpoint: "admin-bug-reporting", field: "syntheticRun.baselineId" })}</p>
+                      <p><span className="text-slate-500">Job:</span> {sanitizeRenderedTextValue(jobId ?? "n/a", { endpoint: "admin-bug-reporting", field: "syntheticRun.jobId" })}</p>
+                      <p><span className="text-slate-500">Assessment:</span> {sanitizeRenderedTextValue(assessmentId ?? "n/a", { endpoint: "admin-bug-reporting", field: "syntheticRun.assessmentId" })}</p>
+                      <p><span className="text-slate-500">Score:</span> {sanitizeRenderedTextValue(score ?? "n/a", { endpoint: "admin-bug-reporting", field: "syntheticRun.score" })}</p>
+                      <p className="sm:col-span-2"><span className="text-slate-500">Next action:</span> {sanitizeRenderedTextValue(nextAction ?? "n/a", { endpoint: "admin-bug-reporting", field: "syntheticRun.nextAction" })}</p>
                     </div>
                     {run.status === "failed" ? (
                       <p className="mt-3 rounded-xl border border-rose-300/30 bg-rose-950/30 p-3 text-sm text-rose-100">
-                        {run.errorMessage ?? "Synthetic run failed."}
+                        {sanitizeRenderedTextValue(run.errorMessage ?? "Synthetic run failed.", {
+                          endpoint: "admin-bug-reporting",
+                          field: "syntheticRun.errorMessage",
+                        })}
                       </p>
                     ) : null}
                     <p className="mt-3 text-xs text-slate-500">Finished: {formatDate(run.finishedAt)}</p>

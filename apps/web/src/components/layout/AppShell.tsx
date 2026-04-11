@@ -7,6 +7,7 @@ import { TopNavAccountArea } from "./TopNavAccountArea";
 import { BetaGuideNudge } from "./BetaGuideNudge";
 import { UnlockPathBar } from "./UnlockPathBar";
 import { readLastAnalysis, type StoredAnalysisRecord } from "@/app/(app)/lib/session";
+import { ClientRequestTimeoutError, fetchWithTimeout } from "@/lib/fetchWithTimeout";
 import { subscribeBaselineUpdated } from "@/src/lib/baseline-sync";
 import {
   ReportBugProvider,
@@ -299,8 +300,12 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
       const isAutoErrorEndpoint = endpoint.includes("/api/support/auto-error");
 
       try {
-        const response = await originalFetch(...args);
-        if (typeof window !== "undefined" && endpoint.startsWith("/api/")) {
+      const response = await fetchWithTimeout(
+        requestInput as RequestInfo | URL,
+        requestInit ?? {},
+        { fetchImpl: originalFetch },
+      );
+      if (typeof window !== "undefined" && endpoint.startsWith("/api/")) {
           const snapshot = {
             endpoint,
             method,
@@ -335,6 +340,15 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
         if (!isAutoErrorEndpoint) {
           const message =
             error instanceof Error ? error.message : "Network request failed";
+          if (error instanceof ClientRequestTimeoutError) {
+            appendDiagnostic({
+              source: "fetch-timeout",
+              method,
+              endpoint,
+              message,
+              at: new Date().toISOString(),
+            });
+          }
           appendDiagnostic({
             source: "fetch-exception",
             method,

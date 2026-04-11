@@ -19,6 +19,7 @@ import { StudioNextMove } from "@/components/StudioNextMove";
 import { defaultClosingTemplateKey } from "@/lib/coverLetters";
 import { buildExportPayload } from "../lib/exportPayload";
 import { formatErrorMessage, readResponsePayload } from "@/lib/compliance/parseComplianceError";
+import { sanitizeRenderedTextValue } from "@/lib/renderedText";
 import {
   applyTargetingExclusionsToReadiness,
   aggregateVerificationIssues,
@@ -68,6 +69,12 @@ import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
 import { resolveCanonicalState } from "@/lib/canonicalDecision";
 import { deriveEvidenceLedger } from "@/lib/evidenceLedger";
 import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
+import {
+  buildWorkflowRequestKey,
+  isWorkflowRequestStale,
+  logWorkflowRequestEvent,
+  type WorkflowRequestScope,
+} from "@/lib/workflowRequestGuard";
 import { useGuidedMode } from "@/hooks/useGuidedMode";
 import { type JobDto } from "@/lib/jobs";
 import {
@@ -272,7 +279,10 @@ const complianceFlagLabelMap: Record<string, string> = {
 };
 
 function mapComplianceFlagLabel(code?: string): string {
-  const normalized = typeof code === "string" ? code.trim().toLowerCase() : "";
+  const normalized = sanitizeRenderedTextValue(code ?? "", {
+    endpoint: "studio-page",
+    field: "complianceFlag.code",
+  }).toLowerCase();
   if (!normalized) {
     return "Statement needs support";
   }
@@ -284,10 +294,25 @@ function normalizeComplianceFlagEntry(value: unknown): CoverLetterComplianceFlag
     return null;
   }
   const record = value as Record<string, unknown>;
-  const code = typeof record.code === "string" ? record.code.trim() : undefined;
-  const message = typeof record.message === "string" ? record.message.trim() : undefined;
+  const code = typeof record.code === "string"
+    ? sanitizeRenderedTextValue(record.code, {
+        endpoint: "studio-page",
+        field: "complianceFlag.code",
+      })
+    : undefined;
+  const message = typeof record.message === "string"
+    ? sanitizeRenderedTextValue(record.message, {
+        endpoint: "studio-page",
+        field: "complianceFlag.message",
+      })
+    : undefined;
   const severity =
-    typeof record.severity === "string" ? record.severity.trim().toLowerCase() : undefined;
+    typeof record.severity === "string"
+      ? sanitizeRenderedTextValue(record.severity, {
+          endpoint: "studio-page",
+          field: "complianceFlag.severity",
+        }).toLowerCase()
+      : undefined;
   const confidence =
     typeof record.confidence === "number"
       ? record.confidence
@@ -389,7 +414,10 @@ function parseComplianceBlockedFromPayload(payload: unknown): CoverLetterComplia
 
 function isHtmlLikePayload(payload: unknown): boolean {
   if (typeof payload !== "string") return false;
-  const normalized = payload.trim().toLowerCase();
+  const normalized = sanitizeRenderedTextValue(payload, {
+    endpoint: "studio-page",
+    field: "htmlLikePayload",
+  }).toLowerCase();
   return (
     normalized.startsWith("<!doctype html") ||
     normalized.startsWith("<html") ||
@@ -425,13 +453,19 @@ function isInsufficientBaselineEvidenceMessage(message: string | null): boolean 
 }
 
 function buildAssessmentAnalysisUrl(analysisId: string) {
-  const normalizedAnalysisId = analysisId.trim();
+  const normalizedAnalysisId = trimString(analysisId);
   if (!normalizedAnalysisId) return "";
   return `/api/analysis/fit-assessments/${encodeURIComponent(normalizedAnalysisId)}`;
 }
 
 function trimString(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
+  const raw = typeof value === "string" ? value : value == null ? "" : String(value);
+  if (!raw.trim()) return "";
+  const sanitized = sanitizeRenderedTextValue(raw, {
+    endpoint: "studio-page",
+    field: "value",
+  });
+  return sanitized === "We couldn’t display this result. Please retry." ? "" : sanitized;
 }
 
 function normalizeClaimText(value: string): string {
@@ -442,11 +476,17 @@ function extractJobDescription(job: JobDto | null): string | null {
   if (!job) return null;
 
   if (typeof job.rawDescription === "string" && job.rawDescription.trim()) {
-    return job.rawDescription.trim();
+    return sanitizeRenderedTextValue(job.rawDescription, {
+      endpoint: "studio-page",
+      field: "job.rawDescription",
+    });
   }
 
   if (typeof job.description === "string" && job.description.trim()) {
-    return job.description.trim();
+    return sanitizeRenderedTextValue(job.description, {
+      endpoint: "studio-page",
+      field: "job.description",
+    });
   }
 
   return null;
@@ -459,7 +499,12 @@ function collectEvidenceItems(analysis: LatestAnalysis | null): string[] {
   if (Array.isArray(supportingSignals)) {
     for (const signal of supportingSignals) {
       if (typeof signal === "string" && signal.trim()) {
-        candidates.push(signal.trim());
+        candidates.push(
+          sanitizeRenderedTextValue(signal, {
+            endpoint: "studio-page",
+            field: "analysis.supportingSignals",
+          }),
+        );
       } else if (signal && typeof signal === "object") {
         const label = trimString((signal as { label?: unknown }).label);
         const name = trimString((signal as { name?: unknown }).name);
@@ -473,7 +518,12 @@ function collectEvidenceItems(analysis: LatestAnalysis | null): string[] {
   if (Array.isArray(baselineEvidence)) {
     for (const entry of baselineEvidence) {
       if (typeof entry === "string" && entry.trim()) {
-        candidates.push(entry.trim());
+        candidates.push(
+          sanitizeRenderedTextValue(entry, {
+            endpoint: "studio-page",
+            field: "analysis.baselineEvidence",
+          }),
+        );
       } else if (entry && typeof entry === "object") {
         const text = trimString((entry as { text?: unknown }).text);
         const title = trimString((entry as { title?: unknown }).title);
@@ -501,7 +551,10 @@ type VerificationIssueAction = {
 
 function resolveVerificationIssueAction(issue: GenerationReadiness["verificationIssues"][number]): VerificationIssueAction {
   if (issue.code === "missing_baseline_evidence") {
-    const claim = issue.claim?.trim() ?? "";
+    const claim = sanitizeRenderedTextValue(issue.claim ?? "", {
+      endpoint: "studio-page",
+      field: "verificationIssue.claim",
+    });
     const params = new URLSearchParams({ source: "studio" });
     if (claim) {
       params.set("highlightClaim", claim);
@@ -549,29 +602,26 @@ export default function StudioPage() {
   const failedReadinessKeysRef = useRef<Set<string>>(new Set());
   const generationSectionRef = useRef<HTMLElement | null>(null);
   const requestedJobId = useMemo(
-    () => searchParams.get("jobId")?.trim() ?? "",
+    () => trimString(searchParams.get("jobId")),
     [searchParamValue],
   );
   const requestedBaselineId = useMemo(
-    () => searchParams.get("baselineId")?.trim() ?? "",
+    () => trimString(searchParams.get("baselineId")),
     [searchParamValue],
   );
   const requestedBaselineVersionId = useMemo(
-    () => searchParams.get("baselineVersionId")?.trim() ?? "",
+    () => trimString(searchParams.get("baselineVersionId")),
     [searchParamValue],
   );
   const requestedAnalysisId = useMemo(
-    () =>
-      searchParams.get("analysisId")?.trim() ??
-      searchParams.get("assessmentId")?.trim() ??
-      "",
+    () => trimString(searchParams.get("analysisId") ?? searchParams.get("assessmentId")),
     [searchParamValue],
   );
   const isFromUnlock = useMemo(() => searchParams.get("fromUnlock") === "true", [searchParamValue]);
   const verifiedClaimParams = useMemo(
     () => {
       const rawClaims =
-        typeof searchParams.getAll === "function"
+          typeof searchParams.getAll === "function"
           ? searchParams.getAll("verifiedClaim")
           : [searchParams.get("verifiedClaim")].filter(
               (value): value is string => typeof value === "string" && value.trim().length > 0,
@@ -579,7 +629,7 @@ export default function StudioPage() {
       return Array.from(
         new Set(
           rawClaims
-            .map((claim) => claim.trim())
+            .map((claim) => trimString(claim))
             .filter((claim) => claim.length > 0),
         ),
       );
@@ -592,9 +642,9 @@ export default function StudioPage() {
     }
     trackedStudioOpenRef.current = true;
 
-    const explicitEntry = (searchParams.get("entrySource") ?? "").trim().toLowerCase();
+    const explicitEntry = trimString(searchParams.get("entrySource")).toLowerCase();
     const allowed = new Set(["results", "nav", "direct", "unknown"]);
-    const baselineIdFromQuery = searchParams.get("baselineId")?.trim() || undefined;
+    const baselineIdFromQuery = trimString(searchParams.get("baselineId")) || undefined;
 
     let entrySource: "results" | "nav" | "direct" | "unknown" = "unknown";
     if (allowed.has(explicitEntry)) {
@@ -762,6 +812,16 @@ export default function StudioPage() {
   const finalRoleCheckTrackedRef = useRef<string | null>(null);
   const finalRoleAdjustmentClickedRef = useRef<string | null>(null);
   const autoGenerationSignatureRef = useRef<string | null>(null);
+  const currentWorkflowScopeRef = useRef<WorkflowRequestScope>({
+    baselineId: null,
+    jobId: null,
+    baselineVersionId: null,
+    analysisId: null,
+  });
+  const activeResumeGenerationRef = useRef<{ requestId: string; requestKey: string } | null>(null);
+  const activeCoverGenerationRef = useRef<{ requestId: string; requestKey: string } | null>(null);
+  const activeAutoGenerationRef = useRef<{ requestId: string; requestKey: string } | null>(null);
+  const activeGenerationRequestKeysRef = useRef<Set<string>>(new Set());
   const [applicationInsights, setApplicationInsights] = useState<ApplicationInsight[]>([]);
   const [opportunityContext, setOpportunityContext] = useState<{
     status: string;
@@ -811,7 +871,12 @@ export default function StudioPage() {
 
   function applyCoverLetterComplianceBlocked(blocked: CoverLetterComplianceBlocked) {
     setCoverLetterComplianceBlocked(blocked);
-    setCoverState(createDocumentState());
+    setCoverState((current) => ({
+      ...current,
+      error: null,
+      tierGateError: null,
+      artifactFailure: null,
+    }));
     setCoverWarningFlags([]);
     setCoverAuditId(undefined);
   }
@@ -1113,6 +1178,33 @@ export default function StudioPage() {
   const effectiveBaselineId = selectedBaselineId || trimString(analysis?.baselineId);
   const effectiveBaselineVersionId =
     selectedBaselineVersionId || trimString(analysis?.baselineVersionId);
+  const currentWorkflowScope = useMemo<WorkflowRequestScope>(
+    () => ({
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      baselineVersionId: effectiveBaselineVersionId || null,
+      analysisId: requestedAnalysisId || null,
+    }),
+    [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, requestedAnalysisId],
+  );
+  useEffect(() => {
+    currentWorkflowScopeRef.current = currentWorkflowScope;
+  }, [currentWorkflowScope]);
+  useEffect(() => {
+    const resumeKey = buildWorkflowRequestKey("resume", currentWorkflowScope);
+    const coverKey = buildWorkflowRequestKey("cover_letter", currentWorkflowScope);
+    const autoKey = buildWorkflowRequestKey("auto_generation", currentWorkflowScope);
+
+    if (resumeGenerating && (!resumeKey || activeResumeGenerationRef.current?.requestKey !== resumeKey)) {
+      setResumeGenerating(false);
+    }
+    if (coverGenerating && (!coverKey || activeCoverGenerationRef.current?.requestKey !== coverKey)) {
+      setCoverGenerating(false);
+    }
+    if (autoGenerationInFlight && (!autoKey || activeAutoGenerationRef.current?.requestKey !== autoKey)) {
+      setAutoGenerationInFlight(false);
+    }
+  }, [autoGenerationInFlight, coverGenerating, currentWorkflowScope, resumeGenerating]);
   const hasLoadedAnalysis = Boolean(
     requestedAnalysisId && !analysisLoading && !analysisError && analysisScore !== null,
   );
@@ -1857,6 +1949,21 @@ export default function StudioPage() {
         fitReviewHref: remediationHref,
         canGenerateDocuments,
         opportunityAlreadySaved: hasCompletedGeneration,
+        persistedAssessmentId: requestedAnalysisId || null,
+        analysisCandidates: analysis
+          ? [
+              {
+                source: "latest_assessment",
+                value: {
+                  assessmentId: analysis.assessmentId ?? requestedAnalysisId ?? null,
+                  baselineId: effectiveBaselineId ?? null,
+                  jobId: effectiveJobId ?? null,
+                  baselineVersionId: effectiveBaselineVersionId ?? null,
+                  score: analysisScore,
+                },
+              },
+            ]
+          : undefined,
         scoreCandidates: [{ source: "primary", value: analysisScore }],
       }),
     [
@@ -1871,14 +1978,14 @@ export default function StudioPage() {
       resultsHref,
     ],
   );
-  const primaryNextAction = studioCanonicalDecision.nextAction;
+  const primaryNextAction = studioCanonicalDecision.primaryAction;
   useEffect(() => {
     if (process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_DEBUG_STUDIO_FLOW !== "true") {
       return;
     }
     if (!analysis || !requestedAnalysisId) return;
-    const readinessState = studioCanonicalDecision.readinessState;
-    const ctaHref = studioCanonicalDecision.cta.href;
+    const readinessState = studioCanonicalDecision.workflowState;
+    const ctaHref = studioCanonicalDecision.primaryAction.destination;
     const analyticsPayload: {
       state: "READY" | "LIMITED" | "BLOCKED";
       score: number | null;
@@ -1929,15 +2036,15 @@ export default function StudioPage() {
     effectiveJobId,
     effectiveBaselineVersionId,
     isFromUnlock,
-    studioCanonicalDecision.cta.href,
+    studioCanonicalDecision.primaryAction.destination,
     primaryNextAction.label,
     primaryNextAction.type,
     remediationHref,
     requestedAnalysisId,
-    studioCanonicalDecision.readinessState,
+    studioCanonicalDecision.workflowState,
   ]);
-  const studioBlockedByNextAction = primaryNextAction.type === "fit_review";
-  const studioUiState = studioCanonicalDecision.readinessState;
+  const studioBlockedByNextAction = primaryNextAction.type === "start_fit_review";
+  const studioUiState = studioCanonicalDecision.workflowState;
   useEffect(() => {
     if (studioBlockedByNextAction && requestedAnalysisId) {
       void router.replace(remediationHref);
@@ -1946,13 +2053,13 @@ export default function StudioPage() {
   const evidenceLedger = useMemo(
     () =>
       deriveEvidenceLedger(analysis, {
-        generationAllowed: primaryNextAction.type !== "fit_review",
+        generationAllowed: primaryNextAction.type !== "start_fit_review",
       }),
     [analysis, primaryNextAction.type],
   );
   useEffect(() => {
     if (!isGuidedActive) return;
-    if (primaryNextAction.type !== "fit_review") {
+    if (primaryNextAction.type !== "start_fit_review") {
       advanceStep("GENERATE");
     }
   }, [advanceStep, isGuidedActive, primaryNextAction.type]);
@@ -1967,7 +2074,10 @@ export default function StudioPage() {
     (coverPresenter.status === "success" && hasCoverLetterArtifact);
   const fullBaselineEvidence = useMemo(() => {
     if (typeof analysis?.summary === "string" && analysis.summary.trim().length) {
-      return analysis.summary.trim();
+      return sanitizeRenderedTextValue(analysis.summary, {
+        endpoint: "studio-page",
+        field: "analysis.summary",
+      });
     }
     return "Evidence is derived from your latest role analysis and baseline signals.";
   }, [analysis?.summary]);
@@ -2178,6 +2288,87 @@ export default function StudioPage() {
       return true;
     },
     [analysisScore, generationBlockerCodes, router, studioUiState],
+  );
+  const createRequestId = useCallback(
+    () =>
+      (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`),
+    [],
+  );
+  const beginStudioGenerationRequest = useCallback(
+    (documentType: "resume" | "cover_letter", requestScope: WorkflowRequestScope) => {
+      const requestKey = buildWorkflowRequestKey(documentType, requestScope);
+      if (!requestKey) return null;
+      if (activeGenerationRequestKeysRef.current.has(requestKey)) {
+        logWorkflowRequestEvent("duplicate_request_ignored", {
+          action: documentType,
+          expected: requestScope,
+          current: currentWorkflowScopeRef.current,
+          reason: "same pair and action already in flight",
+          source: "studio",
+        });
+        return null;
+      }
+
+      const requestId = createRequestId();
+      activeGenerationRequestKeysRef.current.add(requestKey);
+      if (documentType === "resume") {
+        activeResumeGenerationRef.current = { requestId, requestKey };
+      } else {
+        activeCoverGenerationRef.current = { requestId, requestKey };
+      }
+      logWorkflowRequestEvent("request_started", {
+        action: documentType,
+        expected: requestScope,
+        current: currentWorkflowScopeRef.current,
+        requestId,
+        source: "studio",
+      });
+      return { requestId, requestKey };
+    },
+    [createRequestId],
+  );
+  const finishStudioGenerationRequest = useCallback(
+    (
+      documentType: "resume" | "cover_letter",
+      request: { requestId: string; requestKey: string } | null,
+      status: "completed" | "failed" | "timeout" | "blocked",
+      requestScope: WorkflowRequestScope,
+    ) => {
+      if (!request) return;
+      const activeRef = documentType === "resume" ? activeResumeGenerationRef : activeCoverGenerationRef;
+      const activeRequest = activeRef.current;
+      if (activeRequest?.requestId === request.requestId && activeRequest.requestKey === request.requestKey) {
+        activeRef.current = null;
+      }
+      activeGenerationRequestKeysRef.current.delete(request.requestKey);
+      logWorkflowRequestEvent(
+        status === "completed"
+          ? "request_completed"
+          : status === "timeout"
+            ? "request_timeout"
+            : status === "blocked"
+              ? "request_blocked"
+              : "request_failed",
+        {
+          action: documentType,
+          expected: requestScope,
+          current: currentWorkflowScopeRef.current,
+          requestId: request.requestId,
+          reason:
+            status === "blocked"
+              ? "request blocked before commit"
+              : status === "timeout"
+                ? "generation timed out"
+                : status === "completed"
+                  ? "generation completed"
+                  : "generation failed",
+          source: "studio",
+        },
+      );
+    },
+    [],
   );
   const recommendedResumeFocus: ResumeFocusOption = "Operational Leadership";
   const resumeFocusDefinitions: Array<{ value: ResumeFocusOption; label: string; definition: string }> = useMemo(
@@ -2977,19 +3168,26 @@ export default function StudioPage() {
 
   const handleResumeDraft = async () => {
     if (!guardGenerationAction("resume")) return;
+    const requestScope = currentWorkflowScope;
+    const request = beginStudioGenerationRequest("resume", requestScope);
+    if (!request) return;
     setUnlockGenerationConfirmation(null);
     if ((hasSavedResumeEdits || hasUnsavedResumeEdits) && resumeState.response) {
       const proceed =
         typeof window !== "undefined"
           ? window.confirm("Regenerating will replace your saved edits for this version.")
           : true;
-      if (!proceed) return;
+      if (!proceed) {
+        finishStudioGenerationRequest("resume", request, "blocked", requestScope);
+        return;
+      }
       setSavedEditedResumeModel(null);
       setDraftResumeModel(generatedResumeModel);
       setIsResumeEditMode(false);
       setResumeEditError(null);
     }
     if (!canProceedWithStudioDrafts) {
+      finishStudioGenerationRequest("resume", request, "blocked", requestScope);
       setResumeState((current) => ({
         ...current,
         error: generationMessage ?? "Review prerequisites before generating a resume.",
@@ -3004,12 +3202,18 @@ export default function StudioPage() {
     });
     console.info("[studio] generation_requested", {
       documentType: "resume",
+      requestId: request.requestId,
       analysisId: requestedAnalysisId || null,
       jobId: effectiveJobId || null,
       baselineId: effectiveBaselineId || null,
       baselineVersionId: effectiveBaselineVersionId || null,
     });
-    setResumeState(createDocumentState());
+    setResumeState((current) => ({
+      ...current,
+      error: null,
+      tierGateError: null,
+      artifactFailure: null,
+    }));
     setResumeWarningFlags([]);
     setResumeAuditId(undefined);
     const payload = normalizeGenerationPayload(buildResumePayload(false), "resume");
@@ -3020,10 +3224,18 @@ export default function StudioPage() {
         body: JSON.stringify(payload),
       });
       const responsePayload = await readResponsePayload(response);
+      if (
+        isWorkflowRequestStale(requestScope, currentWorkflowScopeRef.current) ||
+        activeResumeGenerationRef.current?.requestId !== request.requestId
+      ) {
+        finishStudioGenerationRequest("resume", request, "blocked", requestScope);
+        return;
+      }
       if (!response.ok) {
         console.warn("[studio] generation_failed", {
           documentType: "resume",
           status: response.status,
+          requestId: request.requestId,
         });
         const tierGate = parseTierGateError({ status: response.status, payload: responsePayload });
         if (tierGate) {
@@ -3036,7 +3248,6 @@ export default function StudioPage() {
             setResumeState((current) => ({
               ...current,
               artifactFailure: failure,
-              response: null,
               error: null,
             }));
             return;
@@ -3063,7 +3274,6 @@ export default function StudioPage() {
         setResumeState((current) => ({
           ...current,
           artifactFailure: failure,
-          response: null,
           error: null,
         }));
         return;
@@ -3074,7 +3284,10 @@ export default function StudioPage() {
           analysisId: requestedAnalysisId || undefined,
           reasonCode: "blocked",
         });
-        setResumeState((current) => ({ ...current, response: responsePayload }));
+        setResumeState((current) => ({
+          ...current,
+          error: presenter.display?.description ?? current.error,
+        }));
         setResumeWarningFlags([]);
         setResumeAuditId(undefined);
         return;
@@ -3087,7 +3300,6 @@ export default function StudioPage() {
         });
         setResumeState((current) => ({
           ...current,
-          response: responsePayload,
           error:
             presenter.display?.description ??
             "Resume generation failed. Please review your baseline and try again.",
@@ -3122,6 +3334,13 @@ export default function StudioPage() {
         },
         validate: (payload) => validateResumeOutput(payload),
       });
+      if (
+        isWorkflowRequestStale(requestScope, currentWorkflowScopeRef.current) ||
+        activeResumeGenerationRef.current?.requestId !== request.requestId
+      ) {
+        finishStudioGenerationRequest("resume", request, "blocked", requestScope);
+        return;
+      }
 
       if (!validatedResult.success) {
         trackEvent("resume_generation_limited", {
@@ -3157,8 +3376,16 @@ export default function StudioPage() {
       }
       console.info("[studio] generation_succeeded", {
         documentType: "resume",
+        requestId: request.requestId,
       });
     } catch (error) {
+      if (
+        isWorkflowRequestStale(requestScope, currentWorkflowScopeRef.current) ||
+        activeResumeGenerationRef.current?.requestId !== request.requestId
+      ) {
+        finishStudioGenerationRequest("resume", request, "blocked", requestScope);
+        return;
+      }
       trackEvent("resume_generation_limited", {
         source: "studio",
         analysisId: requestedAnalysisId || undefined,
@@ -3178,7 +3405,10 @@ export default function StudioPage() {
         },
       }));
     } finally {
-      setResumeGenerating(false);
+      if (activeResumeGenerationRef.current?.requestId === request.requestId) {
+        setResumeGenerating(false);
+      }
+      finishStudioGenerationRequest("resume", request, "completed", requestScope);
     }
   };
 
@@ -3343,8 +3573,12 @@ export default function StudioPage() {
 
   const handleCoverDraft = async () => {
     if (!guardGenerationAction("cover_letter")) return;
+    const requestScope = currentWorkflowScope;
+    const request = beginStudioGenerationRequest("cover_letter", requestScope);
+    if (!request) return;
     setUnlockGenerationConfirmation(null);
     if (!canProceedWithStudioDrafts) {
+      finishStudioGenerationRequest("cover_letter", request, "blocked", requestScope);
       setCoverState((current) => ({
         ...current,
         error: generationMessage ?? "Review prerequisites before generating a cover letter.",
@@ -3359,12 +3593,18 @@ export default function StudioPage() {
     });
     console.info("[studio] generation_requested", {
       documentType: "cover_letter",
+      requestId: request.requestId,
       analysisId: requestedAnalysisId || null,
       jobId: effectiveJobId || null,
       baselineId: effectiveBaselineId || null,
       baselineVersionId: effectiveBaselineVersionId || null,
     });
-    setCoverState(createDocumentState());
+    setCoverState((current) => ({
+      ...current,
+      error: null,
+      tierGateError: null,
+      artifactFailure: null,
+    }));
     setCoverWarningFlags([]);
     setCoverAuditId(undefined);
     setCoverLetterComplianceBlocked(null);
@@ -3376,10 +3616,18 @@ export default function StudioPage() {
         body: JSON.stringify(payload),
       });
       const responsePayload = await readResponsePayload(response);
+      if (
+        isWorkflowRequestStale(requestScope, currentWorkflowScopeRef.current) ||
+        activeCoverGenerationRef.current?.requestId !== request.requestId
+      ) {
+        finishStudioGenerationRequest("cover_letter", request, "blocked", requestScope);
+        return;
+      }
       if (!response.ok) {
         console.warn("[studio] generation_failed", {
           documentType: "cover_letter",
           status: response.status,
+          requestId: request.requestId,
         });
         if (response.status === 409) {
           const existingId = readDuplicateCoverLetterId(responsePayload);
@@ -3394,7 +3642,6 @@ export default function StudioPage() {
             setCoverState((current) => ({
               ...current,
               artifactFailure: failure,
-              response: null,
               error: null,
             }));
             return;
@@ -3417,13 +3664,17 @@ export default function StudioPage() {
         }
         throw new Error(formatErrorMessage(responsePayload, "Cover letter generation failed."));
       }
+      const existingDuplicateId = readDuplicateCoverLetterId(responsePayload);
+      if (existingDuplicateId) {
+        await loadCoverLetterById(existingDuplicateId);
+        return;
+      }
       const initialPresenter = presentCoverLetterGeneration(responsePayload);
       const failure = initialPresenter.failure;
       if (failure) {
         setCoverState((current) => ({
           ...current,
           artifactFailure: failure,
-          response: null,
           error: null,
         }));
         return;
@@ -3469,6 +3720,13 @@ export default function StudioPage() {
         validate: (payload) =>
           validateCoverLetterOutput(payload, coverLetterJobDescriptionText ?? ""),
       });
+      if (
+        isWorkflowRequestStale(requestScope, currentWorkflowScopeRef.current) ||
+        activeCoverGenerationRef.current?.requestId !== request.requestId
+      ) {
+        finishStudioGenerationRequest("cover_letter", request, "blocked", requestScope);
+        return;
+      }
 
       if (!validatedResult.success) {
         trackEvent("cover_letter_generation_limited", {
@@ -3501,8 +3759,16 @@ export default function StudioPage() {
       setCoverAuditId(normalizeAuditId(validatedResult.output));
       console.info("[studio] generation_succeeded", {
         documentType: "cover_letter",
+        requestId: request.requestId,
       });
     } catch (error) {
+      if (
+        isWorkflowRequestStale(requestScope, currentWorkflowScopeRef.current) ||
+        activeCoverGenerationRef.current?.requestId !== request.requestId
+      ) {
+        finishStudioGenerationRequest("cover_letter", request, "blocked", requestScope);
+        return;
+      }
       trackEvent("cover_letter_generation_limited", {
         source: "studio",
         analysisId: requestedAnalysisId || undefined,
@@ -3523,7 +3789,10 @@ export default function StudioPage() {
         },
       }));
   } finally {
-      setCoverGenerating(false);
+      if (activeCoverGenerationRef.current?.requestId === request.requestId) {
+        setCoverGenerating(false);
+      }
+      finishStudioGenerationRequest("cover_letter", request, "completed", requestScope);
     }
   };
 
@@ -3699,18 +3968,28 @@ export default function StudioPage() {
 
   useEffect(() => {
     if (!autoGenerationSignature) return;
+    if (!isFromUnlock) return;
     if (autoGenerationSignatureRef.current === autoGenerationSignature) return;
+    const autoGenerationKey = buildWorkflowRequestKey("auto_generation", currentWorkflowScope);
     if (resumeGenerating || coverGenerating || autoGenerationInFlight) return;
     if (!canProceedWithStudioDrafts) return;
 
     autoGenerationSignatureRef.current = autoGenerationSignature;
+    if (!autoGenerationKey) return;
+    activeAutoGenerationRef.current = {
+      requestId: autoGenerationSignature,
+      requestKey: autoGenerationKey,
+    };
     setAutoGenerationInFlight(true);
 
     const runAutoGeneration = async () => {
       try {
         await Promise.all([handleResumeDraft(), handleCoverDraft()]);
       } finally {
-        setAutoGenerationInFlight(false);
+        if (activeAutoGenerationRef.current?.requestId === autoGenerationSignature) {
+          setAutoGenerationInFlight(false);
+          activeAutoGenerationRef.current = null;
+        }
       }
     };
 
@@ -3720,6 +3999,8 @@ export default function StudioPage() {
     autoGenerationSignature,
     canProceedWithStudioDrafts,
     coverGenerating,
+    currentWorkflowScope,
+    isFromUnlock,
     handleCoverDraft,
     handleResumeDraft,
     resumeGenerating,
@@ -3779,38 +4060,7 @@ export default function StudioPage() {
   );
 
   const handleResumeBasicDraft = async () => {
-    if (!guardGenerationAction("resume")) return;
-    if (!canProceedWithStudioDrafts) {
-      setResumeState((current) => ({
-        ...current,
-        error: generationMessage ?? "Review prerequisites before generating a resume.",
-      }));
-      return;
-    }
-    setResumeGenerating(true);
-    setResumeState(createDocumentState());
-    setResumeWarningFlags([]);
-    setResumeAuditId(undefined);
-    const payload = normalizeGenerationPayload(buildResumePayload(true), "resume");
-    try {
-      const response = await fetch("/api/resume", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const responsePayload = await readResponsePayload(response);
-      if (!response.ok) {
-        throw new Error(formatErrorMessage(responsePayload, "Resume generation failed."));
-      }
-      setResumeState((current) => ({ ...current, response: responsePayload }));
-      setResumeWarningFlags(extractComplianceWarnings(responsePayload));
-      setResumeAuditId(normalizeAuditId(responsePayload));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Resume generation failed.";
-      setResumeState((current) => ({ ...current, error: message }));
-    } finally {
-      setResumeGenerating(false);
-    }
+    await handleResumeDraft();
   };
 
   const exportCoverLetter = async (format: "docx" | "pdf") => {
@@ -3931,7 +4181,7 @@ export default function StudioPage() {
         <div className="flex flex-wrap gap-3">
           <FormButton
             onClick={() => void handleResumeDraft()}
-            disabled={(!canGenerateDocuments && !canProceedWithStudioDrafts) || resumeGenerating}
+            disabled={resumeGenerating}
           >
             {resumeGenerating
               ? studioGenerationRenderState.shouldShowEnhancedLoadingCopy
@@ -3942,7 +4192,7 @@ export default function StudioPage() {
           <FormButton
             variant="secondary"
             onClick={() => void handleCoverDraft()}
-            disabled={(!canGenerateDocuments && !canProceedWithStudioDrafts) || coverGenerating}
+            disabled={coverGenerating}
           >
             {coverGenerating
               ? studioGenerationRenderState.shouldShowEnhancedLoadingCopy
@@ -4136,17 +4386,17 @@ export default function StudioPage() {
             <>
               <FormButton
                 onClick={handleResumeDraft}
-                disabled={(!canGenerateDocuments && !canProceedWithStudioDrafts) || resumeGenerating}
+                disabled={resumeGenerating}
                 className="bg-indigo-600 text-white hover:bg-indigo-500"
               >
-                {resumeGenerating ? "Generating..." : "Generate Resume"}
+                {resumeGenerating ? "Generating..." : "Generate Resume Draft"}
               </FormButton>
               <FormButton
                 variant="secondary"
                 onClick={handleCoverDraft}
-                disabled={(!canGenerateDocuments && !canProceedWithStudioDrafts) || coverGenerating}
+                disabled={coverGenerating}
               >
-                {coverGenerating ? "Generating..." : "Generate Cover Letter"}
+                {coverGenerating ? "Generating..." : "Generate Cover Letter Draft"}
               </FormButton>
               <Link
                 href={resolveGapsHref}
@@ -4155,21 +4405,21 @@ export default function StudioPage() {
                 Improve baseline
               </Link>
             </>
-          ) : primaryNextAction.type === "fit_review" ? (
+          ) : primaryNextAction.type === "start_fit_review" ? (
             <Link
               href={resolveGapsHref}
               className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
             >
               Start Fit Review
             </Link>
-          ) : primaryNextAction.type === "studio" ? (
+          ) : primaryNextAction.type === "view_results" ? (
             <Link
               href={resultsHref}
               className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
             >
               Review Results
             </Link>
-          ) : primaryNextAction.type === "studio_with_save" ? (
+          ) : primaryNextAction.type === "generate_documents" ? (
             <Link
               href="/job-tracker"
               className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
@@ -4187,21 +4437,21 @@ export default function StudioPage() {
             <>
               <FormButton
                 onClick={handleResumeDraft}
-                disabled={(!canGenerateDocuments && !canProceedWithStudioDrafts) || resumeGenerating}
+                disabled={resumeGenerating}
                 className="bg-indigo-600 text-white hover:bg-indigo-500"
               >
                 {resumeGenerating
                   ? "Generating..."
-                  : "Generate Resume"}
+                  : "Generate Resume Draft"}
               </FormButton>
               <FormButton
                 variant="secondary"
                 onClick={handleCoverDraft}
-                disabled={(!canGenerateDocuments && !canProceedWithStudioDrafts) || coverGenerating}
+                disabled={coverGenerating}
               >
                 {coverGenerating
                   ? "Generating..."
-                  : "Generate Cover Letter"}
+                  : "Generate Cover Letter Draft"}
               </FormButton>
             </>
           )}
@@ -4594,7 +4844,7 @@ export default function StudioPage() {
                 variant="secondary"
                 className="text-xs"
                 onClick={() => void handleResumeBasicDraft()}
-                disabled={(!canGenerateDocuments && !canProceedWithStudioDrafts) || resumeGenerating}
+                disabled={resumeGenerating}
               >
                 {resumeGenerating ? "Generating..." : "Generate a basic draft anyway"}
               </FormButton>
@@ -4824,7 +5074,7 @@ export default function StudioPage() {
             <FormButton
               variant="secondary"
               onClick={handleCoverDraft}
-              disabled={(!canGenerateDocuments && !canProceedWithStudioDrafts) || coverGenerating}
+              disabled={coverGenerating}
               data-testid="studio-cover-generate-button"
             >
               {coverGenerating

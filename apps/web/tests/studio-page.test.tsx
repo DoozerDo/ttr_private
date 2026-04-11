@@ -4,6 +4,7 @@ import { beforeEach, vi } from "vitest";
 import StudioPage from "@/app/(app)/studio/page";
 import { listBaselines } from "@/lib/baselines";
 import { listJobs } from "@/lib/jobsClient";
+import { FALLBACK_RENDERED_TEXT } from "@/lib/renderedText";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
 import { mockRouterReplace, overrideSearchParams, setFetchImplementation } from "./setup";
 
@@ -198,6 +199,53 @@ describe("Studio page UX", () => {
     expect(screen.getByText("Your application materials")).toBeInTheDocument();
     expect(screen.getByText(/Using resume/i)).toHaveTextContent("Using resume Leadership Resume");
     expect(screen.queryByText("Role analysis required")).toBeNull();
+  });
+
+  it("sanitizes malformed analysis text before it reaches Studio copy", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            scoring_v2: { score: 84 },
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+            summary: "{{broken analysis summary}}",
+            supportingSignals: ["{{broken signal}}"],
+            baselineEvidence: ["{{broken evidence}}"],
+            verification_coverage: {
+              totalClaims: 2,
+              verifiedClaims: 2,
+              inferredClaims: 0,
+              unverifiedClaims: 0,
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return resolveStudioGenerationFallback(input);
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getAllByText(FALLBACK_RENDERED_TEXT).length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText("{{broken analysis summary}}")).toBeNull();
+    expect(screen.queryByText("{{broken signal}}")).toBeNull();
   });
 
   it("shows the unlock entry panel when arriving from a successful generation unlock", async () => {

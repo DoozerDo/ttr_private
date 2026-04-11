@@ -11,6 +11,7 @@ import { Job } from '../jobs/job.entity';
 import { ApplicationsModule } from '../applications/applications.module';
 import { OpportunitiesModule } from '../opportunities/opportunities.module';
 import { SupportModule } from '../support/support.module';
+import { WorkflowIdempotencyModule } from '../common/workflow-idempotency.module';
 import { ResumeController } from './resume.controller';
 import { ResumeService } from './resume.service';
 
@@ -28,6 +29,7 @@ import { ResumeService } from './resume.service';
     ApplicationsModule,
     OpportunitiesModule,
     SupportModule,
+    WorkflowIdempotencyModule,
   ],
   controllers: [ResumeController],
   providers: [ResumeService, GapAnalysisService],

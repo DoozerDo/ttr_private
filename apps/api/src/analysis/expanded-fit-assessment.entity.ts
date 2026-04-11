@@ -11,6 +11,7 @@ import type { FitDimensionScores } from './fit-assessment.entity';
 @Entity({ name: 'expanded_fit_assessments' })
 @Index(['userId', 'jobId'])
 @Index(['userId', 'baselineId'])
+@Index(['userId', 'interviewId', 'requestHash'])
 export class ExpandedFitAssessment {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -32,6 +33,9 @@ export class ExpandedFitAssessment {
 
   @Column({ type: 'uuid', nullable: true })
   interviewId!: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  requestHash!: string | null;
 
   @Column({ type: 'int' })
   originalScore!: number;

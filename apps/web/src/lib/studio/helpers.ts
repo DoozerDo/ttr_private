@@ -1,3 +1,5 @@
+import { FALLBACK_RENDERED_TEXT, sanitizeRenderedTextValue } from "@/lib/renderedText";
+
 export type ResumeFocusOption =
   | "Auto (recommended)"
   | "Operational Leadership"
@@ -19,7 +21,12 @@ export type ArtifactFailureCategory =
   | "validation_failure"
   | "trace_failure"
   | "generation_blocked"
-  | "generation_failed";
+  | "generation_failed"
+  | "generation_timeout"
+  | "insufficient_verified_evidence"
+  | "invalid_pair_state"
+  | "studio_not_ready"
+  | "artifact_persistence_failed";
 
 export type ArtifactFailurePayload = {
   code: string;
@@ -27,6 +34,10 @@ export type ArtifactFailurePayload = {
   message: string;
   detail?: string;
   retryable: boolean;
+  artifactType?: "resume" | "cover_letter";
+  nextAction?: string;
+  runId?: string;
+  status?: "success" | "error";
   userAction?: {
     title: string;
     description: string;
@@ -46,6 +57,8 @@ export type StudioArtifactFailurePresentation = {
   retryable: boolean;
   category: ArtifactFailureCategory;
   code: string;
+  nextAction?: string;
+  runId?: string;
   userAction?: {
     title: string;
     description: string;
@@ -80,9 +93,13 @@ export type StudioGenerationPresenter = {
 };
 
 export function trimToString(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "string") return value.trim();
-  return String(value).trim();
+  const raw = value === null || value === undefined ? "" : typeof value === "string" ? value : String(value);
+  if (!raw.trim()) return "";
+  const sanitized = sanitizeRenderedTextValue(raw, {
+    endpoint: "studio-helpers",
+    field: "text",
+  });
+  return sanitized === FALLBACK_RENDERED_TEXT ? FALLBACK_RENDERED_TEXT : sanitized;
 }
 
 export function createDocumentState() {
@@ -103,7 +120,7 @@ export function readTrackerField(source: unknown, key: string): string | undefin
   const value = record[key];
   if (value === null || value === undefined) return undefined;
 
-  const normalized = typeof value === "string" ? trimToString(value) : String(value).trim();
+  const normalized = trimToString(value);
   return normalized.length ? normalized : undefined;
 }
 
@@ -115,7 +132,7 @@ export function collectNormalizedContextValues(
 
   for (const value of values) {
     if (value === null || value === undefined) continue;
-    const normalized = value.trim().replace(/\s+/g, " ");
+    const normalized = trimToString(value).replace(/\s+/g, " ");
     if (!normalized) continue;
 
     const dedupeKey = normalized.toLowerCase();
@@ -139,7 +156,7 @@ export function mapApplicationConfidence(
 
 export function normalizeAuditId(value: unknown): string | undefined {
   if (typeof value === "string" && value.trim()) {
-    return value.trim();
+    return trimToString(value);
   }
   if (!value || typeof value !== "object") {
     return undefined;
@@ -149,7 +166,7 @@ export function normalizeAuditId(value: unknown): string | undefined {
   for (const key of keys) {
     const candidate = record[key];
     if (typeof candidate === "string" && candidate.trim()) {
-      return candidate.trim();
+      return trimToString(candidate);
     }
   }
   return undefined;
@@ -169,9 +186,9 @@ export function extractComplianceWarnings(payload: unknown) {
   const normalized: Array<{ code?: string; message: string; severity?: string }> = [];
   for (const entry of raw) {
     if (typeof entry === "string") {
-      const trimmed = entry.trim();
-      if (trimmed) {
-        normalized.push({ message: trimmed });
+    const trimmed = trimToString(entry);
+    if (trimmed) {
+      normalized.push({ message: trimmed });
       }
       continue;
     }
@@ -241,7 +258,7 @@ function mapSafeDisplay(
   }
 
   const reasons =
-    payload.reasons?.filter((value) => value.trim().length > 0).slice(0, 4) ??
+    payload.reasons?.filter((value) => trimToString(value).length > 0).slice(0, 4) ??
     fallback.reasons ??
     [];
 
@@ -265,6 +282,23 @@ function trimMessage(value: unknown): string {
   return trimToString(value).replace(/\s+/g, " ").trim();
 }
 
+function mapGenerationFailureCategory(code: string, status?: string): ArtifactFailureCategory | null {
+  const lowered = trimToString(code).toLowerCase();
+  const loweredStatus = trimToString(status).toLowerCase();
+  if (!lowered && loweredStatus !== "timeout") {
+    return null;
+  }
+  if (loweredStatus === "timeout" || lowered === "generation_timeout") return "generation_timeout";
+  if (lowered === "generation_blocked") return "generation_blocked";
+  if (lowered === "unsupported_input") return "unsupported_input";
+  if (lowered === "generation_failed") return "generation_failed";
+  if (lowered === "artifact_persistence_failed") return "artifact_persistence_failed";
+  if (lowered === "invalid_pair_state") return "invalid_pair_state";
+  if (lowered === "studio_not_ready") return "studio_not_ready";
+  if (lowered === "insufficient_verified_evidence") return "insufficient_verified_evidence";
+  return null;
+}
+
 export function readArtifactFailurePayload(payload: unknown): ArtifactFailurePayload | null {
   if (!payload || typeof payload !== "object") return null;
   const record = payload as Record<string, unknown>;
@@ -272,11 +306,19 @@ export function readArtifactFailurePayload(payload: unknown): ArtifactFailurePay
     record.response && typeof record.response === "object"
       ? (record.response as Record<string, unknown>)
       : record.error && typeof record.error === "object"
-        ? (record.error as Record<string, unknown>)
-        : record;
+      ? (record.error as Record<string, unknown>)
+      : record;
 
+  const status =
+    trimToString(candidate.status) ||
+    trimToString(record.status) ||
+    trimToString(record.generationStatus);
   const code = trimToString(candidate.code);
-  const category = trimToString(candidate.category) as ArtifactFailureCategory;
+  const category =
+    (trimToString(candidate.category) as ArtifactFailureCategory) ||
+    mapGenerationFailureCategory(code, status) ||
+    mapGenerationFailureCategory(trimToString(candidate.nextAction), status) ||
+    null;
   const message = trimMessage(candidate.message);
   const retryable =
     candidate.retryable === true ||
@@ -288,8 +330,13 @@ export function readArtifactFailurePayload(payload: unknown): ArtifactFailurePay
     "trace_failure",
     "generation_blocked",
     "generation_failed",
+    "generation_timeout",
+    "insufficient_verified_evidence",
+    "invalid_pair_state",
+    "studio_not_ready",
+    "artifact_persistence_failed",
   ];
-  if (!code || !message || !validCategories.includes(category)) return null;
+  if (!message || !category || !validCategories.includes(category)) return null;
 
   const userActionRaw = candidate.userAction;
   const userAction =
@@ -332,6 +379,14 @@ export function readArtifactFailurePayload(payload: unknown): ArtifactFailurePay
     message,
     detail: trimMessage(candidate.detail) || undefined,
     retryable,
+    artifactType:
+      trimToString(candidate.artifactType) === "resume" ||
+      trimToString(candidate.artifactType) === "cover_letter"
+        ? (trimToString(candidate.artifactType) as "resume" | "cover_letter")
+        : undefined,
+    nextAction: trimToString(candidate.nextAction) || undefined,
+    runId: trimToString(candidate.runId) || undefined,
+    status: status === "success" || status === "error" ? (status as "success" | "error") : undefined,
     userAction: userAction?.title || userAction?.description ? userAction : undefined,
     diagnostics,
   };
@@ -341,11 +396,11 @@ export function readArtifactFailurePresentation(
   payload: unknown,
 ): StudioArtifactFailurePresentation | null {
   const failure = readArtifactFailurePayload(payload);
-  return failure ? presentArtifactFailure(failure) : null;
+  return failure ? presentArtifactFailureV2(failure) : null;
 }
 
 function presentArtifactFailure(failure: ArtifactFailurePayload): StudioArtifactFailurePresentation {
-  const base: Record<ArtifactFailureCategory, { headline: string; explanation: string; nextStep: string }> = {
+  const base: Partial<Record<ArtifactFailureCategory, { headline: string; explanation: string; nextStep: string }>> = {
     unsupported_input: {
       headline: "This input isn’t supported yet",
       explanation:
@@ -407,6 +462,116 @@ function presentArtifactFailure(failure: ArtifactFailurePayload): StudioArtifact
   };
 }
 
+function presentArtifactFailureV2(failure: ArtifactFailurePayload): StudioArtifactFailurePresentation {
+  const base: Record<ArtifactFailureCategory, { headline: string; explanation: string; nextStep: string }> = {
+    unsupported_input: {
+      headline: "This input isn't supported yet",
+      explanation:
+        failure.detail ||
+        "The current input does not match the supported artifact contract for this generator.",
+      nextStep:
+        failure.userAction?.title ||
+        "Review the unsupported input requirements before trying again.",
+    },
+    validation_failure: {
+      headline: "We couldn't generate this artifact",
+      explanation:
+        failure.detail ||
+        "The artifact could not be completed because the generated structure did not pass validation.",
+      nextStep:
+        failure.userAction?.title ||
+        "Review the structure requirements and adjust the source content.",
+    },
+    trace_failure: {
+      headline: "We couldn't verify this safely",
+      explanation:
+        failure.detail ||
+        "The artifact could not be verified against baseline evidence with enough confidence to return safely.",
+      nextStep:
+        failure.userAction?.title ||
+        "Add or repair baseline evidence so every content line can be traced.",
+    },
+    generation_blocked: {
+      headline: "You're not ready to generate yet",
+      explanation:
+        failure.detail ||
+        "A readiness or compliance gate is preventing generation right now.",
+      nextStep:
+        failure.userAction?.title ||
+        "Complete the missing baseline requirements before generating again.",
+    },
+    generation_failed: {
+      headline: "Generation didn't complete",
+      explanation:
+        failure.detail ||
+        "The artifact generator could not produce a valid result from the current inputs.",
+      nextStep:
+        failure.userAction?.title ||
+        "Review the input and try again with stronger baseline evidence.",
+    },
+    generation_timeout: {
+      headline: "Generation timed out",
+      explanation:
+        failure.detail ||
+        "The generator took longer than expected to finish this draft.",
+      nextStep:
+        failure.userAction?.title ||
+        "Retry generation or return to Results to continue safely.",
+    },
+    insufficient_verified_evidence: {
+      headline: "More verified evidence is needed",
+      explanation:
+        failure.detail ||
+        "This draft needs stronger baseline evidence before Studio can proceed safely.",
+      nextStep:
+        failure.userAction?.title ||
+        "Return to Fit Review and strengthen the missing evidence.",
+    },
+    invalid_pair_state: {
+      headline: "Studio is out of sync with this pair",
+      explanation:
+        failure.detail ||
+        "The selected baseline and job no longer line up with the current generation context.",
+      nextStep:
+        failure.userAction?.title ||
+        "Return to Results, reopen Studio from the active pair, and try again.",
+    },
+    studio_not_ready: {
+      headline: "Studio is not ready yet",
+      explanation:
+        failure.detail ||
+        "The current baseline-job pair is not eligible for generation yet.",
+      nextStep:
+        failure.userAction?.title ||
+        "Return to Results and follow the next available step.",
+    },
+    artifact_persistence_failed: {
+      headline: "We couldn't save this draft",
+      explanation:
+        failure.detail ||
+        "The generator finished, but the artifact could not be saved cleanly.",
+      nextStep:
+        failure.userAction?.title ||
+        "Retry generation after the storage issue clears.",
+    },
+  };
+
+  const copy = base[failure.category] ?? base.generation_failed!;
+  return {
+    headline: copy.headline,
+    explanation: failure.message || copy.explanation,
+    nextStep: failure.userAction?.description || copy.nextStep,
+    retryable: failure.retryable,
+    category: failure.category,
+    code: failure.code,
+    nextAction: failure.nextAction,
+    runId: failure.runId,
+    userAction: failure.userAction,
+    diagnostics: failure.diagnostics,
+    detail: failure.detail,
+  };
+}
+
 function isBlockedPayload(payload: Record<string, unknown>): boolean {
   const generationStatus = trimToString(payload.generationStatus).toLowerCase();
   const status = trimToString(payload.status).toLowerCase();
@@ -455,7 +620,7 @@ export function presentResumeGeneration(payload: unknown): StudioGenerationPrese
       status: artifactFailure.category === "generation_blocked" ? "blocked" : "error",
       hasExportableContent: false,
       display: null,
-      failure: presentArtifactFailure(artifactFailure),
+      failure: presentArtifactFailureV2(artifactFailure),
     };
   }
   const blocked = isBlockedPayload(record);
@@ -535,7 +700,7 @@ export function presentCoverLetterGeneration(payload: unknown): StudioGeneration
       status: artifactFailure.category === "generation_blocked" ? "blocked" : "error",
       hasExportableContent: false,
       display: null,
-      failure: presentArtifactFailure(artifactFailure),
+      failure: presentArtifactFailureV2(artifactFailure),
     };
   }
   const blocked = isBlockedPayload(record);
@@ -616,12 +781,20 @@ export function readDuplicateCoverLetterId(payload: unknown): string | undefined
     return undefined;
   }
   const record = payload as Record<string, unknown>;
+  if (typeof record.code === "string" && trimToString(record.code) === "artifact_updated") {
+    const payloadRecord =
+      record.payload && typeof record.payload === "object"
+        ? (record.payload as Record<string, unknown>)
+        : null;
+    const existingId = trimToString(payloadRecord?.existingCoverLetterId);
+    if (existingId) return existingId;
+  }
   const rawError = record.error;
   if (!rawError || typeof rawError !== "object") {
     return undefined;
   }
   const errorRecord = rawError as Record<string, unknown>;
-  const code = typeof errorRecord.code === "string" ? errorRecord.code.trim() : undefined;
+  const code = typeof errorRecord.code === "string" ? trimToString(errorRecord.code) : undefined;
   if (code !== "COVER_LETTER_DUPLICATE") {
     return undefined;
   }
@@ -629,7 +802,7 @@ export function readDuplicateCoverLetterId(payload: unknown): string | undefined
   if (typeof existingId !== "string") {
     return undefined;
   }
-  const trimmed = existingId.trim();
+  const trimmed = trimToString(existingId);
   return trimmed || undefined;
 }
 
@@ -640,7 +813,10 @@ export function formatPreview(payload: unknown): string {
 
   const display = readSafeDisplay(payload);
   if (display?.description) {
-    return display.description;
+    return sanitizeRenderedTextValue(display.description, {
+      endpoint: "studio-helpers",
+      field: "display.description",
+    });
   }
 
   const record = payload as Record<string, unknown>;
@@ -828,3 +1004,4 @@ export function downloadBlob(blob: Blob, fileName: string) {
   window.URL.revokeObjectURL(url);
 }
 
+import { sanitizeRenderedTextValue } from "@/lib/renderedText";
