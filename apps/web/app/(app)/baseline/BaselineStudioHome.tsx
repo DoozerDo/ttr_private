@@ -270,6 +270,7 @@ function buildBaselineReadinessContract({
   const progression = resolveWorkflowProgression({
     surface: "baseline",
     baselineId,
+    jobId: null,
     routes,
     baselineStatus: isAnalyzing ? "UPLOADING" : "READY",
     analysisStatus: isAnalyzing ? "running" : latestAssessmentId ? "complete" : "idle",

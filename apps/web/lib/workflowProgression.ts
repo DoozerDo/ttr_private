@@ -364,7 +364,7 @@ function resolveBlockingReason(
   input: WorkflowProgressionInput,
   state: WorkflowState,
   action: WorkflowPrimaryAction,
-): WorkflowBlockingReason {
+): WorkflowBlockingReason | null {
   switch (state) {
     case "first_run":
       return buildBlockingReason({
@@ -492,6 +492,8 @@ function resolveBlockingReason(
         destination: action.destination,
       });
   }
+
+  return null;
 }
 
 export function resolveWorkflowProgression(

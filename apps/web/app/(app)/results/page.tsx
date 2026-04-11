@@ -55,6 +55,7 @@ import {
   FALLBACK_RENDERED_TEXT,
   sanitizeRenderedTextList,
   sanitizeRenderedTextValue,
+  type RenderedTextSource,
 } from "@/lib/renderedText";
 import { buildProgressSummary } from "@/lib/progressSummary";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
@@ -72,6 +73,33 @@ import { readRecentIntentState } from "@/src/lib/recentIntent";
 import { useGuidedMode } from "@/hooks/useGuidedMode";
 import { trackEvent } from "@/src/lib/analytics";
 import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
+import type { ResultsPrimaryCtaReadinessStatus } from "@/src/lib/analytics";
+
+function mapResultsAnalyticsActionType(
+  type: ReturnType<typeof resolveCanonicalState>["primaryAction"]["type"],
+): "fit_review" | "verify_examples" | "open_studio_draft" | "open_studio" {
+  switch (type) {
+    case "open_studio":
+      return "open_studio";
+    case "generate_documents":
+      return "open_studio_draft";
+    case "generate_score":
+      return "verify_examples";
+    case "start_fit_review":
+    case "recover_selection":
+      return "fit_review";
+    default:
+      return "fit_review";
+  }
+}
+
+function mapResultsAnalyticsReadinessStatus(
+  readinessState: ReturnType<typeof resolveCanonicalState>["readinessState"],
+): ResultsPrimaryCtaReadinessStatus {
+  if (readinessState === "READY") return "ready";
+  if (readinessState === "LIMITED" || readinessState === "DRAFT") return "limited";
+  return "blocked";
+}
 
 type FitDimensionScores = {
   experienceAlignment?: number;
@@ -358,10 +386,34 @@ function sanitizeAnalysisTextSource(
   return value;
 }
 
+function toRenderedTextSource(value: unknown): RenderedTextSource {
+  if (typeof value === "string" || value === null || value === undefined) {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (typeof value === "object" && value && "type" in value && "content" in value) {
+    const record = value as { type?: unknown; content?: unknown };
+    if (
+      (record.type === "plain_text" ||
+        record.type === "structured" ||
+        record.type === "markdown") &&
+      typeof record.content === "string"
+    ) {
+      return {
+        type: record.type,
+        content: record.content,
+      };
+    }
+  }
+  return undefined;
+}
+
 function sanitizeLatestAnalysisResponse(data: LatestAnalysis, endpoint: string): LatestAnalysis {
   const context = { endpoint, payload: data };
   const sanitizeText = (value: unknown, field: string) =>
-    sanitizeRenderedTextValue(value, { ...context, field });
+    sanitizeRenderedTextValue(toRenderedTextSource(value), { ...context, field });
   const sanitizeList = (value: unknown, field: string) =>
     Array.isArray(value)
       ? sanitizeRenderedTextList(
@@ -2840,15 +2892,7 @@ export default function ResultsPage() {
   const oneClickResultsCta = useMemo(() => {
     if (!latest) return null;
 
-    const analyticsAction =
-      canonicalResultsDecision.primaryAction.type === "open_studio" ||
-      canonicalResultsDecision.primaryAction.type === "generate_documents"
-        ? "open_studio"
-        : canonicalResultsDecision.primaryAction.type === "start_fit_review"
-          ? "fit_review"
-          : canonicalResultsDecision.primaryAction.type === "generate_score"
-            ? "analyze"
-            : "recover_selection";
+    const analyticsAction = mapResultsAnalyticsActionType(canonicalResultsDecision.primaryAction.type);
 
     return {
       label: canonicalResultsDecision.primaryAction.label,
@@ -2865,7 +2909,7 @@ export default function ResultsPage() {
           intentState: recentIntent ?? "none",
           action: analyticsAction,
           scoreBucket: resultsScoreBucket ?? null,
-          readinessStatus: canonicalResultsDecision.workflowState,
+          readinessStatus: mapResultsAnalyticsReadinessStatus(canonicalResultsDecision.readinessState),
         });
       },
     };
@@ -2904,7 +2948,7 @@ export default function ResultsPage() {
       if (canonicalResultsDecision.readinessState === "READY") {
         return {
           state: "READY" as const,
-          primaryCta: "OPEN_STUDIO" as const,
+          primaryCta: "open_studio" as const,
           headline: copy.headline,
           subtext: copy.subtext,
         };
@@ -2913,7 +2957,7 @@ export default function ResultsPage() {
       if (canonicalResultsDecision.readinessState === "DRAFT") {
         return {
           state: "DRAFT" as const,
-          primaryCta: "OPEN_STUDIO" as const,
+          primaryCta: "open_studio" as const,
           headline: copy.headline,
           subtext: copy.subtext,
         };
@@ -2922,7 +2966,7 @@ export default function ResultsPage() {
       if (canonicalResultsDecision.readinessState === "BLOCKED") {
         return {
           state: "BLOCKED" as const,
-          primaryCta: "START_FIT_REVIEW" as const,
+          primaryCta: "fit_review" as const,
           headline: copy.headline,
           subtext: blockedResultsState?.supportSummary ?? copy.subtext,
         };
@@ -2930,7 +2974,7 @@ export default function ResultsPage() {
 
       return {
         state: "IMPROVE" as const,
-        primaryCta: "START_FIT_REVIEW" as const,
+        primaryCta: "fit_review" as const,
         headline: copy.headline,
         subtext: copy.subtext,
       };
@@ -2945,26 +2989,13 @@ export default function ResultsPage() {
     const cta = {
       label: canonicalResultsDecision.primaryAction.label,
       href: canonicalResultsDecision.primaryAction.destination,
-      actionType: canonicalResultsDecision.primaryAction.type as
-        | "open_studio"
-        | "start_fit_review"
-        | "generate_score"
-        | "generate_documents"
-        | "recover_selection",
+      actionType: mapResultsAnalyticsActionType(canonicalResultsDecision.primaryAction.type),
       analyticsPayload: {
         source: "results" as const,
         intentState: recentIntent ?? "none",
-        action:
-          canonicalResultsDecision.primaryAction.type === "start_fit_review"
-            ? "fit_review"
-            : canonicalResultsDecision.primaryAction.type === "open_studio" ||
-                canonicalResultsDecision.primaryAction.type === "generate_documents"
-              ? "open_studio"
-              : canonicalResultsDecision.primaryAction.type === "generate_score"
-                ? "analyze"
-                : "recover_selection",
+        action: mapResultsAnalyticsActionType(canonicalResultsDecision.primaryAction.type),
         scoreBucket: resultsScoreBucket ?? null,
-        readinessStatus: canonicalResultsDecision.workflowState,
+        readinessStatus: mapResultsAnalyticsReadinessStatus(canonicalResultsDecision.readinessState),
       },
     };
     const decisionKey = [

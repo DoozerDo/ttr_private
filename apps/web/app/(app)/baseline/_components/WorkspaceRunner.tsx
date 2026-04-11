@@ -17,7 +17,11 @@ import { getGenerationReadiness } from "@/lib/generationReadiness";
 import { getGenerationAuthorityState } from "@/lib/generationAuthority";
 import { buildGenerationProductReadiness } from "@/lib/generationProductReadiness";
 import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
-import { sanitizeRenderedTextList, sanitizeRenderedTextValue } from "@/lib/renderedText";
+import {
+  sanitizeRenderedTextList,
+  sanitizeRenderedTextValue,
+  type RenderedTextSource,
+} from "@/lib/renderedText";
 import {
   buildTargetCtaContract,
   buildTargetCtaClickedAnalyticsPayload,
@@ -244,9 +248,32 @@ function delay(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-function normalizeRouteValue(value: string | null | undefined, field: string): string {
-  if (typeof value !== "string" || !value.trim()) return "";
-  const sanitized = sanitizeRenderedTextValue(value, {
+function toRenderedTextSource(value: unknown): RenderedTextSource {
+  if (typeof value === "string" || value === null || value === undefined) {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (typeof value === "object" && value && "type" in value && "content" in value) {
+    const record = value as { type?: unknown; content?: unknown };
+    if (
+      (record.type === "plain_text" ||
+        record.type === "structured" ||
+        record.type === "markdown") &&
+      typeof record.content === "string"
+    ) {
+      return {
+        type: record.type,
+        content: record.content,
+      };
+    }
+  }
+  return undefined;
+}
+
+function normalizeRouteValue(value: unknown, field: string): string {
+  const sanitized = sanitizeRenderedTextValue(toRenderedTextSource(value), {
     endpoint: "target-workspace",
     field,
   });
@@ -1658,3 +1685,5 @@ export function WorkspaceRunner({
     </SetupModuleCard>
   );
 }
+
+

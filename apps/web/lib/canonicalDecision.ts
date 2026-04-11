@@ -486,6 +486,8 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
     (candidate) => candidate.value && typeof candidate.value === "object",
   )?.value;
   const routeInput = input as unknown as Record<string, string | undefined>;
+  const studioCanGenerateDocuments =
+    input.surface === "studio" ? input.canGenerateDocuments : false;
   const progressionRoutes: WorkflowProgressionInput["routes"] = {
     baseline: input.baselineId ? "/baseline" : "/baseline",
     target: input.baselineId ? `/target?baselineId=${encodeURIComponent(input.baselineId)}` : "/target",
@@ -508,13 +510,12 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
     generationReadiness: input.generationReadiness,
     productReadiness: input.productReadiness,
     analysisStatus: input.surface === "results" && input.forceFitReview ? "failed" : "complete",
-    generationStatus: input.surface === "studio" && !input.canGenerateDocuments ? "blocked" : "idle",
     firstRun: !input.baselineId && !input.jobId,
     hasJobDescription: Boolean(input.jobId),
     isGenerationBlocked:
       input.surface === "results"
         ? input.forceFitReview || score === null || score < 70 || !input.productReadiness.canOpenStudio || input.generationReadiness.status !== "ready"
-        : !input.canGenerateDocuments || !input.productReadiness.canOpenStudio,
+        : !studioCanGenerateDocuments || !input.productReadiness.canOpenStudio,
     routes: progressionRoutes,
     dataSource: input.dataSource ?? "fresh",
     analysisAssessmentId: analysisCandidate?.assessmentId ?? input.persistedAssessmentId ?? null,
@@ -542,7 +543,7 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
               : input.productReadiness.confidence === "HIGH"
                 ? "READY"
                 : "DRAFT"
-          : !input.canGenerateDocuments || !input.productReadiness.canOpenStudio
+          : !studioCanGenerateDocuments || !input.productReadiness.canOpenStudio
             ? "BLOCKED"
             : score !== null && score < 70
               ? "BLOCKED"
@@ -565,7 +566,7 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
               : input.productReadiness.confidence === "HIGH"
                 ? "generation_ready"
                 : "generation_limited"
-          : !input.canGenerateDocuments || !input.productReadiness.canOpenStudio
+          : !studioCanGenerateDocuments || !input.productReadiness.canOpenStudio
             ? "generation_blocked"
             : score !== null && score >= 85
               ? "generation_ready"

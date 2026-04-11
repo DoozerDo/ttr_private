@@ -463,8 +463,3 @@ export function buildStrategicBrief(input: {
     bestNextMove,
   };
 }
-import {
-  FALLBACK_RENDERED_TEXT,
-  sanitizeRenderedTextList,
-  sanitizeRenderedTextValue,
-} from "@/lib/renderedText";

@@ -1984,7 +1984,8 @@ export default function StudioPage() {
       return;
     }
     if (!analysis || !requestedAnalysisId) return;
-    const readinessState = studioCanonicalDecision.workflowState;
+    const readinessState = studioCanonicalDecision.readinessState;
+    const workflowState = studioCanonicalDecision.workflowState;
     const ctaHref = studioCanonicalDecision.primaryAction.destination;
     const analyticsPayload: {
       state: "READY" | "LIMITED" | "BLOCKED";
@@ -2004,7 +2005,7 @@ export default function StudioPage() {
       requestedAnalysisId,
       effectiveBaselineId ?? "none",
       effectiveJobId ?? "none",
-      readinessState,
+      workflowState,
       primaryNextAction.type,
       ctaHref,
       analysisScore ?? "none",
@@ -2276,7 +2277,7 @@ export default function StudioPage() {
   }, [generationSupportState, recentIntent]);
   const guardGenerationAction = useCallback(
     (documentType: "resume" | "cover_letter" | "application") => {
-      if (studioUiState === "BLOCKED") {
+      if (generationSupportState === "blocked") {
         trackEvent("studio_generate_blocked", {
           score: analysisScore,
           blockerCodes: generationBlockerCodes,
@@ -4426,7 +4427,7 @@ export default function StudioPage() {
             >
               Add to Opportunities
             </Link>
-          ) : studioUiState === "BLOCKED" ? (
+          ) : generationSupportState === "blocked" ? (
             <Link
               href={remediationHref}
               className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
@@ -4489,7 +4490,7 @@ export default function StudioPage() {
             </p>
           ) : null}
         </section>
-      ) : studioUiState === "BLOCKED" && !studioDraftMode ? (
+      ) : generationSupportState === "blocked" && !studioDraftMode ? (
         <RouteStateShell
           testId="studio-evidence-blocked-panel"
           tone="warning"

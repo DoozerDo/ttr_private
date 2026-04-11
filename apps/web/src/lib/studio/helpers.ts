@@ -449,10 +449,11 @@ function presentArtifactFailure(failure: ArtifactFailurePayload): StudioArtifact
   };
 
   const copy = base[failure.category];
+  const fallback = base.generation_failed!;
   return {
-    headline: copy.headline,
-    explanation: failure.message || copy.explanation,
-    nextStep: failure.userAction?.description || copy.nextStep,
+    headline: copy?.headline ?? fallback.headline,
+    explanation: failure.message || copy?.explanation || fallback.explanation,
+    nextStep: failure.userAction?.description || copy?.nextStep || fallback.nextStep,
     retryable: failure.retryable,
     category: failure.category,
     code: failure.code,
@@ -1004,4 +1005,3 @@ export function downloadBlob(blob: Blob, fileName: string) {
   window.URL.revokeObjectURL(url);
 }
 
-import { sanitizeRenderedTextValue } from "@/lib/renderedText";

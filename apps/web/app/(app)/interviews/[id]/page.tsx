@@ -54,6 +54,7 @@ import { InterviewApiError } from "@/lib/interviewsClient";
 import {
   sanitizeRenderedTextList,
   sanitizeRenderedTextValue,
+  type RenderedTextSource,
 } from "@/lib/renderedText";
 
 type ComplianceFlag = {
@@ -139,8 +140,31 @@ function sanitizeInterviewSessionDto(
   endpoint: string,
 ): InterviewSessionDto {
   const context = { endpoint, payload: session };
+  const toRenderedTextSource = (value: unknown): RenderedTextSource => {
+    if (typeof value === "string" || value === null || value === undefined) {
+      return value;
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+    if (typeof value === "object" && value && "type" in value && "content" in value) {
+      const record = value as { type?: unknown; content?: unknown };
+      if (
+        (record.type === "plain_text" ||
+          record.type === "structured" ||
+          record.type === "markdown") &&
+        typeof record.content === "string"
+      ) {
+        return {
+          type: record.type,
+          content: record.content,
+        };
+      }
+    }
+    return undefined;
+  };
   const sanitizeText = (value: unknown, field: string) =>
-    sanitizeRenderedTextValue(value, { ...context, field });
+    sanitizeRenderedTextValue(toRenderedTextSource(value), { ...context, field });
   const sanitizeList = (value: unknown, field: string) =>
     Array.isArray(value)
       ? sanitizeRenderedTextList(
@@ -457,12 +481,16 @@ export default function InterviewSessionPage() {
   );
 
   useEffect(() => {
+    const expandedAssessmentId =
+      typeof session?.expandedFitAssessment?.assessmentId === "string"
+        ? session.expandedFitAssessment.assessmentId
+        : null;
     currentSessionIdRef.current = sessionId ?? null;
     currentSessionScopeRef.current = {
       baselineId: session?.baselineId ?? null,
       jobId: session?.jobId ?? null,
       baselineVersionId: session?.baselineVersionId ?? null,
-      analysisId: session?.expandedFitAssessment?.assessmentId ?? null,
+      analysisId: expandedAssessmentId,
       sessionId: sessionId ?? null,
     };
   }, [session?.baselineId, session?.baselineVersionId, session?.expandedFitAssessment?.assessmentId, session?.jobId, sessionId]);
