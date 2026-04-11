@@ -38,3 +38,17 @@ This pass hardens image build determinism and reduces noisy build context for Ra
   - Added `apps/web/.dockerignore` for service-scoped context hygiene.
 - Rule of thumb:
   - If Docker build context is `apps/web`, all `COPY` paths must be relative to `apps/web` and must not prefix `apps/web/`.
+
+## Avoid missing `/packages` in deployment builds
+
+- Root cause: some CI/deployment pipelines (DigitalOcean, Railway, etc.) build the web or API images from inside a service folder (for example `apps/web`), so the Docker context misses the monorepo `packages/` sibling. `COPY packages ./packages` therefore fails with `"/packages": not found` even though the folder exists at the repo root.
+- Fix: always launch `docker build` (or `docker compose build`) from the repo root so the context includes `apps/`, `packages/`, `package.json`, and `package-lock.json`. For example:
+
+  ```
+  docker build -f apps/web/Dockerfile .
+  docker build -f infra/docker/api.Dockerfile .
+  ```
+
+  and, when using Compose, keep `context: ../..` at the `build` block in `infra/docker/docker-compose.*.yml`.
+- The root `.dockerignore` already allows `packages`, so no changes are needed there.
+- Verifying this locally proves the fix: running `docker build -f apps/web/Dockerfile .` from the repo root succeeds, and the ensuing `COPY packages ./packages` step completes because the context now contains the shared code.

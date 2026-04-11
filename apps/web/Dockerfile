@@ -25,4 +25,4 @@ ENV NODE_ENV=production
 COPY --from=deps /usr/src/app/node_modules ./node_modules
 COPY --from=builder /usr/src/app ./
 EXPOSE 8080
-CMD ["sh","-lc","npm run start -- -H 0.0.0.0 -p ${PORT:-8080}"]
+CMD ["sh","-lc","npm -w apps/web run start -- -H 0.0.0.0 -p ${PORT:-8080}"]
