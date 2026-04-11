@@ -117,7 +117,13 @@ function resolveAutoGenerationSuccess(input: RequestInfo) {
   return Promise.resolve(createResponse({}));
 }
 
-function installStrongFitFetches(options?: { readinessStatus?: "ready" | "limited"; resumeOk?: boolean; coverOk?: boolean }) {
+function installStrongFitFetches(options?: {
+  score?: number;
+  readinessStatus?: "ready" | "limited";
+  resumeOk?: boolean;
+  coverOk?: boolean;
+}) {
+  const score = options?.score ?? 84;
   const readinessStatus = options?.readinessStatus ?? "ready";
   const resumeOk = options?.resumeOk ?? true;
   const coverOk = options?.coverOk ?? true;
@@ -132,7 +138,7 @@ function installStrongFitFetches(options?: { readinessStatus?: "ready" | "limite
       return Promise.resolve(
         createResponse({
           assessmentId: "analysis-1",
-          scoring_v2: { score: 84 },
+          scoring_v2: { score },
           jobId: "job-1",
           baselineId: "base-1",
           baselineVersionId: "base-version-1",
@@ -173,6 +179,17 @@ function installStrongFitFetches(options?: { readinessStatus?: "ready" | "limite
         ? resolveAutoGenerationSuccess(input)
         : Promise.resolve(createResponse({ message: "Cover letter generation failed." }, false, 500));
     }
+    if (url.includes("/api/opportunities") && init?.method === "POST") {
+      return Promise.resolve(
+        createResponse({
+          id: "opp-1",
+          status: "SAVED",
+          updatedAt: new Date().toISOString(),
+          jobId: "job-1",
+          baselineId: "base-1",
+        }),
+      );
+    }
     return resolveAutoGenerationSuccess(input);
   });
   setFetchImplementation(fetchMock);
@@ -205,6 +222,10 @@ describe("Studio auto-generation", () => {
       expect.stringContaining("/api/cover-letters"),
       expect.objectContaining({ method: "POST" }),
     );
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/opportunities"),
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 
   it("still auto-generates when verification confidence is limited", async () => {
@@ -223,6 +244,26 @@ describe("Studio auto-generation", () => {
       expect.stringContaining("/api/cover-letters"),
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  it("auto-generates from the 80 floor without requiring Fit Review", async () => {
+    const fetchMock = installStrongFitFetches({ score: 80, readinessStatus: "limited" });
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("resume-preview")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/opportunities"),
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, init]) => String(url).includes("/api/opportunities") && init?.method === "POST",
+      ),
+    ).toHaveLength(1);
   });
 
   it("shows an explicit error if auto-generation fails", async () => {

@@ -169,7 +169,7 @@ describe("results gating", () => {
     expect(screen.queryByRole("link", { name: "Open Studio" })).toBeNull();
   });
 
-  it("blocks generation for strong fit when verification remains weak", async () => {
+  it("shows qualified strong fit as generation ready even when verification remains weak", async () => {
     overrideSearchParams({ assessmentId: "analysis-current" });
     const fetchMock = installFetch({
       score: 82,
@@ -182,12 +182,15 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Open Studio" })).toBeInTheDocument();
     });
-    expect(screen.queryByRole("link", { name: "Open Studio" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
     expect(screen.queryByTestId("results-blocked-evidence-panel")).toBeNull();
     expect(screen.queryByText("How to improve your fit")).toBeNull();
     expect(screen.queryByText("Apply moment")).toBeNull();
+    expect(screen.queryByTestId("results-improvement-cta")).toBeNull();
+    expect(screen.queryByText("Promising fit. Not ready to generate yet.")).toBeNull();
+    expect(screen.getAllByText("Strong match. Generation is ready.").length).toBeGreaterThan(0);
   });
 
   it("shows a competitive blocked state with concrete readiness drivers", async () => {
@@ -232,12 +235,12 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("Competitive fit. One step left.")).toBeInTheDocument();
+      expect(screen.getAllByText("Promising fit. Not ready to generate yet.").length).toBeGreaterThan(0);
     });
     const blockedPanel = screen.getByTestId("results-blocked-evidence-panel");
     expect(
       within(blockedPanel).getByText(
-        "You are aligned with this role. Before Studio can generate, we need to strengthen a few profile details so the output stays accurate and defensible.",
+        "Your score is strong enough to continue, but we need clearer evidence before Studio can create accurate, defensible output.",
       ),
     ).toBeInTheDocument();
     expect(within(blockedPanel).getByText("Leadership scope")).toBeInTheDocument();
@@ -250,11 +253,15 @@ describe("results gating", () => {
     expect(within(blockedPanel).getByText("Add metrics or concrete results tied to the work.")).toBeInTheDocument();
     expect(
       screen.getAllByText(
-        "You are aligned with this role. Before Studio can generate, we need to strengthen a few profile details so the output stays accurate and defensible.",
+        "Your score is strong enough to continue, but we need clearer evidence before Studio can create accurate, defensible output.",
       ).length,
-    ).toBe(1);
+    ).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: "View top drivers" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: "Start Fit Review" }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("link", { name: "Apply to this role" })).toBeNull();
+    expect(screen.queryByText("Apply moment")).toBeNull();
+    expect(screen.queryByTestId("results-improvement-cta")).toBeNull();
+    expect(screen.getAllByText("You’ll address this in Fit Review.").length).toBeGreaterThan(0);
     expect(screen.queryByText(/verified evidence|key claims/i)).toBeNull();
   });
 
@@ -312,6 +319,7 @@ describe("results gating", () => {
     expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
     expect(screen.queryByText("How to improve your fit")).toBeNull();
     expect(screen.queryByText("Apply moment")).toBeNull();
+    expect(screen.queryByTestId("results-improvement-cta")).toBeNull();
   });
 
   it("leads with fix-first guidance when score confidence is low", async () => {
@@ -335,7 +343,7 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
     });
     expect(screen.queryByRole("link", { name: "Open Studio" })).toBeNull();
   });

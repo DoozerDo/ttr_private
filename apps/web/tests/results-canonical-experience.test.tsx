@@ -157,12 +157,14 @@ describe("results canonical experience", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getAllByText(/You're a strong match\. You can generate now\./i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Strong match\. Generation is ready\./i).length).toBeGreaterThan(0);
     });
 
-    expect(screen.getAllByText(/Confidence: High/i).length).toBeGreaterThan(0);
-    expect(screen.queryByText("You're not ready to apply yet.")).toBeNull();
+    expect(screen.getAllByText(/Confidence: Medium/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText("Promising fit. Not ready to generate yet.")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
     expect(screen.queryAllByText(/confidence/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole("link", { name: "Open Studio" })).toBeInTheDocument();
   });
 
   it("sharpens Results guidance after a refine intent", async () => {
@@ -192,9 +194,9 @@ describe("results canonical experience", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("You're a match. Go generate.")).toBeInTheDocument();
+      expect(screen.getAllByText("Strong match. Generation is ready.").length).toBeGreaterThan(0);
     });
-    expect(screen.getByText("You're a match. Go generate.")).toBeInTheDocument();
+    expect(screen.getAllByText("Strong match. Generation is ready.").length).toBeGreaterThan(0);
   });
 
   it("surfaces Fit Review improvement guidance after a refine intent", async () => {
@@ -208,11 +210,10 @@ describe("results canonical experience", () => {
       expect(screen.getByText(/You signaled refinement, so Fit Review is the fastest path/i)).toBeInTheDocument();
     });
 
-    expect(screen.getAllByText("Strengthen this example").length).toBeGreaterThan(0);
-    expect(
-      screen.getByText("Add one concrete example from your real experience so Studio can use it more confidently."),
-    ).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "Start Fit Review" })[0]).toHaveAttribute(
+    expect(screen.getAllByText("Clarify this example").length).toBeGreaterThan(0);
+    expect(screen.getByText("Add one concrete detail and outcome so Studio can use it more confidently.")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Start Fit Review" }).length).toBe(1);
+    expect(screen.getByRole("link", { name: "Start Fit Review" })).toHaveAttribute(
       "href",
       "/fit-review?jobId=job-1&analysisId=analysis-current&assessmentId=analysis-current&baselineId=base-1&baselineVersionId=base-version-1",
     );
@@ -225,18 +226,7 @@ describe("results canonical experience", () => {
         }),
       );
     });
-    const previousCalls = trackEventMock.mock.calls.length;
-    screen.getByTestId("results-improvement-cta").click();
-    await waitFor(() => {
-      expect(trackEventMock).toHaveBeenCalledWith(
-        "results_improvement_cta_clicked",
-        expect.objectContaining({
-          source: "results",
-          intentState: "refine_intent",
-        }),
-      );
-    });
-    expect(trackEventMock.mock.calls.length).toBeGreaterThan(previousCalls);
+    expect(screen.queryByTestId("results-improvement-cta")).toBeNull();
   });
 
   it("ignores a stale pair response when the user switches to a new baseline and job", async () => {
@@ -418,7 +408,7 @@ describe("results canonical experience", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("Competitive fit. One step left.")).toBeInTheDocument();
+      expect(screen.getAllByText("Promising fit. Not ready to generate yet.").length).toBeGreaterThan(0);
     });
     expect(
       screen.getAllByText((_, element) => element?.textContent?.includes(FALLBACK_RENDERED_TEXT) ?? false)

@@ -1649,7 +1649,7 @@ export default function InterviewSessionPage() {
                           requirement: gap?.jdExcerpt ?? gap?.baselineExcerpt ?? gapId,
                           baselineEvidence: gap?.baselineExcerpt ?? null,
                           summary: gap?.jdExcerpt ?? null,
-                          fallbackTitle: "Strengthen this example",
+                          fallbackTitle: "Clarify this example",
                         });
                         return (
                           <div

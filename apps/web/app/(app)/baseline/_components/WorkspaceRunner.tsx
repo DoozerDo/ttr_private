@@ -908,7 +908,7 @@ export function WorkspaceRunner({
     }))
     .filter((gap): gap is CriticalGapSignal & { title: string } => Boolean(gap.title));
   const competitiveContext = getCompetitiveContext(score);
-  const isStrongScore = typeof score === "number" && score > 80;
+  const isStrongScore = typeof score === "number" && score >= 80;
   const strongMatchSignals = sanitizeScoreExplanationList(visibleStrengthSignals, "supporting", 3);
   const scoreDisplayValue = showResult ? formatScoreValue(revealedScoreValue ?? score) : "--";
   const scoreBand = typeof score === "number" ? resolveScoreBandPresentation(score) : null;

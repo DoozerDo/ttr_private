@@ -32,6 +32,10 @@ export enum OpportunityStatus {
 @Index('IDX_opportunities_company_name', ['companyName'])
 @Index('IDX_opportunities_current_band', ['currentBand'])
 @Index('IDX_opportunities_last_status_change', ['lastStatusChange'])
+@Index('UQ_opportunities_user_pair', ['userId', 'baselineId', 'jobId'], {
+  unique: true,
+  where: '"baseline_id" IS NOT NULL AND "job_id" IS NOT NULL',
+})
 export class Opportunity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

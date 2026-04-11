@@ -28,10 +28,10 @@ describe("gap guidance formatter", () => {
       baselineEvidence: "",
       supportingSignals: [],
       summary: "",
-      fallbackTitle: "Strengthen this example",
+      fallbackTitle: "Clarify this example",
     });
 
-    expect(result.title).toBe("Strengthen this example");
+    expect(result.title).toBe("Clarify this example");
     expect(result.description).toContain("real experience");
     expect(result.description).not.toMatch(/category:|domain:|confidence:|gap id/i);
     expect(result.examplePrompt ?? "").not.toMatch(/category:|domain:|confidence:|uuid/i);

@@ -8,9 +8,9 @@ import {
 import { vi } from "vitest";
 
 describe("Studio trust gate", () => {
-  it("blocks generation when score is below 70", () => {
+  it("blocks generation when score is below 80", () => {
     const decision = evaluateStudioTrustGate({
-      score: 65,
+      score: 79,
       baselineId: "base-1",
       baselineVersionId: "ver-1",
       evidenceUnits: ["signal 1", "signal 2"],
@@ -19,6 +19,28 @@ describe("Studio trust gate", () => {
 
     expect(decision.allowed).toBe(false);
     expect(decision.reason).toBe("You need to improve your fit before generating materials.");
+  });
+
+  it("keeps 80+ competitive and 90+ strong match labels", () => {
+    const competitive = evaluateStudioTrustGate({
+      score: 84,
+      baselineId: "base-1",
+      baselineVersionId: "ver-1",
+      evidenceUnits: ["signal 1", "signal 2"],
+      hasActiveComplianceViolations: false,
+    });
+    const strong = evaluateStudioTrustGate({
+      score: 92,
+      baselineId: "base-1",
+      baselineVersionId: "ver-1",
+      evidenceUnits: ["signal 1", "signal 2"],
+      hasActiveComplianceViolations: false,
+    });
+
+    expect(competitive.allowed).toBe(true);
+    expect(competitive.roleAlignmentLabel).toBe("competitive");
+    expect(strong.allowed).toBe(true);
+    expect(strong.roleAlignmentLabel).toBe("strong match");
   });
 
   it("blocks generation when baseline is incomplete", () => {

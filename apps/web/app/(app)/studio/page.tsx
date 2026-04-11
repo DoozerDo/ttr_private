@@ -812,6 +812,8 @@ export default function StudioPage() {
   const finalRoleCheckTrackedRef = useRef<string | null>(null);
   const finalRoleAdjustmentClickedRef = useRef<string | null>(null);
   const autoGenerationSignatureRef = useRef<string | null>(null);
+  const autoOpportunitySignatureRef = useRef<string | null>(null);
+  const activeAutoOpportunityRef = useRef<string | null>(null);
   const currentWorkflowScopeRef = useRef<WorkflowRequestScope>({
     baselineId: null,
     jobId: null,
@@ -826,6 +828,9 @@ export default function StudioPage() {
   const [opportunityContext, setOpportunityContext] = useState<{
     status: string;
     updatedAt: string;
+    baselineId: string | null;
+    jobId: string | null;
+    pairKey: string | null;
   } | null>(null);
 
   useEffect(() => {
@@ -1046,37 +1051,7 @@ export default function StudioPage() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!requestedAnalysisId) {
-      setOpportunityContext(null);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const response = await fetch(
-          `/api/opportunities?analysisId=${encodeURIComponent(requestedAnalysisId)}`,
-          { cache: "no-store" },
-        );
-        if (!response.ok) return;
-        const payload = (await response.json()) as Array<{
-          status?: string;
-          updatedAt?: string;
-        }>;
-        if (!cancelled && Array.isArray(payload) && payload.length > 0) {
-          const first = payload[0];
-          if (typeof first.status === "string" && typeof first.updatedAt === "string") {
-            setOpportunityContext({ status: first.status, updatedAt: first.updatedAt });
-          }
-        }
-      } catch {
-        // non-blocking
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [requestedAnalysisId]);
+
 
   const handleBlockPolicyVersionAdvance = useCallback(
     (newVersionId: string, newHash: string | null) => {
@@ -1187,6 +1162,46 @@ export default function StudioPage() {
     }),
     [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, requestedAnalysisId],
   );
+  useEffect(() => {
+    if (!requestedAnalysisId) {
+      setOpportunityContext(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/opportunities?analysisId=${encodeURIComponent(requestedAnalysisId)}`,
+          { cache: "no-store" },
+        );
+        if (!response.ok) return;
+        const payload = (await response.json()) as Array<{
+          status?: string;
+          updatedAt?: string;
+        }>;
+        if (!cancelled && Array.isArray(payload) && payload.length > 0) {
+          const first = payload[0];
+          if (typeof first.status === "string" && typeof first.updatedAt === "string") {
+            setOpportunityContext({
+              status: first.status,
+              updatedAt: first.updatedAt,
+              baselineId: effectiveBaselineId ?? null,
+              jobId: effectiveJobId ?? null,
+              pairKey: buildWorkflowRequestKey("opportunity_auto_add", {
+                baselineId: effectiveBaselineId ?? null,
+                jobId: effectiveJobId ?? null,
+              }),
+            });
+          }
+        }
+      } catch {
+        // non-blocking
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveBaselineId, effectiveJobId, requestedAnalysisId]);
   useEffect(() => {
     currentWorkflowScopeRef.current = currentWorkflowScope;
   }, [currentWorkflowScope]);
@@ -1523,6 +1538,7 @@ export default function StudioPage() {
     ],
   );
   const canGenerateDocuments = productReadiness.state === "ALLOWED" && trustGateDecision.allowed;
+  const qualifiedForGeneration = canGenerateDocuments && typeof analysisScore === "number" && analysisScore >= 80;
   const studioDraftMode = productReadiness.generationMode === "draft" && isFromUnlock && !hasGeneratedOnce;
   const improveBaselineHref = useMemo(() => {
     const params = new URLSearchParams();
@@ -1625,6 +1641,15 @@ export default function StudioPage() {
       ].join("|"),
     [roleMatchFinalPass],
   );
+  const autoOpportunitySignature = useMemo(() => {
+    if (!qualifiedForGeneration || !effectiveBaselineId || !effectiveJobId || !requestedAnalysisId) {
+      return null;
+    }
+    return buildWorkflowRequestKey("opportunity_auto_add", {
+      baselineId: effectiveBaselineId,
+      jobId: effectiveJobId,
+    });
+  }, [effectiveBaselineId, effectiveJobId, qualifiedForGeneration, requestedAnalysisId]);
   const artifactQuality = useMemo(
     () =>
       buildArtifactQualityModel({
@@ -2131,32 +2156,11 @@ export default function StudioPage() {
     return "strong";
   }, [studioCanonicalDecision.readinessState]);
   const canProceedWithStudioDrafts = generationSupportState !== "blocked";
+  const needsAutoGeneration = qualifiedForGeneration && (!hasResumeArtifact || !hasCoverLetterArtifact);
   const autoGenerationSignature = useMemo(() => {
-    if (!canGenerateDocuments) return null;
-    if (typeof analysisScore !== "number" || analysisScore < 80) return null;
-    if (
-      !requestedAnalysisId ||
-      !effectiveJobId ||
-      !effectiveBaselineId ||
-      !effectiveBaselineVersionId
-    ) {
-      return null;
-    }
-    return [
-      requestedAnalysisId,
-      effectiveJobId,
-      effectiveBaselineId,
-      effectiveBaselineVersionId,
-      Math.round(analysisScore),
-    ].join("|");
-  }, [
-    analysisScore,
-    canGenerateDocuments,
-    effectiveBaselineId,
-    effectiveBaselineVersionId,
-    effectiveJobId,
-    requestedAnalysisId,
-  ]);
+    if (!needsAutoGeneration) return null;
+    return buildWorkflowRequestKey("auto_generation", currentWorkflowScope);
+  }, [currentWorkflowScope, needsAutoGeneration]);
   const authorityStateTitle =
     generationSupportState === "blocked"
       ? "Generation blocked"
@@ -4011,7 +4015,6 @@ export default function StudioPage() {
 
   useEffect(() => {
     if (!autoGenerationSignature) return;
-    if (!isFromUnlock) return;
     if (autoGenerationSignatureRef.current === autoGenerationSignature) return;
     const autoGenerationKey = buildWorkflowRequestKey("auto_generation", currentWorkflowScope);
     if (resumeGenerating || coverGenerating || autoGenerationInFlight) return;
@@ -4027,7 +4030,10 @@ export default function StudioPage() {
 
     const runAutoGeneration = async () => {
       try {
-        await Promise.all([handleResumeDraft(), handleCoverDraft()]);
+        await Promise.all([
+          hasResumeArtifact ? Promise.resolve() : handleResumeDraft(),
+          hasCoverLetterArtifact ? Promise.resolve() : handleCoverDraft(),
+        ]);
       } finally {
         if (activeAutoGenerationRef.current?.requestId === autoGenerationSignature) {
           setAutoGenerationInFlight(false);
@@ -4043,10 +4049,92 @@ export default function StudioPage() {
     canProceedWithStudioDrafts,
     coverGenerating,
     currentWorkflowScope,
-    isFromUnlock,
     handleCoverDraft,
     handleResumeDraft,
+    hasCoverLetterArtifact,
+    hasResumeArtifact,
     resumeGenerating,
+  ]);
+
+  useEffect(() => {
+    if (!autoOpportunitySignature) return;
+    if (autoOpportunitySignatureRef.current === autoOpportunitySignature) return;
+    if (!canGenerateDocuments || !qualifiedForGeneration) return;
+
+    const storageKey = `ttr:auto-opportunity:${autoOpportunitySignature}`;
+    const storage = typeof window !== "undefined" ? window.localStorage : null;
+    if (storage && typeof storage.getItem === "function" && storage.getItem(storageKey) === "true") {
+      autoOpportunitySignatureRef.current = autoOpportunitySignature;
+      return;
+    }
+
+    autoOpportunitySignatureRef.current = autoOpportunitySignature;
+    if (activeAutoOpportunityRef.current === autoOpportunitySignature) return;
+    activeAutoOpportunityRef.current = autoOpportunitySignature;
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/opportunities", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jobId: effectiveJobId,
+            analysisId: requestedAnalysisId,
+            baselineId: effectiveBaselineId,
+            score: Math.round(analysisScore ?? 0),
+            company: selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company",
+            roleTitle: selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Untitled role",
+            generationCompleted: Boolean(hasCompletedGeneration),
+            savedEvidenceSummary: evidenceSummaryBullets.slice(0, 3),
+          }),
+        });
+        if (!response.ok) {
+          return;
+        }
+        const payload = (await response.json().catch(() => null)) as
+          | { updatedAt?: string; status?: string; baselineId?: string | null; jobId?: string | null }
+          | null;
+        if (storage && typeof storage.setItem === "function") {
+          storage.setItem(storageKey, "true");
+        }
+        setOpportunityContext({
+          status: typeof payload?.status === "string" ? payload.status : "SAVED",
+          updatedAt: typeof payload?.updatedAt === "string" ? payload.updatedAt : new Date().toISOString(),
+          baselineId: effectiveBaselineId ?? null,
+          jobId: effectiveJobId ?? null,
+          pairKey: buildWorkflowRequestKey("opportunity_auto_add", {
+            baselineId: effectiveBaselineId,
+            jobId: effectiveJobId,
+          }),
+        });
+        trackEvent("opportunity_saved", {
+          source: "workspace",
+          score: Math.round(analysisScore ?? 0),
+          baselineId: effectiveBaselineId ?? undefined,
+          jobId: effectiveJobId ?? undefined,
+        });
+      } catch {
+        // Best effort: do not block generation.
+      } finally {
+        activeAutoOpportunityRef.current = null;
+      }
+    })();
+  }, [
+    analysis?.company,
+    analysis?.companyName,
+    analysis?.jobTitle,
+    analysis?.title,
+    analysisScore,
+    autoOpportunitySignature,
+    canGenerateDocuments,
+    effectiveBaselineId,
+    effectiveJobId,
+    hasCompletedGeneration,
+    qualifiedForGeneration,
+    requestedAnalysisId,
+    selectedJob?.company,
+    selectedJob?.title,
+    evidenceSummaryBullets,
   ]);
 
   const activeArtifactFailure = resumeState.artifactFailure ?? coverState.artifactFailure ?? null;

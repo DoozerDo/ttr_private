@@ -854,10 +854,8 @@ type OpportunityMapSectionProps = {
 const GAP_EXPLANATION_FALLBACK = "Add concrete baseline evidence that proves this requirement.";
 
 function ResolveGapsBlock({
-  href,
   gapPreview,
 }: {
-  href: string;
   gapPreview: Array<{ requirement: string; explanation: string }>;
 }) {
   return (
@@ -874,14 +872,7 @@ function ResolveGapsBlock({
           ))}
         </ul>
       ) : null}
-      <div className="mt-4 space-y-2">
-        <Link
-          href={href}
-          className="inline-flex min-h-[44px] min-w-[240px] items-center justify-center rounded-[var(--button-radius)] bg-amber-500 px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-amber-400"
-        >
-          Start Fit Review
-        </Link>
-      </div>
+      <p className="mt-4 text-sm font-medium text-slate-100">You&apos;ll address these gaps in Fit Review.</p>
     </section>
   );
 }
@@ -984,13 +975,15 @@ export function OpportunityMapSection({
         : "This role needs more work";
   const readinessMessage =
     strongFitScore
-      ? readiness.status === "ready"
-        ? "Your profile is grounded enough to generate in Studio."
-        : "Open Studio now. You can tighten a few details after generation."
+      ? blockedState
+        ? blockedState.supportSummary ?? "Complete Fit Review to clarify the evidence gaps below."
+        : score !== null && score >= 90
+          ? "Your profile is grounded enough to generate in Studio."
+          : "Your materials are ready to generate now. Review them in Studio before applying."
       : readiness.status === "blocked"
         ? lowFitScore
           ? "This role needs stronger fit before Studio can open."
-          : blockedState?.supportSummary ?? "Use Fit Review to strengthen the specific areas below."
+          : blockedState?.supportSummary ?? "Complete Fit Review to clarify the evidence gaps below."
         : readiness.status === "limited"
           ? lowFitScore
             ? "Studio can open in draft mode, but the fit still needs improvement."
@@ -1004,20 +997,31 @@ export function OpportunityMapSection({
       };
     }
     if (strongFitScore) {
+      if (blockedState) {
+        return {
+          headline: blockedState?.headline ?? "Promising fit. Not ready to generate yet.",
+          body:
+            blockedState?.body ??
+            "Your score is strong enough to continue, but we need clearer evidence before Studio can create accurate, defensible output.",
+        };
+      }
       return {
-        headline: "Strong fit. Studio is available.",
+        headline:
+          score !== null && score >= 90
+            ? "Strong match. Ready to apply."
+            : "Strong match. Generation is ready.",
         body:
-          readiness.status === "ready"
-            ? "Your profile is grounded enough to generate in Studio."
-            : "Open Studio now. You can tighten a few details after generation.",
+          score !== null && score >= 90
+            ? "Your materials are ready to generate now. Review them in Studio before applying."
+            : "Your materials are ready to generate now. Review them in Studio before applying.",
       };
     }
     if (readiness.status === "blocked") {
       return {
-        headline: blockedState?.headline ?? `${fitDescriptor}. One step left.`,
+        headline: blockedState?.headline ?? "Promising fit. Not ready to generate yet.",
         body:
           blockedState?.body ??
-          "You are aligned with this role. Before Studio can generate, we need to strengthen a few profile details so the output stays accurate and defensible.",
+          "Your score is strong enough to continue, but we need clearer evidence before Studio can create accurate, defensible output.",
       };
     }
     if (readiness.status === "limited") {
@@ -1042,10 +1046,10 @@ export function OpportunityMapSection({
   }, [blockedState?.body, blockedState?.headline, fitDescriptor, lowFitScore, readiness.status, score, strongFitScore]);
   const competitiveBlockedSummary =
     isCompetitiveBlocked
-      ? blockedState?.supportSummary ?? "Use Fit Review to strengthen the specific areas below."
+      ? blockedState?.supportSummary ?? "Complete Fit Review to clarify the evidence gaps below."
       : decisionNarrative.body;
   const competitiveBlockedScoreCardSummary = isCompetitiveBlocked
-    ? "Generation is still blocked until the profile details below are clearer."
+    ? "Generation is still blocked until the evidence below is clearer."
     : decisionNarrative.body;
   const baselineEvidencePreview = useMemo(
     () =>
@@ -1077,12 +1081,7 @@ export function OpportunityMapSection({
                       >
                         <p className="text-sm font-semibold text-slate-100">{driver.title}</p>
                         <p className="text-sm leading-6 text-slate-200">{driver.detail}</p>
-                        <a
-                          href={driver.actionHref}
-                          className="inline-flex text-sm font-semibold text-amber-100 underline decoration-white/25 underline-offset-4 transition hover:text-white hover:decoration-white/55"
-                        >
-                          {driver.actionLabel}
-                        </a>
+                        <p className="text-sm font-semibold text-amber-100">{driver.actionLabel}</p>
                       </article>
                     ))}
                   </div>
@@ -1184,15 +1183,17 @@ export function OpportunityMapSection({
                 <CareerGravity />
                 <section className="space-y-3 rounded-[24px] border border-white/10 bg-slate-900/30 p-5">
                   <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-                    Strategic Next Move
+                    {isCompetitiveBlocked ? "Next step" : "Strategic Next Move"}
                   </p>
                   <div className="space-y-3">
                     <h3 className="text-xl font-semibold tracking-tight text-slate-100">
-                      {decisionNarrative.headline}
+                      {isCompetitiveBlocked
+                        ? "Complete Fit Review to clear the evidence gaps."
+                        : decisionNarrative.headline}
                     </h3>
                     <p className="max-w-2xl text-sm leading-6 text-slate-100 md:text-base">
                       {isCompetitiveBlocked
-                        ? blockedState?.supportSummary ?? "Use Fit Review to strengthen the specific areas below."
+                        ? blockedState?.supportSummary ?? "Complete Fit Review to clarify the evidence gaps below."
                         : decisionNarrative.body}
                     </p>
                     <div className="flex flex-wrap gap-3 text-sm">
@@ -1219,8 +1220,8 @@ export function OpportunityMapSection({
           </>
         ) : null}
         {lowFitScore && weakFitRecovery ? (
-          <ResolveGapsBlock href={weakFitRecovery.href} gapPreview={weakFitRecovery.gapPreview} />
-        ) : null}
+        <ResolveGapsBlock gapPreview={weakFitRecovery.gapPreview} />
+      ) : null}
         <div
           id="generation-readiness-details"
           className={`rounded-xl border px-4 py-2.5 text-sm ${
@@ -1243,19 +1244,14 @@ export function OpportunityMapSection({
                 Top readiness drivers
               </p>
               <ul className="space-y-2">
-                {blockedState.drivers.map((driver) => (
-                  <li key={driver.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-                    <p className="text-sm font-semibold text-slate-100">{driver.title}</p>
-                    <p className="mt-1 text-sm text-slate-300">{driver.detail}</p>
-                    <a
-                      href={driver.actionHref}
-                      className="mt-2 inline-flex text-sm font-semibold text-amber-100 underline decoration-white/25 underline-offset-4 transition hover:text-white hover:decoration-white/55"
-                    >
-                      {driver.actionLabel}
-                    </a>
-                  </li>
-                ))}
-              </ul>
+                      {blockedState.drivers.map((driver) => (
+                        <li key={driver.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                          <p className="text-sm font-semibold text-slate-100">{driver.title}</p>
+                          <p className="mt-1 text-sm text-slate-300">{driver.detail}</p>
+                          <p className="mt-2 text-sm font-semibold text-amber-100">{driver.actionLabel}</p>
+                        </li>
+                      ))}
+                    </ul>
               <a
                 href={blockedState.secondaryActionHref}
                 className="inline-flex text-sm font-semibold text-slate-100 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
@@ -2429,7 +2425,7 @@ export default function ResultsPage() {
             status: "blocked",
             blocked: true,
             badgeLabel: "BLOCKED",
-            summary: "Use Fit Review to strengthen the specific areas below.",
+            summary: "Complete Fit Review to clarify the evidence gaps below.",
           }
         : generationReadiness,
     [activeScore, generationReadiness],
@@ -2493,12 +2489,14 @@ export default function ResultsPage() {
             : "BLOCKED",
       summary:
         canonicalResultsDecision.readinessState === "READY"
-          ? "Your profile is grounded enough to generate in Studio."
+          ? activeScore !== null && activeScore >= 90
+            ? "Your materials are ready to generate now. Review them in Studio before applying."
+            : "Your materials are ready to generate now. Review them in Studio before applying."
           : canonicalResultsDecision.readinessState === "DRAFT"
-            ? "Open Studio now. You can tighten a few details after generation."
-            : "Use Fit Review to strengthen the specific areas below.",
+            ? "Your materials are ready to generate now. Review them in Studio before applying."
+            : "Complete Fit Review to clarify the evidence gaps below.",
     }),
-    [canonicalResultsDecision.readinessState, generationReadiness],
+    [activeScore, canonicalResultsDecision.readinessState, generationReadiness],
   );
   const canOpenStudio = canonicalResultsDecision.readinessState !== "BLOCKED";
   const claimVerifications = useMemo(
@@ -2780,7 +2778,7 @@ export default function ResultsPage() {
   );
   const resultsReturnCue = useMemo(() => {
     if (isStrongFitScore) {
-      return "You're a match. Go generate.";
+      return "Strong match. Generation is ready.";
     }
     if (recentIntent === "used_and_committed") {
       return "You're actively pursuing this role. Keep momentum in Opportunities.";
@@ -2902,7 +2900,7 @@ export default function ResultsPage() {
         canonicalResultsDecision.blockingReason?.message ??
         canonicalResultsDecision.supportingMessage ??
         blockedResultsState?.supportSummary ??
-        "Use Fit Review to strengthen the specific areas below.",
+        "Complete Fit Review to clarify the evidence gaps below.",
       onClick: () => {
         trackEvent("results_primary_cta_clicked", {
           source: "results",
@@ -3057,7 +3055,7 @@ export default function ResultsPage() {
             : undefined
           : bucket === "fix"
           ? "This is the main limiter right now."
-          : undefined;
+        : undefined;
       const ctaDisabled = Boolean(cta?.label.includes("Studio") && !canOpenStudio);
       return {
         ...dimension,
@@ -3120,6 +3118,8 @@ export default function ResultsPage() {
     <div className="grid gap-3 lg:grid-cols-2">
       {scoreDrivers.slice(offset, limit).map((driver) => {
         const cta = driver.cta;
+        const suppressDriverActions =
+          canonicalResultsDecision.readinessState === "BLOCKED" || isWeakFitScore;
         return (
           <article
             key={driver.key}
@@ -3162,17 +3162,21 @@ export default function ResultsPage() {
               ) : null}
             </div>
             {cta ? (
-              <div className="pt-1">
-                <FormButton
-                  variant="ghost"
-                  onClick={() => {
-                    void router.push(cta.href);
-                  }}
-                  disabled={!!driver.ctaDisabled}
-                >
-                  {cta.label}
-                </FormButton>
-              </div>
+              suppressDriverActions ? (
+                <p className="text-xs text-slate-400">You&apos;ll address this in Fit Review.</p>
+              ) : (
+                <div className="pt-1">
+                  <FormButton
+                    variant="ghost"
+                    onClick={() => {
+                      void router.push(cta.href);
+                    }}
+                    disabled={!!driver.ctaDisabled}
+                  >
+                    {cta.label}
+                  </FormButton>
+                </div>
+              )
             ) : driver.showNoChangesMessage ? (
               <p className="text-xs text-slate-400">No changes needed here.</p>
             ) : null}
@@ -3959,11 +3963,9 @@ export default function ResultsPage() {
               <p className="mt-1 text-sm text-emerald-50">
                 {productReadiness.confidence === "HIGH"
                   ? "Your profile is grounded enough to generate in Studio."
-                  : "Open Studio now. You can tighten a few details after generation."}
+                  : "Your materials are ready to generate now. Review them in Studio before applying."}
               </p>
-              <p className="mt-1 text-xs text-emerald-100/80">
-                You can tighten a few details after generation in Studio.
-              </p>
+              <p className="mt-1 text-xs text-emerald-100/80">Review the draft in Studio before applying.</p>
             </>
           ) : (
             <>
@@ -3985,7 +3987,27 @@ export default function ResultsPage() {
           )}
           <div className="mt-3">
             {oneClickResultsCta ? (
-              oneClickResultsCta.disabled ? (
+              canonicalResultsDecision.readinessState === "BLOCKED" && isStrongFitScore ? (
+                oneClickResultsCta.disabled ? (
+                  <span
+                    data-testid="results-hero-primary-cta"
+                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2 text-sm font-semibold text-slate-400"
+                  >
+                    {oneClickResultsCta.label}
+                  </span>
+                ) : oneClickResultsCta.href ? (
+                  <a
+                    data-testid="results-hero-primary-cta"
+                    href={oneClickResultsCta.href}
+                    onClick={oneClickResultsCta.onClick}
+                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                  >
+                    {oneClickResultsCta.label}
+                  </a>
+                ) : null
+              ) : canonicalResultsDecision.readinessState === "BLOCKED" ? (
+                <p className="text-sm font-medium text-slate-200">You&apos;ll address this in Fit Review.</p>
+              ) : oneClickResultsCta.disabled ? (
                 <span
                   data-testid="results-hero-primary-cta"
                   className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2 text-sm font-semibold text-slate-400"
@@ -4014,7 +4036,7 @@ export default function ResultsPage() {
             <p className="mt-1 text-sm text-slate-100">
               {productReadiness.confidence === "HIGH"
                 ? "Your profile now supports this role. You can move into Studio with this result."
-                : "Open Studio now. You can tighten a few details after generation."}
+                : "Your materials are ready to generate now. Review them in Studio before applying."}
             </p>
             {typeof reanalysisDelta.delta === "number" ? (
               <p className="mt-2 text-xs text-emerald-200">
@@ -4088,9 +4110,9 @@ export default function ResultsPage() {
             ) : null}
           </section>
         ) : null}
-        {isQualified && !isStrongFitScore ? (
+        {isQualified && !isStrongFitScore && canonicalResultsDecision.readinessState === "READY" ? (
           <section className="rounded-2xl border border-emerald-300/30 bg-emerald-500/10 p-4">
-            <h2 className="text-base font-semibold text-emerald-100">Apply moment</h2>
+            <h2 className="text-base font-semibold text-emerald-100">Ready to apply</h2>
             <p className="mt-1 text-sm text-slate-100">
               This role is ready to move from preparation to action.
             </p>
@@ -4381,7 +4403,7 @@ export default function ResultsPage() {
                       gaps={blockedResultsState.drivers.map((driver) => driver.title)}
                       summary={blockedResultsState.trustLine}
                       gapHeading="What still needs clarification"
-                      gapEmptyMessage="Use Fit Review to sharpen the same areas listed above."
+                      gapEmptyMessage="Complete Fit Review to clarify the evidence gaps listed above."
                     />
                   ) : (
                     <SignalAlignmentSection
@@ -4458,7 +4480,6 @@ export default function ResultsPage() {
                     <section id="fit-improvement-opportunities" className="rounded-2xl border border-slate-700/50 bg-slate-900/35 p-3">
                       <FitImprovementOpportunities
                         assessmentId={latest?.assessmentId ?? null}
-                        actionHref={fitReviewPath}
                         fallbackInsights={fallbackRequirementInsights}
                         supportingSignals={latest?.supportingSignals}
                         baselineEvidence={latest?.baselineEvidence ?? summarySnippet}
@@ -4487,23 +4508,9 @@ export default function ResultsPage() {
                             </li>
                           ))}
                         </ul>
-                        <div className="pt-1">
-                          <Link
-                            data-testid="results-improvement-cta"
-                            href={fitReviewPath}
-                            className="inline-flex min-h-[44px] min-w-[240px] items-center justify-center rounded-[var(--button-radius)] bg-sky-400 px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-sky-300"
-                            onClick={() => {
-                              trackEvent("results_improvement_cta_clicked", {
-                                source: "results",
-                                intentState: recentIntent ?? "none",
-                                suggestionsShown: improvementSuggestions.length,
-                                scoreBucket: resultsScoreBucket ?? null,
-                              });
-                            }}
-                          >
-                            Start Fit Review
-                          </Link>
-                        </div>
+                        <p className="pt-1 text-sm font-medium text-slate-200">
+                          You&apos;ll address these gaps in Fit Review.
+                        </p>
                       </div>
                     </section>
                   ) : null}

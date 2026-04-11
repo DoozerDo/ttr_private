@@ -234,18 +234,19 @@ function buildAnalysisNextAction(input: {
   forceFitReview?: boolean;
 }): CanonicalNextAction {
   const score = typeof input.score === "number" && Number.isFinite(input.score) ? input.score : null;
+  const qualifiedForGeneration = score !== null && score >= 80;
 
   if (input.surface === "target") {
-    if (score === null || score < 70) {
+    if (!qualifiedForGeneration) {
       return {
         type: "resolve_gaps",
         label: "Start Fit Review",
         route: input.fitReviewHref,
-        reason: score === null ? "score unavailable" : "score below 70",
+        reason: score === null ? "score unavailable" : "score below 80",
       };
     }
 
-    if (input.generationReadiness.status === "ready" && input.productReadiness.canOpenStudio) {
+    if (input.productReadiness.canOpenStudio) {
       return {
         type: "open_studio_generate",
         label: "Open Studio",
@@ -254,34 +255,25 @@ function buildAnalysisNextAction(input: {
       };
     }
 
-    if (input.generationReadiness.status === "limited") {
-      return {
-        type: "resolve_gaps",
-        label: "Start Fit Review",
-        route: input.fitReviewHref,
-        reason: "generation readiness limited",
-      };
-    }
-
     return {
       type: "resolve_gaps",
       label: "Start Fit Review",
       route: input.fitReviewHref,
-      reason: "generation readiness blocked",
+      reason: "generation blocked",
     };
   }
 
   if (input.surface === "results") {
-    if (input.forceFitReview || score === null || score < 70) {
+    if (input.forceFitReview || !qualifiedForGeneration) {
       return {
         type: "fit_review",
         label: "Start Fit Review",
         route: input.fitReviewHref,
-        reason: input.forceFitReview ? "forced fit review" : score === null ? "score unavailable" : "score below 70",
+        reason: input.forceFitReview ? "forced fit review" : score === null ? "score unavailable" : "score below 80",
       };
     }
 
-    if (!input.productReadiness.canOpenStudio || input.generationReadiness.status !== "ready") {
+    if (!input.productReadiness.canOpenStudio) {
       return {
         type: "fit_review",
         label: "Start Fit Review",
@@ -290,12 +282,12 @@ function buildAnalysisNextAction(input: {
       };
     }
 
-    if (input.productReadiness.confidence === "HIGH") {
+    if (score !== null && score >= 90) {
       return {
         type: "open_studio",
         label: "Open Studio",
         route: input.studioHref ?? "/studio",
-        reason: "ready with verified evidence",
+        reason: "strong fit with verified evidence",
       };
     }
 
@@ -303,25 +295,16 @@ function buildAnalysisNextAction(input: {
       type: "open_studio",
       label: "Open Studio",
       route: input.studioHref ?? "/studio",
-      reason: "ready with limited confidence",
+      reason: "qualified fit ready for Studio",
     };
   }
 
-  if (!input.canGenerateDocuments || !input.productReadiness.canOpenStudio) {
+  if (!qualifiedForGeneration || !input.canGenerateDocuments || !input.productReadiness.canOpenStudio) {
     return {
       type: "fit_review",
       label: "Start Fit Review",
       route: input.fitReviewHref,
       reason: "studio generation blocked",
-    };
-  }
-
-  if (score !== null && score < 70) {
-    return {
-      type: "fit_review",
-      label: "Start Fit Review",
-      route: input.fitReviewHref,
-      reason: "score below 70",
     };
   }
 
@@ -524,51 +507,54 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
     analysisBaselineVersionId: analysisCandidate?.baselineVersionId ?? null,
     persistedAssessmentId: input.persistedAssessmentId ?? null,
   });
+  const qualifiedForGeneration = score !== null && score >= 80;
   const nextAction = resolveNextAction(input);
   return {
     surface: input.surface,
     score,
     readinessState:
       input.surface === "target"
-        ? input.generationReadiness.status === "ready" && input.productReadiness.canOpenStudio
+        ? qualifiedForGeneration && input.productReadiness.canOpenStudio
           ? "READY"
-          : input.generationReadiness.status === "limited"
+          : qualifiedForGeneration
+            ? "BLOCKED"
+            : input.generationReadiness.status === "limited"
             ? "LIMITED"
             : "BLOCKED"
         : input.surface === "results"
-          ? input.forceFitReview || score === null || score < 70
+          ? input.forceFitReview || !qualifiedForGeneration
             ? "IMPROVE"
-            : !input.productReadiness.canOpenStudio || input.generationReadiness.status !== "ready"
+            : !input.productReadiness.canOpenStudio
               ? "BLOCKED"
-              : input.productReadiness.confidence === "HIGH"
+              : score !== null && score >= 90
                 ? "READY"
                 : "DRAFT"
-          : !studioCanGenerateDocuments || !input.productReadiness.canOpenStudio
+          : !qualifiedForGeneration || !studioCanGenerateDocuments || !input.productReadiness.canOpenStudio
             ? "BLOCKED"
-            : score !== null && score < 70
-              ? "BLOCKED"
-              : score !== null && score >= 85
-                ? "READY"
-                : "READY",
+            : score !== null && score >= 90
+              ? "READY"
+              : "DRAFT",
     scoreSource: scoreCandidate?.source ?? "primary",
     readinessSource:
       input.surface === "target"
-        ? input.generationReadiness.status === "ready"
+        ? qualifiedForGeneration && input.productReadiness.canOpenStudio
           ? "generation_ready"
-          : input.generationReadiness.status === "limited"
+          : qualifiedForGeneration
+            ? "generation_blocked"
+            : input.generationReadiness.status === "limited"
             ? "generation_limited"
             : "generation_blocked"
         : input.surface === "results"
-          ? input.forceFitReview || score === null || score < 70
+          ? input.forceFitReview || !qualifiedForGeneration
             ? "generation_blocked"
-            : !input.productReadiness.canOpenStudio || input.generationReadiness.status !== "ready"
+            : !input.productReadiness.canOpenStudio
               ? "generation_blocked"
-              : input.productReadiness.confidence === "HIGH"
+              : score !== null && score >= 90
                 ? "generation_ready"
                 : "generation_limited"
-          : !studioCanGenerateDocuments || !input.productReadiness.canOpenStudio
+          : !qualifiedForGeneration || !studioCanGenerateDocuments || !input.productReadiness.canOpenStudio
             ? "generation_blocked"
-            : score !== null && score >= 85
+            : score !== null && score >= 90
               ? "generation_ready"
               : "generation_limited",
     nextAction,
@@ -649,6 +635,7 @@ function mapWorkflowStateToReadinessState(
   generationReadiness: GenerationReadiness | null | undefined,
   forceFitReview?: boolean,
 ): CanonicalReadinessState {
+  const qualifiedForGeneration = score !== null && score >= 80;
   switch (workflowState) {
     case "analysis_in_progress":
     case "generation_running":
@@ -670,16 +657,20 @@ function mapWorkflowStateToReadinessState(
     case "results_ready_studio_blocked":
     case "studio_blocked_for_evidence":
     case "generation_blocked":
-      return score !== null && score >= 70 ? "LIMITED" : "IMPROVE";
+      return qualifiedForGeneration ? "BLOCKED" : "IMPROVE";
     case "returning_user_persisted_last_assessment":
       return "READY";
     case "studio_ready":
-      return score !== null && score >= 85 ? "READY" : productReadiness?.confidence === "HIGH" ? "READY" : "DRAFT";
+      return qualifiedForGeneration && (score !== null && score >= 90 || productReadiness?.confidence === "HIGH")
+        ? "READY"
+        : qualifiedForGeneration
+          ? "DRAFT"
+          : "IMPROVE";
     case "results_ready":
-      if (forceFitReview || score === null || score < 70) return "IMPROVE";
-      if (!productReadiness?.canOpenStudio || generationReadiness?.status !== "ready") return "BLOCKED";
-      return productReadiness?.confidence === "HIGH" ? "READY" : "DRAFT";
+      if (forceFitReview || score === null || score < 80) return "IMPROVE";
+      if (!productReadiness?.canOpenStudio) return "BLOCKED";
+      return score >= 90 || productReadiness?.confidence === "HIGH" ? "READY" : "DRAFT";
     default:
-      return score !== null && score >= 70 ? "READY" : "NOT_ANALYZED";
+      return qualifiedForGeneration ? "READY" : "NOT_ANALYZED";
   }
 }
