@@ -33,6 +33,10 @@ export const ANALYTICS_EVENT_NAMES = [
   "cover_letter_generation_limited",
   "cover_letter_generation_blocked_compliance",
   "analysis_load_failed",
+  "scoring_interrupted_due_to_input_change",
+  "scoring_auto_retried",
+  "scoring_manual_rerun_after_interruption",
+  "scoring_hard_failure",
   "scroll_depth_reached",
   "target_generation_blocked",
   "baseline_readiness_viewed",
@@ -253,6 +257,35 @@ export type AnalyticsEventMap = {
   analysis_load_failed: {
     source: "results" | "unknown";
     status?: string;
+  };
+  scoring_interrupted_due_to_input_change: {
+    source: "target" | "unknown";
+    baselineId: string | null;
+    jobId: string | null;
+    previousBaselineId: string | null;
+    previousJobId: string | null;
+    requestId: string;
+  };
+  scoring_auto_retried: {
+    source: "target" | "unknown";
+    baselineId: string | null;
+    jobId: string | null;
+    previousBaselineId: string | null;
+    previousJobId: string | null;
+    requestId: string;
+  };
+  scoring_manual_rerun_after_interruption: {
+    source: "target" | "unknown";
+    baselineId: string | null;
+    jobId: string | null;
+    requestId: string;
+  };
+  scoring_hard_failure: {
+    source: "target" | "unknown";
+    baselineId: string | null;
+    jobId: string | null;
+    requestId: string;
+    message: string;
   };
   scroll_depth_reached: {
     depthPercent: ScrollDepth;

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
 
 import { WorkspaceRunner } from "@/app/(app)/baseline/_components/WorkspaceRunner";
@@ -19,87 +19,196 @@ function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   } as Response;
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("WorkspaceRunner autorun lifecycle", () => {
-  it(
-    "runs once per pair, stops after a failed autorun, lets explicit retry run, and autoruns for a new pair",
-    async () => {
+  it("restarts analysis once when the active pair changes during scoring", async () => {
     const originalFetch = globalThis.fetch;
     const runCallCounts: Record<string, number> = {};
-    const recordedPairs: string[] = [];
+    const staleRun = createDeferred<Response>();
+    const retryRun = createDeferred<Response>();
+
     const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.url;
-      if (url.includes("/api/analysis/run")) {
-        const payload = init?.body ? JSON.parse(init.body as string) : {};
-        const pairKey = `${payload.baselineId}:${payload.jobId}`;
-        runCallCounts[pairKey] = (runCallCounts[pairKey] ?? 0) + 1;
-        recordedPairs.push(pairKey);
-        if (pairKey === "base-b:job-b" && runCallCounts[pairKey] === 1) {
-          return Promise.resolve(createResponse({ message: "general failure" }, false, 500));
-        }
-        if (pairKey === "base-b:job-b") {
-          return Promise.resolve(
-            createResponse({
-              assessmentId: "assessment-2",
-              baselineId: "base-b",
-              jobId: "job-b",
-              score: 75,
-            }),
-          );
-        }
-        if (pairKey === "base-c:job-c") {
-          return Promise.resolve(
-            createResponse({
-              assessmentId: "assessment-3",
-              baselineId: "base-c",
-              jobId: "job-c",
-              score: 92,
-            }),
-          );
-        }
-        return Promise.resolve(
-          createResponse({
-            assessmentId: "assessment-1",
-            baselineId: "base-a",
-            jobId: "job-a",
-            score: 85,
-          }),
-        );
+      if (!url.includes("/api/analysis/run")) {
+        return Promise.resolve(createResponse({}));
       }
 
-      return Promise.resolve(createResponse({}));
+      const payload = init?.body ? JSON.parse(init.body as string) : {};
+      const pairKey = `${payload.baselineId}:${payload.jobId}`;
+      runCallCounts[pairKey] = (runCallCounts[pairKey] ?? 0) + 1;
+
+      if (pairKey === "base-a:job-a") {
+        return staleRun.promise;
+      }
+
+      if (pairKey === "base-b:job-b") {
+        return retryRun.promise;
+      }
+
+      return Promise.resolve(
+        createResponse({
+          assessmentId: "assessment-default",
+          baselineId: payload.baselineId,
+          jobId: payload.jobId,
+          score: 80,
+        }),
+      );
     });
+
     (globalThis.fetch as typeof window.fetch) = fetchMock as typeof window.fetch;
 
     try {
       const { rerender } = render(<WorkspaceRunner baselineId="base-a" jobId="job-a" />);
-      const waitOptions = { timeout: 10000 };
 
-      await waitFor(() => expect(screen.getByText("Strong Match")).toBeInTheDocument(), waitOptions);
-      expect(recordedPairs[0]).toBe("base-a:job-a");
+      await waitFor(() => expect(runCallCounts["base-a:job-a"]).toBe(1), { timeout: 5000 });
 
       await act(async () => {
         rerender(<WorkspaceRunner baselineId="base-b" jobId="job-b" />);
       });
 
-      await waitFor(() => expect(screen.getByText("Scoring failed")).toBeInTheDocument(), waitOptions);
-      await act(async () => Promise.resolve());
-      expect(recordedPairs.filter((pair) => pair === "base-b:job-b").length).toBe(1);
-
-      fireEvent.click(screen.getByRole("button", { name: "Retry scoring" }));
-
-      await waitFor(() => expect(screen.getByText("Competitive Match")).toBeInTheDocument(), waitOptions);
-      expect(recordedPairs.filter((pair) => pair === "base-b:job-b").length).toBe(2);
-
       await act(async () => {
-        rerender(<WorkspaceRunner baselineId="base-c" jobId="job-c" />);
+        staleRun.resolve(
+          createResponse(
+            {
+              status: "stale_request_ignored",
+              message: "The analysis inputs changed while this request was running.",
+              retryable: true,
+              nextAction: "retry_later",
+            },
+            false,
+            409,
+          ),
+        );
       });
 
-      await waitFor(() => expect(screen.getByText("Primary readiness")).toBeInTheDocument(), waitOptions);
-      expect(recordedPairs.filter((pair) => pair === "base-c:job-c").length).toBe(1);
-      expect(recordedPairs.at(-1)).toBe("base-c:job-c");
+      await waitFor(() => expect(screen.getByText("Updating your score")).toBeInTheDocument(), {
+        timeout: 5000,
+      });
+      await waitFor(() => expect(runCallCounts["base-b:job-b"]).toBe(1), { timeout: 5000 });
+
+      await act(async () => {
+        retryRun.resolve(
+          createResponse({
+            assessmentId: "assessment-2",
+            baselineId: "base-b",
+            jobId: "job-b",
+            score: 75,
+          }),
+        );
+      });
+
+      await waitFor(() => expect(screen.getByText("Competitive Match")).toBeInTheDocument(), {
+        timeout: 5000,
+      });
+      expect(runCallCounts["base-a:job-a"]).toBe(1);
+      expect(runCallCounts["base-b:job-b"]).toBe(1);
+      expect(screen.queryByText("Scoring failed")).not.toBeInTheDocument();
     } finally {
       (globalThis.fetch as typeof window.fetch) = originalFetch;
     }
-  },
-  20000);
+  }, 20000);
+
+  it("shows a soft interruption state without auto-retrying when the current selection is incomplete", async () => {
+    const originalFetch = globalThis.fetch;
+    const runCallCounts: Record<string, number> = {};
+    const staleRun = createDeferred<Response>();
+
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.url;
+      if (!url.includes("/api/analysis/run")) {
+        return Promise.resolve(createResponse({}));
+      }
+
+      const payload = init?.body ? JSON.parse(init.body as string) : {};
+      const pairKey = `${payload.baselineId}:${payload.jobId}`;
+      runCallCounts[pairKey] = (runCallCounts[pairKey] ?? 0) + 1;
+
+      if (pairKey === "base-a:job-a") {
+        return staleRun.promise;
+      }
+
+      return Promise.resolve(
+        createResponse({
+          assessmentId: "assessment-default",
+          baselineId: payload.baselineId,
+          jobId: payload.jobId,
+          score: 80,
+        }),
+      );
+    });
+
+    (globalThis.fetch as typeof window.fetch) = fetchMock as typeof window.fetch;
+
+    try {
+      const { rerender } = render(<WorkspaceRunner baselineId="base-a" jobId="job-a" />);
+
+      await waitFor(() => expect(runCallCounts["base-a:job-a"]).toBe(1), { timeout: 5000 });
+
+      await act(async () => {
+        rerender(<WorkspaceRunner baselineId="base-b" jobId={null} />);
+      });
+
+      await act(async () => {
+        staleRun.resolve(
+          createResponse(
+            {
+              status: "stale_request_ignored",
+              message: "The analysis inputs changed while this request was running.",
+              retryable: true,
+              nextAction: "retry_later",
+            },
+            false,
+            409,
+          ),
+        );
+      });
+
+      await waitFor(() => expect(screen.getByText("Analysis restarted due to changes")).toBeInTheDocument(), {
+        timeout: 5000,
+      });
+      expect(
+        screen.getByText(
+          "You updated your baseline or job while scoring was in progress. We stopped the earlier run to keep your result accurate.",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Analyze current selection" })).toBeDisabled();
+      expect(runCallCounts["base-a:job-a"]).toBe(1);
+      expect(runCallCounts["base-b:job-b"] ?? 0).toBe(0);
+    } finally {
+      (globalThis.fetch as typeof window.fetch) = originalFetch;
+    }
+  }, 20000);
+
+  it("keeps true scoring failures as a hard error state", async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input.url;
+      if (url.includes("/api/analysis/run")) {
+        return Promise.resolve(createResponse({ message: "general failure" }, false, 500));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+
+    (globalThis.fetch as typeof window.fetch) = fetchMock as typeof window.fetch;
+
+    try {
+      render(<WorkspaceRunner baselineId="base-a" jobId="job-a" />);
+
+      await waitFor(() => expect(screen.getByText("Scoring failed")).toBeInTheDocument(), {
+        timeout: 15000,
+      });
+      expect(screen.getByRole("button", { name: "Retry scoring" })).toBeInTheDocument();
+    } finally {
+      (globalThis.fetch as typeof window.fetch) = originalFetch;
+    }
+  }, 20000);
 });

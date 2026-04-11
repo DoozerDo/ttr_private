@@ -29,6 +29,11 @@ import {
   resolveTargetDisplayResult,
 } from "@/lib/targetGenerationContract";
 import { sanitizeScoreExplanationLine, sanitizeScoreExplanationList } from "@/lib/scoreExplanationCopy";
+import {
+  buildWorkflowRequestKey,
+  logWorkflowRequestEvent,
+  type WorkflowRequestScope,
+} from "@/lib/workflowRequestGuard";
 import { trackEvent } from "@/src/lib/analytics";
 import { SetupModuleCard } from "./SetupModuleCard";
 
@@ -126,13 +131,19 @@ type PairKey = {
 type RunTriggerType = "manual" | "retry" | "autorun";
 
 type ActivePairLifecycleState =
+  | "idle"
   | "no_pair"
   | "loading_saved_result"
-  | "ready_to_run"
-  | "running"
-  | "scored"
+  | "ready_to_score"
+  | "scoring"
+  | "interrupted_due_to_changes"
+  | "auto_retrying"
+  | "score_ready"
+  | "blocked"
   | "failed"
   | "mismatch_rejected";
+
+type AnalysisRunResponseState = "ok" | "compliance_blocked" | "interrupted_due_to_changes";
 
 export function resolveScoreBandPresentation(score: number): ScoreBandPresentation {
   if (score >= 90) {
@@ -431,6 +442,13 @@ const MISMATCH_RECOVERY_BODY =
   "Your current baseline and job selection do not have a matching saved score yet.";
 const MISMATCH_RECOVERY_RETRY =
   "Run the compatibility score again to generate a fresh result for this role.";
+const ANALYSIS_INTERRUPTION_TITLE = "Analysis restarted due to changes";
+const ANALYSIS_INTERRUPTION_BODY =
+  "You updated your baseline or job while scoring was in progress. We stopped the earlier run to keep your result accurate.";
+const ANALYSIS_RETRY_TITLE = "Updating your score";
+const ANALYSIS_RETRY_BODY =
+  "Your baseline or job changed, so we’re re-running the analysis with the latest inputs.";
+const ANALYSIS_RETRY_CTA = "Analyze current selection";
 
 function isSelectionMismatchMessage(message: string | null): boolean {
   if (!message) return false;
@@ -527,7 +545,7 @@ const asString = (value?: unknown): string | undefined =>
 
 const parseAnalysisRunResponse = async (
   response: Response,
-): Promise<{ payload: FitResultPayload; runState: "ok" | "compliance_blocked" }> => {
+): Promise<{ payload: FitResultPayload; runState: AnalysisRunResponseState }> => {
   const text = await response.text();
   let parsed: unknown = null;
 
@@ -611,6 +629,17 @@ const parseAnalysisRunResponse = async (
       };
     }
 
+    if (
+      normalizedStatus === "stale_request_ignored" ||
+      normalizedErrorCode === "stale_request_ignored" ||
+      normalizedErrorCode === "stale_response_dropped"
+    ) {
+      return {
+        payload: {},
+        runState: "interrupted_due_to_changes",
+      };
+    }
+
     const message =
       errorPayload.error?.message ??
       extractErrorMessage(parsed) ??
@@ -658,9 +687,13 @@ export function WorkspaceRunner({
   const scoreSummaryRef = useRef<HTMLDivElement | null>(null);
   const revealStartMsRef = useRef<number>(0);
   const revealRunIdRef = useRef(0);
+  const activeRunRequestIdRef = useRef<string | null>(null);
+  const interruptedPairKeyRetryRef = useRef<string | null>(null);
+  const selectedBaselineIdRef = useRef<string | null>(baselineId);
+  const selectedJobIdRef = useRef<string | null>(jobId);
   const [isPreparingMatch, setIsPreparingMatch] = useState(false);
   const activePairKey = baselineId && jobId ? `${baselineId}:${jobId}` : null;
-  const [activePairState, setActivePairState] = useState<ActivePairLifecycleState>("no_pair");
+  const [activePairState, setActivePairState] = useState<ActivePairLifecycleState>("idle");
   const activePairLifecycleKeyRef = useRef<string | null>(null);
   const AUTO_RUN_DELAY_MS = 320;
   const reportProgressState = useCallback(
@@ -695,6 +728,7 @@ export function WorkspaceRunner({
 
   useLayoutEffect(() => {
     setSelectedBaselineId(baselineId);
+    selectedBaselineIdRef.current = baselineId;
   }, [baselineId]);
 
   // DEV CHECKLIST (manual verification paths):
@@ -710,12 +744,15 @@ export function WorkspaceRunner({
 
   useLayoutEffect(() => {
     setSelectedJobId(jobId);
+    selectedJobIdRef.current = jobId;
   }, [jobId]);
 
   useEffect(() => {
     autoRunCombinationRef.current = null;
     autoRunInitiatedRef.current = false;
     pendingCompletionKeyRef.current = null;
+    interruptedPairKeyRetryRef.current = null;
+    activeRunRequestIdRef.current = null;
     if (autoRunTriggerTimerRef.current !== null) {
       window.clearTimeout(autoRunTriggerTimerRef.current);
       autoRunTriggerTimerRef.current = null;
@@ -736,15 +773,26 @@ export function WorkspaceRunner({
   useEffect(() => {
     if (!activePairKey) {
       activePairLifecycleKeyRef.current = null;
-      setActivePairState("no_pair");
+      if (
+        activePairState !== "interrupted_due_to_changes" &&
+        activePairState !== "auto_retrying"
+      ) {
+        setActivePairState("idle");
+      }
       return;
     }
 
     if (activePairLifecycleKeyRef.current !== activePairKey) {
       activePairLifecycleKeyRef.current = activePairKey;
-      setActivePairState("ready_to_run");
+      interruptedPairKeyRetryRef.current = null;
+      if (
+        activePairState !== "interrupted_due_to_changes" &&
+        activePairState !== "auto_retrying"
+      ) {
+        setActivePairState("ready_to_score");
+      }
     }
-  }, [activePairKey]);
+  }, [activePairKey, activePairState]);
 
   const isDevMode = process.env.NODE_ENV !== "production";
   const debugUiEnabled = isDevMode || process.env.NEXT_PUBLIC_DEBUG_UI === "true";
@@ -897,6 +945,8 @@ export function WorkspaceRunner({
         ? "This role is close, but still needs more verified evidence before Studio."
         : scoreBand?.summary ?? "";
   const blockingReasons = generationReadiness.verificationIssues.slice(0, 3);
+  const showInterruptionState =
+    activePairState === "interrupted_due_to_changes" || activePairState === "auto_retrying";
   const showPreAnalysisState = !showResult && !isRunning && !isRevealAnalyzing && !error;
   const showMismatchRecovery = isSelectionMismatchMessage(error);
 
@@ -997,15 +1047,32 @@ export function WorkspaceRunner({
     targetCtaAnalyticsPayload,
   ]);
 
-  const runAssessment = useCallback(async () => {
-    const baselineForRun = selectedBaselineId;
-    const jobForRun = selectedJobId;
-    if (!baselineForRun || !jobForRun || isRunning) return;
+  const runAssessment = useCallback(async (options?: {
+    allowWhenRunning?: boolean;
+    baselineId?: string | null;
+    jobId?: string | null;
+    preserveInterruptionState?: boolean;
+  }) => {
+    const baselineForRun = options?.baselineId ?? selectedBaselineId;
+    const jobForRun = options?.jobId ?? selectedJobId;
+    if (!baselineForRun || !jobForRun || (isRunning && !options?.allowWhenRunning)) return;
 
-    const isRetry = activePairState === "failed";
+    const requestScope: WorkflowRequestScope = {
+      baselineId: baselineForRun,
+      jobId: jobForRun,
+    };
+    const requestId = crypto.randomUUID();
+    const requestKey = buildWorkflowRequestKey("analysis.run", requestScope);
+    const requestStartMs = Date.now();
+    activeRunRequestIdRef.current = requestId;
+
+    const isRetry =
+      options?.preserveInterruptionState === true ||
+      activePairState === "failed" || activePairState === "interrupted_due_to_changes";
+    const isAutoRetry = activePairState === "auto_retrying";
     const runTriggerType: RunTriggerType = autoRunInitiatedRef.current
       ? "autorun"
-      : isRetry
+      : isRetry || isAutoRetry
       ? "retry"
       : "manual";
 
@@ -1016,11 +1083,24 @@ export function WorkspaceRunner({
         baselineId: baselineForRun,
         jobId: jobForRun,
         triggerType: runTriggerType,
+        requestId,
+        requestKey,
       });
     }
+    logWorkflowRequestEvent("request_started", {
+      action: "analysis.run",
+      expected: requestScope,
+      current: requestScope,
+      requestId,
+      source: "target",
+    });
     setInFlightPairKey(pairKey);
     if (activePairLifecycleKeyRef.current === pairKey) {
-      setActivePairState("running");
+      if (options?.preserveInterruptionState === true || activePairState === "interrupted_due_to_changes") {
+        setActivePairState("auto_retrying");
+      } else if (activePairState !== "auto_retrying") {
+        setActivePairState("scoring");
+      }
     }
 
     if (isPreparingMatch) {
@@ -1046,7 +1126,6 @@ export function WorkspaceRunner({
     revealStartMsRef.current = Date.now();
     const runId = revealRunIdRef.current + 1;
     revealRunIdRef.current = runId;
-
     try {
       const response = await fetch("/api/analysis/run", {
         method: "POST",
@@ -1062,7 +1141,112 @@ export function WorkspaceRunner({
       });
 
       const { payload: nextResult, runState } = await parseAnalysisRunResponse(response);
-      if (selectedBaselineId !== baselineForRun || selectedJobId !== jobForRun) {
+      const isInterruptedResponse = runState === "interrupted_due_to_changes";
+      const isSupersededRequest = activeRunRequestIdRef.current !== requestId;
+      if (isSupersededRequest && !isInterruptedResponse) {
+        logWorkflowRequestEvent("stale_response_dropped", {
+          action: "analysis.run",
+          expected: requestScope,
+          current: {
+            baselineId: selectedBaselineIdRef.current,
+            jobId: selectedJobIdRef.current,
+          },
+          requestId,
+          reason: "superseded request completed after a newer scoring attempt started",
+          source: "target",
+        });
+        return;
+      }
+
+      if (isInterruptedResponse) {
+        const currentBaselineId = selectedBaselineIdRef.current;
+        const currentJobId = selectedJobIdRef.current;
+        const currentPairKey =
+          currentBaselineId && currentJobId ? `${currentBaselineId}:${currentJobId}` : null;
+        const currentScope: WorkflowRequestScope = {
+          baselineId: currentBaselineId,
+          jobId: currentJobId,
+        };
+        const shouldAutoRetry =
+          Boolean(currentPairKey) &&
+          currentPairKey !== pairKey &&
+          Boolean(currentBaselineId && currentJobId) &&
+          interruptedPairKeyRetryRef.current !== currentPairKey;
+
+        if (process.env.NODE_ENV !== "production") {
+          console.debug("[target] analysis interruption decision", {
+            baselineId: baselineForRun,
+            jobId: jobForRun,
+            currentBaselineId,
+            currentJobId,
+            currentPairKey,
+            requestPairKey: pairKey,
+            shouldAutoRetry,
+            isSupersededRequest,
+          });
+        }
+
+        setResult(null);
+        setLatestCompletedScore(null);
+        reportMatchingScore(null);
+        setRevealedScoreValue(null);
+        setError(null);
+        setShowUploadAgainCTA(false);
+        setLatestJobId(null);
+        setLatestBaselineId(null);
+        setRunState(null);
+        setIsRevealAnalyzing(false);
+        autoRunInitiatedRef.current = false;
+        reportProgressState({
+          isScoring: false,
+          isCompletionMoment: false,
+          isComplianceBlocked: false,
+          isPreparingMatch: false,
+        });
+
+        setActivePairState(shouldAutoRetry ? "auto_retrying" : "interrupted_due_to_changes");
+
+        trackEvent("scoring_interrupted_due_to_input_change", {
+          source: "target",
+          baselineId: currentBaselineId,
+          jobId: currentJobId,
+          previousBaselineId: baselineForRun,
+          previousJobId: jobForRun,
+          requestId,
+        });
+        logWorkflowRequestEvent("request_blocked", {
+          action: "analysis.run",
+          expected: requestScope,
+          current: currentScope,
+          requestId,
+          reason: "analysis interrupted due to input change",
+          source: "target",
+          durationMs: Date.now() - requestStartMs,
+        });
+
+        if (shouldAutoRetry) {
+          interruptedPairKeyRetryRef.current = currentPairKey;
+          trackEvent("scoring_auto_retried", {
+            source: "target",
+            baselineId: currentBaselineId,
+            jobId: currentJobId,
+            previousBaselineId: baselineForRun,
+            previousJobId: jobForRun,
+            requestId,
+          });
+          const retryBaselineId = currentBaselineId;
+          const retryJobId = currentJobId;
+          activeRunRequestIdRef.current = requestId;
+          if (retryBaselineId && retryJobId && currentPairKey) {
+            void runAssessment({
+              allowWhenRunning: true,
+              baselineId: retryBaselineId,
+              jobId: retryJobId,
+              preserveInterruptionState: true,
+            });
+          }
+        }
+
         return;
       }
 
@@ -1170,7 +1354,7 @@ export function WorkspaceRunner({
       setLatestCompletedScore(nextResult);
       reportMatchingScore(nextResultPair);
       if (activePairLifecycleKeyRef.current === pairKey) {
-        setActivePairState("scored");
+        setActivePairState(runState === "compliance_blocked" ? "blocked" : "score_ready");
       }
 
       const completionText =
@@ -1182,10 +1366,41 @@ export function WorkspaceRunner({
         isPreparingMatch: false,
       });
       setCompleteBanner(completionText);
+      logWorkflowRequestEvent("request_completed", {
+        action: "analysis.run",
+        expected: requestScope,
+        current: requestScope,
+        requestId,
+        reason: completionText,
+        source: "target",
+        durationMs: Date.now() - requestStartMs,
+      });
     } catch (runError: unknown) {
+      if (activeRunRequestIdRef.current !== requestId) {
+        logWorkflowRequestEvent("stale_response_dropped", {
+          action: "analysis.run",
+          expected: requestScope,
+          current: {
+            baselineId: selectedBaselineId,
+            jobId: selectedJobId,
+          },
+          requestId,
+          reason: "error response from superseded request ignored",
+          source: "target",
+        });
+        return;
+      }
+
       const message =
         extractErrorMessage(runError) ?? "Unable to run compatibility scoring right now.";
       const shouldShowUploadCTA = isMissingCanonicalRunError(runError, message);
+      trackEvent("scoring_hard_failure", {
+        source: "target",
+        baselineId: baselineForRun,
+        jobId: jobForRun,
+        requestId,
+        message,
+      });
       setResult(null);
       setLatestCompletedScore(null);
       reportMatchingScore(null);
@@ -1206,9 +1421,24 @@ export function WorkspaceRunner({
         isComplianceBlocked: false,
         isPreparingMatch: false,
       });
+      logWorkflowRequestEvent("request_failed", {
+        action: "analysis.run",
+        expected: requestScope,
+        current: {
+          baselineId: selectedBaselineId,
+          jobId: selectedJobId,
+        },
+        requestId,
+        reason: message,
+        source: "target",
+        durationMs: Date.now() - requestStartMs,
+      });
     } finally {
       setInFlightPairKey((current) => (current === pairKey ? null : current));
       setIsRunning(false);
+      if (activeRunRequestIdRef.current === requestId) {
+        activeRunRequestIdRef.current = null;
+      }
     }
   }, [
     activePairState,
@@ -1220,6 +1450,16 @@ export function WorkspaceRunner({
     selectedBaselineId,
     selectedJobId,
   ]);
+
+  const handleInterruptedRetry = useCallback(() => {
+    trackEvent("scoring_manual_rerun_after_interruption", {
+      source: "target",
+      baselineId: selectedBaselineId,
+      jobId: selectedJobId,
+      requestId: activeRunRequestIdRef.current ?? crypto.randomUUID(),
+    });
+    void runAssessment();
+  }, [runAssessment, selectedBaselineId, selectedJobId]);
 
   const loadLastRun = async () => {
     if (!baselineId || !jobId || isLoadingLastRun) return;
@@ -1336,7 +1576,7 @@ export function WorkspaceRunner({
       setLatestBaselineId(resolvedBaselineId);
       setCompleteBanner("Loaded last run");
       if (loadPairKey && activePairLifecycleKeyRef.current === loadPairKey) {
-        setActivePairState("scored");
+        setActivePairState(loadedIsBlocked ? "blocked" : "score_ready");
       }
     } catch (loadError: unknown) {
       const message = extractErrorMessage(loadError) ?? "Unable to load the last run.";
@@ -1381,7 +1621,7 @@ export function WorkspaceRunner({
     }
     if (!selectedBaselineId || !selectedJobId) return;
     const pairKey = `${selectedBaselineId}:${selectedJobId}`;
-    if (activePairState !== "ready_to_run") {
+    if (activePairState !== "ready_to_score") {
       return;
     }
     if (isRunning || inFlightPairKey === pairKey) {
@@ -1477,7 +1717,26 @@ export function WorkspaceRunner({
 
   return (
     <SetupModuleCard label="" title="" description="">
-      {isRunning || isRevealAnalyzing ? (
+      {showInterruptionState ? (
+        <div className="space-y-3">
+          <Alert
+            intent="warning"
+            title={activePairState === "auto_retrying" ? ANALYSIS_RETRY_TITLE : ANALYSIS_INTERRUPTION_TITLE}
+          >
+            <p className="text-sm text-current">
+              {activePairState === "auto_retrying" ? ANALYSIS_RETRY_BODY : ANALYSIS_INTERRUPTION_BODY}
+            </p>
+          </Alert>
+          <div className="flex flex-wrap justify-end gap-2">
+            <FormButton
+              onClick={activePairState === "auto_retrying" ? undefined : handleInterruptedRetry}
+              disabled={isRunning || !selectedBaselineId || !selectedJobId}
+            >
+              {activePairState === "auto_retrying" ? "Re-running current selection..." : ANALYSIS_RETRY_CTA}
+            </FormButton>
+          </div>
+        </div>
+      ) : isRunning || isRevealAnalyzing ? (
         <div className="rounded-2xl border border-white/10 bg-slate-900/40 px-4 py-3 text-sm text-slate-200">
           <p className="font-medium text-slate-100">{PRE_REVEAL_MESSAGES[revealMessageIndex]}</p>
           <p className="mt-1 text-xs text-slate-400">Preparing your score reveal...</p>
@@ -1494,7 +1753,7 @@ export function WorkspaceRunner({
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3">
               <p className="text-sm text-slate-300">{MISMATCH_RECOVERY_RETRY}</p>
-              <FormButton onClick={runAssessment} disabled={isRunning}>
+              <FormButton onClick={() => void runAssessment()} disabled={isRunning}>
                 Run compatibility score
               </FormButton>
             </div>
@@ -1505,7 +1764,7 @@ export function WorkspaceRunner({
               <p className="text-sm text-current">{error}</p>
             </Alert>
             <div className="flex flex-wrap justify-end gap-2">
-              <FormButton onClick={runAssessment} disabled={isRunning}>
+              <FormButton onClick={() => void runAssessment()} disabled={isRunning}>
                 Retry scoring
               </FormButton>
               {showUploadAgainCTA ? (
@@ -1542,7 +1801,10 @@ export function WorkspaceRunner({
             </div>
           </div>
           <div className="flex flex-wrap justify-end">
-            <FormButton onClick={runAssessment} disabled={isRunning || !baselineId || !jobId}>
+            <FormButton
+              onClick={() => void runAssessment()}
+              disabled={isRunning || !baselineId || !jobId}
+            >
               Run compatibility score
             </FormButton>
           </div>
