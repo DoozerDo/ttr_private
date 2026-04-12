@@ -37,6 +37,7 @@ ENV TTR_TEMPLATES_DIR=/usr/src/app/apps/api/templates
 COPY --from=prod-deps /usr/src/workspace/node_modules /usr/src/app/node_modules
 COPY --from=builder /usr/src/workspace/apps/api/package.json ./package.json
 COPY --from=builder /usr/src/workspace/apps/api/dist ./dist
+COPY --from=builder /usr/src/workspace/apps/api/scripts ./scripts
 COPY --from=builder /usr/src/workspace/apps/api/templates ./templates
 
 EXPOSE 3001
