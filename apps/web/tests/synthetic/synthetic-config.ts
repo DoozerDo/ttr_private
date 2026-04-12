@@ -13,6 +13,17 @@ export const syntheticSignupEmailPrefix =
 export const syntheticLoginEmailPrefix =
   process.env.SYNTHETIC_LOGIN_EMAIL_PREFIX?.trim() || "synthetic-login";
 export const landingPublicJourneysSuiteKey = "landing-public-journeys";
+export const passwordResetPublicJourneysSuiteKey = "password-reset-public-journeys";
+export const syntheticPasswordResetEmail =
+  process.env.SYNTHETIC_PASSWORD_RESET_EMAIL?.trim() || "";
+export const syntheticPasswordResetEmailPrefix =
+  process.env.SYNTHETIC_PASSWORD_RESET_EMAIL_PREFIX?.trim() || "synthetic-password-reset";
+export const syntheticPasswordResetCurrentPassword =
+  process.env.SYNTHETIC_PASSWORD_RESET_CURRENT_PASSWORD?.trim() ||
+  process.env.SYNTHETIC_USER_PASSWORD?.trim() ||
+  "SyntheticResetPass!123";
+export const syntheticPasswordResetNewPassword =
+  process.env.SYNTHETIC_PASSWORD_RESET_NEW_PASSWORD?.trim() || "SyntheticResetPass!456";
 export const syntheticIngestToken =
   process.env.SYNTHETIC_INGEST_TOKEN?.trim() || "synthetic-ingest-local";
 
@@ -26,10 +37,23 @@ export function buildSyntheticLoginEmail() {
   return `${syntheticLoginEmailPrefix}+${uniqueSuffix}@targetthisrole.local`;
 }
 
-export function logSyntheticStep(step: string, details?: Record<string, unknown>) {
+export function buildSyntheticPasswordResetEmail() {
+  if (syntheticPasswordResetEmail) {
+    return syntheticPasswordResetEmail;
+  }
+
+  const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return `${syntheticPasswordResetEmailPrefix}+${uniqueSuffix}@targetthisrole.local`;
+}
+
+export function logSyntheticStep(
+  step: string,
+  details?: Record<string, unknown>,
+  suite = landingPublicJourneysSuiteKey,
+) {
   console.log(
     JSON.stringify({
-    suite: "landing-public-journeys",
+      suite,
       step,
       timestamp: new Date().toISOString(),
       ...(details ?? {}),

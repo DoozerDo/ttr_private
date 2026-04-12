@@ -13,12 +13,17 @@ export class SyntheticIngestGuard implements CanActivate {
       this.configService.get<string>('SYNTHETIC_INGEST_TOKEN')?.trim() ||
       process.env.SYNTHETIC_INGEST_TOKEN?.trim() ||
       DEFAULT_SYNTHETIC_INGEST_TOKEN;
+    const nodeEnv = (this.configService.get<string>('NODE_ENV') ?? process.env.NODE_ENV ?? '').trim();
+    const acceptedTokens = new Set<string>([configuredToken]);
+    if (nodeEnv !== 'production') {
+      acceptedTokens.add(DEFAULT_SYNTHETIC_INGEST_TOKEN);
+    }
 
     const providedToken = String(
       request?.headers?.['x-synthetic-ingest-token'] ?? request?.headers?.['X-Synthetic-Ingest-Token'] ?? '',
     ).trim();
 
-    if (!providedToken || providedToken !== configuredToken) {
+    if (!providedToken || !acceptedTokens.has(providedToken)) {
       throw new ForbiddenException('Synthetic ingest token required');
     }
 

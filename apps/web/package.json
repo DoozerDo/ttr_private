@@ -16,6 +16,7 @@
     "test:compliance": "tsc -p tsconfig.parseComplianceTest.json && node --test .tmp/compliance-test/lib/compliance/parseComplianceError.test.js",
     "test:smoke": "vitest run",
     "synthetic:landing": "playwright test --config playwright.config.ts",
+    "synthetic:auth": "playwright test --config playwright.config.ts",
     "scan:routes": "node scripts/route-integrity-scan.mjs"
   },
   "dependencies": {

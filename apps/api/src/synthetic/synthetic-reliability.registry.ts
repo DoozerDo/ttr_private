@@ -54,6 +54,48 @@ export const SYNTHETIC_RELIABILITY_SUITE_REGISTRY: SyntheticReliabilitySuiteRegi
       'apps/web/tests/fixtures/public-landing/synthetic-job-description.txt',
     ],
   },
+  {
+    suiteKey: 'password-reset-public-journeys',
+    suiteName: 'Password Reset Synthetic',
+    surface: 'Public auth + recovery',
+    category: 'Authentication recovery',
+    journeySummary:
+      'Reset request initiation, reset link retrieval, password replacement, login with the new password, old password rejection, and reset-link reuse rejection.',
+    active: true,
+    validatedJourneys: [
+      'Reset request is accepted',
+      'Reset link is retrievable from the synthetic token store',
+      'Reset link opens and accepts a new password',
+      'New password logs in successfully',
+      'Old password is rejected',
+      'Reused reset link fails cleanly',
+    ],
+    dependencies: [
+      'Public login route',
+      'Forgot password flow',
+      'Reset password flow',
+      'Synthetic token-link helper',
+      'Authenticated landing handoff',
+    ],
+    envInputs: [
+      'BASE_URL',
+      'API_BASE_URL',
+      'SYNTHETIC_INGEST_TOKEN',
+      'SYNTHETIC_PASSWORD_RESET_EMAIL',
+      'SYNTHETIC_PASSWORD_RESET_EMAIL_PREFIX',
+      'SYNTHETIC_PASSWORD_RESET_CURRENT_PASSWORD',
+      'SYNTHETIC_PASSWORD_RESET_NEW_PASSWORD',
+    ],
+    sourceRefs: [
+      'apps/web/tests/synthetic/password-reset-journeys.spec.ts',
+      'apps/web/tests/synthetic/password-reset-synthetic-reliability-publisher.ts',
+      'apps/web/tests/synthetic/synthetic-config.ts',
+      'apps/api/src/synthetic/synthetic-user-token-link.service.ts',
+      'apps/web/app/api/admin/synthetics/user-token-link/route.ts',
+      '.github/workflows/synthetic-landing.yml',
+    ],
+    artifactRefs: [],
+  },
 ];
 
 export function listSyntheticReliabilitySuites(): SyntheticReliabilitySuiteRegistryEntry[] {

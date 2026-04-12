@@ -6,6 +6,9 @@ describe('SyntheticReliabilityController', () => {
     getReliabilityReport: jest.fn(),
     recordRun: jest.fn(),
   } as any;
+  const tokenLinkService = {
+    getUserTokenLink: jest.fn(),
+  } as any;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -20,7 +23,7 @@ describe('SyntheticReliabilityController', () => {
 
   it('returns the synthetic reliability report', async () => {
     service.getReliabilityReport.mockResolvedValue({ suites: [] });
-    const controller = new SyntheticReliabilityController(service);
+    const controller = new SyntheticReliabilityController(service, tokenLinkService);
 
     const result = await controller.getReliability('3');
 
@@ -30,7 +33,7 @@ describe('SyntheticReliabilityController', () => {
 
   it('records an ingested synthetic run', async () => {
     service.recordRun.mockResolvedValue({ id: 'run-1' });
-    const controller = new SyntheticReliabilityController(service);
+    const controller = new SyntheticReliabilityController(service, tokenLinkService);
 
     const result = await controller.recordRun({
       suiteKey: 'landing-public-journeys',
@@ -46,5 +49,25 @@ describe('SyntheticReliabilityController', () => {
       durationMs: 10,
     });
     expect(result).toEqual({ id: 'run-1' });
+  });
+
+  it('returns a synthetic token link for recovery flows', async () => {
+    tokenLinkService.getUserTokenLink.mockResolvedValue({
+      email: 'synthetic@example.com',
+      tokenType: 'reset-password',
+      url: 'http://localhost:3100/auth/reset-password?token=abc',
+      expiresAt: '2026-04-12T11:00:00.000Z',
+    });
+    const controller = new SyntheticReliabilityController(service, tokenLinkService);
+
+    const result = await controller.getUserTokenLink('synthetic@example.com', 'reset-password');
+
+    expect(tokenLinkService.getUserTokenLink).toHaveBeenCalledWith('synthetic@example.com', 'reset-password');
+    expect(result).toEqual({
+      email: 'synthetic@example.com',
+      tokenType: 'reset-password',
+      url: 'http://localhost:3100/auth/reset-password?token=abc',
+      expiresAt: '2026-04-12T11:00:00.000Z',
+    });
   });
 });

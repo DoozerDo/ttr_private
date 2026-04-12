@@ -51,5 +51,5 @@ jobs:
             sleep 5
           done
 
-      - name: Run landing synthetic suite
-        run: npm run synthetic:landing
+      - name: Run auth synthetic suite
+        run: npm run synthetic:auth

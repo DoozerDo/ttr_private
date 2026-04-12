@@ -11,18 +11,19 @@ describe('SyntheticReliabilityService', () => {
     jest.clearAllMocks();
   });
 
-  it('returns the landing/auth registry entry with unknown status when no runs exist', async () => {
+  it('returns the registry entries with unknown status when no runs exist', async () => {
     repo.find.mockResolvedValue([]);
     const service = new SyntheticReliabilityService(repo);
 
     const report = await service.getReliabilityReport();
 
-    expect(report.suiteCount).toBe(1);
-    expect(report.suites).toHaveLength(1);
+    expect(report.suiteCount).toBe(2);
+    expect(report.suites).toHaveLength(2);
     expect(report.suites[0].suiteKey).toBe('landing-public-journeys');
+    expect(report.suites[1].suiteKey).toBe('password-reset-public-journeys');
     expect(report.suites[0].latestRun?.status ?? 'unknown').toBe('unknown');
     expect(report.suites[0].recentHistory).toHaveLength(0);
-    expect(report.statusCounts.unknown).toBe(1);
+    expect(report.statusCounts.unknown).toBe(2);
     expect(report.healthRollup.status).toBe('unknown');
     expect(report.healthRollup.recencyLabel).toBe('No run history yet');
   });
@@ -57,6 +58,23 @@ describe('SyntheticReliabilityService', () => {
         stepResultsJson: [],
         errorMessage: null,
       },
+      {
+        id: 'run-3',
+        runType: 'synthetic_transaction',
+        scenarioKey: 'password-reset-public-journeys',
+        syntheticRunId: 'suite-run-3',
+        status: 'succeeded',
+        triggerSource: 'system',
+        startedAt: new Date('2026-04-10T11:00:00.000Z'),
+        finishedAt: new Date('2026-04-10T11:02:00.000Z'),
+        durationMs: 120000,
+        summaryJson: {
+          summary: 'Password reset synthetic passed',
+          syntheticStatus: 'pass',
+        },
+        stepResultsJson: [],
+        errorMessage: null,
+      },
     ]);
 
     const service = new SyntheticReliabilityService(repo);
@@ -69,6 +87,8 @@ describe('SyntheticReliabilityService', () => {
     expect(report.suites[0].latestRun?.firstFailureStep?.title).toBe('unknown-step');
     expect(report.suites[0].recentHistory).toHaveLength(2);
     expect(report.suites[0].recentHistory[1].status).toBe('pass');
+    expect(report.suites[1].suiteKey).toBe('password-reset-public-journeys');
+    expect(report.suites[1].latestRun?.status).toBe('pass');
     expect(report.statusCounts.fail).toBe(1);
   });
 

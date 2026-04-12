@@ -30,14 +30,17 @@ import { SyntheticConfigService } from './synthetic-config.service';
 import { SyntheticReliabilityController } from './synthetic-reliability.controller';
 import { SyntheticIngestGuard } from './synthetic-ingest.guard';
 import { SyntheticReliabilityService } from './synthetic-reliability.service';
+import { SyntheticUserTokenLinkService } from './synthetic-user-token-link.service';
 import { SyntheticTransactionRunnerService } from './synthetic-transaction-runner.service';
 import { SyntheticTransactionsController } from './synthetic-transactions.controller';
+import { UserToken } from '../auth/user-token.entity';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
       SyntheticCleanupRun,
       User,
+      UserToken,
       Baseline,
       BaselineVersion,
       BaselineSection,
@@ -67,6 +70,7 @@ import { SyntheticTransactionsController } from './synthetic-transactions.contro
     SyntheticCleanupService,
     SyntheticIngestGuard,
     SyntheticReliabilityService,
+    SyntheticUserTokenLinkService,
     SyntheticCleanupScheduler,
     SyntheticTransactionRunnerService,
   ],

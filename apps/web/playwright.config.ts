@@ -5,6 +5,8 @@ const useWebServer = !process.env.BASE_URL;
 
 export default defineConfig({
   testDir: "./tests/synthetic",
+  testMatch: ["**/*.spec.ts"],
+  testIgnore: ["**/*.test.ts"],
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
