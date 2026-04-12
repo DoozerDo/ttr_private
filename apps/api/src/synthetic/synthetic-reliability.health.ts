@@ -136,6 +136,8 @@ export function computeSyntheticReliabilityHealthRollup(
     staleSuiteNames,
     latestRunAt,
     latestRunAgeMinutes,
+    lastSuccessfulPublishAt: latestRunAt,
+    lastAttemptedPublishAt: latestRunAt,
     recencyLabel: formatRecencyLabel(latestRunAgeMinutes, status === 'stale'),
     staleThresholdMinutes: normalizedThreshold,
   };

@@ -34,6 +34,7 @@ export type SyntheticReliabilityRunViewModel = {
   finishedAt: string | null;
   durationMs: number | null;
   ageMinutes: number | null;
+  isStale: boolean;
   summary: string;
   errorMessage: string | null;
   failureReason: string | null;
