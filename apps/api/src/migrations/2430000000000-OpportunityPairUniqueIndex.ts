@@ -2,7 +2,6 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class OpportunityPairUniqueIndex2430000000000 implements MigrationInterface {
   name = 'OpportunityPairUniqueIndex2430000000000';
-  public transaction = true;
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
