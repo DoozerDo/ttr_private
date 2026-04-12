@@ -4,6 +4,29 @@ export class OpportunityPairUniqueIndex2430000000000 implements MigrationInterfa
   name = 'OpportunityPairUniqueIndex2430000000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
+    const opportunityFreshnessColumns = (await queryRunner.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'opportunities'
+        AND column_name IN ('updated_at', 'created_at')
+    `)) as Array<{ column_name: string }>;
+
+    const hasUpdatedAt = opportunityFreshnessColumns.some(
+      (column) => column.column_name === 'updated_at',
+    );
+    const hasCreatedAt = opportunityFreshnessColumns.some(
+      (column) => column.column_name === 'created_at',
+    );
+
+    const freshnessOrderBy = hasUpdatedAt && hasCreatedAt
+      ? '"updated_at" DESC NULLS LAST, "created_at" DESC NULLS LAST, "id" DESC'
+      : hasUpdatedAt
+        ? '"updated_at" DESC NULLS LAST, "id" DESC'
+        : hasCreatedAt
+          ? '"created_at" DESC NULLS LAST, "id" DESC'
+          : '"id" DESC';
+
     await queryRunner.query(`
       WITH duplicates AS (
         SELECT "id"
@@ -12,7 +35,7 @@ export class OpportunityPairUniqueIndex2430000000000 implements MigrationInterfa
             "id",
             ROW_NUMBER() OVER (
               PARTITION BY "user_id", "baseline_id", "job_id"
-              ORDER BY "updated_at" DESC NULLS LAST, "created_at" DESC NULLS LAST, "id" DESC
+              ORDER BY ${freshnessOrderBy}
             ) AS "row_number"
           FROM "opportunities"
           WHERE "baseline_id" IS NOT NULL AND "job_id" IS NOT NULL
