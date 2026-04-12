@@ -75,7 +75,7 @@ export function RunYourAnalysisSection({
             data-testid="landing-analysis-card"
             className="mx-auto max-w-4xl rounded-[22px] border border-slate-600/70 bg-slate-900/95 p-6 shadow-[0_12px_25px_rgba(2,6,19,0.5)]"
           >
-            <h2 className="text-2xl font-semibold text-white lg:text-3xl">Run your analysis</h2>
+          <h2 className="text-2xl font-semibold text-white lg:text-3xl">Run the analysis</h2>
             <p className="mt-2 text-sm text-slate-300">
               Upload your resume, paste the job description, and check whether this role is truly within reach.
             </p>

@@ -21,8 +21,9 @@ describe("Landing adjacency radar teaser", () => {
 
     expect(explanation.compareDocumentPosition(radarTeaser) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(explanation.className).not.toMatch(/bg-slate-950\/35|bg-slate-900\/35|shadow/);
-    expect(screen.getByText("See where your experience actually translates")).toBeInTheDocument();
-    expect(screen.getByText(/Fit isn't binary/i)).toBeInTheDocument();
+    expect(screen.getByText("Where you actually win")).toBeInTheDocument();
+    expect(screen.getByText("We show where your background gives you the clearest edge.")).toBeInTheDocument();
+    expect(screen.queryByText("Strategic preview")).toBeNull();
 
     CAREER_ADJACENCY_RADAR_AXIS_DEFINITIONS.forEach((axis) => {
       expect(screen.getByText(axis.teaserLabel)).toBeInTheDocument();

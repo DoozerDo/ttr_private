@@ -23,24 +23,20 @@ export function LandingAdjacencyRadarTeaser() {
   return (
     <section
       data-testid="landing-adjacency-radar-teaser"
-      className="rounded-[24px] border border-white/10 bg-slate-950/45 px-4 py-5 md:px-5 md:py-6"
+      className="rounded-[24px] bg-slate-950/45 px-4 py-5 md:px-5 md:py-6"
     >
       <div className="grid gap-5 lg:grid-cols-[0.92fr_1.08fr] lg:items-center">
         <div className="space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">
-            Strategic preview
-          </p>
-          <h2 className="text-2xl font-semibold tracking-tight text-white md:text-[1.75rem]">
-            See where your experience actually translates
+          <h2 className="text-2xl font-semibold tracking-tight text-white md:text-[1.9rem]">
+            Where you actually win
           </h2>
-          <p className="max-w-xl text-sm leading-7 text-slate-300 md:text-[0.98rem]">
-            Fit isn&apos;t binary. Most roles are a range of adjacent lanes, and we show where
-            you&apos;re strongest and where you can win faster.
+          <p className="max-w-xl text-sm leading-7 text-slate-200 md:text-[0.98rem]">
+            We show where your background gives you the clearest edge.
           </p>
         </div>
 
-        <div className="rounded-[22px] border border-white/10 bg-slate-900/35 p-4">
-          <div className="mx-auto max-w-[360px]">
+        <div className="rounded-[20px] bg-slate-900/25 p-3 md:p-3.5">
+          <div className="mx-auto max-w-[400px]">
             <svg
               viewBox="0 0 360 320"
               className="h-auto w-full"

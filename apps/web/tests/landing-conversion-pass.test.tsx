@@ -19,6 +19,7 @@ describe("Landing conversion pass", () => {
 
     expect(loginLinks.some((link) => link.getAttribute("href") === "/auth/login?next=%2Fbaseline")).toBe(true);
     expect(screen.getByRole("link", { name: "Get beta access" })).toHaveAttribute("href", "/auth/signup?next=%2Fbaseline");
+    expect(screen.getByRole("link", { name: "Get your score" })).toHaveAttribute("href", "#check-compatibility");
     expect(screen.queryByRole("button", { name: "Get your score" })).toBeNull();
     expect(screen.getByRole("button", { name: "Check fit" })).toBeInTheDocument();
     expect(screen.getByText("Upload resume")).toBeInTheDocument();
