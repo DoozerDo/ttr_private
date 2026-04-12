@@ -1,26 +1,17 @@
-const { spawnSync } = require('child_process');
-const { loadEnv } = require('./load-env');
+const { spawn } = require('child_process');
+const path = require('path');
 
-loadEnv();
+require('./load-env');
 
-const args = process.argv.slice(2);
-if (args.length === 0) {
-  console.error('Usage: node scripts/run-typeorm.js <typeorm args...>');
-  process.exit(1);
-}
-
-const typeormCliPath = require.resolve('typeorm/cli');
-const result = spawnSync(process.execPath, [typeormCliPath, ...args], {
-  stdio: 'inherit',
-  env: process.env,
+const cliPath = require.resolve('typeorm/cli.js', {
+  paths: [path.resolve(__dirname, '..')],
 });
 
-if (result.error) {
-  throw result.error;
-}
+const args = process.argv.slice(2);
+const result = spawn(process.execPath, [cliPath, ...args], {
+  stdio: 'inherit',
+});
 
-if (result.signal) {
-  process.kill(process.pid, result.signal);
-}
-
-process.exit(result.status ?? 1);
+result.on('exit', (code) => {
+  process.exit(code);
+});
