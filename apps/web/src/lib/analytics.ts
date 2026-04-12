@@ -48,6 +48,8 @@ export const ANALYTICS_EVENT_NAMES = [
   "target_generation_blocked_redirect",
   "results_improvement_module_viewed",
   "results_improvement_cta_clicked",
+  "results_radar_viewed",
+  "results_radar_axis_hovered",
   "results_primary_cta_clicked",
   "artifact_viewed_with_confidence_level",
   "improve_output_panel_viewed",
@@ -345,6 +347,21 @@ export type AnalyticsEventMap = {
     intentState: string | null;
     suggestionsShown: number;
     scoreBucket: string | null;
+  };
+  results_radar_viewed: {
+    source: "results";
+    analysisId: string | null;
+    score: number | null;
+    scoreBucket: ScoreBucket | null;
+    axisCount: number;
+  };
+  results_radar_axis_hovered: {
+    source: "results";
+    analysisId: string | null;
+    axisKey: string;
+    axisLabel: string;
+    value: number;
+    scoreBucket: ScoreBucket | null;
   };
   results_primary_cta_clicked: {
     source: "results";

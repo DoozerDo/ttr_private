@@ -124,6 +124,18 @@ describe("results canonical experience", () => {
     });
 
     expect(screen.getByText("You're not ready to apply yet.")).toBeInTheDocument();
+    expect(screen.getByTestId("career-adjacency-radar")).toBeInTheDocument();
+    expect(screen.getByText("Where You're Strongest")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(trackEventMock).toHaveBeenCalledWith(
+        "results_radar_viewed",
+        expect.objectContaining({
+          source: "results",
+          analysisId: "analysis-current",
+          axisCount: 6,
+        }),
+      );
+    });
     expect(screen.getByTestId("resolve-gaps-block")).toBeInTheDocument();
     expect(await screen.findByTestId("how-to-improve-your-fit")).toBeInTheDocument();
     expect(screen.getByText("How to improve your fit")).toBeInTheDocument();
@@ -148,6 +160,72 @@ describe("results canonical experience", () => {
       }),
     );
     expect(screen.queryByRole("link", { name: "Open Resume + Cover Letter Studio" })).toBeNull();
+  });
+
+  it("omits the adjacency radar when analysis does not expose a score breakdown", async () => {
+    overrideSearchParams({ assessmentId: "analysis-current", locked: "1" });
+    setFetchImplementation(
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/analysis/fit-assessments/analysis-current")) {
+          return jsonResponse({
+            assessmentId: "analysis-current",
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            score: 68,
+            strengths: ["Incident management"],
+            gaps: ["Leadership signal is muted"],
+            criticalGaps: [],
+            summary: "Structured role analysis summary.",
+            verification_coverage: {
+              totalClaims: 2,
+              verifiedClaims: 1,
+              inferredClaims: 1,
+              unverifiedClaims: 0,
+              verifiedRequirements: ["Operations"],
+              unverifiedRequirements: [],
+              supportedRequirements: ["Operations"],
+            },
+          });
+        }
+        if (url.includes("/api/analysis/fit-assessments?jobId=job-1")) {
+          return jsonResponse([{ assessmentId: "analysis-current", score: 68 }]);
+        }
+        if (url.includes("/api/baselines/base-1/versions")) {
+          return jsonResponse([{ id: "base-version-1", versionNumber: 1 }]);
+        }
+        if (url.includes("/api/analysis/history")) {
+          return jsonResponse({
+            recentAnalyses: [],
+            alignmentPattern: { strongestAlignmentRoles: [], totalAnalyses: 0, averageScore: 0 },
+            badges: [],
+            generatedAt: new Date().toISOString(),
+          });
+        }
+        if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+          return jsonResponse({
+            status: "ready",
+            blocked: false,
+            reasonCodes: [],
+            reasons: [],
+            badgeLabel: "READY",
+            summary: "Ready.",
+            verificationIssues: [],
+          });
+        }
+        return jsonResponse({});
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Fit Verdict Reveal")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("career-adjacency-radar")).toBeNull();
+    expect(screen.queryByText("Where You're Strongest")).toBeNull();
   });
 
   it("routes high-fit results to Studio and adds stronger competitive framing at 80+", async () => {

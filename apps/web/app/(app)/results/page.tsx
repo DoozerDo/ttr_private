@@ -15,6 +15,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { CareerAlignmentProgress } from "./components/CareerAlignmentProgress";
 import { CareerGravity } from "./components/CareerGravity";
+import { CareerAdjacencyRadar } from "./components/CareerAdjacencyRadar";
 import { FitImprovementOpportunities } from "./components/FitImprovementOpportunities";
 import {
   formatErrorMessage,
@@ -800,7 +801,9 @@ type ScoreDriver = {
 };
 
 type OpportunityMapSectionProps = {
+  assessmentId: string | null;
   score: number | null;
+  scoreBreakdown: ScoreBreakdownShape | null;
   verdict: {
     label: string;
     explanation: string;
@@ -919,7 +922,9 @@ export async function getPreviousAnalysis(
 }
 
 export function OpportunityMapSection({
+  assessmentId,
   score,
+  scoreBreakdown,
   verdict,
   nextAction,
   primaryCta,
@@ -1171,6 +1176,11 @@ export function OpportunityMapSection({
             Fit verdict: {verdict.label}. {verdict.explanation}
           </p>
         </div>
+        <CareerAdjacencyRadar
+          analysisId={assessmentId}
+          score={score}
+          scoreBreakdown={scoreBreakdown}
+        />
         {!lowFitScore ? (
           <>
             {!strongFitScore ? (
@@ -2118,7 +2128,6 @@ export default function ResultsPage() {
   const isFixFirstMode =
     scorePresentationMode === "fix_first" ||
     (typeof activeScore === "number" && activeScore < 60);
-  const resultsAssessmentId = latest?.assessmentId ?? null;
   const scoringRubric = scoringV2?.rubric ?? null;
   const debugFields = scoringV2?.debug ?? null;
   const analysisKeys = latest ? Object.keys(latest) : [];
@@ -4185,7 +4194,9 @@ export default function ResultsPage() {
             <div className="space-y-7">
               <div className="space-y-7">
                   <OpportunityMapSection
+                    assessmentId={latest?.assessmentId ?? null}
                     score={activeScore}
+                    scoreBreakdown={scoreBreakdown}
                     verdict={opportunityVerdict}
                     nextAction={primaryNextAction}
                     advantageSignals={advantageSignals}

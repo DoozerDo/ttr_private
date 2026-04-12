@@ -16,11 +16,17 @@ describe("Landing conversion pass", () => {
     render(<LandingPage isAuthenticated={false} />);
 
     const loginLinks = screen.getAllByRole("link", { name: "Log in" });
-    const scoreButtons = screen.getAllByRole("button", { name: "Get your score" });
 
     expect(loginLinks.some((link) => link.getAttribute("href") === "/auth/login?next=%2Fbaseline")).toBe(true);
     expect(screen.getByRole("link", { name: "Get beta access" })).toHaveAttribute("href", "/auth/signup?next=%2Fbaseline");
-    expect(scoreButtons.length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Get your score" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Check fit" })).toBeInTheDocument();
+    expect(screen.getByText("Upload resume")).toBeInTheDocument();
+    expect(screen.getByText("PDF or DOCX only")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Paste the full job description, including responsibilities and requirements.")).toBeInTheDocument();
+    expect(screen.getByText("Paste at least 120 characters from the job description to enable analysis.")).toBeInTheDocument();
+    expect(screen.getByTestId("landing-primary-action")).toBeInTheDocument();
+    expect(screen.getAllByTestId("landing-primary-action")).toHaveLength(1);
   });
 });
 

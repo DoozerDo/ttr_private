@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useMemo, type ReactNode } from "react";
+import { type ReactNode } from "react";
 
 import { LandingAnalyticsTracker } from "@/src/components/landing/LandingAnalyticsTracker";
 import { DemoAnalysisPreviewSection } from "@/src/components/landing/DemoAnalysisPreviewSection";
+import { LandingAdjacencyRadarTeaser } from "@/src/components/landing/LandingAdjacencyRadarTeaser";
 import { LandingCompatibilityInputSection } from "@/src/components/landing/LandingCompatibilityInputSection";
 import { LandingNav } from "@/src/components/landing/LandingNav";
+import { LandingTrustStrip } from "@/src/components/landing/LandingTrustStrip";
 import { trackEvent } from "@/src/lib/analytics";
 
 type LandingPageProps = {
@@ -17,40 +18,33 @@ type LandingPageProps = {
 function CtaButton({
   children,
   authenticated,
-  footer,
 }: {
   children: ReactNode;
   authenticated: boolean;
-  footer?: boolean;
 }) {
-  const router = useRouter();
-
-  const destination = useMemo(() => (authenticated ? "/baseline" : "/auth/signup?next=%2Fbaseline"), [authenticated]);
-
-  const handleClick = () => {
-    trackEvent(footer ? "landing_cta_footer_click" : "landing_cta_click", {
-      destination: authenticated ? "/baseline" : "/auth/signup",
-      authenticated,
-    });
-    router.push(destination);
-  };
+  const destination = authenticated ? "/baseline" : "/auth/signup?next=%2Fbaseline";
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-[var(--accent-primary)] px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-[var(--accent-primary-hover)]"
+    <a
+      href={destination}
+      onClick={() =>
+        trackEvent("landing_cta_click", {
+          destination: authenticated ? "/baseline" : "/auth/signup",
+          authenticated,
+        })
+      }
+      className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/14 bg-white/[0.03] px-5 py-3 text-sm font-semibold text-slate-100 transition hover:border-white/25 hover:bg-white/[0.06] hover:text-white"
     >
       {children}
-    </button>
+    </a>
   );
 }
 
 function MockPanel() {
   return (
-    <div className="rounded-[22px] border border-slate-700/60 bg-slate-950/70 p-4">
-      <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Compatibility readout</p>
-      <div className="mt-3 space-y-2.5 rounded-[18px] border border-slate-800/60 bg-black/10 p-3.5">
+    <div className="rounded-[22px] border border-white/8 bg-white/[0.03] p-4">
+      <p className="text-xs uppercase tracking-[0.28em] text-slate-500">Compatibility readout</p>
+      <div className="mt-3 space-y-2.5 rounded-[18px] border border-white/8 bg-slate-950/35 p-3.5">
         <div className="flex items-center justify-between gap-4">
           <span className="text-sm text-slate-300">Fit score</span>
           <span className="text-sm font-medium text-white">Shown after upload</span>
@@ -78,25 +72,34 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
       <LandingAnalyticsTracker />
       <LandingNav isAuthenticated={isAuthenticated} />
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-2 px-4 py-3 md:px-6 md:py-4 lg:px-8">
-        <section className="rounded-[30px] border border-white/12 bg-slate-950/70 px-5 py-5 md:px-8 md:pb-4 md:pt-7">
+        <section
+          data-testid="landing-hero"
+          className="rounded-[28px] border border-white/8 bg-white/[0.02] px-5 py-5 md:px-8 md:py-6"
+        >
           <div className="grid gap-4 lg:grid-cols-[1.08fr_0.92fr] lg:items-center">
             <div className="max-w-2xl">
-              <h1 className="mt-0 text-3xl md:text-4xl leading-[1.1] font-semibold max-w-2xl text-white">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
+                Resume-to-role fit
+              </p>
+              <h1 className="mt-3 text-3xl font-semibold leading-[1.08] max-w-2xl text-white md:text-[2.85rem]">
                 Know if you qualify before you apply.
               </h1>
-              <p className="mt-3.5 max-w-xl text-[0.98rem] leading-7 text-slate-200 md:text-[1.02rem]">
-                Most people apply to roles they were never going to get. This shows you where you actually stand before you waste the time.
+              <p className="mt-3.5 max-w-xl text-[0.98rem] leading-7 text-slate-300 md:text-[1.02rem]">
+                Start with your resume and the job description. The analysis block below is where
+                the fit score, gaps, and adjacent strength areas appear.
               </p>
               <div className="mt-4.5 flex flex-wrap items-center gap-3">
                 <CtaButton authenticated={isAuthenticated}>Get your score</CtaButton>
                 <Link
-                  href="#how-it-works"
+                  href="#check-compatibility"
                   className="inline-flex items-center justify-center text-sm font-medium text-slate-300 underline decoration-white/20 decoration-1 underline-offset-4 transition hover:text-white hover:decoration-white/45"
                 >
-                  See how it works
+                  Jump to analysis
                 </Link>
               </div>
-              <p className="mt-2 text-sm text-slate-400">Takes under 60 seconds. No fluff. Just a real answer.</p>
+              <p className="mt-2 text-sm text-slate-500">
+                Takes under 60 seconds. No fluff. Just a real answer.
+              </p>
               {!isAuthenticated && (
                 <div className="mt-4 flex flex-wrap items-center gap-3 text-sm md:hidden">
                   <Link href="/auth/signup?next=%2Fbaseline" className="font-semibold text-white underline underline-offset-4">
@@ -115,9 +118,11 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
           </div>
         </section>
 
-        <div className="-mt-4 hidden md:block">
+        <div className="-mt-2 hidden md:block">
           <LandingCompatibilityInputSection />
         </div>
+
+        <LandingTrustStrip />
 
         {!isAuthenticated && (
           <section className="rounded-[24px] border border-white/10 bg-slate-950/60 px-5 py-4 text-sm text-slate-300 md:hidden">
@@ -141,6 +146,8 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
 
         <DemoAnalysisPreviewSection />
 
+        <LandingAdjacencyRadarTeaser />
+
         <section id="how-it-works" className="grid gap-3 md:grid-cols-3">
           {["Upload your resume", "Paste the job description", "Get your real fit score and breakdown"].map((step, index) => (
             <div key={step} className="rounded-[22px] border border-white/10 bg-slate-950/55 p-[18px]">
@@ -160,24 +167,10 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
           </ul>
         </section>
 
-        <section className="rounded-[26px] border border-white/10 bg-slate-950/75 px-5 py-6 text-center md:px-8 md:py-7">
-          <p className="text-lg font-semibold tracking-tight text-white md:text-2xl">
+        <section className="rounded-[26px] border border-white/10 bg-slate-950/40 px-5 py-5 text-center md:px-8 md:py-6">
+          <p className="text-sm leading-6 text-slate-400">
             Know where you stand in under 60 seconds.
           </p>
-        </section>
-
-        <section className="rounded-[30px] border border-white/12 bg-slate-950/72 px-5 py-6 md:px-8 md:py-7">
-          <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-center">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Final step</p>
-              <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white md:text-4xl">
-                Get your score in under 60 seconds
-              </h2>
-            </div>
-            <CtaButton authenticated={isAuthenticated} footer>
-              Get your score
-            </CtaButton>
-          </div>
         </section>
       </main>
     </div>
