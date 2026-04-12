@@ -5,6 +5,7 @@ import {
   readPersistedFileStalenessAuditSnapshot,
 } from "@/src/lib/fileStalenessAudit";
 import { runHygieneAudit } from "@/src/lib/hygieneAudit";
+import SyntheticHealthCard from "./SyntheticHealthCard";
 
 export default async function AdminPage() {
   const snapshot = await readPersistedFileStalenessAuditSnapshot();
@@ -26,6 +27,8 @@ export default async function AdminPage() {
           Central place for managing users, jobs, and baselines.
         </p>
       </header>
+
+      <SyntheticHealthCard />
 
       <section className="space-y-4 rounded-2xl border border-white/10 bg-slate-900/50 p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -124,6 +127,12 @@ export default async function AdminPage() {
           href="/admin/product-signal"
         >
           Product Signal
+        </Link>
+        <Link
+          className="block rounded-md border border-slate-800 bg-slate-900/70 px-4 py-3 text-base font-medium text-slate-50 transition hover:border-slate-600 hover:bg-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
+          href="/admin/synthetics"
+        >
+          Synthetic Reliability
         </Link>
         <Link
           className="block rounded-md border border-slate-800 bg-slate-900/70 px-4 py-3 text-base font-medium text-slate-50 transition hover:border-slate-600 hover:bg-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"

@@ -24,6 +24,7 @@ const NAV_LINKS = [
   { href: "/admin/beta-friction-dashboard", label: "Beta Friction" },
   { href: "/admin/funnel-diagnostics", label: "Funnel Diagnostics" },
   { href: "/admin/product-signal", label: "Product Signal" },
+  { href: "/admin/synthetics", label: "Synthetic Reliability" },
   { href: "/admin/file-staleness-audit", label: "File Staleness Audit" },
   { href: "/admin/dead-code-review", label: "Dead Code Review" },
   { href: "/admin/route-drift-review", label: "Route Drift Review" },

@@ -85,6 +85,7 @@ export function RunYourAnalysisSection({
                   <button
                     type="button"
                     onClick={handleUploadClick}
+                    data-testid="landing-upload-resume-button"
                     className="inline-flex items-center justify-center rounded-lg border border-slate-200/40 bg-white px-5 py-3 text-sm font-semibold text-slate-950 shadow-[0_8px_20px_rgba(15,23,42,0.45)] transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
                   >
                     Upload resume
@@ -100,6 +101,7 @@ export function RunYourAnalysisSection({
                   ref={fileInputRef}
                   type="file"
                   accept=".pdf,.doc,.docx"
+                  data-testid="landing-resume-input"
                   className="hidden"
                   onChange={(event) => onResumeFileSelected(event.target.files?.[0] ?? null)}
                 />
@@ -114,6 +116,7 @@ export function RunYourAnalysisSection({
                   onChange={(event) => onJobDescriptionChange(event.target.value)}
                   onFocus={onJobDescriptionFocus}
                   placeholder="Paste the full job description, including responsibilities and requirements."
+                  data-testid="landing-job-description-input"
                   className="mt-2 h-[144px] w-full resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 focus:border-white/60 focus:outline-none"
                 />
                 <div className="mt-3">
@@ -125,7 +128,7 @@ export function RunYourAnalysisSection({
                 <button
                   ref={runButtonRef}
                   type="button"
-                  onClick={onAnalyzeCompatibility}
+                  onClick={() => onAnalyzeCompatibility()}
                   disabled={!jdReady || isPreviewLoading}
                   data-testid="landing-primary-action"
                   className={`inline-flex w-full items-center justify-center rounded-lg px-4 py-3 text-sm font-semibold transition ${

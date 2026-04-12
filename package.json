@@ -20,6 +20,7 @@
     "synthetic:loop": "npm -w apps/api run synthetic:loop",
     "synthetic:core-loop": "npm run synthetic:loop",
     "synthetic:core-loop-smoke": "node scripts/synthetic-core-loop.mjs",
+    "synthetic:landing": "npm -w apps/web run synthetic:landing",
     "synthetic:bug-report": "npm -w apps/web run synthetic:bug-report",
     "synthetic:bug-report:unavailable": "npm -w apps/web run synthetic:bug-report:unavailable",
     "validate:synthetic": "npm -w apps/api run synthetic:generation",

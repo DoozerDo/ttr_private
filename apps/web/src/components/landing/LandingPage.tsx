@@ -16,11 +16,14 @@ type LandingPageProps = {
 
 function CtaButton({
   children,
+  testId,
 }: {
   children: ReactNode;
+  testId?: string;
 }) {
   return (
     <a
+      data-testid={testId}
       href="#check-compatibility"
       className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/14 bg-white/[0.03] px-5 py-3 text-sm font-semibold text-slate-100 transition hover:border-white/25 hover:bg-white/[0.06] hover:text-white"
     >
@@ -61,7 +64,7 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
                 Know before you apply.
               </h1>
               <div className="mt-4.5 flex flex-wrap items-center gap-3">
-                <CtaButton>Get your score</CtaButton>
+                <CtaButton testId="landing-hero-primary-action">Get your score</CtaButton>
               </div>
               <p className="mt-2 text-sm text-slate-500">
                 Takes under 60 seconds. No fluff. Just a real answer.

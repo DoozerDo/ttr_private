@@ -27,6 +27,9 @@ import { SyntheticCleanupRun } from './synthetic-cleanup-run.entity';
 import { SyntheticCleanupScheduler } from './synthetic-cleanup.scheduler';
 import { SyntheticCleanupService } from './synthetic-cleanup.service';
 import { SyntheticConfigService } from './synthetic-config.service';
+import { SyntheticReliabilityController } from './synthetic-reliability.controller';
+import { SyntheticIngestGuard } from './synthetic-ingest.guard';
+import { SyntheticReliabilityService } from './synthetic-reliability.service';
 import { SyntheticTransactionRunnerService } from './synthetic-transaction-runner.service';
 import { SyntheticTransactionsController } from './synthetic-transactions.controller';
 
@@ -58,16 +61,19 @@ import { SyntheticTransactionsController } from './synthetic-transactions.contro
     CoverLettersModule,
     OpportunitiesModule,
   ],
-  controllers: [SyntheticCleanupController, SyntheticTransactionsController],
+  controllers: [SyntheticCleanupController, SyntheticTransactionsController, SyntheticReliabilityController],
   providers: [
     SyntheticConfigService,
     SyntheticCleanupService,
+    SyntheticIngestGuard,
+    SyntheticReliabilityService,
     SyntheticCleanupScheduler,
     SyntheticTransactionRunnerService,
   ],
   exports: [
     SyntheticConfigService,
     SyntheticCleanupService,
+    SyntheticReliabilityService,
     SyntheticTransactionRunnerService,
   ],
 })
