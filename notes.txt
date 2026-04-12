@@ -71,6 +71,7 @@ docker compose -f infra/docker/docker-compose.dev.yml ps
 DB
 Connect:
 docker exec -it docker-db-1 psql -U postgres -d targetthisrole
+Local host commands (migrations/start:prod) now read `apps/api/.env.development.local`, which points at `127.0.0.1:5432` so you can run those without passing `DATABASE_URL`. The Docker Compose service still overrides `DATABASE_URL=postgres://postgres:postgres@db:5432/postgres`, so containers keep talking to the `db` service.
 
 Cmds: 
 \dt

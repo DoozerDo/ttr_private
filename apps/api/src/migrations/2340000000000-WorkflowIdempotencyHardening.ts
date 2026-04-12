@@ -31,6 +31,36 @@ export class WorkflowIdempotencyHardening2340000000000
       CREATE INDEX IF NOT EXISTS "IDX_workflow_operation_runs_status"
       ON "workflow_operation_runs" ("status")
     `);
+    const hasUpdatedAtColumnResult =
+      (await queryRunner.query(`
+        SELECT EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_name = 'fit_assessments'
+            AND column_name = 'updatedAt'
+        ) AS "exists"
+      `)) as Array<{ exists: boolean }>;
+    const freshnessColumn = hasUpdatedAtColumnResult?.[0]?.exists
+      ? '"updatedAt"'
+      : '"createdAt"';
+    await queryRunner.query(`
+      WITH duplicates AS (
+        SELECT "id"
+        FROM (
+          SELECT
+            "id",
+            ROW_NUMBER() OVER (
+              PARTITION BY "userId", "jobId", "baselineId", "inputsHash"
+              ORDER BY ${freshnessColumn} DESC, "createdAt" DESC, "id" DESC
+            ) AS "row_number"
+          FROM "fit_assessments"
+          WHERE "inputsHash" IS NOT NULL
+        ) ranked
+        WHERE ranked."row_number" > 1
+      )
+      DELETE FROM "fit_assessments"
+      WHERE "id" IN (SELECT "id" FROM duplicates)
+    `);
     await queryRunner.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS "UQ_fit_assessments_user_job_baseline_inputs_hash"
       ON "fit_assessments" ("userId", "jobId", "baselineId", "inputsHash")
