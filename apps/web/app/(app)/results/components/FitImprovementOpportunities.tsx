@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { shouldSuppressCategorySuggestion } from "@/lib/evidenceSuggestions";
@@ -36,7 +35,6 @@ type VisibleInsight = UserGuidanceCard;
 
 type FitImprovementOpportunitiesProps = {
   assessmentId: string | null;
-  actionHref?: string;
   compact?: boolean;
   fallbackInsights?: RequirementGapInsight[];
   supportingSignals?: unknown;
@@ -46,7 +44,6 @@ type FitImprovementOpportunitiesProps = {
 
 export function FitImprovementOpportunities({
   assessmentId,
-  actionHref = "/fit-review",
   compact = false,
   fallbackInsights = [],
   supportingSignals,
@@ -150,9 +147,9 @@ export function FitImprovementOpportunities({
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
             Next step
           </p>
-          <h3 className="text-xl font-semibold tracking-tight text-slate-100">Strengthen this example</h3>
+          <h3 className="text-xl font-semibold tracking-tight text-slate-100">Clarify this example</h3>
           <p className="text-sm leading-6 text-slate-300">
-            Add one concrete example from your real experience so Studio can use it more confidently.
+            Add one concrete detail and outcome so Studio can use it more confidently.
           </p>
         </div>
 
@@ -171,12 +168,7 @@ export function FitImprovementOpportunities({
           ))}
         </div>
 
-        <Link
-          href={actionHref}
-          className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/15 px-4 py-2.5 text-sm font-semibold text-slate-100 transition hover:border-white/30 hover:bg-white/[0.04]"
-        >
-          Start Fit Review
-        </Link>
+        <p className="text-sm font-medium text-slate-200">You&apos;ll address these gaps in Fit Review.</p>
       </section>
     );
   }
@@ -208,6 +200,7 @@ export function FitImprovementOpportunities({
             </article>
           ))}
         </div>
+        <p className="text-sm font-medium text-slate-300">You&apos;ll address these gaps in Fit Review.</p>
       </div>
     </details>
   );

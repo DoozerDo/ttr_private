@@ -135,7 +135,7 @@ function classifyBlockedDetail(text: string, hasBaselineEvidence: boolean): stri
   }
   return hasBaselineEvidence
     ? "Make the ownership and impact in this area explicit."
-    : "Add one concrete example from your experience.";
+    : "We need a clearer, concrete example from your experience to support this role.";
 }
 
 function normalizeBlockedSource(
@@ -214,7 +214,7 @@ function buildBlockedDriver(source: RankedBlockedSource, index: number): Results
     id: `blocked-driver-${index + 1}`,
     title: source.title,
     detail,
-    actionLabel: "Start Fit Review",
+    actionLabel: "You’ll address this in Fit Review.",
     actionHref: "",
   };
 }
@@ -226,23 +226,28 @@ export function buildResultsDecisionCopy(input: {
   const fitLabel = fitLabelForScore(input.score);
 
   if (input.generationReadiness.state === "ALLOWED") {
-    if (input.generationReadiness.confidence === "HIGH") {
+    if (typeof input.score === "number" && input.score >= 90) {
       return {
-        headline: "You're a strong match. You can generate now.",
-        subtext: "Your profile grounding is strong enough to generate in Studio.",
+        headline: "Strong match. Ready to apply.",
+        subtext: "Your materials are ready to generate now. Review them in Studio before applying.",
       };
     }
 
     return {
-      headline: "You're a strong match. You can generate now.",
-      subtext: "Open Studio now. You can tighten a few details after generation.",
+      headline: "Strong match. Generation is ready.",
+      subtext: "Your materials are ready to generate now. Review them in Studio before applying.",
     };
   }
 
   if (input.generationReadiness.state === "BLOCKED") {
+    const promisingFit = typeof input.score === "number" && Number.isFinite(input.score) && input.score >= 70;
     return {
-      headline: `${fitLabel}. One step left.`,
-      subtext: "Use Fit Review to strengthen the specific areas below.",
+      headline: promisingFit
+        ? "Promising fit. Not ready to generate yet."
+        : `${fitLabel}. Not ready to generate yet.`,
+      subtext: promisingFit
+        ? "Your score is strong enough to continue, but we need clearer evidence before Studio can create accurate, defensible output."
+        : "We need clearer evidence before Studio can create accurate, defensible output.",
     };
   }
 
@@ -275,14 +280,14 @@ export function buildCompetitiveBlockedResultsState(
     headline: copy.headline,
     subtext: copy.subtext,
     body:
-      "You are aligned with this role. Before Studio can generate, we need to strengthen a few profile details so the output stays accurate and defensible.",
+      "Your score is strong enough to continue, but we need clearer evidence before Studio can create accurate, defensible output.",
     supportSummary:
-      "Use Fit Review to strengthen the specific areas below.",
+      "Complete Fit Review to clarify the evidence gaps below.",
     drivers,
     primaryActionLabel: "Start Fit Review",
     primaryActionHref: input.fitReviewHref,
     secondaryActionLabel: "View top drivers",
     secondaryActionHref: input.secondaryActionHref,
-    trustLine: "Studio stays locked until the story is grounded enough to defend the output.",
+    trustLine: "Studio stays locked until the evidence is concrete enough to defend the output.",
   };
 }

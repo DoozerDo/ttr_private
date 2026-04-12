@@ -1803,6 +1803,7 @@ export class ResumeService {
         companyName: job?.company ?? 'Unknown company',
         jobTitle: job?.title ?? 'Untitled role',
         fitScore: latestAssessment?.overallScore ?? 0,
+        jobId: job?.id ?? jobId ?? null,
         baselineVersionUsed: baselineVersion.id,
         analysisId,
         baselineId: baseline.id,

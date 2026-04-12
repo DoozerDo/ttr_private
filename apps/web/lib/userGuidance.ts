@@ -92,7 +92,7 @@ function titleForTopic(topic: ReturnType<typeof deriveTopic>): string {
     case "context":
       return "Add context to this example";
     default:
-      return "Strengthen this example";
+      return "Clarify this example";
   }
 }
 

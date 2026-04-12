@@ -14,10 +14,10 @@ describe("resolveResultsDecision", () => {
         },
       }),
     ).toMatchObject({
-      state: "DRAFT",
+      state: "READY",
       primaryCta: "OPEN_STUDIO",
-      headline: "You're a strong match. You can generate now.",
-      subtext: "Open Studio now. You can tighten a few details after generation.",
+      headline: "Strong match. Ready to apply.",
+      subtext: "Your materials are ready to generate now. Review them in Studio before applying.",
     });
   });
 
@@ -32,10 +32,10 @@ describe("resolveResultsDecision", () => {
         },
       }),
     ).toMatchObject({
-      state: "READY",
+      state: "DRAFT",
       primaryCta: "OPEN_STUDIO",
-      headline: "You're a strong match. You can generate now.",
-      subtext: "Your profile grounding is strong enough to generate in Studio.",
+      headline: "Strong match. Generation is ready.",
+      subtext: "Your materials are ready to generate now. Review them in Studio before applying.",
     });
   });
 
@@ -50,10 +50,10 @@ describe("resolveResultsDecision", () => {
         },
       }),
     ).toMatchObject({
-      state: "READY",
+      state: "DRAFT",
       primaryCta: "OPEN_STUDIO",
-      headline: "You're a strong match. You can generate now.",
-      subtext: "Your profile grounding is strong enough to generate in Studio.",
+      headline: "Strong match. Generation is ready.",
+      subtext: "Your materials are ready to generate now. Review them in Studio before applying.",
     });
   });
 

@@ -125,6 +125,10 @@ function resolvePairKey(baselineId: string | null, jobId: string | null): string
   return `${safeBaselineId}:${safeJobId}`;
 }
 
+function isQualifiedForGeneration(score: number | null | undefined): boolean {
+  return typeof score === "number" && Number.isFinite(score) && score >= 80;
+}
+
 function matchesPair(
   baselineId: string | null,
   jobId: string | null,
@@ -211,7 +215,7 @@ function resolveSurfaceMessage(state: WorkflowState): string {
     case "analysis_in_progress":
       return "Analysis is running. You can safely return to Results or Baseline.";
     case "results_ready":
-      return "Results are ready for review.";
+      return "Results are ready. Open Studio to generate.";
     case "results_ready_studio_blocked":
       return "Results are ready, but Studio still needs stronger grounding.";
     case "studio_ready":
@@ -522,6 +526,7 @@ export function resolveWorkflowProgression(
   const stalePairState =
     Boolean(hasAssessment && input.baselineId && input.jobId && !currentMatches) ||
     Boolean(input.isStalePairState);
+  const qualifiedForGeneration = isQualifiedForGeneration(input.score);
 
   let state: WorkflowState;
 
@@ -551,7 +556,7 @@ export function resolveWorkflowProgression(
     state = "generation_failed";
   } else if (input.generationStatus === "timeout") {
     state = "generation_timeout";
-  } else if (input.generationReadiness?.blocked || input.isGenerationBlocked) {
+  } else if ((input.generationReadiness?.blocked || input.isGenerationBlocked) && !qualifiedForGeneration) {
     state =
       input.surface === "results" || input.surface === "studio"
         ? "studio_blocked_for_evidence"

@@ -1,4 +1,5 @@
 import { buildCoverLetterParagraphs, trimToString } from "@/src/lib/studio/helpers";
+import { sanitizeRenderedTextList } from "@/lib/renderedText";
 
 type TrustGateParams = {
   score: number | null;
@@ -163,10 +164,16 @@ function normalizeEditedResumeModel(value: unknown): unknown {
     })
     .filter(Boolean);
   const competencies = Array.isArray(source.competencies)
-    ? source.competencies
-        .map((item) => trimToString(item))
-        .filter(Boolean)
-        .filter((item) => !isNoiseCompetency(item))
+    ? sanitizeRenderedTextList(
+        source.competencies
+          .map((item) => trimToString(item))
+          .filter(Boolean)
+          .filter((item) => !isNoiseCompetency(item)),
+        {
+          endpoint: "studio-trust-gate",
+          field: "editedResume.competencies",
+        },
+      )
     : undefined;
 
   return {
@@ -210,13 +217,13 @@ export function evaluateStudioTrustGate(params: TrustGateParams): TrustGateDecis
     hasBaseline && hasEvidence ? "verified" : "incomplete";
 
   const roleAlignmentLabel: TrustGateDecision["roleAlignmentLabel"] =
-    params.score !== null && params.score > 80
+    params.score !== null && params.score >= 90
       ? "strong match"
-      : params.score !== null && params.score >= 70
+      : params.score !== null && params.score >= 80
         ? "competitive"
         : "needs improvement";
 
-  if (params.score === null || params.score < 70) {
+  if (params.score === null || params.score < 80) {
     return {
       allowed: false,
       reason: "You need to improve your fit before generating materials.",
@@ -225,7 +232,7 @@ export function evaluateStudioTrustGate(params: TrustGateParams): TrustGateDecis
     };
   }
 
-  if (!hasBaseline || !hasEvidence) {
+  if (!hasBaseline) {
     return {
       allowed: false,
       reason: "Your baseline is incomplete. Add more experience before generating.",

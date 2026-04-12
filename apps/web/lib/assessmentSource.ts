@@ -71,6 +71,7 @@ export async function fetchLatestAssessmentForBaseline(
     cache: "no-store",
     credentials: "include",
   });
+  console.log("SCORING RESPONSE:", response);
   if (!response.ok) return null;
   const payload = await response.json();
   const [latest] = extractAssessmentsFromPayload(payload);

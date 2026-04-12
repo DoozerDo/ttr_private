@@ -14,9 +14,10 @@ describe("results to studio confidence", () => {
     });
 
     expect(decision.primaryCta).toBe("OPEN_STUDIO");
-    expect(decision.headline).toBe("You're a strong match. You can generate now.");
+    expect(decision.state).toBe("DRAFT");
+    expect(decision.headline).toBe("Strong match. Generation is ready.");
     expect(decision.subtext).toBe(
-      "Open Studio now. You can tighten a few details after generation.",
+      "Your materials are ready to generate now. Review them in Studio before applying.",
     );
   });
 });

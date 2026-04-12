@@ -192,8 +192,9 @@ describe("Studio page UX", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Ready to generate")).toBeInTheDocument();
+      expect(screen.getByText("Generation is usable.")).toBeInTheDocument();
     });
+    expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
     expect(screen.getByRole("button", { name: "Generate Resume" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Generate Cover Letter" }).length).toBeGreaterThan(0);
     expect(screen.getByText("Your application materials")).toBeInTheDocument();
@@ -211,7 +212,7 @@ describe("Studio page UX", () => {
         return Promise.resolve(
           createResponse({
             assessmentId: "analysis-1",
-            scoring_v2: { score: 84 },
+            scoring_v2: { score: 80 },
             jobId: "job-1",
             baselineId: "base-1",
             baselineVersionId: "base-version-1",
@@ -297,7 +298,7 @@ describe("Studio page UX", () => {
       expect(screen.getByTestId("studio-unlock-entry-panel")).toBeInTheDocument();
     });
     await waitFor(() => {
-      expect(screen.getByText("Ready to generate")).toBeInTheDocument();
+      expect(screen.getByText("Generation is usable.")).toBeInTheDocument();
     });
     expect(screen.getByText("READY TO GENERATE")).toBeInTheDocument();
     expect(
@@ -354,7 +355,7 @@ describe("Studio page UX", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Ready to generate" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Generation is usable." })).toBeInTheDocument();
     });
     expect(screen.getByTestId("studio-artifact-quality-panel")).toHaveTextContent("Strong Output");
     expect(screen.getByTestId("studio-artifact-quality-panel")).toHaveTextContent(
@@ -471,7 +472,7 @@ describe("Studio page UX", () => {
     fireEvent.click(generateResumeButton);
 
     await waitFor(() => {
-      expect(screen.getByText("Generating...")).toBeInTheDocument();
+      expect(screen.getAllByText("Generating...")).toHaveLength(2);
     });
     expect(screen.queryByText("Generating from your verified evidence...")).toBeNull();
 

@@ -48,35 +48,26 @@ export function buildGenerationProductReadiness(
   if (!input.hasRequiredContext) {
     reasonsBlocked.push("missing_required_context");
   }
-  if (input.authorityState !== "READY") {
-    reasonsBlocked.push("readiness_not_ready");
-  }
 
   const score = typeof input.score === "number" ? input.score : null;
   const scoreEligibleForGeneration = score !== null && score >= 80;
-  const scoreEligibleForStudio = score !== null && score >= 70;
 
-  if (!scoreEligibleForStudio) {
+  if (!scoreEligibleForGeneration) {
     reasonsBlocked.push("score_below_unlock_floor");
   }
 
-  const legacyCanGenerate =
-    scoreEligibleForStudio &&
-    input.hasCanonicalAssessment &&
-    (input.hasRequiredContext || !input.hasCompletedGeneration) &&
-    input.authorityState === "READY";
-
-  const state: GenerationProductReadinessState = scoreEligibleForGeneration
-    ? "ALLOWED"
-    : legacyCanGenerate
+  const state: GenerationProductReadinessState =
+    scoreEligibleForGeneration && input.hasCanonicalAssessment && input.hasRequiredContext
       ? "ALLOWED"
       : "BLOCKED";
   const confidence: GenerationProductConfidence =
-    scoreEligibleForGeneration && input.authorityState !== "READY"
-      ? "MEDIUM"
-      : state === "ALLOWED"
+    state === "ALLOWED"
+      ? score !== null && score >= 90
         ? "HIGH"
-        : "LOW";
+        : input.authorityState === "READY"
+          ? "HIGH"
+          : "MEDIUM"
+      : "LOW";
   const needsVerification = state === "ALLOWED" ? confidence !== "HIGH" : true;
   const canOpenStudio = state === "ALLOWED";
   const canGenerate = state === "ALLOWED";
@@ -88,7 +79,7 @@ export function buildGenerationProductReadiness(
 
   const uniqueReasonsBlocked = Array.from(new Set(reasonsBlocked));
   const tier: GenerationProductTier =
-    state === "BLOCKED" && !scoreEligibleForStudio
+    state === "BLOCKED" && !scoreEligibleForGeneration
       ? "fit_review_only"
       : state === "BLOCKED"
       ? "studio_unlocked"

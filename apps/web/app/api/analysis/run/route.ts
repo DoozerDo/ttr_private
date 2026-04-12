@@ -18,7 +18,8 @@ function decodeUserIdFromJwt(token: string): string | null {
       id?: string;
     };
     return payload.sub ?? payload.userId ?? payload.id ?? null;
-  } catch {
+  } catch (error) {
+    console.error("Failed to decode user id from JWT", error);
     return null;
   }
 }
@@ -58,6 +59,7 @@ export async function POST(req: NextRequest) {
         debug: payload?.debug,
       }),
     });
+    console.log("SCORING RESPONSE:", response);
     const relayed = await relayJsonResponse(response);
     if (process.env.NODE_ENV !== "production") {
       const body =

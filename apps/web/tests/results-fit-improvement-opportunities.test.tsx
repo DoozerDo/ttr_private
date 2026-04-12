@@ -104,7 +104,8 @@ describe("Results fit improvement opportunities", () => {
     );
 
     await waitFor(() => expect(screen.queryByText("Support Operations")).toBeNull());
-    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
+    expect(screen.getByText("You'll address these gaps in Fit Review.")).toBeInTheDocument();
     expect(screen.queryByText(/Category:/i)).toBeNull();
     expect(screen.queryByText(/Domain:/i)).toBeNull();
   });
@@ -181,7 +182,8 @@ describe("Results fit improvement opportunities", () => {
       />,
     );
 
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Strengthen this example", level: 3 })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Clarify this example", level: 3 })).toBeTruthy());
+    expect(screen.getByText("You'll address these gaps in Fit Review.")).toBeInTheDocument();
     expect(screen.queryByText("Analytics Strategy")).toBeNull();
     expect(screen.queryByText(/Category:/i)).toBeNull();
     expect(screen.queryByText(/Domain:/i)).toBeNull();

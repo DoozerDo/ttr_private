@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import { computeNextAction, bandPriority, fitBandFromScore, daysSince } from './opportunity-fit';
 import { OpportunityActionsNeededService } from './opportunity-actions-needed.service';
 import { OpportunityStateMachine } from './opportunity-state-machine';
@@ -23,6 +23,7 @@ import { applySyntheticMetadata } from '../synthetic/synthetic-metadata.util';
 type CreateOpportunityInput = {
   companyName: string;
   jobTitle: string;
+  jobId?: string | null;
   salary?: string | null;
   fitScore: number;
   baselineVersionUsed?: string | null;
@@ -43,11 +44,30 @@ type GroupedOpportunities = {
 
 const DORMANT_THRESHOLD_DAYS = 90;
 const DORMANT_WARNING_DAYS = 60;
+const QUALIFIED_OPPORTUNITY_THRESHOLD = 80;
 
 const TERMINAL_STATUSES = new Set<OpportunityStatus>([
   OpportunityStatus.REJECTED,
   OpportunityStatus.WITHDRAWN,
 ]);
+
+function isUniqueOpportunityPairConflict(error: unknown): boolean {
+  if (!(error instanceof QueryFailedError)) {
+    return false;
+  }
+  const driverError = error.driverError as
+    | { code?: string; constraint?: string; detail?: string }
+    | undefined;
+  const constraintMatch = driverError?.constraint === 'UQ_opportunities_user_pair';
+  const detailMatch =
+    Boolean(driverError?.detail?.includes('user_id')) &&
+    Boolean(driverError?.detail?.includes('baseline_id')) &&
+    Boolean(driverError?.detail?.includes('job_id'));
+  return (
+    driverError?.code === '23505' &&
+    (constraintMatch || detailMatch)
+  );
+}
 
 @Injectable()
 export class OpportunitiesService {
@@ -64,7 +84,7 @@ export class OpportunitiesService {
     input: CreateOpportunityInput,
     syntheticMetadata?: SyntheticMetadataInput,
   ) {
-    if (input.fitScore < 70) {
+    if (input.fitScore < QUALIFIED_OPPORTUNITY_THRESHOLD) {
       return null;
     }
     return this.createFromIntent(
@@ -201,15 +221,18 @@ export class OpportunitiesService {
     }
 
     const normalizedScore = Math.round(dto.score);
-    const existing = await this.opportunityRepository.findOne({
-      where: { userId, analysisId: dto.analysisId },
-      order: { updatedAt: 'DESC' },
-    });
+    const existing = await this.findOpportunityForPair(userId, dto.baselineId, dto.jobId)
+      ?? await this.opportunityRepository.findOne({
+        where: { userId, analysisId: dto.analysisId },
+        order: { updatedAt: 'DESC' },
+      });
 
     if (existing) {
       existing.jobId = dto.jobId;
+      existing.savedJobId = dto.jobId;
       existing.analysisId = dto.analysisId;
       existing.baselineId = dto.baselineId;
+      existing.savedBaselineId = dto.baselineId;
       existing.companyName = companyName;
       existing.jobTitle = jobTitle;
       existing.currentScore = normalizedScore;
@@ -217,7 +240,9 @@ export class OpportunitiesService {
       existing.notes = dto.notes?.trim() || existing.notes || null;
       if (existing.status !== OpportunityStatus.APPLIED && existing.status !== OpportunityStatus.REJECTED) {
         existing.status =
-          normalizedScore >= 70 ? OpportunityStatus.SAVED : OpportunityStatus.IN_FIT_REVIEW;
+          normalizedScore >= QUALIFIED_OPPORTUNITY_THRESHOLD
+            ? OpportunityStatus.SAVED
+            : OpportunityStatus.IN_FIT_REVIEW;
       }
       if (syntheticMetadata?.isSynthetic) {
         applySyntheticMetadata(existing, syntheticMetadata);
@@ -235,7 +260,10 @@ export class OpportunitiesService {
       companyName,
       jobTitle,
       salary: null,
-      status: normalizedScore >= 70 ? OpportunityStatus.SAVED : OpportunityStatus.IN_FIT_REVIEW,
+      status:
+        normalizedScore >= QUALIFIED_OPPORTUNITY_THRESHOLD
+          ? OpportunityStatus.SAVED
+          : OpportunityStatus.IN_FIT_REVIEW,
       initialScore: normalizedScore,
       savedFitScore: normalizedScore,
       currentScore: normalizedScore,
@@ -344,12 +372,16 @@ export class OpportunitiesService {
     const score = Math.round(input.fitScore);
     const band = fitBandFromScore(score);
 
-    const existing = await this.opportunityRepository.findOne({
-      where: { userId, companyName, jobTitle },
-      order: { dateCreated: 'DESC' },
-    });
+    const existing =
+      (await this.findOpportunityForPair(userId, input.baselineId ?? null, input.jobId ?? null)) ??
+      (await this.opportunityRepository.findOne({
+        where: { userId, companyName, jobTitle },
+        order: { dateCreated: 'DESC' },
+      }));
 
-    if (existing && !TERMINAL_STATUSES.has(existing.status)) {
+    if (existing) {
+      existing.jobId = input.jobId ?? existing.jobId;
+      existing.savedJobId = input.jobId ?? existing.savedJobId ?? existing.jobId;
       existing.analysisId = input.analysisId ?? existing.analysisId;
       existing.baselineId = input.baselineId ?? existing.baselineId;
       existing.savedBaselineId = input.baselineId ?? existing.savedBaselineId ?? existing.baselineId;
@@ -361,13 +393,33 @@ export class OpportunitiesService {
       existing.initialBand = existing.initialBand ?? band;
       existing.savedGenerationCompleted = Boolean(existing.savedGenerationCompleted || input.generationCompleted);
       existing.savedEvidenceSummary = this.toSavedEvidenceSummary(input.savedEvidenceSummary) ?? existing.savedEvidenceSummary;
-      return this.opportunityRepository.save(existing);
+      if (!TERMINAL_STATUSES.has(existing.status)) {
+        existing.status = status;
+      }
+      try {
+        return await this.opportunityRepository.save(existing);
+      } catch (error) {
+        if (!isUniqueOpportunityPairConflict(error)) {
+          throw error;
+        }
+        const conflicted = await this.findOpportunityForPair(
+          userId,
+          input.baselineId ?? null,
+          input.jobId ?? null,
+        );
+        if (conflicted) {
+          return conflicted;
+        }
+        throw error;
+      }
     }
 
     const opportunity = this.opportunityRepository.create({
       userId,
       companyName,
       jobTitle,
+      jobId: input.jobId ?? null,
+      savedJobId: input.jobId ?? null,
       salary: input.salary?.trim() || null,
       analysisId: input.analysisId ?? null,
       baselineId: input.baselineId ?? null,
@@ -388,7 +440,22 @@ export class OpportunitiesService {
       applySyntheticMetadata(opportunity, syntheticMetadata);
     }
 
-    return this.opportunityRepository.save(opportunity);
+    try {
+      return await this.opportunityRepository.save(opportunity);
+    } catch (error) {
+      if (!isUniqueOpportunityPairConflict(error)) {
+        throw error;
+      }
+      const conflicted = await this.findOpportunityForPair(
+        userId,
+        input.baselineId ?? null,
+        input.jobId ?? null,
+      );
+      if (conflicted) {
+        return conflicted;
+      }
+      throw error;
+    }
   }
 
   private async mustFindForUser(id: string, userId: string) {
@@ -399,6 +466,26 @@ export class OpportunitiesService {
       throw new NotFoundException('Opportunity not found');
     }
     return opportunity;
+  }
+
+  private async findOpportunityForPair(
+    userId: string,
+    baselineId?: string | null,
+    jobId?: string | null,
+  ) {
+    const safeBaselineId = baselineId?.trim() ?? '';
+    const safeJobId = jobId?.trim() ?? '';
+    if (!safeBaselineId || !safeJobId) {
+      return null;
+    }
+
+    return this.opportunityRepository.findOne({
+      where: [
+        { userId, baselineId: safeBaselineId, jobId: safeJobId },
+        { userId, savedBaselineId: safeBaselineId, savedJobId: safeJobId },
+      ],
+      order: { updatedAt: 'DESC' },
+    });
   }
 
   private withComputedFields(opportunity: Opportunity, now = new Date()) {

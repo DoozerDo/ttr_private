@@ -25,8 +25,8 @@ export interface ResultsDecision {
 
 export function resolveResultsDecision(input: ResultsDecisionInput): ResultsDecision {
   const score = typeof input.score === "number" && Number.isFinite(input.score) ? input.score : null;
-  const scoreFloorBlocked = score !== null && score < 70;
-  const generationAllowed = input.generationReadiness.state === "ALLOWED" && !scoreFloorBlocked;
+  const scoreFloorBlocked = score !== null && score < 80;
+  const generationAllowed = score !== null && score >= 80;
   const canonical = resolveCanonicalState({
     surface: "results",
     baselineId: null,
@@ -54,11 +54,23 @@ export function resolveResultsDecision(input: ResultsDecisionInput): ResultsDeci
         reasonsBlocked: generationAllowed ? [] : ["generation_blocked"],
       },
       state: generationAllowed ? "ALLOWED" : "BLOCKED",
-      confidence: input.generationReadiness.confidence,
-      needsVerification: input.generationReadiness.needsVerification,
+      confidence:
+        generationAllowed && score !== null && score >= 90
+          ? "HIGH"
+          : generationAllowed && input.generationReadiness.confidence === "HIGH"
+            ? "HIGH"
+            : generationAllowed
+              ? "MEDIUM"
+              : input.generationReadiness.confidence,
+      needsVerification: generationAllowed ? score !== null && score < 90 : input.generationReadiness.needsVerification,
       tier: generationAllowed ? "generation_allowed" : "fit_review_only",
       canOpenStudio: generationAllowed,
-      generationMode: input.generationReadiness.confidence === "HIGH" ? "verified" : "draft",
+      generationMode:
+        generationAllowed && score !== null && score >= 90
+          ? "verified"
+          : input.generationReadiness.confidence === "HIGH"
+            ? "verified"
+            : "draft",
     },
     studioHref: "/studio",
     fitReviewHref: "/fit-review",
@@ -87,8 +99,13 @@ export function resolveResultsDecision(input: ResultsDecisionInput): ResultsDeci
       score,
       generationReadiness: {
         state: "ALLOWED",
-        confidence: "MEDIUM",
-        needsVerification: true,
+        confidence:
+          score !== null && score >= 90
+            ? "HIGH"
+            : input.generationReadiness.confidence === "HIGH"
+              ? "HIGH"
+              : "MEDIUM",
+        needsVerification: score !== null ? score < 90 : true,
       },
     });
     return {

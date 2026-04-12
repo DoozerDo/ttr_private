@@ -43,7 +43,7 @@ function buildOpportunity(overrides: Partial<Opportunity> = {}): Opportunity {
 }
 
 describe('OpportunitiesService', () => {
-  it('creates from resume studio only when fit >= 70', async () => {
+  it('creates from resume studio only when fit >= 80', async () => {
     const repository = createRepository();
     repository.findOne.mockResolvedValue(null);
     const service = new OpportunitiesService(
@@ -56,16 +56,42 @@ describe('OpportunitiesService', () => {
     const skipped = await service.createFromResumeStudio('user-1', {
       companyName: 'Acme',
       jobTitle: 'Engineer',
-      fitScore: 68,
+      fitScore: 79,
     });
     const created = await service.createFromResumeStudio('user-1', {
       companyName: 'Acme',
       jobTitle: 'Engineer',
-      fitScore: 76,
+      fitScore: 80,
     });
 
     expect(skipped).toBeNull();
     expect(created?.status).toBe(OpportunityStatus.SAVED);
+    expect(repository.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses the existing pair record instead of creating a duplicate', async () => {
+    const repository = createRepository();
+    repository.findOne.mockResolvedValue(buildOpportunity({ id: 'opp-existing' }));
+    const service = new OpportunitiesService(
+      repository as never,
+      new OpportunityStateMachine(),
+      new OpportunityActionsNeededService(),
+      { rescoreNearBoundariesFromOverride: jest.fn() } as never,
+    );
+
+    const result = await service.upsertOpportunity('user-1', {
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+      baselineId: 'base-1',
+      score: 84,
+      company: 'Acme',
+      roleTitle: 'Engineer',
+      generationCompleted: true,
+      savedEvidenceSummary: ['Owned support workflows'],
+    });
+
+    expect(result.id).toBe('opp-existing');
+    expect(repository.create).not.toHaveBeenCalled();
     expect(repository.save).toHaveBeenCalledTimes(1);
   });
 
