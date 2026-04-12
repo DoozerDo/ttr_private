@@ -27,6 +27,7 @@ import {
   buildTargetCtaContract,
   buildTargetCtaClickedAnalyticsPayload,
   assertTargetCtaAnalyticsMatchesRenderedCta,
+  type TargetCtaContract,
   resolveTargetDisplayResult,
 } from "@/lib/targetGenerationContract";
 import { sanitizeScoreExplanationLine, sanitizeScoreExplanationList } from "@/lib/scoreExplanationCopy";
@@ -883,6 +884,10 @@ export function WorkspaceRunner({
   });
   const displayResult = resolvedDisplayResult.result;
   const showResult = Boolean(displayResult);
+  const data = displayResult as unknown;
+  if (showResult && (!data || typeof data !== "object")) {
+    throw new Error("Invalid Results data shape");
+  }
   const score = typeof displayResult?.score === "number" ? displayResult.score : null;
   const scoreBreakdown = extractScoreBreakdown(displayResult);
   const evidenceLinesFromBreakdown = buildEvidenceLines(scoreBreakdown);
@@ -981,16 +986,31 @@ export function WorkspaceRunner({
           displayResultSource: resolvedDisplayResult.source,
         });
       }
-      return buildTargetCtaContract({
-        baselineId,
-        jobId,
-        score,
-        generationReadiness,
-        productReadiness,
-        studioHref,
-        resolveGapsHref,
-        scoreSource: resolvedDisplayResult.source,
-      });
+      try {
+        return buildTargetCtaContract({
+          baselineId,
+          jobId,
+          score,
+          generationReadiness,
+          productReadiness,
+          studioHref,
+          resolveGapsHref,
+          scoreSource: resolvedDisplayResult.source,
+        });
+      } catch (error) {
+        console.error("[target] target cta resolution failed", error);
+        const fallback: TargetCtaContract = {
+          state: "BLOCKED",
+          label: "Review current selection",
+          href: "/baseline",
+          actionType: "blocked_redirect",
+          score,
+          scoreSource: resolvedDisplayResult.source,
+          readinessSource: "score_floor",
+          isStudioDestination: false,
+        };
+        return fallback;
+      }
     },
     [
       generationReadiness,
@@ -1301,6 +1321,7 @@ const showInterruptionState =
         triggerType: runTriggerType,
       }),
     });
+    console.log("SCORING RESPONSE:", response);
     if (process.env.NODE_ENV !== "production") {
       console.debug("[target] scoring_api_response_received", {
         area: "analysis",
@@ -1797,6 +1818,7 @@ const showInterruptionState =
       )}/latest`;
 
       const response = await fetch(url, { cache: "no-store" });
+      console.log("SCORING RESPONSE:", response);
       const payload = await response.json();
 
       if (!response.ok) {

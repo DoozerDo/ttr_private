@@ -55,7 +55,8 @@ type AppShellProps = {
 async function safeJson<T>(response: Response): Promise<T | null> {
   try {
     return (await response.json()) as T;
-  } catch {
+  } catch (error) {
+    console.error("Failed to parse JSON response", error);
     return null;
   }
 }
@@ -124,7 +125,8 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
       } else {
         baselinesOk = stored.hasBaseline;
       }
-    } catch {
+    } catch (error) {
+      console.error("Failed to refresh baseline context", error);
       baselinesOk = stored.hasBaseline;
     }
 
@@ -149,7 +151,8 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
       } else {
         jobsOk = stored.hasJob;
       }
-    } catch {
+    } catch (error) {
+      console.error("Failed to refresh job context", error);
       jobsOk = stored.hasJob;
     }
 
@@ -201,6 +204,8 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
     const originalFetch = window.fetch.bind(window);
     const diagnosticsBuffer: Array<Record<string, unknown>> = [];
     const localFingerprintTimestamps = new Map<string, number>();
+    const previousOnError = window.onerror;
+    const previousOnUnhandledRejection = window.onunhandledrejection;
 
     const appendDiagnostic = (entry: Record<string, unknown>) => {
       diagnosticsBuffer.push(entry);
@@ -239,9 +244,7 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
           body: JSON.stringify(payload),
         });
       } catch (error) {
-        if (isDev) {
-          console.debug("Auto error submission failed", error);
-        }
+        console.error("Auto error submission failed", error);
       }
     };
 
@@ -293,6 +296,21 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
       });
     };
 
+    window.onerror = function (message, source, lineno, colno, error) {
+      console.error("GLOBAL ERROR:", { message, source, lineno, colno, error });
+      if (typeof previousOnError === "function") {
+        return previousOnError(message, source, lineno, colno, error);
+      }
+      return false;
+    };
+    window.onunhandledrejection = function (event) {
+      console.error("UNHANDLED PROMISE REJECTION:", event.reason);
+      if (typeof previousOnUnhandledRejection === "function") {
+        return previousOnUnhandledRejection.call(window, event);
+      }
+      return false;
+    };
+
     window.fetch = async (...args) => {
       const requestInput = args[0];
       const requestInit = args[1];
@@ -322,8 +340,8 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
           };
           try {
             window.sessionStorage.setItem(LAST_API_SNAPSHOT_KEY, JSON.stringify(snapshot));
-          } catch {
-            // best effort only
+          } catch (error) {
+            console.error("Failed to snapshot API response", error);
           }
         }
         if (response.status >= 500 && !isAutoErrorEndpoint) {
@@ -379,6 +397,8 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
 
     return () => {
       window.fetch = originalFetch;
+      window.onerror = previousOnError;
+      window.onunhandledrejection = previousOnUnhandledRejection;
       window.removeEventListener("error", onWindowError);
       window.removeEventListener("unhandledrejection", onUnhandledRejection);
     };

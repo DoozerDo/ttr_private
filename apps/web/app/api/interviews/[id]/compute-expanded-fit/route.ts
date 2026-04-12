@@ -25,6 +25,7 @@ export async function POST(
       },
       body: JSON.stringify({}),
     });
+    console.log("SCORING RESPONSE:", response);
 
     return relayApiResponse(response);
   } catch (error) {

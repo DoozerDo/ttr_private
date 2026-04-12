@@ -207,7 +207,8 @@ async function parseResponseBody(response: Response): Promise<unknown> {
 
   try {
     return JSON.parse(text);
-  } catch {
+  } catch (error) {
+    console.error("Failed to parse interview API response body", error);
     return text;
   }
 }
@@ -540,6 +541,7 @@ export async function computeInterviewExpandedFit(
     cache: "no-store",
     body: JSON.stringify({}),
   });
+  console.log("SCORING RESPONSE:", response);
 
   const rawText = await response.text();
   const trimmed = rawText.trim();

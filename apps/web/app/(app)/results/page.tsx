@@ -906,6 +906,7 @@ export async function getPreviousAnalysis(
   const response = await fetch(`/api/analysis/fit-assessments?jobId=${encodeURIComponent(targetJobId)}`, {
     cache: "no-store",
   });
+  console.log("SCORING RESPONSE:", response);
   if (!response.ok) return null;
   const payload = (await response.json()) as LatestAnalysis[];
   const assessments = Array.isArray(payload) ? payload : [];
@@ -1865,7 +1866,8 @@ function safeJsonPreview(payload: unknown): string {
   try {
     const stripped = stripInternalKeys(payload);
     return JSON.stringify(stripped, null, 2);
-  } catch {
+  } catch (error) {
+    console.error("Failed to build Results JSON preview", error);
     return "Preview unavailable";
   }
 }
@@ -1920,8 +1922,8 @@ function extractBestResumeText(payload: unknown): string | null {
   try {
     const direct = typeof coercePreviewText === "function" ? coercePreviewText(payload) : null;
     if (typeof direct === "string" && direct.trim().length) return direct.trim();
-  } catch {
-    // ignore
+  } catch (error) {
+    console.error("Failed to extract best resume text", error);
   }
 
   const sectionsRaw = obj["sections"];
@@ -2004,8 +2006,8 @@ export default function ResultsPage() {
         body: JSON.stringify({ assessmentId }),
         credentials: "include",
       });
-    } catch {
-      // best effort; silence failures
+    } catch (error) {
+      console.error("Failed to persist last assessment", error);
     }
   }, []);
 
@@ -2029,8 +2031,8 @@ export default function ResultsPage() {
               typeof (item as { message?: unknown }).message === "string",
           ),
         );
-      } catch {
-        // non-blocking
+      } catch (error) {
+        console.error("Failed to load application insights", error);
       }
     };
     void loadInsights();
@@ -2121,6 +2123,10 @@ export default function ResultsPage() {
   const debugFields = scoringV2?.debug ?? null;
   const analysisKeys = latest ? Object.keys(latest) : [];
   const hasAnalysis = Boolean(latest);
+  const data = latest as unknown;
+  if (hasAnalysis && (!data || typeof data !== "object")) {
+    throw new Error("Invalid Results data shape");
+  }
   const diagnosticAssessmentId = latest?.assessmentId ?? runIdentifier ?? "N/A";
 
   const activeVerdictDecision = useMemo(
@@ -2163,7 +2169,8 @@ export default function ResultsPage() {
         const versions = (await response.json()) as Array<{ id: string; versionNumber: number }>;
         const resolved = resolveLatestBaselineVersionId({ versions });
         if (!cancelled) setCurrentBaselineVersionId(resolved);
-      } catch {
+      } catch (error) {
+        console.error("Failed to resolve baseline version", error);
         if (!cancelled) setCurrentBaselineVersionId(null);
       }
     })();
@@ -2186,7 +2193,8 @@ export default function ResultsPage() {
         if (!cancelled) {
           setPreviousAnalysis(previous ?? null);
         }
-      } catch {
+      } catch (error) {
+        console.error("Failed to resolve previous analysis", error);
         if (!cancelled) setPreviousAnalysis(null);
       }
     })();
@@ -2253,7 +2261,8 @@ export default function ResultsPage() {
           coverPayload as any,
         );
         setGenerationReadiness(resolved);
-      } catch {
+      } catch (error) {
+        console.error("Failed to resolve generation readiness", error);
         failedReadinessKeysRef.current.add(readinessKey);
       }
     })();
@@ -3311,6 +3320,7 @@ export default function ResultsPage() {
           `/api/analysis/fit-assessments/${encodeURIComponent(assessmentId)}`,
           { cache: "no-store" },
         );
+        console.log("SCORING RESPONSE:", res);
 
         const payload = await readResponsePayload(res.clone());
 
@@ -3464,13 +3474,14 @@ export default function ResultsPage() {
       allowCreate,
     });
 
-    try {
-      const res = await fetch(
-        `/api/analysis/job/${encodeURIComponent(targetJobId)}/baseline/${encodeURIComponent(targetBaselineId)}/latest`,
-        { cache: "no-store" },
-      );
+      try {
+        const res = await fetch(
+          `/api/analysis/job/${encodeURIComponent(targetJobId)}/baseline/${encodeURIComponent(targetBaselineId)}/latest`,
+          { cache: "no-store" },
+        );
+        console.log("SCORING RESPONSE:", res);
 
-      const payload = await readResponsePayload(res.clone());
+        const payload = await readResponsePayload(res.clone());
       if (activeLatestLoadRef.current?.requestId !== requestId) {
         return;
       }
@@ -3493,6 +3504,7 @@ export default function ResultsPage() {
             baselineId: targetBaselineId,
           }),
         });
+        console.log("SCORING RESPONSE:", runResponse);
 
         const runPayload = await readResponsePayload(runResponse.clone());
         if (activeLatestLoadRef.current?.requestId !== requestId) {
@@ -3746,8 +3758,8 @@ export default function ResultsPage() {
         }
         return (await response.json()) as { id?: string; status?: string } | null;
       }
-    } catch {
-      // non-blocking
+    } catch (error) {
+      console.error("Failed to save opportunity from Results", error);
     }
     return null;
   }, [activeScore, completeGuidedMode, evidenceLedger.entries, generationCompleted, isGuidedActive, latest]);
@@ -3762,8 +3774,8 @@ export default function ResultsPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: "APPLIED" }),
         });
-      } catch {
-        // non-blocking
+      } catch (error) {
+        console.error("Failed to update opportunity status", error);
       }
     }
   }, [saveOpportunityFromResults]);
@@ -3784,6 +3796,7 @@ export default function ResultsPage() {
           baselineId: targetBaselineId,
         }),
       });
+      console.log("SCORING RESPONSE:", response);
       const payload = await readResponsePayload(response.clone());
       if (!response.ok) {
         const message = formatErrorMessage(payload, "Unable to run re-analysis.");
@@ -3855,8 +3868,8 @@ export default function ResultsPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: "ready_to_apply" }),
         });
-      } catch {
-        // non-blocking
+      } catch (error) {
+        console.error("Failed to update opportunity readiness", error);
       }
     })();
   }, [latest?.baselineId, latest?.jobId, reanalysisDelta.currentScore, reanalysisDelta.previousScore]);
