@@ -43,7 +43,7 @@ export type ResumeGenerationTrackerInput = {
   roleTitle?: string | null;
   jobUrl?: string | null;
   jobText?: string | null;
-  baselineVersionId: string;
+  baselineVersionId?: string | null;
   cxFitScoreSnapshot?: CxFitScoreSnapshot | null;
   resumeArtifactId: string;
   resumeArtifactType?: 'resume' | 'cover';
@@ -469,7 +469,6 @@ export class ApplicationsService {
       resumeArtifactType: input.resumeArtifactType ?? 'resume',
       resumeArtifactFormat: input.resumeArtifactFormat ?? null,
       analysisId: input.analysisId ?? null,
-      baselineId: normalizedBaselineId,
       verificationCoverageSnapshot: input.verificationCoverageSnapshot ?? null,
       outcomeLinkageSnapshot: input.outcomeLinkageSnapshot ?? null,
     });
