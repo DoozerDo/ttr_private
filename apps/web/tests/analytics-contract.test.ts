@@ -392,6 +392,29 @@ describe("analytics contract", () => {
     });
   });
 
+  it("accepts studio_application_completed_viewed with the application payload shape", async () => {
+    trackEvent(
+      "studio_application_completed_viewed",
+      {
+        source: "studio",
+        analysisId: "analysis-1",
+        baselineId: "base-1",
+        jobId: "job-1",
+        score: 84,
+        currentStatus: "Applied",
+        totalApplicationsCount: 3,
+      },
+      { userId: "user-1" },
+    );
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/analytics/event",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+  });
+
   it("accepts studio_apply_clicked with the application payload shape", async () => {
     trackEvent(
       "studio_apply_clicked",
@@ -402,6 +425,53 @@ describe("analytics contract", () => {
         jobId: "job-1",
         score: 84,
         currentStatus: "Ready",
+      },
+      { userId: "user-1" },
+    );
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/analytics/event",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+  });
+
+  it("accepts studio_next_role_clicked with the application payload shape", async () => {
+    trackEvent(
+      "studio_next_role_clicked",
+      {
+        source: "studio",
+        analysisId: "analysis-1",
+        baselineId: "base-1",
+        jobId: "job-1",
+        score: 84,
+        currentStatus: "Applied",
+        totalApplicationsCount: 3,
+      },
+      { userId: "user-1" },
+    );
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/analytics/event",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+  });
+
+  it("accepts application_progress_viewed with the application payload shape", async () => {
+    trackEvent(
+      "application_progress_viewed",
+      {
+        source: "studio",
+        analysisId: "analysis-1",
+        baselineId: "base-1",
+        jobId: "job-1",
+        score: 84,
+        totalApplicationsCount: 3,
+        completedApplicationsCount: 3,
+        recentActivityCount: 3,
       },
       { userId: "user-1" },
     );

@@ -972,12 +972,28 @@ export default function StudioPage() {
     updatedAt: string;
     resumeArtifacts: StudioApplicationArtifactRecord[];
   } | null>(null);
+  const [applicationProgress, setApplicationProgress] = useState<{
+    totalApplicationsCount: number;
+    completedApplicationsCount: number;
+    recentActivity: Array<{
+      id: string;
+      company: string;
+      title: string;
+      status: string;
+      updatedAt: string;
+      appliedAt: string | null;
+    }>;
+  } | null>(null);
   const [applicationActionMessage, setApplicationActionMessage] = useState<string | null>(null);
   const [applicationPairLoading, setApplicationPairLoading] = useState(false);
+  const [applicationProgressLoading, setApplicationProgressLoading] = useState(false);
   const applicationPairSignatureRef = useRef<string | null>(null);
   const applicationReadyViewedSignatureRef = useRef<string | null>(null);
+  const applicationCompletedViewedSignatureRef = useRef<string | null>(null);
+  const applicationProgressViewedSignatureRef = useRef<string | null>(null);
   const applicationUpsertSignatureRef = useRef<string | null>(null);
   const applicationApplySignatureRef = useRef<string | null>(null);
+  const applicationProgressLoadSignatureRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -2322,6 +2338,113 @@ export default function StudioPage() {
     return typeof candidate === "string" && candidate.trim().length ? candidate.trim() : null;
   }, [applicationContext?.jobUrl, applicationContext?.sourceUrl, selectedJob?.sourceUrl]);
 
+  const applicationStatus = applicationContext?.status?.toLowerCase() ?? null;
+  const isApplicationApplied = applicationStatus === "applied";
+  const nextRoleHref = useMemo(() => {
+    const params = new URLSearchParams();
+    if (effectiveBaselineId) {
+      params.set("baselineId", effectiveBaselineId);
+    }
+    if (effectiveJobId) {
+      params.set("jobId", effectiveJobId);
+    }
+    const query = params.toString();
+    return query ? `/target?${query}` : "/target";
+  }, [effectiveBaselineId, effectiveJobId]);
+
+  useEffect(() => {
+    if (!studioArtifactsHydrated) {
+      return;
+    }
+    const progressSignature = `applications:${effectiveBaselineId ?? "none"}:${effectiveJobId ?? "none"}`;
+    if (applicationProgressLoadSignatureRef.current === progressSignature) {
+      return;
+    }
+    applicationProgressLoadSignatureRef.current = progressSignature;
+    let cancelled = false;
+    setApplicationProgressLoading(true);
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/applications", {
+          cache: "no-store",
+        });
+        const payload = await readResponsePayload(response);
+        if (cancelled) return;
+        if (!response.ok || !Array.isArray(payload)) {
+          setApplicationProgress(null);
+          return;
+        }
+        const records = payload
+          .map((record) => {
+            if (!record || typeof record !== "object") return null;
+            const candidate = record as Record<string, unknown>;
+            const id = typeof candidate.id === "string" ? candidate.id : "";
+            if (!id) return null;
+            const status = typeof candidate.status === "string" ? candidate.status : "Unknown";
+            const appliedAt =
+              typeof candidate.appliedAt === "string"
+                ? candidate.appliedAt
+                : typeof candidate.appliedDate === "string"
+                  ? candidate.appliedDate
+                  : null;
+            const updatedAt =
+              typeof candidate.lastTouchedAt === "string"
+                ? candidate.lastTouchedAt
+                : typeof candidate.updatedAt === "string"
+                  ? candidate.updatedAt
+                  : new Date().toISOString();
+            return {
+              id,
+              company:
+                typeof candidate.company === "string" ? candidate.company : "Unknown company",
+              title: typeof candidate.title === "string" ? candidate.title : "Untitled role",
+              status,
+              updatedAt,
+              appliedAt,
+            };
+          })
+          .filter(
+            (
+              record,
+            ): record is {
+              id: string;
+              company: string;
+              title: string;
+              status: string;
+              updatedAt: string;
+              appliedAt: string | null;
+            } => Boolean(record),
+          )
+          .sort((left, right) => {
+            const leftTime = new Date(left.updatedAt).getTime();
+            const rightTime = new Date(right.updatedAt).getTime();
+            return rightTime - leftTime;
+          });
+        const completedApplicationsCount = records.filter(
+          (record) => record.status.toLowerCase() === "applied",
+        ).length;
+        setApplicationProgress({
+          totalApplicationsCount: records.length,
+          completedApplicationsCount,
+          recentActivity: records.slice(0, 3),
+        });
+      } catch {
+        if (!cancelled) {
+          setApplicationProgress(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setApplicationProgressLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveBaselineId, effectiveJobId, studioArtifactsHydrated]);
+
   useEffect(() => {
     if (!applicationPairSignature || !studioArtifactsHydrated) {
       setApplicationContext(null);
@@ -2765,6 +2888,7 @@ export default function StudioPage() {
       jobId: effectiveJobId || null,
       score: analysisScore,
       currentStatus: applicationContext.status,
+      totalApplicationsCount: applicationProgress?.totalApplicationsCount ?? null,
     });
   }, [
     analysisScore,
@@ -2772,7 +2896,61 @@ export default function StudioPage() {
     applicationPairSignature,
     effectiveBaselineId,
     effectiveJobId,
+    applicationProgress?.totalApplicationsCount,
     hasCompletedGeneration,
+    isInstantDraftExperience,
+    requestedAnalysisId,
+  ]);
+
+  useEffect(() => {
+    if (!applicationProgress || !studioArtifactsHydrated) return;
+    const signature = `${effectiveBaselineId ?? "none"}:${effectiveJobId ?? "none"}`;
+    if (applicationProgressViewedSignatureRef.current === signature) return;
+    applicationProgressViewedSignatureRef.current = signature;
+    trackEvent("application_progress_viewed", {
+      source: "studio",
+      analysisId: requestedAnalysisId || null,
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      score: analysisScore,
+      totalApplicationsCount: applicationProgress.totalApplicationsCount,
+      completedApplicationsCount: applicationProgress.completedApplicationsCount,
+      recentActivityCount: applicationProgress.recentActivity.length,
+    });
+  }, [
+    analysisScore,
+    applicationProgress,
+    effectiveBaselineId,
+    effectiveJobId,
+    requestedAnalysisId,
+    studioArtifactsHydrated,
+  ]);
+
+  useEffect(() => {
+    if (!hasCompletedGeneration || !isInstantDraftExperience || !isApplicationApplied || !applicationContext) {
+      return;
+    }
+    const signature = `${applicationPairSignature ?? "application_pair"}:${applicationContext.status}`;
+    if (applicationCompletedViewedSignatureRef.current === signature) return;
+    applicationCompletedViewedSignatureRef.current = signature;
+    trackEvent("studio_application_completed_viewed", {
+      source: "studio",
+      analysisId: requestedAnalysisId || null,
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      score: analysisScore,
+      currentStatus: applicationContext.status,
+      totalApplicationsCount: applicationProgress?.totalApplicationsCount ?? null,
+    });
+  }, [
+    analysisScore,
+    applicationContext,
+    applicationPairSignature,
+    applicationProgress?.totalApplicationsCount,
+    effectiveBaselineId,
+    effectiveJobId,
+    hasCompletedGeneration,
+    isApplicationApplied,
     isInstantDraftExperience,
     requestedAnalysisId,
   ]);
@@ -5046,10 +5224,60 @@ export default function StudioPage() {
               : current?.updatedAt ?? new Date().toISOString(),
           resumeArtifacts: current?.resumeArtifacts ?? [],
         }));
+        setApplicationProgress((current) => {
+          if (!current) return current;
+          const nextActivity = {
+            id:
+              typeof record.id === "string"
+                ? record.id
+                : applicationContext?.id ?? applicationPairSignature ?? "current-application",
+            company:
+              selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company",
+            title: selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Untitled role",
+            status: nextStatus,
+            updatedAt:
+              typeof record.updatedAt === "string"
+                ? record.updatedAt
+                : new Date().toISOString(),
+            appliedAt:
+              typeof record.appliedAt === "string"
+                ? record.appliedAt
+              : typeof record.appliedDate === "string"
+                  ? record.appliedDate
+                  : new Date().toISOString(),
+          };
+          const existingIndex = current.recentActivity.findIndex(
+            (item) => item.id === nextActivity.id,
+          );
+          const nextRecentActivity =
+            existingIndex >= 0
+              ? [
+                  nextActivity,
+                  ...current.recentActivity
+                    .filter((item) => item.id !== nextActivity.id)
+                    .slice(0, 2),
+                ]
+              : [nextActivity, ...current.recentActivity].slice(0, 3);
+          const nextCompleted =
+            nextStatus.toLowerCase() === "applied"
+              ? current.completedApplicationsCount +
+                (previousStatus?.toLowerCase() === "applied" ? 0 : 1)
+              : current.completedApplicationsCount;
+          const nextTotal =
+            current.totalApplicationsCount +
+            (previousStatus?.toLowerCase() === "applied"
+              ? 0
+              : nextStatus.toLowerCase() === "applied"
+                ? 1
+                : 0);
+          return {
+            totalApplicationsCount: nextTotal,
+            completedApplicationsCount: nextCompleted,
+            recentActivity: nextRecentActivity,
+          };
+        });
         setApplicationActionMessage(
-          openUrl
-            ? "Application marked applied and the job posting opened in a new tab."
-            : "Application marked applied. Open the job posting and submit your application.",
+          "Application submitted. Your resume and cover letter were marked applied.",
         );
         trackEvent("application_created_or_upserted", {
           source: "studio",
@@ -5092,6 +5320,28 @@ export default function StudioPage() {
     requestedAnalysisId,
     selectedJob?.company,
     selectedJob?.title,
+  ]);
+
+  const handleAnalyzeAnotherRole = useCallback(() => {
+    trackEvent("studio_next_role_clicked", {
+      source: "studio",
+      analysisId: requestedAnalysisId || null,
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      score: analysisScore,
+      currentStatus: applicationContext?.status ?? null,
+      totalApplicationsCount: applicationProgress?.totalApplicationsCount ?? null,
+    });
+    router.push(nextRoleHref);
+  }, [
+    analysisScore,
+    applicationContext?.status,
+    applicationProgress?.totalApplicationsCount,
+    effectiveBaselineId,
+    effectiveJobId,
+    nextRoleHref,
+    requestedAnalysisId,
+    router,
   ]);
 
   const handlePrimaryResumeAction = useCallback(() => {
@@ -5275,7 +5525,78 @@ export default function StudioPage() {
     }
   }
 
-  const instantDraftHero = isInstantDraftExperience ? (
+  const appliedMomentumHero =
+    isInstantDraftExperience && hasCompletedGeneration && isApplicationApplied ? (
+      <section
+        className="space-y-5 rounded-[28px] border border-emerald-300/20 bg-[linear-gradient(180deg,rgba(16,185,129,0.16),rgba(15,23,42,0.82))] p-6 md:p-8 shadow-[0_24px_60px_rgba(15,23,42,0.35)]"
+        data-testid="studio-application-complete-hero"
+      >
+        <div className="space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-200">
+            Application complete
+          </p>
+          <h1 className="text-3xl font-semibold tracking-tight text-slate-50 md:text-[36px]">
+            Application submitted
+          </h1>
+          <p className="max-w-3xl text-base leading-7 text-slate-200">
+            Let&apos;s find your next opportunity.
+          </p>
+          {applicationActionMessage ? (
+            <p className="text-sm font-medium text-emerald-100">{applicationActionMessage}</p>
+          ) : null}
+        </div>
+        {applicationProgress ? (
+          <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                  Progress
+                </p>
+                <p className="text-sm text-slate-200">
+                  {applicationProgress.completedApplicationsCount} applications completed
+                </p>
+              </div>
+              <p className="text-xs font-medium text-slate-300">
+                {applicationProgress.recentActivity.length > 0
+                  ? `Latest: ${applicationProgress.recentActivity[0].company}, ${applicationProgress.recentActivity[0].title}`
+                  : "No recent activity yet"}
+              </p>
+            </div>
+          </section>
+        ) : null}
+        <div className="flex flex-wrap gap-3">
+          <FormButton
+            variant="secondary"
+            onClick={() => void exportResume("docx")}
+            disabled={!canExportResume || resumeExportFormat === "docx"}
+          >
+            {resumeExportFormat === "docx" ? "Downloading..." : "Download Resume"}
+          </FormButton>
+          <FormButton
+            variant="secondary"
+            onClick={() => void exportCoverLetter("docx")}
+            disabled={!canExportCover || coverExportFormat === "docx"}
+          >
+            {coverExportFormat === "docx" ? "Downloading..." : "Download Cover Letter"}
+          </FormButton>
+          <FormButton variant="secondary" onClick={() => void handleCopyResume()}>
+            Copy Resume
+          </FormButton>
+          <FormButton variant="secondary" onClick={() => void handleCopyCoverLetter()}>
+            Copy Cover Letter
+          </FormButton>
+          <FormButton onClick={handleAnalyzeAnotherRole}>Analyze another role</FormButton>
+          <Link
+            href={resolveGapsHref}
+            className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
+          >
+            Refine
+          </Link>
+        </div>
+      </section>
+    ) : null;
+
+  const instantDraftHero = appliedMomentumHero ?? (isInstantDraftExperience ? (
     <section
       className="space-y-5 rounded-[28px] border border-emerald-300/20 bg-[linear-gradient(180deg,rgba(16,185,129,0.16),rgba(15,23,42,0.82))] p-6 md:p-8 shadow-[0_24px_60px_rgba(15,23,42,0.35)]"
       data-testid="studio-instant-draft-hero"
@@ -5351,28 +5672,50 @@ export default function StudioPage() {
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full border border-emerald-300/30 bg-emerald-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-emerald-100">
-                {applicationContext?.status?.toLowerCase() === "applied" ? "Applied" : "Application ready"}
+                {isApplicationApplied ? "Application complete" : "Application ready"}
               </span>
               {applicationPairLoading ? (
                 <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-300">
                   Syncing application state
                 </span>
               ) : null}
+              {applicationProgressLoading ? (
+                <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-300">
+                  Loading progress
+                </span>
+              ) : null}
             </div>
             <h2 className="text-2xl font-semibold tracking-tight text-slate-50 md:text-[32px]">
-              {applicationContext?.status?.toLowerCase() === "applied"
-                ? "Your application is tracked"
-                : "Your application is ready"}
+              {isApplicationApplied ? "Application submitted" : "Your application is ready"}
             </h2>
             <p className="max-w-3xl text-base leading-7 text-slate-200">
-              {applicationContext?.status?.toLowerCase() === "applied"
-                ? "Your materials are saved and your application has been marked applied."
+              {isApplicationApplied
+                ? "Let’s find your next opportunity."
                 : "Download your resume and cover letter, then apply to this role."}
             </p>
             {applicationActionMessage ? (
               <p className="text-sm font-medium text-emerald-100">{applicationActionMessage}</p>
             ) : null}
           </div>
+          {applicationProgress ? (
+            <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                    Progress
+                  </p>
+                  <p className="text-sm text-slate-200">
+                    {applicationProgress.completedApplicationsCount} applications completed
+                  </p>
+                </div>
+                <p className="text-xs font-medium text-slate-300">
+                  {applicationProgress.recentActivity.length > 0
+                    ? `Latest: ${applicationProgress.recentActivity[0].company}, ${applicationProgress.recentActivity[0].title}`
+                    : "No recent activity yet"}
+                </p>
+              </div>
+            </section>
+          ) : null}
           <div className="flex flex-wrap gap-3">
             <FormButton
               variant="secondary"
@@ -5394,23 +5737,25 @@ export default function StudioPage() {
             <FormButton variant="secondary" onClick={() => void handleCopyCoverLetter()}>
               Copy Cover Letter
             </FormButton>
-            <FormButton onClick={handleApplyToThisRole}>
-              {applicationContext?.status?.toLowerCase() === "applied"
-                ? "Applied"
-                : "Apply to this role"}
-            </FormButton>
+            {isApplicationApplied ? (
+              <FormButton onClick={handleAnalyzeAnotherRole}>Analyze another role</FormButton>
+            ) : (
+              <FormButton onClick={handleApplyToThisRole}>Apply to this role</FormButton>
+            )}
             <Link
               href={resolveGapsHref}
               className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
             >
               Refine
             </Link>
-            <a
-              href="#studio-fit-reasoning"
-              className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
-            >
-              View fit reasoning
-            </a>
+            {!isApplicationApplied ? (
+              <a
+                href="#studio-fit-reasoning"
+                className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
+              >
+                View fit reasoning
+              </a>
+            ) : null}
           </div>
           <div className="grid gap-4 lg:grid-cols-2">
             {resumePresenter.status === "success" && resumeState.response ? (
@@ -5518,7 +5863,7 @@ export default function StudioPage() {
         </div>
       </details>
     </section>
-  ) : null;
+  ) : null);
 
   const unlockEntryPanel = studioGenerationRenderState.shouldShowUnlockEntry ? (
       <RouteStateShell

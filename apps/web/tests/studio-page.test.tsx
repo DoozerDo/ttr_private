@@ -6,7 +6,12 @@ import { listBaselines } from "@/lib/baselines";
 import { listJobs } from "@/lib/jobsClient";
 import { FALLBACK_RENDERED_TEXT } from "@/lib/renderedText";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
-import { mockRouterReplace, overrideSearchParams, setFetchImplementation } from "./setup";
+import {
+  mockRouterPush,
+  mockRouterReplace,
+  overrideSearchParams,
+  setFetchImplementation,
+} from "./setup";
 
 vi.mock("@/app/(app)/studio/BaselineBlockPolicyPanel", () => ({
   BaselineBlockPolicyPanel: () => null,
@@ -294,6 +299,42 @@ function installCompletedArtifactFetches() {
     if (url.includes("/api/analytics/event")) {
       return Promise.resolve(createResponse({ ok: true }));
     }
+    if (url.endsWith("/api/applications")) {
+      return Promise.resolve(
+        createResponse([
+          {
+            id: "application-1",
+            status: "Applied",
+            appliedAt: new Date().toISOString(),
+            lastTouchedAt: new Date().toISOString(),
+            baselineId: "base-1",
+            jobId: "job-0",
+            company: "Northwind",
+            title: "Senior Program Manager",
+          },
+          {
+            id: "application-2",
+            status: "Applied",
+            appliedAt: new Date().toISOString(),
+            lastTouchedAt: new Date().toISOString(),
+            baselineId: "base-1",
+            jobId: "job-1a",
+            company: "Acme",
+            title: "Director of Support",
+          },
+          {
+            id: "application-3",
+            status: "Ready",
+            appliedAt: null,
+            lastTouchedAt: new Date().toISOString(),
+            baselineId: "base-1",
+            jobId: "job-1",
+            company: "Acme",
+            title: "Director of Support",
+          },
+        ]),
+      );
+    }
     return resolveStudioGenerationFallback(input);
   });
   setFetchImplementation(fetchMock);
@@ -339,6 +380,7 @@ describe("Studio page UX", () => {
     });
 
     expect(screen.getAllByText("Your application is ready").length).toBeGreaterThan(0);
+    expect(screen.getByText("2 applications completed")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Apply to this role" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Download Resume" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copy Resume" })).toBeInTheDocument();
@@ -349,29 +391,142 @@ describe("Studio page UX", () => {
     fireEvent.click(screen.getByRole("button", { name: "Copy Resume" }));
     fireEvent.click(screen.getByRole("button", { name: "Download Cover Letter" }));
     fireEvent.click(screen.getByRole("button", { name: "Copy Cover Letter" }));
-    fireEvent.click(screen.getByRole("button", { name: "Apply to this role" }));
 
     await waitFor(() => {
       expect(screen.getByText("Resume copied")).toBeInTheDocument();
       expect(screen.getByText("Cover letter copied")).toBeInTheDocument();
-      expect(screen.getByText(/Application marked applied/i)).toBeInTheDocument();
     });
 
-    const analyticsBodies = fetchMock.mock.calls
-      .filter(([url, init]) => String(url).includes("/api/analytics/event") && init?.method === "POST")
-      .map(([, init]) => JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")));
-    expect(analyticsBodies.map((body) => body.eventName)).toEqual(
-      expect.arrayContaining([
-        "studio_resume_downloaded",
-        "studio_cover_letter_downloaded",
-        "studio_resume_copied",
-        "studio_cover_letter_copied",
-        "studio_application_ready_viewed",
-        "studio_apply_clicked",
-        "application_created_or_upserted",
-        "application_status_updated",
-      ]),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply to this role" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-application-complete-hero")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Analyze another role" })).toBeInTheDocument();
+      expect(screen.getByText("3 applications completed")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Analyze another role" }));
+    expect(mockRouterPush).toHaveBeenCalledWith("/target?baselineId=base-1&jobId=job-1");
+
+    await waitFor(() => {
+      const analyticsBodies = fetchMock.mock.calls
+        .filter(([url, init]) => String(url).includes("/api/analytics/event") && init?.method === "POST")
+        .map(([, init]) => JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")));
+      expect(analyticsBodies.map((body) => body.eventName)).toEqual(
+        expect.arrayContaining([
+          "studio_resume_downloaded",
+          "studio_cover_letter_downloaded",
+          "studio_resume_copied",
+          "studio_cover_letter_copied",
+          "studio_application_ready_viewed",
+          "studio_apply_clicked",
+          "studio_application_completed_viewed",
+          "studio_next_role_clicked",
+          "application_progress_viewed",
+          "application_created_or_upserted",
+          "application_status_updated",
+        ]),
+      );
+    });
+  });
+
+  it("hydrates an already applied application and keeps the momentum state on refresh", async () => {
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            scoring_v2: { score: 84 },
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+            verification_coverage: {
+              totalClaims: 2,
+              verifiedClaims: 2,
+              inferredClaims: 0,
+              unverifiedClaims: 0,
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.endsWith("/api/applications")) {
+        return Promise.resolve(
+          createResponse([
+            {
+              id: "application-1",
+              status: "Applied",
+              appliedAt: new Date().toISOString(),
+              lastTouchedAt: new Date().toISOString(),
+              baselineId: "base-1",
+              jobId: "job-0",
+              company: "Northwind",
+              title: "Senior Program Manager",
+            },
+            {
+              id: "application-2",
+              status: "Applied",
+              appliedAt: new Date().toISOString(),
+              lastTouchedAt: new Date().toISOString(),
+              baselineId: "base-1",
+              jobId: "job-1a",
+              company: "Acme",
+              title: "Director of Support",
+            },
+            {
+              id: "application-3",
+              status: "Applied",
+              appliedAt: new Date().toISOString(),
+              lastTouchedAt: new Date().toISOString(),
+              baselineId: "base-1",
+              jobId: "job-2",
+              company: "Nimbus",
+              title: "Support Operations Lead",
+            },
+          ]),
+        );
+      }
+      if (url.includes("/api/applications/pair")) {
+        return Promise.resolve(
+          createResponse({
+            id: "application-3",
+            status: "Applied",
+            appliedAt: new Date().toISOString(),
+            lastTouchedAt: new Date().toISOString(),
+            baselineId: "base-1",
+            jobId: "job-1",
+            jobUrl: "https://example.com/job",
+            notes: null,
+            sourceUrl: "https://example.com/job",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            resumeArtifacts: [],
+          }),
+        );
+      }
+      return resolveStudioGenerationFallback(input);
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-application-complete-hero")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Analyze another role" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Apply to this role" })).toBeNull();
+    expect(screen.getByText("3 applications completed")).toBeInTheDocument();
   });
 
   it("shows the current ready generation state for an explicit baselineId", async () => {

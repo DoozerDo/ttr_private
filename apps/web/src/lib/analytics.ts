@@ -30,7 +30,10 @@ export const ANALYTICS_EVENT_NAMES = [
   "studio_resume_copied",
   "studio_cover_letter_copied",
   "studio_application_ready_viewed",
+  "studio_application_completed_viewed",
   "studio_apply_clicked",
+  "studio_next_role_clicked",
+  "application_progress_viewed",
   "application_status_updated",
   "application_created_or_upserted",
   "artifact_used_intent",
@@ -247,6 +250,16 @@ export type AnalyticsEventMap = {
     jobId: string | null;
     score: number | null;
     currentStatus: string | null;
+    totalApplicationsCount?: number | null;
+  };
+  studio_application_completed_viewed: {
+    source: "studio";
+    analysisId: string | null;
+    baselineId: string | null;
+    jobId: string | null;
+    score: number | null;
+    currentStatus: string | null;
+    totalApplicationsCount?: number | null;
   };
   studio_apply_clicked: {
     source: "studio";
@@ -255,6 +268,25 @@ export type AnalyticsEventMap = {
     jobId: string | null;
     score: number | null;
     currentStatus: string | null;
+  };
+  studio_next_role_clicked: {
+    source: "studio";
+    analysisId: string | null;
+    baselineId: string | null;
+    jobId: string | null;
+    score: number | null;
+    currentStatus: string | null;
+    totalApplicationsCount?: number | null;
+  };
+  application_progress_viewed: {
+    source: "studio";
+    analysisId: string | null;
+    baselineId: string | null;
+    jobId: string | null;
+    score: number | null;
+    totalApplicationsCount: number | null;
+    completedApplicationsCount: number | null;
+    recentActivityCount: number | null;
   };
   application_status_updated: {
     source: "studio" | "app" | "unknown";
