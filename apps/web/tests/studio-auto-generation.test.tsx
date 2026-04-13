@@ -272,8 +272,109 @@ describe("Studio auto-generation", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Document generation needs attention")).toBeInTheDocument();
+      expect(screen.getByText("Generation did not complete")).toBeInTheDocument();
     });
-    expect(screen.getAllByText(/generation failed/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("hydrates existing artifacts without auto-starting again", async () => {
+    const storageKey = "ttr:studio-artifacts:job-1:base-1";
+    window.localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        updatedAt: new Date().toISOString(),
+        resumeResponse: {
+          status: "success",
+          generationStatus: "success",
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          preview: {
+            resume: {
+              heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+              summary: "Support leader focused on scalable operations.",
+              experience: [
+                {
+                  company: "Cat Daddy Games",
+                  roleTitle: "Senior Producer",
+                  location: "Los Angeles, CA",
+                  dateRange: "2020 - Present",
+                  bullets: ["Led support operations programs."],
+                },
+              ],
+            },
+          },
+        },
+        coverResponse: {
+          status: "success",
+          generationStatus: "success",
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          preview: {
+            coverLetter: {
+              paragraphs: [
+                "Dear Hiring Team,",
+                "I bring verified leadership and operational experience aligned to this role.",
+                "Sincerely,",
+                "Alex Candidate",
+              ],
+            },
+          },
+        },
+      }),
+    );
+
+    const fetchMock = installStrongFitFetches({ readinessStatus: "ready" });
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("resume-preview")).toBeInTheDocument();
+    });
+    expect(fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith("/api/resume") && init?.method === "POST")).toHaveLength(0);
+    expect(fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith("/api/cover-letters") && init?.method === "POST")).toHaveLength(0);
+  });
+
+  it("does not duplicate auto-generation on rerender", async () => {
+    const fetchMock = installStrongFitFetches({ readinessStatus: "ready" });
+    const view = renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("resume-preview")).toBeInTheDocument();
+    });
+
+    const resumePostsBefore = fetchMock.mock.calls.filter(
+      ([url, init]) => String(url).endsWith("/api/resume") && init?.method === "POST",
+    ).length;
+    const coverPostsBefore = fetchMock.mock.calls.filter(
+      ([url, init]) => String(url).endsWith("/api/cover-letters") && init?.method === "POST",
+    ).length;
+
+    view.rerender(
+      <EntitlementsProvider
+        entitlements={{
+          id: "u-1",
+          email: "test@example.com",
+          subscriptionTier: "PRO",
+          role: "user",
+          entitlements: null,
+        }}
+      >
+        <StudioPage />
+      </EntitlementsProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("resume-preview")).toBeInTheDocument();
+    });
+
+    const resumePostsAfter = fetchMock.mock.calls.filter(
+      ([url, init]) => String(url).endsWith("/api/resume") && init?.method === "POST",
+    ).length;
+    const coverPostsAfter = fetchMock.mock.calls.filter(
+      ([url, init]) => String(url).endsWith("/api/cover-letters") && init?.method === "POST",
+    ).length;
+
+    expect(resumePostsAfter).toBe(resumePostsBefore);
+    expect(coverPostsAfter).toBe(coverPostsBefore);
   });
 });

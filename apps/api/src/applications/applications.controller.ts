@@ -10,6 +10,7 @@ import {
   Query,
   Req,
   Res,
+  Put,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
@@ -48,6 +49,35 @@ export class ApplicationsController {
       stage,
       company,
     });
+  }
+
+  @Get('pair')
+  async getApplicationForPair(
+    @Req() request: Request & { user?: { id?: string } },
+    @Query('baselineId') baselineId?: string,
+    @Query('jobId') jobId?: string,
+  ) {
+    const userId = request.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+    if (!baselineId || !jobId) {
+      throw new BadRequestException('Baseline and job are required.');
+    }
+
+    return this.applicationsService.getApplicationForPair(userId, baselineId, jobId);
+  }
+
+  @Put('pair')
+  async upsertApplicationForPair(
+    @Body() dto: any,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+    return this.applicationsService.upsertApplicationForPair({ ...dto, userId });
   }
 
   @Get('insights')

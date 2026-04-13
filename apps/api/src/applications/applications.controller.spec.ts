@@ -28,6 +28,8 @@ describe('ApplicationsController', () => {
       updateApplication: jest
         .fn()
         .mockResolvedValue({ id: 'app-1', stage: ApplicationStage.APPLIED }),
+      getApplicationForPair: jest.fn().mockResolvedValue({ id: 'app-pair-1' }),
+      upsertApplicationForPair: jest.fn().mockResolvedValue({ id: 'app-pair-1' }),
       deleteApplication: jest
         .fn()
         .mockResolvedValue({ deleted: true, id: 'app-1' }),
@@ -82,6 +84,34 @@ describe('ApplicationsController', () => {
     expect(service.listApplicationsForUser).toHaveBeenCalledWith('user-1', {
       stage: ApplicationStage.SAVED,
       company: 'Acme',
+    });
+  });
+
+  it('gets application for a baseline and job pair', async () => {
+    const service = createMockService();
+    const controller = new ApplicationsController(service);
+    const request = createMockRequest('user-1');
+
+    await controller.getApplicationForPair(request as any, 'base-1', 'job-1');
+
+    expect(service.getApplicationForPair).toHaveBeenCalledWith(
+      'user-1',
+      'base-1',
+      'job-1',
+    );
+  });
+
+  it('upserts application for a baseline and job pair', async () => {
+    const service = createMockService();
+    const controller = new ApplicationsController(service);
+    const request = createMockRequest('user-1');
+    const body = { baselineId: 'base-1', jobId: 'job-1' };
+
+    await controller.upsertApplicationForPair(body as any, request as any);
+
+    expect(service.upsertApplicationForPair).toHaveBeenCalledWith({
+      ...body,
+      userId: 'user-1',
     });
   });
 

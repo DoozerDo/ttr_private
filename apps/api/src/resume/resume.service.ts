@@ -40,6 +40,7 @@ import { OpportunitiesService } from '../opportunities/opportunities.service';
 import { AUTO_GENERATE_THRESHOLD } from '../config/autoGenerateThreshold';
 import { CriticalFlowEventType, CriticalFlowTrackerService } from '../support/critical-flow-tracker.service';
 import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
+import { StudioArtifactsService } from '../studio-artifacts/studio-artifacts.service';
 import '../docx-templates/templates';
 import {
   ResumeExportSection,
@@ -207,6 +208,7 @@ export class ResumeService {
     private readonly gapAnalysisService: GapAnalysisService,
     private readonly criticalFlowTrackerService: CriticalFlowTrackerService,
     private readonly workflowIdempotencyService: WorkflowIdempotencyService,
+    private readonly studioArtifactsService: StudioArtifactsService,
   ) {}
 
   private async findLatestAssessment(
@@ -1288,6 +1290,15 @@ export class ResumeService {
         areaOrRoute: 'resume',
       });
     };
+    const studioArtifactContext = {
+      baselineId: '',
+      jobId: '',
+      baselineVersionId: '',
+      baselineVersionHash: '',
+      jobFingerprint: '',
+      inputsHash: '',
+      analysisId: '',
+    };
     let dedupeKey: string | undefined;
     let reservationRunId: string | undefined;
     try {
@@ -1431,6 +1442,52 @@ export class ResumeService {
     const latestAssessment = jobId
       ? await this.findLatestAssessment(userId, jobId, baseline.id)
       : null;
+    studioArtifactContext.baselineId = baseline.id;
+    studioArtifactContext.jobId = job?.id ?? jobId;
+    studioArtifactContext.baselineVersionId = baselineVersion.id;
+    studioArtifactContext.baselineVersionHash = baselineVersion.hash;
+    studioArtifactContext.jobFingerprint =
+      this.studioArtifactsService.computeJobFingerprint(job) ?? '';
+    studioArtifactContext.inputsHash = this.studioArtifactsService.computeResumeInputsHash({
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: studioArtifactContext.jobFingerprint,
+      assessmentInputsHash: latestAssessment?.inputsHash ?? null,
+    });
+    studioArtifactContext.analysisId = analysisId;
+
+    const studioArtifactsState = await this.studioArtifactsService.readState({
+      userId,
+      baselineId: baseline.id,
+      jobId: jobId,
+      baselineVersionId: baselineVersion.id,
+      analysisId,
+    });
+    const cachedResume = studioArtifactsState.resume;
+    if (
+      cachedResume?.status === 'COMPLETED' &&
+      cachedResume.responseBody &&
+      cachedResume.inputsHash === studioArtifactContext.inputsHash
+    ) {
+      const cachedResponse = cachedResume.responseBody as unknown as ResumeGenerationResponse;
+      recordResumeEvent(true);
+      return {
+        ...cachedResponse,
+        idempotency: {
+          status: 'existing_completed',
+          runId:
+            cachedResponse.idempotency?.runId ??
+            cachedResponse.auditId ??
+            cachedResponse.audit_id ??
+            'existing_completed',
+          dedupeKey:
+            cachedResponse.idempotency?.dedupeKey ??
+            cachedResume.inputsHash ??
+            'existing_completed',
+          reused: true,
+        },
+      } as ResumeGenerationResponse;
+    }
+
     const gapInsights =
       job && latestAssessment
         ? this.gapAnalysisService.analyze({
@@ -1784,6 +1841,20 @@ export class ResumeService {
       });
     }
 
+    await this.studioArtifactsService.recordResumeInProgress({
+      userId,
+      baselineId: studioArtifactContext.baselineId,
+      jobId: studioArtifactContext.jobId,
+      baselineVersionId: studioArtifactContext.baselineVersionId,
+      baselineVersionHash: studioArtifactContext.baselineVersionHash,
+      jobFingerprint: studioArtifactContext.jobFingerprint,
+      inputsHash: studioArtifactContext.inputsHash,
+      metadata: {
+        auditId: audit.id,
+        analysisId: studioArtifactContext.analysisId,
+      },
+    });
+
     const trackerEntry =
       await this.applicationsService.upsertPreparedFromResumeGeneration({
         userId,
@@ -1866,6 +1937,22 @@ export class ResumeService {
         reused: reservation.status === 'existing_completed',
       },
     };
+    await this.studioArtifactsService.recordResumeSuccess({
+      userId,
+      baselineId: studioArtifactContext.baselineId,
+      jobId: studioArtifactContext.jobId,
+      baselineVersionId: studioArtifactContext.baselineVersionId,
+      baselineVersionHash: studioArtifactContext.baselineVersionHash,
+      jobFingerprint: studioArtifactContext.jobFingerprint,
+      inputsHash: studioArtifactContext.inputsHash,
+      responseBody: response as unknown as Record<string, unknown>,
+      content: JSON.stringify(normalizedDocument),
+      metadata: {
+        auditId: audit.id,
+        baselineVersionHash: audit.baselineVersionHash,
+        analysisId: studioArtifactContext.analysisId,
+      },
+    });
     await this.workflowIdempotencyService.complete({
       userId,
       operationName: 'generation.resume',
@@ -1876,6 +1963,20 @@ export class ResumeService {
     return response;
     } catch (error) {
       recordResumeEvent(false);
+      void this.studioArtifactsService.recordResumeFailure({
+        userId,
+        baselineId: studioArtifactContext.baselineId,
+        jobId: studioArtifactContext.jobId,
+        baselineVersionId: studioArtifactContext.baselineVersionId,
+        baselineVersionHash: studioArtifactContext.baselineVersionHash,
+        jobFingerprint: studioArtifactContext.jobFingerprint,
+        inputsHash: studioArtifactContext.inputsHash,
+        failureCode: error instanceof Error ? error.name : 'generation_failed',
+        failureMessage: error instanceof Error ? error.message : String(error),
+        metadata: {
+          analysisId: studioArtifactContext.analysisId,
+        },
+      });
       if (dedupeKey) {
         void this.workflowIdempotencyService.markFailure({
           userId,

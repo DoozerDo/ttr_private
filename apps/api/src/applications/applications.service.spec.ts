@@ -366,7 +366,7 @@ describe('ApplicationsService', () => {
           company: 'Acme Corp',
           title: 'Engineer',
           fingerprint: expect.stringContaining('job:'),
-          status: ApplicationTrackerStatus.PREPARED,
+          status: ApplicationTrackerStatus.READY,
           baselineVersionId: 'baseline-v1',
           baselineId: null,
           analysisId: null,
@@ -512,6 +512,90 @@ describe('ApplicationsService', () => {
       expect(repository.create).toHaveBeenCalledWith(
         expect.objectContaining({
           fingerprint: computed,
+        }),
+      );
+    });
+  });
+
+  describe('pair application tracking', () => {
+    it('hydrates an application for a baseline and job pair', async () => {
+      const repository = createMockRepository();
+      repository.findOne.mockResolvedValue(mockApplication);
+      const service = createService(repository);
+
+      const result = await service.getApplicationForPair('user-1', 'base-1', 'job-1');
+
+      expect(repository.findOne).toHaveBeenCalledWith({
+        where: {
+          userId: 'user-1',
+          baselineId: 'base-1',
+          jobId: 'job-1',
+        },
+      });
+      expect(result).toEqual(mockApplication);
+    });
+
+    it('upserts a ready pair application without duplicating applied state', async () => {
+      const repository = createMockRepository();
+      const existing = {
+        ...mockApplication,
+        fingerprint: 'pair:base-1:job-1',
+        baselineId: 'base-1',
+        jobId: 'job-1',
+        status: ApplicationTrackerStatus.APPLIED,
+        appliedAt: baseDate,
+      };
+      repository.findOne.mockResolvedValue(existing);
+      const service = createService(repository);
+
+      const result = await service.upsertApplicationForPair({
+        userId: 'user-1',
+        baselineId: 'base-1',
+        jobId: 'job-1',
+        companyName: 'Acme Corp',
+        roleTitle: 'Engineer',
+        applicationStatus: ApplicationTrackerStatus.READY,
+        fitScore: 92,
+        resumeArtifactId: 'artifact-1',
+        resumeArtifactType: 'cover',
+      });
+
+      expect(repository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: ApplicationTrackerStatus.APPLIED,
+          appliedAt: baseDate,
+          resumeArtifacts: expect.arrayContaining([
+            expect.objectContaining({
+              resumeArtifactId: 'artifact-1',
+              type: 'cover',
+            }),
+          ]),
+        }),
+      );
+      expect(result.status).toBe(ApplicationTrackerStatus.APPLIED);
+    });
+
+    it('creates a ready pair application when none exists', async () => {
+      const repository = createMockRepository();
+      repository.findOne.mockResolvedValue(null);
+      const service = createService(repository);
+
+      await service.upsertApplicationForPair({
+        userId: 'user-1',
+        baselineId: 'base-1',
+        jobId: 'job-1',
+        companyName: 'Acme Corp',
+        roleTitle: 'Engineer',
+        applicationStatus: ApplicationTrackerStatus.READY,
+        fitScore: 91,
+      });
+
+      expect(repository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fingerprint: 'pair:base-1:job-1',
+          status: ApplicationTrackerStatus.READY,
+          baselineId: 'base-1',
+          jobId: 'job-1',
         }),
       );
     });

@@ -147,7 +147,7 @@ function buildService(fixture: typeof dirtyResumeFixture) {
   } as never;
 
   const applicationsService = {
-    upsertPreparedFromResumeGeneration: jest.fn().mockResolvedValue({ id: 'tracker-1', status: 'Prepared' }),
+    upsertPreparedFromResumeGeneration: jest.fn().mockResolvedValue({ id: 'tracker-1', status: 'Ready' }),
   } as unknown as ApplicationsService;
 
   const opportunitiesService = {

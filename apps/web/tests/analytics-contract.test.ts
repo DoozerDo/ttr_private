@@ -127,4 +127,290 @@ describe("analytics contract", () => {
       }),
     );
   });
+
+  it("accepts studio_auto_generation_started with the instant draft payload shape", async () => {
+    trackEvent(
+      "studio_auto_generation_started",
+      {
+        source: "studio",
+        analysisId: "analysis-1",
+        baselineId: "base-1",
+        jobId: "job-1",
+        score: 84,
+        generationTarget: "resume_and_cover_letter",
+      },
+      { userId: "user-1" },
+    );
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/analytics/event",
+        expect.objectContaining({
+          method: "POST",
+        }),
+      );
+    });
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+    const body = JSON.parse(String(init?.body ?? "{}")) as {
+      eventName: string;
+      properties: Record<string, unknown>;
+    };
+
+    expect(body.eventName).toBe("studio_auto_generation_started");
+    expect(body.properties).toEqual(
+      expect.objectContaining({
+        source: "studio",
+        analysisId: "analysis-1",
+        baselineId: "base-1",
+        jobId: "job-1",
+        score: 84,
+        generationTarget: "resume_and_cover_letter",
+      }),
+    );
+  });
+
+  it("accepts studio_retry_clicked with the retry payload shape", async () => {
+    trackEvent(
+      "studio_retry_clicked",
+      {
+        source: "studio",
+        analysisId: "analysis-1",
+        baselineId: "base-1",
+        jobId: "job-1",
+        score: 84,
+        artifactType: "resume",
+        failureCategory: "generation_failed",
+      },
+      { userId: "user-1" },
+    );
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/analytics/event",
+        expect.objectContaining({
+          method: "POST",
+        }),
+      );
+    });
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+    const body = JSON.parse(String(init?.body ?? "{}")) as {
+      eventName: string;
+      properties: Record<string, unknown>;
+    };
+
+    expect(body.eventName).toBe("studio_retry_clicked");
+    expect(body.properties).toEqual(
+      expect.objectContaining({
+        source: "studio",
+        analysisId: "analysis-1",
+        baselineId: "base-1",
+        jobId: "job-1",
+        score: 84,
+        artifactType: "resume",
+        failureCategory: "generation_failed",
+      }),
+    );
+  });
+
+  it("accepts studio_resume_downloaded with the download payload shape", async () => {
+    trackEvent(
+      "studio_resume_downloaded",
+      {
+        source: "studio",
+        analysisId: "analysis-1",
+        baselineId: "base-1",
+        jobId: "job-1",
+        score: 84,
+        format: "docx",
+      },
+      { userId: "user-1" },
+    );
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/analytics/event",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+    const body = JSON.parse(String(init?.body ?? "{}")) as {
+      eventName: string;
+      properties: Record<string, unknown>;
+    };
+
+    expect(body.eventName).toBe("studio_resume_downloaded");
+    expect(body.properties).toEqual(
+      expect.objectContaining({
+        source: "studio",
+        analysisId: "analysis-1",
+        baselineId: "base-1",
+        jobId: "job-1",
+        score: 84,
+        format: "docx",
+      }),
+    );
+  });
+
+  it("accepts studio_cover_letter_downloaded with the download payload shape", async () => {
+    trackEvent(
+      "studio_cover_letter_downloaded",
+      {
+        source: "studio",
+        analysisId: "analysis-1",
+        baselineId: "base-1",
+        jobId: "job-1",
+        score: 84,
+        format: "docx",
+      },
+      { userId: "user-1" },
+    );
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/analytics/event",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+    const body = JSON.parse(String(init?.body ?? "{}")) as {
+      eventName: string;
+      properties: Record<string, unknown>;
+    };
+
+    expect(body.eventName).toBe("studio_cover_letter_downloaded");
+    expect(body.properties).toEqual(
+      expect.objectContaining({
+        source: "studio",
+        analysisId: "analysis-1",
+        baselineId: "base-1",
+        jobId: "job-1",
+        score: 84,
+        format: "docx",
+      }),
+    );
+  });
+
+  it("accepts studio_resume_copied with the copy payload shape", async () => {
+    trackEvent(
+      "studio_resume_copied",
+      {
+        source: "studio",
+        analysisId: "analysis-1",
+        baselineId: "base-1",
+        jobId: "job-1",
+        score: 84,
+      },
+      { userId: "user-1" },
+    );
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/analytics/event",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+    const body = JSON.parse(String(init?.body ?? "{}")) as {
+      eventName: string;
+      properties: Record<string, unknown>;
+    };
+
+    expect(body.eventName).toBe("studio_resume_copied");
+    expect(body.properties).toEqual(
+      expect.objectContaining({
+        source: "studio",
+        analysisId: "analysis-1",
+        baselineId: "base-1",
+        jobId: "job-1",
+        score: 84,
+      }),
+    );
+  });
+
+  it("accepts studio_cover_letter_copied with the copy payload shape", async () => {
+    trackEvent(
+      "studio_cover_letter_copied",
+      {
+        source: "studio",
+        analysisId: "analysis-1",
+        baselineId: "base-1",
+        jobId: "job-1",
+        score: 84,
+      },
+      { userId: "user-1" },
+    );
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/analytics/event",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+    const body = JSON.parse(String(init?.body ?? "{}")) as {
+      eventName: string;
+      properties: Record<string, unknown>;
+    };
+
+    expect(body.eventName).toBe("studio_cover_letter_copied");
+    expect(body.properties).toEqual(
+      expect.objectContaining({
+        source: "studio",
+        analysisId: "analysis-1",
+        baselineId: "base-1",
+        jobId: "job-1",
+        score: 84,
+      }),
+    );
+  });
+
+  it("accepts studio_application_ready_viewed with the application payload shape", async () => {
+    trackEvent(
+      "studio_application_ready_viewed",
+      {
+        source: "studio",
+        analysisId: "analysis-1",
+        baselineId: "base-1",
+        jobId: "job-1",
+        score: 84,
+        currentStatus: "Ready",
+      },
+      { userId: "user-1" },
+    );
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/analytics/event",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+  });
+
+  it("accepts studio_apply_clicked with the application payload shape", async () => {
+    trackEvent(
+      "studio_apply_clicked",
+      {
+        source: "studio",
+        analysisId: "analysis-1",
+        baselineId: "base-1",
+        jobId: "job-1",
+        score: 84,
+        currentStatus: "Ready",
+      },
+      { userId: "user-1" },
+    );
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/analytics/event",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+  });
 });

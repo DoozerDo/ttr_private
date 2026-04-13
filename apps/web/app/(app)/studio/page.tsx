@@ -79,6 +79,7 @@ import { useGuidedMode } from "@/hooks/useGuidedMode";
 import { type JobDto } from "@/lib/jobs";
 import {
   buildCoverLetterParagraphs,
+  copyTextToClipboard,
   readArtifactFailurePresentation,
   collectNormalizedContextValues,
   createDocumentState,
@@ -207,6 +208,45 @@ type LatestAnalysis = {
 type ApplicationInsight = {
   message?: string;
   type?: "warning" | "success" | "gap" | string;
+};
+
+type StudioApplicationArtifactRecord = {
+  resumeArtifactId: string;
+  type: "resume" | "cover";
+  createdAt: string;
+  exportFormat?: string | null;
+};
+
+type StoredStudioArtifactSnapshot = {
+  resumeResponse?: unknown;
+  coverResponse?: unknown;
+  updatedAt?: string;
+};
+
+type BackendStudioArtifactRecord = {
+  artifactType?: "resume" | "cover_letter";
+  status?: string;
+  inputsHash?: string | null;
+  responseBody?: unknown;
+  content?: string | null;
+  failureCode?: string | null;
+  failureMessage?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  failedAt?: string | null;
+  metadata?: Record<string, unknown> | null;
+};
+
+type BackendStudioArtifactsResponse = {
+  status?: string;
+  baselineId?: string;
+  jobId?: string;
+  baselineVersionId?: string | null;
+  baselineVersionHash?: string | null;
+  jobFingerprint?: string | null;
+  generationContractVersion?: string | null;
+  resume?: BackendStudioArtifactRecord | null;
+  coverLetter?: BackendStudioArtifactRecord | null;
 };
 
 const ANALYSIS_LOAD_ERROR_MESSAGE =
@@ -450,6 +490,80 @@ function isInsufficientBaselineEvidenceMessage(message: string | null): boolean 
     normalized.includes("no verified baseline evidence could be assembled") ||
     normalized.includes("no valid evidence units")
   );
+}
+
+function getStudioArtifactStorageKey(jobId?: string | null, baselineId?: string | null): string | null {
+  const safeJobId = trimString(jobId);
+  const safeBaselineId = trimString(baselineId);
+  if (!safeJobId || !safeBaselineId) return null;
+  return `ttr:studio-artifacts:${safeJobId}:${safeBaselineId}`;
+}
+
+function readStoredStudioArtifacts(key: string): StoredStudioArtifactSnapshot | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredStudioArtifactSnapshot;
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredStudioArtifacts(key: string, snapshot: StoredStudioArtifactSnapshot) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(snapshot));
+  } catch {
+    // Best effort only.
+  }
+}
+
+function getBackendArtifactStatus(record: BackendStudioArtifactRecord | null | undefined) {
+  const status = trimString(record?.status).toLowerCase();
+  if (status === "completed") return "completed" as const;
+  if (status === "in_progress") return "in_progress" as const;
+  if (status === "failed") return "failed" as const;
+  return "missing" as const;
+}
+
+function getBackendPairStatus(payload: BackendStudioArtifactsResponse | null | undefined) {
+  const resumeStatus = getBackendArtifactStatus(payload?.resume);
+  const coverStatus = getBackendArtifactStatus(payload?.coverLetter);
+  if (resumeStatus === "completed" || coverStatus === "completed") return "completed" as const;
+  if (resumeStatus === "in_progress" || coverStatus === "in_progress") return "in_progress" as const;
+  if (resumeStatus === "failed" || coverStatus === "failed") return "failed" as const;
+  return "missing" as const;
+}
+
+function isBackendStudioArtifactsResponse(
+  payload: BackendStudioArtifactsResponse | StoredStudioArtifactSnapshot,
+): payload is BackendStudioArtifactsResponse {
+  return "resume" in payload || "coverLetter" in payload;
+}
+
+function buildFailureFromBackendRecord(
+  artifactType: "resume" | "cover_letter",
+  record: BackendStudioArtifactRecord | null | undefined,
+): StudioArtifactFailurePresentation | null {
+  if (!record) return null;
+  const status = getBackendArtifactStatus(record);
+  if (status !== "failed") return null;
+  const message =
+    trimString(record.failureMessage) ||
+    "The draft could not be completed from the current inputs.";
+  return {
+    artifactType,
+    headline: artifactType === "resume" ? "Resume generation did not complete" : "Cover letter generation did not complete",
+    explanation: message,
+    nextStep: "Retry generation from the current verified inputs.",
+    retryable: true,
+    category: "generation_failed",
+    code: trimString(record.failureCode) || "generation_failed",
+    detail: trimString(record.failureMessage) || undefined,
+  };
 }
 
 function buildAssessmentAnalysisUrl(analysisId: string) {
@@ -769,6 +883,7 @@ export default function StudioPage() {
   const [autoGenerationInFlight, setAutoGenerationInFlight] = useState(false);
   const [resumeExportFormat, setResumeExportFormat] =
     useState<"docx" | "pdf" | null>(null);
+  const [resumeCopyStatus, setResumeCopyStatus] = useState<string | null>(null);
   const [recentIntent, setRecentIntent] = useState<RecentIntentState>(() => readRecentIntentState());
   const [resumeWarningFlags, setResumeWarningFlags] = useState<ComplianceFlag[]>([]);
   const [, setResumeAuditId] = useState<string | undefined>();
@@ -781,6 +896,7 @@ export default function StudioPage() {
   const [coverState, setCoverState] = useState<DocumentState>(() => createDocumentState());
   const [coverGenerating, setCoverGenerating] = useState(false);
   const [coverExportFormat, setCoverExportFormat] = useState<"docx" | "pdf" | null>(null);
+  const [coverCopyStatus, setCoverCopyStatus] = useState<string | null>(null);
   const [coverWarningFlags, setCoverWarningFlags] = useState<ComplianceFlag[]>([]);
   const [, setCoverAuditId] = useState<string | undefined>();
   const [coverLetterComplianceBlocked, setCoverLetterComplianceBlocked] =
@@ -794,6 +910,10 @@ export default function StudioPage() {
     targets: RefinementTarget[];
     summary: string;
   } | null>(null);
+  const [studioArtifactsHydrated, setStudioArtifactsHydrated] = useState(false);
+  const [studioArtifactPairStatus, setStudioArtifactPairStatus] = useState<
+    "missing" | "in_progress" | "failed" | "completed"
+  >("missing");
   const [hasGeneratedOnce, setHasGeneratedOnce] = useState(false);
   const [unlockGenerationConfirmation, setUnlockGenerationConfirmation] = useState<string | null>(
     null,
@@ -811,6 +931,12 @@ export default function StudioPage() {
   const previousCritiqueIssuesRef = useRef<DocumentCritiqueIssue[]>([]);
   const finalRoleCheckTrackedRef = useRef<string | null>(null);
   const finalRoleAdjustmentClickedRef = useRef<string | null>(null);
+  const resumeArtifactViewedSignatureRef = useRef<string | null>(null);
+  const coverArtifactViewedSignatureRef = useRef<string | null>(null);
+  const autoGenerationTelemetrySignatureRef = useRef<string | null>(null);
+  const studioArtifactHydrationKeyRef = useRef<string | null>(null);
+  const studioArtifactStorageKeyRef = useRef<string | null>(null);
+  const studioArtifactPresentationStateRef = useRef<"hydrated" | "generated" | "unknown">("unknown");
   const autoGenerationSignatureRef = useRef<string | null>(null);
   const autoOpportunitySignatureRef = useRef<string | null>(null);
   const activeAutoOpportunityRef = useRef<string | null>(null);
@@ -832,6 +958,26 @@ export default function StudioPage() {
     jobId: string | null;
     pairKey: string | null;
   } | null>(null);
+  const [applicationContext, setApplicationContext] = useState<{
+    id: string;
+    status: string;
+    appliedAt: string | null;
+    lastTouchedAt: string;
+    baselineId: string | null;
+    jobId: string | null;
+    jobUrl: string | null;
+    notes: string | null;
+    sourceUrl: string | null;
+    createdAt: string;
+    updatedAt: string;
+    resumeArtifacts: StudioApplicationArtifactRecord[];
+  } | null>(null);
+  const [applicationActionMessage, setApplicationActionMessage] = useState<string | null>(null);
+  const [applicationPairLoading, setApplicationPairLoading] = useState(false);
+  const applicationPairSignatureRef = useRef<string | null>(null);
+  const applicationReadyViewedSignatureRef = useRef<string | null>(null);
+  const applicationUpsertSignatureRef = useRef<string | null>(null);
+  const applicationApplySignatureRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -1051,8 +1197,6 @@ export default function StudioPage() {
     };
   }, []);
 
-
-
   const handleBlockPolicyVersionAdvance = useCallback(
     (newVersionId: string, newHash: string | null) => {
       if (newVersionId) {
@@ -1162,6 +1306,19 @@ export default function StudioPage() {
     }),
     [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, requestedAnalysisId],
   );
+  const studioArtifactStorageKey = useMemo(
+    () => getStudioArtifactStorageKey(effectiveJobId, effectiveBaselineId),
+    [effectiveBaselineId, effectiveJobId],
+  );
+  const studioArtifactHydrationSignature = useMemo(
+    () =>
+      [
+        studioArtifactStorageKey ?? "none",
+        effectiveBaselineVersionId ?? "none",
+        requestedAnalysisId ?? "none",
+      ].join("|"),
+    [effectiveBaselineVersionId, requestedAnalysisId, studioArtifactStorageKey],
+  );
   useEffect(() => {
     if (!requestedAnalysisId) {
       setOpportunityContext(null);
@@ -1205,6 +1362,114 @@ export default function StudioPage() {
   useEffect(() => {
     currentWorkflowScopeRef.current = currentWorkflowScope;
   }, [currentWorkflowScope]);
+  useEffect(() => {
+    studioArtifactStorageKeyRef.current = studioArtifactStorageKey;
+    if (!studioArtifactStorageKey) {
+      studioArtifactHydrationKeyRef.current = null;
+      setStudioArtifactPairStatus("missing");
+      setStudioArtifactsHydrated(true);
+      return;
+    }
+    if (studioArtifactHydrationKeyRef.current === studioArtifactHydrationSignature) {
+      return;
+    }
+
+    studioArtifactHydrationKeyRef.current = studioArtifactHydrationSignature;
+    let cancelled = false;
+
+    const applyHydratedPayload = (payload: BackendStudioArtifactsResponse | StoredStudioArtifactSnapshot | null) => {
+      if (!payload || cancelled) return;
+      const resumeResponse = isBackendStudioArtifactsResponse(payload)
+        ? payload.resume?.responseBody ?? null
+        : payload.resumeResponse ?? null;
+      const coverResponse = isBackendStudioArtifactsResponse(payload)
+        ? payload.coverLetter?.responseBody ?? null
+        : payload.coverResponse ?? null;
+      const resumeFailure = isBackendStudioArtifactsResponse(payload)
+        ? buildFailureFromBackendRecord("resume", payload.resume)
+        : null;
+      const coverFailure = isBackendStudioArtifactsResponse(payload)
+        ? buildFailureFromBackendRecord("cover_letter", payload.coverLetter)
+        : null;
+      if (resumeResponse) {
+        setResumeState((current) => ({
+          ...current,
+          response: resumeResponse,
+          error: null,
+          tierGateError: null,
+          artifactFailure: null,
+        }));
+        setHasGeneratedOnce(true);
+        studioArtifactPresentationStateRef.current = "hydrated";
+      } else if (resumeFailure) {
+        setResumeState((current) => ({ ...current, artifactFailure: resumeFailure, error: null }));
+      }
+      if (coverResponse) {
+        setCoverState((current) => ({
+          ...current,
+          response: coverResponse,
+          error: null,
+          tierGateError: null,
+          artifactFailure: null,
+        }));
+        setHasGeneratedOnce(true);
+        studioArtifactPresentationStateRef.current = "hydrated";
+      } else if (coverFailure) {
+        setCoverState((current) => ({ ...current, artifactFailure: coverFailure, error: null }));
+      }
+      const pairStatus =
+        "status" in payload
+          ? getBackendPairStatus(payload as BackendStudioArtifactsResponse)
+          : ((resumeResponse || coverResponse)
+              ? "completed"
+              : (resumeFailure || coverFailure)
+                ? "failed"
+                : "missing");
+      setStudioArtifactPairStatus(pairStatus);
+    };
+
+    void (async () => {
+      try {
+        const backendUrl = new URL("/api/studio/artifacts", window.location.origin);
+        if (effectiveBaselineId) backendUrl.searchParams.set("baselineId", effectiveBaselineId);
+        if (effectiveBaselineVersionId) backendUrl.searchParams.set("baselineVersionId", effectiveBaselineVersionId);
+        if (effectiveJobId) backendUrl.searchParams.set("jobId", effectiveJobId);
+        if (requestedAnalysisId) backendUrl.searchParams.set("analysisId", requestedAnalysisId);
+
+        const response = await fetch(backendUrl.toString(), { cache: "no-store" });
+        const payload = await readResponsePayload(response);
+        if (cancelled) return;
+        if (response.ok && payload && typeof payload === "object" && !Array.isArray(payload)) {
+          applyHydratedPayload(payload as BackendStudioArtifactsResponse);
+          setStudioArtifactsHydrated(true);
+          return;
+        }
+      } catch {
+        // fall back to local cache below
+      }
+
+      const snapshot = readStoredStudioArtifacts(studioArtifactStorageKey);
+      if (cancelled) return;
+      if (snapshot) {
+        applyHydratedPayload(snapshot);
+        setStudioArtifactsHydrated(true);
+        return;
+      }
+      setStudioArtifactPairStatus("missing");
+      setStudioArtifactsHydrated(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    requestedAnalysisId,
+    studioArtifactHydrationSignature,
+    studioArtifactStorageKey,
+  ]);
   useEffect(() => {
     const resumeKey = buildWorkflowRequestKey("resume", currentWorkflowScope);
     const coverKey = buildWorkflowRequestKey("cover_letter", currentWorkflowScope);
@@ -1769,6 +2034,100 @@ export default function StudioPage() {
     coverPresenter.status === "success" &&
     Boolean(resumeState.response && coverState.response);
   useEffect(() => {
+    if (!studioArtifactStorageKey) return;
+    if (typeof window === "undefined") return;
+
+    const nextSnapshot: StoredStudioArtifactSnapshot = {
+      updatedAt: new Date().toISOString(),
+      ...(resumePresenter.status === "success" && hasResumeArtifact && resumeState.response
+        ? { resumeResponse: resumeState.response }
+        : {}),
+      ...(coverPresenter.status === "success" && hasCoverLetterArtifact && coverState.response
+        ? { coverResponse: coverState.response }
+        : {}),
+    };
+
+    if (!nextSnapshot.resumeResponse && !nextSnapshot.coverResponse) {
+      try {
+        window.localStorage.removeItem(studioArtifactStorageKey);
+      } catch {
+        // Best effort only.
+      }
+      return;
+    }
+
+    writeStoredStudioArtifacts(studioArtifactStorageKey, nextSnapshot);
+  }, [
+    coverPresenter.status,
+    coverState.response,
+    hasCoverLetterArtifact,
+    hasResumeArtifact,
+    resumePresenter.status,
+    resumeState.response,
+    studioArtifactStorageKey,
+  ]);
+  useEffect(() => {
+    if (!studioArtifactsHydrated || !hasCompletedGeneration || !requestedAnalysisId) return;
+    if (resumePresenter.status === "success" && resumeState.response) {
+      const signature = [
+        effectiveBaselineId ?? "none",
+        effectiveJobId ?? "none",
+        requestedAnalysisId,
+        "resume",
+        resumeState.response ? "present" : "missing",
+      ].join(":");
+      if (resumeArtifactViewedSignatureRef.current !== signature) {
+        resumeArtifactViewedSignatureRef.current = signature;
+        trackEvent("studio_generated_artifact_viewed", {
+          source: "studio",
+          analysisId: requestedAnalysisId || null,
+          baselineId: effectiveBaselineId || null,
+          jobId: effectiveJobId || null,
+          score: analysisScore,
+          artifactType: "resume",
+          presentationState: artifactViewedPresentationState,
+        });
+      }
+    }
+    if (coverPresenter.status === "success" && coverState.response) {
+      const signature = [
+        effectiveBaselineId ?? "none",
+        effectiveJobId ?? "none",
+        requestedAnalysisId,
+        "cover_letter",
+        coverState.response ? "present" : "missing",
+      ].join(":");
+      if (coverArtifactViewedSignatureRef.current !== signature) {
+        coverArtifactViewedSignatureRef.current = signature;
+        trackEvent("studio_generated_artifact_viewed", {
+          source: "studio",
+          analysisId: requestedAnalysisId || null,
+          baselineId: effectiveBaselineId || null,
+          jobId: effectiveJobId || null,
+          score: analysisScore,
+          artifactType: "cover_letter",
+          presentationState: artifactViewedPresentationState,
+        });
+      }
+    }
+  }, [
+    analysisScore,
+    coverPresenter.status,
+    coverState.response,
+    effectiveBaselineId,
+    effectiveJobId,
+    hasCompletedGeneration,
+    requestedAnalysisId,
+    resumePresenter.status,
+    resumeState.response,
+    studioArtifactsHydrated,
+  ]);
+
+  const artifactViewedPresentationState =
+    studioArtifactPresentationStateRef.current === "generated"
+      ? "generated"
+      : "hydrated";
+  useEffect(() => {
     if (!documentCritique || !hasCompletedGeneration) return;
     const signature = [
       documentCritique.overallAssessment,
@@ -1945,6 +2304,238 @@ export default function StudioPage() {
     }
     storage.removeItem(generationStorageKey);
   }, [generationStorageKey, hasCompletedGeneration]);
+
+  const applicationPairSignature = useMemo(() => {
+    if (!effectiveBaselineId || !effectiveJobId) return null;
+    return buildWorkflowRequestKey("application_pair", {
+      baselineId: effectiveBaselineId,
+      jobId: effectiveJobId,
+    });
+  }, [effectiveBaselineId, effectiveJobId]);
+
+  const applicationJobUrl = useMemo(() => {
+    const candidate =
+      selectedJob?.sourceUrl ??
+      applicationContext?.jobUrl ??
+      applicationContext?.sourceUrl ??
+      null;
+    return typeof candidate === "string" && candidate.trim().length ? candidate.trim() : null;
+  }, [applicationContext?.jobUrl, applicationContext?.sourceUrl, selectedJob?.sourceUrl]);
+
+  useEffect(() => {
+    if (!applicationPairSignature || !studioArtifactsHydrated) {
+      setApplicationContext(null);
+      return;
+    }
+    if (applicationPairSignatureRef.current === applicationPairSignature) {
+      return;
+    }
+    let cancelled = false;
+    applicationPairSignatureRef.current = applicationPairSignature;
+    setApplicationPairLoading(true);
+    setApplicationActionMessage(null);
+
+    void (async () => {
+      try {
+        const params = new URLSearchParams();
+        if (effectiveBaselineId) params.set("baselineId", effectiveBaselineId);
+        if (effectiveJobId) params.set("jobId", effectiveJobId);
+        const response = await fetch(`/api/applications/pair?${params.toString()}`, {
+          cache: "no-store",
+        });
+        const payload = await readResponsePayload(response);
+        if (cancelled) return;
+        if (!response.ok || !payload || typeof payload !== "object" || Array.isArray(payload)) {
+          setApplicationContext(null);
+          return;
+        }
+        const record = payload as Record<string, unknown>;
+        setApplicationContext({
+          id: typeof record.id === "string" ? record.id : "",
+          status: typeof record.status === "string" ? record.status : "Ready",
+          appliedAt:
+            typeof record.appliedAt === "string"
+              ? record.appliedAt
+              : typeof record.appliedDate === "string"
+                ? record.appliedDate
+                : null,
+          lastTouchedAt:
+            typeof record.lastTouchedAt === "string" ? record.lastTouchedAt : new Date().toISOString(),
+          baselineId: typeof record.baselineId === "string" ? record.baselineId : null,
+          jobId: typeof record.jobId === "string" ? record.jobId : null,
+          jobUrl: typeof record.jobUrl === "string" ? record.jobUrl : null,
+          notes: typeof record.notes === "string" ? record.notes : null,
+          sourceUrl: typeof record.sourceUrl === "string" ? record.sourceUrl : null,
+          createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
+          updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : new Date().toISOString(),
+          resumeArtifacts: Array.isArray(record.resumeArtifacts)
+            ? record.resumeArtifacts
+                .map((artifact) => {
+                  if (!artifact || typeof artifact !== "object") return null;
+                  const candidate = artifact as Record<string, unknown>;
+                  const resumeArtifactId =
+                    typeof candidate.resumeArtifactId === "string"
+                      ? candidate.resumeArtifactId
+                      : "";
+                  if (!resumeArtifactId) return null;
+                  return {
+                    resumeArtifactId,
+                    type: candidate.type === "cover" ? "cover" : "resume",
+                    createdAt:
+                      typeof candidate.createdAt === "string"
+                        ? candidate.createdAt
+                        : new Date().toISOString(),
+                    exportFormat:
+                      typeof candidate.exportFormat === "string"
+                        ? candidate.exportFormat
+                        : null,
+                  } as StudioApplicationArtifactRecord;
+                })
+                .filter(
+                  (artifact): artifact is StudioApplicationArtifactRecord => Boolean(artifact),
+                )
+            : [],
+        });
+      } catch {
+        if (!cancelled) {
+          setApplicationContext(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setApplicationPairLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applicationPairSignature, effectiveBaselineId, effectiveJobId, studioArtifactsHydrated]);
+
+  useEffect(() => {
+    if (!applicationPairSignature) return;
+    if (!hasCompletedGeneration || !canGenerateDocuments || !qualifiedForGeneration) return;
+    if (applicationContext?.status?.toLowerCase() === "applied") return;
+
+    const ensureSignature = `${applicationPairSignature}:${applicationContext?.status ?? "missing"}:${hasCompletedGeneration}`;
+    if (applicationUpsertSignatureRef.current === ensureSignature) return;
+    applicationUpsertSignatureRef.current = ensureSignature;
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const pairUrl = applicationJobUrl;
+        const response = await fetch("/api/applications/pair", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            baselineId: effectiveBaselineId,
+            jobId: effectiveJobId,
+            companyName:
+              selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company",
+            roleTitle: selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Untitled role",
+            jobUrl: pairUrl,
+            sourceUrl: pairUrl,
+            externalApplicationUrl: pairUrl,
+            analysisId: requestedAnalysisId || null,
+            baselineVersionId: effectiveBaselineVersionId || null,
+            applicationStatus: "Ready",
+            fitScore: Math.round(analysisScore ?? 0),
+            resumeArtifactId:
+              readTrackerField(resumeState.response, "audit_id") ??
+              readTrackerField(resumeState.response, "auditId") ??
+              null,
+            resumeArtifactType: "resume",
+            resumeArtifactFormat: "docx",
+          }),
+        });
+        const payload = await readResponsePayload(response);
+        if (cancelled) return;
+        if (!response.ok || !payload || typeof payload !== "object" || Array.isArray(payload)) {
+          return;
+        }
+        const record = payload as Record<string, unknown>;
+        const nextStatus = typeof record.status === "string" ? record.status : "Ready";
+        const previousStatus = applicationContext?.status ?? null;
+        setApplicationContext((current) => ({
+          id: typeof record.id === "string" ? record.id : current?.id ?? "",
+          status: nextStatus,
+          appliedAt:
+            typeof record.appliedAt === "string"
+              ? record.appliedAt
+              : typeof record.appliedDate === "string"
+                ? record.appliedDate
+                : current?.appliedAt ?? null,
+          lastTouchedAt:
+            typeof record.lastTouchedAt === "string"
+              ? record.lastTouchedAt
+              : current?.lastTouchedAt ?? new Date().toISOString(),
+          baselineId:
+            typeof record.baselineId === "string" ? record.baselineId : current?.baselineId ?? null,
+          jobId: typeof record.jobId === "string" ? record.jobId : current?.jobId ?? null,
+          jobUrl: typeof record.jobUrl === "string" ? record.jobUrl : current?.jobUrl ?? null,
+          notes: typeof record.notes === "string" ? record.notes : current?.notes ?? null,
+          sourceUrl:
+            typeof record.sourceUrl === "string" ? record.sourceUrl : current?.sourceUrl ?? null,
+          createdAt:
+            typeof record.createdAt === "string"
+              ? record.createdAt
+              : current?.createdAt ?? new Date().toISOString(),
+          updatedAt:
+            typeof record.updatedAt === "string"
+              ? record.updatedAt
+              : current?.updatedAt ?? new Date().toISOString(),
+          resumeArtifacts: current?.resumeArtifacts ?? [],
+        }));
+        trackEvent("application_created_or_upserted", {
+          source: "studio",
+          baselineId: effectiveBaselineId || null,
+          jobId: effectiveJobId || null,
+          currentStatus: nextStatus,
+          created: !Boolean(previousStatus),
+          score: analysisScore,
+        });
+        if (previousStatus?.toLowerCase() !== nextStatus.toLowerCase()) {
+          trackEvent("application_status_updated", {
+            source: "studio",
+            baselineId: effectiveBaselineId || null,
+            jobId: effectiveJobId || null,
+            currentStatus: nextStatus,
+            previousStatus,
+            score: analysisScore,
+          });
+        }
+      } catch {
+        // Best effort only.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    analysis?.company,
+    analysis?.companyName,
+    analysis?.jobTitle,
+    analysis?.title,
+    analysisScore,
+    applicationContext?.status,
+    applicationJobUrl,
+    applicationPairSignature,
+    canGenerateDocuments,
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    hasCompletedGeneration,
+    qualifiedForGeneration,
+    requestedAnalysisId,
+    resumeState.response,
+    selectedJob?.company,
+    selectedJob?.title,
+    studioArtifactsHydrated,
+  ]);
+
   const resolveGapsHref = useMemo(() => {
     const params = new URLSearchParams();
     if (effectiveJobId) params.set("jobId", effectiveJobId);
@@ -2156,23 +2747,59 @@ export default function StudioPage() {
     return "strong";
   }, [studioCanonicalDecision.readinessState]);
   const canProceedWithStudioDrafts = generationSupportState !== "blocked";
-  const needsAutoGeneration = qualifiedForGeneration && (!hasResumeArtifact || !hasCoverLetterArtifact);
+  const isInstantDraftExperience = canProceedWithStudioDrafts && qualifiedForGeneration;
+  const needsAutoGeneration = isInstantDraftExperience && !hasCompletedGeneration;
   const autoGenerationSignature = useMemo(() => {
     if (!needsAutoGeneration) return null;
     return buildWorkflowRequestKey("auto_generation", currentWorkflowScope);
   }, [currentWorkflowScope, needsAutoGeneration]);
+  useEffect(() => {
+    if (!hasCompletedGeneration || !isInstantDraftExperience || !applicationContext) return;
+    const signature = `${applicationPairSignature ?? "application_pair"}:${applicationContext.status}`;
+    if (applicationReadyViewedSignatureRef.current === signature) return;
+    applicationReadyViewedSignatureRef.current = signature;
+    trackEvent("studio_application_ready_viewed", {
+      source: "studio",
+      analysisId: requestedAnalysisId || null,
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      score: analysisScore,
+      currentStatus: applicationContext.status,
+    });
+  }, [
+    analysisScore,
+    applicationContext,
+    applicationPairSignature,
+    effectiveBaselineId,
+    effectiveJobId,
+    hasCompletedGeneration,
+    isInstantDraftExperience,
+    requestedAnalysisId,
+  ]);
   const authorityStateTitle =
     generationSupportState === "blocked"
       ? "Generation blocked"
-      : generationSupportState === "partial"
-        ? "Generation is usable."
-        : "Ready to generate";
+      : hasCompletedGeneration
+        ? applicationContext?.status?.toLowerCase() === "applied"
+          ? "Your application is tracked"
+          : "Your application is ready"
+        : autoGenerationInFlight || studioArtifactPairStatus === "in_progress"
+          ? "We are generating your application draft now"
+          : studioArtifactPairStatus === "failed"
+            ? "Your draft needs another pass"
+        : "You are a strong match. We are building your application draft";
   const authorityStateExplanation =
     generationSupportState === "blocked"
-          ? "This role is not ready for clean Studio output yet. Return to Fit Review to strengthen verified evidence."
-      : generationSupportState === "partial"
-        ? "Generated from partially verified evidence. Verify key claims to strengthen it."
-        : "Generated from verified evidence. Your role analysis and verified baseline evidence support strong tailored output.";
+      ? "This role is not ready for clean Studio output yet. Return to Fit Review to strengthen verified evidence."
+      : hasCompletedGeneration
+        ? applicationContext?.status?.toLowerCase() === "applied"
+          ? "Your application is marked applied and your materials are ready whenever you need them."
+          : "Download your resume and cover letter, then apply to this role."
+        : autoGenerationInFlight || studioArtifactPairStatus === "in_progress"
+          ? "We are generating both drafts from your verified baseline evidence now."
+          : studioArtifactPairStatus === "failed"
+            ? "The previous attempt could not be completed. Retry to generate a fresh draft from the current verified inputs."
+        : "We can start immediately from your verified baseline evidence and role analysis.";
   const authorityReasons = useMemo(() => {
     const reasons: string[] = [];
     activeGenerationReadiness.verificationIssues.forEach((issue) => {
@@ -3189,11 +3816,11 @@ export default function StudioPage() {
     setSelectedBaselineVersionId(analysis.baselineVersionId);
   }, [analysis?.baselineVersionId, versions]);
 
-  const handleResumeDraft = async () => {
-    if (!guardGenerationAction("resume")) return;
+  const handleResumeDraft = async (): Promise<boolean> => {
+    if (!guardGenerationAction("resume")) return false;
     const requestScope = currentWorkflowScope;
     const request = beginStudioGenerationRequest("resume", requestScope);
-    if (!request) return;
+    if (!request) return false;
     setUnlockGenerationConfirmation(null);
     if ((hasSavedResumeEdits || hasUnsavedResumeEdits) && resumeState.response) {
       const proceed =
@@ -3202,7 +3829,7 @@ export default function StudioPage() {
           : true;
       if (!proceed) {
         finishStudioGenerationRequest("resume", request, "blocked", requestScope);
-        return;
+        return false;
       }
       setSavedEditedResumeModel(null);
       setDraftResumeModel(generatedResumeModel);
@@ -3215,7 +3842,7 @@ export default function StudioPage() {
         ...current,
         error: generationMessage ?? "Review prerequisites before generating a resume.",
       }));
-      return;
+      return false;
     }
     setResumeGenerating(true);
     const shouldShowUnlockConfirmation = isFirstGenerationAfterUnlock;
@@ -3256,7 +3883,7 @@ export default function StudioPage() {
         activeResumeGenerationRef.current?.requestId !== request.requestId
       ) {
         finishStudioGenerationRequest("resume", request, "blocked", requestScope);
-        return;
+        return false;
       }
       if (!response.ok) {
         console.warn("[studio] generation_failed", {
@@ -3271,7 +3898,7 @@ export default function StudioPage() {
         const tierGate = parseTierGateError({ status: response.status, payload: responsePayload });
         if (tierGate) {
           setResumeState((current) => ({ ...current, tierGateError: tierGate }));
-          return;
+          return false;
         }
         if (response.status === 422) {
           const failure = readArtifactFailurePresentation(responsePayload);
@@ -3281,7 +3908,7 @@ export default function StudioPage() {
               artifactFailure: failure,
               error: null,
             }));
-            return;
+            return false;
           }
           const blockedState = parseComplianceBlockedFromPayload(responsePayload);
           if (blockedState) {
@@ -3294,7 +3921,7 @@ export default function StudioPage() {
               ...current,
               error: [blockedState.body, ...blockedState.reasons].filter(Boolean).join(" "),
             }));
-            return;
+            return false;
           }
         }
         throw new Error(formatErrorMessage(responsePayload, "Resume generation failed."));
@@ -3307,7 +3934,7 @@ export default function StudioPage() {
           artifactFailure: failure,
           error: null,
         }));
-        return;
+        return false;
       }
       if (presenter.status === "blocked" && presenter.display) {
         trackEvent("resume_generation_blocked_compliance", {
@@ -3321,7 +3948,7 @@ export default function StudioPage() {
         }));
         setResumeWarningFlags([]);
         setResumeAuditId(undefined);
-        return;
+        return false;
       }
       if (presenter.status === "error") {
         trackEvent("resume_generation_limited", {
@@ -3337,7 +3964,7 @@ export default function StudioPage() {
         }));
         setResumeWarningFlags([]);
         setResumeAuditId(undefined);
-        return;
+        return false;
       }
       if (presenter.status === "unknown") {
         throw new Error("Resume generation returned an unexpected response. Please try again.");
@@ -3370,7 +3997,7 @@ export default function StudioPage() {
         activeResumeGenerationRef.current?.requestId !== request.requestId
       ) {
         finishStudioGenerationRequest("resume", request, "blocked", requestScope);
-        return;
+        return false;
       }
 
       if (!validatedResult.success) {
@@ -3379,11 +4006,12 @@ export default function StudioPage() {
           analysisId: requestedAnalysisId || undefined,
           reasonCode: "validation_failed",
         });
+        setStudioArtifactPairStatus("failed");
         setResumeState((current) => ({
           ...current,
           error: GENERATION_TRUST_FALLBACK_ERROR,
         }));
-        return;
+        return false;
       }
 
       setResumeState((current) => ({
@@ -3392,6 +4020,8 @@ export default function StudioPage() {
         artifactFailure: null,
         error: null,
       }));
+      setStudioArtifactPairStatus("completed");
+      studioArtifactPresentationStateRef.current = "generated";
       trackEvent("resume_generation_succeeded", {
         source: "studio",
         analysisId: requestedAnalysisId || undefined,
@@ -3413,13 +4043,14 @@ export default function StudioPage() {
         artifactType: "resume",
         requestId: request.requestId,
       });
+      return true;
     } catch (error) {
       if (
         isWorkflowRequestStale(requestScope, currentWorkflowScopeRef.current) ||
         activeResumeGenerationRef.current?.requestId !== request.requestId
       ) {
         finishStudioGenerationRequest("resume", request, "blocked", requestScope);
-        return;
+        return false;
       }
       trackEvent("resume_generation_limited", {
         source: "studio",
@@ -3431,14 +4062,17 @@ export default function StudioPage() {
         ...current,
         error: message,
         artifactFailure: {
-          headline: "Generation didn?t complete",
+          artifactType: "resume",
+          headline: "Generation did not complete",
           explanation: message,
           nextStep: "Review the input and try again with stronger baseline evidence.",
-          retryable: false,
+          retryable: true,
           category: "generation_failed",
           code: "generation_failed",
         },
       }));
+      setStudioArtifactPairStatus("failed");
+      return false;
     } finally {
       if (activeResumeGenerationRef.current?.requestId === request.requestId) {
         setResumeGenerating(false);
@@ -3542,6 +4176,14 @@ export default function StudioPage() {
       downloadBlob(blob, serverFilename ?? `resume.${format}`);
       recordArtifactUsedIntent();
       setRecentIntent(readRecentIntentState());
+      trackEvent("studio_resume_downloaded", {
+        source: "studio",
+        analysisId: requestedAnalysisId || null,
+        baselineId: effectiveBaselineId || null,
+        jobId: effectiveJobId || null,
+        score: analysisScore,
+        format,
+      });
       trackEvent("artifact_used_intent", {
         source: "studio",
         artifactType: "resume",
@@ -3566,6 +4208,43 @@ export default function StudioPage() {
       setResumeExportFormat(null);
     }
   };
+
+  const handleCopyResume = useCallback(async () => {
+    if (!hasResumeArtifact || !resumeState.response) {
+      setResumeState((current) => ({ ...current, error: "Generate Resume before copying." }));
+      return;
+    }
+    const copied = await copyTextToClipboard(resumePreviewText);
+    if (!copied) {
+      setResumeState((current) => ({ ...current, error: "Copying the resume text was not available." }));
+      return;
+    }
+    setResumeCopyStatus("Resume copied");
+    recordArtifactUsedIntent();
+    setRecentIntent(readRecentIntentState());
+    trackEvent("studio_resume_copied", {
+      source: "studio",
+      analysisId: requestedAnalysisId || null,
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      score: analysisScore,
+    });
+    trackEvent("artifact_used_intent", {
+      source: "studio",
+      artifactType: "resume",
+      action: "use_now",
+      status: completionCopy.title,
+    });
+  }, [
+    analysisScore,
+    completionCopy.title,
+    effectiveBaselineId,
+    effectiveJobId,
+    hasResumeArtifact,
+    requestedAnalysisId,
+    resumePreviewText,
+    resumeState.response,
+  ]);
 
   async function loadCoverLetterById(coverLetterId: string) {
     setCoverLetterComplianceBlocked(null);
@@ -3597,6 +4276,8 @@ export default function StudioPage() {
         return;
       }
       setCoverState((current) => ({ ...current, response: responsePayload }));
+      setStudioArtifactPairStatus("completed");
+      studioArtifactPresentationStateRef.current = "hydrated";
       setCoverWarningFlags(extractComplianceWarnings(responsePayload));
       setCoverAuditId(normalizeAuditId(responsePayload));
       setCoverLetterComplianceBlocked(null);
@@ -3606,11 +4287,11 @@ export default function StudioPage() {
     }
   }
 
-  const handleCoverDraft = async () => {
-    if (!guardGenerationAction("cover_letter")) return;
+  const handleCoverDraft = async (): Promise<boolean> => {
+    if (!guardGenerationAction("cover_letter")) return false;
     const requestScope = currentWorkflowScope;
     const request = beginStudioGenerationRequest("cover_letter", requestScope);
-    if (!request) return;
+    if (!request) return false;
     setUnlockGenerationConfirmation(null);
     if (!canProceedWithStudioDrafts) {
       finishStudioGenerationRequest("cover_letter", request, "blocked", requestScope);
@@ -3618,7 +4299,7 @@ export default function StudioPage() {
         ...current,
         error: generationMessage ?? "Review prerequisites before generating a cover letter.",
       }));
-      return;
+      return false;
     }
     setCoverGenerating(true);
     const shouldShowUnlockConfirmation = isFirstGenerationAfterUnlock;
@@ -3660,7 +4341,7 @@ export default function StudioPage() {
         activeCoverGenerationRef.current?.requestId !== request.requestId
       ) {
         finishStudioGenerationRequest("cover_letter", request, "blocked", requestScope);
-        return;
+        return false;
       }
       if (!response.ok) {
         console.warn("[studio] generation_failed", {
@@ -3676,7 +4357,7 @@ export default function StudioPage() {
           const existingId = readDuplicateCoverLetterId(responsePayload);
           if (existingId) {
             await loadCoverLetterById(existingId);
-            return;
+            return true;
           }
         }
         if (response.status === 422) {
@@ -3687,7 +4368,7 @@ export default function StudioPage() {
               artifactFailure: failure,
               error: null,
             }));
-            return;
+            return false;
           }
           const blockedState = parseComplianceBlockedFromPayload(responsePayload);
           if (blockedState) {
@@ -3697,20 +4378,20 @@ export default function StudioPage() {
               reasonCode: "compliance_blocked",
             });
             applyCoverLetterComplianceBlocked(blockedState);
-            return;
+            return false;
           }
         }
         const tierGate = parseTierGateError({ status: response.status, payload: responsePayload });
         if (tierGate) {
           setCoverState((current) => ({ ...current, tierGateError: tierGate }));
-          return;
+          return false;
         }
         throw new Error(formatErrorMessage(responsePayload, "Cover letter generation failed."));
       }
       const existingDuplicateId = readDuplicateCoverLetterId(responsePayload);
       if (existingDuplicateId) {
         await loadCoverLetterById(existingDuplicateId);
-        return;
+        return true;
       }
       const initialPresenter = presentCoverLetterGeneration(responsePayload);
       const failure = initialPresenter.failure;
@@ -3720,7 +4401,7 @@ export default function StudioPage() {
           artifactFailure: failure,
           error: null,
         }));
-        return;
+        return false;
       }
       if (initialPresenter.status === "blocked" && initialPresenter.display) {
         trackEvent("cover_letter_generation_blocked_compliance", {
@@ -3734,7 +4415,7 @@ export default function StudioPage() {
           reasons: initialPresenter.display.reasons,
           cta: initialPresenter.display.cta,
         });
-        return;
+        return false;
       }
       if (initialPresenter.status !== "success") {
         throw new Error("Cover letter generation did not return a usable document.");
@@ -3768,7 +4449,7 @@ export default function StudioPage() {
         activeCoverGenerationRef.current?.requestId !== request.requestId
       ) {
         finishStudioGenerationRequest("cover_letter", request, "blocked", requestScope);
-        return;
+        return false;
       }
 
       if (!validatedResult.success) {
@@ -3777,11 +4458,12 @@ export default function StudioPage() {
           analysisId: requestedAnalysisId || undefined,
           reasonCode: "validation_failed",
         });
+        setStudioArtifactPairStatus("failed");
         setCoverState((current) => ({
           ...current,
           error: GENERATION_TRUST_FALLBACK_ERROR,
         }));
-        return;
+        return false;
       }
 
       setCoverState((current) => ({
@@ -3790,6 +4472,8 @@ export default function StudioPage() {
         artifactFailure: null,
         error: null,
       }));
+      setStudioArtifactPairStatus("completed");
+      studioArtifactPresentationStateRef.current = "generated";
       if (shouldShowUnlockConfirmation) {
         setHasGeneratedOnce(true);
         setUnlockGenerationConfirmation("Generated from verified evidence aligned to this role.");
@@ -3808,13 +4492,14 @@ export default function StudioPage() {
         artifactType: "cover_letter",
         requestId: request.requestId,
       });
+      return true;
     } catch (error) {
       if (
         isWorkflowRequestStale(requestScope, currentWorkflowScopeRef.current) ||
         activeCoverGenerationRef.current?.requestId !== request.requestId
       ) {
         finishStudioGenerationRequest("cover_letter", request, "blocked", requestScope);
-        return;
+        return false;
       }
       trackEvent("cover_letter_generation_limited", {
         source: "studio",
@@ -3827,15 +4512,18 @@ export default function StudioPage() {
         ...current,
         error: message,
         artifactFailure: {
-          headline: "Generation didn?t complete",
+          artifactType: "cover_letter",
+          headline: "Generation did not complete",
           explanation: message,
           nextStep: "Review the input and try again with stronger baseline evidence.",
-          retryable: false,
+          retryable: true,
           category: "generation_failed",
           code: "generation_failed",
         },
       }));
-  } finally {
+      setStudioArtifactPairStatus("failed");
+      return false;
+    } finally {
       if (activeCoverGenerationRef.current?.requestId === request.requestId) {
         setCoverGenerating(false);
       }
@@ -3997,6 +4685,8 @@ export default function StudioPage() {
 
   useEffect(() => {
     if (!verifiedClaimParams.length) return;
+    if (studioArtifactPresentationStateRef.current === "hydrated") return;
+    if (hasCompletedGeneration || studioArtifactPairStatus === "completed") return;
     const nextKey = verifiedClaimParams.map(normalizeClaimText).sort().join("|");
     if (processedVerificationRef.current === nextKey) return;
     processedVerificationRef.current = nextKey;
@@ -4011,13 +4701,17 @@ export default function StudioPage() {
     if (coverState.response) {
       void handleCoverDraft();
     }
-  }, [coverState.response, handleCoverDraft, resumeState.response, verifiedClaimParams]);
+  }, [coverState.response, handleCoverDraft, hasCompletedGeneration, resumeState.response, verifiedClaimParams]);
 
   useEffect(() => {
+    if (!studioArtifactsHydrated) return;
     if (!autoGenerationSignature) return;
     if (autoGenerationSignatureRef.current === autoGenerationSignature) return;
+    if (studioArtifactPresentationStateRef.current === "hydrated") return;
     const autoGenerationKey = buildWorkflowRequestKey("auto_generation", currentWorkflowScope);
+    if (studioArtifactPairStatus === "in_progress" || studioArtifactPairStatus === "failed") return;
     if (resumeGenerating || coverGenerating || autoGenerationInFlight) return;
+    if (hasCompletedGeneration) return;
     if (!canProceedWithStudioDrafts) return;
 
     autoGenerationSignatureRef.current = autoGenerationSignature;
@@ -4030,10 +4724,39 @@ export default function StudioPage() {
 
     const runAutoGeneration = async () => {
       try {
-        await Promise.all([
-          hasResumeArtifact ? Promise.resolve() : handleResumeDraft(),
-          hasCoverLetterArtifact ? Promise.resolve() : handleCoverDraft(),
+        trackEvent("studio_auto_generation_started", {
+          source: "studio",
+          analysisId: requestedAnalysisId || null,
+          baselineId: effectiveBaselineId || null,
+          jobId: effectiveJobId || null,
+          score: analysisScore,
+          generationTarget: "resume_and_cover_letter",
+        });
+        const [resumeSucceeded, coverSucceeded] = await Promise.all([
+          handleResumeDraft(),
+          handleCoverDraft(),
         ]);
+        const autoSucceeded = resumeSucceeded && coverSucceeded;
+        if (autoSucceeded) {
+          trackEvent("studio_auto_generation_succeeded", {
+            source: "studio",
+            analysisId: requestedAnalysisId || null,
+            baselineId: effectiveBaselineId || null,
+            jobId: effectiveJobId || null,
+            score: analysisScore,
+            generationTarget: "resume_and_cover_letter",
+          });
+        } else {
+          trackEvent("studio_auto_generation_failed", {
+            source: "studio",
+            analysisId: requestedAnalysisId || null,
+            baselineId: effectiveBaselineId || null,
+            jobId: effectiveJobId || null,
+            score: analysisScore,
+            generationTarget: "resume_and_cover_letter",
+            reason: resumeSucceeded ? "cover_letter_generation_failed" : "resume_generation_failed",
+          });
+        }
       } finally {
         if (activeAutoGenerationRef.current?.requestId === autoGenerationSignature) {
           setAutoGenerationInFlight(false);
@@ -4048,12 +4771,19 @@ export default function StudioPage() {
     autoGenerationSignature,
     canProceedWithStudioDrafts,
     coverGenerating,
+    hasCompletedGeneration,
     currentWorkflowScope,
     handleCoverDraft,
     handleResumeDraft,
     hasCoverLetterArtifact,
     hasResumeArtifact,
+    analysisScore,
+    effectiveBaselineId,
+    effectiveJobId,
+    requestedAnalysisId,
     resumeGenerating,
+    studioArtifactPairStatus,
+    studioArtifactsHydrated,
   ]);
 
   useEffect(() => {
@@ -4190,6 +4920,196 @@ export default function StudioPage() {
     ],
   );
 
+  const handleRetryResumeGeneration = useCallback(() => {
+    trackEvent("studio_retry_clicked", {
+      source: "studio",
+      analysisId: requestedAnalysisId || null,
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      score: analysisScore,
+      artifactType: "resume",
+      failureCategory: resumeState.artifactFailure?.category ?? resumePresenter.failure?.category ?? null,
+    });
+    void handleResumeDraft();
+  }, [
+    analysisScore,
+    effectiveBaselineId,
+    effectiveJobId,
+    handleResumeDraft,
+    requestedAnalysisId,
+    resumePresenter.failure?.category,
+    resumeState.artifactFailure?.category,
+  ]);
+
+  const handleRetryCoverGeneration = useCallback(() => {
+    trackEvent("studio_retry_clicked", {
+      source: "studio",
+      analysisId: requestedAnalysisId || null,
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      score: analysisScore,
+      artifactType: "cover_letter",
+      failureCategory: coverState.artifactFailure?.category ?? coverPresenter.failure?.category ?? null,
+    });
+    void handleCoverDraft();
+  }, [
+    analysisScore,
+    coverPresenter.failure?.category,
+    coverState.artifactFailure?.category,
+    effectiveBaselineId,
+    effectiveJobId,
+    handleCoverDraft,
+    requestedAnalysisId,
+  ]);
+
+  const handleApplyToThisRole = useCallback(() => {
+    const previousStatus = applicationContext?.status ?? null;
+    trackEvent("studio_apply_clicked", {
+      source: "studio",
+      analysisId: requestedAnalysisId || null,
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      score: analysisScore,
+      currentStatus: previousStatus,
+    });
+
+    if (previousStatus?.toLowerCase() === "applied") {
+      setApplicationActionMessage("This application is already marked applied.");
+      return;
+    }
+
+    const openUrl = applicationJobUrl;
+    if (openUrl && typeof window !== "undefined") {
+      window.open(openUrl, "_blank", "noopener,noreferrer");
+    }
+
+    const applySignature = `${applicationPairSignature ?? "application_pair"}:applied`;
+    if (applicationApplySignatureRef.current === applySignature) {
+      return;
+    }
+    applicationApplySignatureRef.current = applySignature;
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/applications/pair", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            baselineId: effectiveBaselineId,
+            jobId: effectiveJobId,
+            companyName:
+              selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company",
+            roleTitle: selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Untitled role",
+            jobUrl: openUrl,
+            sourceUrl: openUrl,
+            externalApplicationUrl: openUrl,
+            analysisId: requestedAnalysisId || null,
+            baselineVersionId: effectiveBaselineVersionId || null,
+            applicationStatus: "Applied",
+            appliedDate: new Date().toISOString(),
+            fitScore: Math.round(analysisScore ?? 0),
+          }),
+        });
+        const payload = await readResponsePayload(response);
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+          return;
+        }
+        const record = payload as Record<string, unknown>;
+        const nextStatus = typeof record.status === "string" ? record.status : "Applied";
+        setApplicationContext((current) => ({
+          id: typeof record.id === "string" ? record.id : current?.id ?? "",
+          status: nextStatus,
+          appliedAt:
+            typeof record.appliedAt === "string"
+              ? record.appliedAt
+              : typeof record.appliedDate === "string"
+                ? record.appliedDate
+                : new Date().toISOString(),
+          lastTouchedAt:
+            typeof record.lastTouchedAt === "string"
+              ? record.lastTouchedAt
+              : current?.lastTouchedAt ?? new Date().toISOString(),
+          baselineId:
+            typeof record.baselineId === "string" ? record.baselineId : current?.baselineId ?? null,
+          jobId: typeof record.jobId === "string" ? record.jobId : current?.jobId ?? null,
+          jobUrl: typeof record.jobUrl === "string" ? record.jobUrl : current?.jobUrl ?? openUrl ?? null,
+          notes: typeof record.notes === "string" ? record.notes : current?.notes ?? null,
+          sourceUrl:
+            typeof record.sourceUrl === "string" ? record.sourceUrl : current?.sourceUrl ?? openUrl ?? null,
+          createdAt:
+            typeof record.createdAt === "string"
+              ? record.createdAt
+              : current?.createdAt ?? new Date().toISOString(),
+          updatedAt:
+            typeof record.updatedAt === "string"
+              ? record.updatedAt
+              : current?.updatedAt ?? new Date().toISOString(),
+          resumeArtifacts: current?.resumeArtifacts ?? [],
+        }));
+        setApplicationActionMessage(
+          openUrl
+            ? "Application marked applied and the job posting opened in a new tab."
+            : "Application marked applied. Open the job posting and submit your application.",
+        );
+        trackEvent("application_created_or_upserted", {
+          source: "studio",
+          baselineId: effectiveBaselineId || null,
+          jobId: effectiveJobId || null,
+          currentStatus: nextStatus,
+          created: !Boolean(previousStatus),
+          score: analysisScore,
+        });
+        if (previousStatus?.toLowerCase() !== nextStatus.toLowerCase()) {
+          trackEvent("application_status_updated", {
+            source: "studio",
+            baselineId: effectiveBaselineId || null,
+            jobId: effectiveJobId || null,
+            currentStatus: nextStatus,
+            previousStatus,
+            score: analysisScore,
+          });
+        }
+      } catch {
+        setApplicationActionMessage(
+          openUrl
+            ? "Open the job posting and submit your application."
+            : "Open the job posting and submit your application.",
+        );
+      }
+    })();
+  }, [
+    analysis?.company,
+    analysis?.companyName,
+    analysis?.jobTitle,
+    analysis?.title,
+    analysisScore,
+    applicationContext?.status,
+    applicationJobUrl,
+    applicationPairSignature,
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    requestedAnalysisId,
+    selectedJob?.company,
+    selectedJob?.title,
+  ]);
+
+  const handlePrimaryResumeAction = useCallback(() => {
+    if (hasResumeArtifact) {
+      generationSectionRef.current?.scrollIntoView?.({ block: "start" });
+      return;
+    }
+    void handleResumeDraft();
+  }, [generationSectionRef, handleResumeDraft, hasResumeArtifact]);
+
+  const handlePrimaryCoverAction = useCallback(() => {
+    if (hasCoverLetterArtifact) {
+      generationSectionRef.current?.scrollIntoView?.({ block: "start" });
+      return;
+    }
+    void handleCoverDraft();
+  }, [generationSectionRef, handleCoverDraft, hasCoverLetterArtifact]);
+
   const handleResumeBasicDraft = async () => {
     await handleResumeDraft();
   };
@@ -4250,6 +5170,14 @@ export default function StudioPage() {
       downloadBlob(blob, `cover-letter.${format}`);
       recordArtifactUsedIntent();
       setRecentIntent(readRecentIntentState());
+      trackEvent("studio_cover_letter_downloaded", {
+        source: "studio",
+        analysisId: requestedAnalysisId || null,
+        baselineId: effectiveBaselineId || null,
+        jobId: effectiveJobId || null,
+        score: analysisScore,
+        format,
+      });
       trackEvent("artifact_used_intent", {
         source: "studio",
         artifactType: "cover_letter",
@@ -4276,12 +5204,62 @@ export default function StudioPage() {
     }
   };
 
+  const handleCopyCoverLetter = useCallback(async () => {
+    if (!hasCoverLetterArtifact || !coverState.response) {
+      setCoverState((current) => ({ ...current, error: "Generate Cover Letter before copying." }));
+      return;
+    }
+    const text = coverLetterParagraphs.join("\n\n");
+    const copied = await copyTextToClipboard(text);
+    if (!copied) {
+      setCoverState((current) => ({ ...current, error: "Copying the cover letter text was not available." }));
+      return;
+    }
+    setCoverCopyStatus("Cover letter copied");
+    recordArtifactUsedIntent();
+    setRecentIntent(readRecentIntentState());
+    trackEvent("studio_cover_letter_copied", {
+      source: "studio",
+      analysisId: requestedAnalysisId || null,
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      score: analysisScore,
+    });
+    trackEvent("artifact_used_intent", {
+      source: "studio",
+      artifactType: "cover_letter",
+      action: "use_now",
+      status: completionCopy.title,
+    });
+  }, [
+    analysisScore,
+    completionCopy.title,
+    coverLetterParagraphs,
+    coverState.response,
+    effectiveBaselineId,
+    effectiveJobId,
+    hasCoverLetterArtifact,
+    requestedAnalysisId,
+  ]);
+
+  useEffect(() => {
+    if (!resumeCopyStatus) return;
+    const timeout = window.setTimeout(() => setResumeCopyStatus(null), 2500);
+    return () => window.clearTimeout(timeout);
+  }, [resumeCopyStatus]);
+
+  useEffect(() => {
+    if (!coverCopyStatus) return;
+    const timeout = window.setTimeout(() => setCoverCopyStatus(null), 2500);
+    return () => window.clearTimeout(timeout);
+  }, [coverCopyStatus]);
+
   function renderCardStatus(status: StudioCardStatus, documentName: string) {
     switch (status) {
       case "not_generated_yet":
         return `${documentName} not generated yet`;
       case "ready_to_generate":
-        return `Ready to generate ${documentName.toLowerCase()}`;
+        return `Ready to review ${documentName.toLowerCase()}`;
       case "generating":
         return `Generating ${documentName.toLowerCase()}`;
       case "generated_successfully":
@@ -4297,12 +5275,257 @@ export default function StudioPage() {
     }
   }
 
+  const instantDraftHero = isInstantDraftExperience ? (
+    <section
+      className="space-y-5 rounded-[28px] border border-emerald-300/20 bg-[linear-gradient(180deg,rgba(16,185,129,0.16),rgba(15,23,42,0.82))] p-6 md:p-8 shadow-[0_24px_60px_rgba(15,23,42,0.35)]"
+      data-testid="studio-instant-draft-hero"
+    >
+      <div className="space-y-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-200">
+          {hasCompletedGeneration
+            ? "Strong match"
+            : autoGenerationInFlight || studioArtifactPairStatus === "in_progress"
+              ? "Building your draft"
+              : studioArtifactPairStatus === "failed"
+                ? "Draft needs another pass"
+                : "Instant draft"}
+        </p>
+        <h1 className="text-3xl font-semibold tracking-tight text-slate-50 md:text-[36px]">
+          {authorityStateTitle}
+        </h1>
+        <p className="max-w-3xl text-base leading-7 text-slate-200">{authorityStateExplanation}</p>
+      </div>
+      <div className="flex flex-wrap gap-3">
+        <FormButton onClick={handlePrimaryResumeAction} disabled={resumeGenerating || autoGenerationInFlight}>
+          Resume
+        </FormButton>
+        <FormButton
+          variant="secondary"
+          onClick={handlePrimaryCoverAction}
+          disabled={coverGenerating || autoGenerationInFlight}
+        >
+          Cover Letter
+        </FormButton>
+        <Link
+          href={resolveGapsHref}
+          className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
+        >
+          Refine
+        </Link>
+        {activeArtifactFailure ? (
+          <FormButton
+            variant="secondary"
+            onClick={
+              activeArtifactFailure.artifactType === "cover_letter"
+                ? handleRetryCoverGeneration
+                : handleRetryResumeGeneration
+            }
+          >
+            Retry
+          </FormButton>
+        ) : null}
+      </div>
+      {activeArtifactFailure ? (
+        <ArtifactFailureState
+          failure={activeArtifactFailure}
+          onRetry={
+            activeArtifactFailure.artifactType === "cover_letter"
+              ? handleRetryCoverGeneration
+              : handleRetryResumeGeneration
+          }
+          retryLabel="Retry"
+        />
+      ) : autoGenerationInFlight || studioArtifactPairStatus === "in_progress" ? (
+        <RouteStateShell
+          tone="neutral"
+          eyebrow="In progress"
+          title="We are generating your application draft now"
+          body={
+            <p className="text-sm text-slate-100">
+              This usually finishes in a moment. Your resume and cover letter are being built from verified evidence.
+            </p>
+          }
+        />
+      ) : hasCompletedGeneration ? (
+        <div className="space-y-5">
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-emerald-300/30 bg-emerald-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-emerald-100">
+                {applicationContext?.status?.toLowerCase() === "applied" ? "Applied" : "Application ready"}
+              </span>
+              {applicationPairLoading ? (
+                <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-300">
+                  Syncing application state
+                </span>
+              ) : null}
+            </div>
+            <h2 className="text-2xl font-semibold tracking-tight text-slate-50 md:text-[32px]">
+              {applicationContext?.status?.toLowerCase() === "applied"
+                ? "Your application is tracked"
+                : "Your application is ready"}
+            </h2>
+            <p className="max-w-3xl text-base leading-7 text-slate-200">
+              {applicationContext?.status?.toLowerCase() === "applied"
+                ? "Your materials are saved and your application has been marked applied."
+                : "Download your resume and cover letter, then apply to this role."}
+            </p>
+            {applicationActionMessage ? (
+              <p className="text-sm font-medium text-emerald-100">{applicationActionMessage}</p>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <FormButton
+              variant="secondary"
+              onClick={() => void exportResume("docx")}
+              disabled={!canExportResume || resumeExportFormat === "docx"}
+            >
+              {resumeExportFormat === "docx" ? "Downloading..." : "Download Resume"}
+            </FormButton>
+            <FormButton
+              variant="secondary"
+              onClick={() => void exportCoverLetter("docx")}
+              disabled={!canExportCover || coverExportFormat === "docx"}
+            >
+              {coverExportFormat === "docx" ? "Downloading..." : "Download Cover Letter"}
+            </FormButton>
+            <FormButton variant="secondary" onClick={() => void handleCopyResume()}>
+              Copy Resume
+            </FormButton>
+            <FormButton variant="secondary" onClick={() => void handleCopyCoverLetter()}>
+              Copy Cover Letter
+            </FormButton>
+            <FormButton onClick={handleApplyToThisRole}>
+              {applicationContext?.status?.toLowerCase() === "applied"
+                ? "Applied"
+                : "Apply to this role"}
+            </FormButton>
+            <Link
+              href={resolveGapsHref}
+              className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
+            >
+              Refine
+            </Link>
+            <a
+              href="#studio-fit-reasoning"
+              className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
+            >
+              View fit reasoning
+            </a>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {resumePresenter.status === "success" && resumeState.response ? (
+              <section className="rounded-2xl border border-white/10 bg-slate-950/45 p-4" data-testid="studio-instant-resume-panel">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Resume</p>
+                    <p className="text-sm text-slate-300">Application ready</p>
+                  </div>
+                </div>
+                <div className="space-y-4 rounded-xl border border-white/10 bg-slate-950/40 p-3">
+                  <ResumePreview
+                    payload={resumeState.response}
+                    model={effectiveResumeModel}
+                    fallbackText={resumePreviewText}
+                    claimHighlights={visibleImprovableClaims}
+                    isEditing={false}
+                    hasUnsavedChanges={false}
+                    onEnterEditMode={handleEnterResumeEditMode}
+                    onSaveEdits={handleSaveResumeEdits}
+                    onCancelEdits={handleCancelResumeEdits}
+                    onSummaryChange={handleResumeSummaryChange}
+                    onBulletChange={handleResumeBulletChange}
+                  />
+                </div>
+                {resumeCopyStatus ? (
+                  <p className="mt-2 text-xs font-medium text-emerald-200">{resumeCopyStatus}</p>
+                ) : null}
+              </section>
+            ) : null}
+            {coverPresenter.status === "success" && coverState.response ? (
+              <section className="rounded-2xl border border-white/10 bg-slate-950/45 p-4" data-testid="studio-instant-cover-panel">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Cover Letter</p>
+                    <p className="text-sm text-slate-300">Application ready</p>
+                  </div>
+                </div>
+                <div className="space-y-3 rounded-xl border border-white/10 bg-slate-950/40 p-3">
+                  {coverLetterParagraphs.slice(0, 4).map((paragraph, index) => (
+                    <p key={`instant-cover-paragraph-${index}`} className="text-sm leading-6 text-slate-200">
+                      {paragraph}
+                    </p>
+                  ))}
+                </div>
+                {coverCopyStatus ? (
+                  <p className="mt-2 text-xs font-medium text-emerald-200">{coverCopyStatus}</p>
+                ) : null}
+              </section>
+            ) : null}
+          </div>
+        </div>
+      ) : studioArtifactPairStatus === "failed" ? (
+        <RouteStateShell
+          tone="warning"
+          eyebrow="Needs another pass"
+          title="Your draft is ready to retry"
+          body={
+            <p className="text-sm text-slate-100">
+              We could not finish the last draft attempt. Use retry to generate a fresh version from the current verified inputs.
+            </p>
+          }
+        />
+      ) : (
+        <RouteStateShell
+          tone="success"
+          eyebrow="Drafting"
+          title="Your draft is taking shape"
+          body={
+            <p className="text-sm text-slate-100">
+              We are preparing your resume and cover letter from the verified evidence already in place.
+            </p>
+          }
+        />
+      )}
+      <details id="studio-fit-reasoning" className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+          Why this is a strong match
+        </summary>
+        <div className="mt-4 space-y-3">
+          <div className="rounded-xl border border-white/10 bg-slate-950/40 p-4">
+            <p className="text-sm font-semibold text-slate-100">Fit confirmation</p>
+            <p className="mt-1 text-sm text-slate-300">
+              You are above the Studio generation floor and your verified baseline supports clean drafting.
+            </p>
+          </div>
+          <StudioArtifactQualityPanel
+            model={artifactQuality}
+            confidence={artifactQuality.confidence}
+            onVerifyClaim={verifyClaim}
+            onEditClaim={openClaimEditModal}
+            onDismissClaim={dismissClaim}
+          />
+          <div className="rounded-xl border border-white/10 bg-slate-950/40 p-4">
+            <p className="text-sm font-semibold text-slate-100">Evidence and rationale</p>
+            <ul className="mt-3 space-y-2 text-sm text-slate-300">
+              {evidenceLedger.entries.slice(0, 4).map((entry) => (
+                <li key={`instant-evidence-${entry.id}`} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                  <p className="text-slate-100">{entry.text}</p>
+                  {entry.sourceLabel ? <p className="mt-1 text-xs text-slate-400">{entry.sourceLabel}</p> : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </details>
+    </section>
+  ) : null;
+
   const unlockEntryPanel = studioGenerationRenderState.shouldShowUnlockEntry ? (
-    <RouteStateShell
+      <RouteStateShell
       testId="studio-unlock-entry-panel"
       tone="success"
       eyebrow="Unlock"
-      title="READY TO GENERATE"
+      title="Your draft is ready to review"
       body={
         <p className="text-sm text-slate-100">
           Your verified evidence supports this role. Your materials are now grounded and ready.
@@ -4344,6 +5567,7 @@ export default function StudioPage() {
 
   return (
     <PageShell className="space-y-4 pb-4">
+      {instantDraftHero}
       {unlockEntryPanel}
       {unlockGenerationLoadingMessage && studioGenerationRenderState.isGenerating ? (
         <Alert intent="info" title="Verified evidence in use">

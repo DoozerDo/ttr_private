@@ -19,7 +19,9 @@ export enum ApplicationStage {
 }
 
 export enum ApplicationTrackerStatus {
+  NOT_STARTED = 'Not started',
   PREPARED = 'Prepared',
+  READY = 'Ready',
   APPLIED = 'Applied',
 }
 
@@ -46,6 +48,7 @@ export type OutcomeLinkageSnapshot = {
 @Entity({ name: 'applications' })
 @Index('IDX_applications_userId', ['userId'])
 @Index('IDX_applications_jobId', ['jobId'])
+@Index('IDX_applications_user_baseline_job', ['userId', 'baselineId', 'jobId'])
 @Index('IDX_applications_status', ['status'])
 @Index('IDX_applications_lastTouchedAt', ['lastTouchedAt'])
 @Index('UQ_applications_user_fingerprint', ['userId', 'fingerprint'], {

@@ -51,6 +51,7 @@ export type ArtifactFailurePayload = {
 };
 
 export type StudioArtifactFailurePresentation = {
+  artifactType: "resume" | "cover_letter";
   headline: string;
   explanation: string;
   nextStep: string;
@@ -451,6 +452,7 @@ function presentArtifactFailure(failure: ArtifactFailurePayload): StudioArtifact
   const copy = base[failure.category];
   const fallback = base.generation_failed!;
   return {
+    artifactType: failure.artifactType ?? "resume",
     headline: copy?.headline ?? fallback.headline,
     explanation: failure.message || copy?.explanation || fallback.explanation,
     nextStep: failure.userAction?.description || copy?.nextStep || fallback.nextStep,
@@ -559,6 +561,7 @@ function presentArtifactFailureV2(failure: ArtifactFailurePayload): StudioArtifa
 
   const copy = base[failure.category] ?? base.generation_failed!;
   return {
+    artifactType: failure.artifactType ?? "resume",
     headline: copy.headline,
     explanation: failure.message || copy.explanation,
     nextStep: failure.userAction?.description || copy.nextStep,
@@ -1003,5 +1006,36 @@ export function downloadBlob(blob: Blob, fileName: string) {
   link.click();
   link.remove();
   window.URL.revokeObjectURL(url);
+}
+
+export async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (typeof navigator !== "undefined" && typeof navigator.clipboard?.writeText === "function") {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall back to the legacy copy path.
+    }
+  }
+
+  if (typeof document === "undefined") {
+    return false;
+  }
+
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    const copied = document.execCommand("copy");
+    textarea.remove();
+    return copied;
+  } catch {
+    return false;
+  }
 }
 

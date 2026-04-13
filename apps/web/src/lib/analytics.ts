@@ -20,6 +20,19 @@ export const ANALYTICS_EVENT_NAMES = [
   "resume_generation_succeeded",
   "resume_generation_limited",
   "resume_generation_blocked_compliance",
+  "studio_auto_generation_started",
+  "studio_auto_generation_succeeded",
+  "studio_auto_generation_failed",
+  "studio_generated_artifact_viewed",
+  "studio_retry_clicked",
+  "studio_resume_downloaded",
+  "studio_cover_letter_downloaded",
+  "studio_resume_copied",
+  "studio_cover_letter_copied",
+  "studio_application_ready_viewed",
+  "studio_apply_clicked",
+  "application_status_updated",
+  "application_created_or_upserted",
   "artifact_used_intent",
   "artifact_refine_intent",
   "refinement_started",
@@ -153,6 +166,111 @@ export type AnalyticsEventMap = {
     source: "studio" | "unknown";
     analysisId?: string;
     reasonCode?: string;
+  };
+  studio_auto_generation_started: {
+    source: "studio";
+    analysisId: string | null;
+    baselineId: string | null;
+    jobId: string | null;
+    score: number | null;
+    generationTarget: "resume_and_cover_letter";
+  };
+  studio_auto_generation_succeeded: {
+    source: "studio";
+    analysisId: string | null;
+    baselineId: string | null;
+    jobId: string | null;
+    score: number | null;
+    generationTarget: "resume_and_cover_letter";
+  };
+  studio_auto_generation_failed: {
+    source: "studio";
+    analysisId: string | null;
+    baselineId: string | null;
+    jobId: string | null;
+    score: number | null;
+    generationTarget: "resume_and_cover_letter";
+    reason: string;
+  };
+  studio_generated_artifact_viewed: {
+    source: "studio";
+    analysisId: string | null;
+    baselineId: string | null;
+    jobId: string | null;
+    score: number | null;
+    artifactType: "resume" | "cover_letter";
+    presentationState: "generated" | "hydrated";
+  };
+  studio_retry_clicked: {
+    source: "studio";
+    analysisId: string | null;
+    baselineId: string | null;
+    jobId: string | null;
+    score: number | null;
+    artifactType: "resume" | "cover_letter" | "pair";
+    failureCategory?: string | null;
+  };
+  studio_resume_downloaded: {
+    source: "studio";
+    analysisId: string | null;
+    baselineId: string | null;
+    jobId: string | null;
+    score: number | null;
+    format: "docx" | "pdf";
+  };
+  studio_cover_letter_downloaded: {
+    source: "studio";
+    analysisId: string | null;
+    baselineId: string | null;
+    jobId: string | null;
+    score: number | null;
+    format: "docx" | "pdf";
+  };
+  studio_resume_copied: {
+    source: "studio";
+    analysisId: string | null;
+    baselineId: string | null;
+    jobId: string | null;
+    score: number | null;
+  };
+  studio_cover_letter_copied: {
+    source: "studio";
+    analysisId: string | null;
+    baselineId: string | null;
+    jobId: string | null;
+    score: number | null;
+  };
+  studio_application_ready_viewed: {
+    source: "studio";
+    analysisId: string | null;
+    baselineId: string | null;
+    jobId: string | null;
+    score: number | null;
+    currentStatus: string | null;
+  };
+  studio_apply_clicked: {
+    source: "studio";
+    analysisId: string | null;
+    baselineId: string | null;
+    jobId: string | null;
+    score: number | null;
+    currentStatus: string | null;
+  };
+  application_status_updated: {
+    source: "studio" | "app" | "unknown";
+    baselineId: string | null;
+    jobId: string | null;
+    currentStatus: string;
+    previousStatus?: string | null;
+    score: number | null;
+  };
+  application_created_or_upserted: {
+    source: "studio" | "app" | "unknown";
+    baselineId: string | null;
+    jobId: string | null;
+    currentStatus: string;
+    created: boolean;
+    score: number | null;
   };
   artifact_used_intent: {
     source: "studio" | "unknown";

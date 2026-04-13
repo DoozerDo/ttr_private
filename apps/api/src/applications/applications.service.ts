@@ -54,6 +54,28 @@ export type ResumeGenerationTrackerInput = {
   outcomeLinkageSnapshot?: OutcomeLinkageSnapshot | null;
 };
 
+export type PairApplicationUpsertInput = {
+  userId: string;
+  baselineId?: string | null;
+  jobId?: string | null;
+  companyName?: string | null;
+  roleTitle?: string | null;
+  jobUrl?: string | null;
+  analysisId?: string | null;
+  baselineVersionId?: string | null;
+  applicationStatus?: ApplicationTrackerStatus | null;
+  appliedDate?: Date | string | null;
+  fitScore?: number | null;
+  notes?: string | null;
+  sourceUrl?: string | null;
+  externalApplicationUrl?: string | null;
+  verificationCoverageSnapshot?: VerificationCoverageSnapshot | null;
+  outcomeLinkageSnapshot?: OutcomeLinkageSnapshot | null;
+  resumeArtifactId?: string | null;
+  resumeArtifactType?: 'resume' | 'cover' | null;
+  resumeArtifactFormat?: string | null;
+};
+
 export type ApplicationInsight = {
   message: string;
   type: 'warning' | 'success' | 'gap';
@@ -82,15 +104,20 @@ export class ApplicationsService {
         : dto.appliedDate
         ? new Date(dto.appliedDate)
         : null;
+    const applicationStatus =
+      dto.applicationStatus ??
+      (dto.stage === ApplicationStage.APPLIED
+        ? ApplicationTrackerStatus.APPLIED
+        : ApplicationTrackerStatus.PREPARED);
 
     const application = this.applicationRepository.create({
       userId,
       jobId: dto.jobId || null,
       company: dto.company.trim(),
       title: dto.title.trim(),
-      jobUrl: dto.sourceUrl?.trim() || null,
+      jobUrl: this.normalizeUrl(dto.externalApplicationUrl ?? dto.sourceUrl),
       fingerprint: this.buildManualFingerprint(),
-      status: ApplicationTrackerStatus.PREPARED,
+      status: applicationStatus,
       preparedAt: now,
       appliedAt,
       lastTouchedAt: now,
@@ -101,7 +128,7 @@ export class ApplicationsService {
       fitScore: dto.fitScore ?? null,
       stage: dto.stage ?? ApplicationStage.SAVED,
       notes: dto.notes?.trim() || null,
-      sourceUrl: dto.sourceUrl?.trim() || null,
+      sourceUrl: this.normalizeUrl(dto.externalApplicationUrl ?? dto.sourceUrl),
       cxFitScoreSnapshot: {},
       resumeArtifacts: [],
       verificationCoverageSnapshot:
@@ -169,6 +196,12 @@ export class ApplicationsService {
     if (dto.baselineVersionId !== undefined) {
       application.baselineVersionId = dto.baselineVersionId?.trim() || null;
     }
+    if (dto.applicationStatus !== undefined) {
+      application.status = dto.applicationStatus ?? ApplicationTrackerStatus.PREPARED;
+      if (application.status === ApplicationTrackerStatus.APPLIED) {
+        application.appliedAt = application.appliedAt ?? new Date();
+      }
+    }
     if (dto.appliedDate !== undefined) {
       application.appliedDate = dto.appliedDate
         ? new Date(dto.appliedDate)
@@ -187,8 +220,11 @@ export class ApplicationsService {
     }
     if (dto.notes !== undefined) application.notes = dto.notes?.trim() || null;
     if (dto.sourceUrl !== undefined) {
-      application.sourceUrl = dto.sourceUrl?.trim() || null;
-      application.jobUrl = dto.sourceUrl?.trim() || null;
+      application.sourceUrl = this.normalizeUrl(dto.sourceUrl);
+      application.jobUrl = this.normalizeUrl(dto.externalApplicationUrl ?? dto.sourceUrl);
+    }
+    if (dto.externalApplicationUrl !== undefined) {
+      application.jobUrl = this.normalizeUrl(dto.externalApplicationUrl);
     }
     if (dto.verificationCoverageSnapshot !== undefined) {
       application.verificationCoverageSnapshot =
@@ -290,7 +326,7 @@ export class ApplicationsService {
         entry.fitScore = input.cxFitScoreSnapshot.overallScore ?? null;
       }
       if (!wasApplied) {
-        entry.status = ApplicationTrackerStatus.PREPARED;
+        entry.status = ApplicationTrackerStatus.READY;
       }
       entry.jobId = input.jobId ?? entry.jobId;
       if (input.companyName?.trim()) {
@@ -340,7 +376,7 @@ export class ApplicationsService {
       title: roleTitle,
       jobUrl: input.jobUrl?.trim() || null,
       fingerprint,
-      status: ApplicationTrackerStatus.PREPARED,
+      status: ApplicationTrackerStatus.READY,
       preparedAt: now,
       appliedAt: null,
       lastTouchedAt: now,
@@ -364,6 +400,183 @@ export class ApplicationsService {
     return this.applicationRepository.save(newEntry);
   }
 
+  async getApplicationForPair(
+    userId: string,
+    baselineId: string,
+    jobId: string,
+  ) {
+    const normalizedBaselineId = baselineId.trim();
+    const normalizedJobId = jobId.trim();
+    if (!normalizedBaselineId || !normalizedJobId) {
+      throw new BadRequestException('Baseline and job are required.');
+    }
+
+    const application = await this.applicationRepository.findOne({
+      where: {
+        userId,
+        baselineId: normalizedBaselineId,
+        jobId: normalizedJobId,
+      },
+    });
+
+    if (application) {
+      return application;
+    }
+
+    const fingerprint = this.computeFingerprint({
+      userId,
+      baselineId: normalizedBaselineId,
+      jobId: normalizedJobId,
+      baselineVersionId: null,
+      resumeArtifactId: 'pair-lookup',
+    });
+
+    const fallback = await this.applicationRepository.findOne({
+      where: { userId, fingerprint },
+    });
+
+    if (!fallback) {
+      throw new NotFoundException('Application not found');
+    }
+
+    return fallback;
+  }
+
+  async upsertApplicationForPair(
+    input: PairApplicationUpsertInput,
+    syntheticMetadata?: SyntheticMetadataInput,
+  ) {
+    const normalizedBaselineId = input.baselineId?.trim() || null;
+    const normalizedJobId = input.jobId?.trim() || null;
+    const fingerprint = this.computeFingerprint({
+      userId: input.userId,
+      baselineId: normalizedBaselineId,
+      jobId: normalizedJobId,
+      companyName: input.companyName,
+      roleTitle: input.roleTitle,
+      jobUrl: input.jobUrl ?? input.sourceUrl ?? input.externalApplicationUrl ?? null,
+      jobText: null,
+      baselineVersionId: input.baselineVersionId ?? '',
+      cxFitScoreSnapshot: input.fitScore
+        ? {
+            overallScore: input.fitScore,
+            verdict: input.fitScore >= 80 ? 'APPLY' : 'CONSIDER',
+            dimensionScores: {},
+            createdAt: new Date().toISOString(),
+          }
+        : null,
+      resumeArtifactId: input.resumeArtifactId ?? 'pair-upsert',
+      resumeArtifactType: input.resumeArtifactType ?? 'resume',
+      resumeArtifactFormat: input.resumeArtifactFormat ?? null,
+      analysisId: input.analysisId ?? null,
+      baselineId: normalizedBaselineId,
+      verificationCoverageSnapshot: input.verificationCoverageSnapshot ?? null,
+      outcomeLinkageSnapshot: input.outcomeLinkageSnapshot ?? null,
+    });
+    const now = new Date();
+    const artifactRecord = input.resumeArtifactId
+      ? this.buildArtifactRecord({
+          userId: input.userId,
+          baselineId: normalizedBaselineId,
+          jobId: normalizedJobId,
+          baselineVersionId: input.baselineVersionId ?? '',
+          resumeArtifactId: input.resumeArtifactId,
+          resumeArtifactType: input.resumeArtifactType ?? 'resume',
+          resumeArtifactFormat: input.resumeArtifactFormat ?? null,
+        })
+      : null;
+
+    const existing = await this.applicationRepository.findOne({
+      where: { userId: input.userId, fingerprint },
+    });
+    const targetStatus =
+      existing?.status === ApplicationTrackerStatus.APPLIED
+        ? ApplicationTrackerStatus.APPLIED
+        : input.applicationStatus ?? ApplicationTrackerStatus.READY;
+    const appliedAt =
+      targetStatus === ApplicationTrackerStatus.APPLIED
+        ? input.appliedDate
+          ? new Date(input.appliedDate)
+          : existing?.appliedAt ?? now
+        : existing?.appliedAt ?? null;
+
+    if (existing) {
+      existing.jobId = normalizedJobId ?? existing.jobId;
+      existing.baselineId = normalizedBaselineId ?? existing.baselineId;
+      if (input.companyName?.trim()) {
+        existing.company = input.companyName.trim();
+      }
+      if (input.roleTitle?.trim()) {
+        existing.title = input.roleTitle.trim();
+      }
+      const normalizedUrl = this.normalizeUrl(
+        input.externalApplicationUrl ?? input.jobUrl ?? input.sourceUrl,
+      );
+      if (normalizedUrl) {
+        existing.jobUrl = normalizedUrl;
+        existing.sourceUrl = normalizedUrl;
+      }
+      if (input.analysisId !== undefined) {
+        existing.analysisId = input.analysisId?.trim() || null;
+      }
+      if (input.baselineVersionId !== undefined) {
+        existing.baselineVersionId = input.baselineVersionId?.trim() || null;
+      }
+      if (input.fitScore !== undefined && existing.status !== ApplicationTrackerStatus.APPLIED) {
+        existing.fitScore = input.fitScore;
+      }
+      if (input.verificationCoverageSnapshot) {
+        existing.verificationCoverageSnapshot = input.verificationCoverageSnapshot;
+      }
+      if (input.outcomeLinkageSnapshot) {
+        existing.outcomeLinkageSnapshot = input.outcomeLinkageSnapshot;
+      }
+      if (artifactRecord) {
+        existing.resumeArtifacts = this.mergeArtifacts(existing.resumeArtifacts, artifactRecord);
+      }
+      if (input.notes !== undefined) {
+        existing.notes = input.notes?.trim() || null;
+      }
+      existing.status = targetStatus;
+      existing.appliedAt = appliedAt;
+      existing.appliedDate = appliedAt;
+      existing.lastTouchedAt = now;
+      if (syntheticMetadata?.isSynthetic) {
+        applySyntheticMetadata(existing, syntheticMetadata);
+      }
+      return this.applicationRepository.save(existing);
+    }
+
+    const application = this.applicationRepository.create({
+      userId: input.userId,
+      jobId: normalizedJobId,
+      company: input.companyName?.trim() || 'Unknown company',
+      title: input.roleTitle?.trim() || 'Untitled role',
+      jobUrl: this.normalizeUrl(input.externalApplicationUrl ?? input.jobUrl ?? input.sourceUrl),
+      fingerprint,
+      status: targetStatus,
+      preparedAt: now,
+      appliedAt,
+      lastTouchedAt: now,
+      baselineVersionId: input.baselineVersionId ?? null,
+      baselineId: normalizedBaselineId,
+      analysisId: input.analysisId ?? null,
+      appliedDate: appliedAt,
+      fitScore: input.fitScore ?? null,
+      stage: targetStatus === ApplicationTrackerStatus.APPLIED ? ApplicationStage.APPLIED : ApplicationStage.SAVED,
+      notes: input.notes?.trim() || null,
+      sourceUrl: this.normalizeUrl(input.externalApplicationUrl ?? input.jobUrl ?? input.sourceUrl),
+      cxFitScoreSnapshot: {},
+      resumeArtifacts: artifactRecord ? [artifactRecord] : [],
+      verificationCoverageSnapshot: input.verificationCoverageSnapshot ?? {},
+      outcomeLinkageSnapshot: input.outcomeLinkageSnapshot ?? {},
+    });
+    if (syntheticMetadata?.isSynthetic) {
+      applySyntheticMetadata(application, syntheticMetadata);
+    }
+    return this.applicationRepository.save(application);
+  }
+
   private buildManualFingerprint() {
     return `manual:${randomUUID()}`;
   }
@@ -384,6 +597,9 @@ export class ApplicationsService {
   }
 
   private computeFingerprint(input: ResumeGenerationTrackerInput) {
+    if (input.baselineId && input.jobId) {
+      return `pair:${input.baselineId}:${input.jobId}`;
+    }
     if (input.jobId) {
       return `job:${input.jobId}`;
     }
@@ -395,6 +611,11 @@ export class ApplicationsService {
       canonicalUrl || this.hashNormalizedValue(input.jobText ?? '');
     const base = `${normalizedCompany}|${normalizedRole}|${urlOrText}`;
     return `role:${createHash('sha256').update(base).digest('hex')}`;
+  }
+
+  private normalizeUrl(value?: string | null) {
+    const trimmed = value?.trim();
+    return trimmed || null;
   }
 
   private buildArtifactRecord(

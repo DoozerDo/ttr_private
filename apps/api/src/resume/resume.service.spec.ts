@@ -11,6 +11,7 @@ import { ComplianceService } from '../compliance/compliance.service';
 import { ComplianceAction, ComplianceFlagSeverity } from '../compliance/compliance.types';
 import { ApplicationsService } from '../applications/applications.service';
 import { OpportunitiesService } from '../opportunities/opportunities.service';
+import { StudioArtifactsService } from '../studio-artifacts/studio-artifacts.service';
 import { GapAnalysisService } from '../analysis/gap-analysis.service';
 import { CriticalFlowTrackerService } from '../support/critical-flow-tracker.service';
 import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
@@ -167,12 +168,31 @@ const buildService = (options?: {
   } as unknown as jest.Mocked<ComplianceService>;
 
   const applicationsService = {
-    upsertPreparedFromResumeGeneration: jest.fn().mockResolvedValue({ id: 'tracker-1', status: 'Prepared' }),
+    upsertPreparedFromResumeGeneration: jest.fn().mockResolvedValue({ id: 'tracker-1', status: 'Ready' }),
   } as unknown as jest.Mocked<ApplicationsService>;
 
   const opportunitiesService = {
     createFromResumeStudio: jest.fn().mockResolvedValue({ id: 'opp-1' }),
   } as unknown as jest.Mocked<OpportunitiesService>;
+
+  const studioArtifactsService = {
+    computeJobFingerprint: jest.fn().mockReturnValue('job-fingerprint-1'),
+    computeResumeInputsHash: jest.fn().mockReturnValue('resume-hash-1'),
+    readState: jest.fn().mockResolvedValue({
+      status: 'NOT_STARTED',
+      baselineId: baseline.id,
+      jobId: job.id,
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: 'job-fingerprint-1',
+      generationContractVersion: 'studio-artifacts-v1',
+      resume: null,
+      coverLetter: null,
+    }),
+    recordResumeInProgress: jest.fn().mockResolvedValue(undefined),
+    recordResumeFailure: jest.fn().mockResolvedValue(undefined),
+    recordResumeSuccess: jest.fn().mockResolvedValue(undefined),
+  } as unknown as jest.Mocked<StudioArtifactsService>;
 
   const gapAnalysisService = {
     analyze: jest.fn().mockReturnValue(null),
@@ -204,9 +224,17 @@ const buildService = (options?: {
     gapAnalysisService,
     criticalFlowTrackerService,
     workflowIdempotencyService,
+    studioArtifactsService,
   );
 
-  return { service, complianceService, applicationsService, opportunitiesService, workflowIdempotencyService };
+  return {
+    service,
+    complianceService,
+    applicationsService,
+    opportunitiesService,
+    studioArtifactsService,
+    workflowIdempotencyService,
+  };
 };
 
 describe('ResumeService contract', () => {

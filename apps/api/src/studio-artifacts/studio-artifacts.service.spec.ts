@@ -1,0 +1,231 @@
+import { StudioArtifactsService } from './studio-artifacts.service';
+import { StudioArtifactLifecycleStatus } from './studio-artifact.entity';
+
+const baselineVersion = { id: 'baseline-version-1', baselineId: 'baseline-1', hash: 'baseline-hash-1' };
+const job = { id: 'job-1', userId: 'user-1', title: 'Director of Support', company: 'Acme', rawDescription: 'Lead support teams.' };
+const assessment = { id: 'analysis-1', userId: 'user-1', jobId: 'job-1', baselineId: 'baseline-1', inputsHash: 'assessment-hash-1' };
+
+function createRepository<T extends object>() {
+  let stored: Partial<T> | null = null;
+  return {
+    findOne: jest.fn(async () => stored),
+    create: jest.fn((payload: Partial<T>) => ({ ...payload } as Partial<T>)),
+    save: jest.fn(async (payload: Partial<T>) => {
+      stored = { ...(stored ?? {}), ...payload };
+      return stored as T;
+    }),
+  };
+}
+
+describe('StudioArtifactsService', () => {
+  it('persists and rehydrates completed resume artifacts for the same pair', async () => {
+    const studioArtifactRepository = createRepository<any>();
+    const baselineVersionRepository = {
+      findOne: jest.fn(async () => baselineVersion),
+    };
+    const jobRepository = {
+      findOne: jest.fn(async () => job),
+    };
+    const assessmentRepository = {
+      findOne: jest.fn(async () => assessment),
+    };
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository as any,
+      baselineVersionRepository as any,
+      jobRepository as any,
+      assessmentRepository as any,
+    );
+
+    const inputsHash = service.computeResumeInputsHash({
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: service.computeJobFingerprint(job as any),
+      assessmentInputsHash: assessment.inputsHash,
+    });
+
+    await service.recordResumeSuccess({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: service.computeJobFingerprint(job as any),
+      inputsHash,
+      responseBody: { status: 'success', preview: { resume: { heading: { name: 'Alex' } } } },
+      content: 'resume-content',
+      metadata: { auditId: 'audit-1' },
+    });
+
+    const state = await service.readState({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      analysisId: 'analysis-1',
+    });
+
+    expect(state.status).toBe(StudioArtifactLifecycleStatus.COMPLETED);
+    expect(state.resume?.status).toBe(StudioArtifactLifecycleStatus.COMPLETED);
+    expect(state.resume?.responseBody).toEqual(
+      expect.objectContaining({ status: 'success' }),
+    );
+    expect(state.coverLetter?.status).toBeUndefined();
+  });
+
+  it('returns in progress and failed states and invalidates stale inputs deterministically', async () => {
+    const studioArtifactRepository = createRepository<any>();
+    const baselineVersionRepository = {
+      findOne: jest.fn(async () => baselineVersion),
+    };
+    const jobRepository = {
+      findOne: jest.fn(async () => job),
+    };
+    const assessmentRepository = {
+      findOne: jest.fn(async () => assessment),
+    };
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository as any,
+      baselineVersionRepository as any,
+      jobRepository as any,
+      assessmentRepository as any,
+    );
+
+    const resumeFingerprint = service.computeJobFingerprint(job as any);
+    const resumeInputsHash = service.computeResumeInputsHash({
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: resumeFingerprint,
+      assessmentInputsHash: assessment.inputsHash,
+    });
+
+    await service.recordCoverLetterInProgress({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: resumeFingerprint,
+      inputsHash: service.computeCoverLetterInputsHash({
+        baselineVersionHash: baselineVersion.hash,
+        jobFingerprint: resumeFingerprint,
+      }),
+      metadata: { auditId: 'audit-1' },
+    });
+
+    const inProgressState = await service.readState({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      analysisId: 'analysis-1',
+    });
+    expect(inProgressState.status).toBe(StudioArtifactLifecycleStatus.IN_PROGRESS);
+    expect(inProgressState.coverLetter?.status).toBe(StudioArtifactLifecycleStatus.IN_PROGRESS);
+
+    await service.recordCoverLetterFailure({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: resumeFingerprint,
+      inputsHash: service.computeCoverLetterInputsHash({
+        baselineVersionHash: baselineVersion.hash,
+        jobFingerprint: resumeFingerprint,
+      }),
+      failureCode: 'generation_failed',
+      failureMessage: 'Cover letter generation failed.',
+      metadata: { auditId: 'audit-1' },
+    });
+
+    const failedState = await service.readState({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      analysisId: 'analysis-1',
+    });
+    expect(failedState.status).toBe(StudioArtifactLifecycleStatus.FAILED);
+    expect(failedState.coverLetter?.status).toBe(StudioArtifactLifecycleStatus.FAILED);
+
+    await service.recordCoverLetterSuccess({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: resumeFingerprint,
+      inputsHash: service.computeCoverLetterInputsHash({
+        baselineVersionHash: baselineVersion.hash,
+        jobFingerprint: resumeFingerprint,
+      }),
+      responseBody: { status: 'success', preview: { coverLetter: { paragraphs: ['Hello'] } } },
+      content: 'cover-letter-content',
+      metadata: { auditId: 'audit-1' },
+    });
+
+    const completedState = await service.readState({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      analysisId: 'analysis-1',
+    });
+    expect(completedState.status).toBe(StudioArtifactLifecycleStatus.COMPLETED);
+    expect(completedState.coverLetter?.status).toBe(StudioArtifactLifecycleStatus.COMPLETED);
+    expect(completedState.coverLetter?.responseBody).toEqual(
+      expect.objectContaining({ status: 'success' }),
+    );
+  });
+
+  it('invalidates stale artifacts when the generation inputs change', async () => {
+    const studioArtifactRepository = createRepository<any>();
+    const baselineVersionRepository = {
+      findOne: jest.fn(async () => baselineVersion),
+    };
+    const jobRepository = {
+      findOne: jest.fn(async () => job),
+    };
+    const assessmentRepository = {
+      findOne: jest.fn(async () => assessment),
+    };
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository as any,
+      baselineVersionRepository as any,
+      jobRepository as any,
+      assessmentRepository as any,
+    );
+
+    const matchingHash = service.computeResumeInputsHash({
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: service.computeJobFingerprint(job as any),
+      assessmentInputsHash: assessment.inputsHash,
+    });
+
+    await service.recordResumeSuccess({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: service.computeJobFingerprint(job as any),
+      inputsHash: matchingHash,
+      responseBody: { status: 'success' },
+      content: 'resume-content',
+      metadata: {},
+    });
+
+    assessmentRepository.findOne = jest.fn(async () => ({ ...assessment, inputsHash: 'assessment-hash-2' }));
+    const staleState = await service.readState({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      analysisId: 'analysis-1',
+    });
+
+    expect(staleState.resume).toBeNull();
+    expect(staleState.status).toBe(StudioArtifactLifecycleStatus.MISSING);
+  });
+});

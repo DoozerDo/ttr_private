@@ -88,6 +88,8 @@ import { filterComplianceFlagsByCanonicalClaims } from '../common/readiness-clai
 import { SyntheticMetadataInput } from '../synthetic/synthetic-metadata.types';
 import { applySyntheticMetadata } from '../synthetic/synthetic-metadata.util';
 import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
+import { StudioArtifactsService } from '../studio-artifacts/studio-artifacts.service';
+import { ApplicationsService } from '../applications/applications.service';
 import type { ArtifactTraceAudit } from '../generation/artifact-trace-audit';
 import { buildArtifactFailurePayload } from '../generation/artifact-failure';
 import { polishCoverLetterGeneration } from '../language-style-pass';
@@ -190,6 +192,8 @@ export class CoverLettersService {
     private readonly complianceService: ComplianceService,
     private readonly gapAnalysisService: GapAnalysisService,
     private readonly workflowIdempotencyService: WorkflowIdempotencyService,
+    private readonly studioArtifactsService: StudioArtifactsService,
+    private readonly applicationsService: ApplicationsService,
   ) {
     this.coverLetterRepository = this.dataSource.getRepository(CoverLetter);
     this.baselineRepository = this.dataSource.getRepository(Baseline);
@@ -310,7 +314,33 @@ export class CoverLettersService {
       });
     }
 
+    const studioArtifactContext = {
+      baselineId: draft.baseline.id,
+      jobId: draft.job.id,
+      baselineVersionId: draft.baselineVersion.id,
+      baselineVersionHash: draft.baselineVersion.hash,
+      jobFingerprint: this.studioArtifactsService.computeJobFingerprint(draft.job),
+      inputsHash: this.studioArtifactsService.computeCoverLetterInputsHash({
+        baselineVersionHash: draft.baselineVersion.hash,
+        jobFingerprint: this.studioArtifactsService.computeJobFingerprint(draft.job),
+      }),
+    };
+
     try {
+      await this.studioArtifactsService.recordCoverLetterInProgress({
+        userId,
+        baselineId: studioArtifactContext.baselineId,
+        jobId: studioArtifactContext.jobId,
+        baselineVersionId: studioArtifactContext.baselineVersionId,
+        baselineVersionHash: studioArtifactContext.baselineVersionHash,
+        jobFingerprint: studioArtifactContext.jobFingerprint,
+        inputsHash: studioArtifactContext.inputsHash,
+        metadata: {
+          auditId: draft.complianceResult.audit.id,
+          closingTemplateKey: draft.closingTemplateKey,
+        },
+      });
+
       await this.ensureNoDuplicateCoverLetter(
         userId,
         draft.baseline.id,
@@ -361,7 +391,7 @@ export class CoverLettersService {
 
       const display = this.buildSuccessDisplayPayload();
       const exports: DocumentGenerationExports = { docx: true, pdf: true };
-      const response: CoverLetterGenerationResponse = {
+      const response = {
         status: 'success',
         generationStatus: 'success',
         exportReady: true,
@@ -396,7 +426,36 @@ export class CoverLettersService {
           dedupeKey,
           reused: reusedExistingCoverLetter || reservation.status === 'existing_completed',
         },
-      };
+      } as unknown as CoverLetterGenerationResponse;
+      await this.studioArtifactsService.recordCoverLetterSuccess({
+        userId,
+        baselineId: studioArtifactContext.baselineId,
+        jobId: studioArtifactContext.jobId,
+        baselineVersionId: studioArtifactContext.baselineVersionId,
+        baselineVersionHash: studioArtifactContext.baselineVersionHash,
+        jobFingerprint: studioArtifactContext.jobFingerprint,
+        inputsHash: studioArtifactContext.inputsHash,
+        responseBody: response as unknown as Record<string, unknown>,
+        content: draft.complianceResult.normalizedContent,
+        metadata: {
+          auditId: draft.complianceResult.audit.id,
+          closingTemplateKey: draft.closingTemplateKey,
+        },
+      });
+      await this.applicationsService.upsertApplicationForPair({
+        userId,
+        baselineId: studioArtifactContext.baselineId,
+        jobId: studioArtifactContext.jobId,
+        companyName: draft.job.company ?? draft.jobContext.company ?? draft.job.title ?? 'Unknown company',
+        roleTitle: draft.job.title ?? draft.jobContext.title ?? 'Untitled role',
+        jobUrl: draft.job.canonicalUrl ?? draft.job.sourceUrl ?? null,
+        analysisId: draft.analysisAssessment.assessmentId ?? input.analysisId ?? null,
+        baselineVersionId: baselineVersion.id,
+        fitScore: latestAssessment?.overallScore ?? null,
+        resumeArtifactId: draft.complianceResult.audit.id,
+        resumeArtifactType: 'cover',
+        resumeArtifactFormat: 'docx',
+      });
       await this.workflowIdempotencyService.complete({
         userId,
         operationName: 'generation.cover_letter',
@@ -406,6 +465,21 @@ export class CoverLettersService {
       });
       return response;
     } catch (error) {
+      void this.studioArtifactsService.recordCoverLetterFailure({
+        userId,
+        baselineId: studioArtifactContext.baselineId,
+        jobId: studioArtifactContext.jobId,
+        baselineVersionId: studioArtifactContext.baselineVersionId,
+        baselineVersionHash: studioArtifactContext.baselineVersionHash,
+        jobFingerprint: studioArtifactContext.jobFingerprint,
+        inputsHash: studioArtifactContext.inputsHash,
+        failureCode: error instanceof Error ? error.name : 'generation_failed',
+        failureMessage: error instanceof Error ? error.message : String(error),
+        metadata: {
+          auditId: draft.complianceResult.audit.id,
+          closingTemplateKey: draft.closingTemplateKey,
+        },
+      });
       void this.workflowIdempotencyService.markFailure({
         userId,
         operationName: 'generation.cover_letter',

@@ -144,7 +144,7 @@ describe("Studio generation error contract", () => {
     });
 
     renderStudio();
-    await waitFor(() => expect(screen.getByText("Ready to generate")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Your application is ready")).toBeInTheDocument());
     expect(screen.getByText("Fix Pair Selection")).toBeInTheDocument();
     expect(screen.getByText("Strong output: you can use this now with confidence.")).toBeInTheDocument();
     expect(
@@ -192,7 +192,7 @@ describe("Studio generation error contract", () => {
     fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
 
     expect(resumeFetches).toBe(1);
-    expect(await screen.findByText("Ready to generate")).toBeInTheDocument();
+    expect(await screen.findByText("Your application is ready")).toBeInTheDocument();
     expect(screen.getByText("Fix Pair Selection")).toBeInTheDocument();
     expect(screen.getByText("Strong output: you can use this now with confidence.")).toBeInTheDocument();
     expect(
@@ -382,7 +382,7 @@ describe("Studio generation error contract", () => {
     fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
 
     expect(resumeFetches).toBe(1);
-    expect(await screen.findByText("Ready to generate")).toBeInTheDocument();
+    expect(await screen.findByText("Your application is ready")).toBeInTheDocument();
     expect(screen.getByText("Fix Pair Selection")).toBeInTheDocument();
     expect(screen.getByText("Strong output: you can use this now with confidence.")).toBeInTheDocument();
     expect(

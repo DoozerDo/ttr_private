@@ -12,6 +12,7 @@ import { ApplicationsModule } from '../applications/applications.module';
 import { OpportunitiesModule } from '../opportunities/opportunities.module';
 import { SupportModule } from '../support/support.module';
 import { WorkflowIdempotencyModule } from '../common/workflow-idempotency.module';
+import { StudioArtifactsModule } from '../studio-artifacts/studio-artifacts.module';
 import { ResumeController } from './resume.controller';
 import { ResumeService } from './resume.service';
 
@@ -30,6 +31,7 @@ import { ResumeService } from './resume.service';
     OpportunitiesModule,
     SupportModule,
     WorkflowIdempotencyModule,
+    StudioArtifactsModule,
   ],
   controllers: [ResumeController],
   providers: [ResumeService, GapAnalysisService],

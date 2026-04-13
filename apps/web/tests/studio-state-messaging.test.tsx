@@ -40,6 +40,8 @@ vi.mock("@/lib/generationProductReadiness", () => ({
     state: mockedStudioState === "blocked" ? "BLOCKED" : "ALLOWED",
     confidence: mockedStudioState === "ready" ? "HIGH" : mockedStudioState === "limited" ? "MEDIUM" : "LOW",
     needsVerification: mockedStudioState !== "ready",
+    canOpenStudio: mockedStudioState !== "blocked",
+    tier: mockedStudioState === "blocked" ? "fit_review_only" : "generation_allowed",
     generationMode: mockedStudioState === "ready" ? "verified" : "draft",
   })),
 }));
@@ -180,24 +182,19 @@ describe("Studio state messaging", () => {
     installBaselineFetches("ready");
     renderStudio();
 
-    await waitFor(() => expect(screen.getAllByText("Ready to generate").length).toBeGreaterThan(0));
-    expect(screen.getByText("Generated from verified evidence.")).toBeInTheDocument();
-    expect(screen.getByText("Why this output is grounded")).toBeInTheDocument();
-    expect(screen.getByText("This output is grounded in your verified experience.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Generation blocked")).toBeInTheDocument());
+    expect(screen.queryByTestId("studio-instant-draft-hero")).toBeNull();
+    expect(screen.getByText("What's holding this back")).toBeInTheDocument();
   });
 
   it("shows limited generation messaging when readiness is partial", async () => {
     installBaselineFetches("limited");
     renderStudio();
 
-    await waitFor(() => expect(screen.getAllByText("Generation is usable.").length).toBeGreaterThan(0));
-    expect(screen.getAllByText(/Generated from partially verified evidence/i).length).toBeGreaterThan(0);
-    expect(screen.getByText("Why this output is limited")).toBeInTheDocument();
-    expect(
-      screen.getAllByText(
-        "Generated from partially verified evidence. Verify key claims to strengthen it.",
-      ).length,
-    ).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument());
+    expect(screen.queryByTestId("studio-instant-draft-hero")).toBeNull();
+    expect(screen.getByText("Limited output: not ready yet.")).toBeInTheDocument();
+    expect(screen.getByText("What's holding this back")).toBeInTheDocument();
   });
 
   it("shows blocked guidance when compliance prevents generation", async () => {

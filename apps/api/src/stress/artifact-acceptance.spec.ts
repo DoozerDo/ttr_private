@@ -165,7 +165,7 @@ function buildResumeService(fixture: typeof dirtyResumeFixture) {
   } as unknown as DataSource;
 
   const applicationsService = {
-    upsertPreparedFromResumeGeneration: jest.fn().mockResolvedValue({ id: 'tracker-1', status: 'Prepared' }),
+    upsertPreparedFromResumeGeneration: jest.fn().mockResolvedValue({ id: 'tracker-1', status: 'Ready' }),
   } as unknown as ApplicationsService;
   const opportunitiesService = {
     createFromResumeStudio: jest.fn().mockResolvedValue({ id: 'opp-1' }),

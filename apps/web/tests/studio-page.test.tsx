@@ -143,8 +143,183 @@ function resolveStudioGenerationFallback(input: RequestInfo) {
   return Promise.resolve(createResponse({}));
 }
 
+function installCompletedArtifactFetches() {
+  const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input?.url ?? "";
+    if (url.includes("/api/baselines/base-1/versions")) {
+      return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+    }
+    if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+      return Promise.resolve(
+        createResponse({
+          assessmentId: "analysis-1",
+          scoring_v2: { score: 84 },
+          jobId: "job-1",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          verification_coverage: {
+            totalClaims: 2,
+            verifiedClaims: 2,
+            inferredClaims: 0,
+            unverifiedClaims: 0,
+          },
+        }),
+      );
+    }
+    if (url.includes("/api/resume/readiness")) {
+      return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+    }
+    if (url.includes("/api/cover-letters/readiness")) {
+      return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+    }
+    if (url.includes("/api/studio/artifacts")) {
+      return Promise.resolve(
+        createResponse({
+          status: "COMPLETED",
+          baselineId: "base-1",
+          jobId: "job-1",
+          baselineVersionId: "base-version-1",
+          baselineVersionHash: "hash-1",
+          jobFingerprint: "job-fingerprint-1",
+          generationContractVersion: "studio-artifacts-v1",
+          resume: {
+            status: "COMPLETED",
+            inputsHash: "resume-hash",
+            responseBody: {
+              status: "success",
+              generationStatus: "success",
+              exportReady: true,
+              exports: { docx: true, pdf: true },
+              preview: {
+                resume: {
+                  heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                  summary: "Support leader focused on scalable operations.",
+                  experience: [
+                    {
+                      company: "Cat Daddy Games",
+                      roleTitle: "Senior Producer",
+                      location: "Los Angeles, CA",
+                      dateRange: "2020 - Present",
+                      bullets: ["Led support operations programs."],
+                    },
+                  ],
+                  education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+                  competencies: ["Customer strategy", "Operational leadership"],
+                },
+              },
+            },
+            content: "resume-content",
+            failureCode: null,
+            failureMessage: null,
+            startedAt: null,
+            completedAt: new Date().toISOString(),
+            failedAt: null,
+            metadata: { auditId: "audit-1" },
+          },
+          coverLetter: {
+            status: "COMPLETED",
+            inputsHash: "cover-hash",
+            responseBody: {
+              status: "success",
+              generationStatus: "success",
+              exportReady: true,
+              exports: { docx: true, pdf: true },
+              preview: {
+                coverLetter: {
+                  paragraphs: [
+                    "Dear Hiring Team,",
+                    "I bring verified leadership and operational experience aligned to this role.",
+                    "Sincerely,",
+                    "Alex Candidate",
+                  ],
+                },
+              },
+            },
+            content: "cover-content",
+            failureCode: null,
+            failureMessage: null,
+            startedAt: null,
+            completedAt: new Date().toISOString(),
+            failedAt: null,
+            metadata: { auditId: "audit-1" },
+          },
+        }),
+      );
+    }
+    if (url.includes("/api/resume/export")) {
+      return Promise.resolve(createExportResponse("Director-of-Support-resume.docx"));
+    }
+    if (url.includes("/api/cover-letters/export")) {
+      return Promise.resolve(createExportResponse("Director-of-Support-cover-letter.docx"));
+    }
+    if (url.includes("/api/applications/pair")) {
+      const method = init?.method ?? "GET";
+      if (method === "GET") {
+        return Promise.resolve(
+          createResponse({
+            id: "application-1",
+            status: "Ready",
+            appliedAt: null,
+            lastTouchedAt: new Date().toISOString(),
+            baselineId: "base-1",
+            jobId: "job-1",
+            jobUrl: "https://example.com/job",
+            notes: null,
+            sourceUrl: "https://example.com/job",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            resumeArtifacts: [],
+          }),
+        );
+      }
+      const parsedBody = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+      const nextStatus = String(parsedBody?.applicationStatus ?? parsedBody?.status ?? "").toLowerCase();
+      return Promise.resolve(
+        createResponse({
+          id: "application-1",
+          status: nextStatus === "applied" ? "Applied" : "Ready",
+          appliedAt: nextStatus === "applied" ? new Date().toISOString() : null,
+          lastTouchedAt: new Date().toISOString(),
+          baselineId: "base-1",
+          jobId: "job-1",
+          jobUrl: "https://example.com/job",
+          notes: null,
+          sourceUrl: "https://example.com/job",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          resumeArtifacts: [],
+        }),
+      );
+    }
+    if (url.includes("/api/analytics/event")) {
+      return Promise.resolve(createResponse({ ok: true }));
+    }
+    return resolveStudioGenerationFallback(input);
+  });
+  setFetchImplementation(fetchMock);
+  return fetchMock;
+}
+
 describe("Studio page UX", () => {
   beforeEach(() => {
+    Object.defineProperty(window.URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn(() => "blob:studio-export"),
+    });
+    Object.defineProperty(window.URL, "revokeObjectURL", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      value: vi.fn(),
+    });
     overrideSearchParams({
       analysisId: "analysis-1",
       jobId: "job-1",
@@ -152,6 +327,51 @@ describe("Studio page UX", () => {
       baselineVersionId: "base-version-1",
     });
     mockRouterReplace.mockClear();
+  });
+
+  it("hydrates completed artifacts from the backend and makes them usable immediately", async () => {
+    const fetchMock = installCompletedArtifactFetches();
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-instant-resume-panel")).toBeInTheDocument();
+    });
+
+    expect(screen.getAllByText("Your application is ready").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Apply to this role" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download Resume" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy Resume" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download Cover Letter" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy Cover Letter" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Download Resume" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy Resume" }));
+    fireEvent.click(screen.getByRole("button", { name: "Download Cover Letter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy Cover Letter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply to this role" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Resume copied")).toBeInTheDocument();
+      expect(screen.getByText("Cover letter copied")).toBeInTheDocument();
+      expect(screen.getByText(/Application marked applied/i)).toBeInTheDocument();
+    });
+
+    const analyticsBodies = fetchMock.mock.calls
+      .filter(([url, init]) => String(url).includes("/api/analytics/event") && init?.method === "POST")
+      .map(([, init]) => JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")));
+    expect(analyticsBodies.map((body) => body.eventName)).toEqual(
+      expect.arrayContaining([
+        "studio_resume_downloaded",
+        "studio_cover_letter_downloaded",
+        "studio_resume_copied",
+        "studio_cover_letter_copied",
+        "studio_application_ready_viewed",
+        "studio_apply_clicked",
+        "application_created_or_upserted",
+        "application_status_updated",
+      ]),
+    );
   });
 
   it("shows the current ready generation state for an explicit baselineId", async () => {
@@ -192,12 +412,12 @@ describe("Studio page UX", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Generation is usable.")).toBeInTheDocument();
+      expect(screen.getAllByText("Your application is ready").length).toBeGreaterThan(0);
     });
     expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Generate Resume" })).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Generate Cover Letter" }).length).toBeGreaterThan(0);
-    expect(screen.getByText("Your application materials")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download Resume" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download Cover Letter" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply to this role" })).toBeInTheDocument();
     expect(screen.getByText(/Using resume/i)).toHaveTextContent("Using resume Leadership Resume");
     expect(screen.queryByText("Role analysis required")).toBeNull();
   });
@@ -298,9 +518,9 @@ describe("Studio page UX", () => {
       expect(screen.getByTestId("studio-unlock-entry-panel")).toBeInTheDocument();
     });
     await waitFor(() => {
-      expect(screen.getByText("Generation is usable.")).toBeInTheDocument();
+      expect(screen.getAllByText("Your application is ready").length).toBeGreaterThan(0);
     });
-    expect(screen.getByText("READY TO GENERATE")).toBeInTheDocument();
+    expect(screen.getAllByText("Your application is ready").length).toBeGreaterThan(0);
     expect(
       screen.getByText("Your verified evidence supports this role. Your materials are now grounded and ready."),
     ).toBeInTheDocument();
@@ -355,14 +575,14 @@ describe("Studio page UX", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Generation is usable." })).toBeInTheDocument();
+      expect(screen.getAllByText("Your application is ready").length).toBeGreaterThan(0);
     });
-    expect(screen.getByTestId("studio-artifact-quality-panel")).toHaveTextContent("Strong Output");
-    expect(screen.getByTestId("studio-artifact-quality-panel")).toHaveTextContent(
+    expect(screen.getAllByTestId("studio-artifact-quality-panel")[0]).toHaveTextContent("Strong Output");
+    expect(screen.getAllByTestId("studio-artifact-quality-panel")[0]).toHaveTextContent(
       "Built from verified experience",
     );
-    expect(screen.getByTestId("studio-artifact-quality-panel")).toHaveTextContent("Confidence: High");
-    expect(screen.getByText("Improve this output")).toBeInTheDocument();
+    expect(screen.getAllByTestId("studio-artifact-quality-panel")[0]).toHaveTextContent("Confidence: High");
+    expect(screen.getAllByText("Improve this output").length).toBeGreaterThan(0);
   });
 
   it("shows verified-evidence messaging for the first generation after unlock only", async () => {
@@ -457,9 +677,7 @@ describe("Studio page UX", () => {
       );
     });
 
-    await waitFor(() => {
-      expect(screen.getByTestId("resume-preview")).toBeInTheDocument();
-    });
+    expect((await screen.findAllByTestId("resume-preview", {}, { timeout: 5000 })).length).toBeGreaterThan(0);
     await waitFor(() => {
       expect(screen.getByTestId("studio-unlock-generation-confirmation")).toHaveTextContent(
         "Generated from verified evidence aligned to this role.",
@@ -574,7 +792,7 @@ describe("Studio page UX", () => {
     fireEvent.click(generateResumeButton);
 
     await waitFor(() => {
-      expect(screen.getByTestId("resume-preview")).toBeInTheDocument();
+      expect(screen.getAllByTestId("resume-preview").length).toBeGreaterThan(0);
     });
     expect(screen.queryByText("Generating from your verified evidence...")).toBeNull();
     expect(screen.queryByTestId("studio-unlock-generation-confirmation")).toBeNull();
@@ -726,7 +944,7 @@ describe("Studio page UX", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Generate Resume" })[0]);
 
     await waitFor(() => {
-      expect(screen.getByTestId("resume-preview")).toBeInTheDocument();
+      expect(screen.getAllByTestId("resume-preview").length).toBeGreaterThan(0);
     });
 
     const exportButton = screen.getByRole("button", { name: "Download DOCX" });
@@ -782,7 +1000,7 @@ describe("Studio page UX", () => {
       expect(screen.getByRole("heading", { name: "Generation blocked" })).toBeInTheDocument();
     });
     expect(screen.getByTestId("studio-decision-panel")).toHaveTextContent("Limited output: not ready yet.");
-    expect(screen.getByTestId("studio-artifact-quality-panel")).toHaveTextContent("Output needs work");
+    expect(screen.getAllByTestId("studio-artifact-quality-panel")[0]).toHaveTextContent("Output needs work");
     expect(screen.getByRole("link", { name: "Start Fit Review" })).toHaveAttribute(
       "href",
       "/resolve-gaps?jobId=job-1&baselineId=base-1",
@@ -826,14 +1044,14 @@ describe("Studio page UX", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Ready to generate" })).toBeInTheDocument();
+      expect(screen.getByTestId("studio-instant-draft-hero")).toBeInTheDocument();
     });
-    expect(screen.getByTestId("studio-artifact-quality-panel")).toHaveTextContent("Usable Output");
-    expect(screen.getByTestId("studio-artifact-quality-panel")).toHaveTextContent(
+    expect(screen.getAllByTestId("studio-artifact-quality-panel")[0]).toHaveTextContent("Usable Output");
+    expect(screen.getAllByTestId("studio-artifact-quality-panel")[0]).toHaveTextContent(
       "Some claims are unverified. Strengthen for best results.",
     );
-    expect(screen.getByTestId("studio-artifact-quality-panel")).toHaveTextContent("Confidence: Medium");
-    expect(screen.getByText("Improve this output")).toBeInTheDocument();
+    expect(screen.getAllByTestId("studio-artifact-quality-panel")[0]).toHaveTextContent("Confidence: Medium");
+    expect(screen.getAllByText("Improve this output").length).toBeGreaterThan(0);
   });
 
   it("generates a resume and exposes downloads after success", async () => {
@@ -890,21 +1108,15 @@ describe("Studio page UX", () => {
 
     renderStudio();
 
-    const generateResumeButton = await screen.findByRole("button", { name: "Generate Resume" });
-    await waitFor(() => expect(generateResumeButton).toBeEnabled());
-    fireEvent.click(generateResumeButton);
-
-    await waitFor(() => {
-      expect(screen.getByTestId("resume-preview")).toBeInTheDocument();
-    });
+    await screen.findAllByTestId("resume-preview", {}, { timeout: 5000 });
     expect(screen.getByTestId("studio-resume-trust-summary")).toHaveTextContent(
       "Generated from verified evidence",
     );
     expect(screen.getByTestId("studio-resume-trust-summary")).toHaveTextContent(
       "Verified baseline used. Aligned to this role. Unsupported claims remain blocked.",
     );
-    expect(screen.getByText("Preview of tailored resume")).toBeInTheDocument();
-    expect(screen.getByText("Alex Candidate")).toBeInTheDocument();
+    expect(screen.getAllByText("Preview of tailored resume").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Alex Candidate").length).toBeGreaterThan(0);
     expect(screen.getByText("Download: DOCX | PDF")).toBeInTheDocument();
   });
 

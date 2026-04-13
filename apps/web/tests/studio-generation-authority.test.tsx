@@ -329,7 +329,7 @@ describe("Studio generation authority", () => {
     setupFetch("ready");
     renderStudio();
 
-    await screen.findByText("Ready to generate");
+    await screen.findByText("Your application is ready");
     const readiness = screen.getByTestId("studio-generation-readiness");
     const decisionPanel = screen.getByTestId("studio-decision-panel");
     expect(readiness).toHaveTextContent(/^(Ready|Usable)/);
@@ -346,7 +346,7 @@ describe("Studio generation authority", () => {
     setupFetch("limited");
     renderStudio();
 
-    await screen.findByRole("heading", { name: "Ready to generate" });
+    await screen.findByRole("heading", { name: "Your application is ready" });
     const decisionPanel = screen.getByTestId("studio-decision-panel");
     expect(screen.getByTestId("studio-generation-readiness")).toHaveTextContent(/^(Usable|Ready)/);
     expect(decisionPanel).toHaveTextContent("Strong output: you can use this now with confidence.");
@@ -361,7 +361,7 @@ describe("Studio generation authority", () => {
     setupFetch("blocked");
     renderStudio();
 
-    await screen.findByText("Ready to generate");
+    await screen.findByText("Your application is ready");
     expect(screen.getByTestId("studio-generation-readiness")).toHaveTextContent(/^Ready/);
     expect(screen.getByTestId("studio-decision-panel")).toHaveTextContent("Strong output: you can use this now with confidence.");
     expect(screen.getAllByRole("button", { name: "Generate Resume" }).length).toBeGreaterThan(0);
@@ -372,7 +372,7 @@ describe("Studio generation authority", () => {
     setupFetch("blocked", 68);
     renderStudio();
 
-    await screen.findByText("Ready to generate");
+    await screen.findByText("Your application is ready");
     expect(screen.getByTestId("studio-generation-readiness")).toHaveTextContent(/^Ready/);
     expect(screen.getAllByRole("button", { name: "Generate Resume" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: "Generate Cover Letter" }).length).toBeGreaterThan(0);
@@ -416,7 +416,7 @@ describe("Studio generation authority", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getAllByRole("button", { name: "Generate Resume" }).length).toBeGreaterThan(0);
+      expect(screen.getByText("Your application is ready")).toBeInTheDocument();
     });
     expect(screen.getByTestId("studio-decision-panel")).toHaveTextContent(/output/i);
     expect(screen.queryByText(/Verified claims:\s*0\s*\/\s*0/i)).toBeNull();
