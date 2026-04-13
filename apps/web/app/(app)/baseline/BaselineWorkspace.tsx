@@ -5,6 +5,8 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
 import type { BaselineDto } from "@/lib/baselines";
+import { JobIngestionForm } from "@/app/(app)/jobs/_components/JobIngestionForm";
+import { trackEvent } from "@/src/lib/analytics";
 import { BaselineDashboard } from "./baseline-dashboard";
 import { JobsHub } from "./_components/JobsHub";
 import { WorkspaceRunner } from "./_components/WorkspaceRunner";
@@ -14,6 +16,7 @@ type BaselineWorkspaceProps = {
   initialFetchError?: string | null;
   initialBaselineId?: string | null;
   initialJobId?: string | null;
+  entrySource?: "studio_post_apply" | null;
   showBaselineCreationControls?: boolean;
 };
 
@@ -130,6 +133,7 @@ export function BaselineWorkspace({
   initialFetchError,
   initialBaselineId,
   initialJobId,
+  entrySource = null,
   showBaselineCreationControls = true,
 }: BaselineWorkspaceProps) {
   const router = useRouter();
@@ -142,6 +146,7 @@ export function BaselineWorkspace({
     baselineId: string;
     jobId: string;
   } | null>(null);
+  const momentumEntryViewedRef = useRef(false);
 
   useEffect(() => {
     setHasHydrated(true);
@@ -159,6 +164,22 @@ export function BaselineWorkspace({
     if (!baselineId) return true;
     return initialBaselines.some((baseline) => baseline.id === baselineId);
   }, [baselineId, initialBaselines]);
+
+  const selectedBaseline = useMemo(
+    () => initialBaselines.find((baseline) => baseline.id === baselineId) ?? null,
+    [baselineId, initialBaselines],
+  );
+  const isMomentumEntry = entrySource === "studio_post_apply";
+
+  useEffect(() => {
+    if (!isMomentumEntry || momentumEntryViewedRef.current) return;
+    momentumEntryViewedRef.current = true;
+    trackEvent("target_momentum_entry_viewed", {
+      source: "studio_post_apply",
+      baselineId: baselineId && baselineExists ? baselineId : null,
+      jobId: null,
+    });
+  }, [baselineExists, baselineId, isMomentumEntry]);
 
   const targetWorkflowState = useTargetWorkflowState({
     baselineId: baselineId && baselineExists ? baselineId : null,
@@ -210,6 +231,21 @@ export function BaselineWorkspace({
     setNotice(NOTICE_MESSAGE);
   }, [removeParamFromUrl]);
 
+  const handleMomentumJobResolved = useCallback(
+    (resolvedJobId: string) => {
+      const params = new URLSearchParams(searchParams?.toString() ?? "");
+      if (baselineId && baselineExists) {
+        params.set("baselineId", baselineId);
+      }
+      params.set("jobId", resolvedJobId);
+      params.set("entry", "studio_post_apply");
+      const target = buildTargetUrl(params, pathname);
+      router.replace(target);
+      router.refresh();
+    },
+    [baselineExists, baselineId, pathname, router, searchParams],
+  );
+
   useEffect(() => {
     if (notice && baselineId && jobId) {
       setNotice(null);
@@ -218,6 +254,42 @@ export function BaselineWorkspace({
 
   return (
     <div className="space-y-6">
+      {isMomentumEntry ? (
+        <section
+          className="space-y-4 rounded-[28px] border border-cyan-300/20 bg-[linear-gradient(180deg,rgba(8,47,73,0.92),rgba(15,23,42,0.98))] p-6 md:p-8 shadow-[0_20px_70px_rgba(2,6,23,0.45)]"
+          data-testid="target-momentum-hero"
+        >
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200">
+              Next role
+            </p>
+            <h2 className="text-3xl font-semibold tracking-tight text-slate-50 md:text-[36px]">
+              Let's find your next role
+            </h2>
+            <p className="max-w-3xl text-sm leading-7 text-slate-200">
+              Your baseline is ready. Paste the next job and we will score it.
+            </p>
+          </div>
+          {selectedBaseline ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-cyan-100">
+                Baseline locked
+              </span>
+              <span className="text-sm text-slate-200">
+                {selectedBaseline.originalFilename ?? selectedBaseline.id}
+              </span>
+            </div>
+          ) : null}
+          <JobIngestionForm
+            momentumEntry
+            baselineId={baselineId}
+            entrySource="studio_post_apply"
+            autoFocusDescription
+            onResolved={handleMomentumJobResolved}
+            onCancel={() => {}}
+          />
+        </section>
+      ) : null}
       <WorkflowProgressStrip steps={workflowSteps} />
       {notice ? (
         <Alert intent="warning" title="Selection reset">
@@ -226,12 +298,17 @@ export function BaselineWorkspace({
       ) : null}
 
       <div
-        className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.8fr)_minmax(0,1.35fr)_minmax(280px,1fr)]"
+        className={[
+          "grid grid-cols-1 gap-6",
+          isMomentumEntry
+            ? "xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1.1fr)]"
+            : "xl:grid-cols-[minmax(0,1.8fr)_minmax(0,1.35fr)_minmax(280px,1fr)]",
+        ].join(" ")}
         data-testid="target-workspace-layout"
       >
         <section className="space-y-3 xl:min-w-0" data-testid="target-baseline-column">
           <p className="px-1 text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">
-            Baseline
+            {isMomentumEntry ? "Baseline context" : "Baseline"}
           </p>
           <BaselineDashboard
             initialBaselines={initialBaselines}
@@ -250,11 +327,19 @@ export function BaselineWorkspace({
             Job description
           </p>
           <div className="flex h-full flex-col">
-            <JobsHub selectedJobId={jobId} onJobMissing={handleJobMissing} />
+            <JobsHub selectedJobId={jobId} onJobMissing={handleJobMissing} momentumEntry={isMomentumEntry} />
           </div>
         </section>
 
-        <section className="space-y-3 xl:min-w-0" data-testid="target-result-column">
+        <section
+          className={[
+            "space-y-3 xl:min-w-0",
+            isMomentumEntry ? "xl:col-span-2" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          data-testid="target-result-column"
+        >
           <p className="px-1 text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">
             Compatibility result
           </p>
@@ -262,6 +347,7 @@ export function BaselineWorkspace({
             key={`${baselineId ?? "none"}:${jobId ?? "none"}`}
             baselineId={baselineId}
             jobId={jobId}
+            entrySource={entrySource}
             onMatchingScoreChange={setActiveScorePair}
           />
         </section>

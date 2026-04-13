@@ -96,6 +96,8 @@ export default async function TargetPage({ searchParams }: TargetPageProps) {
   const showNewBaselineToast = resolveParam(params.toast) === "new_baseline";
   const selectedBaselineId = resolveParam(params.baselineId);
   const selectedJobId = resolveParam(params.jobId);
+  const entrySource = resolveParam(params.entry);
+  const isMomentumEntry = entrySource === "studio_post_apply";
 
   const cookieStore = await cookies();
   const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
@@ -106,19 +108,32 @@ export default async function TargetPage({ searchParams }: TargetPageProps) {
 
   const { baselines, error: baselineFetchError } = await fetchBaselines();
 
+  const selectedBaseline = selectedBaselineId
+    ? baselines.find((baseline) => baseline.id === selectedBaselineId) ?? null
+    : null;
+
   return (
     <div className="mx-auto w-full max-w-7xl space-y-6">
-      <div className="space-y-2">
+      <div className="space-y-3">
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">
-          Target
+          {isMomentumEntry ? "Next role" : "Target"}
         </p>
         <h1 className="text-3xl font-semibold text-slate-100">
-          Run a compatibility score for a role.
+          {isMomentumEntry ? "Let's find your next role" : "Run a compatibility score for a role."}
         </h1>
         <p className="max-w-3xl text-sm text-slate-300">
-          Select a baseline, add a job description, and generate the score that powers Results,
-          Studio, and the rest of the workflow.
+          {isMomentumEntry
+            ? "Your baseline is ready. Paste the next job and we will score it."
+            : "Select a baseline, add a job description, and generate the score that powers Results, Studio, and the rest of the workflow."}
         </p>
+        {isMomentumEntry && selectedBaseline ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-cyan-100">
+              Baseline ready
+            </span>
+            <span className="text-sm text-slate-200">{selectedBaseline.originalFilename ?? selectedBaseline.id}</span>
+          </div>
+        ) : null}
       </div>
       {showNewBaselineToast ? (
         <Alert intent="success" title="New version available">
@@ -143,6 +158,7 @@ export default async function TargetPage({ searchParams }: TargetPageProps) {
         initialFetchError={baselineFetchError}
         initialBaselineId={selectedBaselineId}
         initialJobId={selectedJobId}
+        entrySource={isMomentumEntry ? "studio_post_apply" : null}
         showBaselineCreationControls={false}
       />
     </div>

@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { CSSProperties, FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { CSSProperties, ClipboardEvent, FormEvent } from "react";
 
 import { Alert } from "@/components/Alert";
 import type { JobDto, JobWarning } from "@/lib/jobs";
 import { ttrComponents, ttrTypography } from "@/app/(app)/ui/ttrStyles";
+import { trackEvent } from "@/src/lib/analytics";
 
 const fieldStyle: CSSProperties = {
   display: "flex",
@@ -70,9 +71,189 @@ const buildApiError = (status: number, data: unknown, fallback: string): ApiErro
 export type JobIngestionFormProps = {
   onResolved: (jobId: string) => void;
   onCancel: () => void;
+  momentumEntry?: boolean;
+  entrySource?: "studio_post_apply" | "generic";
+  baselineId?: string | null;
+  autoFocusDescription?: boolean;
 };
 
-export function JobIngestionForm({ onResolved, onCancel }: JobIngestionFormProps) {
+function MomentumJobIngestionForm({
+  onResolved,
+  onCancel,
+  entrySource = "studio_post_apply",
+  baselineId = null,
+  autoFocusDescription = true,
+}: JobIngestionFormProps) {
+  void onCancel;
+  const [rawDescription, setRawDescription] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
+  const viewedRef = useRef(false);
+  const focusedRef = useRef(false);
+  const pastedRef = useRef(false);
+
+  const recordFocus = () => {
+    if (focusedRef.current) return;
+    focusedRef.current = true;
+    trackEvent("target_job_input_focused", {
+      source: entrySource,
+      baselineId,
+      jobId: null,
+    });
+  };
+
+  useEffect(() => {
+    if (viewedRef.current) return;
+    viewedRef.current = true;
+    trackEvent("target_momentum_entry_viewed", {
+      source: entrySource,
+      baselineId,
+      jobId: null,
+    });
+  }, [baselineId, entrySource]);
+
+  useEffect(() => {
+    if (!autoFocusDescription || focusedRef.current) return;
+    descriptionRef.current?.focus();
+    recordFocus();
+  }, [autoFocusDescription, baselineId, entrySource]);
+
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (pastedRef.current) return;
+    pastedRef.current = true;
+    trackEvent("target_job_pasted", {
+      source: entrySource,
+      baselineId,
+      jobId: null,
+      pastedLength: event.clipboardData.getData("text").length,
+    });
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const description = rawDescription.trim();
+    setError(null);
+    setSuccess(null);
+
+    if (!description) {
+      setError(createClientError("Paste a job description to continue.", "submit_validation"));
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch("/api/jobs", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title: null,
+          company: null,
+          rawDescription: description,
+          sourceUrl: null,
+          responsibilities: undefined,
+          requirements: undefined,
+          jdIngestionMethod: "PASTE",
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (response.status === 401) {
+        window.location.href = "/auth/login";
+        return;
+      }
+
+      if (!response.ok) {
+        setError(buildApiError(response.status, data, "Unable to save job"));
+        return;
+      }
+
+      const jobData = data as JobDto;
+      setSuccess("Job added. Scoring starts now.");
+      trackEvent("target_score_started_from_momentum", {
+        source: "studio_post_apply",
+        baselineId,
+        jobId: jobData.id,
+        inputLength: description.length,
+      });
+      onResolved(jobData.id);
+    } catch {
+      setError(createClientError("Unable to save job right now.", "submit_error"));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <section className="space-y-4 rounded-[28px] border border-cyan-300/20 bg-[linear-gradient(180deg,rgba(8,47,73,0.92),rgba(15,23,42,0.98))] p-5 shadow-[0_20px_70px_rgba(2,6,23,0.45)]">
+      <div className="space-y-2">
+        <p style={ttrTypography.subtleLabel}>NEXT ROLE</p>
+        <h2 style={ttrTypography.h2}>Let us find your next role</h2>
+        <p style={ttrTypography.bodyMuted}>
+          Your baseline is already selected. Paste the next job description and we will score it.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-cyan-100">
+          Baseline locked
+        </span>
+        <span className="text-sm text-slate-200">You only need the next job</span>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div style={fieldStyle}>
+          <label style={ttrComponents.fieldLabel} htmlFor="momentumJobDescription">
+            Job description
+          </label>
+          <textarea
+            ref={descriptionRef}
+            id="momentumJobDescription"
+            value={rawDescription}
+            onChange={(event) => setRawDescription(event.target.value)}
+            onFocus={recordFocus}
+            onPaste={handlePaste}
+            placeholder="Paste the full role description, requirements, and responsibilities."
+            style={{ ...ttrComponents.textArea, minHeight: 220 }}
+            disabled={isSubmitting}
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="submit"
+            disabled={isSubmitting || rawDescription.trim().length === 0}
+            style={{
+              ...ttrComponents.primaryButton,
+              width: "fit-content",
+              padding: "10px 14px",
+              fontSize: 12,
+              opacity: isSubmitting || rawDescription.trim().length === 0 ? 0.7 : 1,
+              cursor: isSubmitting || rawDescription.trim().length === 0 ? "not-allowed" : "pointer",
+            }}
+          >
+            {isSubmitting ? "Analyzing..." : "Analyze next role"}
+          </button>
+        </div>
+
+        {error ? <Alert intent="error" title="Job intake issue">{error.message}</Alert> : null}
+        {success ? <div style={ttrComponents.successBox}>{success}</div> : null}
+      </form>
+    </section>
+  );
+}
+
+export function JobIngestionForm(props: JobIngestionFormProps) {
+  if (props.momentumEntry) {
+    return <MomentumJobIngestionForm {...props} />;
+  }
+
+  const { onResolved, onCancel } = props;
   const [title, setTitle] = useState("");
   const [company, setCompany] = useState("");
   const [rawDescription, setRawDescription] = useState("");

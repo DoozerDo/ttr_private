@@ -33,9 +33,10 @@ function isArchived(job: JobDto): boolean {
 interface JobsHubProps {
   selectedJobId?: string | null;
   onJobMissing?: () => void;
+  momentumEntry?: boolean;
 }
 
-export function JobsHub({ selectedJobId, onJobMissing }: JobsHubProps) {
+export function JobsHub({ selectedJobId, onJobMissing, momentumEntry = false }: JobsHubProps) {
   const [jobs, setJobs] = useState<JobDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -145,15 +146,19 @@ export function JobsHub({ selectedJobId, onJobMissing }: JobsHubProps) {
   return (
     <>
       <SetupModuleCard
-        label="JOB DESCRIPTION"
+        label={momentumEntry ? "RECENT ROLES" : "JOB DESCRIPTION"}
         title=""
-        description="Add a job description to score against your resume."
+        description={
+          momentumEntry
+            ? "Your baseline is already set. Recent roles stay here while you add the next one."
+            : "Add a job description to score against your resume."
+        }
         primaryAction={
-          visibleJobs.length > 0 ? (
+          momentumEntry || visibleJobs.length === 0 ? null : (
             <FormButton variant="secondary" onClick={navigateToAddJob}>
               Add job
             </FormButton>
-          ) : null
+          )
         }
       >
         {error ? (

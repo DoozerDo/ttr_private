@@ -1,5 +1,5 @@
-import { render, renderHook, screen } from "@testing-library/react";
-import { vi } from "vitest";
+import { fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { beforeEach, vi } from "vitest";
 
 import TargetPage from "@/app/(app)/target/page";
 import {
@@ -7,6 +7,8 @@ import {
   useTargetWorkflowState,
 } from "@/app/(app)/baseline/BaselineWorkspace";
 import { WorkspaceRunner } from "@/app/(app)/baseline/_components/WorkspaceRunner";
+import { JobIngestionForm } from "@/app/(app)/jobs/_components/JobIngestionForm";
+import { trackEvent } from "@/src/lib/analytics";
 import { overrideSearchParams, setFetchImplementation } from "./setup";
 
 vi.mock("@/src/lib/analytics", () => ({
@@ -34,6 +36,10 @@ function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
 }
 
 describe("target workflow UI", () => {
+  beforeEach(() => {
+    vi.mocked(trackEvent).mockClear();
+  });
+
   it("derives workflow progress states from the current selection state", () => {
     expect(
       buildTargetWorkflowSteps({
@@ -121,6 +127,22 @@ describe("target workflow UI", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders the momentum first target copy from Studio without resetting the baseline", async () => {
+    overrideSearchParams({
+      baselineId: "base-1",
+      entry: "studio_post_apply",
+    });
+    setFetchImplementation(
+      vi.fn(() => Promise.resolve(createResponse([{ id: "base-1", originalFilename: "resume.pdf" }]))),
+    );
+
+    const element = await TargetPage({ searchParams: { baselineId: "base-1", entry: "studio_post_apply" } });
+    render(element);
+
+    expect(screen.getByRole("heading", { name: "Let's find your next role" })).toBeInTheDocument();
+    expect(screen.getByText("Your baseline is ready. Paste the next job and we will score it.")).toBeInTheDocument();
+  });
+
   it("shows the pre-analysis compatibility placeholder instead of a blank panel", () => {
     render(<WorkspaceRunner baselineId={null} jobId={null} />);
 
@@ -130,6 +152,87 @@ describe("target workflow UI", () => {
     expect(
       screen.getByText("Your score will power Results, Studio, and the rest of the workflow."),
     ).toBeInTheDocument();
+  });
+
+  it("tracks momentum job input focus, paste, and score start when a new role is submitted", async () => {
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url === "/api/jobs" && init?.method === "POST") {
+        return Promise.resolve(
+          createResponse({
+            id: "job-created-1",
+            title: "Support Manager",
+            company: "Acme",
+          }),
+        );
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock as typeof fetchMock);
+
+    const onResolved = vi.fn();
+    render(
+      <JobIngestionForm
+        momentumEntry
+        baselineId="base-1"
+        entrySource="studio_post_apply"
+        autoFocusDescription
+        onResolved={onResolved}
+        onCancel={() => {}}
+      />,
+    );
+
+    const textarea = screen.getByLabelText("Job description");
+    await waitFor(() => expect(textarea).toHaveFocus());
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: () => "Lead support operations with measurable outcomes.",
+      },
+    });
+    fireEvent.change(textarea, {
+      target: { value: "Lead support operations with measurable outcomes." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Analyze next role" }));
+
+    await waitFor(() => {
+      expect(onResolved).toHaveBeenCalledWith("job-created-1");
+    });
+
+    expect(trackEvent).toHaveBeenCalledWith(
+      "target_momentum_entry_viewed",
+      expect.objectContaining({
+        source: "studio_post_apply",
+        baselineId: "base-1",
+        jobId: null,
+      }),
+    );
+    expect(trackEvent).toHaveBeenCalledWith(
+      "target_job_input_focused",
+      expect.objectContaining({
+        source: "studio_post_apply",
+        baselineId: "base-1",
+        jobId: null,
+      }),
+    );
+    expect(trackEvent).toHaveBeenCalledWith(
+      "target_job_pasted",
+      expect.objectContaining({
+        source: "studio_post_apply",
+        baselineId: "base-1",
+        jobId: null,
+        pastedLength: 49,
+      }),
+    );
+    expect(trackEvent).toHaveBeenCalledWith(
+      "target_score_started_from_momentum",
+      expect.objectContaining({
+        source: "studio_post_apply",
+        baselineId: "base-1",
+        jobId: "job-created-1",
+        inputLength: 49,
+      }),
+    );
   });
 
   it("shows the placeholder when a job exists but no valid score is present", () => {

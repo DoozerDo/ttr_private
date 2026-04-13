@@ -36,6 +36,11 @@ export const ANALYTICS_EVENT_NAMES = [
   "application_progress_viewed",
   "application_status_updated",
   "application_created_or_upserted",
+  "target_momentum_entry_viewed",
+  "target_job_input_focused",
+  "target_job_pasted",
+  "target_score_started_from_momentum",
+  "target_auto_score_started",
   "artifact_used_intent",
   "artifact_refine_intent",
   "refinement_started",
@@ -303,6 +308,33 @@ export type AnalyticsEventMap = {
     currentStatus: string;
     created: boolean;
     score: number | null;
+  };
+  target_momentum_entry_viewed: {
+    source: "studio_post_apply" | "generic";
+    baselineId: string | null;
+    jobId: string | null;
+  };
+  target_job_input_focused: {
+    source: "studio_post_apply" | "generic";
+    baselineId: string | null;
+    jobId: string | null;
+  };
+  target_job_pasted: {
+    source: "studio_post_apply" | "generic";
+    baselineId: string | null;
+    jobId: string | null;
+    pastedLength: number;
+  };
+  target_score_started_from_momentum: {
+    source: "studio_post_apply";
+    baselineId: string | null;
+    jobId: string | null;
+    inputLength: number;
+  };
+  target_auto_score_started: {
+    source: "studio_post_apply";
+    baselineId: string | null;
+    jobId: string | null;
   };
   artifact_used_intent: {
     source: "studio" | "unknown";

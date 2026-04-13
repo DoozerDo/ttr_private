@@ -128,6 +128,81 @@ describe("analytics contract", () => {
     );
   });
 
+  it("accepts the target momentum entry events with the route aware payload shapes", async () => {
+    trackEvent(
+      "target_momentum_entry_viewed",
+      {
+        source: "studio_post_apply",
+        baselineId: "base-1",
+        jobId: null,
+      },
+      { userId: "user-1" },
+    );
+    trackEvent(
+      "target_job_input_focused",
+      {
+        source: "studio_post_apply",
+        baselineId: "base-1",
+        jobId: null,
+      },
+      { userId: "user-1" },
+    );
+    trackEvent(
+      "target_job_pasted",
+      {
+        source: "studio_post_apply",
+        baselineId: "base-1",
+        jobId: null,
+        pastedLength: 42,
+      },
+      { userId: "user-1" },
+    );
+    trackEvent(
+      "target_score_started_from_momentum",
+      {
+        source: "studio_post_apply",
+        baselineId: "base-1",
+        jobId: "job-1",
+        inputLength: 42,
+      },
+      { userId: "user-1" },
+    );
+    trackEvent(
+      "target_auto_score_started",
+      {
+        source: "studio_post_apply",
+        baselineId: "base-1",
+        jobId: "job-1",
+      },
+      { userId: "user-1" },
+    );
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledTimes(5);
+    });
+
+    const bodies = vi.mocked(fetch).mock.calls.map(([, init]) =>
+      JSON.parse(String(init?.body ?? "{}")),
+    );
+
+    expect(bodies.map((body) => body.eventName)).toEqual(
+      expect.arrayContaining([
+        "target_momentum_entry_viewed",
+        "target_job_input_focused",
+        "target_job_pasted",
+        "target_score_started_from_momentum",
+        "target_auto_score_started",
+      ]),
+    );
+    expect(bodies[0].properties).toEqual(
+      expect.objectContaining({
+        source: "studio_post_apply",
+        baselineId: "base-1",
+        jobId: null,
+      }),
+    );
+  });
+
   it("accepts studio_auto_generation_started with the instant draft payload shape", async () => {
     trackEvent(
       "studio_auto_generation_started",

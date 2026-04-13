@@ -49,6 +49,7 @@ type ProgressState = {
 type WorkspaceRunnerProps = {
   baselineId: string | null;
   jobId: string | null;
+  entrySource?: "studio_post_apply" | null;
   onProgressStateChange?: (state: ProgressState) => void;
   onMatchingScoreChange?: (pair: { baselineId: string; jobId: string } | null) => void;
 };
@@ -722,6 +723,7 @@ const parseAnalysisRunResponse = async (
 export function WorkspaceRunner({
   baselineId,
   jobId,
+  entrySource = null,
   onProgressStateChange,
   onMatchingScoreChange,
 }: WorkspaceRunnerProps) {
@@ -748,6 +750,7 @@ export function WorkspaceRunner({
   const autoRunCombinationRef = useRef<string | null>(null);
   const autoRunCompletionTimerRef = useRef<number | null>(null);
   const autoRunInitiatedRef = useRef(false);
+  const autoScoreStartEventKeyRef = useRef<string | null>(null);
   const pendingCompletionKeyRef = useRef<string | null>(null);
   const stateViewedEventKeyRef = useRef<string | null>(null);
   const autoRunTriggerTimerRef = useRef<number | null>(null);
@@ -1969,6 +1972,17 @@ const showInterruptionState =
       }
       autoRunCombinationRef.current = pairKey;
       autoRunInitiatedRef.current = true;
+      if (entrySource === "studio_post_apply") {
+        const eventKey = `${pairKey}:auto_score_start`;
+        if (autoScoreStartEventKeyRef.current !== eventKey) {
+          autoScoreStartEventKeyRef.current = eventKey;
+          trackEvent("target_auto_score_started", {
+            source: "studio_post_apply",
+            baselineId: selectedBaselineId,
+            jobId: selectedJobId,
+          });
+        }
+      }
       void runAssessment({ reason: "initial_auto" });
     }, AUTO_RUN_DELAY_MS);
 
@@ -1985,6 +1999,7 @@ const showInterruptionState =
     runAssessment,
     selectedBaselineId,
     selectedJobId,
+    entrySource,
   ]);
 
   useEffect(() => {

@@ -406,7 +406,7 @@ describe("Studio page UX", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Analyze another role" }));
-    expect(mockRouterPush).toHaveBeenCalledWith("/target?baselineId=base-1&jobId=job-1");
+    expect(mockRouterPush).toHaveBeenCalledWith("/target?baselineId=base-1&entry=studio_post_apply");
 
     await waitFor(() => {
       const analyticsBodies = fetchMock.mock.calls

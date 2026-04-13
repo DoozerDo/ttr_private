@@ -2345,12 +2345,10 @@ export default function StudioPage() {
     if (effectiveBaselineId) {
       params.set("baselineId", effectiveBaselineId);
     }
-    if (effectiveJobId) {
-      params.set("jobId", effectiveJobId);
-    }
+    params.set("entry", "studio_post_apply");
     const query = params.toString();
     return query ? `/target?${query}` : "/target";
-  }, [effectiveBaselineId, effectiveJobId]);
+  }, [effectiveBaselineId]);
 
   useEffect(() => {
     if (!studioArtifactsHydrated) {

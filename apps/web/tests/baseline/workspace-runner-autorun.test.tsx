@@ -1,7 +1,12 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
-import { vi } from "vitest";
+import { beforeEach, vi } from "vitest";
 
 import { WorkspaceRunner } from "@/app/(app)/baseline/_components/WorkspaceRunner";
+import { trackEvent } from "@/src/lib/analytics";
+
+vi.mock("@/src/lib/analytics", () => ({
+  trackEvent: vi.fn(),
+}));
 
 function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   const stringBody =
@@ -30,6 +35,10 @@ function createDeferred<T>() {
 }
 
 describe("WorkspaceRunner autorun lifecycle", () => {
+  beforeEach(() => {
+    vi.mocked(trackEvent).mockClear();
+  });
+
   it("does not interrupt a stable initial scoring pair across rerenders", async () => {
     const originalFetch = globalThis.fetch;
     const runCallCounts: Record<string, number> = {};
@@ -57,15 +66,27 @@ describe("WorkspaceRunner autorun lifecycle", () => {
     (globalThis.fetch as typeof window.fetch) = fetchMock as typeof window.fetch;
 
     try {
-      const { rerender } = render(<WorkspaceRunner baselineId="base-a" jobId="job-a" />);
+      const { rerender } = render(
+        <WorkspaceRunner baselineId="base-a" jobId="job-a" entrySource="studio_post_apply" />,
+      );
 
       await act(async () => {
-        rerender(<WorkspaceRunner baselineId="base-a" jobId="job-a" />);
+        rerender(<WorkspaceRunner baselineId="base-a" jobId="job-a" entrySource="studio_post_apply" />);
       });
 
       await waitFor(() => expect(runCallCounts["base-a:job-a"]).toBe(1), { timeout: 5000 });
       await waitFor(() => expect(screen.getByText("Strong Match")).toBeInTheDocument(), {
         timeout: 5000,
+      });
+      await waitFor(() => {
+        expect(trackEvent).toHaveBeenCalledWith(
+          "target_auto_score_started",
+          expect.objectContaining({
+            source: "studio_post_apply",
+            baselineId: "base-a",
+            jobId: "job-a",
+          }),
+        );
       });
       expect(screen.queryByText("Analysis restarted due to changes")).not.toBeInTheDocument();
       expect(screen.queryByText("Updating your score")).not.toBeInTheDocument();
