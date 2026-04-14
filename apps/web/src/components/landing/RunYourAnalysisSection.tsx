@@ -67,6 +67,11 @@ export function RunYourAnalysisSection({
   };
 
   const handleAnalyzeClick = async () => {
+    console.log("CHECK_FIT_CLICK_HANDLER_ENTERED");
+    if (!jdReady || isPreviewLoading) {
+      console.log("CHECK_FIT_CLICK_BLOCKED", { jdReady, isPreviewLoading });
+      return;
+    }
     try {
       await onAnalyzeCompatibility();
     } catch (error) {
@@ -137,7 +142,7 @@ export function RunYourAnalysisSection({
                   ref={runButtonRef}
                   type="button"
                   onClick={handleAnalyzeClick}
-                  disabled={!jdReady || isPreviewLoading}
+                  aria-disabled={!jdReady || isPreviewLoading}
                   data-testid="landing-primary-action"
                   className={`inline-flex w-full items-center justify-center rounded-lg px-4 py-3 text-sm font-semibold transition ${
                     jdReady
