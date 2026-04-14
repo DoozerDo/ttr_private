@@ -9,7 +9,7 @@ type RunYourAnalysisSectionProps = {
   resumeFilename: string | null;
   onResumeUploadInitiated: () => void;
   onResumeFileSelected: (file: File | null) => void;
-  onAnalyzeCompatibility: () => void;
+  onAnalyzeCompatibility: () => void | Promise<void>;
   isPreviewLoading: boolean;
   jdReady: boolean;
   previewError: string | null;
@@ -64,6 +64,14 @@ export function RunYourAnalysisSection({
   const handleUploadClick = () => {
     onResumeUploadInitiated();
     fileInputRef.current?.click();
+  };
+
+  const handleAnalyzeClick = async () => {
+    try {
+      await onAnalyzeCompatibility();
+    } catch (error) {
+      console.error("[landing-checkfit] analyze click failed", error);
+    }
   };
 
   return (
@@ -128,7 +136,7 @@ export function RunYourAnalysisSection({
                 <button
                   ref={runButtonRef}
                   type="button"
-                  onClick={() => onAnalyzeCompatibility()}
+                  onClick={handleAnalyzeClick}
                   disabled={!jdReady || isPreviewLoading}
                   data-testid="landing-primary-action"
                   className={`inline-flex w-full items-center justify-center rounded-lg px-4 py-3 text-sm font-semibold transition ${
