@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
 import cookieParser from 'cookie-parser';
+import express from 'express';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { requestLoggerMiddleware } from './common/middleware/request-logger.middleware';
 import { requestTimeoutMiddleware } from './common/middleware/request-timeout.middleware';
@@ -84,7 +85,11 @@ async function bootstrap() {
     console.error('uncaughtException:', err);
   });
 
-  const app = await NestFactory.create(AppModule);
+  // Override Nest/Express default body-parser limits (100kb) to support realistic
+  // resume + job-description preview payloads without triggering PayloadTooLargeError.
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
+  app.use(express.json({ limit: '2mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '2mb' }));
   const config = app.get(ConfigService);
   const dataSource = app.get(DataSource);
   initSentry(config);
