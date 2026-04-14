@@ -11,6 +11,38 @@ const LANDING_ANALYSIS_COUNTER_KEY = "ttr-landing-analysis-number";
 const PREVIEW_MAX_TOTAL_CHARS = 100_000;
 const PREVIEW_DEBUG_FLAG = "debugCheckFit";
 
+function sanitizeUnicodeForJsonTransport(value: string): string {
+  // Replace lone surrogate code units with U+FFFD to avoid runtime failures when the
+  // browser encodes request bodies (some environments throw during fetch dispatch).
+  let output = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    const isHighSurrogate = codeUnit >= 0xd800 && codeUnit <= 0xdbff;
+    const isLowSurrogate = codeUnit >= 0xdc00 && codeUnit <= 0xdfff;
+
+    if (!isHighSurrogate && !isLowSurrogate) {
+      output += value[index];
+      continue;
+    }
+
+    if (isHighSurrogate) {
+      const nextCodeUnit = index + 1 < value.length ? value.charCodeAt(index + 1) : 0;
+      const nextIsLowSurrogate = nextCodeUnit >= 0xdc00 && nextCodeUnit <= 0xdfff;
+      if (nextIsLowSurrogate) {
+        output += value.slice(index, index + 2);
+        index += 1;
+        continue;
+      }
+      output += "\uFFFD";
+      continue;
+    }
+
+    // Lone low surrogate.
+    output += "\uFFFD";
+  }
+  return output;
+}
+
 function isPreviewDebugEnabled() {
   if (typeof window === "undefined") {
     return false;
@@ -83,8 +115,8 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
       const debug = isPreviewDebugEnabled();
       const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
 
-      const normalizedResumeText = nextResumeText.trim();
-      const normalizedJobDescriptionText = nextJobDescription.trim();
+      const normalizedResumeText = sanitizeUnicodeForJsonTransport(nextResumeText.trim());
+      const normalizedJobDescriptionText = sanitizeUnicodeForJsonTransport(nextJobDescription.trim());
 
       // The API enforces a total character limit; protect the client from constructing
       // overly large request bodies (which can fail before dispatch in some browsers).
@@ -102,41 +134,59 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
           jobDescriptionText: normalizedJobDescriptionText,
           mode,
         });
-      } catch (error) {
+
+        if (debug && totalChars > PREVIEW_MAX_TOTAL_CHARS) {
+          console.info("[landing-checkfit] payload capped to API limit", {
+            isAuthenticated,
+            mode,
+            resumeLength: normalizedResumeText.length,
+            resumeBudget,
+            cappedResumeLength: cappedResumeText.length,
+            jobDescriptionLength: normalizedJobDescriptionText.length,
+            totalChars,
+          });
+        }
+
         if (debug) {
-          console.info("[landing-checkfit] failed to serialize request body", {
+          console.info("[landing-checkfit] dispatch preview request", {
+            isAuthenticated,
+            mode,
+            hasResume: Boolean(cappedResumeText),
+            resumeLength: normalizedResumeText.length,
+            cappedResumeLength: cappedResumeText.length,
+            jobDescriptionLength: normalizedJobDescriptionText.length,
+            totalChars,
+          });
+        }
+      } catch (error) {
+        console.error("[landing-checkfit] pre-dispatch failure", error);
+        if (debug) {
+          console.info("[landing-checkfit] pre-dispatch context", {
             isAuthenticated,
             mode,
             resumeLength: normalizedResumeText.length,
             jobDescriptionLength: normalizedJobDescriptionText.length,
             totalChars,
-            error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
           });
         }
-        // Fall back to JD-only preview instead of silently no-op'ing.
+        // Preserve existing behavior: attempt JD-only preview if serialization fails.
         body = JSON.stringify({
           jobDescriptionText: normalizedJobDescriptionText,
           mode,
         });
       }
 
-      if (debug && totalChars > PREVIEW_MAX_TOTAL_CHARS) {
-        console.info("[landing-checkfit] payload capped to API limit", {
-          isAuthenticated,
-          mode,
-          resumeLength: normalizedResumeText.length,
-          resumeBudget,
-          cappedResumeLength: cappedResumeText.length,
-          jobDescriptionLength: normalizedJobDescriptionText.length,
-          totalChars,
+      let response: Response;
+      try {
+        response = await fetch("/api/preview/compatibility-score", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
         });
+      } catch (error) {
+        console.error("[landing-checkfit] preview request dispatch failed", error);
+        throw error;
       }
-
-      const response = await fetch("/api/preview/compatibility-score", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body,
-      });
 
       if (!response.ok) {
         const raw = await response.text().catch(() => "");
