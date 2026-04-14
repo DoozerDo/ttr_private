@@ -33,7 +33,7 @@ export function initSentry(config: ConfigService) {
     return;
   }
 
-  const client = getSentryClient();
+  const client = sentryClient;
   if (!client) {
     return;
   }
@@ -54,7 +54,7 @@ export async function captureSupportEvent(
   if (!sentryInitialized) {
     return null;
   }
-  const client = getSentryClient();
+  const client = sentryClient;
   if (!client) {
     return null;
   }

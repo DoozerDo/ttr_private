@@ -2372,7 +2372,12 @@ export class AnalysisService {
       status: 'ok',
       fit_score: finalScore,
       overall_score: finalScore,
-      verdict: responseVerdict,
+      verdict:
+        responseVerdict === "APPLY"
+          ? "Apply"
+          : responseVerdict === "CONSIDER"
+          ? "Consider"
+          : "Skip",
       breakdown,
       strengths,
       gaps,
@@ -3401,7 +3406,12 @@ export class AnalysisService {
         status: 'ok',
         fit_score: finalScore,
         overall_score: finalScore,
-        verdict: responseVerdict,
+        verdict:
+          responseVerdict === "APPLY"
+            ? "Apply"
+            : responseVerdict === "CONSIDER"
+            ? "Consider"
+            : "Skip",
         breakdown,
         strengths,
         gaps,

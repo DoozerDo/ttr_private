@@ -224,6 +224,10 @@ export function extractClaimUnitsFromSections(
 
       if (!integrityValid) continue;
 
+      if (!candidate.sourceType) {
+        continue;
+      }
+
       units.push({
         text: normalized,
         claim: {
