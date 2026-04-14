@@ -180,16 +180,19 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
 
         if (!response.ok) {
           const message =
-            payload?.message ?? "Support service is unavailable right now. You can try again later.";
+            payload && "message" in payload
+              ? payload.message ?? "Support service is unavailable right now. You can try again later."
+              : "Support service is unavailable right now. You can try again later.";
           setAvailability({
             kind: "service_unavailable",
             message,
-            supportPath: payload?.supportPath ?? "/support/history",
+            supportPath:
+              payload && "supportPath" in payload ? payload.supportPath ?? "/support/history" : "/support/history",
           });
           return;
         }
 
-        if (payload?.githubConfigured === false) {
+        if (payload && "githubConfigured" in payload && payload.githubConfigured === false) {
           setAvailability({
             kind: "disabled",
             message: DEFAULT_DISABLED_MESSAGE,
@@ -267,6 +270,12 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
       }
 
       if (availability.kind !== "ready") {
+        if (availability.kind === "checking") {
+          setSubmitState("service_unavailable");
+          setStatusMessage(DEFAULT_SERVICE_UNAVAILABLE_MESSAGE);
+          setSupportFallbackPath("/support/history");
+          return;
+        }
         setSubmitState(availability.kind === "disabled" ? "disabled" : "service_unavailable");
         setStatusMessage(availability.message);
         setSupportFallbackPath(availability.supportPath);
@@ -306,7 +315,11 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
 
         if (response.ok) {
           setSubmitState("success");
-          setStatusMessage(payload?.message || "Thanks. Your report was submitted successfully.");
+          setStatusMessage(
+            payload && "message" in payload && payload.message
+              ? payload.message
+              : "Thanks. Your report was submitted successfully.",
+          );
           setCreatedReportId(payload && "reportId" in payload ? payload.reportId : null);
           setWhatHappened("");
           setDetails("");
@@ -316,9 +329,10 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
           return;
         }
 
-        const supportPath = payload?.supportPath ?? "/support/history";
+        const supportPath =
+          payload && "supportPath" in payload ? payload.supportPath ?? "/support/history" : "/support/history";
         const message =
-          payload?.message ??
+          (payload && "message" in payload ? payload.message : undefined) ??
           (response.status === 503
             ? DEFAULT_SERVICE_UNAVAILABLE_MESSAGE
             : DEFAULT_RETRYABLE_MESSAGE);
@@ -332,7 +346,8 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
 
         if (
           response.status === 503 &&
-          (payload?.status === "configuration_missing" || payload?.code === "support_config_unavailable")
+          (payload?.status === "configuration_missing" ||
+            (payload && "code" in payload ? payload.code : undefined) === "support_config_unavailable")
         ) {
           setSubmitState("disabled");
           setStatusMessage(message || DEFAULT_DISABLED_MESSAGE);
@@ -340,7 +355,11 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
           return;
         }
 
-        if (response.status === 503 || payload?.status === "service_unavailable" || payload?.code === "service_unavailable") {
+        if (
+          response.status === 503 ||
+          payload?.status === "service_unavailable" ||
+          (payload && "code" in payload ? payload.code : undefined) === "service_unavailable"
+        ) {
           setSubmitState("service_unavailable");
           setStatusMessage(message || DEFAULT_SERVICE_UNAVAILABLE_MESSAGE);
           setSupportFallbackPath(supportPath);

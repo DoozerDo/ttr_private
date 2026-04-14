@@ -240,7 +240,7 @@ export function buildProductDecisionState(
   });
 
   const canonicalDecision = resolveCanonicalState({
-    surface: input.surface,
+    surface: "studio",
     baselineId: input.baselineId,
     jobId: input.jobId,
     score,
@@ -248,16 +248,14 @@ export function buildProductDecisionState(
     productReadiness,
     fitReviewHref: routes.fitReviewHref,
     resultsHref: routes.resultsHref,
-    studioHref: routes.studioHref,
     canGenerateDocuments: input.canGenerateDocuments ?? productReadiness.canOpenStudio,
-    forceFitReview: input.forceFitReview,
     persistedAssessmentId: input.persistedAssessmentId ?? null,
     analysisCandidates: input.analysisCandidates,
     scoreCandidates: input.scoreCandidates ?? [{ source: "primary", value: score }],
   });
-  const renderedGenerationReadiness =
+  const renderedGenerationReadiness: GenerationReadiness =
     input.surface === "results"
-      ? {
+      ? ({
           ...decisionGenerationReadiness,
           status:
             canonicalDecision.readinessState === "READY"
@@ -277,7 +275,7 @@ export function buildProductDecisionState(
             canonicalDecision.readinessState === "DRAFT"
               ? "Your materials are ready to generate now. Review them in Studio before applying."
               : "Complete Fit Review to clarify the evidence gaps below.",
-        }
+        } satisfies GenerationReadiness)
       : generationReadiness;
 
   return {
