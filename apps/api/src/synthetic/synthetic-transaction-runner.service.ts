@@ -6,6 +6,7 @@ import type {
   SyntheticGenerationBaselineFixture,
   SyntheticGenerationJobFixture,
   SyntheticGenerationScenario,
+  SyntheticGenerationResult,
   SyntheticGenerationSuiteResult,
 } from "./generation/synthetic-generation.types";
 import type { SyntheticCleanupRun } from "./synthetic-cleanup-run.entity";
@@ -156,13 +157,32 @@ export class SyntheticTransactionRunnerService {
       return emptyTransactionResult();
     }
 
+    const {
+      syntheticRunRepository,
+      userRepository,
+      jobsService,
+      analysisService,
+      resumeService,
+      coverLettersService,
+    } = this.deps;
+    if (
+      !syntheticRunRepository ||
+      !userRepository ||
+      !jobsService ||
+      !analysisService ||
+      !resumeService ||
+      !coverLettersService
+    ) {
+      throw new Error("SyntheticTransactionRunnerService dependencies not fully configured");
+    }
+
     const stepResults: SyntheticTransactionResult["stepResults"] = [];
     const push = (step: SyntheticTransactionResult["stepResults"][number]) => {
       stepResults.push(step);
     };
 
-    const runLog = await this.deps.syntheticRunRepository.save(
-      this.deps.syntheticRunRepository.create({
+    const runLog = await syntheticRunRepository.save(
+      syntheticRunRepository.create({
         syntheticRunId: `core_loop_smoke_${Date.now()}`,
         startedAt,
         status: "running",
@@ -171,10 +191,7 @@ export class SyntheticTransactionRunnerService {
     const syntheticRunId = runLog.syntheticRunId ?? runLog.id ?? "run-id";
 
     const finalize = async (status: SyntheticTransactionResult["status"], errorMessage: string | null) => {
-      await this.deps?.syntheticRunRepository?.update?.(
-        runLog.id,
-        { status },
-      );
+      await syntheticRunRepository.update(runLog.id, { status });
       const finishedAt = nowIso();
       return {
         status,
@@ -190,7 +207,7 @@ export class SyntheticTransactionRunnerService {
     try {
       const user = await this.resolveOrCreateSyntheticUser();
       push({ step: "resolve_synthetic_user", status: "succeeded" });
-      await this.deps.userRepository.findOneOrFail({ where: { id: user.id } });
+      await userRepository.findOneOrFail({ where: { id: user.id } });
 
       const baseline = await this.resolveOrCreateBaselineFixture(user.id, {
         scenarioKey: "core_loop_smoke",
@@ -199,14 +216,13 @@ export class SyntheticTransactionRunnerService {
       });
       push({ step: "resolve_baseline_fixture", status: "succeeded" });
 
-      const createdJob = await this.deps.jobsService.createJob(user.id, { isSynthetic: true });
+      const createdJob = await jobsService.createJob(user.id, { isSynthetic: true });
       const jobId = createdJob?.job?.id ?? createdJob?.id ?? "job-1";
       push({ step: "create_job", status: "succeeded" });
 
-      const assessment = await this.deps.analysisService.runFitAssessment(
+      const assessment = await analysisService.runFitAssessment(
         user.id,
         { jobId, baselineId: baseline.id },
-        { isSynthetic: true },
       );
       if (!assessment || assessment.status !== "ok") {
         push({ step: "run_fit_assessment", status: "failed", errorMessage: String(assessment?.status ?? "unknown") });
@@ -214,7 +230,7 @@ export class SyntheticTransactionRunnerService {
       }
       push({ step: "run_fit_assessment", status: "succeeded" });
 
-      const resume = await (this.deps.resumeService as any).generateResume(
+      const resume = await (resumeService as any).generateResume(
         user.id,
         { baselineId: baseline.id, jobId },
         undefined,
@@ -226,7 +242,7 @@ export class SyntheticTransactionRunnerService {
       }
       push({ step: "generate_resume_preview", status: "succeeded" });
 
-      const coverLetter = await (this.deps.coverLettersService as any).generateCoverLetter(
+      const coverLetter = await (coverLettersService as any).generateCoverLetter(
         user.id,
         { baselineId: baseline.id, jobId },
         { isSynthetic: true },
@@ -268,21 +284,31 @@ export class SyntheticTransactionRunnerService {
       return emptySuiteResult();
     }
 
-    const runLog = await this.deps.syntheticRunRepository.save(
-      this.deps.syntheticRunRepository.create({
+    const {
+      syntheticRunRepository,
+      analysisService,
+      resumeService,
+      coverLettersService,
+    } = this.deps;
+    if (!syntheticRunRepository || !analysisService || !resumeService || !coverLettersService) {
+      throw new Error("SyntheticTransactionRunnerService dependencies not fully configured");
+    }
+
+    const runLog = await syntheticRunRepository.save(
+      syntheticRunRepository.create({
         syntheticRunId: `synthetic-${Date.now()}`,
         startedAt,
         status: "running",
       }),
     );
 
-    const scenarioResults = [];
+    const scenarioResults: SyntheticGenerationResult[] = [];
     for (const bundle of bundles) {
       const user = await this.resolveOrCreateSyntheticUser();
       const baseline = await this.resolveOrCreateSyntheticBaselineFixture(user.id, bundle.baseline);
       const job = await this.resolveOrCreateSyntheticJobFixture(user.id, bundle.job);
 
-      const assessment = await this.deps.analysisService.runFitAssessment(user.id, { jobId: job.id, baselineId: baseline.id });
+      const assessment = await analysisService.runFitAssessment(user.id, { jobId: job.id, baselineId: baseline.id });
       const plan = buildDocumentStrategyPlan({
         fitScore: assessment?.score ?? null,
         jobTitle: job.title,
@@ -320,12 +346,12 @@ export class SyntheticTransactionRunnerService {
         },
       };
 
-      const resumeResult = await this.deps.resumeService.generateResume(user.id, {
+      const resumeResult = await resumeService.generateResume(user.id, {
         baselineId: baseline.id,
         jobId: job.id,
         documentStrategyPlan: harnessPlan,
       });
-      const coverLetterResult = await this.deps.coverLettersService.generateCoverLetter(user.id, {
+      const coverLetterResult = await coverLettersService.generateCoverLetter(user.id, {
         baselineId: baseline.id,
         jobId: job.id,
         documentStrategyPlan: harnessPlan,
@@ -375,7 +401,7 @@ export class SyntheticTransactionRunnerService {
       errorMessage: null,
     };
 
-    await this.deps.syntheticRunRepository.update({ id: runLog.id }, { status: suite.status, finishedAt });
+    await syntheticRunRepository.update({ id: runLog.id }, { status: suite.status, finishedAt });
     return suite;
   }
 
