@@ -78,7 +78,7 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
   const handleAnalyzeCompatibility = useCallback(
     async (jobDescriptionOverride?: string) => {
       if (!isAuthenticated) {
-        await router.push(`/auth/signup?next=${encodeURIComponent("/baseline")}`);
+        router.push(`/auth/signup?next=${encodeURIComponent("/baseline")}`);
         return;
       }
 
