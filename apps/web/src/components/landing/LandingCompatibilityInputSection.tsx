@@ -77,11 +77,6 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
 
   const handleAnalyzeCompatibility = useCallback(
     async (jobDescriptionOverride?: string) => {
-      if (!isAuthenticated) {
-        router.push(`/auth/signup?next=${encodeURIComponent("/baseline")}`);
-        return;
-      }
-
       const nextJobDescription =
         (jobDescriptionOverride ?? jobDescription).trim() || defaultHeroJobDescription;
       const normalizedResumeText = resumeText.trim();
@@ -116,6 +111,12 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
       try {
         scoredValue = await requestPreviewScore(normalizedResumeText, nextJobDescription, "final-preview");
       } catch {
+        if (!isAuthenticated) {
+          router.push(`/auth/signup?next=${encodeURIComponent("/baseline")}`);
+          setIsFinalPreviewLoading(false);
+          return;
+        }
+
         setPreviewError("Preview is temporarily unavailable. Please try again.");
         setIsFinalPreviewLoading(false);
         return;

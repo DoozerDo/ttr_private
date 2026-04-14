@@ -36,10 +36,23 @@ describe("Landing conversion pass", () => {
     expect(screen.getAllByTestId("landing-primary-action")).toHaveLength(1);
   });
 
-  it("redirects unauthenticated Check fit clicks to auth without firing the preview request", async () => {
+  it("allows unauthenticated users to run the landing preview score without redirecting to auth", async () => {
     vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
     const fetchSpy = vi.spyOn(globalThis, "fetch" as any);
     pushMock.mockClear();
+    fetchSpy.mockImplementation(async (input: any) => {
+      const url = String(input);
+      if (url.includes("/api/preview/compatibility-score")) {
+        return new Response(JSON.stringify({ score: 55 }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
 
     render(<LandingPage isAuthenticated={false} />);
 
@@ -53,8 +66,8 @@ describe("Landing conversion pass", () => {
       fetchSpy.mock.calls.some((call) =>
         String(call[0]).includes("/api/preview/compatibility-score"),
       ),
-    ).toBe(false);
-    expect(pushMock).toHaveBeenCalledWith("/auth/signup?next=%2Fbaseline");
+    ).toBe(true);
+    expect(pushMock).not.toHaveBeenCalled();
 
     fetchSpy.mockRestore();
   });
