@@ -19,9 +19,12 @@ import { Job } from '../jobs/job.entity';
 import { JobsModule } from '../jobs/jobs.module';
 import { OpportunitiesModule } from '../opportunities/opportunities.module';
 import { Opportunity } from '../opportunities/opportunity.entity';
+import { OpportunitiesService } from '../opportunities/opportunities.service';
 import { ResumeModule } from '../resume/resume.module';
+import { ResumeService } from '../resume/resume.service';
 import { User } from '../users/user.entity';
 import { UsersModule } from '../users/users.module';
+import { UsersService } from '../users/users.service';
 import { SyntheticCleanupController } from './synthetic-cleanup.controller';
 import { SyntheticCleanupRun } from './synthetic-cleanup-run.entity';
 import { SyntheticCleanupScheduler } from './synthetic-cleanup.scheduler';
@@ -31,9 +34,14 @@ import { SyntheticReliabilityController } from './synthetic-reliability.controll
 import { SyntheticIngestGuard } from './synthetic-ingest.guard';
 import { SyntheticReliabilityService } from './synthetic-reliability.service';
 import { SyntheticUserTokenLinkService } from './synthetic-user-token-link.service';
-import { SyntheticTransactionRunnerService } from './synthetic-transaction-runner.service';
+import { SYNTHETIC_TRANSACTION_RUNNER_DEPS, SyntheticTransactionRunnerService } from './synthetic-transaction-runner.service';
 import { SyntheticTransactionsController } from './synthetic-transactions.controller';
 import { UserToken } from '../auth/user-token.entity';
+import { JobsService } from '../jobs/jobs.service';
+import { AnalysisService } from '../analysis/analysis.service';
+import { CoverLettersService } from '../cover-letters/cover-letters.service';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import type { Repository } from 'typeorm';
 
 @Module({
   imports: [
@@ -72,6 +80,65 @@ import { UserToken } from '../auth/user-token.entity';
     SyntheticReliabilityService,
     SyntheticUserTokenLinkService,
     SyntheticCleanupScheduler,
+    {
+      provide: SYNTHETIC_TRANSACTION_RUNNER_DEPS,
+      useFactory: (
+        usersService: UsersService,
+        jobsService: JobsService,
+        analysisService: AnalysisService,
+        resumeService: ResumeService,
+        coverLettersService: CoverLettersService,
+        opportunitiesService: OpportunitiesService | undefined,
+        userRepository: Repository<User>,
+        baselineRepository: Repository<Baseline>,
+        baselineSectionRepository: Repository<BaselineSection>,
+        baselineVersionRepository: Repository<BaselineVersion>,
+        baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
+        jobRepository: Repository<Job>,
+        fitAssessmentRepository: Repository<FitAssessment>,
+        coverLetterRepository: Repository<CoverLetter>,
+        opportunityRepository: Repository<Opportunity>,
+        applicationRepository: Repository<Application>,
+        syntheticRunRepository: Repository<SyntheticCleanupRun>,
+      ) => ({
+        usersService,
+        jobsService,
+        analysisService,
+        resumeService,
+        coverLettersService,
+        opportunitiesService,
+        userRepository,
+        baselineRepository,
+        baselineSectionRepository,
+        baselineVersionRepository,
+        baselineBlockPolicyRepository,
+        jobRepository,
+        fitAssessmentRepository,
+        coverLetterRepository,
+        opportunityRepository,
+        applicationRepository,
+        syntheticRunRepository,
+      }),
+      inject: [
+        UsersService,
+        JobsService,
+        AnalysisService,
+        ResumeService,
+        CoverLettersService,
+        { token: OpportunitiesService, optional: true } as any,
+        getRepositoryToken(User),
+        getRepositoryToken(Baseline),
+        getRepositoryToken(BaselineSection),
+        getRepositoryToken(BaselineVersion),
+        getRepositoryToken(BaselineBlockPolicy),
+        getRepositoryToken(Job),
+        getRepositoryToken(FitAssessment),
+        getRepositoryToken(CoverLetter),
+        getRepositoryToken(Opportunity),
+        getRepositoryToken(Application),
+        getRepositoryToken(SyntheticCleanupRun),
+      ],
+    },
     SyntheticTransactionRunnerService,
   ],
   exports: [

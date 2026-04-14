@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { buildDocumentStrategyPlan } from "../shared/documentStrategyPlan";
 import { evaluateSyntheticGenerationScenario } from "./generation/synthetic-generation.evaluator";
 import { listSyntheticGenerationScenarioBundles } from "./generation/synthetic-generation.fixtures";
@@ -10,6 +10,8 @@ import type {
   SyntheticGenerationSuiteResult,
 } from "./generation/synthetic-generation.types";
 import type { SyntheticCleanupRun } from "./synthetic-cleanup-run.entity";
+
+export const SYNTHETIC_TRANSACTION_RUNNER_DEPS = "SYNTHETIC_TRANSACTION_RUNNER_DEPS";
 
 export type SyntheticTransactionResult = {
   status: "succeeded" | "failed";
@@ -87,7 +89,11 @@ function emptyTransactionResult(): SyntheticTransactionResult {
 
 @Injectable()
 export class SyntheticTransactionRunnerService {
-  constructor(private readonly deps?: Partial<Deps>) {}
+  constructor(
+    @Optional()
+    @Inject(SYNTHETIC_TRANSACTION_RUNNER_DEPS)
+    private readonly deps?: Partial<Deps>,
+  ) {}
 
   // These helpers are intentionally instance methods so tests can spy on them.
   // The harness spec overrides them to isolate suite behavior.
