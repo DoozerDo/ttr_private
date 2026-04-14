@@ -2,7 +2,7 @@ import { FitScoreEngine } from './fit-score.engine';
 import type { FitScoreInput } from './fit-score.types';
 
 const baseSentence =
-  'Lead enterprise SaaS security and customer experience programs, coach cross-functional stakeholders, and scale strategy through AWS, ServiceNow, and automation.';
+  'Lead and scale support operations with SLAs, CSAT, first response time, time to resolution, backlog management, QA reviews, ticket audits, operating rhythms, incident management, escalation frameworks, and executive reporting across cross-functional leadership.';
 
 const repeatSentence = (sentence: string, count: number) =>
   Array(count).fill(sentence).join(' ');
@@ -37,12 +37,12 @@ const baseSections = [
   {
     type: 'EXPERIENCE',
     content:
-      'Led enterprise SaaS security programs, orchestrated CX operations, defined strategy roadmaps, and scaled ServiceNow-driven teams across automation and customer support.',
+      'Head of Support / Director of Support and Support Operations leader. Owned incident management, incident communications, and escalation frameworks; built operating rhythms; and drove KPIs like SLAs, CSAT, first response time, and time to resolution with backlog management, QA reviews, and ticket audits. Led and scale global support teams with org design, hiring and performance management, executive reporting, customer advocacy, and cross-functional leadership. Drove change management initiatives with executive influence across Product, Engineering, and Finance teams supporting compliance and subscription billing workflows for enterprise customers.',
   },
   {
     type: 'SKILLS',
     content:
-      'AWS, Kubernetes, Terraform, Snowflake, ServiceNow, Jira, security automation, CX operations',
+      'ServiceNow, Jira Service Management, Zendesk, automation, routing rules, macros, reporting dashboards, backlog management, QA reviews, ticket audits',
   },
 ];
 
@@ -54,7 +54,7 @@ const strongJobInput: FitScoreInput = {
     normalizedResponsibilities: [repeatSentence(baseSentence, 30)],
     normalizedRequirements: [
       repeatSentence(
-        'Drive enterprise strategy, security, and CX operations with AWS, Kubernetes, Terraform, Snowflake, ServiceNow, Jira, and ServiceNow ticketing.',
+        'Lead and scale the support function. Own support operations rigor with KPIs, operating rhythms, quality assurance, root cause analysis, incident management, escalation frameworks, and executive reporting. Drive ticketing platform migration, automation, routing, macros, and reporting dashboards using ServiceNow and Zendesk. Support enterprise customers in compliance and subscription billing / accounting workflows. Be the voice of support with cross-functional planning, customer-impacting incidents, and customer advocacy.',
         20,
       ),
     ],
@@ -82,7 +82,7 @@ const adjacentJobInput: FitScoreInput = {
     ],
     normalizedRequirements: [
       repeatSentence(
-        'Experience with AWS, Kubernetes, and Terraform while supporting customer experience and strategy programs.',
+        'Experience supporting KPIs, operating rhythms, ticket audits, backlog management, and QA reviews while partnering cross-functionally on root cause analysis and reporting dashboards.',
         20,
       ),
     ],
@@ -157,9 +157,9 @@ describe('FitScoreEngine job text override', () => {
     job: {
       title: 'Override Test',
       company: 'ExampleCo',
-      rawDescription: 'Raw leads from executive ops.',
-      normalizedResponsibilities: ['Run operations'],
-      normalizedRequirements: ['5 years operations'],
+      rawDescription: repeatSentence(baseSentence, 35),
+      normalizedResponsibilities: [repeatSentence('Run support operations with KPIs and operating rhythms.', 40)],
+      normalizedRequirements: [repeatSentence('Experience with ServiceNow, dashboards, and cross-functional leadership.', 40)],
       sourceUrl: null,
     },
     baseline: {
@@ -173,7 +173,7 @@ describe('FitScoreEngine job text override', () => {
       engine as unknown as { selectJobText: SelectJobTextInvoker },
       'selectJobText',
     );
-    const overrideToken = 'FULL RAW CONTEXT';
+    const overrideToken = repeatSentence('FULL RAW CONTEXT for support operations and incident management.', 80);
     const input = {
       ...baseJobInput,
       job: {
@@ -202,8 +202,8 @@ describe('FitScoreEngine job text override', () => {
         ...baseJobInput.job,
         rawDescription: '',
         jobTextOverride: undefined,
-        normalizedResponsibilities: ['Normalized one'],
-        normalizedRequirements: ['Normalized two'],
+        normalizedResponsibilities: [repeatSentence('Normalized one', 200)],
+        normalizedRequirements: [repeatSentence('Normalized two', 200)],
       },
     };
 

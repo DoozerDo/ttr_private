@@ -34,7 +34,25 @@ describe('SyntheticTransactionRunnerService', () => {
       findOne: jest.fn(),
     } as any;
 
-    const service = new SyntheticTransactionRunnerService();
+    const service = new SyntheticTransactionRunnerService({
+      usersService,
+      jobsService,
+      analysisService,
+      resumeService,
+      coverLettersService,
+      opportunitiesService,
+      userRepository,
+      baselineRepository,
+      baselineSectionRepository,
+      baselineVersionRepository,
+      baselineBlockPolicyRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      coverLetterRepository,
+      opportunityRepository,
+      applicationRepository,
+      syntheticRunRepository,
+    });
 
     return {
       service,

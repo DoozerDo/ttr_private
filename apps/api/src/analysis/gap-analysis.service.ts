@@ -1036,7 +1036,7 @@ export class GapAnalysisService {
     }
 
     const normalized = compact
-      .replace(/^[•\-]\s*/, '')
+      .replace(/^[•-]\s*/, '')
       .replace(/^(?:or|and\/or)\s+/i, '')
       .replace(
         /^(?:must\s+have|required|preferred|experience\s+with|experience\s+in|ability\s+to|proven\s+ability\s+to|demonstrated\s+ability\s+to|track\s+record\s+of|strong)\s+/i,
@@ -1143,7 +1143,7 @@ export class GapAnalysisService {
 
     const normalized = text
       .toLowerCase()
-      .replace(/^[•\-]\s*/, '')
+      .replace(/^[•-]\s*/, '')
       .replace(/\([^)]*\)/g, ' ')
       .replace(/[^a-z0-9\s/]+/g, ' ')
       .replace(/\s+/g, ' ')

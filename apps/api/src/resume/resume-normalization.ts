@@ -1427,7 +1427,7 @@ export function validateNormalizedResumeDocument(document: NormalizedResumeDocum
       entry.institution,
       entry.location ?? '',
     ]),
-  ].some((value) => /(?:[|,:;\-]{3,}|[.]{4,})/.test(String(value ?? '')));
+  ].some((value) => /(?:[|,:;-]{3,}|[.]{4,})/.test(String(value ?? '')));
   if (hasCollapsedPunctuationNoise) {
     reasons.push('Collapsed punctuation noise detected in normalized model.');
   }

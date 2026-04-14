@@ -211,7 +211,7 @@ function buildRoleMatchSummary(
     corpus,
     Array.from(
       new Set([
-        ...input.scenario.expected.requiredRoleSignals,
+        ...(input.scenario.expected?.requiredRoleSignals ?? []),
         ...plan.roleLens.priorities,
         ...plan.roleLens.requiredSignals,
       ]),
@@ -230,8 +230,18 @@ export function evaluateSyntheticGenerationScenario(
 ): SyntheticGenerationResult {
   const failures: string[] = [];
   const fitScore = input.fitScore ?? null;
-  const generationMode = input.scenario.expected.generationMode;
-  const requiredSignals = input.scenario.expected.requiredRoleSignals;
+
+  // Defensive: synthetic specs sometimes intentionally omit "expected" via `as any`
+  // to verify we fail cleanly instead of throwing.
+  const expected = input.scenario?.expected;
+  if (!expected) {
+    failures.push("Scenario expected state is missing.");
+  }
+
+  // If expected is missing (usually via test `as any`), default to "generate" so
+  // artifact usability checks still run and return actionable failures.
+  const generationMode = expected?.generationMode ?? "generate";
+  const requiredSignals = expected?.requiredRoleSignals ?? [];
   const plan = input.plan;
   const resume = input.generatedResume;
   const coverLetter = input.generatedCoverLetter;
@@ -276,14 +286,14 @@ export function evaluateSyntheticGenerationScenario(
 
   if (fitScore === null) {
     failures.push("Fit score was not produced.");
-  } else if (fitScore < input.scenario.expected.minFitScore) {
+  } else if (expected && fitScore < expected.minFitScore) {
     failures.push(
-      `Fit score ${fitScore} fell below the minimum acceptable score of ${input.scenario.expected.minFitScore}.`,
+      `Fit score ${fitScore} fell below the minimum acceptable score of ${expected.minFitScore}.`,
     );
   }
 
   const resumeGenerated = Boolean(resume && resumeSummary.length > 0 && resumeBullets.length > 0);
-  if (input.scenario.expected.requiresResume && !resumeGenerated) {
+  if (expected?.requiresResume && !resumeGenerated) {
     failures.push("Resume was not generated or is empty.");
   }
   if (generationMode === "generate" && resume && !artifactUsability.resumeUsable) {
@@ -294,7 +304,7 @@ export function evaluateSyntheticGenerationScenario(
   }
 
   const coverLetterGenerated = Boolean(coverLetter && coverParagraphs.length > 0);
-  if (input.scenario.expected.requiresCoverLetter && !coverLetterGenerated) {
+  if (expected?.requiresCoverLetter && !coverLetterGenerated) {
     failures.push("Cover letter was not generated or is empty.");
   }
   if (generationMode === "generate" && coverLetter && !artifactUsability.coverLetterUsable) {
@@ -310,7 +320,7 @@ export function evaluateSyntheticGenerationScenario(
       JSON.stringify(input.generatedCoverLetter ?? {}),
       ...languageStylePass.issues.map((issue) => `${issue.type}:${issue.location}`),
     ]),
-    input.scenario.expected.bannedFailureStates,
+    expected?.bannedFailureStates ?? [],
   );
   if (bannedStates.length > 0) {
     failures.push(`Banned failure states detected: ${bannedStates.join(", ")}.`);
@@ -328,10 +338,10 @@ export function evaluateSyntheticGenerationScenario(
       };
       if (
         readinessRank[roleMatchReadiness] <
-        readinessRank[input.scenario.expected.minRoleMatchReadiness]
+        readinessRank[expected?.minRoleMatchReadiness ?? "ready"]
       ) {
         failures.push(
-          `Role match readiness ${roleMatchReadiness} did not meet the minimum threshold of ${input.scenario.expected.minRoleMatchReadiness}.`,
+          `Role match readiness ${roleMatchReadiness} did not meet the minimum threshold of ${expected?.minRoleMatchReadiness ?? "ready"}.`,
         );
       }
     }
@@ -356,15 +366,18 @@ export function evaluateSyntheticGenerationScenario(
     calibrationBarPassed = meetsGoldStandardCalibrationMinimumBar(calibration);
     highSeverityCalibrationGapCount = countHighSeverityCalibrationGaps(calibration);
 
-    if (input.scenario.expected.mustPassCalibrationBar && !calibrationBarPassed) {
+    if (expected?.mustPassCalibrationBar && !calibrationBarPassed) {
       failures.push("Gold standard calibration did not meet the minimum bar.");
     }
-    if (highSeverityCalibrationGapCount > input.scenario.expected.maxHighSeverityCalibrationGaps) {
+    if (
+      expected
+      && highSeverityCalibrationGapCount > expected.maxHighSeverityCalibrationGaps
+    ) {
       failures.push(
-        `High severity calibration gaps (${highSeverityCalibrationGapCount}) exceeded the maximum of ${input.scenario.expected.maxHighSeverityCalibrationGaps}.`,
+        `High severity calibration gaps (${highSeverityCalibrationGapCount}) exceeded the maximum of ${expected.maxHighSeverityCalibrationGaps}.`,
       );
     }
-  } else if (input.scenario.expected.mustPassCalibrationBar) {
+  } else if (expected?.mustPassCalibrationBar) {
     failures.push("Benchmark-backed calibration was expected but no benchmark fixture was supplied.");
   }
 

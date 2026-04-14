@@ -42,8 +42,7 @@ export async function loadSyntheticLoopBaselineFixture(
       'Partnered with product, engineering, cloud infrastructure, and customer support on incident response, routing, and service quality improvements.',
     ),
     buildHeading('Experience'),
-    buildParagraph('Support Operations Director | Example SaaS | Seattle, WA'),
-    buildParagraph('2019 - 2022'),
+    buildParagraph('Example SaaS | Support Operations Director | 2019 - 2022'),
     buildBullet(
       'Owned support workflow design and queue health for a SaaS team.',
     ),
@@ -70,8 +69,7 @@ export async function loadSyntheticLoopBaselineFixture(
     buildBullet(
       'Created runbooks and process notes that tightened handoffs during active incidents.',
     ),
-    buildParagraph('Support Operations Program Owner | Example SaaS | Seattle, WA'),
-    buildParagraph('2024 - Present'),
+    buildParagraph('Example SaaS | Support Operations Program Owner | 2024 - Present'),
     buildBullet(
       'Led operating reviews, coaching rhythms, and escalation playbooks.',
     ),

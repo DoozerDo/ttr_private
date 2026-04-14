@@ -116,7 +116,7 @@ function splitTextIntoUnits(text: string): string[] {
     .split(/\n|(?<=[.!?])\s+/)
     .map((line) =>
       line
-        .replace(/^[\-*\u2022\u25CF\u25E6\u2043\u2219]\s+/, '')
+        .replace(/^[-*\u2022\u25CF\u25E6\u2043\u2219]\s+/, '')
         .trim(),
     )
     .filter(Boolean);
@@ -134,8 +134,14 @@ export function extractClaimUnitsFromSections(
   const units: ClaimUnit[] = [];
 
   for (const [sectionIndex, section] of (sections ?? []).entries()) {
-    const sectionSourceType =
-      section.sourceType ?? GeneratedTextSourceType.CONNECTIVE_LANGUAGE;
+    // If sentenceSources are provided, each sentence must carry an explicit sourceType
+    // (or inherit from an explicitly-set section.sourceType). If neither is set, we treat
+    // it as "unknown" and let downstream detectors skip it.
+    //
+    // Keep detector defaults conservative: without explicit provenance, treat text as CONNECTIVE_LANGUAGE.
+    // ComplianceService can up-level generated sections to BASELINE_EVIDENCE when it is intentionally
+    // validating generated artifacts.
+    const explicitSectionSourceType = section.sourceType;
     const sentenceSources = Array.isArray(section.sentenceSources)
       ? section.sentenceSources
       : [];
@@ -145,10 +151,7 @@ export function extractClaimUnitsFromSections(
         ? sentenceSources
             .map((sentence) => ({
               text: String(sentence?.text ?? ''),
-              sourceType:
-                sentence?.sourceType ??
-                sectionSourceType ??
-                GeneratedTextSourceType.CONNECTIVE_LANGUAGE,
+              sourceType: sentence?.sourceType ?? explicitSectionSourceType,
             }))
             .filter((entry) => entry.text.trim().length > 0)
         : [
@@ -156,14 +159,13 @@ export function extractClaimUnitsFromSections(
               ? splitTextIntoUnits(section.title).map((text) => ({
                   text,
                   sourceType:
-                    sectionSourceType ??
-                    GeneratedTextSourceType.CONNECTIVE_LANGUAGE,
+                    explicitSectionSourceType ?? GeneratedTextSourceType.CONNECTIVE_LANGUAGE,
                 }))
               : []),
             ...splitTextIntoUnits(section.content ?? '').map((text) => ({
               text,
               sourceType:
-                sectionSourceType ?? GeneratedTextSourceType.CONNECTIVE_LANGUAGE,
+                explicitSectionSourceType ?? GeneratedTextSourceType.CONNECTIVE_LANGUAGE,
             })),
           ];
 
@@ -249,6 +251,30 @@ export function extractClaimUnitsFromSections(
     if (deduped.has(key)) continue;
     deduped.add(key);
     result.push(unit);
+  }
+
+  if (process.env.COMPLIANCE_TRACE === 'true') {
+    const needle = 'Achieved revenue of 450000 last quarter.';
+    const hit = result.find((unit) => unit.text.includes(needle));
+    if (hit) {
+      console.debug('[compliance-trace] extractClaimUnitsFromSections hit', {
+        text: hit.text,
+        sourceType: hit.sourceType,
+        lineType: hit.lineType,
+        integrityValid: hit.integrityValid,
+        integrityReason: hit.integrityReason,
+        sectionTitle: hit.sectionTitle,
+      });
+    } else {
+      const anySectionHasNeedle = (sections ?? []).some((section) =>
+        String(section?.content ?? '').includes(needle),
+      );
+      if (anySectionHasNeedle) {
+        console.debug(
+          '[compliance-trace] extractClaimUnitsFromSections MISS (sentence present in sections, not in units)',
+        );
+      }
+    }
   }
 
   return result;

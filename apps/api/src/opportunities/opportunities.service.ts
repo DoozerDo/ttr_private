@@ -44,7 +44,10 @@ type GroupedOpportunities = {
 
 const DORMANT_THRESHOLD_DAYS = 90;
 const DORMANT_WARNING_DAYS = 60;
-const QUALIFIED_OPPORTUNITY_THRESHOLD = 80;
+// "ready_to_apply" cutoff used by the simple status model and upsert/create flows.
+const READY_TO_APPLY_THRESHOLD = 70;
+// Resume Studio only creates a saved opportunity for stronger fits.
+const RESUME_STUDIO_CREATE_THRESHOLD = 80;
 
 const TERMINAL_STATUSES = new Set<OpportunityStatus>([
   OpportunityStatus.REJECTED,
@@ -84,7 +87,7 @@ export class OpportunitiesService {
     input: CreateOpportunityInput,
     syntheticMetadata?: SyntheticMetadataInput,
   ) {
-    if (input.fitScore < QUALIFIED_OPPORTUNITY_THRESHOLD) {
+    if (input.fitScore < RESUME_STUDIO_CREATE_THRESHOLD) {
       return null;
     }
     return this.createFromIntent(
@@ -240,7 +243,7 @@ export class OpportunitiesService {
       existing.notes = dto.notes?.trim() || existing.notes || null;
       if (existing.status !== OpportunityStatus.APPLIED && existing.status !== OpportunityStatus.REJECTED) {
         existing.status =
-          normalizedScore >= QUALIFIED_OPPORTUNITY_THRESHOLD
+          normalizedScore >= READY_TO_APPLY_THRESHOLD
             ? OpportunityStatus.SAVED
             : OpportunityStatus.IN_FIT_REVIEW;
       }
@@ -261,7 +264,7 @@ export class OpportunitiesService {
       jobTitle,
       salary: null,
       status:
-        normalizedScore >= QUALIFIED_OPPORTUNITY_THRESHOLD
+        normalizedScore >= READY_TO_APPLY_THRESHOLD
           ? OpportunityStatus.SAVED
           : OpportunityStatus.IN_FIT_REVIEW,
       initialScore: normalizedScore,
@@ -599,7 +602,7 @@ export class OpportunitiesService {
     if (opportunity.status === OpportunityStatus.IN_FIT_REVIEW) {
       return 'improving_fit';
     }
-    if (opportunity.status === OpportunityStatus.SAVED && opportunity.currentScore < 70) {
+    if (opportunity.status === OpportunityStatus.SAVED && opportunity.currentScore < READY_TO_APPLY_THRESHOLD) {
       return 'improving_fit';
     }
     if (opportunity.status === OpportunityStatus.SAVED) {
@@ -616,7 +619,7 @@ export class OpportunitiesService {
     if (status === 'passed') return OpportunityStatus.REJECTED;
     if (status === 'improving_fit') return OpportunityStatus.IN_FIT_REVIEW;
     if (status === 'ready_to_apply') return OpportunityStatus.SAVED;
-    return score >= 70 ? OpportunityStatus.SAVED : OpportunityStatus.IN_FIT_REVIEW;
+    return score >= READY_TO_APPLY_THRESHOLD ? OpportunityStatus.SAVED : OpportunityStatus.IN_FIT_REVIEW;
   }
 
   private isSimpleTransitionAllowed(

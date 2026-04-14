@@ -1,4 +1,5 @@
 import { resolveCanonicalState } from "@/lib/canonicalDecision";
+import { getFitReviewHref, getStudioHref } from "@/src/navigation/routes";
 
 export type NextActionType =
   | "fit_review"
@@ -51,8 +52,8 @@ export function getCanonicalNextAction(input: NextActionInput): NextAction {
       canOpenStudio: generationReady,
       generationMode: generationReady ? "verified" : "draft",
     },
-    resultsHref: "/studio",
-    fitReviewHref: "/fit-review",
+    resultsHref: getStudioHref(),
+    fitReviewHref: getFitReviewHref(),
     canGenerateDocuments: generationReady,
     opportunityAlreadySaved: input.opportunityAlreadySaved,
     scoreCandidates: [{ source: "primary", value: score }],

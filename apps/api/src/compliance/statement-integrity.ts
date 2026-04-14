@@ -99,7 +99,10 @@ function hasMalformedSeparatorArtifact(value: string): boolean {
     const parts = sanitized
       .split(/\s[-\u2013\u2014]\s/)
       .map((part) => part.trim());
-    if (parts.some((part) => tokenize(part).length < 2)) {
+    // Treat spaced dashes as common clause separators in generated bullets
+    // (e.g. "Reduced cycle time by 10% — globally."). Only consider it malformed
+    // when the dash produces an empty side, not when one side is a short modifier.
+    if (parts.some((part) => tokenize(part).length < 1)) {
       return true;
     }
   }

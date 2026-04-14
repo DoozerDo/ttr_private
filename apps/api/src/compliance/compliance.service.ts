@@ -290,6 +290,7 @@ export class ComplianceService {
           code: f.code as any,
           message: f.message,
           severity: f.severity ?? ComplianceFlagSeverity.BLOCK,
+          confidence: f.confidence,
           evidence: f.evidence,
         });
       }
@@ -542,8 +543,7 @@ export class ComplianceService {
     const normalized: ComplianceTextSection[] = [];
 
     for (const section of sections) {
-      const sectionSourceType =
-        section.sourceType ?? GeneratedTextSourceType.CONNECTIVE_LANGUAGE;
+      const explicitSectionSourceType = section.sourceType;
       const sentenceSources = Array.isArray(section.sentenceSources)
         ? section.sentenceSources
         : [];
@@ -553,9 +553,7 @@ export class ComplianceService {
           .map((sentence) => ({
             text: this.normalizeText(String(sentence.text ?? '')),
             sourceType:
-              sentence.sourceType ??
-              sectionSourceType ??
-              GeneratedTextSourceType.CONNECTIVE_LANGUAGE,
+              sentence.sourceType ?? explicitSectionSourceType,
           }))
           .filter(
             (sentence) =>
@@ -574,6 +572,9 @@ export class ComplianceService {
         continue;
       }
 
+      // For generated sections without per-sentence provenance, assume they represent baseline-evidence claims.
+      const sectionSourceType =
+        explicitSectionSourceType ?? GeneratedTextSourceType.BASELINE_EVIDENCE;
       if (sectionSourceType !== GeneratedTextSourceType.BASELINE_EVIDENCE) {
         continue;
       }
@@ -592,6 +593,19 @@ export class ComplianceService {
           },
         ],
       });
+    }
+
+    if (process.env.COMPLIANCE_TRACE === 'true') {
+      const needle = 'Achieved revenue of 450000 last quarter.';
+      const match = normalized.find((section) => section.content?.includes(needle));
+      if (match) {
+        console.debug('[compliance-trace] normalizeGeneratedSectionsForClaimValidation hit', {
+          title: match.title,
+          sourceType: match.sourceType,
+          content: match.content,
+          sentenceSources: match.sentenceSources,
+        });
+      }
     }
 
     return normalized;

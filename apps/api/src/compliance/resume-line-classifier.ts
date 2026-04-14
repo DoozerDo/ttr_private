@@ -45,6 +45,22 @@ const ACTION_VERBS = new Set([
   'served',
   'worked',
   'managed',
+  'partnered',
+  'collaborated',
+  'enabled',
+  'discussed',
+  'reduced',
+  'increased',
+  'improved',
+  'achieved',
+  'delivered',
+  'saved',
+  'decreased',
+  'grew',
+  'generated',
+  'administered',
+  'configured',
+  'maintained',
   'built',
   'developed',
   'implemented',
@@ -151,6 +167,8 @@ function isBulletClaim(value: string): boolean {
 function isBulletEvidenceFragment(value: string): boolean {
   const normalized = value.trim();
   if (!normalized) return false;
+  // Fragments are partial bullet-ish spans; full sentences should be treated as claims so detectors can evaluate them.
+  if (/[.!?]$/.test(normalized)) return false;
   if (isRoleHeader(normalized)) return false;
   if (isBulletClaim(normalized)) return false;
   if (isSkillStack(normalized)) return false;
@@ -168,7 +186,7 @@ function isBulletEvidenceFragment(value: string): boolean {
 
 export function classifyResumeLine(input: string): ResumeLineType {
   const line = String(input ?? '')
-    .replace(/^[\-\*\u2022\u25CF\u25E6\u2043\u2219]\s+/, '')
+    .replace(/^[-*\u2022\u25CF\u25E6\u2043\u2219]\s+/, '')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -179,7 +197,15 @@ export function classifyResumeLine(input: string): ResumeLineType {
   if (isBulletEvidenceFragment(line)) {
     return ResumeLineType.BULLET_EVIDENCE_FRAGMENT;
   }
-  if (/\b(?:led|managed|built|developed|implemented|served as|worked as)\b/i.test(line)) {
+  if (/\b(?:led|managed|partnered|collaborated|enabled|discussed|reduced|increased|improved|achieved|delivered|saved|decreased|grew|generated|administered|configured|maintained|built|developed|implemented|served as|worked as)\b/i.test(line)) {
+    return ResumeLineType.BULLET_CLAIM;
+  }
+  // Some synthetic/generated artifacts prefix sentences with section-like tokens (e.g. "Experience VP ...").
+  // Treat these as claims so role/company/metric detectors still evaluate them.
+  if (
+    /^experience\s+/i.test(line) &&
+    /\b(?:vp|vice president|chief|director|head|manager|engineer|officer|president)\b/i.test(line)
+  ) {
     return ResumeLineType.BULLET_CLAIM;
   }
   return ResumeLineType.NOISE;

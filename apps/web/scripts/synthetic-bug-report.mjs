@@ -90,10 +90,9 @@ async function main() {
         status: 503,
         contentType: "application/json",
         body: JSON.stringify({
-          status: "temporarily_unavailable",
+          status: "service_unavailable",
           code: "support_config_unavailable",
-          message:
-            "Bug reporting is temporarily unavailable right now. Save a draft and check Support history later.",
+          message: "Bug reporting service is unavailable right now. Your draft is saved locally.",
           supportPath: "/support/history",
         }),
       });
@@ -118,7 +117,7 @@ async function main() {
   assert(payload?.message?.length >= 10 && payload?.message?.length <= 4000, "message length invalid");
 
   if (SYNTHETIC_MODE === "unavailable") {
-    await page.getByText("Bug reporting is temporarily unavailable right now. Save a draft and check Support history later.").waitFor({ timeout: 15000 });
+    await page.getByText("Bug reporting service is unavailable right now. Your draft is saved locally.").waitFor({ timeout: 15000 });
     await page.getByRole("link", { name: "Support history" }).waitFor({ timeout: 15000 });
     const draft = await page.evaluate(() => window.localStorage.getItem("ttr.support.bug-report.draft.v1"));
     assert(Boolean(draft), "bug report draft was not preserved locally");

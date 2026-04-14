@@ -203,7 +203,7 @@ async function purgeBaselinesForCurrentUser(cookie: string) {
 
 async function getBrowser() {
   if (!browserPromise) {
-    const { chromium } = require('playwright');
+    const { chromium } = await import('playwright');
     browserPromise = chromium.launch({ headless: true });
   }
   return browserPromise;

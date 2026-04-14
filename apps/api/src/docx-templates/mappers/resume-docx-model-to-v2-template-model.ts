@@ -9,14 +9,14 @@ import {
 } from '../docx-template.types';
 
 const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
-const PHONE_PATTERN = /\+?\d[\d().\-\s]{7,}\d/;
+const PHONE_PATTERN = /\+?\d[\d().\s-]{7,}\d/;
 const LINKEDIN_PATTERN = /(?:https?:\/\/)?(?:www\.)?linkedin\.com\/[^\s|,]+/i;
 const BULLET_PREFIX = '\u2022';
 const SKILLS_PER_LINE = 4;
 const SUMMARY_MAX_WORDS = 90;
 const SUMMARY_LABEL_PATTERN = /^(?:professional\s+summary|summary)[:\s-]*/i;
-const BULLET_OR_LIST_PATTERN = /^\s*(?:[\u2022\u25CF\u25E6*\-]|(?:\(?\d{1,3}\)?[.)]))\s+/;
-const PLACEHOLDER_COMPETENCY_PATTERN = /^[\s\u2022\u25CF\u25E6|,;:\-]+$/;
+const BULLET_OR_LIST_PATTERN = /^\s*(?:[\u2022\u25CF\u25E6*-]|(?:\(?\d{1,3}\)?[.)]))\s+/;
+const PLACEHOLDER_COMPETENCY_PATTERN = /^[\s\u2022\u25CF\u25E6|,;:-]+$/;
 const MOJIBAKE_BULLET = '\u00e2\u20ac\u00a2';
 
 function toText(value?: string | null): string {
@@ -234,7 +234,7 @@ function splitCompetencyCandidates(value: string): string[] {
 function normalizeCompetencyToken(value: string): string | null {
   const normalized = toText(value)
     .replace(/^(?:core\s+competencies|competencies|skills|technical\s+skills)[:\s-]*/i, '')
-    .replace(/^[\u2022\u25CF\u25E6*\-]+/, '')
+    .replace(/^[\u2022\u25CF\u25E6*-]+/, '')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -257,7 +257,7 @@ function normalizeCompetencyToken(value: string): string | null {
 function normalizeHeaderField(value?: string | null) {
   return toText(value)
     .replace(/\s+/g, ' ')
-    .replace(/^[|,\-]+|[|,\-]+$/g, '')
+    .replace(/^[|,-]+|[|,-]+$/g, '')
     .trim();
 }
 
@@ -275,7 +275,7 @@ function splitBulletLines(value?: string | null): string[] {
 
 function normalizeBulletText(value: string): string | null {
   const normalized = toText(value)
-    .replace(/^[\u2022\u25CF\u25E6*\-]+\s*/, '')
+    .replace(/^[\u2022\u25CF\u25E6*-]+\s*/, '')
     .replace(new RegExp(`^${escapeRegExp(MOJIBAKE_BULLET)}\\s*`), '')
     .replace(/\s+/g, ' ')
     .trim();

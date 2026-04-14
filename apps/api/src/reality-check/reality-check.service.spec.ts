@@ -69,32 +69,28 @@ describe('RealityCheckService', () => {
 
   const baseCxFit: CxFitV2Result = {
     score: 20,
-    components: {
-      scope: 45,
-      leadership: 40,
-      domain: 0,
-      strategy: 0,
-      execution: 0,
-      tooling: 0,
-    },
-    adjustments: {
-      selfSimilarityApplied: false,
-      selfSimilarityFloor: 0,
-      stretchDampenerApplied: false,
-      stretchDampenerPoints: 0,
-      toolingFloorApplied: false,
-    },
-    bands: {
-      baselineBand: 'L1',
-      roleBand: 'L5',
-      bandDelta: 4,
+    scoreConfidence: 'high',
+    scoreConfidenceReasons: [],
+    scoreSanityFlags: [],
+    likelyUnderestimatedFit: false,
+    scorePresentationMode: 'normal',
+    rubric: {
+      id: 'scoring_contract_v1',
+      // Only a couple of rubric fields are used by RealityCheckService today; keep the rest minimal but present.
+      weights: {} as any,
+      dimensionPercents: {
+        // Default context should be "no mismatch" unless a test overrides it.
+        role_scope_and_seniority: 80,
+      } as any,
+      dimensionPoints: {} as any,
+      subtotal: 0,
+      penalties: [],
+      finalBeforeClamp: 20,
+      rounding: 'round_half_up_final_only',
     },
     debug: {
-      domainTagsBaseline: [],
-      domainTagsRole: [],
-      responsibilityOverlapPercent: 0,
-      baselineCoveragePercent: 0,
-    },
+      bandDelta: 0,
+    } as any,
   };
 
   const baseToolCoverage: ToolCoverage = {
@@ -196,8 +192,22 @@ describe('RealityCheckService', () => {
   });
 
   it('computes mismatch when strong signals exist without updates', () => {
+    const mismatchCxFit: CxFitV2Result = {
+      ...baseCxFit,
+      rubric: {
+        ...baseCxFit.rubric,
+        dimensionPercents: {
+          ...(baseCxFit.rubric.dimensionPercents as any),
+          role_scope_and_seniority: 50,
+        } as any,
+      },
+      debug: {
+        ...(baseCxFit.debug as any),
+        bandDelta: 4,
+      } as any,
+    };
     const context = buildContext({
-      cxFit: baseCxFit,
+      cxFit: mismatchCxFit,
       toolCoverage: {
         ...baseToolCoverage,
         missingRequired: ['aws', 'kubernetes', 'terraform'],

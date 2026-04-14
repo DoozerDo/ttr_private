@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
+
 import { ReportBugModal } from "@/src/components/support/ReportBugModal";
 import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
-import { overrideSearchParams, mockPathname, setFetchImplementation } from "@/tests/setup";
+import { mockPathname, overrideSearchParams, setFetchImplementation } from "@/tests/setup";
 
 function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   return {
@@ -12,30 +13,46 @@ function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   };
 }
 
+function installSupportFetch(overrides?: {
+  config?: Response | ReturnType<typeof createResponse>;
+  reportBug?: Response | ReturnType<typeof createResponse>;
+}) {
+  const configResponse = overrides?.config ?? createResponse({ githubConfigured: true });
+  const reportResponse =
+    overrides?.reportBug ?? createResponse({ status: "submission_success", message: "Thanks. Your report was submitted successfully.", reportId: "bug-123" });
+
+  setFetchImplementation(async (input: RequestInfo) => {
+    const url = typeof input === "string" ? input : input?.url ?? "";
+    if (url.includes("/api/support/config")) {
+      return configResponse as Response;
+    }
+    if (url.includes("/api/support/report-bug")) {
+      return reportResponse as Response;
+    }
+    return createResponse({});
+  });
+}
+
 describe("ReportBugModal", () => {
-  it("submit button stays enabled while validation is handled on submit", () => {
-    setFetchImplementation(async () => createResponse({}));
+  it("preflights support config before enabling submit", async () => {
+    installSupportFetch();
     render(<ReportBugModal open onClose={() => {}} />);
 
     const button = screen.getByRole("button", { name: /send issue report/i });
-    expect(button).not.toBeDisabled();
-
-    fireEvent.change(screen.getByPlaceholderText("What went wrong?"), {
-      target: { value: "This is long enough text" },
+    expect(button).toBeDisabled();
+    await waitFor(() => {
+      expect(button).not.toBeDisabled();
     });
-    expect(button).not.toBeDisabled();
   });
 
   it("shows success message after successful submit", async () => {
-    setFetchImplementation(async (input: RequestInfo) => {
-      const url = typeof input === "string" ? input : input?.url ?? "";
-      if (url.includes("/api/support/report-bug")) {
-        return createResponse({ status: "submission_success", message: "Thanks. Your report was submitted successfully.", reportId: "bug-123" });
-      }
-      return createResponse({});
-    });
+    installSupportFetch();
 
     render(<ReportBugModal open onClose={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /send issue report/i })).not.toBeDisabled();
+    });
+
     fireEvent.change(screen.getByPlaceholderText("What went wrong?"), {
       target: { value: "Results page crashes on load with error" },
     });
@@ -46,7 +63,23 @@ describe("ReportBugModal", () => {
     });
   });
 
-  it("shows error state when submit fails", async () => {
+  it("shows an explicit disabled state when bug reporting is not configured", async () => {
+    installSupportFetch({
+      config: createResponse({ githubConfigured: false }),
+    });
+
+    render(<ReportBugModal open onClose={() => {}} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Bug reporting is disabled in this environment. Save a draft and check Support history later.",
+      );
+    });
+    expect(screen.getByRole("button", { name: /send issue report/i })).toBeDisabled();
+    expect(screen.getByRole("link", { name: /support history/i })).toHaveAttribute("href", "/support/history");
+  });
+
+  it("shows a retryable error when submission fails", async () => {
     const stored: Record<string, string> = {};
     Object.defineProperty(window, "localStorage", {
       configurable: true,
@@ -60,52 +93,79 @@ describe("ReportBugModal", () => {
         },
       },
     });
-    setFetchImplementation(async (input: RequestInfo) => {
-      const url = typeof input === "string" ? input : input?.url ?? "";
-      if (url.includes("/api/support/report-bug")) {
-        return createResponse(
-          {
-            status: "temporarily_unavailable",
-            code: "support_config_unavailable",
-            message: "Bug reporting is temporarily unavailable right now. Save a draft and check Support history later.",
-            supportPath: "/support/history",
-          },
-          false,
-          503,
-        );
-      }
-      return createResponse({});
+    installSupportFetch({
+      reportBug: createResponse(
+        {
+          status: "submission_failed",
+          code: "bug_report_failed",
+          message: "Bug report failed to send",
+          supportPath: "/support/history",
+        },
+        false,
+        503,
+      ),
     });
 
     render(<ReportBugModal open onClose={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /send issue report/i })).not.toBeDisabled();
+    });
+
     fireEvent.change(screen.getByPlaceholderText("What went wrong?"), {
       target: { value: "Saving baseline failed unexpectedly" },
     });
     fireEvent.click(screen.getByRole("button", { name: /send issue report/i }));
 
     await waitFor(() => {
-      expect(
-        screen.getByText(
-          "Bug reporting is temporarily unavailable right now. Save a draft and check Support history later.",
-        ),
-      ).toBeInTheDocument();
+      expect(screen.getByText("Bug report failed to send")).toBeInTheDocument();
     });
     expect(screen.getByRole("link", { name: /support history/i })).toHaveAttribute("href", "/support/history");
     expect(stored["ttr.support.bug-report.draft.v1"]).toContain("Saving baseline failed unexpectedly");
   });
 
+  it("shows service unavailable when the config request cannot reach the backend", async () => {
+    installSupportFetch({
+      config: createResponse(
+        {
+          status: "service_unavailable",
+          code: "UPSTREAM_API_URL_MISSING",
+          message: "Support service is unavailable right now. You can keep working and try again later.",
+        },
+        false,
+        503,
+      ),
+    });
+
+    render(<ReportBugModal open onClose={() => {}} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Support service is unavailable right now. You can keep working and try again later.",
+      );
+    });
+    expect(screen.getByRole("button", { name: /send issue report/i })).toBeDisabled();
+  });
+
   it("sends the message field expected by the backend", async () => {
     let payload: Record<string, unknown> | null = null;
+    installSupportFetch();
     setFetchImplementation(async (input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/support/config")) {
+        return createResponse({ githubConfigured: true });
+      }
       if (url.includes("/api/support/report-bug")) {
         payload = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
-        return createResponse({ ok: true, reportId: "bug-789" });
+        return createResponse({ status: "submission_success", message: "Thanks. Your report was submitted successfully.", reportId: "bug-789" });
       }
       return createResponse({});
     });
 
     render(<ReportBugModal open onClose={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /send issue report/i })).not.toBeDisabled();
+    });
+
     fireEvent.change(screen.getByPlaceholderText("What went wrong?"), {
       target: { value: "Valid bug report message" },
     });
@@ -122,20 +182,49 @@ describe("ReportBugModal", () => {
   });
 
   it("does not submit an empty message", async () => {
-    const fetchSpy = vi.fn(async () => createResponse({ ok: true, reportId: "bug-000" }));
+    const fetchSpy = vi.fn(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/support/config")) {
+        return createResponse({ githubConfigured: true });
+      }
+      if (url.includes("/api/support/report-bug")) {
+        return createResponse({ ok: true, reportId: "bug-000" });
+      }
+      return createResponse({});
+    });
     setFetchImplementation(fetchSpy as unknown as typeof fetch);
 
     render(<ReportBugModal open onClose={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /send issue report/i })).not.toBeDisabled();
+    });
     fireEvent.click(screen.getByRole("button", { name: /send issue report/i }));
 
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(
+      fetchSpy.mock.calls.some(([input]) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        return url.includes("/api/support/report-bug");
+      }),
+    ).toBe(false);
   });
 
   it("does not submit a short message", async () => {
-    const fetchSpy = vi.fn(async () => createResponse({ ok: true, reportId: "bug-001" }));
+    const fetchSpy = vi.fn(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/support/config")) {
+        return createResponse({ githubConfigured: true });
+      }
+      if (url.includes("/api/support/report-bug")) {
+        return createResponse({ ok: true, reportId: "bug-001" });
+      }
+      return createResponse({});
+    });
     setFetchImplementation(fetchSpy as unknown as typeof fetch);
 
     render(<ReportBugModal open onClose={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /send issue report/i })).not.toBeDisabled();
+    });
     fireEvent.change(screen.getByPlaceholderText("What went wrong?"), {
       target: { value: "short" },
     });
@@ -144,7 +233,12 @@ describe("ReportBugModal", () => {
     await waitFor(() => {
       expect(screen.getAllByText("Please enter a message between 10 and 4000 characters.").length).toBeGreaterThan(0);
     });
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(
+      fetchSpy.mock.calls.some(([input]) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        return url.includes("/api/support/report-bug");
+      }),
+    ).toBe(false);
   });
 
   it("submits issue context with route and user id", async () => {
@@ -191,9 +285,12 @@ describe("ReportBugModal", () => {
     );
     setFetchImplementation(async (input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/support/config")) {
+        return createResponse({ githubConfigured: true });
+      }
       if (url.includes("/api/support/report-bug")) {
         payload = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
-        return createResponse({ ok: true, reportId: "bug-456" });
+        return createResponse({ status: "submission_success", message: "Thanks. Your report was submitted successfully.", reportId: "bug-456" });
       }
       return createResponse({});
     });
@@ -215,6 +312,9 @@ describe("ReportBugModal", () => {
     global.Date = MockDate;
 
     render(<ReportBugModal open onClose={() => {}} userId="user-123" />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /send issue report/i })).not.toBeDisabled();
+    });
     fireEvent.change(screen.getByPlaceholderText("What went wrong?"), {
       target: { value: "The header report button does not open on mobile." },
     });
@@ -227,7 +327,7 @@ describe("ReportBugModal", () => {
       expect(screen.getByText("Thanks. Your report was submitted successfully.")).toBeInTheDocument();
     });
 
-      expect(payload).toMatchObject({
+    expect(payload).toMatchObject({
       message: "The header report button does not open on mobile.",
       details: "Opened Baseline, clicked the header button, nothing happened.",
       route: "/results?baselineId=baseline-1&jobId=job-1&assessmentId=assessment-1",
@@ -243,4 +343,3 @@ describe("ReportBugModal", () => {
     global.Date = originalDate;
   });
 });
-

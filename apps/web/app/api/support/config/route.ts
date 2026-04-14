@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../baselines/helpers";
 import { UpstreamApiConfigError } from "../../_lib/serverApiConfig";
-import { fetchWithTimeout } from "@/lib/fetchWithTimeout";
+import { ClientRequestTimeoutError, fetchWithTimeout } from "@/lib/fetchWithTimeout";
 
 export const runtime = "nodejs";
 
@@ -27,14 +27,21 @@ export async function GET(req: NextRequest) {
     if (error instanceof UpstreamApiConfigError) {
       return NextResponse.json(
         {
-          status: "configuration_missing",
+          status: "service_unavailable",
           code: error.code,
-          message: "Support configuration is unavailable in this environment right now.",
+          message: "Support service is unavailable right now. You can keep working and try again later.",
         },
         { status: 503 },
       );
     }
 
-    throw error;
+    return NextResponse.json(
+      {
+        status: "service_unavailable",
+        code: error instanceof ClientRequestTimeoutError ? "UPSTREAM_REQUEST_TIMEOUT" : "UPSTREAM_REQUEST_UNAVAILABLE",
+        message: "Support service is unavailable right now. You can keep working and try again later.",
+      },
+      { status: 503 },
+    );
   }
 }

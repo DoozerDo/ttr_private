@@ -4,6 +4,7 @@ import type {
   GenerationProductConfidence,
   GenerationProductReadinessState,
 } from "@/lib/generationProductReadiness";
+import { getFitReviewHref, getStudioHref } from "@/src/navigation/routes";
 
 export type ResultsDecisionState = "BLOCKED" | "READY" | "IMPROVE" | "DRAFT";
 
@@ -72,8 +73,8 @@ export function resolveResultsDecision(input: ResultsDecisionInput): ResultsDeci
             ? "verified"
             : "draft",
     },
-    studioHref: "/studio",
-    fitReviewHref: "/fit-review",
+    studioHref: getStudioHref(),
+    fitReviewHref: getFitReviewHref(),
     scoreCandidates: [{ source: "primary", value: score }],
   });
 

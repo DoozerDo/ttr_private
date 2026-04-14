@@ -2,6 +2,7 @@ import type { BaselineAssessmentSummaryDto } from "@/lib/baselines";
 import type { GenerationReadiness } from "@/lib/generationReadiness";
 import type { GenerationProductReadiness } from "@/lib/generationProductReadiness";
 import type { DecisionFlowDataSource } from "@/lib/decisionFlowDebug";
+import { getFitReviewHref, getResultsHref, getStudioHref } from "@/src/navigation/routes";
 import {
   resolveWorkflowProgression,
   type WorkflowBlockingReason,
@@ -101,7 +102,8 @@ export type ResolveCanonicalStateInput =
       generationReadiness: GenerationReadiness;
       productReadiness: GenerationProductReadiness;
       studioHref: string;
-      resolveGapsHref: string;
+      fitReviewHref: string;
+      resolveGapsHref?: string;
       dataSource?: DecisionFlowDataSource;
       persistedAssessmentId?: string | null;
       scoreCandidates?: Array<DecisionCandidate<number | null>>;
@@ -345,7 +347,7 @@ export function resolveNextAction(input: ResolveCanonicalStateInput): CanonicalN
     score: input.score,
     generationReadiness: input.generationReadiness,
     productReadiness: input.productReadiness,
-    fitReviewHref: input.surface === "target" ? input.resolveGapsHref : input.fitReviewHref,
+    fitReviewHref: input.fitReviewHref,
     studioHref: input.surface === "target" ? input.studioHref : input.surface === "results" ? input.studioHref : undefined,
     resultsHref: input.surface === "studio" ? input.resultsHref : undefined,
     canGenerateDocuments: input.surface === "studio" ? input.canGenerateDocuments : undefined,
@@ -426,11 +428,9 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
         baseline: input.routes.baseline,
         target: input.routes.target,
         analyze: buildAnalyzeHref(input.baselineId, null),
-        results: input.routes.results,
-        studio: latestAssessmentId ? `/studio?assessmentId=${encodeURIComponent(latestAssessmentId)}` : "/studio",
-        fitReview: latestAssessmentId
-          ? `/fit-review?assessmentId=${encodeURIComponent(latestAssessmentId)}`
-          : "/fit-review",
+        results: input.routes.results ?? getResultsHref({ assessmentId: latestAssessmentId }),
+        studio: getStudioHref({ assessmentId: latestAssessmentId }),
+        fitReview: getFitReviewHref({ assessmentId: latestAssessmentId }),
       },
       dataSource: input.dataSource ?? "fresh",
       persistedAssessmentId: input.persistedAssessmentId ?? latestAssessmentId,
@@ -478,12 +478,12 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
     results:
       routeInput.resultsHref ??
       routeInput.studioHref ??
-      "/results",
+      getResultsHref({ baselineId: input.baselineId, jobId: input.jobId }),
     studio:
       routeInput.studioHref ??
       routeInput.resultsHref ??
-      "/studio",
-    fitReview: routeInput.fitReviewHref ?? routeInput.resolveGapsHref ?? "/fit-review",
+      getStudioHref({ baselineId: input.baselineId, jobId: input.jobId }),
+    fitReview: routeInput.fitReviewHref ?? getFitReviewHref({ baselineId: input.baselineId, jobId: input.jobId }),
   };
   const workflowProgression = resolveWorkflowProgression({
     surface: input.surface,

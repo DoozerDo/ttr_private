@@ -51,7 +51,7 @@ function resolveIdentityFromSections(baseline: Baseline): BaselineIdentity | und
     if (/^(summary|experience|skills|education|technical skills|professional experience|projects?)$/i.test(line)) {
       return false;
     }
-    if (/^[\-\u2022•]/.test(line)) {
+    if (/^[-\u2022•]/.test(line)) {
       return false;
     }
     return line.split(/\s+/).length >= 2 && line.length <= 80;

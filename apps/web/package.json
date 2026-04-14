@@ -15,6 +15,7 @@
     "synthetic:bug-report:unavailable": "SYNTHETIC_BUG_REPORT_MODE=unavailable node scripts/synthetic-bug-report.mjs",
     "test:compliance": "tsc -p tsconfig.parseComplianceTest.json && node --test .tmp/compliance-test/lib/compliance/parseComplianceError.test.js",
     "test:smoke": "vitest run",
+    "test:trust": "vitest run tests/synthetic-core-loop-journeys.test.tsx --reporter=verbose",
     "synthetic:landing": "playwright test --config playwright.config.ts",
     "synthetic:auth": "playwright test --config playwright.config.ts",
     "scan:routes": "node scripts/route-integrity-scan.mjs"

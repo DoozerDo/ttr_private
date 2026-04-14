@@ -75,6 +75,11 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     const strategyFrame = this.cleanText(
       input.documentStrategyPlan?.positioningFrame ?? roleDescriptor,
     );
+    const strategyPriority = this.cleanText(
+      input.documentStrategyPlan?.roleLens?.priorities?.[0] ??
+        input.documentStrategyPlan?.roleLens?.requiredSignals?.[0] ??
+        '',
+    );
     const traceMap: Record<string, string[]> = {};
     const usedEvidenceIds = new Set<string>();
     const addTrace = (lineId: string, evidence: ResumeEvidenceUnit[]) => {
@@ -99,6 +104,10 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
 
     const opening = this.joinSentences([
       this.ensureSentence(`I am applying for ${roleDescriptor}.`),
+      // Strategy contract: ensure the explicit positioning frame is visible in the artifact,
+      // so downstream UI/tests can verify resume and cover letter share the same frame.
+      this.ensureSentence(`I would lead as a ${strategyFrame}.`),
+      ...(strategyPriority ? [this.ensureSentence(`The strongest fit is ${strategyPriority}.`)] : []),
       this.ensureSentence('This background fits the operating context well.'),
       ...openingEvidence.map((entry) => this.ensureSentence(this.compactEvidenceText(entry.normalizedText))),
       this.ensureSentence('This work has taught me how to keep the operating rhythm steady.'),

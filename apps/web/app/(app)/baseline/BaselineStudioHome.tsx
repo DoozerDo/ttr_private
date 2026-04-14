@@ -41,7 +41,13 @@ import {
 } from "@/lib/professionalSignals";
 import { publishBaselineUpdated, subscribeBaselineUpdated } from "@/src/lib/baseline-sync";
 import { BETA_BASELINE_UPLOAD_LIMIT } from "@/src/features/baseline/constants";
-import { getBaselineDetailsHref } from "@/src/navigation/routes";
+import {
+  assertCanonicalRouteHref,
+  getBaselineDetailsHref,
+  getFitReviewHref,
+  getResultsHref,
+  getStudioHref,
+} from "@/src/navigation/routes";
 import { trackEvent } from "@/src/lib/analytics";
 import { sanitizeRenderedTextList, sanitizeRenderedTextValue } from "@/lib/renderedText";
 import { resolveWorkflowProgression } from "@/lib/workflowProgression";
@@ -262,10 +268,10 @@ function buildBaselineReadinessContract({
     baseline: "/baseline",
     target: baselineId ? `/target?baselineId=${encodeURIComponent(baselineId)}` : "/target",
     analyze: baselineId ? `/analyze?baselineId=${encodeURIComponent(baselineId)}` : "/analyze",
-    results: latestAssessmentId ? `/results?assessmentId=${encodeURIComponent(latestAssessmentId)}` : "/results",
+    results: latestAssessmentId ? getResultsHref({ assessmentId: latestAssessmentId }) : "/results",
     upload: baselineId ? getBaselineDetailsHref(baselineId) : "/baseline",
-    studio: latestAssessmentId ? `/studio?assessmentId=${encodeURIComponent(latestAssessmentId)}` : "/studio",
-    fitReview: latestAssessmentId ? `/fit-review?assessmentId=${encodeURIComponent(latestAssessmentId)}` : "/fit-review",
+    studio: latestAssessmentId ? getStudioHref({ assessmentId: latestAssessmentId }) : "/studio",
+    fitReview: latestAssessmentId ? getFitReviewHref({ assessmentId: latestAssessmentId }) : "/fit-review",
   };
   const progression = resolveWorkflowProgression({
     surface: "baseline",
@@ -503,16 +509,56 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   const latestAssessmentId = latestAssessmentSummary?.latestAssessmentId?.trim() ?? null;
   const latestAssessmentCreatedAt = latestAssessmentSummary?.latestAssessmentCreatedAt?.trim() ?? null;
   const latestResultsHref = latestAssessmentId
-    ? `/results?assessmentId=${encodeURIComponent(latestAssessmentId)}`
+    ? assertCanonicalRouteHref({
+        kind: "results",
+        href: getResultsHref({ assessmentId: latestAssessmentId }),
+        canonicalHref: getResultsHref({ assessmentId: latestAssessmentId }),
+        state: primaryBaselineReadiness.readinessState,
+        baselineId: primaryBaseline?.id ?? primaryBaselineId ?? null,
+        jobId: null,
+        entrySource: "baseline",
+      })
     : null;
   const baselineDetailsHref = primaryBaselineId ? getBaselineDetailsHref(primaryBaselineId) : "/baseline";
   const targetRoleHref = primaryBaselineId ? `/target?baselineId=${encodeURIComponent(primaryBaselineId)}` : "/target";
   const studioHref = latestAssessmentId
-    ? `/studio?assessmentId=${encodeURIComponent(latestAssessmentId)}&analysisId=${encodeURIComponent(latestAssessmentId)}${
-        primaryBaselineId ? `&baselineId=${encodeURIComponent(primaryBaselineId)}` : ""
-      }`
+    ? assertCanonicalRouteHref({
+        kind: "studio",
+        href: getStudioHref({
+          assessmentId: latestAssessmentId,
+          analysisId: latestAssessmentId,
+          baselineId: primaryBaselineId,
+        }),
+        canonicalHref: getStudioHref({
+          assessmentId: latestAssessmentId,
+          analysisId: latestAssessmentId,
+          baselineId: primaryBaselineId,
+        }),
+        state: primaryBaselineReadiness.readinessState,
+        baselineId: primaryBaseline?.id ?? primaryBaselineId ?? null,
+        jobId: null,
+        entrySource: "baseline",
+      })
     : null;
-  const fitReviewHref = latestResultsHref ? `${latestResultsHref}&locked=1` : "/fit-review";
+  const fitReviewHref = assertCanonicalRouteHref({
+    kind: "fit_review",
+    href: getFitReviewHref({
+      baselineId: primaryBaselineId,
+      assessmentId: latestAssessmentId,
+      analysisId: latestAssessmentId,
+      locked: true,
+    }),
+    canonicalHref: getFitReviewHref({
+      baselineId: primaryBaselineId,
+      assessmentId: latestAssessmentId,
+      analysisId: latestAssessmentId,
+      locked: true,
+    }),
+    state: primaryBaselineReadiness.readinessState,
+    baselineId: primaryBaseline?.id ?? primaryBaselineId ?? null,
+    jobId: null,
+    entrySource: "baseline",
+  });
   const heroState: "no_baseline" | "no_analysis" | "analysis_exists" = useMemo(() => {
     if (!hasBaseline) return "no_baseline";
     if (!hasCompletedAnalysis) return "no_analysis";
@@ -574,14 +620,19 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     trackEvent("baseline_readiness_viewed", baselineReadinessAnalyticsPayload);
     logDecisionFlowEvent({
       event: "baseline_readiness_resolved",
+      entrySource: "baseline",
       baselineId: primaryBaseline.id,
       jobId: null,
+      pairKey: null,
       score: primaryBaselineReadiness.latestFitScore ?? null,
       readinessState: primaryBaselineReadiness.readinessState,
       contractSource: "resolveCanonicalState",
       ctaLabel: cta.label,
       ctaHref: cta.href,
+      resolvedRoute: cta.href,
       actionType: cta.actionType,
+      legacyFallbackAttempted: false,
+      legacyFallbackBlocked: true,
       analyticsPayload: baselineReadinessAnalyticsPayload,
       dataSource: baselineReadinessDataSource,
       persistedAssessmentId: primaryBaselineReadiness.latestAssessmentId,
@@ -1463,7 +1514,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 const canTargetJob = readinessState === "READY";
                 const setActiveDisabled = isLoading || isPrimary || isArchived || !isHydrated;
                 const latestResultsForBaselineHref = baselineReadiness.latestAssessmentId
-                  ? `/results?assessmentId=${encodeURIComponent(baselineReadiness.latestAssessmentId)}`
+                  ? getResultsHref({ assessmentId: baselineReadiness.latestAssessmentId })
                   : null;
                 const latestAssessmentTimestamp = baselineReadiness.latestAssessmentCreatedAt;
                 const latestRoleFitScore =

@@ -30,7 +30,7 @@ describe("support proxy routes", () => {
 
     expect(response.status).toBe(503);
     expect(payload).toMatchObject({
-      status: "temporarily_unavailable",
+      status: "service_unavailable",
       code: "UPSTREAM_API_URL_MISSING",
       supportPath: "/support/history",
     });
@@ -45,7 +45,7 @@ describe("support proxy routes", () => {
 
     expect(response.status).toBe(503);
     expect(payload).toMatchObject({
-      status: "configuration_missing",
+      status: "service_unavailable",
       code: "UPSTREAM_API_URL_MISSING",
     });
   });

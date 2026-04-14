@@ -18,6 +18,12 @@ describe('SyntheticUserTokenLinkService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-13T10:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   it('builds a reset-password link for the latest token', async () => {

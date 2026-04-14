@@ -32,8 +32,6 @@ import {
   normalizeUserFacingRequirementLabel,
   type VerificationCoverage,
 } from "@/lib/generationReadiness";
-import { getGenerationAuthorityState } from "@/lib/generationAuthority";
-import { buildGenerationProductReadiness } from "@/lib/generationProductReadiness";
 import { normalizeClaimVerifications } from "@/lib/claimVerification";
 import {
   buildCompetitiveBlockedResultsState,
@@ -61,6 +59,7 @@ import {
 import { buildProgressSummary } from "@/lib/progressSummary";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
 import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
+import { buildProductDecisionState } from "@/lib/productDecisionState";
 import { resolveCanonicalState } from "@/lib/canonicalDecision";
 import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
 import {
@@ -75,6 +74,7 @@ import { useGuidedMode } from "@/hooks/useGuidedMode";
 import { trackEvent } from "@/src/lib/analytics";
 import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
 import type { ResultsPrimaryCtaReadinessStatus } from "@/src/lib/analytics";
+import { getStudioHref } from "@/src/navigation/routes";
 
 function mapResultsAnalyticsActionType(
   type: ReturnType<typeof resolveCanonicalState>["primaryAction"]["type"],
@@ -752,36 +752,13 @@ export function buildStudioHrefFromResultsContext(input: {
   analysisId?: string | null;
   fromUnlock?: boolean;
 }): string {
-  const jobId = input.jobId?.trim() ?? "";
-  const params = new URLSearchParams();
-  if (jobId) {
-    params.set("jobId", jobId);
-  }
-
-  const analysisId = input.analysisId?.trim() ?? "";
-  if (analysisId) {
-    params.set("analysisId", analysisId);
-  }
-
-  const baselineId = input.baselineId?.trim() ?? "";
-  if (baselineId) {
-    params.set("baselineId", baselineId);
-  }
-
-  const baselineVersionId = input.baselineVersionId?.trim() ?? "";
-  if (baselineVersionId) {
-    params.set("baselineVersionId", baselineVersionId);
-  }
-
-  if (input.fromUnlock) {
-    params.set("fromUnlock", "true");
-  }
-
-  if (!params.toString()) {
-    return "/studio";
-  }
-
-  return `/studio?${params.toString()}`;
+  return getStudioHref({
+    jobId: input.jobId,
+    baselineId: input.baselineId,
+    baselineVersionId: input.baselineVersionId,
+    analysisId: input.analysisId,
+    fromUnlock: input.fromUnlock,
+  });
 }
 
 type ScoreDriver = {
@@ -2119,15 +2096,7 @@ export default function ResultsPage() {
   }, [latest?.score_breakdown, latest?.scoring_v2?.rubric]);
 
   const scoringV2 = latest?.scoring_v2 ?? null;
-  const scorePresentationMode =
-    latest?.scorePresentationMode ?? scoringV2?.scorePresentationMode ?? "normal";
   const scoreConfidenceReasons = latest?.scoreConfidenceReasons ?? scoringV2?.scoreConfidenceReasons ?? [];
-  const likelyUnderestimatedFit =
-    Boolean(latest?.likelyUnderestimatedFit ?? scoringV2?.likelyUnderestimatedFit) ||
-    scorePresentationMode === "fix_first";
-  const isFixFirstMode =
-    scorePresentationMode === "fix_first" ||
-    (typeof activeScore === "number" && activeScore < 60);
   const scoringRubric = scoringV2?.rubric ?? null;
   const debugFields = scoringV2?.debug ?? null;
   const analysisKeys = latest ? Object.keys(latest) : [];
@@ -2355,22 +2324,6 @@ export default function ResultsPage() {
     ],
   );
   const opportunityVerdict = useMemo(() => getOpportunityVerdict(activeScore), [activeScore]);
-  const fitReviewPath = useMemo(() => {
-    const candidateJobId = (latest?.jobId || jobId || "").trim();
-    const candidateBaselineId = (latest?.baselineId || baselineId || "").trim();
-    const candidateAnalysisId = (latest?.assessmentId || runIdentifier || "").trim();
-    const candidateBaselineVersionId = (latest?.baselineVersionId || "").trim();
-    const params = new URLSearchParams();
-    if (candidateJobId) params.set("jobId", candidateJobId);
-    if (candidateAnalysisId) {
-      params.set("analysisId", candidateAnalysisId);
-      params.set("assessmentId", candidateAnalysisId);
-    }
-    if (candidateBaselineId) params.set("baselineId", candidateBaselineId);
-    if (candidateBaselineVersionId) params.set("baselineVersionId", candidateBaselineVersionId);
-    const query = params.toString();
-    return query ? `/fit-review?${query}` : "/fit-review";
-  }, [baselineId, jobId, latest?.assessmentId, latest?.baselineId, latest?.baselineVersionId, latest?.jobId, runIdentifier]);
   const interviewToolkitHref = INTERVIEW_TOOLKIT_PATH;
   useEffect(() => {
     const key = getGenerationCompletionStorageKey(latest?.jobId ?? null, latest?.baselineId ?? null);
@@ -2384,15 +2337,77 @@ export default function ResultsPage() {
   const latestBaselineId = latest?.baselineId?.trim() ?? "";
   const latestBaselineVersionId = latest?.baselineVersionId?.trim() ?? "";
   const justUnlocked = searchParams?.get("justUnlocked") === "true";
-  const studioHref = useMemo(() => {
-    return buildStudioHrefFromResultsContext({
-      jobId: latest?.jobId,
-      baselineId: latestBaselineId,
-      baselineVersionId: latestBaselineVersionId,
-      analysisId: latest?.assessmentId ?? null,
-      fromUnlock: justUnlocked,
-    });
-  }, [justUnlocked, latest?.assessmentId, latest?.jobId, latestBaselineId, latestBaselineVersionId]);
+  const scorePresentationMode =
+    latest?.scorePresentationMode ?? scoringV2?.scorePresentationMode ?? "normal";
+  const likelyUnderestimatedFit =
+    Boolean(latest?.likelyUnderestimatedFit ?? scoringV2?.likelyUnderestimatedFit) ||
+    scorePresentationMode === "fix_first";
+  const isFixFirstMode =
+    scorePresentationMode === "fix_first" ||
+    (typeof activeScore === "number" && activeScore < 60);
+  const productDecisionState = useMemo(
+    () =>
+      buildProductDecisionState({
+        surface: "results",
+        baselineId: latest?.baselineId ?? baselineId ?? null,
+        jobId: latest?.jobId ?? jobId ?? null,
+        score: typeof activeScore === "number" ? activeScore : null,
+        generationReadiness,
+        hasCanonicalAssessment: Boolean(latest?.assessmentId),
+        hasRequiredContext: Boolean((latest?.jobId ?? jobId) && (latestBaselineId || baselineId)),
+        isPro: true,
+        forceFitReview: isFixFirstMode,
+        scorePresentationModeCandidates: [
+          latest?.scorePresentationMode ?? null,
+          scoringV2?.scorePresentationMode ?? null,
+          scorePresentationMode,
+        ],
+        likelyUnderestimatedFit,
+        routeContext: {
+          assessmentId: latest?.assessmentId ?? runIdentifier ?? null,
+          analysisId: latest?.assessmentId ?? runIdentifier ?? null,
+          baselineId: latest?.baselineId ?? baselineId ?? null,
+          jobId: latest?.jobId ?? jobId ?? null,
+          baselineVersionId: latest?.baselineVersionId ?? null,
+          fromUnlock: justUnlocked,
+        },
+        persistedAssessmentId: latest?.assessmentId ?? null,
+        analysisCandidates: latest
+          ? [
+              {
+                source: "latest_assessment",
+                value: {
+                  assessmentId: latest.assessmentId ?? null,
+                  baselineId: latest.baselineId ?? null,
+                  jobId: latest.jobId ?? null,
+                  baselineVersionId: latest.baselineVersionId ?? null,
+                },
+              },
+            ]
+          : undefined,
+        scoreCandidates: [{ source: "primary", value: typeof activeScore === "number" ? activeScore : null }],
+      }),
+    [
+      activeScore,
+      baselineId,
+      generationReadiness,
+      isFixFirstMode,
+      justUnlocked,
+      latest?.assessmentId,
+      latest?.baselineId,
+      latest?.baselineVersionId,
+      latest?.jobId,
+      latest?.scorePresentationMode,
+      latestBaselineId,
+      jobId,
+      likelyUnderestimatedFit,
+      runIdentifier,
+      scorePresentationMode,
+      scoringV2?.scorePresentationMode,
+    ],
+  );
+  const fitReviewPath = productDecisionState.fitReviewHref;
+  const studioHref = productDecisionState.studioHref;
 
   const normalizedDimensionScores = useMemo(
     () => normalizeDimensionScores(latest ?? null),
@@ -2424,97 +2439,11 @@ export default function ResultsPage() {
         typeof scoringRubric.weights[key] === "number" ? scoringRubric.weights[key] : null,
     }));
   }, [scoringRubric]);
-  const productReadiness = useMemo(
-    () =>
-      buildGenerationProductReadiness({
-        score: typeof activeScore === "number" ? activeScore : null,
-        authorityState: getGenerationAuthorityState(generationReadiness),
-        hasCanonicalAssessment: Boolean(latest?.assessmentId),
-        hasRequiredContext: Boolean(latest?.jobId && latestBaselineId),
-        isPro: true,
-      }),
-    [activeScore, generationReadiness, latest?.assessmentId, latest?.jobId, latestBaselineId],
-  );
-  const generationReadinessForDecision = useMemo<GenerationReadiness>(
-    () =>
-      typeof activeScore === "number" && activeScore < 70 && generationReadiness.status === "ready"
-        ? {
-            ...generationReadiness,
-            status: "blocked",
-            blocked: true,
-            badgeLabel: "BLOCKED",
-            summary: "Complete Fit Review to clarify the evidence gaps below.",
-          }
-        : generationReadiness,
-    [activeScore, generationReadiness],
-  );
-  const canonicalResultsDecision = useMemo(
-    () =>
-      resolveCanonicalState({
-        surface: "results",
-        baselineId: latest?.baselineId ?? null,
-        jobId: latest?.jobId ?? null,
-        score: typeof activeScore === "number" ? activeScore : null,
-        generationReadiness: generationReadinessForDecision,
-        productReadiness,
-        studioHref,
-        fitReviewHref: fitReviewPath,
-        forceFitReview: isFixFirstMode,
-        persistedAssessmentId: latest?.assessmentId ?? null,
-        analysisCandidates: latest
-          ? [
-              {
-                source: "latest_assessment",
-                value: {
-                  assessmentId: latest.assessmentId ?? null,
-                  baselineId: latest.baselineId ?? null,
-                  jobId: latest.jobId ?? null,
-                  baselineVersionId: latest.baselineVersionId ?? null,
-                  score: typeof activeScore === "number" ? activeScore : null,
-                },
-              },
-            ]
-          : undefined,
-        scoreCandidates: [{ source: "primary", value: typeof activeScore === "number" ? activeScore : null }],
-      }),
-    [
-      activeScore,
-      fitReviewPath,
-      generationReadiness,
-      generationReadinessForDecision,
-      isFixFirstMode,
-      latest?.baselineId,
-      latest?.jobId,
-      productReadiness,
-      studioHref,
-    ],
-  );
+  const productReadiness = productDecisionState.productReadiness;
+  const canonicalResultsDecision = productDecisionState.canonicalDecision;
   const resultsReadiness = useMemo<GenerationReadiness>(
-    () => ({
-      ...generationReadiness,
-      status:
-        canonicalResultsDecision.readinessState === "READY"
-          ? "ready"
-          : canonicalResultsDecision.readinessState === "DRAFT"
-            ? "limited"
-            : "blocked",
-      blocked: canonicalResultsDecision.readinessState !== "READY",
-      badgeLabel:
-        canonicalResultsDecision.readinessState === "READY"
-          ? "READY"
-          : canonicalResultsDecision.readinessState === "DRAFT"
-            ? "LIMITED"
-            : "BLOCKED",
-      summary:
-        canonicalResultsDecision.readinessState === "READY"
-          ? activeScore !== null && activeScore >= 90
-            ? "Your materials are ready to generate now. Review them in Studio before applying."
-            : "Your materials are ready to generate now. Review them in Studio before applying."
-          : canonicalResultsDecision.readinessState === "DRAFT"
-            ? "Your materials are ready to generate now. Review them in Studio before applying."
-            : "Complete Fit Review to clarify the evidence gaps below.",
-    }),
-    [activeScore, canonicalResultsDecision.readinessState, generationReadiness],
+    () => productDecisionState.renderedGenerationReadiness,
+    [productDecisionState.renderedGenerationReadiness],
   );
   const canOpenStudio = canonicalResultsDecision.readinessState !== "BLOCKED";
   const claimVerifications = useMemo(
@@ -3027,14 +2956,20 @@ export default function ResultsPage() {
 
     logDecisionFlowEvent({
       event: "results_decision_resolved",
+      entrySource: "results",
       baselineId: latest.baselineId ?? null,
       jobId: latest.jobId ?? null,
+      pairKey:
+        latest.baselineId && latest.jobId ? `${latest.baselineId}:${latest.jobId}` : null,
       score: typeof activeScore === "number" ? activeScore : null,
       readinessState: canonicalResultsDecision.workflowState,
       contractSource: "resolveCanonicalState",
       ctaLabel: cta.label,
       ctaHref: cta.href,
+      resolvedRoute: cta.href,
       actionType: cta.actionType,
+      legacyFallbackAttempted: cta.href.startsWith("/resolve-gaps"),
+      legacyFallbackBlocked: !cta.href.startsWith("/resolve-gaps"),
       analyticsPayload: cta.analyticsPayload,
       dataSource: "mixed",
       persistedAssessmentId: latest.assessmentId ?? null,

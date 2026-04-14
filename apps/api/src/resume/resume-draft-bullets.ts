@@ -200,7 +200,16 @@ function normalizeTrailingPunctuation(text: string): string {
 function toSingleSentence(text: string): string {
   const spans = extractSentenceSpans(text);
   if (spans.length > 0) {
-    return spans[0] ?? '';
+    const first = spans[0] ?? '';
+    const second = spans[1] ?? '';
+    // Avoid splitting on common abbreviations inside a single bullet line (e.g. "Alt. Positions, ...").
+    if (
+      second &&
+      /\b(?:alt|sr|jr|mr|ms|dr|st|vs|etc)\.$/i.test(first.trim())
+    ) {
+      return normalizeLine(`${first} ${second}`);
+    }
+    return first;
   }
   const normalized = normalizeLine(text);
   if (!normalized) return '';
@@ -213,7 +222,7 @@ function toSingleSentence(text: string): string {
 
 function sanitizeDraftBulletText(raw: string): string {
   const withoutLead = String(raw ?? '')
-    .replace(/^[\s\u2022\u25CF\u25E6*\-]+/, '')
+    .replace(/^[\s\u2022\u25CF\u25E6*-]+/, '')
     .replace(/[|]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -298,7 +307,11 @@ function isValidBulletCandidateText(text: string, exactBaselineBullet: boolean) 
   if (PLACEHOLDER_ONLY_PATTERN.test(normalized)) return false;
   if (SECTION_HEADING_PATTERN.test(normalized)) return false;
   if (looksLikeExperienceHeader(normalized)) return false;
-  if (lineLooksLikeHeaderFragment(normalized) && !ACTION_VERB_PATTERN.test(normalized)) {
+  // Exact baseline bullets that start lowercase are usually wrapped fragments ("needed", "well as ...").
+  if (exactBaselineBullet && isLowercaseStart(normalized)) {
+    return false;
+  }
+  if (!exactBaselineBullet && lineLooksLikeHeaderFragment(normalized) && !ACTION_VERB_PATTERN.test(normalized)) {
     return false;
   }
   if (hasFragmentBoundary(normalized, exactBaselineBullet)) return false;

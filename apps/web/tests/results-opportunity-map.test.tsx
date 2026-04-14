@@ -51,7 +51,7 @@ describe("Results opportunity map", () => {
         canonicalCoverage={null}
         predictiveUnlock={null}
         weakFitRecovery={{
-          href: "/resolve-gaps?jobId=job-1&baselineId=base-1",
+          href: "/fit-review?jobId=job-1&baselineId=base-1",
           gapPreview: [{ requirement: "Salesforce", explanation: "Add concrete baseline evidence that proves this requirement." }],
         }}
       />,
@@ -263,7 +263,7 @@ describe("Results opportunity map", () => {
         canonicalCoverage={null}
         predictiveUnlock={null}
         weakFitRecovery={{
-          href: "/resolve-gaps?jobId=job-1&baselineId=base-1",
+          href: "/fit-review?jobId=job-1&baselineId=base-1",
           gapPreview: [
             { requirement: "Salesforce", explanation: "Add concrete baseline evidence that proves this requirement." },
             { requirement: "Zendesk", explanation: "Add concrete baseline evidence that proves this requirement." },
@@ -277,7 +277,7 @@ describe("Results opportunity map", () => {
     expect(screen.getByText("Strengthen your baseline before generating application materials.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Start Fit Review" })).toHaveAttribute(
       "href",
-      "/resolve-gaps?jobId=job-1&baselineId=base-1",
+      "/fit-review?jobId=job-1&baselineId=base-1",
     );
     expect(screen.queryByTestId("results-hero-primary-cta")).toBeNull();
   });

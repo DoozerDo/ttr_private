@@ -179,6 +179,8 @@ const EXPERIENCE_HEADER_DELIMITERS = /[-@|/]+/;
 
 const ROLE_CONTEXT_PATTERN =
   /\b(?:served as|worked as|was|acting as|appointed|promoted to|my role was|in the role of)\s+(?:an?\s+|the\s+)?([A-Za-z][\w&'.-]*(?:\s+(?:of\s+)?[A-Za-z][\w&'.-]*){0,5})/gi;
+const ROLE_DISCUSSION_PATTERN =
+  /\bdiscussed\s+(?:an?\s+|the\s+)?([A-Za-z][\w&'.-]*(?:\s+(?:of\s+)?[A-Za-z][\w&'.-]*){0,5})\s+role\b/gi;
 const ROLE_ASSERTION_PREFIX_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
   { label: 'served as', pattern: /\b(?:i\s+)?served as\s+(?:an?\s+|the\s+)?/i },
   { label: 'worked as', pattern: /\b(?:i\s+)?worked as\s+(?:an?\s+|the\s+)?/i },
@@ -187,10 +189,11 @@ const ROLE_ASSERTION_PREFIX_PATTERNS: Array<{ label: string; pattern: RegExp }> 
   { label: 'acting as', pattern: /\b(?:i\s+)?acting as\s+(?:an?\s+|the\s+)?/i },
   { label: 'appointed', pattern: /\b(?:i\s+was\s+)?appointed\s+(?:as\s+)?(?:an?\s+|the\s+)?/i },
   { label: 'promoted to', pattern: /\b(?:i\s+was\s+)?promoted to\s+(?:an?\s+|the\s+)?/i },
+  { label: 'discussed', pattern: /\b(?:i\s+)?discussed\s+(?:an?\s+|the\s+)?/i },
   { label: 'as a', pattern: /\b(?:i|my)\b[\s\S]{0,80}?\bas\s+(?:an?\s+|the\s+)?/i },
 ];
 const ROLE_EXPLICIT_ASSERTION_PATTERN =
-  /\b(?:served as|worked as|was|acting as|appointed|promoted to|my role was|in the role of)\b/i;
+  /\b(?:served as|worked as|was|acting as|appointed|promoted to|my role was|in the role of|discussed)\b/i;
 const ROLE_NON_ASSERTION_PATTERNS = [
   /\brecommended for this role\b/i,
   /\bthis focus emphasizes\b/i,
@@ -438,8 +441,9 @@ const METRIC_CONTEXT_PATTERNS = METRIC_CONTEXT_KEYWORDS.map(
   (keyword) => new RegExp(`\\b${escapeRegex(keyword)}\\b`, 'i'),
 );
 const METRIC_CONTEXT_WINDOW = 40;
+// Accept plain multi-digit values (e.g. 450000) as well as comma-grouped values (e.g. 450,000).
 const METRIC_VALUE_PATTERN =
-  /\b\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*(?:percent(?:age)?|%))?\b/gi;
+  /\b\d+(?:,\d{3})*(?:\.\d+)?(?:\s*(?:percent(?:age)?|%))?\b/gi;
 const METRIC_IGNORE_CONTEXT_PATTERNS = [
   /\b24\s*\/\s*7\b/i,
   /\btier\s+[123]\b/i,
@@ -536,7 +540,14 @@ function stripCompanySuffixes(value: string): string {
 export function normalizeCompanyTokenForComparison(value: string): string {
   const normalized = normalizeTokenForComparison(value);
   if (!normalized) return '';
-  return stripCompanySuffixes(normalized);
+  const stripped = stripCompanySuffixes(normalized);
+  // Keep multi-token company identifiers stable. Over-stripping ("Horizon Labs" -> "horizon")
+  // causes false allowlisting and suppresses intended invented-company flags.
+  const strippedTokens = stripped.split(/\s+/).filter(Boolean);
+  if (strippedTokens.length < 2) {
+    return normalized;
+  }
+  return stripped;
 }
 
 export function addCandidate(
@@ -1100,6 +1111,17 @@ export function collectMetricCandidatesFromSections(
     const text = span.text;
     if (!text) continue;
 
+    if (process.env.COMPLIANCE_TRACE === 'true') {
+      const needle = 'Achieved revenue of 450000 last quarter.';
+      if (text.includes(needle)) {
+        console.debug('[compliance-trace] collectMetricCandidatesFromSections span hit', {
+          text,
+          sourceType: span.sourceType,
+          lineType: span.lineType,
+        });
+      }
+    }
+
     METRIC_VALUE_PATTERN.lastIndex = 0;
 
     let match: RegExpExecArray | null;
@@ -1177,6 +1199,23 @@ export function collectMetricCandidatesFromSections(
     }
   }
 
+  if (process.env.COMPLIANCE_TRACE === 'true') {
+    const needle = 'Achieved revenue of 450000 last quarter.';
+    const hit = candidates.filter((c) => (c.sourceText ?? '').includes(needle));
+    if (hit.length) {
+      console.debug('[compliance-trace] collectMetricCandidatesFromSections candidates hit', hit);
+    } else {
+      const anySectionHasNeedle = (sections ?? []).some((section) =>
+        String(section?.content ?? '').includes(needle),
+      );
+      if (anySectionHasNeedle) {
+        console.debug(
+          '[compliance-trace] collectMetricCandidatesFromSections MISS (sentence present in sections, no candidates)',
+        );
+      }
+    }
+  }
+
   return candidates;
 }
 
@@ -1219,6 +1258,14 @@ export function detectInventedMetric(
   const flags: ComplianceFlag[] = [];
 
   for (const candidate of generatedCandidates) {
+    emitDetectorTrace({
+      detector: String(ComplianceFlagCode.INVENTED_METRIC),
+      text: candidate.sourceText ?? candidate.original,
+      normalized: candidate.normalized,
+      sourceType: String(candidate.sourceType ?? 'UNSPECIFIED'),
+      evaluated: true,
+      skipReason: null,
+    });
     if (!isBaselineEvidenceSourceType(candidate.sourceType)) {
       addComplianceDebugLine(payload.debugTrace, {
         sourceText: candidate.sourceText ?? candidate.original,
@@ -1340,12 +1387,14 @@ export function detectInventedMetric(
       flagged: true,
       flag,
     });
-    console.warn(
-      'inventedMetric detector blocked span',
-      `text="${candidate.sourceText ?? candidate.original}" sourceType=${String(
-        candidate.sourceType ?? 'UNSPECIFIED',
-      )} detector=inventedMetric`,
-    );
+    if (process.env.COMPLIANCE_TRACE === 'true') {
+      console.debug(
+        '[compliance-trace] inventedMetric blocked span',
+        `text="${candidate.sourceText ?? candidate.original}" sourceType=${String(
+          candidate.sourceType ?? 'UNSPECIFIED',
+        )} detector=inventedMetric`,
+      );
+    }
   }
 
   return flags;
@@ -1415,6 +1464,17 @@ export function extractRoleCandidatesFromText(text: string): string[] {
   };
 
   capture(ROLE_CONTEXT_PATTERN);
+  capture(ROLE_DISCUSSION_PATTERN);
+
+  // Generated artifacts sometimes prefix role headers with "Experience ..." without a formal assertion verb.
+  // Example: "Experience VP of Galactic Support overseeing ..." should still be evaluated as a role claim.
+  if (/^experience\s+/i.test(normalizedStatement)) {
+    const withoutPrefix = normalizedStatement.replace(/^experience\s+/i, '').trim();
+    const roleLike = withoutPrefix.split(/\b(?:overseeing|leading|driving|managing|building|supporting)\b/i)[0]?.trim() ?? '';
+    if (roleLike) {
+      matches.add(roleLike.replace(/[.!?]$/, '').trim());
+    }
+  }
   if (statementLooksLikeStandaloneRole) {
     matches.add(normalizedStatement);
   }
@@ -1432,7 +1492,9 @@ function isCompanyAllowlisted(normalized: string, original: string): boolean {
   if (LOCATION_ALLOWLIST.has(normalized)) return true;
   if (MONTHS.has(normalized)) return true;
   if (/\b(?:com|org|net|io|co|us|uk|edu|gov)\b/i.test(original)) return true;
-  if (original.includes('@') || original.includes('.')) return true;
+  // Allow URLs/emails, but do not blanket-allow any sentence that ends with a period.
+  if (original.includes('@')) return true;
+  if (/\b[a-z0-9-]+\.[a-z]{2,}\b/i.test(original)) return true;
   return false;
 }
 
@@ -1576,6 +1638,9 @@ function isLikelyRoleFragment(options: {
     return true;
   }
   if (!isValidRoleTitleShape(options.original)) return true;
+  if (sourceText && /^experience\s+/i.test(sourceText)) {
+    return false;
+  }
   if (sourceText && !resolveRoleAssertionPattern(sourceText, options.original)) {
     return true;
   }
@@ -1639,9 +1704,11 @@ function shouldEvaluateInventedRoleAssertion(options: {
 
   const assertionPattern = resolveRoleAssertionPattern(sourceText, candidate);
   const standaloneAssertion = isStandaloneRoleTitleAssertion(sourceText);
+  const experiencePrefixAssertion = /^experience\s+/i.test(sourceText);
   if (
     !assertionPattern &&
     !standaloneAssertion &&
+    !experiencePrefixAssertion &&
     !ROLE_EXPLICIT_ASSERTION_PATTERN.test(sourceText)
   ) {
     return {
@@ -1676,7 +1743,9 @@ function shouldEvaluateInventedRoleAssertion(options: {
   return {
     eligible: true,
     reason: 'evaluated_complete_asserted_role',
-    assertionPattern: assertionPattern ?? (standaloneAssertion ? 'standalone_title' : null),
+    assertionPattern:
+      assertionPattern ??
+      (standaloneAssertion ? 'standalone_title' : experiencePrefixAssertion ? 'experience_prefix' : null),
   };
 }
 
@@ -2254,12 +2323,14 @@ function detectInventedEntity(options: {
       flagged: true,
       flag,
     });
-    console.warn(
-      `${detectorName} detector blocked span`,
-      `text="${sourceText}" sourceType=${String(
-        sourceType ?? 'UNSPECIFIED',
-      )} detector=${detectorName} assertionPattern="${assertionPattern ?? 'none'}"`,
-    );
+    if (process.env.COMPLIANCE_TRACE === 'true') {
+      console.debug(
+        `[compliance-trace] ${detectorName} blocked span`,
+        `text="${sourceText}" sourceType=${String(
+          sourceType ?? 'UNSPECIFIED',
+        )} detector=${detectorName} assertionPattern="${assertionPattern ?? 'none'}"`,
+      );
+    }
   }
 
   return flags;
@@ -2429,6 +2500,13 @@ export function classifyClaimType(token: string): ClaimClassification {
 function looksCompanyLikeToken(token: string): boolean {
   const normalized = normalizeCandidate(token);
   if (!normalized) return false;
+  // Avoid treating obvious technology tokens as companies.
+  if (STRICT_TECHNOLOGY_TERMS.has(normalized.toLowerCase())) {
+    return false;
+  }
+  if (/db$/i.test(normalized) || /sql$/i.test(normalized) || /api$/i.test(normalized)) {
+    return false;
+  }
   if (normalized.split(/\s+/).length >= 2) return true;
   return /^[A-Z][A-Za-z0-9]+$/.test(normalized);
 }
@@ -2590,6 +2668,10 @@ function isTechnologyTokenCandidate(value: string): boolean {
   if (STRICT_TECHNOLOGY_TERMS.has(normalized)) return true;
   const cleaned = value.replace(/[^A-Za-z0-9]/g, '');
   if (cleaned.length < 3) return false;
+  // Ignore pure numbers (eg "99.9") which show up in metric claims.
+  if (/^\d+(?:\.\d+)?$/.test(value.trim())) return false;
+  // Ignore common lowercase hyphenated words (eg "follow-up") that aren't technologies.
+  if (/-/.test(value) && /^[a-z-]+$/.test(value)) return false;
 
   if (/[.#+-]/.test(value)) return true;
   if (/\d/.test(cleaned)) return true;
@@ -2731,6 +2813,14 @@ export function detectFictionalTechnology(
 
   for (const [normalized, claim] of generatedClaims.entries()) {
     const original = claim.text;
+    emitDetectorTrace({
+      detector: String(ComplianceFlagCode.FICTIONAL_TECHNOLOGY),
+      text: original,
+      normalized,
+      sourceType: String(GeneratedTextSourceType.BASELINE_EVIDENCE),
+      evaluated: true,
+      skipReason: null,
+    });
     if (baselineTokenSet.has(normalized)) continue;
     const entity = resolveEntity(original);
     if (claim.type === 'company' && entity.verifiedCompany) {
@@ -2776,6 +2866,49 @@ export function detectFictionalTechnology(
         conditions: buildTraceConditions([
           `normalized=${normalized}`,
           'support=derived-only',
+        ]),
+        evidence: [
+          {
+            baseline: '',
+            generated: original,
+            generatedClaim: claim,
+          },
+        ],
+      };
+      flags.push(flag);
+      continue;
+    }
+    // Some strict platform terms (eg Salesforce) can be treated as WARN if the baseline clearly
+    // demonstrates equivalent capability (CRM/case management) even if the exact token isn't present.
+    if (normalized === 'salesforce' && hasEquivalentCapability(original, payload.baselineSections)) {
+      const confidence = Math.max(0.55, computeTechnologyConfidence(original) - 0.2);
+      const flag: ComplianceFlag = {
+        code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+        severity: ComplianceFlagSeverity.WARN,
+        message: `Technology "${original}" is not explicitly listed, but equivalent baseline capability was detected.`,
+        confidence,
+        type: 'INVALID_ASSERTION',
+        sourceText: original,
+        location: {
+          section: resolveComplianceLocation(
+            claim.sectionType,
+            claim.sectionTitle,
+            ResumeLineType.BULLET_CLAIM,
+          ),
+          role: claim.sectionTitle?.trim() || undefined,
+          index:
+            typeof claim.candidateIndex === 'number'
+              ? claim.candidateIndex
+              : typeof claim.sectionIndex === 'number'
+                ? claim.sectionIndex
+                : undefined,
+        },
+        rule: 'TECHNOLOGY_ASSERTION_VALIDATION',
+        reason: 'Strict platform term mapped to an equivalent capability but was not explicitly listed.',
+        conditions: buildTraceConditions([
+          `normalized=${normalized}`,
+          'equivalentCapability=true',
+          'strictTechnologyTerm=true',
         ]),
         evidence: [
           {
@@ -2866,10 +2999,12 @@ export function detectFictionalTechnology(
       ],
     };
     flags.push(flag);
-    console.warn(
-      'inventedTechnology detector blocked span',
-      `text="${original}" sourceType=${GeneratedTextSourceType.BASELINE_EVIDENCE} detector=inventedTechnology`,
-    );
+    if (process.env.COMPLIANCE_TRACE === 'true') {
+      console.debug(
+        '[compliance-trace] inventedTechnology blocked span',
+        `text="${original}" sourceType=${GeneratedTextSourceType.BASELINE_EVIDENCE} detector=inventedTechnology`,
+      );
+    }
   }
 
   return flags;

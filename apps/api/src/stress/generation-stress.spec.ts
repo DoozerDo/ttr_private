@@ -45,7 +45,7 @@ const INFLATED_SCOPE_PATTERN =
   /\b(global(?:ly)?|worldwide|end[\s-]?to[\s-]?end|enterprise[\s-]?wide|org[\s-]?wide|all teams|entire company)\b/i;
 const INVENTED_ENTITY_PATTERN =
   /\b(confidential company|stealth startup|fortune\s*\d{2,3}|unnamed company|undisclosed company)\b/i;
-const BULLET_ARTIFACT_PATTERN = /^(?:[•*\-]\s+|\d{1,2}[.)]\s+)/m;
+const BULLET_ARTIFACT_PATTERN = /^(?:[•*-]\s+|\d{1,2}[.)]\s+)/m;
 
 function computeTokenOverlapRatio(source: string, target: string): number {
   const sourceTokens = new Set(

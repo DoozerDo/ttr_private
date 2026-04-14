@@ -39,7 +39,7 @@ const MIN_TEXT_LENGTH = 200;
 export class FitScoringService {
   private readonly engine: FitScoreEngine;
 
-  constructor(private readonly criticalFlowTrackerService: CriticalFlowTrackerService) {
+  constructor(private readonly criticalFlowTrackerService?: CriticalFlowTrackerService) {
     this.engine = new FitScoreEngine();
   }
 
@@ -121,7 +121,7 @@ export class FitScoringService {
       }
 
       const delta = expandedScore - baseResult.overallScore;
-      void this.criticalFlowTrackerService.recordCriticalFlowEvent({
+      void this.criticalFlowTrackerService?.recordCriticalFlowEvent({
         flow: CriticalFlowEventType.SCORE_GENERATED_SUCCESS,
         areaOrRoute: 'scoring',
       });
@@ -141,7 +141,7 @@ export class FitScoringService {
         verdict: baseResult.verdict,
       };
     } catch (error) {
-      void this.criticalFlowTrackerService.recordCriticalFlowEvent({
+      void this.criticalFlowTrackerService?.recordCriticalFlowEvent({
         flow: CriticalFlowEventType.SCORE_GENERATED_FAILURE,
         areaOrRoute: 'scoring',
       });

@@ -33,7 +33,7 @@ describe("target generation contract", () => {
       generationReadiness,
       productReadiness,
       studioHref: "/studio?analysisId=analysis-19&jobId=job-19&baselineId=base-19",
-      resolveGapsHref: "/resolve-gaps?analysisId=analysis-19&jobId=job-19&baselineId=base-19",
+      fitReviewHref: "/fit-review?analysisId=analysis-19&jobId=job-19&baselineId=base-19",
       scoreSource: "fresh_computation",
     });
 
@@ -41,7 +41,7 @@ describe("target generation contract", () => {
       state: "BLOCKED",
       label: "Start Fit Review",
       actionType: "resolve_gaps",
-      href: "/resolve-gaps?analysisId=analysis-19&jobId=job-19&baselineId=base-19",
+      href: "/fit-review?analysisId=analysis-19&jobId=job-19&baselineId=base-19",
       isStudioDestination: false,
       score: 19,
     });
@@ -51,7 +51,7 @@ describe("target generation contract", () => {
       state: "BLOCKED",
       score: 19,
       label: "Start Fit Review",
-      href: "/resolve-gaps?analysisId=analysis-19&jobId=job-19&baselineId=base-19",
+      href: "/fit-review?analysisId=analysis-19&jobId=job-19&baselineId=base-19",
       actionType: "resolve_gaps",
     });
     expect(() => assertTargetCtaAnalyticsMatchesRenderedCta(contract, analyticsPayload)).not.toThrow();
@@ -79,7 +79,7 @@ describe("target generation contract", () => {
       generationReadiness,
       productReadiness,
       studioHref: "/studio?analysisId=analysis-82&jobId=job-82&baselineId=base-82",
-      resolveGapsHref: "/resolve-gaps?analysisId=analysis-82&jobId=job-82&baselineId=base-82",
+      fitReviewHref: "/fit-review?analysisId=analysis-82&jobId=job-82&baselineId=base-82",
       scoreSource: "fresh_computation",
     });
 
@@ -124,7 +124,7 @@ describe("target generation contract", () => {
       generationReadiness,
       productReadiness,
       studioHref: "/studio?analysisId=analysis-78&jobId=job-78&baselineId=base-78",
-      resolveGapsHref: "/resolve-gaps?analysisId=analysis-78&jobId=job-78&baselineId=base-78",
+      fitReviewHref: "/fit-review?analysisId=analysis-78&jobId=job-78&baselineId=base-78",
       scoreSource: "fresh_computation",
     });
 
@@ -132,7 +132,7 @@ describe("target generation contract", () => {
       state: "LIMITED",
       label: "Start Fit Review",
       actionType: "resolve_gaps",
-      href: "/resolve-gaps?analysisId=analysis-78&jobId=job-78&baselineId=base-78",
+      href: "/fit-review?analysisId=analysis-78&jobId=job-78&baselineId=base-78",
       isStudioDestination: false,
       score: 78,
     });
@@ -142,7 +142,7 @@ describe("target generation contract", () => {
       state: "LIMITED",
       score: 78,
       label: "Start Fit Review",
-      href: "/resolve-gaps?analysisId=analysis-78&jobId=job-78&baselineId=base-78",
+      href: "/fit-review?analysisId=analysis-78&jobId=job-78&baselineId=base-78",
       actionType: "resolve_gaps",
     });
   });
@@ -175,13 +175,13 @@ describe("target generation contract", () => {
       generationReadiness,
       productReadiness,
       studioHref: "/studio?analysisId=analysis-88&jobId=job-88&baselineId=base-88",
-      resolveGapsHref: "/resolve-gaps?analysisId=analysis-88&jobId=job-88&baselineId=base-88",
+      fitReviewHref: "/fit-review?analysisId=analysis-88&jobId=job-88&baselineId=base-88",
       scoreSource: "fresh_computation",
     });
 
     expect(contract.actionType).toBe("resolve_gaps");
     expect(contract.label).toBe("Start Fit Review");
-    expect(contract.href).toContain("/resolve-gaps");
+    expect(contract.href).toContain("/fit-review");
     expect(buildTargetCtaClickedAnalyticsPayload(contract)).toEqual({
       state: contract.state,
       score: 88,
@@ -213,7 +213,7 @@ describe("target generation contract", () => {
       generationReadiness,
       productReadiness,
       studioHref: "/studio?analysisId=analysis-19&jobId=job-19&baselineId=base-19",
-      resolveGapsHref: "/resolve-gaps?analysisId=analysis-19&jobId=job-19&baselineId=base-19",
+      fitReviewHref: "/fit-review?analysisId=analysis-19&jobId=job-19&baselineId=base-19",
       scoreSource: "fresh_computation",
     });
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});

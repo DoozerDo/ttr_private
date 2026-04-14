@@ -85,14 +85,26 @@ export function parseComplianceError({
 }
 
 export function readResponsePayload(response: Response): Promise<unknown> {
-  const contentType = response.headers.get("content-type") ?? "";
-  const isJson = contentType.includes("application/json");
+  const responseLike = response as Response & {
+    headers?: { get?: (name: string) => string | null };
+  };
+  const contentType = responseLike.headers?.get?.("content-type") ?? "";
+  const hasJsonContentType = contentType.includes("application/json");
+  const canReadJson = hasJsonContentType || !contentType;
 
-  if (isJson) {
-    return response.json().catch(() => null);
+  if (canReadJson && typeof responseLike.json === "function") {
+    return responseLike.json().catch(() => null);
   }
 
-  return response.text().catch(() => null);
+  if (typeof responseLike.text === "function") {
+    return responseLike.text().catch(() => null);
+  }
+
+  if (typeof responseLike.json === "function") {
+    return responseLike.json().catch(() => null);
+  }
+
+  return Promise.resolve(null);
 }
 
 export function formatErrorMessage(payload: unknown, fallback: string): string {

@@ -124,11 +124,25 @@ const buildService = (options?: {
     markFailure: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<WorkflowIdempotencyService>;
 
+  const studioArtifactsService = {
+    computeJobFingerprint: jest.fn().mockReturnValue('job-fingerprint-1'),
+    computeCoverLetterInputsHash: jest.fn().mockReturnValue('cover-letter-inputs-hash-1'),
+    recordCoverLetterInProgress: jest.fn().mockResolvedValue(undefined),
+    recordCoverLetterSuccess: jest.fn().mockResolvedValue(undefined),
+    recordCoverLetterFailure: jest.fn().mockResolvedValue(undefined),
+  } as any;
+
+  const applicationsService = {
+    upsertApplicationForPair: jest.fn().mockResolvedValue({ id: 'app-1' }),
+  } as any;
+
   const service = new CoverLettersService(
     dataSource,
     complianceService as any,
     gapAnalysis,
     workflowIdempotencyService,
+    studioArtifactsService,
+    applicationsService,
   );
   return { service, complianceService, coverRepo, workflowIdempotencyService };
 };

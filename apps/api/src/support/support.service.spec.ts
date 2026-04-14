@@ -222,7 +222,7 @@ describe('SupportService', () => {
       response: expect.objectContaining({
         code: 'support_config_unavailable',
         message:
-          'Bug reporting is temporarily unavailable right now. Save a draft and check Support history later.',
+          'Bug reporting is disabled because GitHub bug reporting is not configured in this environment. Save a draft and check Support history later.',
       }),
     });
   });

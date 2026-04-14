@@ -126,7 +126,7 @@ function createSupportConfigUnavailableException() {
     {
       code: SUPPORT_CONFIG_UNAVAILABLE_CODE,
       message:
-        'Bug reporting is temporarily unavailable right now. Save a draft and check Support history later.',
+        'Bug reporting is disabled because GitHub bug reporting is not configured in this environment. Save a draft and check Support history later.',
     },
     HttpStatus.SERVICE_UNAVAILABLE,
   );

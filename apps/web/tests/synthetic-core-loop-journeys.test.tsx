@@ -2,9 +2,11 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { beforeEach, vi } from "vitest";
 
 import { BaselineStudioHome } from "@/app/(app)/baseline/BaselineStudioHome";
+import { ReportBugModal } from "@/src/components/support/ReportBugModal";
 import ResultsPage from "@/app/(app)/results/page";
 import StudioPage from "@/app/(app)/studio/page";
 import TargetPage from "@/app/(app)/target/page";
+import SupportHistoryPage from "@/app/(app)/support/history/page";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
 import {
   mockRouterReplace,
@@ -83,6 +85,21 @@ type ReadinessPayload = {
   status: "ready" | "limited" | "blocked";
   reasons: Array<{ code: string; message: string }>;
   compliance_flags: Array<{ code: string; severity: "warn" | "block"; message: string }>;
+};
+
+type SupportHistoryItem = {
+  issueNumber: number;
+  title: string;
+  state: "open" | "closed";
+  status: "Investigating" | "Fix in progress" | "Resolved";
+  labels: string[];
+  createdAt: string;
+  updatedAt: string;
+  severity: "high" | "medium" | null;
+  area: string | null;
+  reporterMessagePreview: string;
+  sentryEventId: string | null;
+  resolutionNote: string | null;
 };
 
 type AssessmentFixture = {
@@ -382,6 +399,7 @@ function createScenarioBackend(scenario: SyntheticJourneyScenario) {
         ? [[scenario.uploadAssessment.assessmentId, scenario.uploadAssessment] as const]
         : []),
     ]),
+    supportIssues: [] as SupportHistoryItem[],
     analysisRunCalls: 0,
   };
 
@@ -456,6 +474,47 @@ function createScenarioBackend(scenario: SyntheticJourneyScenario) {
 
     if (pathname === "/api/jobs" && method === "GET") {
       return jsonResponse(scenario.jobs);
+    }
+
+    if (pathname === "/api/support/config" && method === "GET") {
+      return jsonResponse({ githubConfigured: true, sentryConfigured: true, projectAssignmentEnabled: true });
+    }
+
+    if (pathname === "/api/support/report-bug" && method === "POST") {
+      const rawBody = typeof init?.body === "string" ? init.body : String(init?.body ?? "");
+      const parsedBody = rawBody ? (JSON.parse(rawBody) as { message?: string; route?: string }) : {};
+      const now = "2026-04-09T00:00:00.000Z";
+      const issueNumber = state.supportIssues.length + 1;
+      const issue: SupportHistoryItem = {
+        issueNumber,
+        title: parsedBody.message?.slice(0, 48) || "Bug report",
+        state: "closed",
+        status: "Resolved",
+        labels: ["bug", "area:results", "severity:high"],
+        createdAt: now,
+        updatedAt: now,
+        severity: "high",
+        area: parsedBody.route?.includes("results") ? "Results" : "Core loop",
+        reporterMessagePreview: parsedBody.message?.slice(0, 120) || "",
+        sentryEventId: `sentry-${issueNumber}`,
+        resolutionNote: "Captured in support history.",
+      };
+      state.supportIssues.unshift(issue);
+      return jsonResponse({
+        status: "submission_success",
+        message: "Thanks. Your report was submitted successfully.",
+        reportId: `bug-${issueNumber}`,
+      });
+    }
+
+    if (pathname === "/api/support/history" && method === "GET") {
+      return jsonResponse({ items: state.supportIssues });
+    }
+
+    if (pathname === "/api/support/history/still-seeing" && method === "POST") {
+      const rawBody = typeof init?.body === "string" ? init.body : String(init?.body ?? "");
+      const parsedBody = rawBody ? (JSON.parse(rawBody) as { issueNumber?: number }) : {};
+      return jsonResponse({ issueNumber: parsedBody.issueNumber ?? null, count: 1 });
     }
 
     if (pathname === "/api/analysis/fit-assessments" && method === "GET") {
@@ -634,14 +693,14 @@ const scenarios: SyntheticJourneyScenario[] = [
         readinessText: "Generation Ready",
         scoreText: "86",
         ctaLabel: "Open Studio",
-        ctaHref: "/studio?analysisId=assessment-new-1&jobId=job-new-1&baselineId=base-new-1&baselineVersionId=base-new-1-v1",
+        ctaHref: "/studio?jobId=job-new-1&analysisId=assessment-new-1&baselineId=base-new-1&baselineVersionId=base-new-1-v1",
         actionType: "open_studio_generate",
         analyticsEvent: "target_cta_clicked",
         analyticsPayload: buildAnalyticsPayload("target_cta_clicked", {
           state: "READY",
           score: 86,
           label: "Open Studio",
-          href: "/studio?analysisId=assessment-new-1&jobId=job-new-1&baselineId=base-new-1&baselineVersionId=base-new-1-v1",
+          href: "/studio?jobId=job-new-1&analysisId=assessment-new-1&baselineId=base-new-1&baselineVersionId=base-new-1-v1",
           actionType: "open_studio_generate",
         }),
       }),
@@ -652,18 +711,18 @@ const scenarios: SyntheticJourneyScenario[] = [
       jobId: "job-new-1",
       loadMode: "assessment",
       expected: buildStageExpectation({
-        readinessText: "Competitive fit. Not ready to generate yet.",
+        readinessText: "Strong match. Generation is ready.",
         scoreText: "86",
-        ctaLabel: "Start Fit Review",
-        ctaHref: "/fit-review?jobId=job-new-1&analysisId=assessment-new-1&assessmentId=assessment-new-1&baselineId=base-new-1&baselineVersionId=base-new-1-v1",
-        actionType: "fit_review",
+        ctaLabel: "Open Studio",
+        ctaHref: "/studio?jobId=job-new-1&analysisId=assessment-new-1&baselineId=base-new-1&baselineVersionId=base-new-1-v1",
+        actionType: "open_studio",
         analyticsEvent: "results_primary_cta_clicked",
         analyticsPayload: buildAnalyticsPayload("results_primary_cta_clicked", {
           source: "results",
           intentState: "none",
-          action: "verify_examples",
+          action: "open_studio",
           scoreBucket: "MID",
-          readinessStatus: "blocked",
+          readinessStatus: "limited",
         }),
       }),
     },
@@ -673,14 +732,14 @@ const scenarios: SyntheticJourneyScenario[] = [
       jobId: "job-new-1",
       baselineVersionId: "base-new-1-v1",
       expected: buildStageExpectation({
-        readinessText: "Ready to generate",
+        readinessText: "Your draft needs another pass",
         scoreText: "Fit score 86",
-        ctaLabel: "Add to Opportunities",
-        ctaHref: "/job-tracker",
-        actionType: "studio_with_save",
+        ctaLabel: "Refine",
+        ctaHref: "/fit-review?jobId=job-new-1&analysisId=assessment-new-1&assessmentId=assessment-new-1&baselineId=base-new-1&baselineVersionId=base-new-1-v1",
+        actionType: "fit_review",
         analyticsEvent: "studio_generation_state_viewed",
         analyticsPayload: buildAnalyticsPayload("studio_generation_state_viewed", {
-          state: "READY",
+          state: "BLOCKED",
           score: 86,
           blockerCount: 0,
         }),
@@ -760,14 +819,14 @@ const scenarios: SyntheticJourneyScenario[] = [
         readinessText: "Generation Ready",
         scoreText: "82",
         ctaLabel: "Open Studio",
-        ctaHref: "/studio?analysisId=assessment-return-1&jobId=job-return-1&baselineId=base-return-1&baselineVersionId=base-return-1-v1",
+        ctaHref: "/studio?jobId=job-return-1&analysisId=assessment-return-1&baselineId=base-return-1&baselineVersionId=base-return-1-v1",
         actionType: "open_studio_generate",
         analyticsEvent: "target_cta_clicked",
         analyticsPayload: buildAnalyticsPayload("target_cta_clicked", {
           state: "READY",
           score: 82,
           label: "Open Studio",
-          href: "/studio?analysisId=assessment-return-1&jobId=job-return-1&baselineId=base-return-1&baselineVersionId=base-return-1-v1",
+          href: "/studio?jobId=job-return-1&analysisId=assessment-return-1&baselineId=base-return-1&baselineVersionId=base-return-1-v1",
           actionType: "open_studio_generate",
         }),
       }),
@@ -778,18 +837,18 @@ const scenarios: SyntheticJourneyScenario[] = [
       jobId: "job-return-1",
       loadMode: "assessment",
       expected: buildStageExpectation({
-        readinessText: "Competitive fit. Not ready to generate yet.",
+        readinessText: "Strong match. Generation is ready.",
         scoreText: "82",
-        ctaLabel: "Start Fit Review",
-        ctaHref: "/fit-review?jobId=job-return-1&analysisId=assessment-return-1&assessmentId=assessment-return-1&baselineId=base-return-1&baselineVersionId=base-return-1-v1",
-        actionType: "fit_review",
+        ctaLabel: "Open Studio",
+        ctaHref: "/studio?jobId=job-return-1&analysisId=assessment-return-1&baselineId=base-return-1&baselineVersionId=base-return-1-v1",
+        actionType: "open_studio",
         analyticsEvent: "results_primary_cta_clicked",
         analyticsPayload: buildAnalyticsPayload("results_primary_cta_clicked", {
           source: "results",
           intentState: "none",
-          action: "verify_examples",
+          action: "open_studio",
           scoreBucket: "MID",
-          readinessStatus: "blocked",
+          readinessStatus: "limited",
         }),
       }),
     },
@@ -799,14 +858,14 @@ const scenarios: SyntheticJourneyScenario[] = [
       jobId: "job-return-1",
       baselineVersionId: "base-return-1-v1",
       expected: buildStageExpectation({
-        readinessText: "Ready to generate",
+        readinessText: "Your draft needs another pass",
         scoreText: "Fit score 82",
-        ctaLabel: "Review Results",
-        ctaHref: "/results?jobId=job-return-1&analysisId=assessment-return-1&baselineId=base-return-1",
-        actionType: "studio",
+        ctaLabel: "Refine",
+        ctaHref: "/fit-review?jobId=job-return-1&analysisId=assessment-return-1&assessmentId=assessment-return-1&baselineId=base-return-1&baselineVersionId=base-return-1-v1",
+        actionType: "fit_review",
         analyticsEvent: "studio_generation_state_viewed",
         analyticsPayload: buildAnalyticsPayload("studio_generation_state_viewed", {
-          state: "READY",
+          state: "BLOCKED",
           score: 82,
           blockerCount: 0,
         }),
@@ -882,14 +941,16 @@ const scenarios: SyntheticJourneyScenario[] = [
         readinessText: "Fit Review Needed",
         scoreText: "54",
         ctaLabel: "Start Fit Review",
-        ctaHref: "/resolve-gaps?jobId=job-low-1&baselineId=base-low-1&analysisId=assessment-low-1&baselineVersionId=base-low-1-v1",
+        ctaHref:
+          "/fit-review?jobId=job-low-1&analysisId=assessment-low-1&assessmentId=assessment-low-1&baselineId=base-low-1&baselineVersionId=base-low-1-v1",
         actionType: "resolve_gaps",
         analyticsEvent: "target_cta_clicked",
         analyticsPayload: buildAnalyticsPayload("target_cta_clicked", {
           state: "BLOCKED",
           score: 54,
           label: "Start Fit Review",
-          href: "/resolve-gaps?jobId=job-low-1&baselineId=base-low-1&analysisId=assessment-low-1&baselineVersionId=base-low-1-v1",
+          href:
+            "/fit-review?jobId=job-low-1&analysisId=assessment-low-1&assessmentId=assessment-low-1&baselineId=base-low-1&baselineVersionId=base-low-1-v1",
           actionType: "resolve_gaps",
         }),
       }),
@@ -904,14 +965,14 @@ const scenarios: SyntheticJourneyScenario[] = [
         // Results shows the low-confidence warning copy before the verdict card.
         // The canonical blocked headline is the warning banner rather than the old placeholder string.
         scoreText: "54",
-        ctaLabel: "Start Fit Review",
-        ctaHref: "/fit-review?jobId=job-low-1&analysisId=assessment-low-1&assessmentId=assessment-low-1&baselineId=base-low-1&baselineVersionId=base-low-1-v1",
+        ctaLabel: "Go to Target",
+        ctaHref: "/target?baselineId=base-low-1",
         actionType: "fit_review",
         analyticsEvent: "results_primary_cta_clicked",
         analyticsPayload: buildAnalyticsPayload("results_primary_cta_clicked", {
           source: "results",
           intentState: "none",
-          action: "verify_examples",
+          action: "fit_review",
           scoreBucket: "LOW",
           readinessStatus: "blocked",
         }),
@@ -987,14 +1048,14 @@ const scenarios: SyntheticJourneyScenario[] = [
         readinessText: "Generation Ready",
         scoreText: "84",
         ctaLabel: "Open Studio",
-        ctaHref: "/studio?analysisId=assessment-trust-1&jobId=job-trust-1&baselineId=base-trust-1&baselineVersionId=base-trust-1-v1",
+        ctaHref: "/studio?jobId=job-trust-1&analysisId=assessment-trust-1&baselineId=base-trust-1&baselineVersionId=base-trust-1-v1",
         actionType: "open_studio_generate",
         analyticsEvent: "target_cta_clicked",
         analyticsPayload: buildAnalyticsPayload("target_cta_clicked", {
           state: "READY",
           score: 84,
           label: "Open Studio",
-          href: "/studio?analysisId=assessment-trust-1&jobId=job-trust-1&baselineId=base-trust-1&baselineVersionId=base-trust-1-v1",
+          href: "/studio?jobId=job-trust-1&analysisId=assessment-trust-1&baselineId=base-trust-1&baselineVersionId=base-trust-1-v1",
           actionType: "open_studio_generate",
         }),
       }),
@@ -1005,18 +1066,18 @@ const scenarios: SyntheticJourneyScenario[] = [
       jobId: "job-trust-1",
       loadMode: "assessment",
       expected: buildStageExpectation({
-        readinessText: "Competitive fit. Not ready to generate yet.",
+        readinessText: "Strong match. Generation is ready.",
         scoreText: "84",
-        ctaLabel: "Start Fit Review",
-        ctaHref: "/fit-review?jobId=job-trust-1&analysisId=assessment-trust-1&assessmentId=assessment-trust-1&baselineId=base-trust-1&baselineVersionId=base-trust-1-v1",
-        actionType: "fit_review",
+        ctaLabel: "Open Studio",
+        ctaHref: "/studio?jobId=job-trust-1&analysisId=assessment-trust-1&baselineId=base-trust-1&baselineVersionId=base-trust-1-v1",
+        actionType: "open_studio",
         analyticsEvent: "results_primary_cta_clicked",
         analyticsPayload: buildAnalyticsPayload("results_primary_cta_clicked", {
           source: "results",
           intentState: "none",
-          action: "verify_examples",
+          action: "open_studio",
           scoreBucket: "MID",
-          readinessStatus: "blocked",
+          readinessStatus: "limited",
         }),
       }),
     },
@@ -1026,14 +1087,14 @@ const scenarios: SyntheticJourneyScenario[] = [
       jobId: "job-trust-1",
       baselineVersionId: "base-trust-1-v1",
       expected: buildStageExpectation({
-        readinessText: "Ready to generate",
+        readinessText: "Your draft needs another pass",
         scoreText: "Fit score 84",
-        ctaLabel: "Review Results",
-        ctaHref: "/results?jobId=job-trust-1&analysisId=assessment-trust-1&baselineId=base-trust-1",
-        actionType: "studio",
+        ctaLabel: "Refine",
+        ctaHref: "/fit-review?jobId=job-trust-1&analysisId=assessment-trust-1&assessmentId=assessment-trust-1&baselineId=base-trust-1&baselineVersionId=base-trust-1-v1",
+        actionType: "fit_review",
         analyticsEvent: "studio_generation_state_viewed",
         analyticsPayload: buildAnalyticsPayload("studio_generation_state_viewed", {
-          state: "READY",
+          state: "BLOCKED",
           score: 84,
           blockerCount: 0,
         }),
@@ -1115,14 +1176,14 @@ const scenarios: SyntheticJourneyScenario[] = [
         readinessText: "Generation Ready",
         scoreText: "81",
         ctaLabel: "Open Studio",
-        ctaHref: "/studio?analysisId=assessment-stale-fresh&jobId=job-stale-1&baselineId=base-stale-1&baselineVersionId=base-stale-1-v1",
+        ctaHref: "/studio?jobId=job-stale-1&analysisId=assessment-stale-fresh&baselineId=base-stale-1&baselineVersionId=base-stale-1-v1",
         actionType: "open_studio_generate",
         analyticsEvent: "target_cta_clicked",
         analyticsPayload: buildAnalyticsPayload("target_cta_clicked", {
           state: "READY",
           score: 81,
           label: "Open Studio",
-          href: "/studio?analysisId=assessment-stale-fresh&jobId=job-stale-1&baselineId=base-stale-1&baselineVersionId=base-stale-1-v1",
+          href: "/studio?jobId=job-stale-1&analysisId=assessment-stale-fresh&baselineId=base-stale-1&baselineVersionId=base-stale-1-v1",
           actionType: "open_studio_generate",
         }),
       }),
@@ -1134,18 +1195,18 @@ const scenarios: SyntheticJourneyScenario[] = [
       freshAssessmentId: "assessment-stale-fresh",
       shouldRecompute: true,
       expected: buildStageExpectation({
-        readinessText: "Competitive fit. Not ready to generate yet.",
+        readinessText: "Strong match. Generation is ready.",
         scoreText: "81",
-        ctaLabel: "Start Fit Review",
-        ctaHref: "/fit-review?jobId=job-stale-1&analysisId=assessment-stale-fresh&assessmentId=assessment-stale-fresh&baselineId=base-stale-1&baselineVersionId=base-stale-1-v1",
-        actionType: "fit_review",
+        ctaLabel: "Open Studio",
+        ctaHref: "/studio?jobId=job-stale-1&analysisId=assessment-stale-fresh&baselineId=base-stale-1&baselineVersionId=base-stale-1-v1",
+        actionType: "open_studio",
         analyticsEvent: "results_primary_cta_clicked",
         analyticsPayload: buildAnalyticsPayload("results_primary_cta_clicked", {
           source: "results",
           intentState: "none",
-          action: "verify_examples",
+          action: "open_studio",
           scoreBucket: "MID",
-          readinessStatus: "blocked",
+          readinessStatus: "limited",
         }),
       }),
     },
@@ -1155,14 +1216,14 @@ const scenarios: SyntheticJourneyScenario[] = [
       jobId: "job-stale-1",
       baselineVersionId: "base-stale-1-v1",
       expected: buildStageExpectation({
-        readinessText: "Ready to generate",
+        readinessText: "Your draft needs another pass",
         scoreText: "Fit score 81",
-        ctaLabel: "Review Results",
-        ctaHref: "/results?jobId=job-stale-1&analysisId=assessment-stale-fresh&baselineId=base-stale-1",
-        actionType: "studio",
+        ctaLabel: "Refine",
+        ctaHref: "/fit-review?jobId=job-stale-1&analysisId=assessment-stale-fresh&assessmentId=assessment-stale-fresh&baselineId=base-stale-1&baselineVersionId=base-stale-1-v1",
+        actionType: "fit_review",
         analyticsEvent: "studio_generation_state_viewed",
         analyticsPayload: buildAnalyticsPayload("studio_generation_state_viewed", {
-          state: "READY",
+          state: "BLOCKED",
           score: 81,
           blockerCount: 0,
         }),
@@ -1248,14 +1309,14 @@ const scenarios: SyntheticJourneyScenario[] = [
         readinessText: "Generation Ready",
         scoreText: "83",
         ctaLabel: "Open Studio",
-        ctaHref: "/studio?analysisId=assessment-archived-active-1&jobId=job-archived-1&baselineId=base-archived-active-1&baselineVersionId=base-archived-active-1-v1",
+        ctaHref: "/studio?jobId=job-archived-1&analysisId=assessment-archived-active-1&baselineId=base-archived-active-1&baselineVersionId=base-archived-active-1-v1",
         actionType: "open_studio_generate",
         analyticsEvent: "target_cta_clicked",
         analyticsPayload: buildAnalyticsPayload("target_cta_clicked", {
           state: "READY",
           score: 83,
           label: "Open Studio",
-          href: "/studio?analysisId=assessment-archived-active-1&jobId=job-archived-1&baselineId=base-archived-active-1&baselineVersionId=base-archived-active-1-v1",
+          href: "/studio?jobId=job-archived-1&analysisId=assessment-archived-active-1&baselineId=base-archived-active-1&baselineVersionId=base-archived-active-1-v1",
           actionType: "open_studio_generate",
         }),
       }),
@@ -1266,18 +1327,18 @@ const scenarios: SyntheticJourneyScenario[] = [
       jobId: "job-archived-1",
       loadMode: "assessment",
       expected: buildStageExpectation({
-        readinessText: "Competitive fit. Not ready to generate yet.",
+        readinessText: "Strong match. Generation is ready.",
         scoreText: "83",
-        ctaLabel: "Start Fit Review",
-        ctaHref: "/fit-review?jobId=job-archived-1&analysisId=assessment-archived-active-1&assessmentId=assessment-archived-active-1&baselineId=base-archived-active-1&baselineVersionId=base-archived-active-1-v1",
-        actionType: "fit_review",
+        ctaLabel: "Open Studio",
+        ctaHref: "/studio?jobId=job-archived-1&analysisId=assessment-archived-active-1&baselineId=base-archived-active-1&baselineVersionId=base-archived-active-1-v1",
+        actionType: "open_studio",
         analyticsEvent: "results_primary_cta_clicked",
         analyticsPayload: buildAnalyticsPayload("results_primary_cta_clicked", {
           source: "results",
           intentState: "none",
-          action: "verify_examples",
+          action: "open_studio",
           scoreBucket: "MID",
-          readinessStatus: "blocked",
+          readinessStatus: "limited",
         }),
       }),
     },
@@ -1287,14 +1348,14 @@ const scenarios: SyntheticJourneyScenario[] = [
       jobId: "job-archived-1",
       baselineVersionId: "base-archived-active-1-v1",
       expected: buildStageExpectation({
-        readinessText: "Ready to generate",
+        readinessText: "Your draft needs another pass",
         scoreText: "Fit score 83",
-        ctaLabel: "Review Results",
-        ctaHref: "/results?jobId=job-archived-1&analysisId=assessment-archived-active-1&baselineId=base-archived-active-1",
-        actionType: "studio",
+        ctaLabel: "Refine",
+        ctaHref: "/fit-review?jobId=job-archived-1&analysisId=assessment-archived-active-1&assessmentId=assessment-archived-active-1&baselineId=base-archived-active-1&baselineVersionId=base-archived-active-1-v1",
+        actionType: "fit_review",
         analyticsEvent: "studio_generation_state_viewed",
         analyticsPayload: buildAnalyticsPayload("studio_generation_state_viewed", {
-          state: "READY",
+          state: "BLOCKED",
           score: 83,
           blockerCount: 0,
         }),
@@ -1382,14 +1443,14 @@ const scenarios: SyntheticJourneyScenario[] = [
         readinessText: "Generation Ready",
         scoreText: "88",
         ctaLabel: "Open Studio",
-        ctaHref: "/studio?analysisId=assessment-multi-2&jobId=job-multi-1&baselineId=base-multi-2&baselineVersionId=base-multi-2-v1",
+        ctaHref: "/studio?jobId=job-multi-1&analysisId=assessment-multi-2&baselineId=base-multi-2&baselineVersionId=base-multi-2-v1",
         actionType: "open_studio_generate",
         analyticsEvent: "target_cta_clicked",
         analyticsPayload: buildAnalyticsPayload("target_cta_clicked", {
           state: "READY",
           score: 88,
           label: "Open Studio",
-          href: "/studio?analysisId=assessment-multi-2&jobId=job-multi-1&baselineId=base-multi-2&baselineVersionId=base-multi-2-v1",
+          href: "/studio?jobId=job-multi-1&analysisId=assessment-multi-2&baselineId=base-multi-2&baselineVersionId=base-multi-2-v1",
           actionType: "open_studio_generate",
         }),
       }),
@@ -1400,37 +1461,18 @@ const scenarios: SyntheticJourneyScenario[] = [
       jobId: "job-multi-1",
       loadMode: "assessment",
       expected: buildStageExpectation({
-        readinessText: "Competitive fit. Not ready to generate yet.",
+        readinessText: "Strong match. Generation is ready.",
         scoreText: "88",
-        ctaLabel: "Start Fit Review",
-        ctaHref: "/fit-review?jobId=job-multi-1&analysisId=assessment-multi-2&assessmentId=assessment-multi-2&baselineId=base-multi-2&baselineVersionId=base-multi-2-v1",
-        actionType: "fit_review",
+        ctaLabel: "Open Studio",
+        ctaHref: "/studio?jobId=job-multi-1&analysisId=assessment-multi-2&baselineId=base-multi-2&baselineVersionId=base-multi-2-v1",
+        actionType: "open_studio",
         analyticsEvent: "results_primary_cta_clicked",
         analyticsPayload: buildAnalyticsPayload("results_primary_cta_clicked", {
           source: "results",
           intentState: "none",
-          action: "verify_examples",
+          action: "open_studio",
           scoreBucket: "MID",
-          readinessStatus: "blocked",
-        }),
-      }),
-    },
-    studioStage: {
-      assessmentId: "assessment-multi-2",
-      baselineId: "base-multi-2",
-      jobId: "job-multi-1",
-      baselineVersionId: "base-multi-2-v1",
-      expected: buildStageExpectation({
-        readinessText: "Ready to generate",
-        scoreText: "Fit score 88",
-        ctaLabel: "Add to Opportunities",
-        ctaHref: "/job-tracker",
-        actionType: "studio_with_save",
-        analyticsEvent: "studio_generation_state_viewed",
-        analyticsPayload: buildAnalyticsPayload("studio_generation_state_viewed", {
-          state: "READY",
-          score: 88,
-          blockerCount: 0,
+          readinessStatus: "limited",
         }),
       }),
     },
@@ -1514,14 +1556,16 @@ const scenarios: SyntheticJourneyScenario[] = [
         readinessText: "Fit Review Needed",
         scoreText: "19",
         ctaLabel: "Start Fit Review",
-        ctaHref: "/resolve-gaps?jobId=job-james-1&baselineId=base-james-1&analysisId=assessment-james-1&baselineVersionId=base-james-1-v1",
+        ctaHref:
+          "/fit-review?jobId=job-james-1&analysisId=assessment-james-1&assessmentId=assessment-james-1&baselineId=base-james-1&baselineVersionId=base-james-1-v1",
         actionType: "resolve_gaps",
         analyticsEvent: "target_cta_clicked",
         analyticsPayload: buildAnalyticsPayload("target_cta_clicked", {
           state: "BLOCKED",
           score: 19,
           label: "Start Fit Review",
-          href: "/resolve-gaps?jobId=job-james-1&baselineId=base-james-1&analysisId=assessment-james-1&baselineVersionId=base-james-1-v1",
+          href:
+            "/fit-review?jobId=job-james-1&analysisId=assessment-james-1&assessmentId=assessment-james-1&baselineId=base-james-1&baselineVersionId=base-james-1-v1",
           actionType: "resolve_gaps",
         }),
       }),
@@ -1534,14 +1578,14 @@ const scenarios: SyntheticJourneyScenario[] = [
       expected: buildStageExpectation({
         readinessText: "We may be underestimating your fit.",
         scoreText: "19",
-        ctaLabel: "Start Fit Review",
-        ctaHref: "/fit-review?jobId=job-james-1&analysisId=assessment-james-1&assessmentId=assessment-james-1&baselineId=base-james-1&baselineVersionId=base-james-1-v1",
+        ctaLabel: "Go to Target",
+        ctaHref: "/target?baselineId=base-james-1",
         actionType: "fit_review",
         analyticsEvent: "results_primary_cta_clicked",
         analyticsPayload: buildAnalyticsPayload("results_primary_cta_clicked", {
           source: "results",
           intentState: "none",
-          action: "verify_examples",
+          action: "fit_review",
           scoreBucket: "LOW",
           readinessStatus: "blocked",
         }),
@@ -1591,11 +1635,27 @@ const scenarios: SyntheticJourneyScenario[] = [
   },
 ];
 
-describe("synthetic core-loop journeys", () => {
+describe("[trust:route-continuity][trust:cta-consistency] synthetic core-loop journeys", () => {
   beforeEach(() => {
     trackEventMock.mockClear();
     mockRouterReplace.mockClear();
     activeScenario = null;
+    let cache: Record<string, string> = {};
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => (key in cache ? cache[key] : null),
+        setItem: (key: string, value: string) => {
+          cache[key] = value;
+        },
+        removeItem: (key: string) => {
+          delete cache[key];
+        },
+        clear: () => {
+          cache = {};
+        },
+      },
+    });
     Object.defineProperty(window.HTMLElement.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
@@ -1603,7 +1663,7 @@ describe("synthetic core-loop journeys", () => {
   });
 
   for (const scenario of scenarios) {
-    it(scenario.name, async () => {
+    it(`[trust:route-continuity][trust:cta-consistency] ${scenario.name}`, async () => {
       activeScenario = scenario;
       const backend = createScenarioBackend(scenario);
       setFetchImplementation(backend.fetchMock as unknown as typeof fetch);
@@ -1715,7 +1775,7 @@ describe("synthetic core-loop journeys", () => {
         expect(screen.getByTestId("results-score-verdict-card")).toBeInTheDocument();
       });
       expect(
-        screen.getAllByText(scenario.resultsStage.expected.readinessText).length,
+        screen.getAllByText(toSafeRegex(scenario.resultsStage.expected.readinessText)).length,
       ).toBeGreaterThan(0);
       expect(
         screen.getAllByText(toSafeRegex(scenario.resultsStage.expected.scoreText)).length,
@@ -1743,15 +1803,21 @@ describe("synthetic core-loop journeys", () => {
         });
 
         await waitFor(() => {
-          expect(screen.getByText(scenario.studioStage!.expected.readinessText)).toBeInTheDocument();
+          expect(
+            screen.getAllByText(toSafeRegex(scenario.studioStage!.expected.readinessText)).length,
+          ).toBeGreaterThan(0);
         });
         expect(screen.getAllByText(toSafeRegex(scenario.studioStage.expected.scoreText)).length).toBeGreaterThan(0);
-        const studioLink = screen.getByRole("link", { name: scenario.studioStage.expected.ctaLabel });
+        const studioLink = screen
+          .getAllByRole("link")
+          .find((link) => link.getAttribute("href") === scenario.studioStage!.expected.ctaHref);
+        expect(studioLink).toBeTruthy();
         expect(studioLink).toHaveAttribute("href", scenario.studioStage.expected.ctaHref);
         const studioActionTypeByLabel: Record<string, string> = {
           "Add to Opportunities": "studio_with_save",
           "Review Results": "studio",
           "Start Fit Review": "fit_review",
+          Refine: "fit_review",
         };
         expect(studioActionTypeByLabel[scenario.studioStage.expected.ctaLabel]).toBe(
           scenario.studioStage.expected.actionType,
@@ -1769,4 +1835,129 @@ describe("synthetic core-loop journeys", () => {
       }
     });
   }
+});
+
+it("[trust:support-flow][trust:recovery-behavior] keeps the core loop canonical through support submission and recovery", async () => {
+  const scenario = scenarios[1];
+  activeScenario = scenario;
+  const backend = createScenarioBackend(scenario);
+  setFetchImplementation(backend.fetchMock as unknown as typeof fetch);
+
+  render(<BaselineStudioHome baselines={scenario.baselines} />);
+
+  await waitFor(() => {
+    const targetLink = screen.getByRole("link", { name: /target a role/i });
+    expect(targetLink.getAttribute("href")).toContain("/target?");
+    expect(targetLink.getAttribute("href")).toContain(`baselineId=${scenario.baselineStage.baselineId}`);
+  });
+
+  cleanup();
+  trackEventMock.mockClear();
+
+  await renderTargetStage(scenario);
+  fireEvent.click(screen.getByRole("button", { name: /run compatibility score/i }));
+  await waitFor(() => {
+    expect(screen.getByRole("link", { name: scenario.targetStage.expected.ctaLabel })).toHaveAttribute(
+      "href",
+      scenario.targetStage.expected.ctaHref,
+    );
+  });
+  expect(screen.getByText(scenario.targetStage.expected.readinessText)).toBeInTheDocument();
+
+  cleanup();
+  trackEventMock.mockClear();
+
+  renderResultsStageWithAssessmentId(scenario.resultsStage.assessmentId ?? scenario.resultsAssessment.assessmentId);
+  await waitFor(() => {
+    expect(screen.getByTestId("results-score-verdict-card")).toBeInTheDocument();
+  });
+  expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent(
+    scenario.resultsStage.expected.ctaLabel,
+  );
+  expect(screen.getByTestId("results-hero-primary-cta")).toHaveAttribute(
+    "href",
+    scenario.resultsStage.expected.ctaHref,
+  );
+
+  cleanup();
+  trackEventMock.mockClear();
+
+  await renderStudioStage({
+    analysisId: scenario.studioStage?.assessmentId ?? scenario.studioAssessment.assessmentId,
+    assessmentId: scenario.studioStage?.assessmentId ?? scenario.studioAssessment.assessmentId,
+    jobId: scenario.studioStage?.jobId ?? scenario.studioAssessment.jobId,
+    baselineId: scenario.studioStage?.baselineId ?? scenario.studioAssessment.baselineId,
+    baselineVersionId: scenario.studioStage?.baselineVersionId ?? scenario.studioAssessment.baselineVersionId,
+  });
+  await waitFor(() => {
+    expect(
+      screen.getAllByText(toSafeRegex(scenario.studioStage?.expected.readinessText ?? "Ready to generate")).length,
+    ).toBeGreaterThan(0);
+  });
+  expect(
+    screen
+      .getAllByRole("link")
+      .some((link) => link.getAttribute("href") === (scenario.studioStage?.expected.ctaHref ?? "/job-tracker")),
+  ).toBe(true);
+
+  cleanup();
+  trackEventMock.mockClear();
+
+  overrideSearchParams({
+    baselineId: scenario.resultsStage.baselineId,
+    jobId: scenario.resultsStage.jobId,
+    assessmentId: scenario.resultsStage.assessmentId ?? scenario.resultsAssessment.assessmentId,
+    analysisId: scenario.resultsStage.assessmentId ?? scenario.resultsAssessment.assessmentId,
+  });
+  render(<ReportBugModal open onClose={() => {}} userId="user-1" />);
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: /send issue report/i })).not.toBeDisabled();
+  });
+  fireEvent.change(screen.getByPlaceholderText("What went wrong?"), {
+    target: { value: "Results to Studio handoff felt unclear" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /send issue report/i }));
+  await waitFor(() => {
+    expect(screen.getByText("Thanks. Your report was submitted successfully.")).toBeInTheDocument();
+  });
+
+  cleanup();
+  render(<SupportHistoryPage />);
+  await waitFor(() => {
+    expect(screen.getByText("Issue #1")).toBeInTheDocument();
+  });
+  expect(screen.getAllByText(/Results to Studio handoff felt unclear/i).length).toBeGreaterThan(0);
+  fireEvent.click(screen.getByRole("button", { name: /still seeing this issue/i }));
+  await waitFor(() => {
+    expect(screen.getByText(/Thanks\. We recorded that you're still seeing this issue/i)).toBeInTheDocument();
+  });
+});
+
+it("[trust:failure-messaging][trust:recovery-behavior] keeps recoverable support configuration failures explicit and quiet", async () => {
+  const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  setFetchImplementation(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/api/support/config")) {
+      return jsonResponse(
+        {
+          status: "service_unavailable",
+          code: "UPSTREAM_API_URL_MISSING",
+          message: "Support service is unavailable right now. You can keep working and try again later.",
+        },
+        503,
+      );
+    }
+    return jsonResponse({});
+  });
+
+  render(<ReportBugModal open onClose={() => {}} />);
+
+  await waitFor(() => {
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Support service is unavailable right now. You can keep working and try again later.",
+    );
+  });
+  expect(screen.getByRole("button", { name: /send issue report/i })).toBeDisabled();
+  expect(consoleErrorSpy).not.toHaveBeenCalled();
+  consoleErrorSpy.mockRestore();
 });

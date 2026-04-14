@@ -168,13 +168,13 @@ describe("results auto analysis loading", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getAllByText("You're a strong match. You can generate now.").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Strong match. Generation is ready.").length).toBeGreaterThan(0);
     });
     expect(screen.getByTestId("results-hero-primary-cta").closest("section")).toHaveTextContent(
       "Confidence: Medium",
     );
     expect(screen.queryByTestId("results-generation-unlocked-panel")).toBeNull();
-    expect(screen.getAllByText("You're a strong match. You can generate now.").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Strong match. Generation is ready.").length).toBeGreaterThan(0);
     expect(screen.queryByText("This role may not be a fit.")).toBeNull();
     expect(screen.queryByText("No compatibility analysis yet")).toBeNull();
     expect(screen.queryByText("Start Fit Review")).toBeNull();
@@ -188,6 +188,7 @@ describe("results auto analysis loading", () => {
 
   it("uses missing verification language when generation readiness is blocked", async () => {
     overrideSearchParams({ analysisId: "assessment-blocked", justUnlocked: "true" });
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -252,12 +253,14 @@ describe("results auto analysis loading", () => {
     expect(screen.getAllByText(/Competitive fit\. Not ready to generate yet\./).length).toBeGreaterThan(0);
     expect(screen.queryByText("No material gaps were identified in this run.")).toBeNull();
     expect(screen.getAllByTestId("results-hero-primary-cta")[0]).toHaveTextContent(
-      "Verify 2 examples to unlock Studio",
+      "Start Fit Review",
     );
     expect(screen.getAllByTestId("results-hero-primary-cta")[0]).toHaveAttribute(
       "href",
       "/fit-review?jobId=job-1&analysisId=assessment-blocked&assessmentId=assessment-blocked&baselineId=base-1&baselineVersionId=base-version-1",
     );
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
   });
 
   it("shows generation unlocked state when a blocked analysis returns unblocked", async () => {

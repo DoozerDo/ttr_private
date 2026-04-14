@@ -2899,12 +2899,13 @@ export function computeConfidenceScore(
   const baselineTags = debug.domainTagsBaseline ?? [];
   const roleTags = debug.domainTagsRole ?? [];
   const baselineTextForPenalty =
-    debug.bundle?.inputs.normalizedBaseline.sections.map((section) => section.snippet).join(' ') ??
-    '';
+    debug.bundle?.inputs?.normalizedBaseline?.sections
+      ?.map((section) => section.snippet)
+      .join(' ') ?? '';
   const jobTextForPenalty =
     [
-      ...(debug.bundle?.inputs.normalizedJob.responsibilities ?? []),
-      ...(debug.bundle?.inputs.normalizedJob.requirements ?? []),
+      ...(debug.bundle?.inputs?.normalizedJob?.responsibilities ?? []),
+      ...(debug.bundle?.inputs?.normalizedJob?.requirements ?? []),
     ]
       .map((segment) => segment.snippet)
       .join(' ') ?? '';

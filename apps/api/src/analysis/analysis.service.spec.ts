@@ -11,7 +11,10 @@ import {
 } from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { BaselineParsed } from '../baseline/baseline-parsed.entity';
-import { BaselineSchemaCoreShape } from '../baseline/baseline-schema';
+import {
+  BaselineSchema,
+  BaselineSchemaCoreShape,
+} from '../baseline/baseline-schema';
 import {
   ComplianceAction,
   ComplianceFlagSeverity,
@@ -28,7 +31,12 @@ import { GapAnalysisService } from './gap-analysis.service';
 import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
 import type { CalibrationProfile } from './calibration-profiles';
 import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
-import type { CxFitV2Result } from './cx-fit-scoring-v2';
+import { scoreCxFitV2, type CxFitV2Result } from './cx-fit-scoring-v2';
+
+jest.mock('./cx-fit-scoring-v2', () => ({
+  ...jest.requireActual('./cx-fit-scoring-v2'),
+  scoreCxFitV2: jest.fn(),
+}));
 
 describe('AnalysisService - fit scores contract', () => {
   let service: AnalysisService;
@@ -103,7 +111,12 @@ describe('AnalysisService - fit scores contract', () => {
   const defaultJobRecord: Partial<Job> = {
     id: 'job-1',
     userId: 'user-1',
-    rawDescription: 'Lead operations with AWS focus.',
+    // Keep JD long enough to satisfy scoring reliability guards in the canonical scoring contract.
+    rawDescription:
+      'Lead support operations and process rigor for a scaling SaaS team. '
+        .repeat(80) +
+      'Own incident response, queue health, SLA adherence, tooling strategy, and cross-functional execution. '
+        .repeat(80),
     normalizedResponsibilities: [],
     normalizedRequirements: [],
     jdIngestionMethod: JobIngestionMethod.PASTE,
@@ -115,7 +128,12 @@ describe('AnalysisService - fit scores contract', () => {
   };
 
 const sampleScoringV2: CxFitV2Result = {
-  score: 80,
+  score: 90,
+  scoreConfidence: 0.85,
+  scoreConfidenceReasons: [],
+  scoreSanityFlags: [],
+  likelyUnderestimatedFit: false,
+  scorePresentationMode: 'score',
   rubric: {
     id: 'scoring_contract_v1',
     weights: {
@@ -126,22 +144,22 @@ const sampleScoringV2: CxFitV2Result = {
       change_leadership_and_customer_advocacy: 15,
     },
     dimensionPercents: {
-      role_scope_and_seniority: 80,
-      support_operations_and_process_rigor: 70,
-      tooling_and_platform_experience: 60,
-      domain_and_business_context: 75,
-      change_leadership_and_customer_advocacy: 65,
+      role_scope_and_seniority: 90,
+      support_operations_and_process_rigor: 90,
+      tooling_and_platform_experience: 90,
+      domain_and_business_context: 90,
+      change_leadership_and_customer_advocacy: 90,
     },
     dimensionPoints: {
-      role_scope_and_seniority: 20,
-      support_operations_and_process_rigor: 18,
-      tooling_and_platform_experience: 12,
-      domain_and_business_context: 11,
-      change_leadership_and_customer_advocacy: 9,
+      role_scope_and_seniority: 23,
+      support_operations_and_process_rigor: 23,
+      tooling_and_platform_experience: 18,
+      domain_and_business_context: 14,
+      change_leadership_and_customer_advocacy: 14,
     },
-    subtotal: 70,
+    subtotal: 92,
     penalties: [],
-    finalBeforeClamp: 70,
+    finalBeforeClamp: 90,
     rounding: 'round_half_up_final_only',
   },
   debug: {
@@ -149,6 +167,10 @@ const sampleScoringV2: CxFitV2Result = {
     baselineBand: 'L4',
     roleBand: 'L4',
     bandDelta: 0,
+    heuristicInference: {
+      usedHeuristicInference: false,
+      heuristicLiftTotal: 0,
+    },
     domainTagsBaseline: [],
     domainTagsRole: [],
     responsibilityOverlapPercent: 0,
@@ -161,6 +183,8 @@ const sampleScoringV2: CxFitV2Result = {
 };
 
   beforeEach(async () => {
+    (scoreCxFitV2 as unknown as jest.Mock).mockReturnValue(sampleScoringV2);
+
     baselineVersionRepository = {
       findOne: jest.fn().mockResolvedValue(baselineVersion),
     };
@@ -1170,7 +1194,13 @@ const sampleScoringV2: CxFitV2Result = {
     ];
 
     const parsedRecord = {
-      parsedJson: canonicalBaseline,
+      parsedJson: {
+        ...canonicalBaseline,
+        baseline_id: '11111111-1111-4111-8111-111111111111',
+        source_file_id: '22222222-2222-4222-8222-222222222222',
+        source_format: 'pdf',
+        ingested_at: '2026-04-01T00:00:00.000Z',
+      },
       createdAt: new Date(),
       updatedAt: new Date(),
     } as BaselineParsed;
@@ -1421,7 +1451,13 @@ const sampleScoringV2: CxFitV2Result = {
       },
     };
     const parsedRecord = {
-      parsedJson: canonicalBaseline,
+      parsedJson: {
+        ...canonicalBaseline,
+        baseline_id: '11111111-1111-4111-8111-111111111111',
+        source_file_id: '22222222-2222-4222-8222-222222222222',
+        source_format: 'pdf',
+        ingested_at: '2026-04-01T00:00:00.000Z',
+      },
       createdAt: new Date(),
       updatedAt: new Date(),
     } as BaselineParsed;
@@ -1438,7 +1474,8 @@ const sampleScoringV2: CxFitV2Result = {
     baselineSectionRepo.find.mockResolvedValue(baselineSections);
 
     const expectedHash = createHash('sha256')
-      .update(JSON.stringify(canonicalBaseline))
+      // buildBaselineFallbackHash hashes the validated/normalized canonical baseline (BaselineSchema.parse).
+      .update(JSON.stringify(BaselineSchema.parse(parsedRecord.parsedJson)))
       .digest('hex');
 
     await service.runFitAssessment('user-1', {
@@ -1610,6 +1647,7 @@ const sampleScoringV2: CxFitV2Result = {
     let legacyExpectedHash: string;
 
     beforeEach(async () => {
+      (scoreCxFitV2 as unknown as jest.Mock).mockClear();
       jobRepository.findOne.mockResolvedValue(refreshJobRecord);
       expectedHash = await service['computeExpectedInputsHashForJobBaseline'](
         'user-1',
@@ -1706,7 +1744,8 @@ const sampleScoringV2: CxFitV2Result = {
         strengths: ['leadership'],
         gaps: ['detail'],
       complianceFlags: [],
-      scoringV2: sampleScoringV2,
+      // For legacy persisted assessments without scoring_v2, the response should reuse the stored overallScore.
+      scoringV2: null,
       inputsHash: expectedHash,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -1722,7 +1761,7 @@ const sampleScoringV2: CxFitV2Result = {
 
       expect(result.assessmentId).toBe(storedAssessment.id);
       expect(result.overallScore).toBe(storedAssessment.overallScore);
-      expect(fitScoringServiceMock.score).not.toHaveBeenCalled();
+      expect(scoreCxFitV2).not.toHaveBeenCalled();
     });
 
     it('recomputes when the stored inputs hash is stale', async () => {
@@ -1774,7 +1813,7 @@ const sampleScoringV2: CxFitV2Result = {
         'b-1',
       );
 
-      expect(fitScoringServiceMock.score).toHaveBeenCalled();
+      expect(scoreCxFitV2).toHaveBeenCalled();
       expect(savedAssessment).not.toBeNull();
       expect(savedAssessment?.inputsHash).toBe(expectedHash);
       expect(result.assessmentId).toBe(savedAssessment?.id);
@@ -1830,7 +1869,7 @@ const sampleScoringV2: CxFitV2Result = {
       );
 
       expect(legacyExpectedHash).not.toBe(expectedHash);
-      expect(fitScoringServiceMock.score).toHaveBeenCalled();
+      expect(scoreCxFitV2).toHaveBeenCalled();
       expect(savedAssessment?.inputsHash).toBe(expectedHash);
       expect(result.assessmentId).toBe(savedAssessment?.id);
     });

@@ -188,7 +188,7 @@ function splitBulletParagraphs(value: string): string[] {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
-    .map((line) => line.replace(/^[\u2022\u25CF\u25E6*\-]+\s*/, '').trim())
+    .map((line) => line.replace(/^[\u2022\u25CF\u25E6*-]+\s*/, '').trim())
     .filter(Boolean);
 }
 

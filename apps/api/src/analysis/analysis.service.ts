@@ -74,6 +74,10 @@ import {
   mapLegacyToCalibrationWeights,
   type LegacyCalibrationWeights,
 } from './calibration-weights';
+import {
+  CALIBRATION_PROFILES,
+  type CalibrationProfile,
+} from './calibration-profiles';
 
 import { countWords, getCharCount, sha256 } from '../common/text-metrics';
 import { buildJobPromptText, normalizeText } from '../scoring/fit-score/fit-score.utils';
@@ -734,9 +738,10 @@ export class AnalysisService {
   }
 
   private deriveFitScoreVerdictLabelFromScore(score: number) {
-    if (score >= 85) return 'Apply';
-    if (score >= 70) return 'Consider';
-    return 'Skip';
+    // Contract uses uppercase verdict labels (mirrors FitAssessmentVerdict).
+    if (score >= 85) return 'APPLY';
+    if (score >= 70) return 'CONSIDER';
+    return 'SKIP';
   }
 
   private mapAssessmentDimensionPercents(
@@ -1781,7 +1786,9 @@ export class AnalysisService {
   }
 
   private formatProfileLabel(profileName: string) {
-    return profileName
+    const normalized = String(profileName ?? '').trim();
+    if (!normalized) return '';
+    return normalized
       .split(/[-_\s]+/)
       .filter(Boolean)
       .map(
@@ -1794,9 +1801,33 @@ export class AnalysisService {
   async calibrateAssessment(
     userId: string,
     assessmentId: string,
-    legacyWeights: LegacyCalibrationWeights,
-    profileName: string,
+    legacyWeightsOrProfile: LegacyCalibrationWeights | CalibrationProfile,
+    profileName?: string,
   ) {
+    // Support the external signature: (userId, assessmentId, profileName).
+    // And the internal signature from saveCalibration: (userId, assessmentId, legacyWeights, profileName).
+    const resolved = (() => {
+      if (typeof legacyWeightsOrProfile === 'string') {
+        const profile = legacyWeightsOrProfile.trim() as CalibrationProfile;
+        const preset = CALIBRATION_PROFILES[profile];
+        if (!preset) {
+          throw new BadRequestException('Unsupported calibration profile');
+        }
+        const { legacy } = this.normalizeIncomingWeights(preset.weights);
+        return {
+          legacyWeights: legacy,
+          profileName: profile,
+          presetWeights: preset.weights,
+        };
+      }
+
+      const name = String(profileName ?? '').trim();
+      if (!name) {
+        throw new BadRequestException('profileName is required');
+      }
+      return { legacyWeights: legacyWeightsOrProfile, profileName: name };
+    })();
+
     const assessment = await this.fitAssessmentRepository.findOne({
       where: { id: assessmentId, userId },
     });
@@ -1806,19 +1837,66 @@ export class AnalysisService {
     }
 
     const payload = await this.buildLatestAssessmentPayload(assessment);
-    const calibrated = this.computeCalibratedScore(
+
+    // When calibrating via a named profile, prefer re-running the legacy scorer with the
+    // corresponding dimension weights so callers get a realistic calibrated score.
+    // (computeCalibratedScore is a lightweight fallback used for saved custom weights.)
+    let calibrated = this.computeCalibratedScore(
       assessment.dimensionScores,
-      legacyWeights,
+      resolved.legacyWeights,
       assessment.overallScore,
     );
+    if (
+      typeof legacyWeightsOrProfile === 'string' &&
+      'presetWeights' in resolved &&
+      resolved.presetWeights
+    ) {
+      const job = assessment.jobId
+        ? await this.jobRepository.findOne({
+            where: { id: assessment.jobId, userId },
+          })
+        : null;
+      const baseline = assessment.baselineId
+        ? await this.baselineRepository.findOne({
+            where: { id: assessment.baselineId, userId },
+            relations: ['sections'],
+            order: { sections: { order: 'ASC' } },
+          })
+        : null;
+
+      if (job && baseline) {
+        const dimensionWeights = this.mapCalibrationToDimensionWeights(
+          resolved.presetWeights,
+        );
+        const scoring = await this.fitScoringService.score(
+          {
+            job,
+            baseline: {
+              version: assessment.baselineVersion ?? baseline.version ?? null,
+              sections: this.buildSectionPayload(baseline.sections ?? []),
+            },
+          },
+          dimensionWeights,
+          { debug: false },
+        );
+        const overall = Math.round(Number(scoring.overallScore) * 10) / 10;
+        if (Number.isFinite(overall)) {
+          calibrated = {
+            overallScore: overall,
+            delta:
+              Math.round((overall - (assessment.overallScore ?? 0)) * 10) / 10,
+          };
+        }
+      }
+    }
 
     return {
       ...payload,
       overallScore: calibrated.overallScore,
       score: calibrated.overallScore,
       calibration: {
-        profile: profileName,
-        label: this.formatProfileLabel(profileName),
+        profile: resolved.profileName,
+        label: this.formatProfileLabel(resolved.profileName),
         delta: calibrated.delta,
       },
     };

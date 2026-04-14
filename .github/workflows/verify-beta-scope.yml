@@ -27,5 +27,8 @@ jobs:
       - name: Run synthetic generation gate
         run: npm run validate:synthetic
 
+      - name: Run web trust gate
+        run: npm run test:trust:web
+
       - name: Run beta verification
-        run: npm run verify:ci
+        run: npm run verify:ci:core

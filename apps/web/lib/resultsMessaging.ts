@@ -240,7 +240,15 @@ export function buildResultsDecisionCopy(input: {
   }
 
   if (input.generationReadiness.state === "BLOCKED") {
-    const promisingFit = typeof input.score === "number" && Number.isFinite(input.score) && input.score >= 70;
+    const score = typeof input.score === "number" && Number.isFinite(input.score) ? input.score : null;
+    const strengthenFit = score !== null && score < 65;
+    const promisingFit = score !== null && score >= 74;
+    if (strengthenFit) {
+      return {
+        headline: "Strengthen your fit before generating.",
+        subtext: "You are close, but improving alignment and evidence will significantly strengthen your materials.",
+      };
+    }
     return {
       headline: promisingFit
         ? "Promising fit. Not ready to generate yet."

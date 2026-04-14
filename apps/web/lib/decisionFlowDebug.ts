@@ -2,14 +2,19 @@ export type DecisionFlowDataSource = "fresh" | "persisted" | "mixed";
 
 export type DecisionFlowLogPayload = {
   event: string;
+  entrySource?: string | null;
   baselineId: string | null;
   jobId: string | null;
+  pairKey?: string | null;
   score: number | null;
   readinessState: string;
   contractSource: string;
   ctaLabel: string | null;
   ctaHref: string | null;
+  resolvedRoute?: string | null;
   actionType: string | null;
+  legacyFallbackAttempted?: boolean;
+  legacyFallbackBlocked?: boolean;
   analyticsPayload: Record<string, unknown> | null;
   dataSource: DecisionFlowDataSource;
   persistedAssessmentId: string | null;

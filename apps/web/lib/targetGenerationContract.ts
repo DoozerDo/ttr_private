@@ -48,7 +48,8 @@ type BuildTargetCtaContractInput = {
   generationReadiness: GenerationReadiness;
   productReadiness: GenerationProductReadiness;
   studioHref: string;
-  resolveGapsHref: string;
+  fitReviewHref: string;
+  resolveGapsHref?: string;
   scoreSource: TargetCtaSource;
 };
 
@@ -137,7 +138,7 @@ export function buildTargetCtaContract(input: BuildTargetCtaContractInput): Targ
     generationReadiness: input.generationReadiness,
     productReadiness: input.productReadiness,
     studioHref: input.studioHref,
-    resolveGapsHref: input.resolveGapsHref,
+    fitReviewHref: input.fitReviewHref,
     scoreCandidates: [{ source: input.scoreSource, value: input.score }],
   });
 

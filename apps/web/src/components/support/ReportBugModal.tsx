@@ -3,14 +3,17 @@
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
+
 import { readLastAnalysis } from "@/app/(app)/lib/session";
 import { getCanonicalNextAction, getGenerationCompletionStorageKey } from "@/lib/nextAction";
 
-const resolvedGitSha =
-  process.env.NEXT_PUBLIC_GIT_SHA ??
-  process.env.NEXT_PUBLIC_RAILWAY_GIT_COMMIT_SHA ??
-  process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ??
-  "";
+const BUG_REPORT_DRAFT_STORAGE_KEY = "ttr.support.bug-report.draft.v1";
+const DEFAULT_DISABLED_MESSAGE =
+  "Bug reporting is disabled in this environment. Save a draft and check Support history later.";
+const DEFAULT_SERVICE_UNAVAILABLE_MESSAGE =
+  "Bug reporting service is unavailable right now. Your draft is saved locally.";
+const DEFAULT_RETRYABLE_MESSAGE = "Bug report failed to send. Your draft was preserved.";
+const DEFAULT_VALIDATION_MESSAGE = "Please enter a message between 10 and 4000 characters.";
 
 type ReportBugModalProps = {
   open: boolean;
@@ -25,13 +28,21 @@ type BugReportCreateResponse = {
 };
 
 type BugReportFailureResponse = {
-  status?: "temporarily_unavailable" | "configuration_missing" | "validation_failed" | "submission_failed";
+  status?:
+    | "service_unavailable"
+    | "configuration_missing"
+    | "validation_failed"
+    | "submission_failed";
   code?: string;
   message?: string;
   supportPath?: string;
 };
 
-const BUG_REPORT_DRAFT_STORAGE_KEY = "ttr.support.bug-report.draft.v1";
+type SupportConfigResponse = {
+  githubConfigured?: boolean;
+  sentryConfigured?: boolean;
+  projectAssignmentEnabled?: boolean;
+};
 
 type StructuredBugContext = {
   baselineId: string | null;
@@ -41,16 +52,32 @@ type StructuredBugContext = {
   nextAction: string | null;
 };
 
+type AvailabilityState =
+  | { kind: "checking" }
+  | { kind: "ready" }
+  | { kind: "disabled"; message: string; supportPath: string }
+  | { kind: "service_unavailable"; message: string; supportPath: string };
+
+type SubmitState =
+  | "idle"
+  | "submitting"
+  | "success"
+  | "validation_error"
+  | "retryable_error"
+  | "service_unavailable"
+  | "disabled";
+
 export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
   const pathname = usePathname() ?? "/";
   const searchParams = useSearchParams();
   const [whatHappened, setWhatHappened] = useState("");
   const [details, setDetails] = useState("");
-  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [submitState, setSubmitState] = useState<SubmitState>("idle");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [createdReportId, setCreatedReportId] = useState<string | null>(null);
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [supportFallbackPath, setSupportFallbackPath] = useState<string | null>(null);
+  const [availability, setAvailability] = useState<AvailabilityState>({ kind: "checking" });
 
   const structuredContext = useMemo<StructuredBugContext>(() => {
     const stored = readLastAnalysis();
@@ -109,16 +136,21 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
 
   useEffect(() => {
     if (!open) return;
-    setStatus("idle");
+
+    let active = true;
+    setSubmitState("idle");
     setStatusMessage(null);
     setCreatedReportId(null);
     setHasSubmitted(false);
     setSupportFallbackPath(null);
+    setAvailability({ kind: "checking" });
 
     if (typeof window === "undefined") {
       setWhatHappened("");
       setDetails("");
-      return;
+      return () => {
+        active = false;
+      };
     }
 
     try {
@@ -126,16 +158,62 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
       if (!raw) {
         setWhatHappened("");
         setDetails("");
-        return;
+      } else {
+        const draft = JSON.parse(raw) as { whatHappened?: string; details?: string };
+        setWhatHappened(draft.whatHappened ?? "");
+        setDetails(draft.details ?? "");
       }
-
-      const draft = JSON.parse(raw) as { whatHappened?: string; details?: string };
-      setWhatHappened(draft.whatHappened ?? "");
-      setDetails(draft.details ?? "");
     } catch {
       setWhatHappened("");
       setDetails("");
     }
+
+    const loadSupportConfig = async () => {
+      try {
+        const response = await fetch("/api/support/config", {
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+        });
+        const payload = (await response.json().catch(() => null)) as SupportConfigResponse | BugReportFailureResponse | null;
+
+        if (!active) return;
+
+        if (!response.ok) {
+          const message =
+            payload?.message ?? "Support service is unavailable right now. You can try again later.";
+          setAvailability({
+            kind: "service_unavailable",
+            message,
+            supportPath: payload?.supportPath ?? "/support/history",
+          });
+          return;
+        }
+
+        if (payload?.githubConfigured === false) {
+          setAvailability({
+            kind: "disabled",
+            message: DEFAULT_DISABLED_MESSAGE,
+            supportPath: "/support/history",
+          });
+          return;
+        }
+
+        setAvailability({ kind: "ready" });
+      } catch {
+        if (!active) return;
+        setAvailability({
+          kind: "service_unavailable",
+          message: DEFAULT_SERVICE_UNAVAILABLE_MESSAGE,
+          supportPath: "/support/history",
+        });
+      }
+    };
+
+    void loadSupportConfig();
+
+    return () => {
+      active = false;
+    };
   }, [open]);
 
   useEffect(() => {
@@ -168,16 +246,37 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
   const messageLength = trimmedMessage.length;
   const messageIsValid = messageLength >= 10 && messageLength <= 4000;
   const showMessageError = hasSubmitted && !messageIsValid;
+  const actionDisabled = submitState === "submitting" || availability.kind !== "ready";
+  const availabilityMessage =
+    availability.kind === "checking"
+      ? "Checking bug reporting availability..."
+      : availability.kind === "ready"
+        ? null
+        : availability.message;
 
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       setHasSubmitted(true);
-      if (!messageIsValid || status === "loading") return;
-
-      setStatus("loading");
-      setStatusMessage(null);
       setSupportFallbackPath(null);
+
+      if (!messageIsValid) {
+        setSubmitState("validation_error");
+        setStatusMessage(DEFAULT_VALIDATION_MESSAGE);
+        return;
+      }
+
+      if (availability.kind !== "ready") {
+        setSubmitState(availability.kind === "disabled" ? "disabled" : "service_unavailable");
+        setStatusMessage(availability.message);
+        setSupportFallbackPath(availability.supportPath);
+        return;
+      }
+
+      if (submitState === "submitting") return;
+
+      setSubmitState("submitting");
+      setStatusMessage(null);
 
       const timestamp = new Date().toISOString();
       const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : null;
@@ -203,38 +302,89 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(requestPayload),
         });
+        const payload = (await response.json().catch(() => null)) as BugReportCreateResponse | BugReportFailureResponse | null;
 
-        if (!response.ok) {
-          const errorPayload = (await response.json().catch(() => null)) as BugReportFailureResponse | null;
-          const message =
-            errorPayload?.message ??
-            (response.status === 503
-              ? "Bug reporting is unavailable right now. Your draft was preserved."
-              : "Bug report failed to send. Your draft was preserved.");
-          setSupportFallbackPath(errorPayload?.supportPath ?? "/support/history");
-          throw new Error(message);
+        if (response.ok) {
+          setSubmitState("success");
+          setStatusMessage(payload?.message || "Thanks. Your report was submitted successfully.");
+          setCreatedReportId(payload && "reportId" in payload ? payload.reportId : null);
+          setWhatHappened("");
+          setDetails("");
+          setHasSubmitted(false);
+          setSupportFallbackPath(null);
+          clearDraft();
+          return;
         }
 
-        const responsePayload = (await response.json()) as BugReportCreateResponse;
-        setStatus("success");
-        setStatusMessage(responsePayload.message || "Thanks. Your report was submitted successfully.");
-        setCreatedReportId(responsePayload.reportId);
-        setWhatHappened("");
-        setDetails("");
-        setHasSubmitted(false);
-        setSupportFallbackPath(null);
-        clearDraft();
-      } catch (err) {
-        setStatus("error");
-        setStatusMessage(
-          err instanceof Error ? err.message : "Bug report failed to send. Your draft was preserved.",
-        );
+        const supportPath = payload?.supportPath ?? "/support/history";
+        const message =
+          payload?.message ??
+          (response.status === 503
+            ? DEFAULT_SERVICE_UNAVAILABLE_MESSAGE
+            : DEFAULT_RETRYABLE_MESSAGE);
+
+        if (response.status === 400 || payload?.status === "validation_failed") {
+          setSubmitState("validation_error");
+          setStatusMessage(message || DEFAULT_VALIDATION_MESSAGE);
+          setSupportFallbackPath(null);
+          return;
+        }
+
+        if (
+          response.status === 503 &&
+          (payload?.status === "configuration_missing" || payload?.code === "support_config_unavailable")
+        ) {
+          setSubmitState("disabled");
+          setStatusMessage(message || DEFAULT_DISABLED_MESSAGE);
+          setSupportFallbackPath(supportPath);
+          return;
+        }
+
+        if (response.status === 503 || payload?.status === "service_unavailable" || payload?.code === "service_unavailable") {
+          setSubmitState("service_unavailable");
+          setStatusMessage(message || DEFAULT_SERVICE_UNAVAILABLE_MESSAGE);
+          setSupportFallbackPath(supportPath);
+          return;
+        }
+
+        setSubmitState("retryable_error");
+        setStatusMessage(message || DEFAULT_RETRYABLE_MESSAGE);
+        setSupportFallbackPath(supportPath);
+      } catch {
+        setSubmitState("service_unavailable");
+        setStatusMessage(DEFAULT_SERVICE_UNAVAILABLE_MESSAGE);
+        setSupportFallbackPath("/support/history");
       }
     },
-    [clearDraft, details, messageIsValid, pathname, status, structuredContext, trimmedMessage, userId, whatHappened],
+    [
+      availability.kind,
+      clearDraft,
+      details,
+      messageIsValid,
+      submitState,
+      structuredContext,
+      trimmedMessage,
+      userId,
+    ],
   );
 
   if (!open) return null;
+
+  const statusText =
+    submitState === "submitting"
+      ? "Sending issue report..."
+      : submitState === "success"
+      ? statusMessage ?? (createdReportId ? `Report ID: ${createdReportId}` : "Thanks. Your report was submitted successfully.")
+      : statusMessage ??
+        (availability.kind === "checking"
+          ? "Checking bug reporting availability..."
+          : availability.kind === "ready"
+            ? messageIsValid
+              ? "Ready to send."
+              : hasSubmitted
+                ? DEFAULT_VALIDATION_MESSAGE
+                : "Message must be 10 to 4000 characters."
+            : availability.message);
 
   return (
     <div
@@ -277,7 +427,7 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
             placeholder="What went wrong?"
           />
           {showMessageError ? (
-            <p className="text-xs text-rose-300">Please enter a message between 10 and 4000 characters.</p>
+            <p className="text-xs text-rose-300">{DEFAULT_VALIDATION_MESSAGE}</p>
           ) : null}
         </div>
 
@@ -295,28 +445,39 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="submit"
-            disabled={status === "loading"}
+            disabled={actionDisabled}
             className="flex-1 rounded-2xl border border-amber-400/60 bg-amber-400/20 px-4 py-2 text-sm font-semibold text-amber-100 transition hover:border-amber-400/90 hover:bg-amber-400/30 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {status === "loading" ? "Sending..." : "Send issue report"}
+            {submitState === "submitting" ? "Sending..." : "Send issue report"}
           </button>
           <span
-            className={`text-xs ${status === "success" ? "text-emerald-300" : status === "error" ? "text-rose-300" : "text-slate-400"}`}
+            className={`text-xs ${submitState === "success" ? "text-emerald-300" : submitState === "validation_error" ? "text-amber-200" : submitState === "retryable_error" || submitState === "service_unavailable" || submitState === "disabled" ? "text-rose-300" : "text-slate-400"}`}
             role="status"
             aria-live="polite"
           >
-            {statusMessage ??
-              (messageIsValid
-                ? createdReportId
-                  ? `Report ID: ${createdReportId}`
-                  : "Ready to send."
-                : hasSubmitted
-                  ? "Please enter a message between 10 and 4000 characters."
-                  : "Message must be 10 to 4000 characters.")}
+            {statusText}
           </span>
         </div>
 
-        {status === "error" ? (
+        {availabilityMessage ? (
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200">
+            <p>{availabilityMessage}</p>
+            {availability.kind !== "ready" && availability.kind !== "checking" ? (
+              <p className="mt-2">
+                You can review submitted reports and next steps in{" "}
+                <Link href={availability.supportPath} className="font-semibold underline">
+                  Support history
+                </Link>
+                .
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {submitState === "retryable_error" ||
+        submitState === "service_unavailable" ||
+        submitState === "disabled" ||
+        submitState === "validation_error" ? (
           <div className="space-y-2 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-50">
             <p>Your report draft is saved locally in this browser.</p>
             {supportFallbackPath ? (
@@ -330,7 +491,7 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
             ) : null}
           </div>
         ) : null}
-    </form>
-  </div>
+      </form>
+    </div>
   );
 }

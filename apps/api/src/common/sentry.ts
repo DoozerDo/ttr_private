@@ -1,4 +1,5 @@
 import type { ConfigService } from '@nestjs/config';
+import * as Sentry from '@sentry/node';
 
 type SupportEventContext = {
   user?: { id?: string; email?: string };
@@ -20,21 +21,7 @@ type SentryClient = {
 };
 
 let sentryInitialized = false;
-let sentryClient: SentryClient | null = null;
-
-function getSentryClient(): SentryClient | null {
-  if (sentryClient) {
-    return sentryClient;
-  }
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const mod = require('@sentry/node') as SentryClient;
-    sentryClient = mod;
-    return sentryClient;
-  } catch {
-    return null;
-  }
-}
+const sentryClient: SentryClient = Sentry as unknown as SentryClient;
 
 export function initSentry(config: ConfigService) {
   if (sentryInitialized) {

@@ -5,6 +5,7 @@ import StudioPage from "@/app/(app)/studio/page";
 import { listBaselines } from "@/lib/baselines";
 import { listJobs } from "@/lib/jobsClient";
 import { FALLBACK_RENDERED_TEXT } from "@/lib/renderedText";
+import { getFitReviewHref } from "@/src/navigation/routes";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
 import {
   mockRouterPush,
@@ -1158,7 +1159,13 @@ describe("Studio page UX", () => {
     expect(screen.getAllByTestId("studio-artifact-quality-panel")[0]).toHaveTextContent("Output needs work");
     expect(screen.getByRole("link", { name: "Start Fit Review" })).toHaveAttribute(
       "href",
-      "/resolve-gaps?jobId=job-1&baselineId=base-1",
+      getFitReviewHref({
+        jobId: "job-1",
+        baselineId: "base-1",
+        baselineVersionId: "base-version-1",
+        assessmentId: "analysis-1",
+        analysisId: "analysis-1",
+      }),
     );
   });
 

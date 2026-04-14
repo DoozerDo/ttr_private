@@ -20,6 +20,7 @@ import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
 import { FitScoringService } from './fit-scoring.service';
 import { GapAnalysisService } from './gap-analysis.service';
 import { selectBaselineTextForScoring } from './baseline-selection';
+import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
 
 jest.mock('./baseline-selection', () => ({
   selectBaselineTextForScoring: jest.fn(),
@@ -234,6 +235,21 @@ describe('AnalysisService baseline linkage', () => {
               id: 'user-1',
               calibrationProfileName: null,
               calibrationWeights: null,
+            }),
+          },
+        },
+        {
+          provide: WorkflowIdempotencyService,
+          useValue: {
+            reserve: jest.fn().mockResolvedValue({
+              status: 'accepted_new',
+              runId: 'run-1',
+              dedupeKey: 'dedupe-1',
+              recordId: 'record-1',
+            }),
+            complete: jest.fn().mockResolvedValue({
+              status: 'completed',
+              recordId: 'record-1',
             }),
           },
         },

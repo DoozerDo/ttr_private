@@ -4,7 +4,8 @@ export const countWords = (text = ''): number => {
   return text
     .trim()
     .split(/\s+/)
-    .filter((segment) => segment.length > 0).length;
+    .map((segment) => segment.replace(/^[^a-z0-9]+|[^a-z0-9]+$/giu, ''))
+    .filter((segment) => segment.length >= 3).length;
 };
 
 export const getCharCount = (text = ''): number => text.length;

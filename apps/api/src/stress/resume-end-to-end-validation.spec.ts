@@ -162,6 +162,35 @@ function buildService(fixture: typeof dirtyResumeFixture) {
     recordCriticalFlowEvent: jest.fn().mockResolvedValue(undefined),
   } as unknown as CriticalFlowTrackerService;
 
+  const workflowIdempotencyService = {
+    reserve: jest.fn().mockResolvedValue({
+      status: 'accepted_new',
+      runId: 'run-1',
+      responseBody: null,
+    }),
+    complete: jest.fn().mockResolvedValue({ status: 'completed' }),
+    markFailure: jest.fn().mockResolvedValue(undefined),
+  } as any;
+
+  const studioArtifactsService = {
+    readState: jest.fn().mockResolvedValue({
+      status: 'NONE',
+      baselineId: fixture.baselineId,
+      jobId: fixture.jobId,
+      baselineVersionId: fixture.baselineVersionId,
+      baselineVersionHash: 'hash-1',
+      jobFingerprint: 'job-fingerprint-1',
+      generationContractVersion: 'test',
+      resume: null,
+      coverLetter: null,
+    }),
+    computeJobFingerprint: jest.fn().mockReturnValue('job-fingerprint-1'),
+    computeResumeInputsHash: jest.fn().mockReturnValue('resume-inputs-hash-1'),
+    recordResumeInProgress: jest.fn().mockResolvedValue(undefined),
+    recordResumeSuccess: jest.fn().mockResolvedValue(undefined),
+    recordResumeFailure: jest.fn().mockResolvedValue(undefined),
+  } as any;
+
   return new ResumeService(
     baselineRepo as Repository<Baseline>,
     versionRepo as Repository<BaselineVersion>,
@@ -173,6 +202,8 @@ function buildService(fixture: typeof dirtyResumeFixture) {
     opportunitiesService,
     gapAnalysisService,
     criticalFlowTrackerService,
+    workflowIdempotencyService,
+    studioArtifactsService,
   );
 }
 

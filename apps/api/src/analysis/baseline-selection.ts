@@ -41,10 +41,12 @@ export function selectBaselineTextForScoring({
   const availableSections = (baseline.sections ?? []).filter(
     (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
   );
-  const availableText = availableSections
-    .map((section) => section.content ?? '')
-    .join('\n');
-  const originalBaselineChars = getCharCount(availableText);
+  // Char counts are intended to reflect only baseline content characters, not join separators
+  // (eg we don't want a +1 for the newline between sections).
+  const originalBaselineChars = availableSections.reduce(
+    (sum, section) => sum + getCharCount(section.content ?? ''),
+    0,
+  );
 
   const normalizedIds =
     normalizedSelectedBlockIds?.map((id) => id.trim()).filter(Boolean) ?? [];
@@ -60,7 +62,10 @@ export function selectBaselineTextForScoring({
   const selectedText = selectedSections
     .map((section) => section.content ?? '')
     .join('\n');
-  let includedBaselineChars = getCharCount(selectedText);
+  let includedBaselineChars = selectedSections.reduce(
+    (sum, section) => sum + getCharCount(section.content ?? ''),
+    0,
+  );
   let sectionsForScoring = selectedSections
     .map((section) => ({
       type: section.sectionType ?? section.type,

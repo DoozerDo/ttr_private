@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../baselines/helpers";
 import { UpstreamApiConfigError } from "../../_lib/serverApiConfig";
-import { fetchWithTimeout } from "@/lib/fetchWithTimeout";
+import { ClientRequestTimeoutError, fetchWithTimeout } from "@/lib/fetchWithTimeout";
 
 export const runtime = "nodejs";
 
@@ -30,16 +30,25 @@ export async function POST(req: NextRequest) {
     if (error instanceof UpstreamApiConfigError) {
       return NextResponse.json(
         {
-          status: "temporarily_unavailable",
+          status: "service_unavailable",
           code: error.code,
           message:
-            "Bug reporting is unavailable in this environment right now. Your draft is preserved in the browser, and you can still review support history from Settings.",
+            "Bug reporting service is unavailable right now. Your draft is preserved in the browser, and you can still review support history from Settings.",
           supportPath: "/support/history",
         },
         { status: 503 },
       );
     }
 
-    throw error;
+    return NextResponse.json(
+      {
+        status: "service_unavailable",
+        code: error instanceof ClientRequestTimeoutError ? "UPSTREAM_REQUEST_TIMEOUT" : "UPSTREAM_REQUEST_UNAVAILABLE",
+        message:
+          "Bug reporting service is unavailable right now. Your draft is preserved in the browser, and you can still review support history from Settings.",
+        supportPath: "/support/history",
+      },
+      { status: 503 },
+    );
   }
 }

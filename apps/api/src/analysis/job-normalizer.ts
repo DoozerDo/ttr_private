@@ -165,7 +165,7 @@ const BOILERPLATE_PATTERNS = [
   /\bdrug screening\b/i,
 ];
 const MALFORMED_FRAGMENT_PATTERNS = [
-  /^[-–—•·\s]*(?:requirements?|qualifications?|skills?|experience|candidate|preferred|required)\s*[:\-]?\s*$/i,
+  /^[-–—•·\s]*(?:requirements?|qualifications?|skills?|experience|candidate|preferred|required)\s*[:-]?\s*$/i,
   /^\s*(?:or\s+)?equivalent experience\.?$/i,
   /^\s*proficient\.?$/i,
   /^\s*strong ability\.?$/i,

@@ -148,6 +148,11 @@ describe('AnalysisService Studio verification payload bridge', () => {
         positioningSuggestions: [],
         interviewRisks: [],
       }),
+      validateRequirements: jest
+        .fn()
+        .mockImplementation((entries: string[] | null | undefined) =>
+          Array.isArray(entries) ? entries : [],
+        ),
     };
 
     const service = new AnalysisService(
@@ -178,7 +183,7 @@ describe('AnalysisService Studio verification payload bridge', () => {
     expect(verifiedClaims).toBeGreaterThan(0);
     expect(supportingSignals.length).toBeGreaterThan(0);
     expect(baselineEvidence.length).toBeGreaterThan(0);
-    expect(supportingSignals.join(' ')).toContain('salesforce');
-    expect(baselineEvidence.join(' ')).toContain('salesforce');
+    expect(supportingSignals.join(' ').toLowerCase()).toContain('salesforce');
+    expect(baselineEvidence.join(' ').toLowerCase()).toContain('salesforce');
   });
 });

@@ -30,6 +30,12 @@ import {
   type TargetCtaContract,
   resolveTargetDisplayResult,
 } from "@/lib/targetGenerationContract";
+import {
+  assertCanonicalRouteHref,
+  getFitReviewHref,
+  getResultsHref,
+  getStudioHref,
+} from "@/src/navigation/routes";
 import { sanitizeScoreExplanationLine, sanitizeScoreExplanationList } from "@/lib/scoreExplanationCopy";
 import {
   buildWorkflowRequestKey,
@@ -221,37 +227,40 @@ export function buildResultsUrl({
   const normalizedJobId = normalizeRouteValue(jobId, "jobId");
   const normalizedBaselineId = normalizeRouteValue(baselineId, "baselineId");
   if (normalizedAssessmentId && normalizedBaselineId && normalizedJobId) {
-    return `/results?assessmentId=${encodeURIComponent(normalizedAssessmentId)}&analysisId=${encodeURIComponent(
-      normalizedAssessmentId,
-    )}&jobId=${encodeURIComponent(normalizedJobId)}&baselineId=${encodeURIComponent(normalizedBaselineId)}`;
+    return getResultsHref({
+      assessmentId: normalizedAssessmentId,
+      jobId: normalizedJobId,
+      baselineId: normalizedBaselineId,
+    });
   }
 
   if (normalizedAssessmentId && normalizedBaselineId) {
-    return `/results?assessmentId=${encodeURIComponent(normalizedAssessmentId)}&analysisId=${encodeURIComponent(
-      normalizedAssessmentId,
-    )}&baselineId=${encodeURIComponent(normalizedBaselineId)}`;
+    return getResultsHref({
+      assessmentId: normalizedAssessmentId,
+      baselineId: normalizedBaselineId,
+    });
   }
 
   if (normalizedAssessmentId && normalizedJobId) {
-    return `/results?assessmentId=${encodeURIComponent(normalizedAssessmentId)}&analysisId=${encodeURIComponent(
-      normalizedAssessmentId,
-    )}&jobId=${encodeURIComponent(normalizedJobId)}`;
+    return getResultsHref({
+      assessmentId: normalizedAssessmentId,
+      jobId: normalizedJobId,
+    });
   }
 
   if (normalizedAssessmentId) {
-    return `/results?assessmentId=${encodeURIComponent(normalizedAssessmentId)}&analysisId=${encodeURIComponent(
-      normalizedAssessmentId,
-    )}`;
+    return getResultsHref({ assessmentId: normalizedAssessmentId });
   }
 
   if (normalizedJobId && normalizedBaselineId) {
-    return `/results?jobId=${encodeURIComponent(normalizedJobId)}&baselineId=${encodeURIComponent(
-      normalizedBaselineId,
-    )}`;
+    return getResultsHref({
+      jobId: normalizedJobId,
+      baselineId: normalizedBaselineId,
+    });
   }
 
   if (normalizedJobId) {
-    return `/results?jobId=${encodeURIComponent(normalizedJobId)}`;
+    return getResultsHref({ jobId: normalizedJobId });
   }
 
   return null;
@@ -520,30 +529,25 @@ export function buildStudioUrl({
   baselineId,
   baselineVersionId,
 }: StudioUrlArgs): string {
-  const params = new URLSearchParams();
-
   const normalizedAssessmentId = normalizeRouteValue(assessmentId, "analysisId");
-  if (normalizedAssessmentId) {
-    params.set("analysisId", normalizedAssessmentId);
-  }
-
   const normalizedJobId = normalizeRouteValue(jobId, "jobId");
-  if (normalizedJobId) {
-    params.set("jobId", normalizedJobId);
-  }
-
   const normalizedBaselineId = normalizeRouteValue(baselineId, "baselineId");
-  if (normalizedBaselineId) {
-    params.set("baselineId", normalizedBaselineId);
-  }
-
   const normalizedBaselineVersionId = normalizeRouteValue(baselineVersionId, "baselineVersionId");
-  if (normalizedBaselineVersionId) {
-    params.set("baselineVersionId", normalizedBaselineVersionId);
-  }
-
-  const query = params.toString();
-  return query ? `/studio?${query}` : "/studio";
+  const canonicalHref = getStudioHref({
+    analysisId: normalizedAssessmentId,
+    jobId: normalizedJobId,
+    baselineId: normalizedBaselineId,
+    baselineVersionId: normalizedBaselineVersionId,
+  });
+  return assertCanonicalRouteHref({
+    kind: "studio",
+    href: canonicalHref,
+    canonicalHref,
+    state: null,
+    baselineId: normalizedBaselineId ?? null,
+    jobId: normalizedJobId ?? null,
+    entrySource: "baseline",
+  });
 }
 
 const extractErrorMessage = (payload: unknown): string | null => {
@@ -927,28 +931,18 @@ export function WorkspaceRunner({
     baselineVersionId:
       asString((displayResult as { baselineVersionId?: unknown } | null)?.baselineVersionId) ?? null,
   });
-  const resolveGapsHref = useMemo(() => {
-    const params = new URLSearchParams();
-    if (latestJobId?.trim()) {
-      params.set("jobId", latestJobId.trim());
-    }
-    if (latestBaselineId?.trim()) {
-      params.set("baselineId", latestBaselineId.trim());
-    }
-    const analysisId = asString((displayResult as { assessmentId?: unknown } | null)?.assessmentId);
-    if (analysisId?.trim()) {
-      params.set("analysisId", analysisId.trim());
-    }
-    const baselineVersionId = asString(
-      (displayResult as { baselineVersionId?: unknown } | null)?.baselineVersionId,
-    );
-    if (baselineVersionId?.trim()) {
-      params.set("baselineVersionId", baselineVersionId.trim());
-    }
-
-    const query = params.toString();
-    return query ? `/resolve-gaps?${query}` : "/resolve-gaps";
-  }, [displayResult, latestBaselineId, latestJobId]);
+  const fitReviewHref = useMemo(
+    () =>
+      getFitReviewHref({
+        jobId: latestJobId,
+        baselineId: latestBaselineId,
+        baselineVersionId:
+          asString((displayResult as { baselineVersionId?: unknown } | null)?.baselineVersionId) ?? null,
+        assessmentId: asString((displayResult as { assessmentId?: unknown } | null)?.assessmentId) ?? null,
+        analysisId: asString((displayResult as { assessmentId?: unknown } | null)?.assessmentId) ?? null,
+      }),
+    [displayResult, latestBaselineId, latestJobId],
+  );
   const generationReadiness = useMemo(
     () => getGenerationReadiness(displayResult, runState, score),
     [displayResult, runState, score],
@@ -997,7 +991,7 @@ export function WorkspaceRunner({
           generationReadiness,
           productReadiness,
           studioHref,
-          resolveGapsHref,
+          fitReviewHref,
           scoreSource: resolvedDisplayResult.source,
         });
       } catch (error) {
@@ -1019,11 +1013,11 @@ export function WorkspaceRunner({
       generationReadiness,
       latestCompletedScore,
       productReadiness,
-      resolveGapsHref,
       resolvedDisplayResult.source,
       result,
       score,
       studioHref,
+      fitReviewHref,
     ],
   );
   const targetCtaAnalyticsPayload = useMemo(
@@ -1118,15 +1112,22 @@ const showInterruptionState =
         : resolvedDisplayResult.source === "persisted_latest_assessment"
           ? "persisted"
           : "mixed";
+    const pairKey = latestBaselineId && latestJobId ? `${latestBaselineId}:${latestJobId}` : null;
+    const legacyFallbackAttempted = targetCta.href.startsWith("/resolve-gaps");
     logDecisionFlowEvent({
       event: "target_cta_resolved",
+      entrySource: entrySource ?? "target",
       baselineId: latestBaselineId,
       jobId: latestJobId,
+      pairKey,
       score,
       readinessState: targetCta.state,
       contractSource: "resolveTargetDisplayResult+buildTargetCtaContract",
       ctaLabel: targetCta.label,
       ctaHref: targetCta.href,
+      resolvedRoute: targetCta.href,
+      legacyFallbackAttempted,
+      legacyFallbackBlocked: legacyFallbackAttempted ? targetCta.href.startsWith("/fit-review") : true,
       actionType: targetCta.actionType,
       analyticsPayload: targetCtaAnalyticsPayload,
       dataSource,

@@ -177,6 +177,35 @@ function buildResumeService(fixture: typeof dirtyResumeFixture) {
     recordCriticalFlowEvent: jest.fn().mockResolvedValue(undefined),
   } as unknown as CriticalFlowTrackerService;
 
+  const workflowIdempotencyService = {
+    reserve: jest.fn().mockResolvedValue({
+      status: 'accepted_new',
+      runId: 'run-1',
+      responseBody: null,
+    }),
+    complete: jest.fn().mockResolvedValue({ status: 'completed' }),
+    markFailure: jest.fn().mockResolvedValue(undefined),
+  } as any;
+
+  const studioArtifactsService = {
+    readState: jest.fn().mockResolvedValue({
+      status: 'NONE',
+      baselineId: fixture.baselineId,
+      jobId: fixture.jobId,
+      baselineVersionId: fixture.baselineVersionId,
+      baselineVersionHash: 'hash-1',
+      jobFingerprint: 'job-fingerprint-1',
+      generationContractVersion: 'test',
+      resume: null,
+      coverLetter: null,
+    }),
+    computeJobFingerprint: jest.fn().mockReturnValue('job-fingerprint-1'),
+    computeResumeInputsHash: jest.fn().mockReturnValue('resume-inputs-hash-1'),
+    recordResumeInProgress: jest.fn().mockResolvedValue(undefined),
+    recordResumeSuccess: jest.fn().mockResolvedValue(undefined),
+    recordResumeFailure: jest.fn().mockResolvedValue(undefined),
+  } as any;
+
   return new ResumeService(
     createRepo(baseline) as never,
     createRepo(baselineVersion) as never,
@@ -188,6 +217,8 @@ function buildResumeService(fixture: typeof dirtyResumeFixture) {
     opportunitiesService,
     gapAnalysisService,
     criticalFlowTrackerService,
+    workflowIdempotencyService,
+    studioArtifactsService,
   );
 }
 
@@ -303,9 +334,12 @@ describe('artifact acceptance harness', () => {
     expect(artifact.preview.coverLetter?.signoff).toBe('Sincerely,');
   });
 
-  it('rejects the unsupported cover letter envelope cleanly', () => {
+  it('keeps cover letter generation within the supported envelope window', () => {
     const generator = new TemplateCoverLetterGenerator();
-    expect(() => generator.generate(jdHeavyCoverLetterFixture)).toThrow(/unsupported_input/i);
+    const result = generator.generate(jdHeavyCoverLetterFixture as never);
+    expect(result.wordCount).toBeGreaterThanOrEqual(250);
+    expect(result.wordCount).toBeLessThanOrEqual(400);
+    expect(result.content).toContain('Dear Hiring Team,');
   });
 
   it('keeps the JD-heavy resume fixture deterministic across runs', async () => {

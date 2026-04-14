@@ -237,7 +237,15 @@ export class FitScoreEngine {
       penaltiesApplied,
       strengths,
       gaps,
-      summary: 'CX Fit rubric scored via scoring_contract_v1.',
+      summary: (() => {
+        // Keep the summary deterministic and user-oriented for beta trust.
+        // When we have strengths, surface the most salient theme.
+        if (strengths.length > 0) {
+          const topTheme = strengths.includes('leadership') ? 'leadership' : strengths[0];
+          return `Weighted fit based on ${topTheme}.`;
+        }
+        return 'CX Fit rubric scored via scoring_contract_v1.';
+      })(),
       missingRequiredTools: [],
       missingRequiredToolsCount: 0,
       missingRequiredToolsPenalty: 0,

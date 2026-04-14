@@ -31,8 +31,6 @@ import {
   deriveVerificationCoverage,
   normalizeUserFacingRequirementLabel,
 } from "@/lib/generationReadiness";
-import { getGenerationAuthorityState, type GenerationAuthorityState } from "@/lib/generationAuthority";
-import { buildGenerationProductReadiness } from "@/lib/generationProductReadiness";
 import {
   buildArtifactQualityModel,
   deriveArtifactConfidenceTransition,
@@ -66,7 +64,7 @@ import {
 } from "@/lib/languageStylePass";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
 import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
-import { resolveCanonicalState } from "@/lib/canonicalDecision";
+import { buildProductDecisionState } from "@/lib/productDecisionState";
 import { deriveEvidenceLedger } from "@/lib/evidenceLedger";
 import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
 import {
@@ -77,6 +75,7 @@ import {
 } from "@/lib/workflowRequestGuard";
 import { useGuidedMode } from "@/hooks/useGuidedMode";
 import { type JobDto } from "@/lib/jobs";
+import { getFitReviewHref } from "@/src/navigation/routes";
 import {
   buildCoverLetterParagraphs,
   copyTextToClipboard,
@@ -750,37 +749,41 @@ export default function StudioPage() {
     },
     [searchParamValue],
   );
+  const baselineIdFromQuery = useMemo(() => trimString(searchParams.get("baselineId")) || undefined, [searchParamValue]);
+  const entrySource = useMemo<"results" | "nav" | "direct" | "unknown">(() => {
+    const explicitEntry = trimString(searchParams.get("entrySource")).toLowerCase();
+    const allowed = new Set(["results", "nav", "direct", "unknown"]);
+
+    if (allowed.has(explicitEntry)) {
+      return explicitEntry as "results" | "nav" | "direct" | "unknown";
+    }
+
+    if (!document.referrer) {
+      return "direct";
+    }
+
+    try {
+      const referrerUrl = new URL(document.referrer);
+      if (referrerUrl.origin === window.location.origin && referrerUrl.pathname === "/results") {
+        return "results";
+      }
+    } catch {
+      return "unknown";
+    }
+
+    return "unknown";
+  }, [searchParamValue]);
   useEffect(() => {
     if (trackedStudioOpenRef.current) {
       return;
     }
     trackedStudioOpenRef.current = true;
 
-    const explicitEntry = trimString(searchParams.get("entrySource")).toLowerCase();
-    const allowed = new Set(["results", "nav", "direct", "unknown"]);
-    const baselineIdFromQuery = trimString(searchParams.get("baselineId")) || undefined;
-
-    let entrySource: "results" | "nav" | "direct" | "unknown" = "unknown";
-    if (allowed.has(explicitEntry)) {
-      entrySource = explicitEntry as "results" | "nav" | "direct" | "unknown";
-    } else if (!document.referrer) {
-      entrySource = "direct";
-    } else {
-      try {
-        const referrerUrl = new URL(document.referrer);
-        if (referrerUrl.origin === window.location.origin && referrerUrl.pathname === "/results") {
-          entrySource = "results";
-        }
-      } catch {
-        entrySource = "unknown";
-      }
-    }
-
     trackEvent("resume_studio_opened", {
       entrySource,
       baselineId: baselineIdFromQuery,
     });
-  }, [searchParams]);
+  }, [baselineIdFromQuery, entrySource]);
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
@@ -1784,41 +1787,58 @@ export default function StudioPage() {
       hasMissingBaselineEvidenceIssue,
     ],
   );
-  const studioGenerationState: GenerationAuthorityState = useMemo(
-    () => getGenerationAuthorityState(activeGenerationReadiness),
-    [activeGenerationReadiness],
-  );
   const generationBlockerCodes = useMemo(
     () => activeGenerationReadiness.verificationIssues.map((issue) => issue.code),
     [activeGenerationReadiness.verificationIssues],
   );
   const generationBlockerCount = generationBlockerCodes.length;
 
-  const productReadiness = useMemo(
+  const productDecisionState = useMemo(
     () =>
-      buildGenerationProductReadiness({
+      buildProductDecisionState({
+        surface: "studio",
+        baselineId: effectiveBaselineId ?? null,
+        jobId: effectiveJobId ?? null,
         score: analysisScore,
-        authorityState: studioGenerationState,
+        generationReadiness: activeGenerationReadiness,
         hasCanonicalAssessment: Boolean(requestedAnalysisId) && !analysisError,
         hasRequiredContext:
           Boolean(effectiveJobId && effectiveBaselineId) &&
           (Boolean(effectiveBaselineVersionId) || isNonProduction),
         isPro,
-        hasCompletedGeneration: false,
+        canGenerateDocuments: trustGateDecision.allowed,
+        opportunityAlreadySaved: hasGeneratedOnce,
+        analysisAssessmentId: requestedAnalysisId ?? null,
+        analysisBaselineId: effectiveBaselineId ?? null,
+        analysisJobId: effectiveJobId ?? null,
+        analysisBaselineVersionId: effectiveBaselineVersionId ?? null,
+        routeContext: {
+          assessmentId: requestedAnalysisId ?? null,
+          analysisId: requestedAnalysisId ?? null,
+          baselineId: effectiveBaselineId ?? null,
+          jobId: effectiveJobId ?? null,
+          baselineVersionId: effectiveBaselineVersionId ?? null,
+          fromUnlock: isFromUnlock,
+        },
+        persistedAssessmentId: requestedAnalysisId ?? null,
       }),
     [
       analysisError,
       analysisScore,
+      activeGenerationReadiness,
       effectiveBaselineId,
       effectiveBaselineVersionId,
       effectiveJobId,
+      hasGeneratedOnce,
+      isFromUnlock,
       isNonProduction,
       isPro,
       requestedAnalysisId,
-      studioGenerationState,
+      trustGateDecision.allowed,
     ],
   );
-  const canGenerateDocuments = productReadiness.state === "ALLOWED" && trustGateDecision.allowed;
+  const productReadiness = productDecisionState.productReadiness;
+  const canGenerateDocuments = productDecisionState.canGenerateDocuments;
   const qualifiedForGeneration = canGenerateDocuments && typeof analysisScore === "number" && analysisScore >= 80;
   const studioDraftMode = productReadiness.generationMode === "draft" && isFromUnlock && !hasGeneratedOnce;
   const improveBaselineHref = useMemo(() => {
@@ -2657,64 +2677,10 @@ export default function StudioPage() {
     studioArtifactsHydrated,
   ]);
 
-  const resolveGapsHref = useMemo(() => {
-    const params = new URLSearchParams();
-    if (effectiveJobId) params.set("jobId", effectiveJobId);
-    if (effectiveBaselineId) params.set("baselineId", effectiveBaselineId);
-    const query = params.toString();
-    return query ? `/resolve-gaps?${query}` : "/resolve-gaps";
-  }, [effectiveBaselineId, effectiveJobId]);
-  const resultsHref = useMemo(() => {
-    const params = new URLSearchParams();
-    if (effectiveJobId) params.set("jobId", effectiveJobId);
-    if (requestedAnalysisId) params.set("analysisId", requestedAnalysisId);
-    if (effectiveBaselineId) params.set("baselineId", effectiveBaselineId);
-    const query = params.toString();
-    return query ? `/results?${query}` : "/results";
-  }, [effectiveBaselineId, effectiveJobId, requestedAnalysisId]);
+  const fitReviewHref = productDecisionState.fitReviewHref;
+  const resultsHref = productDecisionState.resultsHref;
   const remediationHref = `${resultsHref}#advanced-insights`;
-  const studioCanonicalDecision = useMemo(
-    () =>
-      resolveCanonicalState({
-        surface: "studio",
-        baselineId: effectiveBaselineId ?? null,
-        jobId: effectiveJobId ?? null,
-        score: analysisScore,
-        generationReadiness: activeGenerationReadiness,
-        productReadiness,
-        resultsHref,
-        fitReviewHref: remediationHref,
-        canGenerateDocuments,
-        opportunityAlreadySaved: hasCompletedGeneration,
-        persistedAssessmentId: requestedAnalysisId || null,
-        analysisCandidates: analysis
-          ? [
-              {
-                source: "latest_assessment",
-                value: {
-                  assessmentId: analysis.assessmentId ?? requestedAnalysisId ?? null,
-                  baselineId: effectiveBaselineId ?? null,
-                  jobId: effectiveJobId ?? null,
-                  baselineVersionId: effectiveBaselineVersionId ?? null,
-                  score: analysisScore,
-                },
-              },
-            ]
-          : undefined,
-        scoreCandidates: [{ source: "primary", value: analysisScore }],
-      }),
-    [
-      activeGenerationReadiness,
-      analysisScore,
-      canGenerateDocuments,
-      effectiveBaselineId,
-      effectiveJobId,
-      hasCompletedGeneration,
-      productReadiness,
-      remediationHref,
-      resultsHref,
-    ],
-  );
+  const studioCanonicalDecision = productDecisionState.canonicalDecision;
   const primaryNextAction = studioCanonicalDecision.primaryAction;
   useEffect(() => {
     if (process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_DEBUG_STUDIO_FLOW !== "true") {
@@ -2751,15 +2717,21 @@ export default function StudioPage() {
     studioDecisionLogKeyRef.current = decisionKey;
 
     trackEvent("studio_generation_state_viewed", analyticsPayload);
+    const legacyFallbackAttempted = ctaHref.startsWith("/resolve-gaps");
     logDecisionFlowEvent({
       event: "studio_generation_readiness_resolved",
+      entrySource,
       baselineId: effectiveBaselineId || null,
       jobId: effectiveJobId || null,
+      pairKey: studioCanonicalDecision.pairKey,
       score: analysisScore,
       readinessState,
       contractSource: "resolveCanonicalState",
       ctaLabel: primaryNextAction.label,
       ctaHref,
+      resolvedRoute: ctaHref,
+      legacyFallbackAttempted,
+      legacyFallbackBlocked: legacyFallbackAttempted ? ctaHref.startsWith("/fit-review") : true,
       actionType: primaryNextAction.type,
       analyticsPayload,
       dataSource: "mixed",
@@ -2779,6 +2751,7 @@ export default function StudioPage() {
     primaryNextAction.type,
     remediationHref,
     requestedAnalysisId,
+    entrySource,
     studioCanonicalDecision.workflowState,
   ]);
   const studioBlockedByNextAction = primaryNextAction.type === "start_fit_review";
@@ -4748,16 +4721,14 @@ export default function StudioPage() {
 
   const buildClaimVerificationHref = useCallback(
     (claimText: string) => {
-      const params = new URLSearchParams();
-      if (effectiveJobId) params.set("jobId", effectiveJobId);
-      if (effectiveBaselineId) params.set("baselineId", effectiveBaselineId);
-      if (effectiveBaselineVersionId) params.set("baselineVersionId", effectiveBaselineVersionId);
-      if (requestedAnalysisId) {
-        params.set("analysisId", requestedAnalysisId);
-        params.set("assessmentId", requestedAnalysisId);
-      }
-      params.set("highlightClaim", claimText);
-      return `/fit-review?${params.toString()}`;
+      return getFitReviewHref({
+        jobId: effectiveJobId,
+        baselineId: effectiveBaselineId,
+        baselineVersionId: effectiveBaselineVersionId,
+        assessmentId: requestedAnalysisId || null,
+        analysisId: requestedAnalysisId || null,
+        highlightClaim: claimText,
+      });
     },
     [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, requestedAnalysisId],
   );
@@ -5058,7 +5029,7 @@ export default function StudioPage() {
             void handleCoverDraft();
           },
           reviewTopGaps: () => {
-            void router.push(resolveGapsHref);
+            void router.push(fitReviewHref);
           },
           improveExperience: () => {
             void router.push(improveBaselineHref);
@@ -5090,7 +5061,7 @@ export default function StudioPage() {
       handleCoverDraft,
       handleResumeDraft,
       improveBaselineHref,
-      resolveGapsHref,
+      fitReviewHref,
       resultsHref,
       router,
     ],
@@ -5585,7 +5556,7 @@ export default function StudioPage() {
           </FormButton>
           <FormButton onClick={handleAnalyzeAnotherRole}>Analyze another role</FormButton>
           <Link
-            href={resolveGapsHref}
+            href={fitReviewHref}
             className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
           >
             Refine
@@ -5626,7 +5597,7 @@ export default function StudioPage() {
           Cover Letter
         </FormButton>
         <Link
-          href={resolveGapsHref}
+          href={fitReviewHref}
           className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
         >
           Refine
@@ -5741,7 +5712,7 @@ export default function StudioPage() {
               <FormButton onClick={handleApplyToThisRole}>Apply to this role</FormButton>
             )}
             <Link
-              href={resolveGapsHref}
+              href={fitReviewHref}
               className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
             >
               Refine
@@ -6097,7 +6068,7 @@ export default function StudioPage() {
                 {coverGenerating ? "Generating..." : "Generate Cover Letter Draft"}
               </FormButton>
               <Link
-                href={resolveGapsHref}
+                href={fitReviewHref}
                 className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
               >
                 Improve baseline
@@ -6105,7 +6076,7 @@ export default function StudioPage() {
             </>
           ) : primaryNextAction.type === "start_fit_review" ? (
             <Link
-              href={resolveGapsHref}
+              href={fitReviewHref}
               className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
             >
               Start Fit Review
@@ -6622,7 +6593,7 @@ export default function StudioPage() {
                 </Link>
               )}
               <Link
-                href={resolveGapsHref}
+                href={fitReviewHref}
                 onClick={() => {
                   recordArtifactRefineIntent();
                   setRecentIntent(readRecentIntentState());
@@ -6906,7 +6877,7 @@ export default function StudioPage() {
                 </Link>
               )}
               <Link
-                href={resolveGapsHref}
+                href={fitReviewHref}
                 onClick={() => {
                   recordArtifactRefineIntent();
                   setRecentIntent(readRecentIntentState());

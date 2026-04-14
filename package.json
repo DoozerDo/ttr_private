@@ -16,6 +16,7 @@
     "lint:api": "npm -w apps/api run lint",
     "lint": "npm run lint:api && npm run lint:web",
     "test:api": "npm -w apps/api run test",
+    "test:trust:web": "npm -w apps/web run test:trust",
     "check:beta-scope": "node scripts/check-beta-scope.js",
     "synthetic:loop": "npm -w apps/api run synthetic:loop",
     "synthetic:core-loop": "npm run synthetic:loop",
@@ -25,7 +26,8 @@
     "synthetic:bug-report": "npm -w apps/web run synthetic:bug-report",
     "synthetic:bug-report:unavailable": "npm -w apps/web run synthetic:bug-report:unavailable",
     "validate:synthetic": "npm -w apps/api run synthetic:generation",
-    "verify:ci": "npm run check:beta-scope && npm run lint:api && npm run lint:web && npm run test:api && npm run build:both",
+    "verify:ci:core": "npm run check:beta-scope && npm run lint:api && npm run lint:web && npm run test:api && npm run build:both",
+    "verify:ci": "npm run test:trust:web && npm run verify:ci:core",
     "smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1",
     "scan:routes": "npm -w apps/web run scan:routes",
     "postinstall": "patch-package"
