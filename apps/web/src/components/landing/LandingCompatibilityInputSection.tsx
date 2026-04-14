@@ -8,6 +8,35 @@ import { defaultHeroJobDescription } from "@/src/data/heroPreview";
 import { resolveScoreBucket, trackEvent } from "@/src/lib/analytics";
 
 const LANDING_ANALYSIS_COUNTER_KEY = "ttr-landing-analysis-number";
+const PREVIEW_MAX_TOTAL_CHARS = 100_000;
+const PREVIEW_DEBUG_FLAG = "debugCheckFit";
+
+function isPreviewDebugEnabled() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  try {
+    return new URLSearchParams(window.location.search).get(PREVIEW_DEBUG_FLAG) === "1";
+  } catch {
+    return false;
+  }
+}
+
+async function readFileText(file: File): Promise<string> {
+  const candidate = file as File & { text?: () => Promise<string> };
+  if (typeof candidate.text === "function") {
+    return await candidate.text();
+  }
+
+  // JSDOM does not implement File.text() consistently; fall back to FileReader.
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error("file-read-failed"));
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.readAsText(file);
+  });
+}
 
 export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthenticated: boolean }) {
   const router = useRouter();
@@ -27,7 +56,7 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
   const handleResumeFileSelected = useCallback(async (file: File | null) => {
     if (!file) return;
     setResumeFilename(file.name);
-    const extractedText = (await file.text().catch(() => "")).trim();
+    const extractedText = (await readFileText(file).catch(() => "")).trim();
     setResumeText(extractedText);
     trackEvent("resume_upload_completed", {
       source: "landing",
@@ -51,40 +80,91 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
       nextJobDescription: string,
       mode: "live-preview" | "final-preview",
     ): Promise<number> => {
+      const debug = isPreviewDebugEnabled();
       const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+
+      const normalizedResumeText = nextResumeText.trim();
+      const normalizedJobDescriptionText = nextJobDescription.trim();
+
+      // The API enforces a total character limit; protect the client from constructing
+      // overly large request bodies (which can fail before dispatch in some browsers).
+      const totalChars = normalizedResumeText.length + normalizedJobDescriptionText.length;
+      const resumeBudget = Math.max(0, PREVIEW_MAX_TOTAL_CHARS - normalizedJobDescriptionText.length);
+      const cappedResumeText =
+        normalizedResumeText.length > resumeBudget
+          ? normalizedResumeText.slice(0, resumeBudget)
+          : normalizedResumeText;
+
+      let body: string;
+      try {
+        body = JSON.stringify({
+          ...(cappedResumeText ? { resumeText: cappedResumeText } : {}),
+          jobDescriptionText: normalizedJobDescriptionText,
+          mode,
+        });
+      } catch (error) {
+        if (debug) {
+          console.info("[landing-checkfit] failed to serialize request body", {
+            isAuthenticated,
+            mode,
+            resumeLength: normalizedResumeText.length,
+            jobDescriptionLength: normalizedJobDescriptionText.length,
+            totalChars,
+            error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+          });
+        }
+        // Fall back to JD-only preview instead of silently no-op'ing.
+        body = JSON.stringify({
+          jobDescriptionText: normalizedJobDescriptionText,
+          mode,
+        });
+      }
+
+      if (debug && totalChars > PREVIEW_MAX_TOTAL_CHARS) {
+        console.info("[landing-checkfit] payload capped to API limit", {
+          isAuthenticated,
+          mode,
+          resumeLength: normalizedResumeText.length,
+          resumeBudget,
+          cappedResumeLength: cappedResumeText.length,
+          jobDescriptionLength: normalizedJobDescriptionText.length,
+          totalChars,
+        });
+      }
+
       const response = await fetch("/api/preview/compatibility-score", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...(nextResumeText ? { resumeText: nextResumeText } : {}),
-          jobDescriptionText: nextJobDescription,
-          mode,
-        }),
+        body,
       });
 
       if (!response.ok) {
         const raw = await response.text().catch(() => "");
         const elapsedMs =
           typeof performance !== "undefined" ? Math.round(performance.now() - startedAt) : undefined;
-        console.info("[landing-checkfit] preview non-2xx", {
-          isAuthenticated,
-          mode,
-          status: response.status,
-          elapsedMs,
-          contentType: response.headers.get("content-type") ?? "unknown",
-          snippet: raw.slice(0, 280),
-        });
+        if (debug) {
+          console.info("[landing-checkfit] preview non-2xx", {
+            isAuthenticated,
+            mode,
+            status: response.status,
+            elapsedMs,
+            contentType: response.headers.get("content-type") ?? "unknown",
+            snippet: raw.slice(0, 280),
+          });
+        }
         throw new Error(`preview-request-failed status=${response.status}`);
       }
 
       const payload = (await response.json()) as { score?: unknown };
       const score = typeof payload?.score === "number" ? payload.score : null;
       if (score === null) {
-        console.info("[landing-checkfit] preview invalid payload", {
-          isAuthenticated,
-          mode,
-          scoreType: typeof (payload as any)?.score,
-        });
+        if (debug) {
+          console.info("[landing-checkfit] preview invalid payload", {
+            isAuthenticated,
+            mode,
+            scoreType: typeof (payload as any)?.score,
+          });
+        }
         throw new Error("invalid-preview-score");
       }
       return score;
@@ -120,35 +200,36 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
         hasResume,
         analysisNumber,
       });
-      console.info("[landing-checkfit] click", {
-        isAuthenticated,
-        hasResume,
-        jobDescriptionLength: nextJobDescription.length,
-        resumeLength: normalizedResumeText.length,
-        analysisNumber,
-      });
+      if (isPreviewDebugEnabled()) {
+        console.info("[landing-checkfit] click", {
+          isAuthenticated,
+          hasResume,
+          jobDescriptionLength: nextJobDescription.length,
+          resumeLength: normalizedResumeText.length,
+          analysisNumber,
+        });
+      }
 
       setPreviewError(null);
       setIsFinalPreviewLoading(true);
 
       let scoredValue: number;
       try {
-        console.info("[landing-checkfit] dispatch preview request", { isAuthenticated, analysisNumber });
         scoredValue = await requestPreviewScore(normalizedResumeText, nextJobDescription, "final-preview");
       } catch (error) {
-        console.info("[landing-checkfit] preview request failed", {
-          isAuthenticated,
-          analysisNumber,
-          error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
-        });
+        if (isPreviewDebugEnabled()) {
+          console.info("[landing-checkfit] preview request failed", {
+            isAuthenticated,
+            analysisNumber,
+            error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+          });
+        }
         if (!isAuthenticated) {
-          console.info("[landing-checkfit] redirect branch=signup_on_preview_failure", { analysisNumber });
           router.push(`/auth/signup?next=${encodeURIComponent("/baseline")}`);
           setIsFinalPreviewLoading(false);
           return;
         }
 
-        console.info("[landing-checkfit] branch=show_preview_error", { analysisNumber });
         setPreviewError("Preview is temporarily unavailable. Please try again.");
         setIsFinalPreviewLoading(false);
         return;
@@ -156,7 +237,6 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
 
       setJobDescription(nextJobDescription);
       setIsFinalPreviewLoading(false);
-      console.info("[landing-checkfit] preview success", { isAuthenticated, analysisNumber, score: scoredValue });
       trackEvent("compatibility_analysis_completed", {
         source: "landing",
         score: scoredValue,

@@ -71,6 +71,56 @@ describe("Landing conversion pass", () => {
 
     fetchSpy.mockRestore();
   });
+
+  it("dispatches preview even when resume text + JD exceed API char cap (no silent no-op)", async () => {
+    vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
+    const fetchSpy = vi.spyOn(globalThis, "fetch" as any);
+    pushMock.mockClear();
+
+    fetchSpy.mockImplementation(async (input: any, init?: any) => {
+      const url = String(input);
+      if (url.includes("/api/preview/compatibility-score")) {
+        const bodyRaw = String(init?.body ?? "");
+        // Should still fire a request, and body should remain valid JSON.
+        const parsed = JSON.parse(bodyRaw) as { resumeText?: string; jobDescriptionText?: string };
+        expect(typeof parsed.jobDescriptionText).toBe("string");
+        if (typeof parsed.resumeText === "string") {
+          expect(parsed.resumeText.length + parsed.jobDescriptionText!.length).toBeLessThanOrEqual(100_000);
+        }
+        return new Response(JSON.stringify({ score: 61 }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    render(<LandingPage isAuthenticated={false} />);
+
+    const hugeResume = "r".repeat(120_000);
+    const file = new File([hugeResume], "resume.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByTestId("landing-resume-input"), {
+      target: { files: [file] },
+    });
+
+    fireEvent.change(screen.getByTestId("landing-job-description-input"), {
+      target: { value: "j".repeat(10_000) },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Check fit" }));
+
+    expect(
+      fetchSpy.mock.calls.some((call) =>
+        String(call[0]).includes("/api/preview/compatibility-score"),
+      ),
+    ).toBe(true);
+    expect(pushMock).not.toHaveBeenCalled();
+
+    fetchSpy.mockRestore();
+  });
 });
 
 
