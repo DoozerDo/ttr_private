@@ -7,38 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { AccessCodesService } from '../../access-codes/access-codes.service';
 import { isFounderEmail } from '../founder-access';
-
-function isPublicRoute(context: ExecutionContext): boolean {
-  const request = context.switchToHttp().getRequest<{
-    method?: string;
-    originalUrl?: string;
-    url?: string;
-  }>();
-
-  const method = request?.method?.toUpperCase() ?? '';
-  if (method === 'OPTIONS') {
-    return true;
-  }
-
-  const url = (request?.originalUrl ?? request?.url ?? '').split('?')[0];
-
-  if (url === '/' || url === '/health' || url === '/status' || url === '/version') {
-    return true;
-  }
-
-  return (
-    url === '/auth/register' ||
-    url === '/auth/login' ||
-    url === '/auth/forgot-password' ||
-    url === '/auth/reset-password' ||
-    url === '/auth/redeem-access-code-and-login' ||
-    url === '/auth/confirm' ||
-    url === '/auth/resend-confirmation' ||
-    url === '/auth/logout' ||
-    url === '/analytics/event' ||
-    url === '/preview/compatibility-score'
-  );
-}
+import { isPublicRoute } from './public-routes';
 
 @Injectable()
 export class AccessGuard implements CanActivate {

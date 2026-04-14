@@ -51,6 +51,7 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
       nextJobDescription: string,
       mode: "live-preview" | "final-preview",
     ): Promise<number> => {
+      const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
       const response = await fetch("/api/preview/compatibility-score", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -62,17 +63,33 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
       });
 
       if (!response.ok) {
-        throw new Error("preview-request-failed");
+        const raw = await response.text().catch(() => "");
+        const elapsedMs =
+          typeof performance !== "undefined" ? Math.round(performance.now() - startedAt) : undefined;
+        console.info("[landing-checkfit] preview non-2xx", {
+          isAuthenticated,
+          mode,
+          status: response.status,
+          elapsedMs,
+          contentType: response.headers.get("content-type") ?? "unknown",
+          snippet: raw.slice(0, 280),
+        });
+        throw new Error(`preview-request-failed status=${response.status}`);
       }
 
       const payload = (await response.json()) as { score?: unknown };
       const score = typeof payload?.score === "number" ? payload.score : null;
       if (score === null) {
+        console.info("[landing-checkfit] preview invalid payload", {
+          isAuthenticated,
+          mode,
+          scoreType: typeof (payload as any)?.score,
+        });
         throw new Error("invalid-preview-score");
       }
       return score;
     },
-    [],
+    [isAuthenticated],
   );
 
   const handleAnalyzeCompatibility = useCallback(
@@ -103,20 +120,35 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
         hasResume,
         analysisNumber,
       });
+      console.info("[landing-checkfit] click", {
+        isAuthenticated,
+        hasResume,
+        jobDescriptionLength: nextJobDescription.length,
+        resumeLength: normalizedResumeText.length,
+        analysisNumber,
+      });
 
       setPreviewError(null);
       setIsFinalPreviewLoading(true);
 
       let scoredValue: number;
       try {
+        console.info("[landing-checkfit] dispatch preview request", { isAuthenticated, analysisNumber });
         scoredValue = await requestPreviewScore(normalizedResumeText, nextJobDescription, "final-preview");
-      } catch {
+      } catch (error) {
+        console.info("[landing-checkfit] preview request failed", {
+          isAuthenticated,
+          analysisNumber,
+          error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+        });
         if (!isAuthenticated) {
+          console.info("[landing-checkfit] redirect branch=signup_on_preview_failure", { analysisNumber });
           router.push(`/auth/signup?next=${encodeURIComponent("/baseline")}`);
           setIsFinalPreviewLoading(false);
           return;
         }
 
+        console.info("[landing-checkfit] branch=show_preview_error", { analysisNumber });
         setPreviewError("Preview is temporarily unavailable. Please try again.");
         setIsFinalPreviewLoading(false);
         return;
@@ -124,6 +156,7 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
 
       setJobDescription(nextJobDescription);
       setIsFinalPreviewLoading(false);
+      console.info("[landing-checkfit] preview success", { isAuthenticated, analysisNumber, score: scoredValue });
       trackEvent("compatibility_analysis_completed", {
         source: "landing",
         score: scoredValue,
