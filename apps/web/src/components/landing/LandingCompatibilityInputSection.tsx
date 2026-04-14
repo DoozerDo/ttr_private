@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { RunYourAnalysisSection } from "@/src/components/landing/RunYourAnalysisSection";
 import { defaultHeroJobDescription } from "@/src/data/heroPreview";
@@ -8,7 +9,8 @@ import { resolveScoreBucket, trackEvent } from "@/src/lib/analytics";
 
 const LANDING_ANALYSIS_COUNTER_KEY = "ttr-landing-analysis-number";
 
-export function LandingCompatibilityInputSection() {
+export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthenticated: boolean }) {
+  const router = useRouter();
   const [resumeFilename, setResumeFilename] = useState<string | null>(null);
   const [resumeText, setResumeText] = useState<string>("");
   const [jobDescription, setJobDescription] = useState("");
@@ -75,6 +77,11 @@ export function LandingCompatibilityInputSection() {
 
   const handleAnalyzeCompatibility = useCallback(
     async (jobDescriptionOverride?: string) => {
+      if (!isAuthenticated) {
+        await router.push(`/auth/signup?next=${encodeURIComponent("/baseline")}`);
+        return;
+      }
+
       const nextJobDescription =
         (jobDescriptionOverride ?? jobDescription).trim() || defaultHeroJobDescription;
       const normalizedResumeText = resumeText.trim();
@@ -122,7 +129,7 @@ export function LandingCompatibilityInputSection() {
         scoreBucket: resolveScoreBucket(scoredValue),
       });
     },
-    [jobDescription, requestPreviewScore, resumeText],
+    [isAuthenticated, jobDescription, requestPreviewScore, resumeText, router],
   );
 
   return (

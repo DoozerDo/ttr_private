@@ -88,7 +88,7 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
         </section>
 
         <div className="-mt-2 hidden md:block">
-          <LandingCompatibilityInputSection />
+          <LandingCompatibilityInputSection isAuthenticated={isAuthenticated} />
         </div>
 
         <LandingTrustStrip />
