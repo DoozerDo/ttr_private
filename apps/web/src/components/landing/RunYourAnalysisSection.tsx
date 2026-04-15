@@ -47,6 +47,9 @@ export function RunYourAnalysisSection({
 }: RunYourAnalysisSectionProps) {
   const [showReadyPulse, setShowReadyPulse] = useState(false);
   const [hasClickedCheckFit, setHasClickedCheckFit] = useState(false);
+  const [lastStep, setLastStep] = useState<
+    "idle" | "entered" | "before onAnalyzeCompatibility" | "after onAnalyzeCompatibility" | "error"
+  >("idle");
   const previousReadyRef = useRef(jdReady);
   const runButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -69,12 +72,16 @@ export function RunYourAnalysisSection({
 
   const handleAnalyzeClick = async () => {
     setHasClickedCheckFit(true);
+    setLastStep("entered");
     if (!jdReady || isPreviewLoading) {
       return;
     }
     try {
+      setLastStep("before onAnalyzeCompatibility");
       await onAnalyzeCompatibility();
+      setLastStep("after onAnalyzeCompatibility");
     } catch (error) {
+      setLastStep("error");
       console.error("[landing-checkfit] analyze click failed", error);
     }
   };
@@ -158,6 +165,7 @@ export function RunYourAnalysisSection({
                   <div>hasResumeFilename: {String(Boolean(resumeFilename))}</div>
                   <div>jobDescriptionLength: {jobDescription.length}</div>
                   <div>hasClickedCheckFit: {String(hasClickedCheckFit)}</div>
+                  <div>lastStep: {lastStep}</div>
                 </div>
                 {!jdReady ? (
                   <p className="text-xs text-slate-600">Paste at least 120 characters from the job description to enable analysis.</p>
