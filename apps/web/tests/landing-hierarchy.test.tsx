@@ -29,9 +29,10 @@ describe("Landing hierarchy", () => {
     expect(resultStructure.compareDocumentPosition(radarTeaser) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(hero.className).not.toMatch(/bg-slate-950\/70|shadow/);
     expect(analysisCard.className).toMatch(/bg-slate-900\/95|shadow/);
-    expect(within(hero).getByRole("button", { name: "Get your fit score" })).toBeInTheDocument();
+    expect(within(hero).queryByRole("button")).toBeNull();
     expect(primaryAction).toBeInTheDocument();
     expect(within(analysisBlock).getAllByTestId("landing-primary-action")).toHaveLength(1);
+    expect(screen.queryByText("Edit inputs")).toBeNull();
     expect(screen.getByText("Most tools try to make you look qualified. This tells you if you actually are.")).toBeInTheDocument();
     expect(screen.getByText("A compliance-gated analysis that shows where you are strongest and what to do next.")).toBeInTheDocument();
     expect(screen.getByText("Where you match")).toBeInTheDocument();

@@ -130,10 +130,6 @@ test.describe("public landing synthetic transactions", () => {
     const analysisBlock = page.getByTestId("landing-analysis-block");
     const primaryAction = analysisBlock.getByRole("button", { name: "Get your fit score" });
 
-    await expect(
-      page.getByTestId("landing-hero").getByRole("button", { name: "Get your fit score" }),
-      "hero primary action did not render",
-    ).toBeVisible();
     await expect(page.getByRole("link", { name: "Log in" }), "landing login link did not render").toBeVisible();
     await expect(page.getByRole("link", { name: "Get beta access" }), "landing beta access link did not render").toBeVisible();
     await expect(primaryAction, "analysis block primary action missing").toHaveCount(1);

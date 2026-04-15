@@ -78,13 +78,10 @@ export function RunYourAnalysisSection({
 }: RunYourAnalysisSectionProps) {
   const [showReadyPulse, setShowReadyPulse] = useState(false);
   const [hasClickedCheckFit, setHasClickedCheckFit] = useState(false);
-  const [inputsExpanded, setInputsExpanded] = useState(true);
   const previousReadyRef = useRef(jdReady);
   const runButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const jobTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const inputsContentRef = useRef<HTMLDivElement | null>(null);
-  const [inputsMaxHeight, setInputsMaxHeight] = useState<number | null>(null);
 
   const hasResult = typeof previewScore === "number";
   const fitLabel = useMemo(() => resolveFitLabelFromBand(previewScoreBucket), [previewScoreBucket]);
@@ -135,20 +132,6 @@ export function RunYourAnalysisSection({
       // no-op
     }
   }, [hasResult, revealStage]);
-
-  useEffect(() => {
-    if (!hasResult) {
-      setInputsExpanded(true);
-      return;
-    }
-    setInputsExpanded(false);
-  }, [hasResult]);
-
-  useEffect(() => {
-    const el = inputsContentRef.current;
-    if (!el) return;
-    setInputsMaxHeight(el.scrollHeight);
-  }, [inputsExpanded, resumeFilename, jobDescription.length, jdReady, hasResult]);
 
   const handleUploadClick = () => {
     onResumeUploadInitiated();
@@ -281,19 +264,11 @@ export function RunYourAnalysisSection({
                 </div>
               ) : null}
 
-              <details
+              <div
                 data-testid="landing-inputs"
-                open={inputsExpanded}
-                onToggle={(event) => setInputsExpanded((event.currentTarget as HTMLDetailsElement).open)}
-                className={hasResult ? "rounded-2xl border border-white/8 bg-white/[0.01] px-5 py-4 transition" : ""}
+                className={hasResult ? "rounded-2xl border border-white/8 bg-white/[0.01] px-5 py-4" : ""}
               >
-                {hasResult ? <summary className="cursor-pointer select-none text-sm font-semibold text-slate-200">Edit inputs</summary> : null}
-                <div
-                  ref={inputsContentRef}
-                  style={hasResult ? { maxHeight: inputsExpanded ? inputsMaxHeight ?? undefined : 0 } : undefined}
-                  className={hasResult ? `mt-4 overflow-hidden transition-[max-height,opacity,transform] duration-300 ${inputsExpanded ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-1"}` : ""}
-                >
-                  <div className="space-y-6">
+                <div className={hasResult ? "space-y-6" : "space-y-6"}>
                   <div className="rounded-[18px] border border-slate-600/50 bg-slate-950/35 p-5 shadow-[0_10px_24px_rgba(2,6,23,0.35)]">
                     <div className="flex flex-wrap items-center gap-4">
                       <button type="button" onClick={handleUploadClick} data-testid="landing-upload-resume-button" className="inline-flex items-center justify-center rounded-lg border border-slate-200/40 bg-white px-5 py-3 text-sm font-semibold text-slate-950 shadow-[0_10px_26px_rgba(15,23,42,0.45)] transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900">
@@ -337,9 +312,8 @@ export function RunYourAnalysisSection({
                       </button>
                     </div>
                   ) : null}
-                  </div>
                 </div>
-              </details>
+              </div>
 
               {showDebug ? (
                 <details className="rounded-xl border border-amber-300/25 bg-amber-500/5 px-3 py-2 text-[11px] leading-5 text-amber-200">
@@ -368,13 +342,6 @@ export function RunYourAnalysisSection({
                 </details>
               ) : null}
 
-              {!resumeFilename ? (
-                <p className="text-xs text-slate-500">Upload your resume to enable scoring.</p>
-              ) : !jdReady ? (
-                <p className="text-xs text-slate-500">Paste at least 120 characters of the job description.</p>
-              ) : !hasResult ? (
-                <p className="text-xs text-slate-400">Ready.</p>
-              ) : null}
             </div>
 
             <div className="mt-3 min-h-5">

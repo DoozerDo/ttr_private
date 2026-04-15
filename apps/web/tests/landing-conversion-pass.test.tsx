@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent } from "@testing-library/react";
 
@@ -22,16 +22,17 @@ describe("Landing conversion pass", () => {
     render(<LandingPage isAuthenticated={false} />);
 
     const loginLinks = screen.getAllByRole("link", { name: "Log in" });
+    const hero = screen.getByTestId("landing-hero");
 
     expect(loginLinks.some((link) => link.getAttribute("href") === "/auth/login?next=%2Fbaseline")).toBe(true);
     expect(screen.getByRole("link", { name: "Get beta access" })).toHaveAttribute("href", "/auth/signup?next=%2Fbaseline");
-    expect(screen.getByTestId("landing-hero-primary-action")).toHaveTextContent("Get your fit score");
+    expect(within(hero).queryByRole("button", { name: /get your fit score/i })).toBeNull();
     expect(screen.getByText("Upload resume")).toBeInTheDocument();
     expect(screen.getByText("PDF or DOCX only")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Paste the full job description, including responsibilities and requirements.")).toBeInTheDocument();
-    expect(screen.getByText("Upload your resume to enable scoring.")).toBeInTheDocument();
     expect(screen.getByTestId("landing-primary-action")).toBeInTheDocument();
     expect(screen.getAllByTestId("landing-primary-action")).toHaveLength(1);
+    expect(screen.getByTestId("landing-primary-action")).toHaveTextContent("Get your fit score");
   });
 
   it("allows unauthenticated users to run the landing preview score without redirecting to auth", async () => {

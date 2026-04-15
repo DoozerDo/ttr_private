@@ -88,6 +88,8 @@ describe("Public landing polish", () => {
     expect(gateEl.compareDocumentPosition(screen.getByTestId("landing-primary-action")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(scoreEl.compareDocumentPosition(inputsEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getAllByTestId("landing-primary-action").length).toBe(1);
+    expect(screen.queryByText("Edit inputs")).toBeNull();
+    expect(screen.queryByText("Upload your resume to enable scoring.")).toBeNull();
 
     fireEvent.click(screen.getByTestId("landing-primary-action"));
     expect(mockRouterPush).toHaveBeenCalledWith("/auth/signup?next=%2Fbaseline");
