@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { RunYourAnalysisSection } from "@/src/components/landing/RunYourAnalysisSection";
 import { defaultHeroJobDescription } from "@/src/data/heroPreview";
@@ -66,6 +67,7 @@ type LandingCompatibilityStep =
 type LandingCompatibilityError = { code: string; message: string } | null;
 
 export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthenticated: boolean }) {
+  const router = useRouter();
   const [resumeFilename, setResumeFilename] = useState<string | null>(null);
   const [resumeText, setResumeText] = useState<string>("");
   const [jobDescription, setJobDescription] = useState("");
@@ -82,6 +84,8 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
   const [authBootstrapFailed, setAuthBootstrapFailed] = useState(false);
   const [lastError, setLastError] = useState<LandingCompatibilityError>(null);
   const jdReady = jobDescription.trim().length > 120;
+  const hasResumeText = resumeText.trim().length > 0;
+  const canRequestScore = jdReady && hasResumeText && !isFinalPreviewLoading;
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -253,6 +257,16 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
       const normalizedResumeText = resumeText.trim();
       const hasResume = normalizedResumeText.length > 0;
 
+      trackEvent(
+        "landing_score_requested",
+        {
+          source: "landing",
+          hasResume,
+          jobDescriptionLength: nextJobDescription.length,
+        },
+        analyticsOptions,
+      );
+
       const analysisNumber = (() => {
         if (typeof window === "undefined") {
           return 1;
@@ -268,12 +282,16 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
         }
       })();
 
-      trackEvent("compatibility_analysis_started", {
-        source: "landing",
-        jobDescriptionLength: nextJobDescription.length,
-        hasResume,
-        analysisNumber,
-      }, analyticsOptions);
+      trackEvent(
+        "compatibility_analysis_started",
+        {
+          source: "landing",
+          jobDescriptionLength: nextJobDescription.length,
+          hasResume,
+          analysisNumber,
+        },
+        analyticsOptions,
+      );
       if (isPreviewDebugEnabled()) {
         console.info("[landing-checkfit] click", {
           isAuthenticated,
@@ -323,11 +341,25 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
       setPreviewScoreBand(scoredBand);
       setPreviewRequestFinishedAt(new Date().toISOString());
       setLastStep("preview_succeeded");
-      trackEvent("compatibility_analysis_completed", {
-        source: "landing",
-        score: scoredValue,
-        scoreBucket: resolveScoreBucket(scoredValue),
-      }, analyticsOptions);
+      trackEvent(
+        "landing_score_revealed",
+        {
+          source: "landing",
+          score: scoredValue,
+          scoreBand: scoredBand,
+          tension_variant: "v1",
+        },
+        analyticsOptions,
+      );
+      trackEvent(
+        "compatibility_analysis_completed",
+        {
+          source: "landing",
+          score: scoredValue,
+          scoreBucket: resolveScoreBucket(scoredValue),
+        },
+        analyticsOptions,
+      );
     },
     [analyticsOptions, isAuthenticated, jobDescription, requestCanonicalFitScore, resumeText],
   );
@@ -341,8 +373,32 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
       onResumeUploadInitiated={handleResumeUploadInitiated}
       onResumeFileSelected={handleResumeFileSelected}
       onAnalyzeCompatibility={handleAnalyzeCompatibility}
+      onUnlockFullAnalysis={() => {
+        const next = encodeURIComponent("/baseline");
+        if (isAuthenticated) {
+          trackEvent(
+            "landing_unlock_clicked",
+            { source: "landing", destination: "/baseline", authenticated: true, tension_variant: "v1" },
+            analyticsOptions,
+          );
+          router.push("/baseline");
+          return;
+        }
+        trackEvent(
+          "landing_unlock_clicked",
+          { source: "landing", destination: "/auth/signup", authenticated: false, tension_variant: "v1" },
+          analyticsOptions,
+        );
+        trackEvent(
+          "landing_auth_started",
+          { source: "landing", destination: "/auth/signup" },
+          analyticsOptions,
+        );
+        router.push(`/auth/signup?next=${next}`);
+      }}
       isPreviewLoading={isFinalPreviewLoading}
       jdReady={jdReady}
+      canRequestScore={canRequestScore}
       previewError={previewError}
       previewScore={previewScore}
       previewScoreBucket={previewScoreBand}

@@ -42,6 +42,10 @@ describe("Anonymous landing upload flow", () => {
       return url.includes("/api/preview/compatibility-score");
     });
     expect(legacyPreviewCalls.length).toBe(0);
+
+    expect(screen.queryByText(/Check fit DEBUG/i)).toBeNull();
+    expect(screen.queryByText(/CHECKFIT_DEBUG_/i)).toBeNull();
+    expect(screen.queryByText(/Unlock full analysis/i)).toBeNull();
   });
 
   it("advances to file_selected immediately and continues upload state independent of JD", async () => {

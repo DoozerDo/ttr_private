@@ -5,6 +5,10 @@ import type { ScoreBand } from "@/src/lib/score-band";
 
 export const ANALYTICS_EVENT_NAMES = [
   "landing_viewed",
+  "landing_score_requested",
+  "landing_score_revealed",
+  "landing_unlock_clicked",
+  "landing_auth_started",
   "landing_cta_click",
   "landing_cta_footer_click",
   "resume_upload_initiated",
@@ -105,6 +109,27 @@ export type AnalyticsEventMap = {
   landing_viewed: {
     referrer: string | null;
     deviceType: "mobile" | "tablet" | "desktop";
+  };
+  landing_score_requested: {
+    source: "landing";
+    hasResume: boolean;
+    jobDescriptionLength: number;
+  };
+  landing_score_revealed: {
+    source: "landing";
+    score: number;
+    scoreBand: "TOP" | "MID" | "LOW";
+    tension_variant?: "v1";
+  };
+  landing_unlock_clicked: {
+    source: "landing";
+    destination: "/auth/signup" | "/auth/login" | "/baseline";
+    authenticated: boolean;
+    tension_variant?: "v1";
+  };
+  landing_auth_started: {
+    source: "landing";
+    destination: "/auth/signup" | "/auth/login";
   };
   landing_cta_click: {
     destination: "/auth/signup" | "/baseline";
