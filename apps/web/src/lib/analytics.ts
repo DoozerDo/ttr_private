@@ -707,9 +707,30 @@ type TrackEventInput<TName extends AnalyticsEventName> = {
 
 const ANALYTICS_SESSION_KEY = "ttr-analytics-session-id";
 const USER_ID_ENDPOINT = "/api/users/me";
+const AUTH_BOOTSTRAP_DIAGNOSTIC_EVENT = "ttr:auth-bootstrap";
 
 let cachedUserId: string | null = null;
 let userIdLookupInFlight: Promise<string | null> | null = null;
+
+type AuthBootstrapDiagnosticStage = "attempted" | "succeeded" | "failed";
+
+function emitAuthBootstrapDiagnostic(
+  stage: AuthBootstrapDiagnosticStage,
+  detail?: Record<string, unknown>,
+) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.dispatchEvent(
+      new CustomEvent(AUTH_BOOTSTRAP_DIAGNOSTIC_EVENT, {
+        detail: { stage, ...(detail ?? {}) },
+      }),
+    );
+  } catch {
+    // no-op
+  }
+}
 
 function safeStorageGet(key: string): string | null {
   try {
@@ -798,12 +819,17 @@ async function getUserIdBestEffort(): Promise<string | null> {
 
   userIdLookupInFlight = (async () => {
     try {
+      emitAuthBootstrapDiagnostic("attempted", { endpoint: USER_ID_ENDPOINT });
       const response = await fetch(USER_ID_ENDPOINT, {
         method: "GET",
         credentials: "include",
         cache: "no-store",
       });
       if (!response.ok) {
+        emitAuthBootstrapDiagnostic("failed", {
+          endpoint: USER_ID_ENDPOINT,
+          status: response.status,
+        });
         return null;
       }
       const payload = await response.json().catch(() => null);
@@ -811,8 +837,13 @@ async function getUserIdBestEffort(): Promise<string | null> {
       if (userId) {
         cachedUserId = userId;
       }
+      emitAuthBootstrapDiagnostic("succeeded", { endpoint: USER_ID_ENDPOINT });
       return userId;
     } catch {
+      emitAuthBootstrapDiagnostic("failed", {
+        endpoint: USER_ID_ENDPOINT,
+        status: "network_error",
+      });
       return null;
     } finally {
       userIdLookupInFlight = null;
@@ -825,7 +856,7 @@ async function getUserIdBestEffort(): Promise<string | null> {
 export function trackEvent<TName extends AnalyticsEventName>(
   eventName: TName,
   properties: AnalyticsEventMap[TName],
-  options?: { path?: string | null; userId?: string | null },
+  options?: { path?: string | null; userId?: string | null; allowUserLookup?: boolean },
 ): void {
   if (typeof window === "undefined") {
     return;
@@ -834,10 +865,13 @@ export function trackEvent<TName extends AnalyticsEventName>(
   const sessionId = getOrCreateAnalyticsSessionId();
   const createdAt = new Date().toISOString();
   const path = options?.path ?? pathFromWindow();
+  const allowUserLookup = options?.allowUserLookup !== false;
 
   void (async () => {
     const resolvedUserId =
-      options?.userId === undefined ? await getUserIdBestEffort() : options.userId;
+      allowUserLookup && options?.userId === undefined
+        ? await getUserIdBestEffort()
+        : (options?.userId ?? null);
     const payload: TrackEventInput<TName> & {
       sessionId: string;
       createdAt: string;

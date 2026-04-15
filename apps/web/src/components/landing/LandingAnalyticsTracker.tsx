@@ -15,7 +15,7 @@ export function LandingAnalyticsTracker() {
     trackEvent("landing_viewed", {
       referrer: document.referrer || null,
       deviceType: detectDeviceType(),
-    });
+    }, { allowUserLookup: false, userId: null });
   }, []);
 
   return null;

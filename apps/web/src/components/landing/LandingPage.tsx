@@ -37,7 +37,7 @@ function MockPanel() {
     <div className="hidden md:block border-l border-white/10 pl-6">
       <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">What the result shows</p>
       <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-300">
-        <li>Real fit score</li>
+        <li>Canonical fit score</li>
         <li>Strengths, gaps, and adjacent lanes</li>
         <li>Clear next move</li>
       </ul>

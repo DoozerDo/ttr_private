@@ -48,7 +48,9 @@ export function isPublicRequest(
     url === '/auth/resend-confirmation' ||
     url === '/auth/logout' ||
     url === '/analytics/event' ||
-    url === '/preview/compatibility-score'
+    url === '/preview/compatibility-score' ||
+    url === '/preview/extract-resume-text' ||
+    url === '/preview/canonical-fit-score'
   );
 }
 
@@ -56,4 +58,3 @@ export function isPublicRoute(context: ExecutionContext): boolean {
   const request = context.switchToHttp().getRequest<HttpRequestLike>();
   return isPublicRequest(request);
 }
-

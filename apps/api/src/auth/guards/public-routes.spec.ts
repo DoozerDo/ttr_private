@@ -11,6 +11,24 @@ describe('public routes', () => {
     ).toBe(true);
   });
 
+  it('treats preview extract-resume-text as public', () => {
+    expect(
+      isPublicRequest({
+        method: 'POST',
+        url: '/preview/extract-resume-text',
+      }),
+    ).toBe(true);
+  });
+
+  it('treats preview canonical-fit-score as public', () => {
+    expect(
+      isPublicRequest({
+        method: 'POST',
+        url: '/preview/canonical-fit-score',
+      }),
+    ).toBe(true);
+  });
+
   it('treats preview compatibility-score as public when mounted under /api', () => {
     expect(
       isPublicRequest({
@@ -38,4 +56,3 @@ describe('public routes', () => {
     ).toBe(false);
   });
 });
-
