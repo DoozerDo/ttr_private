@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { type ReactNode } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 import { LandingAnalyticsTracker } from "@/src/components/landing/LandingAnalyticsTracker";
 import { DemoAnalysisPreviewSection } from "@/src/components/landing/DemoAnalysisPreviewSection";
@@ -21,14 +21,38 @@ function CtaButton({
   children: ReactNode;
   testId?: string;
 }) {
+  const handleClick = () => {
+    const anchor = document.getElementById("check-compatibility");
+    if (anchor) {
+      anchor.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    // Trigger the next action (resume upload) instead of a passive scroll.
+    window.setTimeout(() => {
+      const uploadButton = document.querySelector(
+        '[data-testid="landing-upload-resume-button"]',
+      ) as HTMLButtonElement | null;
+      const jdField = document.querySelector(
+        '[data-testid="landing-job-description-input"]',
+      ) as HTMLTextAreaElement | null;
+
+      if (uploadButton) {
+        uploadButton.click();
+        return;
+      }
+      jdField?.focus();
+    }, 120);
+  };
+
   return (
-    <a
+    <button
       data-testid={testId}
-      href="#check-compatibility"
+      type="button"
+      onClick={handleClick}
       className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/14 bg-white/[0.03] px-5 py-3 text-sm font-semibold text-slate-100 transition hover:border-white/25 hover:bg-white/[0.06] hover:text-white"
     >
       {children}
-    </a>
+    </button>
   );
 }
 
@@ -46,6 +70,14 @@ function MockPanel() {
 }
 
 export function LandingPage({ isAuthenticated }: LandingPageProps) {
+  const [hasScoreRevealed, setHasScoreRevealed] = useState(false);
+
+  useEffect(() => {
+    const handler = () => setHasScoreRevealed(true);
+    window.addEventListener("ttr:landing-score-revealed", handler);
+    return () => window.removeEventListener("ttr:landing-score-revealed", handler);
+  }, []);
+
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,_#050816_0%,_#070b14_60%,_#050816_100%)] text-slate-100">
       <LandingAnalyticsTracker />
@@ -64,7 +96,7 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
                 Know before you apply.
               </h1>
               <div className="mt-4.5 flex flex-wrap items-center gap-3">
-                <CtaButton testId="landing-hero-primary-action">Get your score</CtaButton>
+                <CtaButton testId="landing-hero-primary-action">Get your fit score</CtaButton>
               </div>
               <p className="mt-2 text-sm text-slate-500">
                 Takes under 60 seconds. No fluff. Just a real answer.
@@ -99,9 +131,12 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
           </p>
         )}
 
-        <DemoAnalysisPreviewSection />
-
-        <LandingAdjacencyRadarTeaser />
+        {!hasScoreRevealed ? (
+          <>
+            <DemoAnalysisPreviewSection />
+            <LandingAdjacencyRadarTeaser />
+          </>
+        ) : null}
 
       </main>
     </div>

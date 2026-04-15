@@ -29,11 +29,7 @@ describe("Landing hierarchy", () => {
     expect(resultStructure.compareDocumentPosition(radarTeaser) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(hero.className).not.toMatch(/bg-slate-950\/70|shadow/);
     expect(analysisCard.className).toMatch(/bg-slate-900\/95|shadow/);
-    expect(within(hero).getByRole("link", { name: "Get your score" })).toHaveAttribute(
-      "href",
-      "#check-compatibility",
-    );
-    expect(within(hero).queryByRole("button")).toBeNull();
+    expect(within(hero).getByRole("button", { name: "Get your fit score" })).toBeInTheDocument();
     expect(primaryAction).toBeInTheDocument();
     expect(within(analysisBlock).getAllByTestId("landing-primary-action")).toHaveLength(1);
     expect(screen.getByText("Most tools try to make you look qualified. This tells you if you actually are.")).toBeInTheDocument();

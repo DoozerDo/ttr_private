@@ -128,11 +128,11 @@ test.describe("public landing synthetic transactions", () => {
     await openLanding(page);
 
     const analysisBlock = page.getByTestId("landing-analysis-block");
-    const primaryAction = analysisBlock.getByRole("button", { name: "Check fit" });
+    const primaryAction = analysisBlock.getByRole("button", { name: "Get your fit score" });
 
     await expect(
-      page.getByRole("link", { name: "Get your score" }),
-      "hero anchor action did not render",
+      page.getByTestId("landing-hero").getByRole("button", { name: "Get your fit score" }),
+      "hero primary action did not render",
     ).toBeVisible();
     await expect(page.getByRole("link", { name: "Log in" }), "landing login link did not render").toBeVisible();
     await expect(page.getByRole("link", { name: "Get beta access" }), "landing beta access link did not render").toBeVisible();
@@ -158,11 +158,11 @@ test.describe("public landing synthetic transactions", () => {
     logSyntheticStep("resume.upload.start", { file: resumeFixturePath });
     await uploadInput.setInputFiles(resumeFixture);
     await expect(
-      page.getByText("Loaded: synthetic-resume.pdf"),
+      page.getByText("synthetic-resume.pdf"),
       "uploaded resume filename did not render",
     ).toBeVisible();
     await expect(
-      page.getByText("We extract your experience from the file. PDF and DOCX only."),
+      page.getByText("We extract text from your PDF/DOCX to score against the role."),
       "resume helper guidance was not visible",
     ).toBeVisible();
     await expect(uploadButton, "upload control disappeared after upload").toBeVisible();
@@ -175,7 +175,7 @@ test.describe("public landing synthetic transactions", () => {
 
     const uploadInput = page.getByTestId("landing-resume-input");
     const jobDescriptionInput = page.getByTestId("landing-job-description-input");
-    const primaryAction = page.getByRole("button", { name: "Check fit" });
+    const primaryAction = page.getByRole("button", { name: "Get your fit score" });
 
     await uploadInput.setInputFiles(resumeFixture);
     await jobDescriptionInput.fill(jobDescriptionFixture);
@@ -188,7 +188,7 @@ test.describe("public landing synthetic transactions", () => {
 
     const responsePromise = page.waitForResponse(
       (response) =>
-        response.url().includes("/api/preview/compatibility-score") &&
+        response.url().includes("/api/preview/canonical-fit-score") &&
         response.request().method() === "POST",
     );
     await primaryAction.click();
@@ -198,10 +198,7 @@ test.describe("public landing synthetic transactions", () => {
       response.ok(),
       `compatibility preview did not complete successfully: ${response.status()} ${response.url()}`,
     ).toBeTruthy();
-    await expect(
-      page.getByText("Ready. Run the analysis to see your fit."),
-      "analysis completion guidance was not restored",
-    ).toBeVisible();
+    await expect(page.getByTestId("landing-preview-score"), "score reveal did not render").toBeVisible();
     logSyntheticStep("analysis.preview.complete", {
       status: response.status(),
     });
@@ -211,12 +208,12 @@ test.describe("public landing synthetic transactions", () => {
     await openLanding(page);
 
     const jobDescriptionInput = page.getByTestId("landing-job-description-input");
-    const primaryAction = page.getByRole("button", { name: "Check fit" });
+    const primaryAction = page.getByRole("button", { name: "Get your fit score" });
 
     await jobDescriptionInput.fill(shortJobDescription);
     await expect(primaryAction, "analysis action should be disabled for a short JD").toBeDisabled();
     await expect(
-      page.getByText("Paste at least 120 characters from the job description to enable analysis."),
+      page.getByText("Paste at least 120 characters of the job description."),
       "short JD helper text was not visible",
     ).toBeVisible();
     await expect(page.getByText("PDF or DOCX only"), "resume type guidance was missing").toBeVisible();

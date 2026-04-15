@@ -1,6 +1,20 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 export function DemoAnalysisPreviewSection() {
+  const [hidden, setHidden] = useState(false);
+
+  useEffect(() => {
+    const handler = () => setHidden(true);
+    window.addEventListener("ttr:landing-score-revealed", handler);
+    return () => window.removeEventListener("ttr:landing-score-revealed", handler);
+  }, []);
+
+  if (hidden) {
+    return null;
+  }
+
   return (
     <section
       id="result-structure"

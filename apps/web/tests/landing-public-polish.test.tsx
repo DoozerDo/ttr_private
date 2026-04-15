@@ -68,20 +68,26 @@ describe("Public landing polish", () => {
       expect(screen.getByTestId("landing-personalization-hook")).toBeInTheDocument();
     });
     expect(screen.getByTestId("landing-gated-insights")).toBeInTheDocument();
+    expect(screen.getByTestId("landing-partial-indicator")).toBeInTheDocument();
     expect(screen.getByTestId("landing-primary-action")).toHaveTextContent("Show me what’s missing");
     expect(screen.queryByText(/Unlock full analysis/i)).toBeNull();
-    expect(screen.getByText("Missing experience signals")).toBeInTheDocument();
-    expect(screen.getByText("Role expectation gaps")).toBeInTheDocument();
-    expect(screen.getByText("Why you may not get interviews")).toBeInTheDocument();
+    expect(screen.getByText("Missing signals hiring managers look for")).toBeInTheDocument();
+    expect(screen.getByText("Where your experience doesn’t match the role")).toBeInTheDocument();
+    expect(screen.getByText("Why you might be filtered out")).toBeInTheDocument();
+    expect(screen.getByTestId("landing-primary-action-subline")).toHaveTextContent("See exactly what’s holding you back");
 
     const scoreEl = screen.getByTestId("landing-preview-score");
     const personalizationEl = screen.getByTestId("landing-personalization-hook");
     const tensionEl = screen.getByTestId("landing-tension-bridge");
     const gateEl = screen.getByTestId("landing-gated-insights");
+    const inputsEl = screen.getByTestId("landing-inputs");
     expect(scoreEl.compareDocumentPosition(personalizationEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(personalizationEl.compareDocumentPosition(tensionEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(scoreEl.compareDocumentPosition(tensionEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(tensionEl.compareDocumentPosition(gateEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(gateEl.compareDocumentPosition(screen.getByTestId("landing-primary-action")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(scoreEl.compareDocumentPosition(inputsEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getAllByTestId("landing-primary-action").length).toBe(1);
 
     fireEvent.click(screen.getByTestId("landing-primary-action"));
     expect(mockRouterPush).toHaveBeenCalledWith("/auth/signup?next=%2Fbaseline");
