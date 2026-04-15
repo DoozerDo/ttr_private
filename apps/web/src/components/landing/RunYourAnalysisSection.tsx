@@ -9,7 +9,7 @@ type RunYourAnalysisSectionProps = {
   resumeFilename: string | null;
   onResumeUploadInitiated: () => void;
   onResumeFileSelected: (file: File | null) => void;
-  onAnalyzeCompatibility: () => void;
+  onAnalyzeCompatibility: () => void | Promise<void>;
   isPreviewLoading: boolean;
   jdReady: boolean;
   previewError: string | null;
@@ -46,6 +46,7 @@ export function RunYourAnalysisSection({
   previewError,
 }: RunYourAnalysisSectionProps) {
   const [showReadyPulse, setShowReadyPulse] = useState(false);
+  const [hasClickedCheckFit, setHasClickedCheckFit] = useState(false);
   const previousReadyRef = useRef(jdReady);
   const runButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -66,6 +67,17 @@ export function RunYourAnalysisSection({
     fileInputRef.current?.click();
   };
 
+  const handleAnalyzeClick = async () => {
+    setHasClickedCheckFit(true);
+    if (!jdReady || isPreviewLoading) {
+      return;
+    }
+    try {
+      await onAnalyzeCompatibility();
+    } catch (error) {
+      console.error("[landing-checkfit] analyze click failed", error);
+    }
+  };
   return (
     <>
       <div id="check-compatibility" className="scroll-mt-24" />
@@ -128,8 +140,8 @@ export function RunYourAnalysisSection({
                 <button
                   ref={runButtonRef}
                   type="button"
-                  onClick={() => onAnalyzeCompatibility()}
-                  disabled={!jdReady || isPreviewLoading}
+                  onClick={handleAnalyzeClick}
+                  aria-disabled={!jdReady || isPreviewLoading}
                   data-testid="landing-primary-action"
                   className={`inline-flex w-full items-center justify-center rounded-lg px-4 py-3 text-sm font-semibold transition ${
                     jdReady
@@ -137,8 +149,16 @@ export function RunYourAnalysisSection({
                       : "cursor-not-allowed border border-slate-700 bg-slate-900/70 text-slate-400"
                   } transform transition-transform duration-[175ms] ${showReadyPulse ? "scale-[1.03]" : "scale-100"}`}
                 >
-                  {isPreviewLoading ? "Analyzing..." : "Check fit"}
+                  {isPreviewLoading ? "Analyzing..." : "Check fit DEBUG"}
                 </button>
+                <div className="rounded-lg border border-amber-300/40 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-200">
+                  <div className="font-semibold tracking-[0.14em] uppercase">CHECKFIT_DEBUG_V1</div>
+                  <div>jdReady: {String(jdReady)}</div>
+                  <div>isPreviewLoading: {String(isPreviewLoading)}</div>
+                  <div>hasResumeFilename: {String(Boolean(resumeFilename))}</div>
+                  <div>jobDescriptionLength: {jobDescription.length}</div>
+                  <div>hasClickedCheckFit: {String(hasClickedCheckFit)}</div>
+                </div>
                 {!jdReady ? (
                   <p className="text-xs text-slate-600">Paste at least 120 characters from the job description to enable analysis.</p>
                 ) : (
