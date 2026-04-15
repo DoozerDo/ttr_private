@@ -13,6 +13,8 @@ type RunYourAnalysisSectionProps = {
   isPreviewLoading: boolean;
   jdReady: boolean;
   previewError: string | null;
+  previewScore: number | null;
+  previewScoreBucket: string | null;
 };
 
 const SAMPLE_ROLES = [
@@ -44,6 +46,8 @@ export function RunYourAnalysisSection({
   isPreviewLoading,
   jdReady,
   previewError,
+  previewScore,
+  previewScoreBucket,
 }: RunYourAnalysisSectionProps) {
   const [showReadyPulse, setShowReadyPulse] = useState(false);
   const [hasClickedCheckFit, setHasClickedCheckFit] = useState(false);
@@ -149,6 +153,7 @@ export function RunYourAnalysisSection({
                   type="button"
                   onClick={handleAnalyzeClick}
                   aria-disabled={!jdReady || isPreviewLoading}
+                  aria-label="Check fit"
                   data-testid="landing-primary-action"
                   className={`inline-flex w-full items-center justify-center rounded-lg px-4 py-3 text-sm font-semibold transition ${
                     jdReady
@@ -158,6 +163,15 @@ export function RunYourAnalysisSection({
                 >
                   {isPreviewLoading ? "Analyzing..." : "Check fit DEBUG"}
                 </button>
+                {typeof previewScore === "number" && (
+                  <div
+                    data-testid="landing-preview-score"
+                    className="rounded-lg border border-emerald-300/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100"
+                  >
+                    Fit score: <span className="font-semibold">{previewScore}</span>
+                    {previewScoreBucket ? <span className="text-emerald-200"> ({previewScoreBucket})</span> : null}
+                  </div>
+                )}
                 <div className="rounded-lg border border-amber-300/40 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-200">
                   <div className="font-semibold tracking-[0.14em] uppercase">CHECKFIT_DEBUG_V1</div>
                   <div>jdReady: {String(jdReady)}</div>

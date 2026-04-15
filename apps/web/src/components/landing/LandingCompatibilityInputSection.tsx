@@ -77,6 +77,7 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
   const [jobDescription, setJobDescription] = useState("");
   const [isFinalPreviewLoading, setIsFinalPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewScore, setPreviewScore] = useState<number | null>(null);
   const jdReady = jobDescription.trim().length > 120;
 
   const handleResumeUploadInitiated = useCallback(() => {
@@ -261,6 +262,7 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
       }
 
       setPreviewError(null);
+      setPreviewScore(null);
       setIsFinalPreviewLoading(true);
 
       let scoredValue: number;
@@ -287,6 +289,7 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
 
       setJobDescription(nextJobDescription);
       setIsFinalPreviewLoading(false);
+      setPreviewScore(scoredValue);
       trackEvent("compatibility_analysis_completed", {
         source: "landing",
         score: scoredValue,
@@ -308,6 +311,8 @@ export function LandingCompatibilityInputSection({ isAuthenticated }: { isAuthen
       isPreviewLoading={isFinalPreviewLoading}
       jdReady={jdReady}
       previewError={previewError}
+      previewScore={previewScore}
+      previewScoreBucket={previewScore === null ? null : resolveScoreBucket(previewScore)}
     />
   );
 }

@@ -67,6 +67,8 @@ describe("Landing conversion pass", () => {
         String(call[0]).includes("/api/preview/compatibility-score"),
       ),
     ).toBe(true);
+
+    expect(await screen.findByTestId("landing-preview-score")).toBeInTheDocument();
     expect(pushMock).not.toHaveBeenCalled();
 
     fetchSpy.mockRestore();
@@ -117,6 +119,8 @@ describe("Landing conversion pass", () => {
         String(call[0]).includes("/api/preview/compatibility-score"),
       ),
     ).toBe(true);
+
+    expect(await screen.findByTestId("landing-preview-score")).toBeInTheDocument();
     expect(pushMock).not.toHaveBeenCalled();
 
     fetchSpy.mockRestore();
