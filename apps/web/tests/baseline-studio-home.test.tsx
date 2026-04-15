@@ -205,7 +205,7 @@ describe("BaselineStudioHome", () => {
         "href",
         "/target?baselineId=base-2",
       );
-      expect(within(archivedCard as HTMLElement).getByRole("button", { name: /archived/i })).toBeDisabled();
+      expect(within(sourceSection as HTMLElement).queryByText("resume-1.pdf")).toBeNull();
     });
   });
 
@@ -353,9 +353,9 @@ describe("BaselineStudioHome", () => {
       />,
     );
 
-    await screen.findByText("Uploaded resumes");
-    await screen.findByText("resume-1.pdf");
-    expect(screen.queryByRole("button", { name: /upload another resume/i })).toBeNull();
+    await screen.findByText("Upload your resume to get started");
+    expect(screen.queryByText("Uploaded resumes")).toBeNull();
+    expect(screen.queryByText("resume-1.pdf")).toBeNull();
   });
 
   it("shows the fit-review launch point for a low-fit analyzed baseline", async () => {

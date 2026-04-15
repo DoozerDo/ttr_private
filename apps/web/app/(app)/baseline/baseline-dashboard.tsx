@@ -21,6 +21,7 @@ import {
 } from "@/lib/baselines";
 import { formatDateTime } from "@/lib/format-date";
 import { getBaselineDetailsHref } from "@/src/navigation/routes";
+import { publishBaselineUpdated } from "@/src/lib/baseline-sync";
 import { ttrComponents } from "@/app/(app)/ui/ttrStyles";
 import { OverflowMenu } from "./_components/OverflowMenu";
 import { SetupModuleCard } from "./_components/SetupModuleCard";
@@ -154,9 +155,14 @@ export function BaselineDashboard({
     setArchivingBaselineId(baselineId);
 
     try {
+      if (process.env.NODE_ENV !== "production") {
+        console.log("[UI][ARCHIVE_CLICK]", baselineId);
+      }
       await archiveBaseline(baselineId);
       const latest = await listBaselines(true);
       setBaselines(latest);
+      publishBaselineUpdated({ baselineId, source: "baseline" });
+      router.refresh();
       if (selectedBaselineId === baselineId) {
         const nextActive = resolveNextActiveBaselineId(latest, baselineId);
         if (nextActive) {
@@ -189,6 +195,8 @@ export function BaselineDashboard({
       await restoreBaseline(baselineId);
       const latest = await listBaselines(true);
       setBaselines(latest);
+      publishBaselineUpdated({ baselineId, source: "baseline" });
+      router.refresh();
       setBaselineSelection(baselineId);
     } catch (restoreError: unknown) {
       console.error("Unable to restore baseline", restoreError);

@@ -1216,23 +1216,32 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
       setError(null);
 
       try {
-        await archiveBaseline(baselineId);
+        if (process.env.NODE_ENV !== "production") {
+          console.log("[BASELINE_UI][LIST_BEFORE]", baselineList.map((b) => ({ id: b.id, status: b.status, isActive: b.isActive })));
+        }
+        const archived = await archiveBaseline(baselineId);
 
         const remainingBaselines = activeBaselines.filter((item) => item.id !== baselineId);
         const nextPrimaryId =
           primaryBaselineId === baselineId ? remainingBaselines[0]?.id ?? null : primaryBaselineId;
 
-        setBaselineList((current) =>
-          current.map((item) =>
+        setBaselineList((current) => {
+          const next = current.map((item) =>
             item.id === baselineId
               ? {
                   ...item,
-                  status: "ARCHIVED",
-                  archivedAt: new Date().toISOString(),
+                  status: archived.status ?? "ARCHIVED",
+                  archivedAt: archived.archivedAt ?? new Date().toISOString(),
+                  isActive: archived.isActive ?? false,
                 }
               : item,
-          ),
-        );
+          );
+          if (process.env.NODE_ENV !== "production") {
+            console.log("[BASELINE_UI][ARCHIVE_SUCCESS]", { baselineId });
+            console.log("[BASELINE_UI][LIST_AFTER]", next.map((b) => ({ id: b.id, status: b.status, isActive: b.isActive })));
+          }
+          return next;
+        });
         setBaselineDetails((current) => {
           const next = { ...current };
           delete next[baselineId];
@@ -1241,6 +1250,13 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         setPostUploadCtaBaselineId((current) => (current === baselineId ? null : current));
         setUploadSuccessId((current) => (current === baselineId ? null : current));
         setPrimaryBaselineId(nextPrimaryId);
+
+        publishBaselineUpdated({ baselineId, source: "baseline" });
+        try {
+          await refreshBaselineLibrary();
+        } catch (refreshError) {
+          console.error("Unable to refresh baseline library after archive", refreshError);
+        }
       } catch (archiveError) {
         console.error("Unable to archive baseline", {
           baselineId,
@@ -1251,7 +1267,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         setArchivingBaselineId(null);
       }
     },
-    [activeBaselines, archivingBaselineId, primaryBaselineId],
+    [activeBaselines, archivingBaselineId, baselineList, primaryBaselineId, refreshBaselineLibrary],
   );
 
   const triggerUploadClick = useCallback(() => {
@@ -1480,7 +1496,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             </div>
           </div>
         </section>
-        {allBaselines.length > 0 ? (
+        {activeBaselines.length > 0 ? (
           <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
             <header className="space-y-1">
               <h2 className="text-xl font-semibold tracking-tight text-slate-100">
@@ -1493,7 +1509,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
               </p>
             </header>
             <div className="space-y-3">
-              {allBaselines
+              {activeBaselines
                 .filter((baseline) => !(isValidatedBaselineState && baseline.id === primaryBaselineId))
                 .slice(0, 3)
                 .map((baseline) => {

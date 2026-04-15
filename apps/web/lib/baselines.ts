@@ -267,6 +267,9 @@ export async function listBaselines(includeArchived = false) {
 }
 
 export async function archiveBaseline(id: string) {
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[UI][ARCHIVE_CLICK]", id);
+  }
   const response = await fetch(`${BASELINE_API_PATH}/${encodeURIComponent(id)}/archive`, {
     method: "PATCH",
     credentials: "include",

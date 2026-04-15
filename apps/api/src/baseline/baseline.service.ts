@@ -1045,6 +1045,11 @@ return {
   }
 
   async archiveBaseline(userId: string, baselineId: string) {
+    if (process.env.NODE_ENV !== 'production') {
+      // Debug logging for archive action (requested for troubleshooting).
+      // eslint-disable-next-line no-console
+      console.log('[BASELINE][ARCHIVE]', { baselineId, userId });
+    }
     return this.updateBaselineStatus(
       userId,
       baselineId,
@@ -1053,6 +1058,10 @@ return {
   }
 
   async restoreBaseline(userId: string, baselineId: string) {
+    if (process.env.NODE_ENV !== 'production') {
+      // eslint-disable-next-line no-console
+      console.log('[BASELINE][RESTORE]', { baselineId, userId });
+    }
     return this.updateBaselineStatus(userId, baselineId, BaselineStatus.ACTIVE);
   }
 

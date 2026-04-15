@@ -38,9 +38,7 @@ async function proxyBaselineAction(
   const outgoingAuth =
     incomingAuthHeader?.trim() || (tokenFromCookie ? `Bearer ${tokenFromCookie}` : "");
 
-  const proxiedHeaders: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
+  const proxiedHeaders: Record<string, string> = {};
 
   if (outgoingAuth) {
     proxiedHeaders.Authorization = outgoingAuth;
