@@ -566,11 +566,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   }, [hasBaseline, hasCompletedAnalysis]);
   const isValidatedBaselineState = heroState === "analysis_exists";
   const canReplaceActiveBaseline = isValidatedBaselineState || !uploadLimitReached;
-  const sourceResumesSectionTitle = hasBaseline
-    ? isValidatedBaselineState
-      ? "Source resumes"
-      : "Your resumes"
-    : "Uploaded resumes";
+  const baselineLibrarySectionTitle = "Baseline library";
   const activeBaselineVersionLabel = `Version ${primaryBaseline?.versionNumber ?? primaryBaseline?.version ?? 1} (current)`;
   const baselineReadinessDataSource = primaryBaselineReadiness.dataSource;
   const baselineReadinessAnalyticsPayload = useMemo(
@@ -1051,6 +1047,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   const handleUpload = useCallback(
     async (file: File) => {
       if (isUploading || (!canReplaceActiveBaseline && uploadLimitReached)) return;
+      const shouldPromoteToCurrent = !primaryBaselineId;
 
       if (process.env.NODE_ENV !== "production") {
         console.debug("[BaselineStudioHome] upload handler entered", {
@@ -1100,7 +1097,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
               if (matchingBaseline) {
                 setHighlightedBaselineId(matchingBaseline.id);
                 if (matchingBaseline.status !== "ARCHIVED") {
-                  setPrimaryBaselineId(matchingBaseline.id);
+                  setPrimaryBaselineId((current) => (current ? current : matchingBaseline.id));
                 }
               }
             } catch (refreshError) {
@@ -1141,7 +1138,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           baselineRecord,
           ...current.filter((item) => item.id !== baselineRecord.id),
         ]);
-        setPrimaryBaselineId(baselineRecord.id);
+        setPrimaryBaselineId((current) => (current ? current : baselineRecord.id));
         setUploadSuccessId(baselineRecord.id);
         setHighlightedBaselineId(baselineRecord.id);
         setPostUploadCtaBaselineId(baselineRecord.id);
@@ -1195,7 +1192,9 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         }
 
         await refreshBaselineLibrary();
-        await fetchBaselineDetails(baselineRecord.id);
+        if (shouldPromoteToCurrent) {
+          await fetchBaselineDetails(baselineRecord.id);
+        }
       } catch (uploadError) {
         console.error("Upload failed", uploadError);
         setError("Unable to upload resume right now.");
@@ -1206,7 +1205,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         }
       }
     },
-    [canReplaceActiveBaseline, isUploading, refreshBaselineLibrary, uploadLimitReached],
+    [canReplaceActiveBaseline, fetchBaselineDetails, isUploading, primaryBaselineId, refreshBaselineLibrary, uploadLimitReached],
   );
 
   const handleArchiveBaseline = useCallback(
@@ -1389,11 +1388,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   <p className="text-sm text-slate-300">
                     {heroState === "no_baseline"
                       ? "Upload resume or drag and drop a PDF or DOCX here."
-                      : "Upload another resume if you want to replace the source file."}
+                      : "Upload another resume to create another baseline."}
                   </p>
                   <p className="text-sm text-slate-400">Accepted file types: PDF and DOCX</p>
                   <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
-                    {activeBaselines.length} of {BETA_BASELINE_UPLOAD_LIMIT} active resumes
+                    {activeBaselines.length} of {BETA_BASELINE_UPLOAD_LIMIT} active baselines
                   </p>
                   <input
                     ref={fileInputRef}
@@ -1405,7 +1404,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   />
                   {uploadLimitReached ? (
                     <p className="text-sm text-slate-300">
-                      Maximum of {BETA_BASELINE_UPLOAD_LIMIT} active resumes reached.
+                      Maximum of {BETA_BASELINE_UPLOAD_LIMIT} active baselines reached.
                     </p>
                   ) : null}
                 </div>
@@ -1413,22 +1412,21 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             </div>
           </section>
         ) : null}
-        {isValidatedBaselineState ? (
+        {primaryBaseline ? (
           <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
             <header className="space-y-1">
-              <h2 className="text-xl font-semibold tracking-tight text-slate-100">Your baseline</h2>
+              <h2 className="text-xl font-semibold tracking-tight text-slate-100">Current baseline</h2>
               <p className="text-sm text-slate-400">
-                This is the version used to score your fit and generate tailored applications.
+                This is the active baseline used to score your fit and generate tailored materials.
               </p>
             </header>
-            {primaryBaseline ? (
-              <article className="rounded-[16px] border border-white/10 bg-slate-950/30 p-4">
-                <ResumeWithBaselineStatus
-                  filename={primaryBaseline.originalFilename}
-                  isValidated
-                  isReadyForTargeting
-                  showValidatedBadge={false}
-                />
+            <article className="rounded-[16px] border border-white/10 bg-slate-950/30 p-4">
+              <ResumeWithBaselineStatus
+                filename={primaryBaseline.originalFilename}
+                isValidated={hasCompletedAnalysis}
+                isReadyForTargeting={primaryBaselineReadiness.readinessState === "READY"}
+                showValidatedBadge={false}
+              />
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -1444,13 +1442,18 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   <p className="mt-1 text-xs text-slate-500">Role fit score: {latestFitScore}%</p>
                 ) : null}
                 <p className="mt-1 text-xs text-slate-400">{activeBaselineVersionLabel}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Created from: {primaryBaseline.originalFilename}
+                </p>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <Link
-                    href={targetRoleHref}
-                    className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold uppercase text-cyan-50 transition hover:bg-cyan-400/15"
-                  >
-                    Target a role
-                  </Link>
+                  {primaryBaselineReadiness.readinessState === "READY" ? (
+                    <Link
+                      href={targetRoleHref}
+                      className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold uppercase text-cyan-50 transition hover:bg-cyan-400/15"
+                    >
+                      Target a role
+                    </Link>
+                  ) : null}
                   <Link
                     href={baselineDetailsHref}
                     className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold uppercase text-slate-100 transition hover:bg-white/10"
@@ -1468,26 +1471,25 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                     </FormButton>
                   ) : null}
                 </div>
-              </article>
-            ) : null}
+            </article>
           </section>
         ) : null}
         <section className="rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
           <h2 className="text-lg font-semibold text-slate-100">What is a baseline?</h2>
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             <div className="rounded-xl border border-white/10 bg-slate-950/30 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">What is a baseline?</p>
-              <p className="mt-2 text-sm leading-6 text-slate-300">You upload a resume.</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">How it works</p>
+              <p className="mt-2 text-sm leading-6 text-slate-300">You upload a resume (a file).</p>
               <p className="mt-2 text-sm leading-6 text-slate-300">
-                We convert it into a structured baseline that represents your verified experience.
+                We convert it into a structured baseline (the data we actually use).
               </p>
               <p className="mt-2 text-sm leading-6 text-slate-300">
-                This baseline is what we use to score your fit for a role and generate tailored application materials.
+                Your current baseline is the active one used for scoring fit and generating tailored materials.
               </p>
             </div>
             <div className="rounded-xl border border-white/10 bg-slate-950/30 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                Why not just use your resume?
+                Why not just use the resume file?
               </p>
               <p className="mt-2 text-sm leading-6 text-slate-300">Resumes are written for people, not systems.</p>
               <p className="mt-2 text-sm leading-6 text-slate-300">
@@ -1500,17 +1502,15 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
             <header className="space-y-1">
               <h2 className="text-xl font-semibold tracking-tight text-slate-100">
-                {sourceResumesSectionTitle}
+                {baselineLibrarySectionTitle}
               </h2>
               <p className="text-sm text-slate-400">
-                {isValidatedBaselineState
-                  ? "The source file for the active baseline is shown here without repeating the same record at full weight."
-                  : "One resume becomes the active baseline used for scoring and tailored documents."}
+                Uploading a resume creates a new baseline. Set one baseline as current to use it across the app.
               </p>
             </header>
             <div className="space-y-3">
               {activeBaselines
-                .filter((baseline) => !(isValidatedBaselineState && baseline.id === primaryBaselineId))
+                .filter((baseline) => baseline.id !== primaryBaselineId)
                 .slice(0, 3)
                 .map((baseline) => {
                 const isPrimary = primaryBaselineId === baseline.id;
@@ -1556,6 +1556,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                       isReadyForTargeting={isReadyBaseline}
                       isSourceForActiveBaseline={isValidatedBaselineState && isPrimary}
                     />
+                    <p className="mt-1 text-xs text-slate-500">Created from: {baseline.originalFilename}</p>
                     <p className="mt-2 text-xs text-slate-400">Uploaded {formatDateTime(baseline.createdAt)}</p>
                     {hasCompletedAssessment ? (
                       <p className="mt-1 text-xs text-slate-400">
@@ -1615,7 +1616,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                             <FormButton
                               variant="ghost"
                               onClick={() => void handleArchiveBaseline(baseline.id)}
-                              disabled={archivingBaselineId === baseline.id || isArchived}
+                              disabled={archivingBaselineId === baseline.id || isArchived || isPrimary}
                               className="uppercase"
                             >
                               {isArchived
@@ -1656,13 +1657,10 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   </article>
                 );
               })}
-              {isValidatedBaselineState && !allBaselines.some((baseline) => baseline.id !== primaryBaselineId) ? (
-                <article className="rounded-[16px] border border-white/10 bg-slate-950/25 p-4">
-                  <ResumeWithBaselineStatus
-                    filename={primaryBaseline?.originalFilename ?? "active baseline"}
-                    isSourceForActiveBaseline
-                  />
-                </article>
+              {!activeBaselines.some((baseline) => baseline.id !== primaryBaselineId) ? (
+                <p className="text-sm text-slate-400">
+                  No other baselines yet. Upload another resume to create one.
+                </p>
               ) : null}
             </div>
           </section>
@@ -1713,7 +1711,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   Professional Signals Diagnosis
                 </h2>
                 <p className="max-w-3xl text-sm leading-6 text-slate-300">
-                  Your baseline emits a set of professional signals. Strong signals improve targeting outcomes while developing signals indicate where signal clarity should improve next.
+                  Your current baseline emits a set of professional signals. Strong signals improve targeting outcomes while developing signals indicate where signal clarity should improve next.
                 </p>
               </header>
 
@@ -1753,7 +1751,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   </div>
                 ) : (
                   <p className="mt-3 text-sm leading-6 text-emerald-100">
-                    Your baseline signals are already well developed.
+                    Your current baseline signals are already well developed.
                   </p>
                 )}
               </article>
@@ -1785,7 +1783,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   {signalGraph.developingSignals.length === 0 ? (
                     <article className="rounded-[20px] border border-emerald-300/15 bg-emerald-400/[0.08] p-4">
                       <p className="text-base font-semibold text-emerald-100">
-                        Your baseline signals are already well developed.
+                        Your current baseline signals are already well developed.
                       </p>
                       <p className="mt-2 text-sm leading-6 text-slate-200">
                         Reanalyze after future updates, or move into TARGET to apply your certified signal set.

@@ -675,6 +675,20 @@ export class BaselineService {
     fileHash: string,
     parseResult?: BaselineFileParseResult,
   ): Promise<BaselineCreationResult> {
+    const existingActiveBaseline =
+      (
+        await manager.find(Baseline, {
+          where: {
+            userId,
+            status: BaselineStatus.ACTIVE,
+            isActive: true,
+          },
+          order: { createdAt: 'DESC' },
+          take: 1,
+        })
+      )?.[0] ?? null;
+    const shouldBecomeActive = !existingActiveBaseline;
+
     const sectionPayloads =
       parseResult?.sections?.map((section, index) => ({
         sectionType: section.sectionType ?? BaselineSectionType.OTHER,
@@ -702,7 +716,7 @@ export class BaselineService {
       hash: fileHash,
       status: BaselineStatus.ACTIVE,
       archivedAt: null,
-      isActive: true,
+      isActive: shouldBecomeActive,
       sections: sectionPayloads,
     });
 
@@ -750,10 +764,12 @@ export class BaselineService {
 
     await manager.save(policyEntities);
 
-    await this.setSingleActiveBaseline(manager, userId, savedBaseline.id);
+    if (shouldBecomeActive) {
+      await this.setSingleActiveBaseline(manager, userId, savedBaseline.id);
+    }
     savedBaseline.version = nextVersionNumber;
     savedBaseline.versionNumber = nextVersionNumber;
-    savedBaseline.isActive = true;
+    savedBaseline.isActive = shouldBecomeActive;
     savedBaseline.versions = [savedVersion];
 
         let normalization: CanonicalNormalizationResult | undefined;
@@ -772,7 +788,9 @@ export class BaselineService {
       );
     }
 
-    await this.setSingleActiveBaseline(manager, userId, savedBaseline.id);
+    if (shouldBecomeActive) {
+      await this.setSingleActiveBaseline(manager, userId, savedBaseline.id);
+    }
     const finalBaseline = await manager.save(savedBaseline);
 return {
       baselineId: finalBaseline.id,
