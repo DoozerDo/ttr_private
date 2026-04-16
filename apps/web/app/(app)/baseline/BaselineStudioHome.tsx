@@ -1347,6 +1347,15 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
 
   return (
     <div className="mx-auto w-full max-w-6xl px-6 2xl:px-8">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        className="hidden"
+        onChange={onFileChange}
+        disabled={isUploading || (!canReplaceActiveBaseline && uploadLimitReached)}
+        data-testid="baseline-upload-input"
+      />
       <div className="flex flex-col gap-6">
         {!isValidatedBaselineState ? (
           <section className="rounded-[28px] bg-slate-900/40 p-6 md:p-8">
@@ -1394,14 +1403,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
                     {activeBaselines.length} of {BETA_BASELINE_UPLOAD_LIMIT} active baselines
                   </p>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    className="hidden"
-                    onChange={onFileChange}
-                    disabled={isUploading || (!canReplaceActiveBaseline && uploadLimitReached)}
-                  />
                   {uploadLimitReached ? (
                     <p className="text-sm text-slate-300">
                       Maximum of {BETA_BASELINE_UPLOAD_LIMIT} active baselines reached.
@@ -1427,14 +1428,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 isReadyForTargeting={primaryBaselineReadiness.readinessState === "READY"}
                 showValidatedBadge={false}
               />
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                  className="hidden"
-                  onChange={onFileChange}
-                  disabled={isUploading || (!canReplaceActiveBaseline && uploadLimitReached)}
-                />
                 {latestAssessmentCreatedAt ? (
                   <p className="mt-2 text-xs text-slate-400">Last analyzed {formatDateTime(latestAssessmentCreatedAt)}</p>
                 ) : null}
@@ -1460,16 +1453,14 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   >
                     View baseline details
                   </Link>
-                  {isEditableLibrary ? (
-                    <FormButton
-                      variant="ghost"
-                      onClick={triggerUploadClick}
-                      disabled={isUploading || (!canReplaceActiveBaseline && uploadLimitReached) || !isEditableLibrary}
-                      className="uppercase border-white/10 bg-transparent text-slate-300 hover:border-white/20 hover:text-slate-100"
-                    >
-                      Upload another resume
-                    </FormButton>
-                  ) : null}
+                  <FormButton
+                    variant="ghost"
+                    onClick={triggerUploadClick}
+                    disabled={isUploading || (!canReplaceActiveBaseline && uploadLimitReached) || !isEditableLibrary}
+                    className="uppercase border-white/10 bg-transparent text-slate-300 hover:border-white/20 hover:text-slate-100"
+                  >
+                    {isEditableLibrary ? "Upload another resume" : "Upload unavailable"}
+                  </FormButton>
                 </div>
             </article>
           </section>
@@ -1509,10 +1500,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
               </p>
             </header>
             <div className="space-y-3">
-              {activeBaselines
-                .filter((baseline) => baseline.id !== primaryBaselineId)
-                .slice(0, 3)
-                .map((baseline) => {
+              {activeBaselines.map((baseline) => {
                 const isPrimary = primaryBaselineId === baseline.id;
                 const isArchived = baseline.status === "ARCHIVED";
                 const assessmentSummary = baseline.latestAssessmentSummary;
@@ -1566,7 +1554,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                           : "recently"}
                       </p>
                     ) : null}
-                    {latestRoleFitScore !== null ? (
+                    {hasCompletedAssessment && latestRoleFitScore !== null ? (
                       <p className="mt-1 text-xs text-slate-500">Last role analysis: {latestRoleFitScore}%</p>
                     ) : null}
                     <div className="mt-4 space-y-3">
@@ -1657,11 +1645,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   </article>
                 );
               })}
-              {!activeBaselines.some((baseline) => baseline.id !== primaryBaselineId) ? (
-                <p className="text-sm text-slate-400">
-                  No other baselines yet. Upload another resume to create one.
-                </p>
-              ) : null}
             </div>
           </section>
         ) : null}
