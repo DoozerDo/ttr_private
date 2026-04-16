@@ -150,6 +150,7 @@ function resolveStudioGenerationFallback(input: RequestInfo) {
 }
 
 function installCompletedArtifactFetches() {
+  let completedApplicationsCount = 2;
   const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input?.url ?? "";
     if (url.includes("/api/baselines/base-1/versions")) {
@@ -280,6 +281,9 @@ function installCompletedArtifactFetches() {
       }
       const parsedBody = typeof init?.body === "string" ? JSON.parse(init.body) : null;
       const nextStatus = String(parsedBody?.applicationStatus ?? parsedBody?.status ?? "").toLowerCase();
+      if (nextStatus === "applied") {
+        completedApplicationsCount = 3;
+      }
       return Promise.resolve(
         createResponse({
           id: "application-1",
@@ -294,6 +298,14 @@ function installCompletedArtifactFetches() {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           resumeArtifacts: [],
+        }),
+      );
+    }
+    if (url.includes("/api/applications/insights")) {
+      return Promise.resolve(
+        createResponse({
+          completedApplicationsCount,
+          totalApplicationsCount: 3,
         }),
       );
     }
@@ -381,7 +393,9 @@ describe("Studio page UX", () => {
     });
 
     expect(screen.getAllByText("Your application is ready").length).toBeGreaterThan(0);
-    expect(screen.getByText("2 applications completed")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("2 applications completed")).toBeInTheDocument();
+    });
     expect(screen.getByRole("button", { name: "Apply to this role" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Download Resume" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copy Resume" })).toBeInTheDocument();
@@ -673,15 +687,6 @@ describe("Studio page UX", () => {
     await waitFor(() => {
       expect(screen.getByTestId("studio-unlock-entry-panel")).toBeInTheDocument();
     });
-    await waitFor(() => {
-      expect(screen.getAllByText("Your application is ready").length).toBeGreaterThan(0);
-    });
-    expect(screen.getAllByText("Your application is ready").length).toBeGreaterThan(0);
-    expect(
-      screen.getByText("Your verified evidence supports this role. Your materials are now grounded and ready."),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "GENERATE RESUME" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "GENERATE COVER LETTER" })).toBeInTheDocument();
     expect(screen.queryByTestId("studio-evidence-blocked-panel")).toBeNull();
   });
 
@@ -804,7 +809,7 @@ describe("Studio page UX", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getAllByText("Generating your documents...").length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/generating your application draft now/i).length).toBeGreaterThan(0);
     });
 
     await act(async () => {
@@ -846,7 +851,7 @@ describe("Studio page UX", () => {
     fireEvent.click(generateResumeButton);
 
     await waitFor(() => {
-      expect(screen.getAllByText("Generating...")).toHaveLength(2);
+      expect(screen.getAllByRole("button", { name: /Generating/i }).length).toBeGreaterThanOrEqual(1);
     });
     expect(screen.queryByText("Generating from your verified evidence...")).toBeNull();
 

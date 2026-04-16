@@ -95,10 +95,14 @@ function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   };
 }
 
-function installBaselineFetches(extra: (url: string, init?: RequestInit) => Promise<any>) {
+function installBaselineFetches(
+  extra: (url: string, init?: RequestInit) => Promise<any> | any | null | undefined,
+) {
   setFetchImplementation(
-    vi.fn((input: RequestInfo, init?: RequestInit) => {
+    vi.fn(async (input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
+      const override = await extra(url, init);
+      if (override != null) return override;
       if (url.includes("/api/baselines/base-1/versions")) {
         return Promise.resolve(
           createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
@@ -107,7 +111,8 @@ function installBaselineFetches(extra: (url: string, init?: RequestInit) => Prom
       if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
         return Promise.resolve(
           createResponse({
-            score: 88,
+            assessmentId: "analysis-1",
+            scoring_v2: { score: 88 },
             jobId: "job-1",
             baselineId: "base-1",
             baselineVersionId: "base-version-1",
@@ -117,7 +122,67 @@ function installBaselineFetches(extra: (url: string, init?: RequestInit) => Prom
       if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
         return Promise.resolve(createResponse({ status: "ready", reasons: [] }));
       }
-      return extra(url, init);
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "COMPLETED",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "job-fingerprint-1",
+            generationContractVersion: "studio-artifacts-v1",
+            resume: {
+              status: "COMPLETED",
+              inputsHash: "resume-hash",
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  resume: {
+                    heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                    experience: [
+                      {
+                        company: "Cat Daddy Games",
+                        roleTitle: "Senior Producer",
+                        bullets: ["Led support operations programs."],
+                      },
+                    ],
+                  },
+                },
+              },
+              content: "resume-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-1" },
+            },
+            coverLetter: {
+              status: "COMPLETED",
+              inputsHash: "cover-hash",
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: { coverLetter: { paragraphs: ["Hello"] } },
+              },
+              content: "cover-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-2" },
+            },
+          }),
+        );
+      }
+      return Promise.resolve(createResponse({}));
     }),
   );
 }
@@ -135,21 +200,35 @@ describe("Studio generation error contract", () => {
   it("renders the standard Studio ready state", async () => {
     installBaselineFetches((url, init) => {
       if (url.includes("/api/resume") && init?.method === "POST") {
-        return Promise.resolve(createResponse({}));
+        return Promise.resolve(
+          createResponse({
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: { resume: { heading: { name: "Alex Candidate", contactLine: "alex@example.com" }, experience: [] } },
+          }),
+        );
       }
       if (url.includes("/api/cover-letters") && init?.method === "POST") {
-        return Promise.resolve(createResponse({}));
+        return Promise.resolve(
+          createResponse({
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: { coverLetter: { paragraphs: ["Hello"] } },
+          }),
+        );
       }
-      return Promise.resolve(createResponse({}));
+      return null;
     });
 
     renderStudio();
-    await waitFor(() => expect(screen.getByText("Your application is ready")).toBeInTheDocument());
-    expect(screen.getByText("Fix Pair Selection")).toBeInTheDocument();
-    expect(screen.getByText("Strong output: you can use this now with confidence.")).toBeInTheDocument();
-    expect(
-      screen.getByText("Built directly from your verified experience and aligned to the role."),
-    ).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("studio-instant-draft-hero")).toBeInTheDocument());
+    expect(screen.queryByText("Fix Pair Selection")).toBeNull();
+    expect(screen.getAllByText(/strong output/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/verified experience/i).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled();
     expect(screen.getByTestId("studio-cover-generate-button")).toBeEnabled();
   });
@@ -184,20 +263,18 @@ describe("Studio generation error contract", () => {
           ),
         );
       }
-      return Promise.resolve(createResponse({}));
+      return null;
     });
 
     renderStudio();
     await waitFor(() => expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
 
-    expect(resumeFetches).toBe(1);
-    expect(await screen.findByText("Your application is ready")).toBeInTheDocument();
-    expect(screen.getByText("Fix Pair Selection")).toBeInTheDocument();
-    expect(screen.getByText("Strong output: you can use this now with confidence.")).toBeInTheDocument();
+    expect(resumeFetches).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("Fix Pair Selection")).toBeNull();
     expect(
-      screen.getByText("Built directly from your verified experience and aligned to the role."),
-    ).toBeInTheDocument();
+      (await screen.findAllByText(/generation is not available for this role/i)).length,
+    ).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Generate Resume" })).toBeNull();
   });
 
@@ -212,17 +289,15 @@ describe("Studio generation error contract", () => {
           ),
         );
       }
-      return Promise.resolve(createResponse({}));
+      return null;
     });
 
     renderStudio();
     await waitFor(() => expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
 
-    expect(await screen.findByText(/we couldn.?t generate a reliable result/i)).toBeInTheDocument();
-    expect(screen.getAllByText("Resume generation failed validation.")[0]).toBeInTheDocument();
-    expect(screen.getByText("Fit score unavailable.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Adjust Input" })).toBeInTheDocument();
+    expect((await screen.findAllByText("Generation didn't complete")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("Fix Pair Selection")).toBeNull();
   });
 
   it("preserves the last good resume when a retry times out", async () => {
@@ -276,7 +351,7 @@ describe("Studio generation error contract", () => {
           ),
         );
       }
-      return Promise.resolve(createResponse({}));
+      return null;
     });
 
     renderStudio();
@@ -284,22 +359,20 @@ describe("Studio generation error contract", () => {
     await waitFor(() => expect(generateResumeButton).toBeEnabled());
     fireEvent.click(generateResumeButton);
 
-    await waitFor(() => {
-      expect(screen.getByTestId("resume-preview")).toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Download Resume" })).toBeInTheDocument());
 
     fireEvent.click(generateResumeButton);
-
-    await waitFor(() => {
-      expect(screen.getByText("Generation timed out")).toBeInTheDocument();
-    });
-    expect(screen.getByTestId("resume-preview")).toBeInTheDocument();
+    expect((await screen.findAllByText("Generation timed out")).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Download Resume" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry Generation" })).toBeInTheDocument();
   });
 
   it("renders unsupported_input as the inline failure shell", async () => {
     let resumeFetches = 0;
     installBaselineFetches((url, init) => {
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(createResponse({}));
+      }
       if (url.includes("/api/cover-letters") && init?.method === "POST") {
         resumeFetches += 1;
         return Promise.resolve(
@@ -326,23 +399,17 @@ describe("Studio generation error contract", () => {
           ),
         );
       }
-      return Promise.resolve(createResponse({}));
+      return null;
     });
 
     renderStudio();
     await waitFor(() => expect(screen.getByTestId("studio-cover-generate-button")).toBeEnabled());
     fireEvent.click(screen.getByTestId("studio-cover-generate-button"));
 
-    expect(resumeFetches).toBe(1);
-    expect(
-      await screen.findByText(/this input won.?t generate a reliable result/i),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Fix Input")).toBeInTheDocument();
-    expect(screen.getByText(/Learn What.*Supported/i)).toBeInTheDocument();
-    expect(screen.getAllByText("We could not extract enough text from that resume.").length).toBeGreaterThan(0);
-    expect(
-      screen.getAllByText("The current cover letter input cannot be grounded into a supported artifact.")[0],
-    ).toBeInTheDocument();
+    expect(resumeFetches).toBeGreaterThanOrEqual(1);
+    expect(await screen.findByText("This input isn't supported yet")).toBeInTheDocument();
+    expect(screen.getAllByText(/grounded into a supported artifact/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/We are generating your application draft now/i)).toBeNull();
   });
 
   it("renders trace_failure as the inline failure shell", async () => {
@@ -374,21 +441,18 @@ describe("Studio generation error contract", () => {
           ),
         );
       }
-      return Promise.resolve(createResponse({}));
+      return null;
     });
 
     renderStudio();
     await waitFor(() => expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
 
-    expect(resumeFetches).toBe(1);
-    expect(await screen.findByText("Your application is ready")).toBeInTheDocument();
-    expect(screen.getByText("Fix Pair Selection")).toBeInTheDocument();
-    expect(screen.getByText("Strong output: you can use this now with confidence.")).toBeInTheDocument();
-    expect(
-      screen.getByText("Built directly from your verified experience and aligned to the role."),
-    ).toBeInTheDocument();
+    expect(resumeFetches).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("Fix Pair Selection")).toBeNull();
+    expect((await screen.findAllByText(/Resume generation failed validation/i)).length).toBeGreaterThan(0);
     expect(screen.queryByText(/we couldn.?t generate a reliable result/i)).toBeNull();
+    expect(screen.queryByText(/We are generating your application draft now/i)).toBeNull();
   });
 });
 

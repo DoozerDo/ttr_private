@@ -105,6 +105,7 @@ import {
   validateCoverLetterOutput,
   validateResumeOutput,
 } from "@/lib/studioTrustGate";
+import { buildStudioPageTruth } from "@/lib/studioPageTruth";
 import { BaselineBlockPolicyPanel } from "./BaselineBlockPolicyPanel";
 import { readResumeModel, ResumePreview } from "./ResumePreview";
 import type { ResumeModel } from "@/lib/resumeModel";
@@ -1386,7 +1387,7 @@ export default function StudioPage() {
     if (!studioArtifactStorageKey) {
       studioArtifactHydrationKeyRef.current = null;
       setStudioArtifactPairStatus("missing");
-      setStudioArtifactsHydrated(true);
+      setStudioArtifactsHydrated(false);
       return;
     }
     if (studioArtifactHydrationKeyRef.current === studioArtifactHydrationSignature) {
@@ -1866,6 +1867,7 @@ export default function StudioPage() {
     isResumeEditMode &&
     JSON.stringify(draftResumeModel ?? null) !==
       JSON.stringify((savedEditedResumeModel ?? generatedResumeModel) ?? null);
+  const hasResumeDraft = resumePresenter.status === "success" && Boolean(resumeState.response);
   const hasResumeArtifact = resumePresenter.hasExportableContent;
   const canExportDocuments = productReadiness.generation_readiness.canExport;
   const canExportResume =
@@ -1885,6 +1887,7 @@ export default function StudioPage() {
     () => presentCoverLetterGeneration(coverState.response),
     [coverState.response],
   );
+  const hasCoverLetterDraft = coverPresenter.status === "success" && Boolean(coverState.response);
   const documentCritique = useMemo(
     () =>
       buildDocumentCritique({
@@ -2064,7 +2067,7 @@ export default function StudioPage() {
     }, 4000);
     return () => window.clearTimeout(timeout);
   }, [confidenceUpgradeMessage]);
-  const hasCompletedGeneration = hasResumeArtifact || hasCoverLetterArtifact;
+  const hasCompletedGeneration = hasResumeDraft || hasCoverLetterDraft;
   const hasGeneratedDocumentPair =
     resumePresenter.status === "success" &&
     coverPresenter.status === "success" &&
@@ -2075,10 +2078,10 @@ export default function StudioPage() {
 
     const nextSnapshot: StoredStudioArtifactSnapshot = {
       updatedAt: new Date().toISOString(),
-      ...(resumePresenter.status === "success" && hasResumeArtifact && resumeState.response
+      ...(resumePresenter.status === "success" && hasResumeDraft && resumeState.response
         ? { resumeResponse: resumeState.response }
         : {}),
-      ...(coverPresenter.status === "success" && hasCoverLetterArtifact && coverState.response
+      ...(coverPresenter.status === "success" && hasCoverLetterDraft && coverState.response
         ? { coverResponse: coverState.response }
         : {}),
     };
@@ -2842,7 +2845,14 @@ export default function StudioPage() {
   }, [studioCanonicalDecision.readinessState]);
   const canProceedWithStudioDrafts = generationSupportState !== "blocked";
   const isInstantDraftExperience = canProceedWithStudioDrafts && qualifiedForGeneration;
-  const needsAutoGeneration = isInstantDraftExperience && !hasCompletedGeneration;
+  const needsAutoGeneration =
+    isInstantDraftExperience &&
+    !hasCompletedGeneration &&
+    studioArtifactPairStatus === "missing" &&
+    !resumeState.response &&
+    !coverState.response &&
+    !resumeState.artifactFailure &&
+    !coverState.artifactFailure;
   const autoGenerationSignature = useMemo(() => {
     if (!needsAutoGeneration) return null;
     return buildWorkflowRequestKey("auto_generation", currentWorkflowScope);
@@ -3057,6 +3067,14 @@ export default function StudioPage() {
   }, [generationSupportState, recentIntent]);
   const guardGenerationAction = useCallback(
     (documentType: "resume" | "cover_letter" | "application") => {
+      if (!effectiveBaselineId || !effectiveJobId || !effectiveBaselineVersionId) {
+        trackEvent("studio_generate_blocked", {
+          score: analysisScore,
+          blockerCodes: ["missing_pair_selection"],
+          documentType,
+        });
+        return false;
+      }
       if (generationSupportState === "blocked") {
         trackEvent("studio_generate_blocked", {
           score: analysisScore,
@@ -3068,7 +3086,16 @@ export default function StudioPage() {
       }
       return true;
     },
-    [analysisScore, generationBlockerCodes, router, studioUiState],
+    [
+      analysisScore,
+      effectiveBaselineId,
+      effectiveBaselineVersionId,
+      effectiveJobId,
+      generationBlockerCodes,
+      remediationHref,
+      router,
+      trackEvent,
+    ],
   );
   const createRequestId = useCallback(
     () =>
@@ -3099,6 +3126,7 @@ export default function StudioPage() {
       } else {
         activeCoverGenerationRef.current = { requestId, requestKey };
       }
+      currentWorkflowScopeRef.current = requestScope;
       logWorkflowRequestEvent("request_started", {
         action: documentType,
         expected: requestScope,
@@ -4856,13 +4884,13 @@ export default function StudioPage() {
     if (autoGenerationSignatureRef.current === autoGenerationSignature) return;
     if (studioArtifactPresentationStateRef.current === "hydrated") return;
     const autoGenerationKey = buildWorkflowRequestKey("auto_generation", currentWorkflowScope);
-    if (studioArtifactPairStatus === "in_progress" || studioArtifactPairStatus === "failed") return;
+    if (studioArtifactPairStatus !== "missing") return;
+    if (resumeState.response || coverState.response || resumeState.artifactFailure || coverState.artifactFailure) return;
     if (resumeGenerating || coverGenerating || autoGenerationInFlight) return;
     if (hasCompletedGeneration) return;
     if (!canProceedWithStudioDrafts) return;
-
-    autoGenerationSignatureRef.current = autoGenerationSignature;
     if (!autoGenerationKey) return;
+    autoGenerationSignatureRef.current = autoGenerationSignature;
     activeAutoGenerationRef.current = {
       requestId: autoGenerationSignature,
       requestKey: autoGenerationKey,
@@ -5625,7 +5653,8 @@ export default function StudioPage() {
           }
           retryLabel="Retry"
         />
-      ) : autoGenerationInFlight || studioArtifactPairStatus === "in_progress" ? (
+      ) : null}
+      {!activeArtifactFailure && (autoGenerationInFlight || studioArtifactPairStatus === "in_progress") ? (
         <RouteStateShell
           tone="neutral"
           eyebrow="In progress"
@@ -5636,7 +5665,8 @@ export default function StudioPage() {
             </p>
           }
         />
-      ) : hasCompletedGeneration ? (
+      ) : null}
+      {hasCompletedGeneration ? (
         <div className="space-y-5">
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -5777,7 +5807,8 @@ export default function StudioPage() {
             ) : null}
           </div>
         </div>
-      ) : studioArtifactPairStatus === "failed" ? (
+      ) : null}
+      {!hasCompletedGeneration && studioArtifactPairStatus === "failed" ? (
         <RouteStateShell
           tone="warning"
           eyebrow="Needs another pass"
@@ -5823,7 +5854,13 @@ export default function StudioPage() {
             <ul className="mt-3 space-y-2 text-sm text-slate-300">
               {evidenceLedger.entries.slice(0, 4).map((entry) => (
                 <li key={`instant-evidence-${entry.id}`} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
-                  <p className="text-slate-100">{entry.text}</p>
+                  <p className="text-slate-100">
+                    {String(entry.text ?? "")
+                      .replace(/\s+/g, " ")
+                      .trim()
+                      .slice(0, 240)}
+                    {String(entry.text ?? "").replace(/\s+/g, " ").trim().length > 240 ? "..." : ""}
+                  </p>
                   {entry.sourceLabel ? <p className="mt-1 text-xs text-slate-400">{entry.sourceLabel}</p> : null}
                 </li>
               ))}
@@ -5879,23 +5916,44 @@ export default function StudioPage() {
     </RouteStateShell>
   ) : null;
 
+  const pageTruth = buildStudioPageTruth({
+    generationSupportState,
+    readiness: productReadiness ?? null,
+    trustGate: trustGateDecision ?? null,
+    hasCompletedGeneration,
+    isGenerating: Boolean(
+      studioGenerationRenderState.isGenerating ||
+        resumeGenerating ||
+        coverGenerating ||
+        autoGenerationInFlight,
+    ),
+    resumeState,
+    coverState,
+  });
+
+  const showPrimaryGeneratingNotice =
+    pageTruth.isGenerating && (pageTruth.state === "ready" || pageTruth.state === "draftable_limited");
+  const showInstantDraftHero =
+    pageTruth.state === "ready" ||
+    pageTruth.state === "draftable_limited" ||
+    pageTruth.state === "generated_reviewable" ||
+    (pageTruth.state === "failed" && (hasCompletedGeneration || Boolean(resumeState.response) || Boolean(coverState.response)));
+
   return (
     <PageShell className="space-y-4 pb-4">
-      {instantDraftHero}
-      {unlockEntryPanel}
-      {unlockGenerationLoadingMessage && studioGenerationRenderState.isGenerating ? (
+      {showInstantDraftHero ? instantDraftHero : null}
+      {pageTruth.state === "blocked_evidence" ? unlockEntryPanel : null}
+      {unlockGenerationLoadingMessage && showPrimaryGeneratingNotice ? (
         <Alert intent="info" title="Verified evidence in use">
           {unlockGenerationLoadingMessage}
         </Alert>
       ) : null}
-      {autoGenerationLoadingMessage ? (
+      {autoGenerationLoadingMessage && showPrimaryGeneratingNotice ? (
         <Alert intent="info" title="Generating your documents...">
           {autoGenerationLoadingMessage}
         </Alert>
       ) : null}
-      {!studioGenerationRenderState.isGenerating &&
-      !hasCompletedGeneration &&
-      (resumeState.error || coverState.error || resumeState.artifactFailure || coverState.artifactFailure) ? (
+      {pageTruth.state === "failed" ? (
         <Alert intent="warning" title="Document generation needs attention">
           {toConstraintMessage(
             resumeState.error ??
@@ -5906,7 +5964,7 @@ export default function StudioPage() {
           )}
         </Alert>
       ) : null}
-      {isGuidedActive && guidedStep === "GENERATE" && !studioBlockedByNextAction ? (
+      {pageTruth.state === "ready" && isGuidedActive && guidedStep === "GENERATE" && !studioBlockedByNextAction ? (
         <GuidedOverlay
           headline="Now this role is ready for tailored output."
           body="Generate your resume now, then save the opportunity."
@@ -6142,7 +6200,13 @@ export default function StudioPage() {
             <ul className="mt-3 space-y-2">
               {evidenceLedger.entries.map((entry) => (
                 <li key={entry.id} className="rounded-lg border border-white/10 bg-slate-950/35 p-2">
-                  <p className="text-sm text-slate-100">{entry.text}</p>
+                  <p className="text-sm text-slate-100">
+                    {String(entry.text ?? "")
+                      .replace(/\s+/g, " ")
+                      .trim()
+                      .slice(0, 240)}
+                    {String(entry.text ?? "").replace(/\s+/g, " ").trim().length > 240 ? "..." : ""}
+                  </p>
                   {entry.sourceLabel ? <p className="mt-1 text-xs text-slate-400">{entry.sourceLabel}</p> : null}
                 </li>
               ))}

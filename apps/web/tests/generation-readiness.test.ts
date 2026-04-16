@@ -469,6 +469,12 @@ describe("generation readiness model", () => {
     expect(normalizeUserFacingClaimLabel("multi-system")).toBeNull();
     expect(normalizeUserFacingClaimLabel("Salesforce")).toBe("Salesforce");
     expect(normalizeUserFacingClaimLabel("Five9")).toBe("Five9");
+    expect(normalizeUserFacingClaimLabel("next")).toBeNull();
+    expect(normalizeUserFacingClaimLabel("azure")).toBe("Microsoft Azure");
+    expect(normalizeUserFacingClaimLabel("ok")).toBeNull();
+    expect(normalizeUserFacingClaimLabel("[object Object]")).toBeNull();
+    expect(normalizeUserFacingClaimLabel("undefined")).toBeNull();
+    expect(normalizeUserFacingClaimLabel("null")).toBeNull();
     expect(normalizeUserFacingClaimLabel("")).toBeNull();
     expect(normalizeUserFacingClaimLabel("   ")).toBeNull();
     expect(normalizeUserFacingClaimLabel("!@#")).toBeNull();

@@ -239,6 +239,29 @@ const KNOWN_PLATFORM_TOKENS = new Set([
   "gcp",
 ]);
 
+const SUPPRESSED_JUNK_LABELS = new Set([
+  "next",
+  "n/a",
+  "na",
+  "none",
+  "unknown",
+  "tbd",
+]);
+
+const PLATFORM_TOKEN_LABELS: Record<string, string> = {
+  aws: "Amazon Web Services (AWS)",
+  azure: "Microsoft Azure",
+  gcp: "Google Cloud Platform (GCP)",
+  servicenow: "ServiceNow",
+  "service now": "ServiceNow",
+  jira: "Jira",
+  kubernetes: "Kubernetes",
+  salesforce: "Salesforce",
+  zendesk: "Zendesk",
+  talkdesk: "Talkdesk",
+  five9: "Five9",
+};
+
 export function normalizeUserFacingRequirementLabel(
   claim: string | null,
   context?: { sourceContext?: string | null; flagMessage?: string | null; issueCode?: VerificationIssue["code"] },
@@ -246,8 +269,16 @@ export function normalizeUserFacingRequirementLabel(
   if (!claim) return null;
   const trimmed = claim.trim().replace(/\s+/g, " ");
   if (!trimmed) return null;
+  if (trimmed.length < 3) return null;
   if (!/[a-z0-9]/i.test(trimmed)) return null;
   const lowered = trimmed.toLowerCase();
+  if (SUPPRESSED_JUNK_LABELS.has(lowered)) return null;
+  if (lowered === "[object object]" || lowered === "object object" || lowered === "undefined" || lowered === "null") {
+    return null;
+  }
+  if (trimmed.split(" ").length === 1 && trimmed.length <= 3 && !KNOWN_PLATFORM_TOKENS.has(lowered)) {
+    return null;
+  }
   const suppressedExact = new Set([
     "multi-system",
     "multisystem",
@@ -264,7 +295,7 @@ export function normalizeUserFacingRequirementLabel(
     }
   }
   if (KNOWN_PLATFORM_TOKENS.has(lowered)) {
-    return trimmed;
+    return PLATFORM_TOKEN_LABELS[lowered] ?? trimmed;
   }
   if (lowered === "self-service" || lowered === "self service") {
     const contextText = coerceContextText([
@@ -684,6 +715,13 @@ export function getGenerationReadiness(
   runState: "ok" | "compliance_blocked" | null,
   fitScore: number | null = null,
 ): GenerationReadiness {
+  const inferredFitScore =
+    typeof fitScore === "number" && Number.isFinite(fitScore)
+      ? fitScore
+      : result && typeof result === "object" && typeof (result as { score?: unknown }).score === "number"
+        ? ((result as { score?: number }).score as number)
+        : null;
+
   const reasonCodes: string[] = [];
   const reasons: GenerationReadiness["reasons"] = [];
 
@@ -791,13 +829,13 @@ export function getGenerationReadiness(
     }
   }
 
-  if (fitScore === null || !Number.isFinite(fitScore)) {
+  if (inferredFitScore === null || !Number.isFinite(inferredFitScore)) {
     reasonCodes.push("missing_score");
     addUniqueReason(reasons, {
       code: "full_block",
       message: "Fit score is unavailable for this analysis.",
     });
-  } else if (fitScore < 70) {
+  } else if (inferredFitScore < 70) {
     reasonCodes.push("score_floor_blocked");
     addUniqueReason(reasons, {
       code: "full_block",

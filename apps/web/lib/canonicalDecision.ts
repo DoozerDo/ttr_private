@@ -502,8 +502,8 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
     routes: progressionRoutes,
     dataSource: input.dataSource ?? "fresh",
     analysisAssessmentId: analysisCandidate?.assessmentId ?? input.persistedAssessmentId ?? null,
-    analysisBaselineId: analysisCandidate?.baselineId ?? null,
-    analysisJobId: analysisCandidate?.jobId ?? null,
+    analysisBaselineId: analysisCandidate?.baselineId ?? input.baselineId ?? null,
+    analysisJobId: analysisCandidate?.jobId ?? input.jobId ?? null,
     analysisBaselineVersionId: analysisCandidate?.baselineVersionId ?? null,
     persistedAssessmentId: input.persistedAssessmentId ?? null,
   });
