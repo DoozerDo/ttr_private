@@ -66,11 +66,7 @@ describe("results re-analysis loop", () => {
     expect(await screen.findByText("Updated Baseline Detected")).toBeInTheDocument();
     expect(await screen.findByText(/You['’]ve improved your fit/)).toBeInTheDocument();
     expect(await screen.findByText("+12 points (68 -> 80)")).toBeInTheDocument();
-    expect(await screen.findByText("Verification-first next step")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
-    expect(screen.getByTestId("results-hero-primary-cta")).toHaveAttribute(
-      "href",
-      "/studio?jobId=job-1&analysisId=analysis-current&baselineId=base-1&baselineVersionId=base-version-1",
-    );
+    expect((await screen.findAllByText(/Your materials are ready to generate now/)).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
   });
 });

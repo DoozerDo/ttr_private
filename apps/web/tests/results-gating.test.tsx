@@ -190,7 +190,7 @@ describe("results gating", () => {
     expect(screen.queryByText("Apply moment")).toBeNull();
     expect(screen.queryByTestId("results-improvement-cta")).toBeNull();
     expect(screen.queryByText("Promising fit. Not ready to generate yet.")).toBeNull();
-    expect(screen.getAllByText("Strong match. Generation is ready.").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Strong match. Ready for document generation.").length).toBeGreaterThan(0);
   });
 
   it("shows a competitive blocked state with concrete readiness drivers", async () => {

@@ -139,18 +139,9 @@ describe("results canonical experience", () => {
     expect(screen.getByTestId("resolve-gaps-block")).toBeInTheDocument();
     expect(await screen.findByTestId("how-to-improve-your-fit")).toBeInTheDocument();
     expect(screen.getByText("How to improve your fit")).toBeInTheDocument();
-    expect(
-      screen.getAllByRole("link", { name: "Start Fit Review" }).some(
-        (link) =>
-          link.getAttribute("href") ===
-          "/fit-review?jobId=job-1&analysisId=analysis-current&assessmentId=analysis-current&baselineId=base-1&baselineVersionId=base-version-1",
-      ),
-    ).toBe(true);
+    expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
     expect(screen.queryByText(/gauge|dial|meter|speedometer/i)).toBeNull();
-    expect(screen.getAllByRole("link", { name: "Start Fit Review" })[0]).toHaveAttribute(
-      "href",
-      "/fit-review?jobId=job-1&analysisId=analysis-current&assessmentId=analysis-current&baselineId=base-1&baselineVersionId=base-version-1",
-    );
+    expect(screen.getByText("You'll address this in Fit Review.")).toBeInTheDocument();
     expect(trackEventMock).toHaveBeenCalledWith(
       "results_improvement_module_viewed",
       expect.objectContaining({
@@ -235,14 +226,14 @@ describe("results canonical experience", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getAllByText(/Strong match\. Generation is ready\./i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Strong match\. Ready for document generation\./i).length).toBeGreaterThan(0);
     });
 
     expect(screen.getAllByText(/Confidence: Medium/i).length).toBeGreaterThan(0);
     expect(screen.queryByText("Promising fit. Not ready to generate yet.")).toBeNull();
     expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
     expect(screen.queryAllByText(/confidence/i).length).toBeGreaterThan(0);
-    expect(screen.getByRole("link", { name: "Open Studio" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
   });
 
   it("sharpens Results guidance after a refine intent", async () => {
@@ -257,10 +248,8 @@ describe("results canonical experience", () => {
     });
 
     expect(screen.getByText(/You signaled refinement, so Fit Review is the fastest path/i)).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "Start Fit Review" })[0]).toHaveAttribute(
-      "href",
-      "/fit-review?jobId=job-1&analysisId=analysis-current&assessmentId=analysis-current&baselineId=base-1&baselineVersionId=base-version-1",
-    );
+    expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
+    expect(screen.getByText("You'll address this in Fit Review.")).toBeInTheDocument();
   });
 
   it("reinforces progress after the user has used the artifact and committed the role", async () => {
@@ -272,9 +261,9 @@ describe("results canonical experience", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getAllByText("Strong match. Generation is ready.").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Strong match. Ready for document generation.").length).toBeGreaterThan(0);
     });
-    expect(screen.getAllByText("Strong match. Generation is ready.").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Strong match. Ready for document generation.").length).toBeGreaterThan(0);
   });
 
   it("surfaces Fit Review improvement guidance after a refine intent", async () => {
@@ -290,11 +279,8 @@ describe("results canonical experience", () => {
 
     expect(screen.getAllByText("Clarify this example").length).toBeGreaterThan(0);
     expect(screen.getByText("Add one concrete detail and outcome so Studio can use it more confidently.")).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "Start Fit Review" }).length).toBe(1);
-    expect(screen.getByRole("link", { name: "Start Fit Review" })).toHaveAttribute(
-      "href",
-      "/fit-review?jobId=job-1&analysisId=analysis-current&assessmentId=analysis-current&baselineId=base-1&baselineVersionId=base-version-1",
-    );
+    expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
+    expect(screen.getByText("You'll address this in Fit Review.")).toBeInTheDocument();
     await waitFor(() => {
       expect(trackEventMock).toHaveBeenCalledWith(
         "results_improvement_module_viewed",

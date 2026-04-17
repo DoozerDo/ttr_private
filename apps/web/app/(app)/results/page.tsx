@@ -1026,6 +1026,24 @@ export function OpportunityMapSection({
             : "You can generate now. Tighten a few examples to strengthen the output."
           : "Your profile is grounded enough to generate in Studio.";
   const decisionNarrative = useMemo(() => {
+    if (generationPhase !== "not_started") {
+      if (generationPhase === "generating") {
+        return {
+          headline: "Generating your documents...",
+          body: "We’re drafting your resume and cover letter now.",
+        };
+      }
+      if (generationPhase === "generated") {
+        return {
+          headline: "Your documents are ready",
+          body: "Open Studio to review and adjust your drafts before applying.",
+        };
+      }
+      return {
+        headline: "Generation needs attention",
+        body: "At least one draft did not complete. Open Studio to retry and review what’s available.",
+      };
+    }
     if (lowFitScore) {
       return {
         headline: "This role may not be a fit.",
@@ -1045,7 +1063,7 @@ export function OpportunityMapSection({
         headline:
           score !== null && score >= 90
             ? "Strong match. Ready to apply."
-            : "Strong match. Generation is ready.",
+            : "Strong match. Ready for document generation.",
         body:
           score !== null && score >= 90
             ? "Your materials are ready to generate now. Review them in Studio before applying."
@@ -1079,7 +1097,16 @@ export function OpportunityMapSection({
       headline: "This role is ready for review.",
       body: "Use the next step that matches the evidence state so Studio stays aligned with the profile.",
     };
-  }, [blockedState?.body, blockedState?.headline, fitDescriptor, lowFitScore, readiness.status, score, strongFitScore]);
+  }, [
+    blockedState?.body,
+    blockedState?.headline,
+    fitDescriptor,
+    generationPhase,
+    lowFitScore,
+    readiness.status,
+    score,
+    strongFitScore,
+  ]);
   const competitiveBlockedSummary =
     isCompetitiveBlocked
       ? blockedState?.supportSummary ?? "Complete Fit Review to clarify the evidence gaps below."
@@ -2559,8 +2586,13 @@ export default function ResultsPage() {
         if (cancelled) return;
         if (!response.ok) return;
         const statuses = deriveResultsArtifactStatuses(payload);
+        const derivedPhase = deriveResultsGenerationPhase(statuses);
+        const requestedAt = generationRequestedAtRef.current;
+        const withinGrace = typeof requestedAt === "number" && Date.now() - requestedAt < 12_000;
+        const phase =
+          derivedPhase === "not_started" && withinGrace ? ("generating" as const) : derivedPhase;
         setResultsArtifactStatuses(statuses);
-        setResultsGenerationPhase(deriveResultsGenerationPhase(statuses));
+        setResultsGenerationPhase(phase);
       } catch {
         // Best effort only.
       }
@@ -2880,8 +2912,17 @@ export default function ResultsPage() {
     [activeScore, applicationInsights, latest],
   );
   const resultsReturnCue = useMemo(() => {
+    if (resultsGenerationPhase === "generating") {
+      return "Generating your documents...";
+    }
+    if (resultsGenerationPhase === "generated") {
+      return "Your documents are ready.";
+    }
+    if (resultsGenerationPhase === "failed" || resultsGenerationPhase === "partial") {
+      return "Generation needs attention.";
+    }
     if (isStrongFitScore) {
-      return "Strong match. Generation is ready.";
+      return "Strong match. Ready for document generation.";
     }
     if (recentIntent === "used_and_committed") {
       return "You're actively pursuing this role. Keep momentum in Opportunities.";
@@ -2893,7 +2934,7 @@ export default function ResultsPage() {
       return "You signaled refinement, so Fit Review is the fastest path to a sharper result.";
     }
     return null;
-  }, [isStrongFitScore, recentIntent]);
+  }, [isStrongFitScore, recentIntent, resultsGenerationPhase]);
   const resultsScoreBucket = useMemo(
     () => (typeof activeScore === "number" ? getScoreBand(activeScore) : undefined),
     [activeScore],

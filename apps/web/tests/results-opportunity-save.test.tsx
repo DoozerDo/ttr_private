@@ -32,7 +32,7 @@ describe("results opportunity persistence", () => {
     });
   });
 
-  it("creates an opportunity after loading analysis and assigns ready_to_apply logic by score", async () => {
+  it("does not surface opportunity-save CTAs while Studio is blocked for evidence", async () => {
     overrideSearchParams({ assessmentId: "analysis-1" });
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -42,9 +42,19 @@ describe("results opportunity persistence", () => {
           assessmentId: "analysis-1",
           jobId: "job-1",
           baselineId: "base-1",
-          score: 82,
+          baselineVersionId: "base-version-1",
+          score: 74,
           companyName: "Acme",
           jobTitle: "Support Director",
+          strengths: ["Incident management"],
+          verification_coverage: {
+            totalClaims: 3,
+            verifiedClaims: 3,
+            inferredClaims: 0,
+            unverifiedClaims: 0,
+            verifiedRequirements: ["Leadership", "Operations"],
+            unverifiedRequirements: [],
+          },
         });
       }
       if (url.includes("/api/analysis/history")) {
@@ -62,6 +72,15 @@ describe("results opportunity persistence", () => {
       if (url.includes("/api/opportunities") && init?.method === "POST") {
         return jsonResponse({ id: "opp-1" });
       }
+      if (url.endsWith("/api/opportunities") && !init?.method) {
+        return jsonResponse([]);
+      }
+      if (url.endsWith("/api/resume/readiness") && init?.method === "POST") {
+        return jsonResponse({ status: "limited", reasons: [] });
+      }
+      if (url.endsWith("/api/cover-letters/readiness") && init?.method === "POST") {
+        return jsonResponse({ status: "limited", reasons: [] });
+      }
       return jsonResponse({});
     });
 
@@ -70,23 +89,17 @@ describe("results opportunity persistence", () => {
     setFetchImplementation(fetchMock as unknown as typeof fetch);
     render(<ResultsPage />);
 
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Add to Opportunities" })).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Add to Opportunities" }));
+    expect(await screen.findByTestId("results-blocked-evidence-panel")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save this opportunity" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Apply to this role" })).toBeNull();
 
-    await waitFor(() => {
-      const postCall = fetchMock.mock.calls.find(
-        ([url, requestInit]) =>
-          String(url).includes("/api/opportunities") &&
-          requestInit?.method === "POST",
-      );
-      expect(postCall).toBeDefined();
-      const body = JSON.parse((postCall?.[1]?.body as string) ?? "{}") as Record<string, unknown>;
-      expect(body.score).toBe(82);
-      expect(typeof body.generationCompleted).toBe("boolean");
-      expect(Array.isArray(body.savedEvidenceSummary)).toBe(true);
-    });
+    const postCall = fetchMock.mock.calls.find(
+      ([url, requestInit]) =>
+        String(url).includes("/api/opportunities") &&
+        requestInit?.method === "POST",
+    );
+    expect(postCall).toBeUndefined();
   });
 
   it("upgrades opportunity to ready_to_apply after improved re-analysis crosses 70", async () => {

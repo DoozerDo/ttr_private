@@ -168,22 +168,17 @@ describe("results auto analysis loading", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getAllByText("Strong match. Generation is ready.").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Strong match. Ready for document generation.").length).toBeGreaterThan(0);
     });
     expect(screen.getByTestId("results-hero-primary-cta").closest("section")).toHaveTextContent(
       "Confidence: Medium",
     );
     expect(screen.queryByTestId("results-generation-unlocked-panel")).toBeNull();
-    expect(screen.getAllByText("Strong match. Generation is ready.").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Strong match. Ready for document generation.").length).toBeGreaterThan(0);
     expect(screen.queryByText("This role may not be a fit.")).toBeNull();
     expect(screen.queryByText("No compatibility analysis yet")).toBeNull();
     expect(screen.queryByText("Start Fit Review")).toBeNull();
-    await waitFor(() => {
-      expect(screen.getByTestId("results-hero-primary-cta")).toHaveAttribute(
-        "href",
-        "/studio?jobId=job-1&analysisId=assessment-good&baselineId=base-1&baselineVersionId=base-version-1",
-      );
-    });
+    expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
   });
 
   it("uses missing verification language when generation readiness is blocked", async () => {
@@ -316,8 +311,7 @@ describe("results auto analysis loading", () => {
       );
     });
     expect(screen.queryByTestId("results-generation-unlocked-panel")).toBeNull();
-    expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("Open Studio");
-    expect(screen.getByRole("link", { name: "Open Studio" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
   });
 
   it("keeps fit messaging when score is low but generation is not blocked", async () => {
@@ -368,8 +362,8 @@ describe("results auto analysis loading", () => {
     render(<ResultsPage />);
 
     await screen.findByText("Strengthen your fit before generating.");
-    expect(screen.getByTestId("results-hero-primary-cta")).not.toHaveTextContent("Open Studio");
-    expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("Start Fit Review");
+    expect(screen.queryByTestId("results-hero-primary-cta")).toBeNull();
+    expect(screen.getByText("You'll address this in Fit Review.")).toBeInTheDocument();
   });
 
   it("uses existing latest assessment without creating duplicate analysis", async () => {
