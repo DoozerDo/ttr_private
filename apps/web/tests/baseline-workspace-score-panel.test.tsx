@@ -157,19 +157,17 @@ describe("BaselineWorkspace live score panel", () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
+      fireEvent.click(screen.getByRole("button", { name: "Previous result for this role" }));
 
       await waitFor(() => {
         expect(screen.getByText("Strong Match")).toBeInTheDocument();
       });
 
-      expect(screen.getByText("Strong alignment with this role.")).toBeInTheDocument();
       expect(screen.getByText(/Led global support operations at sentinelone/i)).toBeInTheDocument();
-      expect(screen.getByText("Ready to analyze")).toBeInTheDocument();
-      expect(screen.getByText("Ready to analyze now.")).toBeInTheDocument();
+      expect(screen.getAllByText("Ready to generate documents.").length).toBeGreaterThan(0);
       expect(
-        screen.getByRole("link", { name: "Generate Compatibility Score" }),
-      ).toHaveAttribute("href", "/studio?analysisId=assessment-1&jobId=job-1&baselineId=base-1");
+        screen.getByRole("link", { name: "Generate documents" }),
+      ).toHaveAttribute("href", "/studio?jobId=job-1&analysisId=assessment-1&baselineId=base-1");
       expect(screen.queryByRole("link", { name: "View detailed analysis" })).toBeNull();
       expect(screen.queryByRole("button", { name: "Add to Opportunities" })).toBeNull();
       expect(
@@ -249,13 +247,13 @@ describe("BaselineWorkspace live score panel", () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
+      fireEvent.click(screen.getByRole("button", { name: "Previous result for this role" }));
 
       await waitFor(() => {
         expect(screen.getByText("Strong Match")).toBeInTheDocument();
       });
 
-      expect(screen.getByText("Ready to analyze")).toBeInTheDocument();
+      expect(screen.getAllByText("Ready to generate documents.").length).toBeGreaterThan(0);
       expect(
         screen.getByText(/Partnered with engineering teams to operate complex systems/i),
       ).toBeInTheDocument();
@@ -318,18 +316,15 @@ describe("BaselineWorkspace live score panel", () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
+      fireEvent.click(screen.getByRole("button", { name: "Previous result for this role" }));
 
       await waitFor(() => {
         expect(screen.getByText("Primary readiness")).toBeInTheDocument();
       });
 
-      expect(screen.getByText("You are a strong match and ready to generate tailored materials.")).toBeInTheDocument();
+      expect(screen.getByText("Document generation is blocked. Start Fit Review to strengthen verification.")).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Retry scoring" })).toBeNull();
-      expect(screen.getByRole("link", { name: "Generate Compatibility Score" })).toHaveAttribute(
-        "href",
-        "/results?assessmentId=assessment-3&analysisId=assessment-3&jobId=job-1&baselineId=base-1",
-      );
+      expect(screen.getByRole("link", { name: "Review current selection" })).toHaveAttribute("href", "/baseline");
       expect(screen.queryByRole("link", { name: "Generate Tailored Materials" })).toBeNull();
     } finally {
       setTimeoutSpy.mockRestore();
@@ -390,10 +385,10 @@ describe("BaselineWorkspace live score panel", () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
+      fireEvent.click(screen.getByRole("button", { name: "Previous result for this role" }));
 
       await waitFor(() => {
-        expect(screen.getByRole("link", { name: "Generate Compatibility Score" })).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
       });
 
       expect(screen.queryByRole("button", { name: "Retry scoring" })).toBeNull();
@@ -551,7 +546,7 @@ describe("BaselineWorkspace live score panel", () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
+      fireEvent.click(screen.getByRole("button", { name: "Previous result for this role" }));
 
       await waitFor(() => {
         expect(
@@ -635,7 +630,7 @@ describe("BaselineWorkspace live score panel", () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
+      fireEvent.click(screen.getByRole("button", { name: "Previous result for this role" }));
       await waitFor(() => {
         expect(screen.getByText("Strong Match")).toBeInTheDocument();
       });

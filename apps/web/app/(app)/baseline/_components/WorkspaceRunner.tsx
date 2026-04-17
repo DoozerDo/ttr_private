@@ -877,8 +877,6 @@ export function WorkspaceRunner({
 
   const isDevMode = process.env.NODE_ENV !== "production";
   const debugUiEnabled = isDevMode || process.env.NEXT_PUBLIC_DEBUG_UI === "true";
-
-  const showLoadLastRun = Boolean(baselineId) && Boolean(jobId);
   const latestCompletedScorePair = resolveResultPair(latestCompletedScore);
   const currentResultPair = resolveResultPair(result);
   const resolvedDisplayResult = resolveTargetDisplayResult({
@@ -891,6 +889,8 @@ export function WorkspaceRunner({
   });
   const displayResult = resolvedDisplayResult.result;
   const showResult = Boolean(displayResult);
+  const showPreAnalysisState = !showResult && !isRunning && !isRevealAnalyzing && !error;
+  const showLoadLastRun = showPreAnalysisState && Boolean(baselineId) && Boolean(jobId);
   const data = displayResult as unknown;
   if (showResult && (!data || typeof data !== "object")) {
     throw new Error("Invalid Results data shape");
@@ -934,14 +934,14 @@ export function WorkspaceRunner({
   const fitReviewHref = useMemo(
     () =>
       getFitReviewHref({
-        jobId: latestJobId,
-        baselineId: latestBaselineId,
+        jobId: latestJobId ?? jobId ?? null,
+        baselineId: latestBaselineId ?? baselineId ?? null,
         baselineVersionId:
           asString((displayResult as { baselineVersionId?: unknown } | null)?.baselineVersionId) ?? null,
         assessmentId: asString((displayResult as { assessmentId?: unknown } | null)?.assessmentId) ?? null,
         analysisId: asString((displayResult as { assessmentId?: unknown } | null)?.assessmentId) ?? null,
       }),
-    [displayResult, latestBaselineId, latestJobId],
+    [baselineId, displayResult, jobId, latestBaselineId, latestJobId],
   );
   const generationReadiness = useMemo(
     () => getGenerationReadiness(displayResult, runState, score),
@@ -1024,22 +1024,22 @@ export function WorkspaceRunner({
     () => buildTargetCtaClickedAnalyticsPayload(targetCta),
     [targetCta],
   );
+  const targetCtaLabel = targetCta.isStudioDestination ? "Generate documents" : targetCta.label;
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
     assertTargetCtaAnalyticsMatchesRenderedCta(targetCta, targetCtaAnalyticsPayload);
   }, [targetCta, targetCtaAnalyticsPayload]);
   const scoreBandSummary =
     targetCta.state === "READY"
-      ? "This role is ready for Studio."
+      ? "Ready to generate documents."
       : targetCta.state === "LIMITED"
-        ? "This role is close, but still needs more verified evidence before Studio."
+        ? "You can generate documents, but some claims still need stronger evidence."
         : scoreBand?.summary ?? "";
   const blockingReasons = generationReadiness.verificationIssues.slice(0, 3);
 const showInterruptionState =
     activePairState === "interrupted_due_to_changes" ||
     activePairState === "auto_retrying" ||
     activePairState === "analysis_in_flight";
-  const showPreAnalysisState = !showResult && !isRunning && !isRevealAnalyzing && !error;
   const showMismatchRecovery = isSelectionMismatchMessage(error);
 
   useEffect(() => {
@@ -2148,7 +2148,7 @@ const showInterruptionState =
               Add a job description to generate your compatibility score.
             </p>
             <p className="text-sm text-slate-400">
-              Your score will power Results, Studio, and the rest of the workflow.
+              Your score will power Results and document generation.
             </p>
           </div>
           <div className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
@@ -2178,9 +2178,9 @@ const showInterruptionState =
           }}
           disabled={isLoadingLastRun || isRunning}
           className="text-xs font-semibold text-slate-300 underline decoration-white/10 underline-offset-4 hover:decoration-white/30 disabled:cursor-not-allowed disabled:opacity-50"
-          aria-label="Load last run"
+          aria-label="Previous result for this role"
         >
-          {isLoadingLastRun ? "Loading last run..." : "Load last run"}
+          {isLoadingLastRun ? "Loading previous result..." : "Previous result for this role"}
         </button>
       ) : null}
 
@@ -2267,10 +2267,10 @@ const showInterruptionState =
                 </p>
                 <p className="mt-1 text-sm">
                   {targetCta.state === "READY"
-                    ? "This role is ready for Studio."
+                    ? "Ready to generate documents."
                     : targetCta.state === "LIMITED"
-                      ? "This role needs more verified evidence before Studio."
-                      : "This role is not ready for Studio yet. Start Fit Review to strengthen the analysis."}
+                      ? "You can generate documents, but the evidence still needs strengthening."
+                      : "Document generation is blocked. Start Fit Review to strengthen verification."}
                 </p>
                 {blockingReasons.length && targetCta.state !== "READY" ? (
                   <ul className="mt-2 space-y-1 text-slate-200">
@@ -2285,7 +2285,7 @@ const showInterruptionState =
               <p className="text-sm font-medium text-slate-100">
                 {targetCta.state === "READY"
                   ? "You are well aligned with this role and ready to generate tailored materials."
-                  : "You are not ready for Studio yet. Improve the fit before generating."}
+                  : "Document generation is not available yet. Improve the fit before generating."}
               </p>
             ) : null}
             <a
@@ -2293,7 +2293,7 @@ const showInterruptionState =
               onClick={handleGenerateClick}
               className="inline-flex items-center justify-center whitespace-nowrap rounded-2xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
             >
-              {targetCta.label}
+              {targetCtaLabel}
             </a>
           </div>
         </div>

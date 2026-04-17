@@ -163,7 +163,7 @@ describe("target workflow UI", () => {
       screen.getByText("Add a job description to generate your compatibility score."),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Your score will power Results, Studio, and the rest of the workflow."),
+      screen.getByText("Your score will power Results and document generation."),
     ).toBeInTheDocument();
   });
 

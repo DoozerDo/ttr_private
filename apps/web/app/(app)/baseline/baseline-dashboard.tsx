@@ -612,7 +612,7 @@ export function BaselineDashboard({
                       disabled={isSelected}
                       className="shrink-0"
                     >
-                      {isSelected ? "Selected" : "Select"}
+                      {isSelected ? "Selected" : "Use this baseline"}
                     </FormButton>
                     {baseline.status !== "ARCHIVED" ? (
                       <OverflowMenu

@@ -152,6 +152,7 @@ export function JobsHub({
   };
 
   const showNoJobsState = !isLoading && visibleJobs.length === 0;
+  const addJobLabel = visibleJobs.length > 0 ? "Add another job" : "Add job";
 
   return (
     <>
@@ -168,7 +169,7 @@ export function JobsHub({
         primaryAction={
           momentumEntry || showNoJobsState ? null : (
             <FormButton variant="secondary" onClick={navigateToAddJob}>
-              Add job
+              {addJobLabel}
             </FormButton>
           )
         }
@@ -193,7 +194,7 @@ export function JobsHub({
           <EmptyState
             title="No jobs yet"
             body="Add a job description to run your compatibility score."
-            cta={<FormButton onClick={navigateToAddJob}>Add job</FormButton>}
+            cta={<FormButton onClick={navigateToAddJob}>{addJobLabel}</FormButton>}
           />
         ) : (
           <div className="space-y-3">

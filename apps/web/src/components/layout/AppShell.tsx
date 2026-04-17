@@ -87,8 +87,8 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
   const router = useRouter();
   const pathname = usePathname() ?? "/";
   const isBaseline = pathname.startsWith("/baseline");
-  const [, setHasBaseline] = useState(false);
-  const [, setHasJob] = useState(false);
+  const [hasBaseline, setHasBaseline] = useState(false);
+  const [hasJob, setHasJob] = useState(false);
   const [storedContext, setStoredContext] = useState<StoredContext>({
     hasBaseline: false,
     hasJob: false,
@@ -156,7 +156,7 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
       jobsOk = stored.hasJob;
     }
 
-    setStoredContext(getStoredContext());
+    setStoredContext({ ...getStoredContext(), hasBaseline: baselinesOk, hasJob: jobsOk });
     setHasBaseline(Boolean(baselinesOk));
     setHasJob(Boolean(jobsOk));
 
@@ -470,7 +470,7 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
                 <div className="min-w-0 flex-1">
                   <UnlockPathBar
                     currentPathname={pathname}
-                    baselineReady={storedContext.hasBaseline}
+                    baselineReady={hasBaseline || storedContext.hasBaseline}
                     analysisExists={Boolean(lastAnalysis)}
                     score={lastAnalysis?.fitScore ?? null}
                     readinessStatus={readinessStatus}
