@@ -20,6 +20,7 @@ import { defaultClosingTemplateKey } from "@/lib/coverLetters";
 import { buildExportPayload } from "../lib/exportPayload";
 import { formatErrorMessage, readResponsePayload } from "@/lib/compliance/parseComplianceError";
 import { sanitizeRenderedTextValue } from "@/lib/renderedText";
+import { isDocumentGenerationUnlocked } from "@/lib/documentGenerationGate";
 import {
   applyTargetingExclusionsToReadiness,
   aggregateVerificationIssues,
@@ -942,6 +943,7 @@ export default function StudioPage() {
   const studioArtifactStorageKeyRef = useRef<string | null>(null);
   const studioArtifactPresentationStateRef = useRef<"hydrated" | "generated" | "unknown">("unknown");
   const autoGenerationSignatureRef = useRef<string | null>(null);
+  const suppressAutoGenerationRef = useRef(false);
   const autoOpportunitySignatureRef = useRef<string | null>(null);
   const activeAutoOpportunityRef = useRef<string | null>(null);
   const currentWorkflowScopeRef = useRef<WorkflowRequestScope>({
@@ -1386,6 +1388,7 @@ export default function StudioPage() {
     studioArtifactStorageKeyRef.current = studioArtifactStorageKey;
     if (!studioArtifactStorageKey) {
       studioArtifactHydrationKeyRef.current = null;
+      suppressAutoGenerationRef.current = false;
       setStudioArtifactPairStatus("missing");
       setStudioArtifactsHydrated(false);
       return;
@@ -1395,6 +1398,8 @@ export default function StudioPage() {
     }
 
     studioArtifactHydrationKeyRef.current = studioArtifactHydrationSignature;
+    // Block auto-generation until hydration determines whether artifacts already exist for this pair.
+    suppressAutoGenerationRef.current = true;
     let cancelled = false;
 
     const applyHydratedPayload = (payload: BackendStudioArtifactsResponse | StoredStudioArtifactSnapshot | null) => {
@@ -1446,6 +1451,8 @@ export default function StudioPage() {
                 ? "failed"
                 : "missing");
       setStudioArtifactPairStatus(pairStatus);
+      // If hydration confirms artifacts are missing, allow auto-generation to proceed afterwards.
+      suppressAutoGenerationRef.current = pairStatus !== "missing";
     };
 
     void (async () => {
@@ -1476,6 +1483,7 @@ export default function StudioPage() {
         return;
       }
       setStudioArtifactPairStatus("missing");
+      suppressAutoGenerationRef.current = false;
       setStudioArtifactsHydrated(true);
     })();
 
@@ -1511,7 +1519,7 @@ export default function StudioPage() {
   const lowFitRedirectedRef = useRef(false);
   useEffect(() => {
     if (analysisScore === null) return;
-    if (analysisScore >= 70) {
+    if (isDocumentGenerationUnlocked(analysisScore)) {
       lowFitRedirectedRef.current = false;
       return;
     }
@@ -1662,8 +1670,7 @@ export default function StudioPage() {
   );
   const showEvidenceExpansion = useMemo(
     () =>
-      typeof analysisScore === "number" &&
-      analysisScore >= 70 &&
+      isDocumentGenerationUnlocked(analysisScore) &&
       canonicalUnverifiedRequirements.length > 0,
     [analysisScore, canonicalUnverifiedRequirements.length],
   );
@@ -1840,7 +1847,7 @@ export default function StudioPage() {
   );
   const productReadiness = productDecisionState.productReadiness;
   const canGenerateDocuments = productDecisionState.canGenerateDocuments;
-  const qualifiedForGeneration = canGenerateDocuments && typeof analysisScore === "number" && analysisScore >= 80;
+  const qualifiedForGeneration = canGenerateDocuments && isDocumentGenerationUnlocked(analysisScore);
   const studioDraftMode = productReadiness.generationMode === "draft" && isFromUnlock && !hasGeneratedOnce;
   const improveBaselineHref = useMemo(() => {
     const params = new URLSearchParams();
@@ -3994,6 +4001,13 @@ export default function StudioPage() {
   }, [analysis?.baselineVersionId, versions]);
 
   const handleResumeDraft = async (): Promise<boolean> => {
+    if (
+      studioArtifactPresentationStateRef.current === "hydrated" &&
+      hasResumeArtifact &&
+      Boolean(resumeState.response)
+    ) {
+      return true;
+    }
     if (!guardGenerationAction("resume")) return false;
     const requestScope = currentWorkflowScope;
     const request = beginStudioGenerationRequest("resume", requestScope);
@@ -4465,6 +4479,13 @@ export default function StudioPage() {
   }
 
   const handleCoverDraft = async (): Promise<boolean> => {
+    if (
+      studioArtifactPresentationStateRef.current === "hydrated" &&
+      hasCoverLetterArtifact &&
+      Boolean(coverState.response)
+    ) {
+      return true;
+    }
     if (!guardGenerationAction("cover_letter")) return false;
     const requestScope = currentWorkflowScope;
     const request = beginStudioGenerationRequest("cover_letter", requestScope);
@@ -4883,6 +4904,7 @@ export default function StudioPage() {
     if (!autoGenerationSignature) return;
     if (autoGenerationSignatureRef.current === autoGenerationSignature) return;
     if (studioArtifactPresentationStateRef.current === "hydrated") return;
+    if (suppressAutoGenerationRef.current) return;
     const autoGenerationKey = buildWorkflowRequestKey("auto_generation", currentWorkflowScope);
     if (studioArtifactPairStatus !== "missing") return;
     if (resumeState.response || coverState.response || resumeState.artifactFailure || coverState.artifactFailure) return;
@@ -5043,6 +5065,7 @@ export default function StudioPage() {
   ]);
 
   const activeArtifactFailure = resumeState.artifactFailure ?? coverState.artifactFailure ?? null;
+  const showGenericRetry = !activeArtifactFailure && studioArtifactPairStatus === "failed";
   const studioNextMove = useMemo(
     () =>
       resolveStudioNextMove({
@@ -5638,6 +5661,17 @@ export default function StudioPage() {
                 ? handleRetryCoverGeneration
                 : handleRetryResumeGeneration
             }
+          >
+            Retry
+          </FormButton>
+        ) : showGenericRetry ? (
+          <FormButton
+            variant="secondary"
+            onClick={() => {
+              void handleResumeDraft();
+              void handleCoverDraft();
+            }}
+            disabled={autoGenerationInFlight}
           >
             Retry
           </FormButton>

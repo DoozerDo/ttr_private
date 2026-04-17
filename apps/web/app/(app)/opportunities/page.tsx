@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { FormButton } from "@/components/FormButton";
 import { deriveOpportunityDrift, type OpportunityDriftStatus } from "@/lib/opportunityDrift";
+import { isDocumentGenerationUnlocked } from "@/lib/documentGenerationGate";
 
 type OpportunityItem = {
   id: string;
@@ -310,9 +311,7 @@ export default function OpportunitiesPage() {
                       typeof row.savedFitScore === "number" ? row.savedFitScore : row.score;
                     const currentFitScore = currentFitScores[row.id] ?? null;
                     const generationAllowed =
-                      typeof currentFitScore === "number" &&
-                      currentFitScore >= 70 &&
-                      row.status !== "passed";
+                      isDocumentGenerationUnlocked(currentFitScore) && row.status !== "passed";
                     const drift = deriveOpportunityDrift({
                       savedFitScore,
                       currentFitScore,

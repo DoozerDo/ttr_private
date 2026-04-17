@@ -1,4 +1,5 @@
 import type { GenerationAuthorityState } from "@/lib/generationAuthority";
+import { isDocumentGenerationUnlocked } from "@/lib/documentGenerationGate";
 
 export type GenerationReadinessContract = {
   canGenerate: boolean;
@@ -50,7 +51,7 @@ export function buildGenerationProductReadiness(
   }
 
   const score = typeof input.score === "number" ? input.score : null;
-  const scoreEligibleForGeneration = score !== null && score >= 80;
+  const scoreEligibleForGeneration = isDocumentGenerationUnlocked(score);
 
   if (!scoreEligibleForGeneration) {
     reasonsBlocked.push("score_below_unlock_floor");

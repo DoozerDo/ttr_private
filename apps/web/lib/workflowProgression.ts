@@ -1,6 +1,7 @@
 import type { GenerationProductReadiness } from "@/lib/generationProductReadiness";
 import type { GenerationReadiness } from "@/lib/generationReadiness";
 import type { DecisionFlowDataSource } from "@/lib/decisionFlowDebug";
+import { isDocumentGenerationUnlocked } from "@/lib/documentGenerationGate";
 
 export type WorkflowSurface = "baseline" | "target" | "analyze" | "results" | "studio";
 
@@ -126,7 +127,7 @@ function resolvePairKey(baselineId: string | null, jobId: string | null): string
 }
 
 function isQualifiedForGeneration(score: number | null | undefined): boolean {
-  return typeof score === "number" && Number.isFinite(score) && score >= 80;
+  return isDocumentGenerationUnlocked(score);
 }
 
 function matchesPair(

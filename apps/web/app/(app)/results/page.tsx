@@ -63,6 +63,7 @@ import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
 import { buildProductDecisionState } from "@/lib/productDecisionState";
 import { resolveCanonicalState } from "@/lib/canonicalDecision";
 import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
+import { isDocumentGenerationUnlocked } from "@/lib/documentGenerationGate";
 import {
   buildWorkflowRequestKey,
   isWorkflowRequestStale,
@@ -123,12 +124,22 @@ function deriveResultsGenerationPhase(statuses: {
   coverLetter: ResultsArtifactStatus;
 }, opts?: {
   recoveryInProgress?: boolean;
+  generationStarted?: boolean;
 }): ResultsGenerationPhase {
   const { resume, coverLetter } = statuses;
   if (opts?.recoveryInProgress && (resume === "failed" || coverLetter === "failed")) {
     return "generating";
   }
   if (resume === "in_progress" || coverLetter === "in_progress") return "generating";
+  if (
+    opts?.generationStarted &&
+    resume !== "failed" &&
+    coverLetter !== "failed" &&
+    (resume === "missing" || coverLetter === "missing")
+  ) {
+    // After generation is kicked off, transient missing records shouldn't be treated as a terminal partial state.
+    return "generating";
+  }
   if (resume === "completed" && coverLetter === "completed") return "generated";
   if (resume === "failed" && coverLetter === "failed") return "failed";
   const hasOutcome =
@@ -1008,7 +1019,7 @@ export function OpportunityMapSection({
     [canonicalCoverage?.unverifiedRequirements],
   );
   const blockedByEvidence = readiness.status === "blocked";
-  const lowFitScore = typeof score === "number" && score < 70;
+  const lowFitScore = typeof score === "number" && !isDocumentGenerationUnlocked(score);
   const strongFitScore = typeof score === "number" && score >= 80;
   const isCompetitiveBlocked = Boolean(blockedState && blockedByEvidence && !lowFitScore && !strongFitScore);
   const readinessToneClass =
@@ -1021,7 +1032,7 @@ export function OpportunityMapSection({
   const fitDescriptor =
     typeof score === "number" && score >= 80
       ? "Strong fit"
-      : typeof score === "number" && score >= 70
+      : typeof score === "number" && isDocumentGenerationUnlocked(score)
         ? "Competitive fit"
         : "This role needs more work";
   const readinessMessage =
@@ -2162,10 +2173,7 @@ export default function ResultsPage() {
   const activeScore = useMemo(() => {
     return resolveDisplayedFitScore(latest);
   }, [latest]);
-  const isQualified =
-    typeof activeScore === "number" &&
-    activeScore >= 70 &&
-    (!generationReadiness.blocked || activeScore >= 80);
+  const isQualified = isDocumentGenerationUnlocked(activeScore);
   const studioLocked = searchParams?.get("locked") === "1";
 
   const scoreBreakdown = useMemo(() => {
@@ -2529,6 +2537,9 @@ export default function ResultsPage() {
     resume: ResultsArtifactStatus;
     coverLetter: ResultsArtifactStatus;
   }>({ resume: "missing", coverLetter: "missing" });
+  const [hasCompletedGeneration, setHasCompletedGeneration] = useState(false);
+  const hasCompletedGenerationRef = useRef(false);
+  const hasStartedGenerationRef = useRef(false);
   const generationRequestedAtRef = useRef<number | null>(null);
   const generationRecoveryRequestIdRef = useRef(0);
   const [generationRecoveryStage, setGenerationRecoveryStage] =
@@ -2572,7 +2583,7 @@ export default function ResultsPage() {
     [productDecisionState.renderedGenerationReadiness],
   );
   const canOpenStudio = canonicalResultsDecision.readinessState !== "BLOCKED";
-  const shouldAutoRecoverGeneration = typeof activeScore === "number" && activeScore >= 80;
+  const shouldAutoRecoverGeneration = isDocumentGenerationUnlocked(activeScore);
   const generationRecoveryInProgress =
     shouldAutoRecoverGeneration &&
     generationRecoveryStage !== "idle" &&
@@ -2597,6 +2608,48 @@ export default function ResultsPage() {
       analysisId: analysisIdValue,
     };
   }, [latest?.assessmentId, latest?.baselineId, latest?.baselineVersionId, latest?.jobId]);
+  const generationPairKey = useMemo(() => {
+    if (!generationPairIds) return null;
+    return `${generationPairIds.baselineId}:${generationPairIds.baselineVersionId}:${generationPairIds.jobId}:${generationPairIds.analysisId}`;
+  }, [generationPairIds]);
+
+  const applyArtifactSnapshot = useCallback(
+    (statuses: { resume: ResultsArtifactStatus; coverLetter: ResultsArtifactStatus }, phase: ResultsGenerationPhase) => {
+      const completed =
+        statuses.resume === "completed" && statuses.coverLetter === "completed";
+      if (completed) {
+        if (!hasCompletedGenerationRef.current) {
+          hasCompletedGenerationRef.current = true;
+          setHasCompletedGeneration(true);
+        }
+        setResultsArtifactStatuses(statuses);
+        setResultsGenerationPhase("generated");
+        setGenerationRecoveryStage("idle");
+        setGenerationRecoveryExhausted(false);
+        return;
+      }
+
+      if (hasCompletedGenerationRef.current) {
+        // Once completion is reached, ignore partial polling frames that may not include all artifacts.
+        return;
+      }
+
+      setResultsArtifactStatuses(statuses);
+      setResultsGenerationPhase(phase);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    hasCompletedGenerationRef.current = false;
+    hasStartedGenerationRef.current = false;
+    generationRequestedAtRef.current = null;
+    setHasCompletedGeneration(false);
+    setResultsArtifactStatuses({ resume: "missing", coverLetter: "missing" });
+    setResultsGenerationPhase("not_started");
+    setGenerationRecoveryStage("idle");
+    setGenerationRecoveryExhausted(false);
+  }, [generationPairKey]);
   const studioHrefFromLatest = useMemo(() => {
     if (!generationPairIds) return studioHref;
     return getStudioHref({
@@ -2616,6 +2669,7 @@ export default function ResultsPage() {
   );
   useEffect(() => {
     if (!generationPairIds) return;
+    if (hasCompletedGenerationRef.current) return;
 
     let cancelled = false;
     const fetchArtifacts = async () => {
@@ -2630,19 +2684,17 @@ export default function ResultsPage() {
         if (cancelled) return;
         if (!response.ok) return;
         const statuses = deriveResultsArtifactStatuses(payload);
+        const generationStarted =
+          hasStartedGenerationRef.current || typeof generationRequestedAtRef.current === "number";
         const derivedPhase = deriveResultsGenerationPhase(statuses, {
           recoveryInProgress:
             shouldAutoRecoverGeneration &&
             generationRecoveryStage !== "idle" &&
             generationRecoveryStage !== "exhausted" &&
             !generationRecoveryExhausted,
+          generationStarted,
         });
-        const requestedAt = generationRequestedAtRef.current;
-        const withinGrace = typeof requestedAt === "number" && Date.now() - requestedAt < 12_000;
-        const phase =
-          derivedPhase === "not_started" && withinGrace ? ("generating" as const) : derivedPhase;
-        setResultsArtifactStatuses(statuses);
-        setResultsGenerationPhase(phase);
+        applyArtifactSnapshot(statuses, derivedPhase);
       } catch {
         // Best effort only.
       }
@@ -2653,10 +2705,17 @@ export default function ResultsPage() {
     return () => {
       cancelled = true;
     };
-  }, [generationPairIds, generationRecoveryExhausted, generationRecoveryStage, shouldAutoRecoverGeneration]);
+  }, [
+    applyArtifactSnapshot,
+    generationPairIds,
+    generationRecoveryExhausted,
+    generationRecoveryStage,
+    shouldAutoRecoverGeneration,
+  ]);
 
   useEffect(() => {
     if (!generationPairIds) return;
+    if (hasCompletedGenerationRef.current) return;
     if (resultsGenerationPhase !== "generating") return;
 
     let cancelled = false;
@@ -2672,20 +2731,19 @@ export default function ResultsPage() {
         const payload = await readResponsePayload(response);
         if (!response.ok) return;
         const statuses = deriveResultsArtifactStatuses(payload);
+        const generationStarted =
+          hasStartedGenerationRef.current || typeof generationRequestedAtRef.current === "number";
         const derivedPhase = deriveResultsGenerationPhase(statuses, {
           recoveryInProgress:
             shouldAutoRecoverGeneration &&
             generationRecoveryStage !== "idle" &&
             generationRecoveryStage !== "exhausted" &&
             !generationRecoveryExhausted,
+          generationStarted,
         });
-        const requestedAt = generationRequestedAtRef.current;
-        const withinGrace = typeof requestedAt === "number" && Date.now() - requestedAt < 12_000;
-        const phase =
-          derivedPhase === "not_started" && withinGrace ? ("generating" as const) : derivedPhase;
-        setResultsArtifactStatuses(statuses);
-        setResultsGenerationPhase(phase);
-        if (phase !== "generating") {
+        applyArtifactSnapshot(statuses, derivedPhase);
+        const terminalPhase = hasCompletedGenerationRef.current ? "generated" : derivedPhase;
+        if (terminalPhase !== "generating") {
           window.clearInterval(interval);
         }
       } catch {
@@ -2698,6 +2756,7 @@ export default function ResultsPage() {
       window.clearInterval(interval);
     };
   }, [
+    applyArtifactSnapshot,
     generationPairIds,
     generationRecoveryExhausted,
     generationRecoveryStage,
@@ -2787,7 +2846,7 @@ export default function ResultsPage() {
   const canShowEvidenceExpansion = useMemo(
     () =>
       typeof activeScore === "number" &&
-      activeScore >= 70 &&
+      isDocumentGenerationUnlocked(activeScore) &&
       canonicalUnverifiedRequirements.length > 0 &&
       activeScore < 80,
     [activeScore, canonicalUnverifiedRequirements.length],
@@ -2880,7 +2939,7 @@ export default function ResultsPage() {
     const shouldShowRefinementGuidance =
       recentIntent === "refine_intent" || recentIntent === "used_not_committed";
     if (
-      !((typeof activeScore === "number" && activeScore >= 70 && resultsReadiness.status !== "ready") || shouldShowRefinementGuidance)
+      !((isDocumentGenerationUnlocked(activeScore) && resultsReadiness.status !== "ready") || shouldShowRefinementGuidance)
     ) {
       return [];
     }
@@ -2955,7 +3014,9 @@ export default function ResultsPage() {
     summarySnippet,
   ]);
   const isStrongFitScore = typeof activeScore === "number" && activeScore >= 80;
-  const shouldTreatGenerationAsSystemOwned = isStrongFitScore && shouldAutoRecoverGeneration;
+  const shouldTreatGenerationAsSystemOwned = shouldAutoRecoverGeneration;
+  const hasArtifactFailure =
+    resultsArtifactStatuses.resume === "failed" || resultsArtifactStatuses.coverLetter === "failed";
   const suppressFailureUiDuringRecovery =
     shouldTreatGenerationAsSystemOwned && generationRecoveryInProgress && !generationRecoveryExhausted;
   const suppressFailureUiUntilRecoveryStarts =
@@ -2963,7 +3024,8 @@ export default function ResultsPage() {
     !generationRecoveryExhausted &&
     (generationRecoveryInProgress ||
       effectiveResultsGenerationPhase === "failed" ||
-      effectiveResultsGenerationPhase === "partial");
+      effectiveResultsGenerationPhase === "partial" ||
+      (resultsGenerationPhase === "generating" && hasArtifactFailure));
   const generationCuePhase: ResultsGenerationPhase = suppressFailureUiDuringRecovery
     ? "generating"
     : effectiveResultsGenerationPhase;
@@ -2973,7 +3035,7 @@ export default function ResultsPage() {
     !(
       resultsReadiness.status === "blocked" &&
       typeof activeScore === "number" &&
-      activeScore >= 70 &&
+      isDocumentGenerationUnlocked(activeScore) &&
       activeScore < 80
     );
   const discoveredRoles = useMemo(
@@ -2990,7 +3052,9 @@ export default function ResultsPage() {
       return "We hit an issue generating your documents.";
     }
     if (generationCuePhase === "generating") {
-      return suppressFailureUiDuringRecovery ? "Finalizing your documents..." : "Generating your documents...";
+      return suppressFailureUiDuringRecovery || suppressFailureUiUntilRecoveryStarts
+        ? "Finalizing your documents..."
+        : "Generating your documents...";
     }
     if (generationCuePhase === "generated") {
       return "Your documents are ready.";
@@ -3023,7 +3087,8 @@ export default function ResultsPage() {
     () => (typeof activeScore === "number" ? getScoreBand(activeScore) : undefined),
     [activeScore],
   );
-  const isGenerationBlocked = resultsReadiness.status === "blocked" && !isStrongFitScore;
+  const isGenerationBlocked =
+    resultsReadiness.status === "blocked" && !isDocumentGenerationUnlocked(activeScore);
   const effectiveReadinessStatus: GenerationReadiness["status"] = resultsReadiness.status;
   useEffect(() => {
     if (!showImprovementModule) return;
@@ -3043,7 +3108,7 @@ export default function ResultsPage() {
     [latest],
   );
   const primaryNextAction = canonicalResultsDecision.nextAction;
-  const isWeakFitScore = typeof activeScore === "number" && activeScore < 70;
+  const isWeakFitScore = typeof activeScore === "number" && !isDocumentGenerationUnlocked(activeScore);
   const isCompetitiveBlocked = isGenerationBlocked && !isWeakFitScore;
   const { isGuidedActive, syncWithNextAction, completeGuidedMode, advanceStep } = useGuidedMode();
   useEffect(() => {
@@ -3157,11 +3222,21 @@ export default function ResultsPage() {
     async (opts?: { force?: boolean }) => {
       if (!generationPairIds) return;
       if (!shouldAutoRecoverGeneration) return;
+      if (hasCompletedGenerationRef.current) return;
       if (resultsGenerationPhase === "generating" && !opts?.force) return;
+
+      const needsResume =
+        resultsArtifactStatuses.resume === "missing" || resultsArtifactStatuses.resume === "failed";
+      const needsCoverLetter =
+        resultsArtifactStatuses.coverLetter === "missing" || resultsArtifactStatuses.coverLetter === "failed";
+      if (!needsResume && !needsCoverLetter) {
+        return;
+      }
 
       const requestId = generationRecoveryRequestIdRef.current + 1;
       generationRecoveryRequestIdRef.current = requestId;
 
+      hasStartedGenerationRef.current = true;
       setGenerationRecoveryExhausted(false);
       setGenerationRecoveryStage("primary_attempt");
       generationRequestedAtRef.current = Date.now();
@@ -3215,7 +3290,10 @@ export default function ResultsPage() {
       };
 
       try {
-        const first = await attempt("primary");
+        const first = await attempt("primary", [
+          ...(needsResume ? (["resume"] as const) : []),
+          ...(needsCoverLetter ? (["coverLetter"] as const) : []),
+        ]);
         if (generationRecoveryRequestIdRef.current !== requestId) return;
         if (first.resumeOk && first.coverOk) {
           setGenerationRecoveryStage("idle");
@@ -3252,7 +3330,7 @@ export default function ResultsPage() {
         setGenerationRecoveryExhausted(true);
       }
     },
-    [generationPairIds, resultsGenerationPhase, shouldAutoRecoverGeneration],
+    [generationPairIds, resultsArtifactStatuses.coverLetter, resultsArtifactStatuses.resume, resultsGenerationPhase, shouldAutoRecoverGeneration],
   );
 
   useEffect(() => {
@@ -3260,13 +3338,16 @@ export default function ResultsPage() {
     if (!generationPairIds) return;
     if (generationRecoveryExhausted) return;
     if (generationRecoveryStage !== "idle") return;
-    if (resultsGenerationPhase !== "failed" && resultsGenerationPhase !== "partial") return;
+    const hasArtifactFailure =
+      resultsArtifactStatuses.resume === "failed" || resultsArtifactStatuses.coverLetter === "failed";
+    if (!hasArtifactFailure) return;
     void runGenerationRecovery({ force: true });
   }, [
     generationPairIds,
     generationRecoveryExhausted,
     generationRecoveryStage,
-    resultsGenerationPhase,
+    resultsArtifactStatuses.coverLetter,
+    resultsArtifactStatuses.resume,
     runGenerationRecovery,
     shouldTreatGenerationAsSystemOwned,
   ]);
@@ -3314,8 +3395,13 @@ export default function ResultsPage() {
       analysisId: generationPairIds?.analysisId ?? null,
     });
 
+    if (hasCompletedGenerationRef.current) {
+      router.push(studioHrefFromLatest);
+      return;
+    }
+
     if (shouldAutoRecoverGeneration) {
-      void runGenerationRecovery({ force: true });
+      void runGenerationRecovery(generationRecoveryExhausted ? { force: true } : undefined);
       return;
     }
 
@@ -3328,6 +3414,7 @@ export default function ResultsPage() {
     canonicalResultsDecision.primaryAction.destination,
     canonicalResultsDecision.primaryAction.label,
     canonicalResultsDecision.primaryAction.type,
+    generationRecoveryExhausted,
     generationPairIds?.analysisId,
     generationPairIds?.baselineId,
     generationPairIds?.jobId,
@@ -4244,7 +4331,7 @@ export default function ResultsPage() {
     const previousScore = reanalysisDelta.previousScore;
     const currentScoreValue = reanalysisDelta.currentScore;
     if (typeof previousScore !== "number" || typeof currentScoreValue !== "number") return;
-    const upgraded = (previousScore < 70 && currentScoreValue >= 70) || currentScoreValue >= 85;
+    const upgraded = (previousScore <= 70 && currentScoreValue > 70) || currentScoreValue >= 85;
     if (!upgraded) return;
     const baselineIdValue = latest?.baselineId?.trim() ?? "";
     const jobIdValue = latest?.jobId?.trim() ?? "";
@@ -4513,7 +4600,7 @@ export default function ResultsPage() {
                 >
                   Generating...
                 </span>
-              ) : effectiveResultsGenerationPhase === "generated" || effectiveResultsGenerationPhase === "partial" ? (
+              ) : effectiveResultsGenerationPhase === "generated" ? (
                 <a
                   data-testid="results-hero-primary-cta"
                   href={studioHrefFromLatest}
@@ -4524,6 +4611,26 @@ export default function ResultsPage() {
                 >
                   Open in Studio
                 </a>
+              ) : effectiveResultsGenerationPhase === "partial" ? (
+                shouldAutoRecoverGeneration && !generationRecoveryExhausted ? (
+                  <span
+                    data-testid="results-hero-primary-cta"
+                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2 text-sm font-semibold text-slate-200"
+                  >
+                    Finalizing...
+                  </span>
+                ) : (
+                  <a
+                    data-testid="results-hero-primary-cta"
+                    href={studioHrefFromLatest}
+                    onClick={() => {
+                      oneClickResultsCta.onClick?.();
+                    }}
+                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                  >
+                    Open in Studio
+                  </a>
+                )
               ) : effectiveResultsGenerationPhase === "failed" ? (
                 <button
                   type="button"

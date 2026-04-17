@@ -1,5 +1,6 @@
 import { buildCoverLetterParagraphs, trimToString } from "@/src/lib/studio/helpers";
 import { sanitizeRenderedTextList } from "@/lib/renderedText";
+import { isDocumentGenerationUnlocked } from "@/lib/documentGenerationGate";
 
 type TrustGateParams = {
   score: number | null;
@@ -219,11 +220,11 @@ export function evaluateStudioTrustGate(params: TrustGateParams): TrustGateDecis
   const roleAlignmentLabel: TrustGateDecision["roleAlignmentLabel"] =
     params.score !== null && params.score >= 90
       ? "strong match"
-      : params.score !== null && params.score >= 80
+      : isDocumentGenerationUnlocked(params.score)
         ? "competitive"
         : "needs improvement";
 
-  if (params.score === null || params.score < 80) {
+  if (!isDocumentGenerationUnlocked(params.score)) {
     return {
       allowed: false,
       reason: "You need to improve your fit before generating materials.",

@@ -1,4 +1,5 @@
 import { resolveCanonicalState } from "@/lib/canonicalDecision";
+import { isDocumentGenerationUnlocked } from "@/lib/documentGenerationGate";
 import { getFitReviewHref, getStudioHref } from "@/src/navigation/routes";
 
 export type NextActionType =
@@ -22,7 +23,9 @@ export type NextAction = {
 
 export function getCanonicalNextAction(input: NextActionInput): NextAction {
   const score = typeof input.fitScore === "number" && Number.isFinite(input.fitScore) ? input.fitScore : null;
-  const generationReady = Boolean(input.generationReady && input.trustGateAllowed && (score === null || score >= 70));
+  const generationReady = Boolean(
+    input.generationReady && input.trustGateAllowed && (score === null || isDocumentGenerationUnlocked(score)),
+  );
   const canonical = resolveCanonicalState({
     surface: "studio",
     baselineId: null,

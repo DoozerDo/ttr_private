@@ -1,9 +1,9 @@
 import { buildGenerationProductReadiness } from "@/lib/generationProductReadiness";
 
 describe("generation product readiness contract", () => {
-  it("fails closed below 80", () => {
+  it("fails closed at or below 70", () => {
     const readiness = buildGenerationProductReadiness({
-      score: 79,
+      score: 70,
       authorityState: "READY",
       hasCanonicalAssessment: true,
       hasRequiredContext: true,
@@ -19,9 +19,9 @@ describe("generation product readiness contract", () => {
     expect(readiness.tier).toBe("fit_review_only");
   });
 
-  it("unlocks studio and generation at 80+ when readiness is ready", () => {
+  it("unlocks studio and generation over 70 when readiness is ready", () => {
     const readiness = buildGenerationProductReadiness({
-      score: 80,
+      score: 71,
       authorityState: "READY",
       hasCanonicalAssessment: true,
       hasRequiredContext: true,
@@ -55,29 +55,29 @@ describe("generation product readiness contract", () => {
     expect(readiness.generationMode).toBe("draft");
   });
 
-  it("allows generation at 80+ when readiness is ready and export for pro", () => {
-    const score80 = buildGenerationProductReadiness({
-      score: 80,
+  it("allows generation over 70 when readiness is ready and export for pro", () => {
+    const scoreUnlocked = buildGenerationProductReadiness({
+      score: 71,
       authorityState: "READY",
       hasCanonicalAssessment: true,
       hasRequiredContext: true,
       isPro: true,
     });
-    const score80NonPro = buildGenerationProductReadiness({
-      score: 80,
+    const scoreUnlockedNonPro = buildGenerationProductReadiness({
+      score: 71,
       authorityState: "READY",
       hasCanonicalAssessment: true,
       hasRequiredContext: true,
       isPro: false,
     });
 
-    expect(score80.generation_readiness.canGenerate).toBe(true);
-    expect(score80.generation_readiness.canExport).toBe(true);
-    expect(score80.tier).toBe("generation_export_allowed");
+    expect(scoreUnlocked.generation_readiness.canGenerate).toBe(true);
+    expect(scoreUnlocked.generation_readiness.canExport).toBe(true);
+    expect(scoreUnlocked.tier).toBe("generation_export_allowed");
 
-    expect(score80NonPro.generation_readiness.canGenerate).toBe(true);
-    expect(score80NonPro.generation_readiness.canExport).toBe(false);
-    expect(score80NonPro.tier).toBe("generation_allowed");
+    expect(scoreUnlockedNonPro.generation_readiness.canGenerate).toBe(true);
+    expect(scoreUnlockedNonPro.generation_readiness.canExport).toBe(false);
+    expect(scoreUnlockedNonPro.tier).toBe("generation_allowed");
   });
 
   it("blocks generation when required context is missing", () => {

@@ -4,6 +4,7 @@ import type {
   GenerationProductConfidence,
   GenerationProductReadinessState,
 } from "@/lib/generationProductReadiness";
+import { isDocumentGenerationUnlocked } from "@/lib/documentGenerationGate";
 import { getFitReviewHref, getStudioHref } from "@/src/navigation/routes";
 
 export type ResultsDecisionState = "BLOCKED" | "READY" | "IMPROVE" | "DRAFT";
@@ -26,8 +27,8 @@ export interface ResultsDecision {
 
 export function resolveResultsDecision(input: ResultsDecisionInput): ResultsDecision {
   const score = typeof input.score === "number" && Number.isFinite(input.score) ? input.score : null;
-  const scoreFloorBlocked = score !== null && score < 80;
-  const generationAllowed = score !== null && score >= 80;
+  const generationAllowed = isDocumentGenerationUnlocked(score);
+  const scoreFloorBlocked = score !== null && !generationAllowed;
   const canonical = resolveCanonicalState({
     surface: "results",
     baselineId: null,

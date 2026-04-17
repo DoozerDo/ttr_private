@@ -1,5 +1,6 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
+
 import ResultsPage from "@/app/(app)/results/page";
 import { overrideSearchParams, setFetchImplementation } from "@/tests/setup";
 
@@ -154,7 +155,7 @@ function installFetch(input: {
 }
 
 describe("results gating", () => {
-  it("opens a first-run draft instead of hard-blocking when evidence is incomplete", async () => {
+  it("treats score over 70 as generation-unlocked even when readiness is blocked", async () => {
     overrideSearchParams({ assessmentId: "analysis-current" });
     const fetchMock = installFetch({
       score: 72,
@@ -166,7 +167,9 @@ describe("results gating", () => {
 
     render(<ResultsPage />);
 
-    expect(screen.queryByRole("button", { name: "Generate Documents" })).toBeNull();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
+    });
   });
 
   it("shows qualified strong fit as generation ready even when verification remains weak", async () => {
@@ -193,7 +196,7 @@ describe("results gating", () => {
     expect(screen.getAllByText("Strong match. Ready for document generation.").length).toBeGreaterThan(0);
   });
 
-  it("shows a competitive blocked state with concrete readiness drivers", async () => {
+  it("does not hard-block over-70 results into a competitive blocked evidence state", async () => {
     overrideSearchParams({ assessmentId: "analysis-current" });
     const fetchMock = installFetch({
       score: 74,
@@ -208,24 +211,6 @@ describe("results gating", () => {
           baselineEvidence: null,
           reasoning: "Leadership scope needs stronger grounding.",
         },
-        {
-          gapId: "gap-2",
-          title: "Incident ownership",
-          description: "Clarify escalation and triage ownership.",
-          severityScore: 0.8,
-          requirementEvidence: "Clarify your role in escalation, triage, restoration, or problem management.",
-          baselineEvidence: null,
-          reasoning: "Incident ownership needs stronger grounding.",
-        },
-        {
-          gapId: "gap-3",
-          title: "Measured outcomes",
-          description: "Add metrics or concrete results.",
-          severityScore: 0.7,
-          requirementEvidence: "Add metrics or concrete results tied to the work.",
-          baselineEvidence: null,
-          reasoning: "Measured outcomes need stronger grounding.",
-        },
       ],
       readinessStatus: "blocked",
       readinessBlocked: true,
@@ -235,34 +220,9 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getAllByText("Promising fit. Not ready to generate yet.").length).toBeGreaterThan(0);
+      expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
     });
-    const blockedPanel = screen.getByTestId("results-blocked-evidence-panel");
-    expect(
-      within(blockedPanel).getByText(
-        "Your score is strong enough to continue, but we need clearer evidence before Studio can create accurate, defensible output.",
-      ),
-    ).toBeInTheDocument();
-    expect(within(blockedPanel).getByText("Leadership scope")).toBeInTheDocument();
-    expect(within(blockedPanel).getByText("Clarify team size, ownership span, or operational scope.")).toBeInTheDocument();
-    expect(within(blockedPanel).getByText("Incident ownership")).toBeInTheDocument();
-    expect(
-      within(blockedPanel).getByText("Clarify your role in escalation, triage, restoration, or problem management."),
-    ).toBeInTheDocument();
-    expect(within(blockedPanel).getByText("Measured outcomes")).toBeInTheDocument();
-    expect(within(blockedPanel).getByText("Add metrics or concrete results tied to the work.")).toBeInTheDocument();
-    expect(
-      screen.getAllByText(
-        "Your score is strong enough to continue, but we need clearer evidence before Studio can create accurate, defensible output.",
-      ).length,
-    ).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: "View top drivers" }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: "Start Fit Review" }).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("link", { name: "Apply to this role" })).toBeNull();
-    expect(screen.queryByText("Apply moment")).toBeNull();
-    expect(screen.queryByTestId("results-improvement-cta")).toBeNull();
-    expect(screen.getAllByText("You’ll address this in Fit Review.").length).toBeGreaterThan(0);
-    expect(screen.queryByText(/verified evidence|key claims/i)).toBeNull();
+    expect(screen.queryByTestId("results-blocked-evidence-panel")).toBeNull();
   });
 
   it("routes ready results to Studio and suppresses recovery guidance when evidence is verified", async () => {
@@ -315,7 +275,6 @@ describe("results gating", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
     });
-    expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
     expect(screen.queryByText("How to improve your fit")).toBeNull();
     expect(screen.queryByText("Apply moment")).toBeNull();
@@ -347,4 +306,21 @@ describe("results gating", () => {
     });
     expect(screen.queryByRole("button", { name: "Generate Documents" })).toBeNull();
   });
+
+  it("keeps score at 70 gated from document generation", async () => {
+    overrideSearchParams({ assessmentId: "analysis-current" });
+    const fetchMock = installFetch({
+      score: 70,
+      readinessStatus: "ready",
+      readinessBlocked: false,
+    });
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    render(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Generate Documents" })).toBeNull();
+    });
+  });
 });
+

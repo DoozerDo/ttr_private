@@ -9,6 +9,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { PageShell } from '@/components/PageShell';
 import { TextInput } from '@/components/TextInput';
 import { sanitizeRenderedTextValue } from '@/lib/renderedText';
+import { isDocumentGenerationUnlocked } from '@/lib/documentGenerationGate';
 
 type JobTrackerEntry = {
   id: string;
@@ -142,8 +143,8 @@ function getProgressChecks(entry: JobTrackerEntry): ProgressCheck[] {
   const stageOrder = canonicalStage ? STAGE_PROGRESS_ORDER[canonicalStage] : 0;
 
   return [
-    { id: 'resume', label: 'Resume ready', complete: score >= 70 },
-    { id: 'cover', label: 'Cover letter ready', complete: score >= 70 },
+    { id: 'resume', label: 'Resume ready', complete: isDocumentGenerationUnlocked(score) },
+    { id: 'cover', label: 'Cover letter ready', complete: isDocumentGenerationUnlocked(score) },
     { id: 'applied', label: 'Applied', complete: stageOrder >= STAGE_PROGRESS_ORDER.Applied },
     {
       id: 'prep',

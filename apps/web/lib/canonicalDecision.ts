@@ -2,6 +2,7 @@ import type { BaselineAssessmentSummaryDto } from "@/lib/baselines";
 import type { GenerationReadiness } from "@/lib/generationReadiness";
 import type { GenerationProductReadiness } from "@/lib/generationProductReadiness";
 import type { DecisionFlowDataSource } from "@/lib/decisionFlowDebug";
+import { isDocumentGenerationUnlocked } from "@/lib/documentGenerationGate";
 import { getFitReviewHref, getResultsHref, getStudioHref } from "@/src/navigation/routes";
 import {
   resolveWorkflowProgression,
@@ -236,7 +237,7 @@ function buildAnalysisNextAction(input: {
   forceFitReview?: boolean;
 }): CanonicalNextAction {
   const score = typeof input.score === "number" && Number.isFinite(input.score) ? input.score : null;
-  const qualifiedForGeneration = score !== null && score >= 80;
+  const qualifiedForGeneration = isDocumentGenerationUnlocked(score);
 
   if (input.surface === "target") {
     if (!qualifiedForGeneration) {
@@ -244,7 +245,7 @@ function buildAnalysisNextAction(input: {
         type: "resolve_gaps",
         label: "Start Fit Review",
         route: input.fitReviewHref,
-        reason: score === null ? "score unavailable" : "score below 80",
+        reason: score === null ? "score unavailable" : "score at/below unlock floor",
       };
     }
 
@@ -271,7 +272,12 @@ function buildAnalysisNextAction(input: {
         type: "fit_review",
         label: "Start Fit Review",
         route: input.fitReviewHref,
-        reason: input.forceFitReview ? "forced fit review" : score === null ? "score unavailable" : "score below 80",
+        reason:
+          input.forceFitReview
+            ? "forced fit review"
+            : score === null
+              ? "score unavailable"
+              : "score at/below unlock floor",
       };
     }
 
@@ -497,7 +503,11 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
     hasJobDescription: Boolean(input.jobId),
     isGenerationBlocked:
       input.surface === "results"
-        ? input.forceFitReview || score === null || score < 70 || !input.productReadiness.canOpenStudio || input.generationReadiness.status !== "ready"
+        ? input.forceFitReview ||
+          score === null ||
+          !isDocumentGenerationUnlocked(score) ||
+          !input.productReadiness.canOpenStudio ||
+          input.generationReadiness.status !== "ready"
         : !studioCanGenerateDocuments || !input.productReadiness.canOpenStudio,
     routes: progressionRoutes,
     dataSource: input.dataSource ?? "fresh",
@@ -507,7 +517,7 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
     analysisBaselineVersionId: analysisCandidate?.baselineVersionId ?? null,
     persistedAssessmentId: input.persistedAssessmentId ?? null,
   });
-  const qualifiedForGeneration = score !== null && score >= 80;
+  const qualifiedForGeneration = isDocumentGenerationUnlocked(score);
   const nextAction = resolveNextAction(input);
   return {
     surface: input.surface,
@@ -635,7 +645,7 @@ function mapWorkflowStateToReadinessState(
   generationReadiness: GenerationReadiness | null | undefined,
   forceFitReview?: boolean,
 ): CanonicalReadinessState {
-  const qualifiedForGeneration = score !== null && score >= 80;
+  const qualifiedForGeneration = isDocumentGenerationUnlocked(score);
   switch (workflowState) {
     case "analysis_in_progress":
     case "generation_running":
@@ -667,7 +677,7 @@ function mapWorkflowStateToReadinessState(
           ? "DRAFT"
           : "IMPROVE";
     case "results_ready":
-      if (forceFitReview || score === null || score < 80) return "IMPROVE";
+      if (forceFitReview || score === null || !isDocumentGenerationUnlocked(score)) return "IMPROVE";
       if (!productReadiness?.canOpenStudio) return "BLOCKED";
       return score >= 90 || productReadiness?.confidence === "HIGH" ? "READY" : "DRAFT";
     default:

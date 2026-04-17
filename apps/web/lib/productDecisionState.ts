@@ -13,6 +13,7 @@ import {
   type CanonicalDecisionResult,
   type CanonicalSurface,
 } from "@/lib/canonicalDecision";
+import { isDocumentGenerationUnlocked } from "@/lib/documentGenerationGate";
 import {
   assertCanonicalRouteHref,
   getFitReviewHref,
@@ -156,7 +157,7 @@ function buildCanonicalRoutes(
       highlightClaim: routeContext.highlightClaim ?? null,
       locked: routeContext.locked ?? null,
     }),
-    state: typeof input.score === "number" && input.score >= 80 ? "READY" : "BLOCKED",
+    state: isDocumentGenerationUnlocked(input.score) ? "READY" : "BLOCKED",
     baselineId: routeContext.baselineId ?? input.baselineId,
     jobId: routeContext.jobId ?? input.jobId,
     entrySource: surface,
@@ -178,7 +179,7 @@ function buildCanonicalRoutes(
       analysisId: routeContext.analysisId ?? input.analysisAssessmentId ?? null,
       highlightClaim: routeContext.highlightClaim ?? null,
     }),
-    state: typeof input.score === "number" && input.score >= 80 ? "READY" : "BLOCKED",
+    state: isDocumentGenerationUnlocked(input.score) ? "READY" : "BLOCKED",
     baselineId: routeContext.baselineId ?? input.baselineId,
     jobId: routeContext.jobId ?? input.jobId,
     entrySource: surface,
@@ -202,7 +203,7 @@ function buildCanonicalRoutes(
       analysisId: routeContext.analysisId ?? input.analysisAssessmentId ?? null,
       fromUnlock: routeContext.fromUnlock,
     }),
-    state: typeof input.score === "number" && input.score >= 80 ? "READY" : "BLOCKED",
+    state: isDocumentGenerationUnlocked(input.score) ? "READY" : "BLOCKED",
     baselineId: routeContext.baselineId ?? input.baselineId,
     jobId: routeContext.jobId ?? input.jobId,
     entrySource: surface,

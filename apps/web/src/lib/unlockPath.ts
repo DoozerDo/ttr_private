@@ -1,3 +1,5 @@
+import { isDocumentGenerationUnlocked } from "@/lib/documentGenerationGate";
+
 export type UnlockPathModuleState = "LOCKED" | "CURRENT" | "UNLOCKED" | "COMPLETE";
 
 export type UnlockPathResolvedState = {
@@ -36,12 +38,15 @@ export function resolveUnlockPathState(input: UnlockPathInput): UnlockPathResolv
 
   const score = typeof input.score === "number" ? input.score : null;
   const readinessReady = input.readinessStatus === "ready";
-  const studioEligible = score !== null && score >= 70 && readinessReady;
+  const studioEligible = isDocumentGenerationUnlocked(score);
   const hasActiveBaseline = input.baselineReady;
   const fitReviewRelevant = score !== null;
   const fitReviewCurrent =
-    hasActiveBaseline && fitReviewRelevant && (score < 70 || (score >= 70 && !readinessReady));
-  const fitReviewComplete = hasActiveBaseline && fitReviewRelevant && score >= 70 && readinessReady;
+    hasActiveBaseline &&
+    fitReviewRelevant &&
+    (!isDocumentGenerationUnlocked(score) || (isDocumentGenerationUnlocked(score) && !readinessReady));
+  const fitReviewComplete =
+    hasActiveBaseline && fitReviewRelevant && isDocumentGenerationUnlocked(score) && readinessReady;
 
   const baseline: UnlockPathModuleState =
     isBaselineRoute ? "CURRENT" : input.baselineReady ? "COMPLETE" : "LOCKED";
