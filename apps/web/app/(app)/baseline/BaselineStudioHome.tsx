@@ -566,7 +566,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   }, [hasBaseline, hasCompletedAnalysis]);
   const isValidatedBaselineState = heroState === "analysis_exists";
   const canReplaceActiveBaseline = isValidatedBaselineState || !uploadLimitReached;
-  const baselineLibrarySectionTitle = "Baseline library";
+  const baselineLibrarySectionTitle = "Other baselines";
   const activeBaselineVersionLabel = `Version ${primaryBaseline?.versionNumber ?? primaryBaseline?.version ?? 1} (current)`;
   const baselineReadinessDataSource = primaryBaselineReadiness.dataSource;
   const baselineReadinessAnalyticsPayload = useMemo(
@@ -1424,9 +1424,9 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             <article className="rounded-[16px] border border-white/10 bg-slate-950/30 p-4">
               <ResumeWithBaselineStatus
                 filename={primaryBaseline.originalFilename}
-                isValidated={hasCompletedAnalysis}
                 isReadyForTargeting={primaryBaselineReadiness.readinessState === "READY"}
-                showValidatedBadge={false}
+                isActiveBaseline
+                showNeedsReviewBadge={primaryBaselineReadiness.readinessState !== "READY"}
               />
                 {latestAssessmentCreatedAt ? (
                   <p className="mt-2 text-xs text-slate-400">Last analyzed {formatDateTime(latestAssessmentCreatedAt)}</p>
@@ -1465,8 +1465,13 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             </article>
           </section>
         ) : null}
-        <section className="rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
-          <h2 className="text-lg font-semibold text-slate-100">What is a baseline?</h2>
+        <details
+          className="rounded-[22px] border border-white/10 bg-slate-900/25 p-5"
+          open={!primaryBaseline}
+        >
+          <summary className="cursor-pointer text-lg font-semibold text-slate-100">
+            What is a baseline?
+          </summary>
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             <div className="rounded-xl border border-white/10 bg-slate-950/30 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">How it works</p>
@@ -1475,7 +1480,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 We convert it into a structured baseline (the data we actually use).
               </p>
               <p className="mt-2 text-sm leading-6 text-slate-300">
-                Your current baseline is the active one used for scoring fit and generating tailored materials.
+                Your current baseline is the one used for scoring fit and generating tailored materials.
               </p>
             </div>
             <div className="rounded-xl border border-white/10 bg-slate-950/30 p-4">
@@ -1488,7 +1493,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
               </p>
             </div>
           </div>
-        </section>
+        </details>
         {activeBaselines.length > 0 ? (
           <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
             <header className="space-y-1">
@@ -1496,11 +1501,14 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 {baselineLibrarySectionTitle}
               </h2>
               <p className="text-sm text-slate-400">
-                Uploading a resume creates a new baseline. Set one baseline as current to use it across the app.
+                Uploading a resume creates a baseline. Set one as current to use across the app.
               </p>
             </header>
             <div className="space-y-3">
-              {activeBaselines.map((baseline) => {
+              {activeBaselines
+                .filter((baseline) => baseline.id !== primaryBaselineId)
+                .slice(0, 3)
+                .map((baseline) => {
                 const isPrimary = primaryBaselineId === baseline.id;
                 const isArchived = baseline.status === "ARCHIVED";
                 const assessmentSummary = baseline.latestAssessmentSummary;
@@ -1527,6 +1535,8 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                     : null;
                 const canOpenStudio = latestRoleFitScore !== null && latestRoleFitScore >= 70;
                 const isReadyBaseline = readinessState === "READY" && !isArchived;
+                const baselineTargetRoleHref = `/target?baselineId=${encodeURIComponent(baseline.id)}`;
+                const baselineDetailsHref = getBaselineDetailsHref(baseline.id);
 
                 return (
                   <article
@@ -1539,10 +1549,8 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   >
                     <ResumeWithBaselineStatus
                       filename={baseline.originalFilename}
-                      isActiveBaseline={isPrimary}
-                      isValidated={hasCompletedAssessment && isPrimary}
                       isReadyForTargeting={isReadyBaseline}
-                      isSourceForActiveBaseline={isValidatedBaselineState && isPrimary}
+                      showNeedsReviewBadge={!isReadyBaseline}
                     />
                     <p className="mt-1 text-xs text-slate-500">Created from: {baseline.originalFilename}</p>
                     <p className="mt-2 text-xs text-slate-400">Uploaded {formatDateTime(baseline.createdAt)}</p>
@@ -1559,25 +1567,9 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                     ) : null}
                     <div className="mt-4 space-y-3">
                       <div className="flex flex-wrap gap-2">
-                        {!isPrimary ? (
-                          <FormButton
-                            variant="ghost"
-                            onClick={() => setPrimaryBaselineId(baseline.id)}
-                            disabled={setActiveDisabled}
-                            className="uppercase"
-                          >
-                            {formatCardActionLabel("Set Active")}
-                          </FormButton>
-                        ) : null}
-                        <Link
-                          href={baselineDetailsHref}
-                          className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold uppercase text-slate-100 transition hover:bg-white/10"
-                        >
-                          {formatCardActionLabel("View Baseline Details")}
-                        </Link>
-                        {isArchived ? null : isReadyBaseline ? (
+                        {isReadyBaseline ? (
                           <Link
-                            href={targetRoleHref}
+                            href={baselineTargetRoleHref}
                             className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold uppercase text-cyan-50 transition hover:bg-cyan-400/15"
                           >
                             {formatCardActionLabel("Target a role")}
@@ -1588,32 +1580,34 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                             disabled={setActiveDisabled}
                             className="bg-indigo-600 uppercase text-white hover:bg-indigo-500"
                           >
-                            {formatCardActionLabel("Upload Another Resume")}
+                            {formatCardActionLabel("Set current")}
                           </FormButton>
                         )}
-                        {isReadyBaseline ? null : canTargetJob && !isArchived ? (
-                          <Link
-                            href={targetRoleHref}
-                            className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-cyan-300/20 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold uppercase text-cyan-50 transition hover:bg-cyan-400/15"
+                        <Link
+                          href={baselineDetailsHref}
+                          className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold uppercase text-slate-100 transition hover:bg-white/10"
+                        >
+                          {formatCardActionLabel("View baseline details")}
+                        </Link>
+                        {isReadyBaseline ? (
+                          <FormButton
+                            variant="ghost"
+                            onClick={() => setPrimaryBaselineId(baseline.id)}
+                            disabled={setActiveDisabled}
+                            className="uppercase"
                           >
-                            {formatCardActionLabel("Add Job Description")}
-                          </Link>
+                            {formatCardActionLabel("Set current")}
+                          </FormButton>
                         ) : null}
                         {isEditableLibrary ? (
-                          <>
-                            <FormButton
-                              variant="ghost"
-                              onClick={() => void handleArchiveBaseline(baseline.id)}
-                              disabled={archivingBaselineId === baseline.id || isArchived || isPrimary}
-                              className="uppercase"
-                            >
-                              {isArchived
-                                ? formatCardActionLabel("Archived")
-                                : archivingBaselineId === baseline.id
-                                  ? formatCardActionLabel("Archiving...")
-                                  : formatCardActionLabel("Archive")}
-                            </FormButton>
-                          </>
+                          <FormButton
+                            variant="ghost"
+                            onClick={() => void handleArchiveBaseline(baseline.id)}
+                            disabled={archivingBaselineId === baseline.id || isArchived || isPrimary}
+                            className="uppercase"
+                          >
+                            {archivingBaselineId === baseline.id ? "Archiving..." : "Archive"}
+                          </FormButton>
                         ) : null}
                       </div>
                       {latestResultsForBaselineHref ? (
@@ -1645,6 +1639,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   </article>
                 );
               })}
+              {!activeBaselines.some((baseline) => baseline.id !== primaryBaselineId) ? (
+                <p className="text-sm text-slate-400">
+                  No other baselines yet. Upload another resume to create one.
+                </p>
+              ) : null}
             </div>
           </section>
         ) : null}
