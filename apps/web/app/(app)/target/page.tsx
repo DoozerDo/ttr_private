@@ -124,7 +124,7 @@ export default async function TargetPage({ searchParams }: TargetPageProps) {
         <p className="max-w-3xl text-sm text-slate-300">
           {isMomentumEntry
             ? "Your baseline is ready. Paste the next job and we will score it."
-            : "Select a baseline, add a job description, and generate the score that powers Results, Studio, and the rest of the workflow."}
+            : "Select a baseline and a job description to generate a compatibility score."}
         </p>
         {isMomentumEntry && selectedBaseline ? (
           <div className="flex flex-wrap items-center gap-2">

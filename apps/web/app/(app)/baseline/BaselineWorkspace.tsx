@@ -146,6 +146,7 @@ export function BaselineWorkspace({
     baselineId: string;
     jobId: string;
   } | null>(null);
+  const [jobCount, setJobCount] = useState<number | null>(null);
   const momentumEntryViewedRef = useRef(false);
 
   useEffect(() => {
@@ -194,6 +195,8 @@ export function BaselineWorkspace({
     () => buildTargetWorkflowSteps(targetWorkflowState),
     [targetWorkflowState],
   );
+
+  const shouldCollapseForNoJobs = !isMomentumEntry && (jobCount === 0 || jobCount === null);
 
   const removeParamFromUrl = useCallback(
     (key: "baselineId" | "jobId") => {
@@ -302,7 +305,9 @@ export function BaselineWorkspace({
           "grid grid-cols-1 gap-6",
           isMomentumEntry
             ? "xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1.1fr)]"
-            : "xl:grid-cols-[minmax(0,1.8fr)_minmax(0,1.35fr)_minmax(280px,1fr)]",
+            : shouldCollapseForNoJobs
+              ? "xl:grid-cols-[minmax(0,1.8fr)_minmax(0,1.35fr)]"
+              : "xl:grid-cols-[minmax(0,1.8fr)_minmax(0,1.35fr)_minmax(280px,1fr)]",
         ].join(" ")}
         data-testid="target-workspace-layout"
       >
@@ -317,8 +322,7 @@ export function BaselineWorkspace({
             showBaselineCreationControls={showBaselineCreationControls}
           />
           <p className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
-            Your resume becomes a structured source of truth for compatibility scoring and
-            document generation.
+            Your resume becomes a structured source of truth for compatibility scoring.
           </p>
         </section>
 
@@ -327,30 +331,37 @@ export function BaselineWorkspace({
             Job description
           </p>
           <div className="flex h-full flex-col">
-            <JobsHub selectedJobId={jobId} onJobMissing={handleJobMissing} momentumEntry={isMomentumEntry} />
+            <JobsHub
+              selectedJobId={jobId}
+              onJobMissing={handleJobMissing}
+              momentumEntry={isMomentumEntry}
+              onJobCountChange={setJobCount}
+            />
           </div>
         </section>
 
-        <section
-          className={[
-            "space-y-3 xl:min-w-0",
-            isMomentumEntry ? "xl:col-span-2" : "",
-          ]
-            .filter(Boolean)
-            .join(" ")}
-          data-testid="target-result-column"
-        >
-          <p className="px-1 text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">
-            Compatibility result
-          </p>
-          <WorkspaceRunner
-            key={`${baselineId ?? "none"}:${jobId ?? "none"}`}
-            baselineId={baselineId}
-            jobId={jobId}
-            entrySource={entrySource}
-            onMatchingScoreChange={setActiveScorePair}
-          />
-        </section>
+        {!shouldCollapseForNoJobs ? (
+          <section
+            className={[
+              "space-y-3 xl:min-w-0",
+              isMomentumEntry ? "xl:col-span-2" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            data-testid="target-result-column"
+          >
+            <p className="px-1 text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">
+              Compatibility result
+            </p>
+            <WorkspaceRunner
+              key={`${baselineId ?? "none"}:${jobId ?? "none"}`}
+              baselineId={baselineId}
+              jobId={jobId}
+              entrySource={entrySource}
+              onMatchingScoreChange={setActiveScorePair}
+            />
+          </section>
+        ) : null}
       </div>
     </div>
   );

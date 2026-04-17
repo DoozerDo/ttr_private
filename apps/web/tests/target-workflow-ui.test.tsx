@@ -122,7 +122,7 @@ describe("target workflow UI", () => {
     expect(screen.getByRole("heading", { name: "Run a compatibility score for a role." })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Select a baseline, add a job description, and generate the score that powers Results, Studio, and the rest of the workflow.",
+        "Select a baseline and a job description to generate a compatibility score.",
       ),
     ).toBeInTheDocument();
   });

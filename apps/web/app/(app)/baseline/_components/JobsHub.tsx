@@ -34,9 +34,15 @@ interface JobsHubProps {
   selectedJobId?: string | null;
   onJobMissing?: () => void;
   momentumEntry?: boolean;
+  onJobCountChange?: (count: number) => void;
 }
 
-export function JobsHub({ selectedJobId, onJobMissing, momentumEntry = false }: JobsHubProps) {
+export function JobsHub({
+  selectedJobId,
+  onJobMissing,
+  momentumEntry = false,
+  onJobCountChange,
+}: JobsHubProps) {
   const [jobs, setJobs] = useState<JobDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -53,14 +59,16 @@ export function JobsHub({ selectedJobId, onJobMissing, momentumEntry = false }: 
     try {
       const result = await listJobs({ includeArchived: true });
       setJobs(result);
+      onJobCountChange?.(result.length);
       return result;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to load jobs");
+      onJobCountChange?.(0);
       return [];
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [onJobCountChange]);
 
   useEffect(() => {
     void load();
@@ -143,6 +151,8 @@ export function JobsHub({ selectedJobId, onJobMissing, momentumEntry = false }: 
     setIsIngestOpen(true);
   };
 
+  const showNoJobsState = !isLoading && visibleJobs.length === 0;
+
   return (
     <>
       <SetupModuleCard
@@ -151,10 +161,12 @@ export function JobsHub({ selectedJobId, onJobMissing, momentumEntry = false }: 
         description={
           momentumEntry
             ? "Your baseline is already set. Recent roles stay here while you add the next one."
-            : "Add a job description to score against your resume."
+            : showNoJobsState
+              ? ""
+              : "Add a job description to score against your resume."
         }
         primaryAction={
-          momentumEntry || visibleJobs.length === 0 ? null : (
+          momentumEntry || showNoJobsState ? null : (
             <FormButton variant="secondary" onClick={navigateToAddJob}>
               Add job
             </FormButton>
@@ -180,7 +192,7 @@ export function JobsHub({ selectedJobId, onJobMissing, momentumEntry = false }: 
         ) : visibleJobs.length === 0 ? (
           <EmptyState
             title="No jobs yet"
-            body="Add a job to start building your target workspace."
+            body="Add a job description to run your compatibility score."
             cta={<FormButton onClick={navigateToAddJob}>Add job</FormButton>}
           />
         ) : (
