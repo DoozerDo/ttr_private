@@ -28,6 +28,12 @@ describe("results generation transition", () => {
     let artifactsCallCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/api/resume")) {
+        return jsonResponse({ ok: true });
+      }
+      if (url.endsWith("/api/cover-letters")) {
+        return jsonResponse({ ok: true });
+      }
       if (url.includes("/api/analysis/fit-assessments/analysis-current")) {
         return jsonResponse({
           assessmentId: "analysis-current",
@@ -120,10 +126,6 @@ describe("results generation transition", () => {
     expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("Generating...");
     expect(screen.queryByText("Strong match. Ready for document generation.")).toBeNull();
 
-    await waitFor(() => {
-      expect(mockRouterPush).toHaveBeenCalled();
-    });
-
     await waitFor(
       () => {
         expect(screen.getAllByText("Your documents are ready").length).toBeGreaterThan(0);
@@ -135,6 +137,223 @@ describe("results generation transition", () => {
     },
     15_000,
   );
+
+  it("auto-retries once and then recovers without exposing failure UI when score >= 80", async () => {
+    overrideSearchParams({ assessmentId: "analysis-current" });
+
+    let resumeCalls = 0;
+    let artifactsCallCount = 0;
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "POST" && url.endsWith("/api/resume")) {
+        resumeCalls += 1;
+        if (resumeCalls === 1) return jsonResponse({ error: "boom" }, 500);
+        return jsonResponse({ ok: true });
+      }
+      if (method === "POST" && url.endsWith("/api/cover-letters")) {
+        return jsonResponse({ ok: true });
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-current")) {
+        return jsonResponse({
+          assessmentId: "analysis-current",
+          jobId: "job-1",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          score: 92,
+          strengths: ["Incident management"],
+          verification_coverage: {
+            totalClaims: 1,
+            verifiedClaims: 1,
+            inferredClaims: 0,
+            unverifiedClaims: 0,
+            verifiedRequirements: ["Incident management"],
+            unverifiedRequirements: [],
+          },
+        });
+      }
+      if (url.includes("/api/analysis/job/job-1/baseline/base-1/latest")) {
+        return jsonResponse({
+          assessmentId: "analysis-current",
+          jobId: "job-1",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          score: 92,
+          strengths: ["Incident management"],
+          verification_coverage: {
+            totalClaims: 1,
+            verifiedClaims: 1,
+            inferredClaims: 0,
+            unverifiedClaims: 0,
+            verifiedRequirements: ["Incident management"],
+            unverifiedRequirements: [],
+          },
+        });
+      }
+      if (url.includes("/api/analysis/fit-assessments?jobId=job-1")) {
+        return jsonResponse([
+          {
+            assessmentId: "analysis-current",
+            score: 92,
+            strengths: ["Incident management"],
+            supportingSignals: ["Incident management"],
+          },
+        ]);
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return jsonResponse([{ id: "base-version-1", versionNumber: 1 }]);
+      }
+      if (url.includes("/api/analysis/history")) {
+        return jsonResponse({
+          recentAnalyses: [],
+          alignmentPattern: { strongestAlignmentRoles: [], totalAnalyses: 0, averageScore: 0 },
+          badges: [],
+          generatedAt: new Date().toISOString(),
+        });
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return jsonResponse({ status: "ready", blocked: false, reasons: [] });
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return jsonResponse({ status: "ready", blocked: false, reasons: [] });
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        artifactsCallCount += 1;
+        if (artifactsCallCount < 3) {
+          return jsonResponse({
+            resume: { status: "failed" },
+            coverLetter: { status: "missing" },
+          });
+        }
+        return jsonResponse({
+          resume: { status: "completed" },
+          coverLetter: { status: "completed" },
+        });
+      }
+      return jsonResponse({});
+    });
+
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    render(<ResultsPage />);
+
+    const cta = await screen.findByTestId("results-hero-primary-cta");
+    fireEvent.click(cta);
+
+    await waitFor(() => {
+      expect(resumeCalls).toBeGreaterThanOrEqual(2);
+    });
+    expect(screen.queryByText("Generation needs attention")).toBeNull();
+    expect(screen.queryByText("Retry generation")).toBeNull();
+    expect(screen.queryByText("Open in Studio")).toBeNull();
+    expect(screen.queryByText(/Resume:/)).toBeNull();
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Your documents are ready").length).toBeGreaterThan(0);
+    });
+    expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("Open in Studio");
+    expect(mockRouterPush).not.toHaveBeenCalled();
+    expect(resumeCalls).toBeGreaterThanOrEqual(2);
+  });
+
+  it("falls back and only exposes a generic failure after all attempts fail when score >= 80", async () => {
+    overrideSearchParams({ assessmentId: "analysis-current" });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "POST" && (url.endsWith("/api/resume") || url.endsWith("/api/cover-letters"))) {
+        return jsonResponse({ error: "nope" }, 500);
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-current")) {
+        return jsonResponse({
+          assessmentId: "analysis-current",
+          jobId: "job-1",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          score: 92,
+          strengths: ["Incident management"],
+          verification_coverage: {
+            totalClaims: 1,
+            verifiedClaims: 1,
+            inferredClaims: 0,
+            unverifiedClaims: 0,
+            verifiedRequirements: ["Incident management"],
+            unverifiedRequirements: [],
+          },
+        });
+      }
+      if (url.includes("/api/analysis/job/job-1/baseline/base-1/latest")) {
+        return jsonResponse({
+          assessmentId: "analysis-current",
+          jobId: "job-1",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          score: 92,
+          strengths: ["Incident management"],
+          verification_coverage: {
+            totalClaims: 1,
+            verifiedClaims: 1,
+            inferredClaims: 0,
+            unverifiedClaims: 0,
+            verifiedRequirements: ["Incident management"],
+            unverifiedRequirements: [],
+          },
+        });
+      }
+      if (url.includes("/api/analysis/fit-assessments?jobId=job-1")) {
+        return jsonResponse([
+          {
+            assessmentId: "analysis-current",
+            score: 92,
+            strengths: ["Incident management"],
+            supportingSignals: ["Incident management"],
+          },
+        ]);
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return jsonResponse([{ id: "base-version-1", versionNumber: 1 }]);
+      }
+      if (url.includes("/api/analysis/history")) {
+        return jsonResponse({
+          recentAnalyses: [],
+          alignmentPattern: { strongestAlignmentRoles: [], totalAnalyses: 0, averageScore: 0 },
+          badges: [],
+          generatedAt: new Date().toISOString(),
+        });
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return jsonResponse({ status: "ready", blocked: false, reasons: [] });
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return jsonResponse({ status: "ready", blocked: false, reasons: [] });
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        return jsonResponse({
+          resume: { status: "missing" },
+          coverLetter: { status: "missing" },
+        });
+      }
+      return jsonResponse({});
+    });
+
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    render(<ResultsPage />);
+
+    const cta = await screen.findByTestId("results-hero-primary-cta");
+    fireEvent.click(cta);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("We hit an issue generating your documents").length).toBeGreaterThan(0);
+    });
+    expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("Try again");
+    expect(screen.queryByText("Generation needs attention")).toBeNull();
+    expect(screen.queryByText("Retry generation")).toBeNull();
+    expect(screen.queryByText("Open Studio to adjust inputs and try again.")).toBeNull();
+    expect(mockRouterPush).not.toHaveBeenCalled();
+  });
 
   it("suppresses ready messaging when artifacts indicate a partial/failed lifecycle state", async () => {
     overrideSearchParams({ assessmentId: "analysis-current" });

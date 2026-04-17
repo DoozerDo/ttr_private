@@ -58,6 +58,7 @@ import {
 } from "@/lib/renderedText";
 import { buildProgressSummary } from "@/lib/progressSummary";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
+import { buildExportPayload } from "../lib/exportPayload";
 import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
 import { buildProductDecisionState } from "@/lib/productDecisionState";
 import { resolveCanonicalState } from "@/lib/canonicalDecision";
@@ -78,6 +79,13 @@ import { getStudioHref } from "@/src/navigation/routes";
 
 type ResultsArtifactStatus = "missing" | "in_progress" | "completed" | "failed";
 type ResultsGenerationPhase = "not_started" | "generating" | "generated" | "failed" | "partial";
+
+type ResultsGenerationRecoveryStage =
+  | "idle"
+  | "primary_attempt"
+  | "retry_attempt"
+  | "fallback_attempt"
+  | "exhausted";
 
 type BackendStudioArtifactRecord = {
   status?: string | null;
@@ -113,8 +121,13 @@ function deriveResultsArtifactStatuses(payload: unknown): {
 function deriveResultsGenerationPhase(statuses: {
   resume: ResultsArtifactStatus;
   coverLetter: ResultsArtifactStatus;
+}, opts?: {
+  recoveryInProgress?: boolean;
 }): ResultsGenerationPhase {
   const { resume, coverLetter } = statuses;
+  if (opts?.recoveryInProgress && (resume === "failed" || coverLetter === "failed")) {
+    return "generating";
+  }
   if (resume === "in_progress" || coverLetter === "in_progress") return "generating";
   if (resume === "completed" && coverLetter === "completed") return "generated";
   if (resume === "failed" && coverLetter === "failed") return "failed";
@@ -881,6 +894,7 @@ type OpportunityMapSectionProps = {
     gapsResolvable: boolean;
   };
   generationPhase?: ResultsGenerationPhase;
+  generationRecoveryUi?: "finalizing" | "exhausted" | null;
 };
 
 const GAP_EXPLANATION_FALLBACK = "Add concrete baseline evidence that proves this requirement.";
@@ -967,6 +981,7 @@ export function OpportunityMapSection({
   predictiveUnlock,
   weakFitRecovery,
   generationPhase = "not_started",
+  generationRecoveryUi = null,
 }: OpportunityMapSectionProps) {
   const resolvedEvidenceLedger: EvidenceLedger = evidenceLedger ?? {
     entries: [],
@@ -1026,6 +1041,18 @@ export function OpportunityMapSection({
             : "You can generate now. Tighten a few examples to strengthen the output."
           : "Your profile is grounded enough to generate in Studio.";
   const decisionNarrative = useMemo(() => {
+    if (generationRecoveryUi === "finalizing") {
+      return {
+        headline: "Finalizing your documents...",
+        body: "Keep this tab open. We’ll update as soon as the drafts are ready.",
+      };
+    }
+    if (generationRecoveryUi === "exhausted") {
+      return {
+        headline: "We hit an issue generating your documents",
+        body: "Please try again.",
+      };
+    }
     if (generationPhase !== "not_started") {
       if (generationPhase === "generating") {
         return {
@@ -1102,6 +1129,7 @@ export function OpportunityMapSection({
     blockedState?.headline,
     fitDescriptor,
     generationPhase,
+    generationRecoveryUi,
     lowFitScore,
     readiness.status,
     score,
@@ -2502,6 +2530,10 @@ export default function ResultsPage() {
     coverLetter: ResultsArtifactStatus;
   }>({ resume: "missing", coverLetter: "missing" });
   const generationRequestedAtRef = useRef<number | null>(null);
+  const generationRecoveryRequestIdRef = useRef(0);
+  const [generationRecoveryStage, setGenerationRecoveryStage] =
+    useState<ResultsGenerationRecoveryStage>("idle");
+  const [generationRecoveryExhausted, setGenerationRecoveryExhausted] = useState(false);
 
   const normalizedDimensionScores = useMemo(
     () => normalizeDimensionScores(latest ?? null),
@@ -2540,6 +2572,18 @@ export default function ResultsPage() {
     [productDecisionState.renderedGenerationReadiness],
   );
   const canOpenStudio = canonicalResultsDecision.readinessState !== "BLOCKED";
+  const shouldAutoRecoverGeneration = typeof activeScore === "number" && activeScore >= 80;
+  const generationRecoveryInProgress =
+    shouldAutoRecoverGeneration &&
+    generationRecoveryStage !== "idle" &&
+    generationRecoveryStage !== "exhausted" &&
+    !generationRecoveryExhausted;
+  const generationRecoveryFinalizing =
+    generationRecoveryInProgress &&
+    (generationRecoveryStage === "retry_attempt" || generationRecoveryStage === "fallback_attempt");
+  const effectiveResultsGenerationPhase: ResultsGenerationPhase = generationRecoveryInProgress
+    ? "generating"
+    : resultsGenerationPhase;
   const generationPairIds = useMemo(() => {
     const baselineIdValue = latest?.baselineId?.trim() ?? "";
     const baselineVersionIdValue = latest?.baselineVersionId?.trim() ?? "";
@@ -2586,7 +2630,13 @@ export default function ResultsPage() {
         if (cancelled) return;
         if (!response.ok) return;
         const statuses = deriveResultsArtifactStatuses(payload);
-        const derivedPhase = deriveResultsGenerationPhase(statuses);
+        const derivedPhase = deriveResultsGenerationPhase(statuses, {
+          recoveryInProgress:
+            shouldAutoRecoverGeneration &&
+            generationRecoveryStage !== "idle" &&
+            generationRecoveryStage !== "exhausted" &&
+            !generationRecoveryExhausted,
+        });
         const requestedAt = generationRequestedAtRef.current;
         const withinGrace = typeof requestedAt === "number" && Date.now() - requestedAt < 12_000;
         const phase =
@@ -2603,7 +2653,7 @@ export default function ResultsPage() {
     return () => {
       cancelled = true;
     };
-  }, [generationPairIds]);
+  }, [generationPairIds, generationRecoveryExhausted, generationRecoveryStage, shouldAutoRecoverGeneration]);
 
   useEffect(() => {
     if (!generationPairIds) return;
@@ -2622,7 +2672,13 @@ export default function ResultsPage() {
         const payload = await readResponsePayload(response);
         if (!response.ok) return;
         const statuses = deriveResultsArtifactStatuses(payload);
-        const derivedPhase = deriveResultsGenerationPhase(statuses);
+        const derivedPhase = deriveResultsGenerationPhase(statuses, {
+          recoveryInProgress:
+            shouldAutoRecoverGeneration &&
+            generationRecoveryStage !== "idle" &&
+            generationRecoveryStage !== "exhausted" &&
+            !generationRecoveryExhausted,
+        });
         const requestedAt = generationRequestedAtRef.current;
         const withinGrace = typeof requestedAt === "number" && Date.now() - requestedAt < 12_000;
         const phase =
@@ -2641,7 +2697,13 @@ export default function ResultsPage() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [generationPairIds, resultsGenerationPhase]);
+  }, [
+    generationPairIds,
+    generationRecoveryExhausted,
+    generationRecoveryStage,
+    resultsGenerationPhase,
+    shouldAutoRecoverGeneration,
+  ]);
   const reliabilityFacts = useMemo(() => {
     const totalClaims = verificationCoverage.totalClaims;
     const verifiedClaims = verificationCoverage.verifiedClaims;
@@ -2893,6 +2955,11 @@ export default function ResultsPage() {
     summarySnippet,
   ]);
   const isStrongFitScore = typeof activeScore === "number" && activeScore >= 80;
+  const suppressFailureUiDuringRecovery =
+    shouldAutoRecoverGeneration && generationRecoveryInProgress && !generationRecoveryExhausted;
+  const generationCuePhase: ResultsGenerationPhase = suppressFailureUiDuringRecovery
+    ? "generating"
+    : effectiveResultsGenerationPhase;
   const showImprovementModule =
     !isStrongFitScore &&
     improvementSuggestions.length > 0 &&
@@ -2912,13 +2979,16 @@ export default function ResultsPage() {
     [activeScore, applicationInsights, latest],
   );
   const resultsReturnCue = useMemo(() => {
-    if (resultsGenerationPhase === "generating") {
-      return "Generating your documents...";
+    if (shouldAutoRecoverGeneration && generationRecoveryExhausted) {
+      return "We hit an issue generating your documents.";
     }
-    if (resultsGenerationPhase === "generated") {
+    if (generationCuePhase === "generating") {
+      return suppressFailureUiDuringRecovery ? "Finalizing your documents..." : "Generating your documents...";
+    }
+    if (generationCuePhase === "generated") {
       return "Your documents are ready.";
     }
-    if (resultsGenerationPhase === "failed" || resultsGenerationPhase === "partial") {
+    if (generationCuePhase === "failed" || generationCuePhase === "partial") {
       return "Generation needs attention.";
     }
     if (isStrongFitScore) {
@@ -2934,7 +3004,14 @@ export default function ResultsPage() {
       return "You signaled refinement, so Fit Review is the fastest path to a sharper result.";
     }
     return null;
-  }, [isStrongFitScore, recentIntent, resultsGenerationPhase]);
+  }, [
+    generationCuePhase,
+    generationRecoveryExhausted,
+    isStrongFitScore,
+    recentIntent,
+    shouldAutoRecoverGeneration,
+    suppressFailureUiDuringRecovery,
+  ]);
   const resultsScoreBucket = useMemo(
     () => (typeof activeScore === "number" ? getScoreBand(activeScore) : undefined),
     [activeScore],
@@ -3031,7 +3108,7 @@ export default function ResultsPage() {
     isGenerationBlocked,
     latest,
   ]);
-  const oneClickResultsCta = useMemo(() => {
+  const oneClickResultsCta = useMemo<OpportunityMapSectionProps["primaryCta"]>(() => {
     if (!latest) return null;
 
     const analyticsAction = mapResultsAnalyticsActionType(canonicalResultsDecision.primaryAction.type);
@@ -3069,6 +3146,136 @@ export default function ResultsPage() {
     recentIntent,
     resultsScoreBucket,
   ]);
+  const runGenerationRecovery = useCallback(
+    async (opts?: { force?: boolean }) => {
+      if (!generationPairIds) return;
+      if (!shouldAutoRecoverGeneration) return;
+      if (resultsGenerationPhase === "generating" && !opts?.force) return;
+
+      const requestId = generationRecoveryRequestIdRef.current + 1;
+      generationRecoveryRequestIdRef.current = requestId;
+
+      setGenerationRecoveryExhausted(false);
+      setGenerationRecoveryStage("primary_attempt");
+      generationRequestedAtRef.current = Date.now();
+      setResultsGenerationPhase("generating");
+
+      const baseFields = {
+        jobId: generationPairIds.jobId,
+        baselineId: generationPairIds.baselineId,
+        baselineVersionId: generationPairIds.baselineVersionId,
+        analysisId: generationPairIds.analysisId,
+      };
+
+      const callResume = async (mode: "primary" | "fallback") => {
+        const payload = buildExportPayload({
+          documentType: "resume",
+          oneTap: mode === "fallback",
+          ...baseFields,
+          analysisId: mode === "fallback" ? null : baseFields.analysisId,
+        });
+        const response = await fetch("/api/resume", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        return response.ok;
+      };
+
+      const callCoverLetter = async (mode: "primary" | "fallback") => {
+        const payload = buildExportPayload({
+          documentType: "cover_letter",
+          oneTap: mode === "fallback",
+          ...baseFields,
+          analysisId: mode === "fallback" ? null : baseFields.analysisId,
+        });
+        const response = await fetch("/api/cover-letters", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        return response.ok;
+      };
+
+      const attempt = async (mode: "primary" | "fallback", only?: Array<"resume" | "coverLetter">) => {
+        const shouldResume = !only || only.includes("resume");
+        const shouldCover = !only || only.includes("coverLetter");
+        const [resumeOk, coverOk] = await Promise.all([
+          shouldResume ? callResume(mode) : Promise.resolve(true),
+          shouldCover ? callCoverLetter(mode) : Promise.resolve(true),
+        ]);
+        return { resumeOk, coverOk };
+      };
+
+      try {
+        const first = await attempt("primary");
+        if (generationRecoveryRequestIdRef.current !== requestId) return;
+        if (first.resumeOk && first.coverOk) {
+          setGenerationRecoveryStage("idle");
+          return;
+        }
+
+        setGenerationRecoveryStage("retry_attempt");
+        const retryOnly: Array<"resume" | "coverLetter"> = [];
+        if (!first.resumeOk) retryOnly.push("resume");
+        if (!first.coverOk) retryOnly.push("coverLetter");
+        const second = await attempt("primary", retryOnly);
+        if (generationRecoveryRequestIdRef.current !== requestId) return;
+        if (second.resumeOk && second.coverOk) {
+          setGenerationRecoveryStage("idle");
+          return;
+        }
+
+        setGenerationRecoveryStage("fallback_attempt");
+        const fallbackOnly: Array<"resume" | "coverLetter"> = [];
+        if (!second.resumeOk) fallbackOnly.push("resume");
+        if (!second.coverOk) fallbackOnly.push("coverLetter");
+        const third = await attempt("fallback", fallbackOnly);
+        if (generationRecoveryRequestIdRef.current !== requestId) return;
+        if (third.resumeOk && third.coverOk) {
+          setGenerationRecoveryStage("idle");
+          return;
+        }
+
+        setGenerationRecoveryStage("exhausted");
+        setGenerationRecoveryExhausted(true);
+      } catch {
+        if (generationRecoveryRequestIdRef.current !== requestId) return;
+        setGenerationRecoveryStage("exhausted");
+        setGenerationRecoveryExhausted(true);
+      }
+    },
+    [generationPairIds, resultsGenerationPhase, shouldAutoRecoverGeneration],
+  );
+  const opportunityMapPrimaryCta = useMemo(() => {
+    if (!oneClickResultsCta) return null;
+    if (suppressFailureUiDuringRecovery) {
+      return {
+        label: "Finalizing...",
+        disabled: true,
+        description: "Finalizing your documents...",
+      };
+    }
+    if (shouldAutoRecoverGeneration && generationRecoveryExhausted) {
+      return {
+        label: "Try again",
+        onClick: () => void runGenerationRecovery({ force: true }),
+        description: "We hit an issue generating your documents. Please try again.",
+      };
+    }
+    return oneClickResultsCta;
+  }, [
+    generationRecoveryExhausted,
+    oneClickResultsCta,
+    runGenerationRecovery,
+    shouldAutoRecoverGeneration,
+    suppressFailureUiDuringRecovery,
+  ]);
+  const opportunityMapGenerationRecoveryUi = suppressFailureUiDuringRecovery
+    ? ("finalizing" as const)
+    : shouldAutoRecoverGeneration && generationRecoveryExhausted
+      ? ("exhausted" as const)
+      : null;
   const triggerResultsGeneration = useCallback(() => {
     const actionType = canonicalResultsDecision.primaryAction.type;
     const label = canonicalResultsDecision.primaryAction.label.toLowerCase();
@@ -3084,6 +3291,11 @@ export default function ResultsPage() {
       analysisId: generationPairIds?.analysisId ?? null,
     });
 
+    if (shouldAutoRecoverGeneration) {
+      void runGenerationRecovery({ force: true });
+      return;
+    }
+
     generationRequestedAtRef.current = Date.now();
     setResultsGenerationPhase("generating");
     window.setTimeout(() => {
@@ -3097,6 +3309,8 @@ export default function ResultsPage() {
     generationPairIds?.baselineId,
     generationPairIds?.jobId,
     router,
+    runGenerationRecovery,
+    shouldAutoRecoverGeneration,
     studioHrefFromLatest,
   ]);
   const isReadyResultsState = canonicalResultsDecision.readinessState === "READY";
@@ -4132,45 +4346,61 @@ export default function ResultsPage() {
           >
             {scorePresentationMode === "fix_first"
                 ? "We may be underestimating your fit."
-                : resultsGenerationPhase === "generating"
-                  ? "Generating your documents..."
-                  : resultsGenerationPhase === "generated"
-                    ? "Your documents are ready"
-                    : resultsGenerationPhase === "failed"
-                      ? "Generation failed"
-                      : resultsGenerationPhase === "partial"
-                        ? "Generation needs attention"
-                        : resultsDecision.headline}
+                : shouldAutoRecoverGeneration && generationRecoveryExhausted
+                  ? "We hit an issue generating your documents"
+                  : shouldAutoRecoverGeneration && generationRecoveryFinalizing
+                    ? "Finalizing your documents..."
+                    : effectiveResultsGenerationPhase === "generating"
+                      ? "Generating your documents..."
+                      : effectiveResultsGenerationPhase === "generated"
+                        ? "Your documents are ready"
+                        : effectiveResultsGenerationPhase === "failed"
+                          ? "Generation failed"
+                          : effectiveResultsGenerationPhase === "partial"
+                            ? "Generation needs attention"
+                            : resultsDecision.headline}
           </p>
           <p className="mt-1 text-sm text-slate-100">
             {scorePresentationMode === "fix_first"
                 ? "This score looks low confidence. Fix the evidence story first, then rerun generation."
-                : resultsGenerationPhase === "generating"
-                  ? "We’re drafting your resume and cover letter now."
-                  : resultsGenerationPhase === "generated"
-                    ? "Open Studio to review and adjust your drafts before applying."
-                    : resultsGenerationPhase === "failed"
-                      ? "Retry generation, or open Studio to adjust inputs and try again."
-                      : resultsGenerationPhase === "partial"
-                        ? "Some drafts finished, but at least one needs a retry."
-                        : resultsDecision.subtext}
+                : shouldAutoRecoverGeneration && generationRecoveryExhausted
+                  ? "We hit an issue generating your documents. Please try again."
+                  : shouldAutoRecoverGeneration && generationRecoveryFinalizing
+                    ? "Finalizing your documents..."
+                    : effectiveResultsGenerationPhase === "generating"
+                      ? "We’re drafting your resume and cover letter now."
+                      : effectiveResultsGenerationPhase === "generated"
+                        ? "Open Studio to review and adjust your drafts before applying."
+                        : effectiveResultsGenerationPhase === "failed"
+                          ? "Retry generation, or open Studio to adjust inputs and try again."
+                          : effectiveResultsGenerationPhase === "partial"
+                            ? "Some drafts finished, but at least one needs a retry."
+                            : resultsDecision.subtext}
           </p>
-          {resultsGenerationPhase !== "not_started" ? (
+          {effectiveResultsGenerationPhase !== "not_started" ? (
             <>
               <p className="mt-2 text-sm font-medium text-slate-200">
-                {resultsGenerationPhase === "generating"
-                  ? "Generating your documents..."
-                  : resultsGenerationPhase === "generated"
-                    ? "Your documents are ready."
-                    : resultsGenerationPhase === "failed"
-                      ? "Generation failed."
-                      : "Some documents need attention."}
+                {shouldAutoRecoverGeneration && generationRecoveryExhausted
+                  ? "We hit an issue generating your documents."
+                  : shouldAutoRecoverGeneration && generationRecoveryFinalizing
+                    ? "Finalizing your documents..."
+                    : effectiveResultsGenerationPhase === "generating"
+                      ? "Generating your documents..."
+                      : effectiveResultsGenerationPhase === "generated"
+                        ? "Your documents are ready."
+                        : effectiveResultsGenerationPhase === "failed"
+                          ? "Generation failed."
+                          : "Some documents need attention."}
               </p>
-              {resultsGenerationPhase === "generating" ? (
+              {shouldAutoRecoverGeneration && generationRecoveryInProgress ? (
+                <p className="mt-1 text-sm text-slate-300">
+                  Keep this tab open. We’ll update as soon as the drafts are ready.
+                </p>
+              ) : effectiveResultsGenerationPhase === "generating" ? (
                 <p className="mt-1 text-sm text-slate-300">
                   Keep this tab open. You can review drafts in Studio as soon as they finish.
                 </p>
-              ) : resultsGenerationPhase === "generated" ? (
+              ) : effectiveResultsGenerationPhase === "generated" ? (
                 <p className="mt-1 text-sm text-slate-300">
                   Open Studio to review your resume and cover letter drafts.
                 </p>
@@ -4234,14 +4464,26 @@ export default function ResultsPage() {
                 ) : null
               ) : canonicalResultsDecision.readinessState === "BLOCKED" ? (
                 <p className="text-sm font-medium text-slate-200">You&apos;ll address this in Fit Review.</p>
-              ) : resultsGenerationPhase === "generating" ? (
+              ) : shouldAutoRecoverGeneration && generationRecoveryExhausted ? (
+                <button
+                  type="button"
+                  data-testid="results-hero-primary-cta"
+                  onClick={() => {
+                    oneClickResultsCta.onClick?.();
+                    void runGenerationRecovery({ force: true });
+                  }}
+                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                >
+                  Try again
+                </button>
+              ) : effectiveResultsGenerationPhase === "generating" ? (
                 <span
                   data-testid="results-hero-primary-cta"
                   className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2 text-sm font-semibold text-slate-200"
                 >
-                  Generating...
+                  {shouldAutoRecoverGeneration && generationRecoveryFinalizing ? "Finalizing..." : "Generating..."}
                 </span>
-              ) : resultsGenerationPhase === "generated" || resultsGenerationPhase === "partial" ? (
+              ) : effectiveResultsGenerationPhase === "generated" || effectiveResultsGenerationPhase === "partial" ? (
                 <a
                   data-testid="results-hero-primary-cta"
                   href={studioHrefFromLatest}
@@ -4252,17 +4494,21 @@ export default function ResultsPage() {
                 >
                   Open in Studio
                 </a>
-              ) : resultsGenerationPhase === "failed" ? (
+              ) : effectiveResultsGenerationPhase === "failed" ? (
                 <button
                   type="button"
                   data-testid="results-hero-primary-cta"
                   onClick={() => {
                     oneClickResultsCta.onClick?.();
-                    triggerResultsGeneration();
+                    if (shouldAutoRecoverGeneration) {
+                      void runGenerationRecovery({ force: true });
+                    } else {
+                      triggerResultsGeneration();
+                    }
                   }}
                   className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
                 >
-                  Retry generation
+                  {shouldAutoRecoverGeneration ? "Try again" : "Retry generation"}
                 </button>
               ) : oneClickResultsCta.disabled ? (
                 <span
@@ -4449,7 +4695,7 @@ export default function ResultsPage() {
                     verdict={opportunityVerdict}
                     nextAction={primaryNextAction}
                     advantageSignals={advantageSignals}
-                    primaryCta={oneClickResultsCta}
+                    primaryCta={opportunityMapPrimaryCta}
                     evidenceLedger={evidenceLedger}
                     scoreAnalysisHref="#advanced-insights"
                     readiness={resultsReadiness}
@@ -4460,7 +4706,8 @@ export default function ResultsPage() {
                     weakFitRecovery={weakFitRecovery}
                     reliabilityFacts={reliabilityFacts}
                     secondaryAction={secondaryAction}
-                    generationPhase={resultsGenerationPhase}
+                    generationPhase={generationCuePhase}
+                    generationRecoveryUi={opportunityMapGenerationRecoveryUi}
                   />
                   {applicationInsights.length ? (
                     <section className="rounded-2xl border border-sky-300/30 bg-sky-500/10 p-4">
