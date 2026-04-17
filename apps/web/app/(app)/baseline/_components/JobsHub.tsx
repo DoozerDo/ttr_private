@@ -163,7 +163,7 @@ export function JobsHub({
             ? "Your baseline is already set. Recent roles stay here while you add the next one."
             : showNoJobsState
               ? ""
-              : "Add a job description to score against your resume."
+              : "Add a job description to score against your baseline."
         }
         primaryAction={
           momentumEntry || showNoJobsState ? null : (

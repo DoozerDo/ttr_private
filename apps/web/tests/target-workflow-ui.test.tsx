@@ -127,6 +127,19 @@ describe("target workflow UI", () => {
     ).toBeInTheDocument();
   });
 
+  it("does not use resume/upload-resume terminology on the Target page", async () => {
+    overrideSearchParams({});
+    setFetchImplementation(
+      vi.fn(() => Promise.resolve(createResponse([{ id: "base-1", originalFilename: "baseline.pdf" }]))),
+    );
+
+    const element = await TargetPage({ searchParams: {} });
+    const { container } = render(element);
+
+    expect(container.textContent ?? "").not.toMatch(/upload resume/i);
+    expect(container.textContent ?? "").not.toMatch(/\bresume\b/i);
+  });
+
   it("renders the momentum first target copy from Studio without resetting the baseline", async () => {
     overrideSearchParams({
       baselineId: "base-1",

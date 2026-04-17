@@ -170,6 +170,10 @@ export function BaselineWorkspace({
     () => initialBaselines.find((baseline) => baseline.id === baselineId) ?? null,
     [baselineId, initialBaselines],
   );
+  const activeBaseline = useMemo(() => {
+    const explicitActive = initialBaselines.find((baseline) => Boolean((baseline as { isActive?: boolean }).isActive));
+    return explicitActive ?? initialBaselines[0] ?? null;
+  }, [initialBaselines]);
   const isMomentumEntry = entrySource === "studio_post_apply";
 
   useEffect(() => {
@@ -183,11 +187,11 @@ export function BaselineWorkspace({
   }, [baselineExists, baselineId, isMomentumEntry]);
 
   const targetWorkflowState = useTargetWorkflowState({
-    baselineId: baselineId && baselineExists ? baselineId : null,
+    baselineId: ((baselineId && baselineExists ? baselineId : null) ?? activeBaseline?.id ?? null),
     jobId,
     hasMatchingScore:
       Boolean(activeScorePair) &&
-      activeScorePair?.baselineId === baselineId &&
+      activeScorePair?.baselineId === (baselineId ?? activeBaseline?.id ?? null) &&
       activeScorePair?.jobId === jobId,
   });
 
@@ -196,7 +200,7 @@ export function BaselineWorkspace({
     [targetWorkflowState],
   );
 
-  const shouldCollapseForNoJobs = !isMomentumEntry && (jobCount === 0 || jobCount === null);
+  const shouldCollapseForNoJobs = !isMomentumEntry && !jobId && (jobCount === 0 || jobCount === null);
 
   const removeParamFromUrl = useCallback(
     (key: "baselineId" | "jobId") => {
@@ -276,7 +280,7 @@ export function BaselineWorkspace({
           {selectedBaseline ? (
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-cyan-100">
-                Baseline locked
+                Baseline selected
               </span>
               <span className="text-sm text-slate-200">
                 {selectedBaseline.originalFilename ?? selectedBaseline.id}
@@ -321,9 +325,6 @@ export function BaselineWorkspace({
             selectedBaselineId={baselineId}
             showBaselineCreationControls={showBaselineCreationControls}
           />
-          <p className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
-            Your resume becomes a structured source of truth for compatibility scoring.
-          </p>
         </section>
 
         <section className="space-y-3 xl:min-w-0" data-testid="target-job-column">

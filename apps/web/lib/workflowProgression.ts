@@ -201,11 +201,11 @@ function buildUnsupportedState(input: WorkflowProgressionInput, state: WorkflowS
 function resolveSurfaceMessage(state: WorkflowState): string {
   switch (state) {
     case "first_run":
-      return "Start by uploading a baseline resume.";
+      return "Start by creating a baseline.";
     case "founder_excluded":
       return "Founder-excluded workflows need a standard baseline before continuing.";
     case "no_baseline":
-      return "Upload a baseline resume to continue.";
+      return "Create a baseline to continue.";
     case "baseline_uploading":
       return "Your baseline is still being uploaded.";
     case "baseline_ready_no_job":
@@ -229,7 +229,7 @@ function resolveSurfaceMessage(state: WorkflowState): string {
     case "generation_timeout":
       return "Generation is taking longer than expected.";
     case "archived_baseline_selected":
-      return "This baseline is archived. Choose an active resume.";
+      return "This baseline is archived. Choose an active baseline.";
     case "missing_or_mismatched_pair_state":
       return "The selected baseline and role do not match the saved assessment.";
     case "returning_user_persisted_last_assessment":
@@ -373,7 +373,7 @@ function resolveBlockingReason(
     case "first_run":
       return buildBlockingReason({
         code: "results_unavailable",
-        message: "Upload a baseline resume to start a valid workflow.",
+        message: "Create a baseline to start a valid workflow.",
         retryable: true,
         nextAction: action.label,
         destination: action.destination,
@@ -389,7 +389,7 @@ function resolveBlockingReason(
     case "no_baseline":
       return buildBlockingReason({
         code: "results_unavailable",
-        message: "Upload a baseline resume before continuing.",
+        message: "Create a baseline before continuing.",
         retryable: true,
         nextAction: action.label,
         destination: action.destination,
@@ -469,7 +469,7 @@ function resolveBlockingReason(
     case "archived_baseline_selected":
       return buildBlockingReason({
         code: "archived_baseline_selected",
-        message: "This baseline is archived. Choose an active resume.",
+        message: "This baseline is archived. Choose an active baseline.",
         retryable: true,
         nextAction: action.label,
         destination: action.destination,

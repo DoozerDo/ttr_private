@@ -21,12 +21,23 @@ describe("target no-jobs UI", () => {
     await waitFor(() => {
       expect(screen.getByText("No jobs yet")).toBeInTheDocument();
     });
+    expect(screen.getByText("BASELINE")).toBeInTheDocument();
+    expect(screen.queryByText("RESUME")).toBeNull();
     expect(screen.getByText("Add a job description to run your compatibility score.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add job" })).toBeInTheDocument();
 
     expect(screen.queryByTestId("target-result-column")).toBeNull();
     expect(screen.queryByText(/Compatibility result/i)).toBeNull();
     expect(screen.queryByText(/Run compatibility score/i)).toBeNull();
+
+    const progress = screen.getByLabelText("Target workflow progress");
+    expect(progress.textContent ?? "").toMatch(/✓|âœ“/);
+  });
+
+  it("shows baseline as incomplete when no baseline exists", () => {
+    render(<BaselineWorkspace initialBaselines={[]} showBaselineCreationControls={false} />);
+    const progress = screen.getByLabelText("Target workflow progress");
+    expect(progress.textContent ?? "").toMatch(/Baseline selected/);
+    expect(progress.textContent ?? "").toContain("1Baseline selected");
   });
 });
-

@@ -79,7 +79,7 @@ const getLibraryCapMessage = (data: unknown): string | null => {
   if (capCode !== "BASELINE_LIBRARY_CAP_REACHED") return null;
   return (
     (typeof errorBody?.message === "string" ? errorBody.message : null) ??
-    `Maximum of ${BASELINE_LIBRARY_CAP} active resumes reached.`
+    `Maximum of ${BASELINE_LIBRARY_CAP} active baselines reached.`
   );
 };
 
@@ -300,7 +300,7 @@ export function BaselineDashboard({
     if (!baseline) {
       return {
         progressPercent: activeBaselineId ? 28 : 0,
-        milestoneLabel: "Resume ingested",
+        milestoneLabel: "Baseline created",
         isBaselineReady: false,
       };
     }
@@ -361,7 +361,7 @@ export function BaselineDashboard({
 
     const milestoneLabel =
       progressPercent <= 28
-        ? "Resume ingested"
+        ? "Baseline created"
         : progressPercent <= 45
           ? "Career history confirmed"
           : progressPercent <= 65
@@ -459,7 +459,7 @@ export function BaselineDashboard({
       }
     } catch (uploadError) {
       console.error("Upload failed", uploadError);
-      setError("Unable to upload resume right now.");
+      setError("Unable to add baseline right now.");
       setDuplicateErrorDetail(null);
     } finally {
       setIsUploading(false);
@@ -484,13 +484,13 @@ export function BaselineDashboard({
 
   return (
     <SetupModuleCard
-      label="RESUME"
+      label="BASELINE"
       title=""
-      description="Upload the resume you trust and keep it ready as your scoring anchor."
+      description=""
       primaryAction={
         showBaselineCreationControls ? (
           <FormButton onClick={triggerUploadClick} disabled={isUploading || uploadLimitReached}>
-            {isUploading ? "Uploading..." : uploadLimitReached ? "Maximum reached" : "Add resume"}
+            {isUploading ? "Adding..." : uploadLimitReached ? "Maximum reached" : "Add baseline"}
           </FormButton>
         ) : null
       }
@@ -534,7 +534,7 @@ export function BaselineDashboard({
             <BaselineUnlockProgress
               progressPercent={baselineUnlockState.progressPercent}
               milestoneLabel={
-                loadingSelectedBaselineDetails ? "Resume ingested" : baselineUnlockState.milestoneLabel
+                loadingSelectedBaselineDetails ? "Baseline created" : baselineUnlockState.milestoneLabel
               }
               isBaselineReady={baselineUnlockState.isBaselineReady}
               onContinue={() => {
@@ -563,7 +563,7 @@ export function BaselineDashboard({
       ) : null}
 
       {initialFetchError ? (
-        <Alert intent="error" title="Unable to load resumes">
+        <Alert intent="error" title="Unable to load baselines">
           <p className="text-sm text-current">{initialFetchError}</p>
         </Alert>
       ) : null}
@@ -571,13 +571,13 @@ export function BaselineDashboard({
       {sortedBaselines.length === 0 ? (
         initialFetchError ? null : (
           <p className="m-0 text-[13px] text-slate-400">
-            No resumes uploaded yet.
+            No baselines yet.
           </p>
         )
       ) : (
         <div className="space-y-3">
           <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
-            {activeBaselineCount} of {BASELINE_LIBRARY_CAP} active resumes
+            {activeBaselineCount} of {BASELINE_LIBRARY_CAP} active baselines
           </p>
           {activeBaselines.map((baseline) => {
             const isSelected = baseline.id === activeBaselineId;
@@ -618,7 +618,7 @@ export function BaselineDashboard({
                       <OverflowMenu
                         onArchive={() => handleArchiveBaseline(baseline.id)}
                         loading={archivingBaselineId === baseline.id}
-                        ariaLabel="Resume overflow actions"
+                        ariaLabel="Baseline overflow actions"
                       />
                     ) : null}
                   </div>
@@ -632,16 +632,16 @@ export function BaselineDashboard({
           })}
           {showBaselineCreationControls && uploadLimitReached ? (
             <p className="text-sm text-slate-400">
-              Maximum of {BASELINE_LIBRARY_CAP} active resumes reached.
+              Maximum of {BASELINE_LIBRARY_CAP} active baselines reached.
             </p>
           ) : showBaselineCreationControls ? (
             <FormButton onClick={triggerUploadClick} disabled={isUploading}>
-              Add resume
+              Add baseline
             </FormButton>
           ) : null}
           {archivedBaselines.length ? (
             <div className="space-y-3 pt-3">
-              <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Archived resumes</p>
+              <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Archived baselines</p>
               {archivedBaselines.map((baseline) => (
                 <div
                   key={baseline.id}

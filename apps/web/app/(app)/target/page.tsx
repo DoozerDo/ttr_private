@@ -143,7 +143,7 @@ export default async function TargetPage({ searchParams }: TargetPageProps) {
       {baselines.length === 0 ? (
         <Alert intent="warning" title="Create a baseline first">
           <p className="text-sm">
-            Upload your resume on the Baseline page before starting role analysis.
+            Create a baseline on the Baseline page before starting role analysis.
           </p>
           <Link
             href="/baseline"

@@ -80,7 +80,7 @@ describe("Target generation authority", () => {
     renderTarget();
     fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Retry scoring" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Open Studio" })).toBeInTheDocument();
     });
     expect(screen.queryByText("Generation status: BLOCKED")).toBeNull();
     expect(screen.queryByRole("link", { name: "ANALYZE" })).toBeNull();
