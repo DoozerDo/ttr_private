@@ -122,8 +122,8 @@ describe("results generation transition", () => {
 
     fireEvent.click(cta);
 
-    expect(screen.getAllByText("Generating your documents...").length).toBeGreaterThan(0);
-    expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("Generating...");
+    expect(screen.getAllByText("Finalizing your documents...").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("Finalizing");
     expect(screen.queryByText("Strong match. Ready for document generation.")).toBeNull();
 
     await waitFor(
@@ -437,8 +437,11 @@ describe("results generation transition", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getAllByText("Generation needs attention").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Finalizing your documents...").length).toBeGreaterThan(0);
     });
     expect(screen.queryByText("Strong match. Ready for document generation.")).toBeNull();
+    expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("Finalizing");
+    expect(screen.queryByText("Open in Studio")).toBeNull();
+    expect(screen.queryByText(/^Resume:/i)).toBeNull();
   });
 });

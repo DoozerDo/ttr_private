@@ -2955,8 +2955,15 @@ export default function ResultsPage() {
     summarySnippet,
   ]);
   const isStrongFitScore = typeof activeScore === "number" && activeScore >= 80;
+  const shouldTreatGenerationAsSystemOwned = isStrongFitScore && shouldAutoRecoverGeneration;
   const suppressFailureUiDuringRecovery =
-    shouldAutoRecoverGeneration && generationRecoveryInProgress && !generationRecoveryExhausted;
+    shouldTreatGenerationAsSystemOwned && generationRecoveryInProgress && !generationRecoveryExhausted;
+  const suppressFailureUiUntilRecoveryStarts =
+    shouldTreatGenerationAsSystemOwned &&
+    !generationRecoveryExhausted &&
+    (generationRecoveryInProgress ||
+      effectiveResultsGenerationPhase === "failed" ||
+      effectiveResultsGenerationPhase === "partial");
   const generationCuePhase: ResultsGenerationPhase = suppressFailureUiDuringRecovery
     ? "generating"
     : effectiveResultsGenerationPhase;
@@ -3247,9 +3254,25 @@ export default function ResultsPage() {
     },
     [generationPairIds, resultsGenerationPhase, shouldAutoRecoverGeneration],
   );
+
+  useEffect(() => {
+    if (!shouldTreatGenerationAsSystemOwned) return;
+    if (!generationPairIds) return;
+    if (generationRecoveryExhausted) return;
+    if (generationRecoveryStage !== "idle") return;
+    if (resultsGenerationPhase !== "failed" && resultsGenerationPhase !== "partial") return;
+    void runGenerationRecovery({ force: true });
+  }, [
+    generationPairIds,
+    generationRecoveryExhausted,
+    generationRecoveryStage,
+    resultsGenerationPhase,
+    runGenerationRecovery,
+    shouldTreatGenerationAsSystemOwned,
+  ]);
   const opportunityMapPrimaryCta = useMemo(() => {
     if (!oneClickResultsCta) return null;
-    if (suppressFailureUiDuringRecovery) {
+    if (suppressFailureUiUntilRecoveryStarts) {
       return {
         label: "Finalizing...",
         disabled: true,
@@ -3269,9 +3292,9 @@ export default function ResultsPage() {
     oneClickResultsCta,
     runGenerationRecovery,
     shouldAutoRecoverGeneration,
-    suppressFailureUiDuringRecovery,
+    suppressFailureUiUntilRecoveryStarts,
   ]);
-  const opportunityMapGenerationRecoveryUi = suppressFailureUiDuringRecovery
+  const opportunityMapGenerationRecoveryUi = suppressFailureUiUntilRecoveryStarts
     ? ("finalizing" as const)
     : shouldAutoRecoverGeneration && generationRecoveryExhausted
       ? ("exhausted" as const)
@@ -3558,7 +3581,7 @@ export default function ResultsPage() {
             {cta ? (
               suppressDriverActions ? (
                 <p className="text-xs text-slate-400">You&apos;ll address this in Fit Review.</p>
-              ) : (
+              ) : shouldTreatGenerationAsSystemOwned ? null : (
                 <div className="pt-1">
                   <FormButton
                     variant="ghost"
@@ -4348,7 +4371,7 @@ export default function ResultsPage() {
                 ? "We may be underestimating your fit."
                 : shouldAutoRecoverGeneration && generationRecoveryExhausted
                   ? "We hit an issue generating your documents"
-                  : shouldAutoRecoverGeneration && generationRecoveryFinalizing
+                : suppressFailureUiUntilRecoveryStarts
                     ? "Finalizing your documents..."
                     : effectiveResultsGenerationPhase === "generating"
                       ? "Generating your documents..."
@@ -4365,7 +4388,7 @@ export default function ResultsPage() {
                 ? "This score looks low confidence. Fix the evidence story first, then rerun generation."
                 : shouldAutoRecoverGeneration && generationRecoveryExhausted
                   ? "We hit an issue generating your documents. Please try again."
-                  : shouldAutoRecoverGeneration && generationRecoveryFinalizing
+                : suppressFailureUiUntilRecoveryStarts
                     ? "Finalizing your documents..."
                     : effectiveResultsGenerationPhase === "generating"
                       ? "We’re drafting your resume and cover letter now."
@@ -4382,7 +4405,7 @@ export default function ResultsPage() {
               <p className="mt-2 text-sm font-medium text-slate-200">
                 {shouldAutoRecoverGeneration && generationRecoveryExhausted
                   ? "We hit an issue generating your documents."
-                  : shouldAutoRecoverGeneration && generationRecoveryFinalizing
+                  : suppressFailureUiUntilRecoveryStarts
                     ? "Finalizing your documents..."
                     : effectiveResultsGenerationPhase === "generating"
                       ? "Generating your documents..."
@@ -4392,7 +4415,7 @@ export default function ResultsPage() {
                           ? "Generation failed."
                           : "Some documents need attention."}
               </p>
-              {shouldAutoRecoverGeneration && generationRecoveryInProgress ? (
+              {suppressFailureUiUntilRecoveryStarts ? (
                 <p className="mt-1 text-sm text-slate-300">
                   Keep this tab open. We’ll update as soon as the drafts are ready.
                 </p>
@@ -4476,12 +4499,19 @@ export default function ResultsPage() {
                 >
                   Try again
                 </button>
+              ) : suppressFailureUiUntilRecoveryStarts ? (
+                <span
+                  data-testid="results-hero-primary-cta"
+                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2 text-sm font-semibold text-slate-200"
+                >
+                  Finalizing...
+                </span>
               ) : effectiveResultsGenerationPhase === "generating" ? (
                 <span
                   data-testid="results-hero-primary-cta"
                   className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2 text-sm font-semibold text-slate-200"
                 >
-                  {shouldAutoRecoverGeneration && generationRecoveryFinalizing ? "Finalizing..." : "Generating..."}
+                  Generating...
                 </span>
               ) : effectiveResultsGenerationPhase === "generated" || effectiveResultsGenerationPhase === "partial" ? (
                 <a
