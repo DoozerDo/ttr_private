@@ -76,6 +76,57 @@ import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
 import type { ResultsPrimaryCtaReadinessStatus } from "@/src/lib/analytics";
 import { getStudioHref } from "@/src/navigation/routes";
 
+type ResultsArtifactStatus = "missing" | "in_progress" | "completed" | "failed";
+type ResultsGenerationPhase = "not_started" | "generating" | "generated" | "failed" | "partial";
+
+type BackendStudioArtifactRecord = {
+  status?: string | null;
+} | null;
+
+type BackendStudioArtifactsResponse = {
+  resume?: BackendStudioArtifactRecord;
+  coverLetter?: BackendStudioArtifactRecord;
+};
+
+function normalizeBackendArtifactStatus(status: unknown): ResultsArtifactStatus {
+  const value = typeof status === "string" ? status.trim().toLowerCase() : "";
+  if (value === "completed") return "completed";
+  if (value === "in_progress") return "in_progress";
+  if (value === "failed") return "failed";
+  return "missing";
+}
+
+function deriveResultsArtifactStatuses(payload: unknown): {
+  resume: ResultsArtifactStatus;
+  coverLetter: ResultsArtifactStatus;
+} {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { resume: "missing", coverLetter: "missing" };
+  }
+  const record = payload as BackendStudioArtifactsResponse;
+  return {
+    resume: normalizeBackendArtifactStatus(record.resume?.status),
+    coverLetter: normalizeBackendArtifactStatus(record.coverLetter?.status),
+  };
+}
+
+function deriveResultsGenerationPhase(statuses: {
+  resume: ResultsArtifactStatus;
+  coverLetter: ResultsArtifactStatus;
+}): ResultsGenerationPhase {
+  const { resume, coverLetter } = statuses;
+  if (resume === "in_progress" || coverLetter === "in_progress") return "generating";
+  if (resume === "completed" && coverLetter === "completed") return "generated";
+  if (resume === "failed" && coverLetter === "failed") return "failed";
+  const hasOutcome =
+    resume === "completed" ||
+    coverLetter === "completed" ||
+    resume === "failed" ||
+    coverLetter === "failed";
+  if (hasOutcome) return "partial";
+  return "not_started";
+}
+
 function mapResultsAnalyticsActionType(
   type: ReturnType<typeof resolveCanonicalState>["primaryAction"]["type"],
 ): "fit_review" | "verify_examples" | "open_studio_draft" | "open_studio" {
@@ -829,6 +880,7 @@ type OpportunityMapSectionProps = {
     scoreImproved: boolean | null;
     gapsResolvable: boolean;
   };
+  generationPhase?: ResultsGenerationPhase;
 };
 
 const GAP_EXPLANATION_FALLBACK = "Add concrete baseline evidence that proves this requirement.";
@@ -914,6 +966,7 @@ export function OpportunityMapSection({
   blockedState,
   predictiveUnlock,
   weakFitRecovery,
+  generationPhase = "not_started",
 }: OpportunityMapSectionProps) {
   const resolvedEvidenceLedger: EvidenceLedger = evidenceLedger ?? {
     entries: [],
@@ -1210,29 +1263,35 @@ export function OpportunityMapSection({
         {lowFitScore && weakFitRecovery ? (
         <ResolveGapsBlock gapPreview={weakFitRecovery.gapPreview} />
       ) : null}
-        <div
-          id="generation-readiness-details"
-          className={`rounded-xl border px-4 py-2.5 text-sm ${
-            strongFitScore
-              ? "border-emerald-300/30 bg-emerald-500/10 text-emerald-50"
-              : readinessToneClass
-          }`}
-        >
-          <p className={`text-xs font-medium tracking-[0.08em] ${strongFitScore ? "text-emerald-100" : "text-slate-300"}`}>
-            {strongFitScore
-              ? `Confidence: ${readiness.status === "ready" ? "High" : "Medium"}`
-              : `Generation readiness: ${readinessBadgeLabel}`}
-          </p>
-          <p className={`mt-1 ${strongFitScore ? "text-emerald-50" : "text-slate-100"}`}>
-            {readinessMessage}
-          </p>
-          {isCompetitiveBlocked && blockedState?.drivers.length ? (
-            <div id="results-readiness-drivers" className="mt-3 space-y-3 rounded-xl border border-white/10 bg-slate-950/35 p-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-100">
-                Top readiness drivers
-              </p>
-              <ul className="space-y-2">
-                      {blockedState.drivers.map((driver) => (
+        {generationPhase === "not_started" ? (
+          <div
+            id="generation-readiness-details"
+            className={`rounded-xl border px-4 py-2.5 text-sm ${
+              strongFitScore
+                ? "border-emerald-300/30 bg-emerald-500/10 text-emerald-50"
+                : readinessToneClass
+            }`}
+          >
+            <p
+              className={`text-xs font-medium tracking-[0.08em] ${strongFitScore ? "text-emerald-100" : "text-slate-300"}`}
+            >
+              {strongFitScore
+                ? `Confidence: ${readiness.status === "ready" ? "High" : "Medium"}`
+                : `Generation readiness: ${readinessBadgeLabel}`}
+            </p>
+            <p className={`mt-1 ${strongFitScore ? "text-emerald-50" : "text-slate-100"}`}>
+              {readinessMessage}
+            </p>
+            {isCompetitiveBlocked && blockedState?.drivers.length ? (
+              <div
+                id="results-readiness-drivers"
+                className="mt-3 space-y-3 rounded-xl border border-white/10 bg-slate-950/35 p-3"
+              >
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-100">
+                  Top readiness drivers
+                </p>
+                <ul className="space-y-2">
+                  {blockedState.drivers.map((driver) => (
                         <li key={driver.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
                           <p className="text-sm font-semibold text-slate-100">{driver.title}</p>
                           <p className="mt-1 text-sm text-slate-300">{driver.detail}</p>
@@ -1269,6 +1328,7 @@ export function OpportunityMapSection({
             </p>
           ) : null}
         </div>
+        ) : null}
         {!strongFitScore ? (
           <section className="rounded-xl border border-white/10 bg-white/5 p-4">
           <h3 className="text-sm font-semibold text-slate-100">Evidence used for this role</h3>
@@ -2408,6 +2468,13 @@ export default function ResultsPage() {
   );
   const fitReviewPath = productDecisionState.fitReviewHref;
   const studioHref = productDecisionState.studioHref;
+  const [resultsGenerationPhase, setResultsGenerationPhase] =
+    useState<ResultsGenerationPhase>("not_started");
+  const [resultsArtifactStatuses, setResultsArtifactStatuses] = useState<{
+    resume: ResultsArtifactStatus;
+    coverLetter: ResultsArtifactStatus;
+  }>({ resume: "missing", coverLetter: "missing" });
+  const generationRequestedAtRef = useRef<number | null>(null);
 
   const normalizedDimensionScores = useMemo(
     () => normalizeDimensionScores(latest ?? null),
@@ -2446,6 +2513,28 @@ export default function ResultsPage() {
     [productDecisionState.renderedGenerationReadiness],
   );
   const canOpenStudio = canonicalResultsDecision.readinessState !== "BLOCKED";
+  const generationPairIds = useMemo(() => {
+    const baselineIdValue = latest?.baselineId?.trim() ?? "";
+    const baselineVersionIdValue = latest?.baselineVersionId?.trim() ?? "";
+    const jobIdValue = latest?.jobId?.trim() ?? "";
+    const analysisIdValue = latest?.assessmentId?.trim() ?? "";
+    if (!baselineIdValue || !baselineVersionIdValue || !jobIdValue || !analysisIdValue) return null;
+    return {
+      baselineId: baselineIdValue,
+      baselineVersionId: baselineVersionIdValue,
+      jobId: jobIdValue,
+      analysisId: analysisIdValue,
+    };
+  }, [latest?.assessmentId, latest?.baselineId, latest?.baselineVersionId, latest?.jobId]);
+  const studioHrefFromLatest = useMemo(() => {
+    if (!generationPairIds) return studioHref;
+    return getStudioHref({
+      baselineId: generationPairIds.baselineId,
+      baselineVersionId: generationPairIds.baselineVersionId,
+      jobId: generationPairIds.jobId,
+      analysisId: generationPairIds.analysisId,
+    });
+  }, [generationPairIds, studioHref]);
   const claimVerifications = useMemo(
     () => normalizeClaimVerifications(debugFields?.toolingCoverage?.claims),
     [debugFields?.toolingCoverage?.claims],
@@ -2454,6 +2543,73 @@ export default function ResultsPage() {
     () => deriveVerificationCoverage(generationReadiness, claimVerifications),
     [claimVerifications, generationReadiness],
   );
+  useEffect(() => {
+    if (!generationPairIds) return;
+
+    let cancelled = false;
+    const fetchArtifacts = async () => {
+      try {
+        const backendUrl = new URL("/api/studio/artifacts", window.location.origin);
+        backendUrl.searchParams.set("baselineId", generationPairIds.baselineId);
+        backendUrl.searchParams.set("baselineVersionId", generationPairIds.baselineVersionId);
+        backendUrl.searchParams.set("jobId", generationPairIds.jobId);
+        backendUrl.searchParams.set("analysisId", generationPairIds.analysisId);
+        const response = await fetch(backendUrl.toString(), { cache: "no-store" });
+        const payload = await readResponsePayload(response);
+        if (cancelled) return;
+        if (!response.ok) return;
+        const statuses = deriveResultsArtifactStatuses(payload);
+        setResultsArtifactStatuses(statuses);
+        setResultsGenerationPhase(deriveResultsGenerationPhase(statuses));
+      } catch {
+        // Best effort only.
+      }
+    };
+
+    void fetchArtifacts();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [generationPairIds]);
+
+  useEffect(() => {
+    if (!generationPairIds) return;
+    if (resultsGenerationPhase !== "generating") return;
+
+    let cancelled = false;
+    const interval = window.setInterval(async () => {
+      if (cancelled) return;
+      try {
+        const backendUrl = new URL("/api/studio/artifacts", window.location.origin);
+        backendUrl.searchParams.set("baselineId", generationPairIds.baselineId);
+        backendUrl.searchParams.set("baselineVersionId", generationPairIds.baselineVersionId);
+        backendUrl.searchParams.set("jobId", generationPairIds.jobId);
+        backendUrl.searchParams.set("analysisId", generationPairIds.analysisId);
+        const response = await fetch(backendUrl.toString(), { cache: "no-store" });
+        const payload = await readResponsePayload(response);
+        if (!response.ok) return;
+        const statuses = deriveResultsArtifactStatuses(payload);
+        const derivedPhase = deriveResultsGenerationPhase(statuses);
+        const requestedAt = generationRequestedAtRef.current;
+        const withinGrace = typeof requestedAt === "number" && Date.now() - requestedAt < 12_000;
+        const phase =
+          derivedPhase === "not_started" && withinGrace ? ("generating" as const) : derivedPhase;
+        setResultsArtifactStatuses(statuses);
+        setResultsGenerationPhase(phase);
+        if (phase !== "generating") {
+          window.clearInterval(interval);
+        }
+      } catch {
+        // ignore
+      }
+    }, 1500);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [generationPairIds, resultsGenerationPhase]);
   const reliabilityFacts = useMemo(() => {
     const totalClaims = verificationCoverage.totalClaims;
     const verifiedClaims = verificationCoverage.verifiedClaims;
@@ -2871,6 +3027,36 @@ export default function ResultsPage() {
     latest,
     recentIntent,
     resultsScoreBucket,
+  ]);
+  const triggerResultsGeneration = useCallback(() => {
+    const actionType = canonicalResultsDecision.primaryAction.type;
+    const label = canonicalResultsDecision.primaryAction.label.toLowerCase();
+    const isGenerationAction =
+      actionType === "generate_documents" || actionType === "retry_generation" || label.includes("generate");
+    if (!isGenerationAction) return;
+
+    console.log("[RESULTS_UI][GENERATE_CLICK]", {
+      actionType,
+      destination: canonicalResultsDecision.primaryAction.destination,
+      baselineId: generationPairIds?.baselineId ?? null,
+      jobId: generationPairIds?.jobId ?? null,
+      analysisId: generationPairIds?.analysisId ?? null,
+    });
+
+    generationRequestedAtRef.current = Date.now();
+    setResultsGenerationPhase("generating");
+    window.setTimeout(() => {
+      router.push(studioHrefFromLatest);
+    }, 50);
+  }, [
+    canonicalResultsDecision.primaryAction.destination,
+    canonicalResultsDecision.primaryAction.label,
+    canonicalResultsDecision.primaryAction.type,
+    generationPairIds?.analysisId,
+    generationPairIds?.baselineId,
+    generationPairIds?.jobId,
+    router,
+    studioHrefFromLatest,
   ]);
   const isReadyResultsState = canonicalResultsDecision.readinessState === "READY";
   const resultsDecision = useMemo(
@@ -3905,14 +4091,57 @@ export default function ResultsPage() {
           >
             {scorePresentationMode === "fix_first"
                 ? "We may be underestimating your fit."
-                : resultsDecision.headline}
+                : resultsGenerationPhase === "generating"
+                  ? "Generating your documents..."
+                  : resultsGenerationPhase === "generated"
+                    ? "Your documents are ready"
+                    : resultsGenerationPhase === "failed"
+                      ? "Generation failed"
+                      : resultsGenerationPhase === "partial"
+                        ? "Generation needs attention"
+                        : resultsDecision.headline}
           </p>
           <p className="mt-1 text-sm text-slate-100">
             {scorePresentationMode === "fix_first"
                 ? "This score looks low confidence. Fix the evidence story first, then rerun generation."
-                : resultsDecision.subtext}
+                : resultsGenerationPhase === "generating"
+                  ? "We’re drafting your resume and cover letter now."
+                  : resultsGenerationPhase === "generated"
+                    ? "Open Studio to review and adjust your drafts before applying."
+                    : resultsGenerationPhase === "failed"
+                      ? "Retry generation, or open Studio to adjust inputs and try again."
+                      : resultsGenerationPhase === "partial"
+                        ? "Some drafts finished, but at least one needs a retry."
+                        : resultsDecision.subtext}
           </p>
-          {canonicalResultsDecision.readinessState === "READY" ? (
+          {resultsGenerationPhase !== "not_started" ? (
+            <>
+              <p className="mt-2 text-sm font-medium text-slate-200">
+                {resultsGenerationPhase === "generating"
+                  ? "Generating your documents..."
+                  : resultsGenerationPhase === "generated"
+                    ? "Your documents are ready."
+                    : resultsGenerationPhase === "failed"
+                      ? "Generation failed."
+                      : "Some documents need attention."}
+              </p>
+              {resultsGenerationPhase === "generating" ? (
+                <p className="mt-1 text-sm text-slate-300">
+                  Keep this tab open. You can review drafts in Studio as soon as they finish.
+                </p>
+              ) : resultsGenerationPhase === "generated" ? (
+                <p className="mt-1 text-sm text-slate-300">
+                  Open Studio to review your resume and cover letter drafts.
+                </p>
+              ) : (
+                <p className="mt-1 text-sm text-slate-300">
+                  Resume:{" "}
+                  <span className="font-medium text-slate-100">{resultsArtifactStatuses.resume}</span> · Cover letter:{" "}
+                  <span className="font-medium text-slate-100">{resultsArtifactStatuses.coverLetter}</span>
+                </p>
+              )}
+            </>
+          ) : canonicalResultsDecision.readinessState === "READY" ? (
             <>
               <p className="mt-2 text-sm font-medium text-emerald-100">
                 Confidence: {productReadiness.confidence === "HIGH" ? "High" : "Medium"}
@@ -3964,6 +4193,36 @@ export default function ResultsPage() {
                 ) : null
               ) : canonicalResultsDecision.readinessState === "BLOCKED" ? (
                 <p className="text-sm font-medium text-slate-200">You&apos;ll address this in Fit Review.</p>
+              ) : resultsGenerationPhase === "generating" ? (
+                <span
+                  data-testid="results-hero-primary-cta"
+                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2 text-sm font-semibold text-slate-200"
+                >
+                  Generating...
+                </span>
+              ) : resultsGenerationPhase === "generated" || resultsGenerationPhase === "partial" ? (
+                <a
+                  data-testid="results-hero-primary-cta"
+                  href={studioHrefFromLatest}
+                  onClick={() => {
+                    oneClickResultsCta.onClick?.();
+                  }}
+                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                >
+                  Open in Studio
+                </a>
+              ) : resultsGenerationPhase === "failed" ? (
+                <button
+                  type="button"
+                  data-testid="results-hero-primary-cta"
+                  onClick={() => {
+                    oneClickResultsCta.onClick?.();
+                    triggerResultsGeneration();
+                  }}
+                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                >
+                  Retry generation
+                </button>
               ) : oneClickResultsCta.disabled ? (
                 <span
                   data-testid="results-hero-primary-cta"
@@ -3972,19 +4231,33 @@ export default function ResultsPage() {
                   {oneClickResultsCta.label}
                 </span>
               ) : oneClickResultsCta.href ? (
-                <a
-                  data-testid="results-hero-primary-cta"
-                  href={oneClickResultsCta.href}
-                  onClick={oneClickResultsCta.onClick}
-                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
-                >
-                  {oneClickResultsCta.label}
-                </a>
+                canonicalResultsDecision.primaryAction.kind === "invoke" ? (
+                  <button
+                    type="button"
+                    data-testid="results-hero-primary-cta"
+                    onClick={() => {
+                      oneClickResultsCta.onClick?.();
+                      triggerResultsGeneration();
+                    }}
+                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                  >
+                    {oneClickResultsCta.label}
+                  </button>
+                ) : (
+                  <a
+                    data-testid="results-hero-primary-cta"
+                    href={oneClickResultsCta.href}
+                    onClick={oneClickResultsCta.onClick}
+                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                  >
+                    {oneClickResultsCta.label}
+                  </a>
+                )
               ) : null
             ) : null}
           </div>
         </section>
-        {showGenerationUnlockedPanel && !isStrongFitScore ? (
+        {resultsGenerationPhase === "not_started" && showGenerationUnlockedPanel && !isStrongFitScore ? (
           <section
             className="rounded-2xl border border-emerald-300/30 bg-emerald-500/10 p-4"
             data-testid="results-generation-unlocked-panel"
@@ -4146,6 +4419,7 @@ export default function ResultsPage() {
                     weakFitRecovery={weakFitRecovery}
                     reliabilityFacts={reliabilityFacts}
                     secondaryAction={secondaryAction}
+                    generationPhase={resultsGenerationPhase}
                   />
                   {applicationInsights.length ? (
                     <section className="rounded-2xl border border-sky-300/30 bg-sky-500/10 p-4">

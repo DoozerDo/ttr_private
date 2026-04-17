@@ -166,7 +166,7 @@ describe("results gating", () => {
 
     render(<ResultsPage />);
 
-    expect(screen.queryByRole("link", { name: "Open Studio" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Generate Documents" })).toBeNull();
   });
 
   it("shows qualified strong fit as generation ready even when verification remains weak", async () => {
@@ -182,7 +182,7 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("link", { name: "Open Studio" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
     });
     expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
     expect(screen.queryByTestId("results-blocked-evidence-panel")).toBeNull();
@@ -313,9 +313,9 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("link", { name: "Open Studio" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
     });
-    expect(screen.getByRole("link", { name: "Open Studio" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
     expect(screen.queryByText("How to improve your fit")).toBeNull();
     expect(screen.queryByText("Apply moment")).toBeNull();
@@ -345,6 +345,6 @@ describe("results gating", () => {
     await waitFor(() => {
       expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
     });
-    expect(screen.queryByRole("link", { name: "Open Studio" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Generate Documents" })).toBeNull();
   });
 });
