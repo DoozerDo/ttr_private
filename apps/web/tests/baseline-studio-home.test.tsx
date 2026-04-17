@@ -1030,6 +1030,101 @@ describe("BaselineStudioHome", () => {
     expect(screen.queryByRole("dialog", { name: "Strengthen Signal" })).toBeNull();
   });
 
+  it("classifies duplicate strengthening as no-change and anchors feedback on the affected signal", async () => {
+    const baseline = createAnalyzedBaseline("base-1", "resume-1.pdf", 82);
+    baseline.latestBaselineScore = 79;
+
+    setFetchImplementation(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      if (url.includes("/api/baselines/base-1/strengthening-additions") && init?.method === "PATCH") {
+        return createJsonResponse({
+          ...baseline,
+          latestBaselineScore: 79,
+          impactType: "duplicate",
+          changeClassification: "no_change_duplicate",
+          scoreDelta: 0,
+          explanation: "This addition appears to already be covered by existing baseline evidence.",
+          matchedRequirement: null,
+        });
+      }
+      if (url.includes("/api/baselines/base-1")) {
+        return createJsonResponse(baseline);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<BaselineStudioHome baselines={[baseline]} />);
+    await screen.findByText("Baseline Strengthening");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Strengthen This Signal" })[0]);
+    expect(screen.getByRole("dialog", { name: "Strengthen Signal" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText(/Add concrete evidence/i), {
+      target: { value: "I reduced incident resolution time by 18% across the support team." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Generate Proposed Update" }));
+    await screen.findByText("Proposed baseline update");
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve and Apply" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Strengthen Signal" })).toBeNull();
+    });
+
+    expect(screen.queryByText("Signal strengthened")).toBeNull();
+    const feedbackBlocks = screen.getAllByTestId(/baseline-strengthening-feedback-/);
+    expect(feedbackBlocks.length).toBeGreaterThan(0);
+    expect(feedbackBlocks[0]).toHaveTextContent("No changes made. This experience is already represented.");
+  });
+
+  it("classifies refined strengthening as improved and anchors feedback on the affected signal", async () => {
+    const baseline = createAnalyzedBaseline("base-1", "resume-1.pdf", 82);
+    baseline.latestBaselineScore = 79;
+
+    setFetchImplementation(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      if (url.includes("/api/baselines/base-1/strengthening-additions") && init?.method === "PATCH") {
+        return createJsonResponse({
+          ...baseline,
+          latestBaselineScore: 81,
+          impactType: "strengthened_match",
+          changeClassification: "refined_existing_signal",
+          scoreDelta: 2,
+          explanation: "This strengthens an existing requirement match: reduce incident resolution time",
+          matchedRequirement: "reduce incident resolution time",
+        });
+      }
+      if (url.includes("/api/baselines/base-1")) {
+        return createJsonResponse(baseline);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<BaselineStudioHome baselines={[baseline]} />);
+    await screen.findByText("Baseline Strengthening");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Strengthen This Signal" })[0]);
+    fireEvent.change(screen.getByPlaceholderText(/Add concrete evidence/i), {
+      target: { value: "Reduced incident resolution time by 18% by redesigning the escalation workflow." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Generate Proposed Update" }));
+    await screen.findByText("Proposed baseline update");
+    fireEvent.click(screen.getByRole("button", { name: "Approve and Apply" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Strengthen Signal" })).toBeNull();
+    });
+
+    const feedbackBlocks = screen.getAllByTestId(/baseline-strengthening-feedback-/);
+    expect(feedbackBlocks.length).toBeGreaterThan(0);
+    expect(feedbackBlocks[0]).toHaveTextContent("Signal improved. We strengthened how this experience is described.");
+    expect(feedbackBlocks[0]).toHaveTextContent("(reduce incident resolution time)");
+  });
+
   it("does not surface score delta chips in streamlined baseline record list", async () => {
     setFetchImplementation(async (input: RequestInfo) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;

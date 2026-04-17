@@ -151,6 +151,7 @@ export type BaselineAnalysisTrace = {
 export type BaselineStrengtheningResult = {
   baseline: Baseline;
   impactType: StrengtheningImpactResult['impactType'];
+  changeClassification: 'no_change_duplicate' | 'refined_existing_signal' | 'new_signal_added';
   scoreDelta: number;
   explanation: string;
   matchedRequirement: string | null;
@@ -1358,12 +1359,46 @@ return {
       throw new NotFoundException('Baseline not found');
     }
 
+    const latestAssessmentForImpact = await this.fitAssessmentRepository.findOne({
+      where: { userId, baselineId },
+      order: { createdAt: 'DESC', id: 'DESC' },
+    });
+
+    const existingEvidenceForImpact = (baseline.sections ?? [])
+      .flatMap((section) =>
+        [section.title, section.content]
+          .map((value) => (typeof value === 'string' ? value.trim() : ''))
+          .filter((value) => value.length > 0),
+      )
+      .filter(Boolean);
+
+    const unmetRequirementsForImpact = this.extractUnmetRequirements(latestAssessmentForImpact);
+    const preImpact = classifyStrengtheningImpact({
+      addition: normalizedDetail,
+      existingEvidence: existingEvidenceForImpact,
+      unmetRequirements: unmetRequirementsForImpact,
+    });
+
+    // Single source of truth for "what changed": when the addition is a duplicate, do not persist or score.
+    if (preImpact.impactType === 'duplicate') {
+      return {
+        baseline,
+        impactType: 'duplicate',
+        changeClassification: 'no_change_duplicate',
+        scoreDelta: 0,
+        explanation: preImpact.explanation,
+        matchedRequirement: null,
+      };
+    }
+
     const sectionTitle = 'Approved signal refinements';
     const existingSection = (baseline.sections ?? []).find(
       (section) =>
         section.sectionType === BaselineSectionType.OTHER &&
         (section.title ?? '').trim().toLowerCase() === sectionTitle.toLowerCase(),
     );
+
+    let didPersistChange = false;
 
     if (existingSection) {
       const existingContent =
@@ -1387,6 +1422,7 @@ return {
             { id: existingSection.id, baselineId: baseline.id },
             updatePayload,
           );
+          didPersistChange = true;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const stack = error instanceof Error ? error.stack : undefined;
@@ -1428,6 +1464,7 @@ return {
       try {
         await this.attachEmbeddingsToSections([newSection]);
         await this.baselineSectionRepository.save(newSection);
+        didPersistChange = true;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const stack = error instanceof Error ? error.stack : undefined;
@@ -1457,6 +1494,18 @@ return {
       }
     }
 
+    // If we didn't persist anything (e.g., exact match already present), treat as duplicate and do not score.
+    if (!didPersistChange) {
+      return {
+        baseline,
+        impactType: 'duplicate',
+        changeClassification: 'no_change_duplicate',
+        scoreDelta: 0,
+        explanation: 'This addition appears to already be covered by existing baseline evidence.',
+        matchedRequirement: null,
+      };
+    }
+
     try {
       const updatedAt = new Date();
       await this.baselineRepository.update(
@@ -1483,36 +1532,28 @@ return {
       });
     }
     const refreshedBaseline = await this.getBaselineByIdForUser(baselineId, userId);
-    const latestAssessment = await this.fitAssessmentRepository.findOne({
-      where: { userId, baselineId },
-      order: { createdAt: 'DESC', id: 'DESC' },
-    });
-    const existingEvidence = (refreshedBaseline.sections ?? [])
-      .flatMap((section) =>
-        [section.title, section.content]
-          .map((value) => (typeof value === 'string' ? value.trim() : ''))
-          .filter((value) => value.length > 0),
-      )
-      .filter(Boolean);
-    const unmetRequirements = this.extractUnmetRequirements(latestAssessment);
-    const impact = classifyStrengtheningImpact({
-      addition: normalizedDetail,
-      existingEvidence,
-      unmetRequirements,
-    });
+    const impact = preImpact;
+
+    const changeClassification: BaselineStrengtheningResult['changeClassification'] =
+      impact.impactType === 'new_match'
+        ? 'new_signal_added'
+        : impact.impactType === 'strengthened_match'
+          ? 'refined_existing_signal'
+          : 'refined_existing_signal';
 
     if (impact.scoreDelta !== 0) {
       const currentScore =
         typeof refreshedBaseline.latestBaselineScore === 'number'
           ? refreshedBaseline.latestBaselineScore
-          : typeof latestAssessment?.overallScore === 'number'
-            ? latestAssessment.overallScore
+          : typeof latestAssessmentForImpact?.overallScore === 'number'
+            ? latestAssessmentForImpact.overallScore
             : 0;
       const nextScore = Math.max(0, Math.min(100, currentScore + impact.scoreDelta));
       const scoredBaseline = await this.recordBaselineAnalysisScore(userId, baselineId, nextScore);
       return {
         baseline: scoredBaseline,
         impactType: impact.impactType,
+        changeClassification,
         scoreDelta: impact.scoreDelta,
         explanation: impact.explanation,
         matchedRequirement: impact.matchedRequirement,
@@ -1522,6 +1563,7 @@ return {
     return {
       baseline: refreshedBaseline,
       impactType: impact.impactType,
+      changeClassification,
       scoreDelta: 0,
       explanation: impact.explanation,
       matchedRequirement: impact.matchedRequirement,

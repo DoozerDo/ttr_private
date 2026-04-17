@@ -362,7 +362,16 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   );
   const [savingStrengtheningProposal, setSavingStrengtheningProposal] = useState(false);
   const [strengtheningSaveError, setStrengtheningSaveError] = useState<string | null>(null);
-  const [strengtheningSuccessMessage, setStrengtheningSuccessMessage] = useState<string | null>(null);
+  const [strengtheningFeedbackBySignalId, setStrengtheningFeedbackBySignalId] = useState<
+    Record<
+      string,
+      {
+        classification: "no_change_duplicate" | "refined_existing_signal" | "new_signal_added";
+        message: string;
+        scoreDelta: number;
+      }
+    >
+  >({});
   const [isUploading, setIsUploading] = useState(false);
   const [uploadSuccessId, setUploadSuccessId] = useState<string | null>(null);
   const [highlightedBaselineId, setHighlightedBaselineId] = useState<string | null>(null);
@@ -764,7 +773,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
       return;
     }
     setStrengtheningSaveError(null);
-    setStrengtheningSuccessMessage(null);
     setPendingStrengtheningProposal(createBaselineUpdateProposal(activeStrengtheningSignal.label, trimmed));
   }, [activeStrengtheningSignal, strengtheningAnswer]);
 
@@ -948,14 +956,8 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     }
     setSavingStrengtheningProposal(true);
     setStrengtheningSaveError(null);
-    setStrengtheningSuccessMessage(null);
 
     try {
-      const beforeBaseline =
-        baselineDetails[primaryBaselineId] ??
-        baselineList.find((item) => item.id === primaryBaselineId) ??
-        null;
-      const previousScore = beforeBaseline?.latestBaselineScore ?? null;
       const response = await fetch(
         `/api/baselines/${encodeURIComponent(primaryBaselineId)}/strengthening-additions`,
         {
@@ -985,6 +987,17 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         typeof (payload as { impactType?: unknown }).impactType === "string"
           ? ((payload as { impactType?: string }).impactType as string)
           : "no_match";
+      const changeClassification =
+        typeof (payload as { changeClassification?: unknown }).changeClassification === "string"
+          ? ((payload as { changeClassification?: string }).changeClassification as
+              | "no_change_duplicate"
+              | "refined_existing_signal"
+              | "new_signal_added")
+          : impactType === "duplicate"
+            ? "no_change_duplicate"
+            : impactType === "new_match"
+              ? "new_signal_added"
+              : "refined_existing_signal";
       const scoreDelta =
         typeof (payload as { scoreDelta?: unknown }).scoreDelta === "number"
           ? ((payload as { scoreDelta?: number }).scoreDelta as number)
@@ -1005,27 +1018,23 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
       );
 
       publishBaselineUpdated({ baselineId: primaryBaselineId, source: "baseline" });
-      const nextScore = persistedBaseline.latestBaselineScore ?? null;
-      const delta = previousScore !== null && nextScore !== null ? nextScore - previousScore : null;
-      const deltaLabel =
-        delta === null
-          ? "No change"
-          : delta > 0
-            ? `+${delta}%`
-            : delta < 0
-              ? `${delta}%`
-              : "No change";
-      const changeSummary =
-        (persistedBaseline.sections ?? [])
-          .slice(-1)[0]?.title ??
-        activeStrengtheningSignal?.label ??
-        "Signal strengthened";
+      const feedbackMessage =
+        changeClassification === "no_change_duplicate"
+          ? "No changes made. This experience is already represented."
+          : changeClassification === "new_signal_added"
+            ? "Signal added. New experience included."
+            : scoreDelta > 0
+              ? "Signal improved. We strengthened how this experience is described."
+              : "Saved. We’ll incorporate this as more evidence becomes available.";
 
-      setStrengtheningSuccessMessage(
-        scoreDelta === 0
-          ? `${explanation} Impact: ${impactType.replace("_", " ")}. Added signal: ${changeSummary}${matchedRequirement ? ` (${matchedRequirement})` : ""}.`
-          : `Previous score ${previousScore ?? "--"}%. New score ${nextScore ?? "--"}%. Delta ${deltaLabel}. ${explanation} Impact: ${impactType.replace("_", " ")}. Added signal: ${changeSummary}${matchedRequirement ? ` (${matchedRequirement})` : ""}.`,
-      );
+      setStrengtheningFeedbackBySignalId((current) => ({
+        ...current,
+        [activeStrengtheningSignal?.id ?? "unknown"]: {
+          classification: changeClassification,
+          message: matchedRequirement ? `${feedbackMessage} (${matchedRequirement})` : feedbackMessage,
+          scoreDelta,
+        },
+      }));
       closeStrengtheningModal();
     } catch (saveError) {
       const message =
@@ -1666,15 +1675,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           </section>
         ) : null}
 
-        {strengtheningSuccessMessage ? (
-          <section className="rounded-[20px] border border-emerald-300/15 bg-emerald-400/[0.06] p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-100/80">
-              Signal strengthened
-            </p>
-            <p className="mt-2 text-sm leading-6 text-emerald-50">{strengtheningSuccessMessage}</p>
-          </section>
-        ) : null}
-
         {analysisReady ? (
           <div className="space-y-6 pt-4">
             <section
@@ -1781,6 +1781,14 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                       <p className="mt-2 text-sm leading-6 text-slate-300">
                         {STRENGTHENING_PROMPTS[signal.id].whyMatters}
                       </p>
+                      {strengtheningFeedbackBySignalId[signal.id] ? (
+                        <div
+                          data-testid={`baseline-strengthening-feedback-${signal.id}`}
+                          className="mt-3 rounded-[14px] border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-100"
+                        >
+                          {strengtheningFeedbackBySignalId[signal.id].message}
+                        </div>
+                      ) : null}
                       <div className="mt-4">
                         <FormButton onClick={() => openStrengtheningModal(signal.id)}>
                           Strengthen This Signal

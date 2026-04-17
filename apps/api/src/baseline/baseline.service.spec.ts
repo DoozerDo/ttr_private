@@ -1343,8 +1343,12 @@ describe('BaselineService - strengthening additions', () => {
       ),
     ).resolves.toMatchObject({
       impactType: 'duplicate',
+      changeClassification: 'no_change_duplicate',
       scoreDelta: 0,
     });
+
+    expect(baselineSectionRepository.update).not.toHaveBeenCalled();
+    expect(baselineRepository.update).not.toHaveBeenCalled();
   });
 
   it('returns a new match impact and increases score for unmet requirement evidence', async () => {

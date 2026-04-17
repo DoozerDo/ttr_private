@@ -410,6 +410,7 @@ export class BaselineController {
       return stripBaselineVersioning({
         ...((result.baseline as unknown as Record<string, unknown>) ?? {}),
         impactType: result.impactType,
+        changeClassification: result.changeClassification,
         scoreDelta: result.scoreDelta,
         explanation: result.explanation,
         matchedRequirement: result.matchedRequirement,
