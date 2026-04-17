@@ -255,6 +255,33 @@ describe("BaselineStudioHome", () => {
     expect(screen.getByText("Why not just use the resume file?")).not.toBeVisible();
   });
 
+  it("does not expose downstream navigation (Studio/Results) from the baseline page", async () => {
+    const baseline = createAnalyzedBaseline("base-1", "resume-1.pdf", 82);
+    setFetchImplementation(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return createJsonResponse([baseline]);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    const { container } = render(<BaselineStudioHome baselines={[baseline]} />);
+    await screen.findByRole("heading", { name: "Current baseline" });
+
+    const links = Array.from(container.querySelectorAll("a[href]"))
+      .map((anchor) => anchor.getAttribute("href") ?? "")
+      .filter(Boolean);
+
+    expect(links.some((href) => href.startsWith("/studio") || href.includes("/studio?"))).toBe(false);
+    expect(links.some((href) => href.startsWith("/results") || href.includes("/results?"))).toBe(false);
+
+    expect(screen.queryByText(/open resume studio/i)).toBeNull();
+    expect(screen.queryByText(/view latest results/i)).toBeNull();
+  });
+
   it("uploads a second resume without replacing the current baseline", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -404,12 +431,12 @@ describe("BaselineStudioHome", () => {
     expect(screen.queryByText("resume-1.pdf")).toBeNull();
   });
 
-  it("shows the fit-review launch point for a low-fit analyzed baseline", async () => {
+  it("does not expose downstream generation actions for a low-fit analyzed baseline", async () => {
     render(<BaselineStudioHome baselines={[createAnalyzedBaseline("base-1", "resume-1.pdf", 55)]} />);
 
     await screen.findByRole("heading", { name: "Current baseline" });
     await screen.findByText("Other baselines");
-    expect(screen.getByText("Role fit score: 55%")).toBeInTheDocument();
+    expect(screen.queryByText(/Role fit score/i)).toBeNull();
     const activeSection = screen.getByRole("heading", { name: "Current baseline" }).closest("section");
     expect(activeSection).toBeTruthy();
     expect(within(activeSection as HTMLElement).getByText("resume-1.pdf")).toBeInTheDocument();
@@ -684,9 +711,8 @@ describe("BaselineStudioHome", () => {
     );
 
     await screen.findByRole("heading", { name: "Current baseline" });
-    expect(screen.getAllByText(/Last analyzed/i).length).toBeGreaterThan(0);
-    expect(screen.queryByText(/Fit 82%/i)).not.toBeInTheDocument();
-    expect(screen.getByText("Role fit score: 82%")).toBeInTheDocument();
+    expect(screen.queryByText(/Last analyzed/i)).toBeNull();
+    expect(screen.queryByText(/Role fit score/i)).toBeNull();
     expect(screen.getAllByRole("link", { name: "View baseline details" }).length).toBeGreaterThan(0);
     const activeSection = screen.getByRole("heading", { name: "Current baseline" }).closest("section");
     expect(activeSection).toBeTruthy();
@@ -793,8 +819,8 @@ describe("BaselineStudioHome", () => {
       />,
     );
 
-    expect(screen.getAllByText(/Last analyzed/i).length).toBeGreaterThan(0);
-    expect(screen.queryByText(/Last role analysis:/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Last analyzed/i)).toBeNull();
+    expect(screen.queryByText(/Last role analysis:/i)).toBeNull();
   });
 
   it("does not treat fit score as readiness when baseline analysis is incomplete", async () => {
@@ -1039,6 +1065,9 @@ describe("BaselineStudioHome", () => {
       if (url.includes("/api/analysis/history")) {
         return createJsonResponse([]);
       }
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return createJsonResponse([baseline]);
+      }
       if (url.includes("/api/baselines/base-1/strengthening-additions") && init?.method === "PATCH") {
         return createJsonResponse({
           ...baseline,
@@ -1087,6 +1116,9 @@ describe("BaselineStudioHome", () => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (url.includes("/api/analysis/history")) {
         return createJsonResponse([]);
+      }
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return createJsonResponse([baseline]);
       }
       if (url.includes("/api/baselines/base-1/strengthening-additions") && init?.method === "PATCH") {
         return createJsonResponse({

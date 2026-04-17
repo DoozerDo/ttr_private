@@ -44,14 +44,10 @@ import { BETA_BASELINE_UPLOAD_LIMIT } from "@/src/features/baseline/constants";
 import {
   assertCanonicalRouteHref,
   getBaselineDetailsHref,
-  getFitReviewHref,
-  getResultsHref,
-  getStudioHref,
 } from "@/src/navigation/routes";
 import { trackEvent } from "@/src/lib/analytics";
 import { sanitizeRenderedTextList, sanitizeRenderedTextValue } from "@/lib/renderedText";
 import { resolveWorkflowProgression } from "@/lib/workflowProgression";
-import { CareerGravity } from "../results/components/CareerGravity";
 import { ResumeWithBaselineStatus } from "./_components/ResumeWithBaselineStatus";
 
 type BaselineStudioHomeProps = {
@@ -76,7 +72,7 @@ type BaselinePageReadinessContract = {
   readinessState: BaselineReadinessState;
   ctaLabel: string;
   ctaHref: string;
-  actionType: "target_role" | "view_results" | "upload_resume";
+  actionType: "target_role" | "upload_resume";
   workflowState: string;
   dataSource: "fresh" | "persisted" | "mixed";
   persistedAssessmentId: string | null;
@@ -268,10 +264,10 @@ function buildBaselineReadinessContract({
     baseline: "/baseline",
     target: baselineId ? `/target?baselineId=${encodeURIComponent(baselineId)}` : "/target",
     analyze: baselineId ? `/analyze?baselineId=${encodeURIComponent(baselineId)}` : "/analyze",
-    results: latestAssessmentId ? getResultsHref({ assessmentId: latestAssessmentId }) : "/results",
+    results: baselineId ? `/target?baselineId=${encodeURIComponent(baselineId)}` : "/target",
     upload: baselineId ? getBaselineDetailsHref(baselineId) : "/baseline",
-    studio: latestAssessmentId ? getStudioHref({ assessmentId: latestAssessmentId }) : "/studio",
-    fitReview: latestAssessmentId ? getFitReviewHref({ assessmentId: latestAssessmentId }) : "/fit-review",
+    studio: baselineId ? `/target?baselineId=${encodeURIComponent(baselineId)}` : "/target",
+    fitReview: baselineId ? `/target?baselineId=${encodeURIComponent(baselineId)}` : "/target",
   };
   const progression = resolveWorkflowProgression({
     surface: "baseline",
@@ -300,9 +296,9 @@ function buildBaselineReadinessContract({
       : latestAssessmentId
         ? "READY"
         : "NOT_ANALYZED",
-    ctaLabel: progression.primaryAction.label,
-    ctaHref: progression.primaryAction.destination,
-    actionType: progression.primaryAction.type as "target_role" | "view_results" | "upload_resume",
+    ctaLabel: "Target a role",
+    ctaHref: routes.target,
+    actionType: "target_role",
     workflowState: progression.state,
     dataSource: progression.dataSource,
     persistedAssessmentId: progression.persistedAssessmentId,
@@ -514,60 +510,8 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   const latestAssessmentSummary = primaryBaseline?.latestAssessmentSummary ?? null;
   const hasBaseline = activeBaselines.length > 0;
   const hasCompletedAnalysis = primaryBaselineReadiness.hasCompletedAssessment;
-  const latestFitScore = getLatestRoleAnalysisFitScore(latestAssessmentSummary);
-  const latestAssessmentId = latestAssessmentSummary?.latestAssessmentId?.trim() ?? null;
-  const latestAssessmentCreatedAt = latestAssessmentSummary?.latestAssessmentCreatedAt?.trim() ?? null;
-  const latestResultsHref = latestAssessmentId
-    ? assertCanonicalRouteHref({
-        kind: "results",
-        href: getResultsHref({ assessmentId: latestAssessmentId }),
-        canonicalHref: getResultsHref({ assessmentId: latestAssessmentId }),
-        state: primaryBaselineReadiness.readinessState,
-        baselineId: primaryBaseline?.id ?? primaryBaselineId ?? null,
-        jobId: null,
-        entrySource: "baseline",
-      })
-    : null;
   const baselineDetailsHref = primaryBaselineId ? getBaselineDetailsHref(primaryBaselineId) : "/baseline";
   const targetRoleHref = primaryBaselineId ? `/target?baselineId=${encodeURIComponent(primaryBaselineId)}` : "/target";
-  const studioHref = latestAssessmentId
-    ? assertCanonicalRouteHref({
-        kind: "studio",
-        href: getStudioHref({
-          assessmentId: latestAssessmentId,
-          analysisId: latestAssessmentId,
-          baselineId: primaryBaselineId,
-        }),
-        canonicalHref: getStudioHref({
-          assessmentId: latestAssessmentId,
-          analysisId: latestAssessmentId,
-          baselineId: primaryBaselineId,
-        }),
-        state: primaryBaselineReadiness.readinessState,
-        baselineId: primaryBaseline?.id ?? primaryBaselineId ?? null,
-        jobId: null,
-        entrySource: "baseline",
-      })
-    : null;
-  const fitReviewHref = assertCanonicalRouteHref({
-    kind: "fit_review",
-    href: getFitReviewHref({
-      baselineId: primaryBaselineId,
-      assessmentId: latestAssessmentId,
-      analysisId: latestAssessmentId,
-      locked: true,
-    }),
-    canonicalHref: getFitReviewHref({
-      baselineId: primaryBaselineId,
-      assessmentId: latestAssessmentId,
-      analysisId: latestAssessmentId,
-      locked: true,
-    }),
-    state: primaryBaselineReadiness.readinessState,
-    baselineId: primaryBaseline?.id ?? primaryBaselineId ?? null,
-    jobId: null,
-    entrySource: "baseline",
-  });
   const heroState: "no_baseline" | "no_analysis" | "analysis_exists" = useMemo(() => {
     if (!hasBaseline) return "no_baseline";
     if (!hasCompletedAnalysis) return "no_analysis";
@@ -1427,7 +1371,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             <header className="space-y-1">
               <h2 className="text-xl font-semibold tracking-tight text-slate-100">Current baseline</h2>
               <p className="text-sm text-slate-400">
-                This is the active baseline used to score your fit and generate tailored materials.
+                This baseline is your current experience foundation for targeting roles.
               </p>
             </header>
             <article className="rounded-[16px] border border-white/10 bg-slate-950/30 p-4">
@@ -1437,12 +1381,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 isActiveBaseline
                 showNeedsReviewBadge={primaryBaselineReadiness.readinessState !== "READY"}
               />
-                {latestAssessmentCreatedAt ? (
-                  <p className="mt-2 text-xs text-slate-400">Last analyzed {formatDateTime(latestAssessmentCreatedAt)}</p>
-                ) : null}
-                {latestFitScore !== null ? (
-                  <p className="mt-1 text-xs text-slate-500">Role fit score: {latestFitScore}%</p>
-                ) : null}
                 <p className="mt-1 text-xs text-slate-400">{activeBaselineVersionLabel}</p>
                 <p className="mt-1 text-xs text-slate-500">
                   Created from: {primaryBaseline.originalFilename}
@@ -1489,7 +1427,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 We convert it into a structured baseline (the data we actually use).
               </p>
               <p className="mt-2 text-sm leading-6 text-slate-300">
-                Your current baseline is the one used for scoring fit and generating tailored materials.
+                Your current baseline is the one used when you target roles.
               </p>
             </div>
             <div className="rounded-xl border border-white/10 bg-slate-950/30 p-4">
@@ -1528,21 +1466,10 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   summary: activeBaselineSummary,
                   isAnalyzing: loadingBaselineId === baseline.id,
                 });
-                const hasCompletedAssessment = baselineReadiness.hasCompletedAssessment;
                 const isLoading = loadingBaselineId === baseline.id;
                 const readinessState = baselineReadiness.readinessState;
-                const readinessLabel = getBaselineReadinessLabel(readinessState);
                 const canTargetJob = readinessState === "READY";
                 const setActiveDisabled = isLoading || isPrimary || isArchived || !isHydrated;
-                const latestResultsForBaselineHref = baselineReadiness.latestAssessmentId
-                  ? getResultsHref({ assessmentId: baselineReadiness.latestAssessmentId })
-                  : null;
-                const latestAssessmentTimestamp = baselineReadiness.latestAssessmentCreatedAt;
-                const latestRoleFitScore =
-                  typeof baselineReadiness.latestFitScore === "number"
-                    ? Math.max(0, Math.min(100, Math.round(baselineReadiness.latestFitScore)))
-                    : null;
-                const canOpenStudio = latestRoleFitScore !== null && latestRoleFitScore >= 70;
                 const isReadyBaseline = readinessState === "READY" && !isArchived;
                 const baselineTargetRoleHref = `/target?baselineId=${encodeURIComponent(baseline.id)}`;
                 const baselineDetailsHref = getBaselineDetailsHref(baseline.id);
@@ -1563,17 +1490,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                     />
                     <p className="mt-1 text-xs text-slate-500">Created from: {baseline.originalFilename}</p>
                     <p className="mt-2 text-xs text-slate-400">Uploaded {formatDateTime(baseline.createdAt)}</p>
-                    {hasCompletedAssessment ? (
-                      <p className="mt-1 text-xs text-slate-400">
-                        Last analyzed{" "}
-                        {latestAssessmentTimestamp
-                          ? formatDateTime(latestAssessmentTimestamp)
-                          : "recently"}
-                      </p>
-                    ) : null}
-                    {hasCompletedAssessment && latestRoleFitScore !== null ? (
-                      <p className="mt-1 text-xs text-slate-500">Last role analysis: {latestRoleFitScore}%</p>
-                    ) : null}
                     <div className="mt-4 space-y-3">
                       <div className="flex flex-wrap gap-2">
                         {isReadyBaseline ? (
@@ -1619,31 +1535,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                           </FormButton>
                         ) : null}
                       </div>
-                      {latestResultsForBaselineHref ? (
-                        <div className="flex flex-wrap gap-2 text-sm">
-                          <Link
-                            href={latestResultsForBaselineHref}
-                            className="text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
-                          >
-                            {formatCardActionLabel("View Latest Results")}
-                          </Link>
-                          {canOpenStudio ? (
-                            <Link
-                              href={studioHref ?? "/studio"}
-                              className="text-cyan-100 underline decoration-cyan-300/25 underline-offset-4 transition hover:text-cyan-50 hover:decoration-cyan-200/60"
-                            >
-                              {formatCardActionLabel("Open Resume Studio")}
-                            </Link>
-                          ) : (
-                            <Link
-                              href={fitReviewHref}
-                              className="text-amber-100 underline decoration-amber-300/25 underline-offset-4 transition hover:text-amber-50 hover:decoration-amber-200/60"
-                            >
-                              {formatCardActionLabel("Start Fit Review")}
-                            </Link>
-                          )}
-                        </div>
-                      ) : null}
                     </div>
                   </article>
                 );
@@ -1820,7 +1711,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                         </p>
                       </div>
                       <div className="mt-5">
-                        <CareerGravity />
                       </div>
                     </>
                   ) : (
