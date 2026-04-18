@@ -436,11 +436,12 @@ describe("results generation transition", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getAllByText("Finalizing your documents...").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Your documents are ready").length).toBeGreaterThan(0);
     });
     expect(screen.queryByText("Strong match. Ready for document generation.")).toBeNull();
-    expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("Finalizing");
-    expect(screen.queryByText("Open in Studio")).toBeNull();
+    expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("Open in Studio");
+    // Partial success must be terminal; failure details stay suppressed until recovery is exhausted.
+    expect(screen.queryByText(/generation needs attention/i)).toBeNull();
     expect(screen.queryByText(/^Resume:/i)).toBeNull();
   });
 

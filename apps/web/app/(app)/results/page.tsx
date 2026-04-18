@@ -133,22 +133,13 @@ function deriveResultsGenerationPhase(statuses: {
     return "generating";
   }
   if (resume === "in_progress" || coverLetter === "in_progress") return "generating";
-  if (
-    opts?.generationStarted &&
-    resume !== "failed" &&
-    coverLetter !== "failed" &&
-    (resume === "missing" || coverLetter === "missing")
-  ) {
-    // After generation is kicked off, transient missing records shouldn't be treated as a terminal partial state.
+  if (resume === "completed" || coverLetter === "completed") return "generated";
+  if (resume === "failed" && coverLetter === "failed") return "failed";
+  const hasOutcome = resume === "failed" || coverLetter === "failed";
+  if (opts?.generationStarted && !hasOutcome) {
+    // After generation is kicked off, transient missing records shouldn't be treated as a terminal state.
     return "generating";
   }
-  if (resume === "completed" && coverLetter === "completed") return "generated";
-  if (resume === "failed" && coverLetter === "failed") return "failed";
-  const hasOutcome =
-    resume === "completed" ||
-    coverLetter === "completed" ||
-    resume === "failed" ||
-    coverLetter === "failed";
   if (hasOutcome) return "partial";
   return "not_started";
 }
@@ -2674,7 +2665,7 @@ export default function ResultsPage() {
       const completed =
         resultsArtifactScope === "resume_only"
           ? statuses.resume === "completed"
-          : statuses.resume === "completed" && statuses.coverLetter === "completed";
+          : statuses.resume === "completed" || statuses.coverLetter === "completed";
       if (completed) {
         if (!hasCompletedGenerationRef.current) {
           hasCompletedGenerationRef.current = true;
