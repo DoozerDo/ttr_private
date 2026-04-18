@@ -1371,14 +1371,20 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           </section>
         ) : null}
         {primaryBaseline ? (
-          <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
+          <section
+            className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/25 p-5"
+            data-testid="baseline-current-section"
+          >
             <header className="space-y-1">
               <h2 className="text-xl font-semibold tracking-tight text-slate-100">Current baseline</h2>
               <p className="text-sm text-slate-400">
                 This baseline is your current experience foundation for targeting roles.
               </p>
             </header>
-            <article className="rounded-[16px] border border-white/10 bg-slate-950/30 p-4">
+            <article
+              className="rounded-[16px] border border-white/10 bg-slate-950/30 p-4"
+              data-testid={`baseline-current-card:${primaryBaseline.id}`}
+            >
               <ResumeWithBaselineStatus
                 filename={primaryBaseline.originalFilename}
                 isReadyForTargeting={primaryBaselineReadiness.readinessState === "READY"}
@@ -1455,7 +1461,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 Uploading a resume creates a baseline. Set one as current to use across the app.
               </p>
             </header>
-            <div className="space-y-3">
+            <div className="space-y-3" data-testid="baseline-library-section">
               {libraryBaselines.slice(0, 3).map((baseline) => {
                 const isArchived = baseline.status === "ARCHIVED";
                 const assessmentSummary = baseline.latestAssessmentSummary;
@@ -1477,6 +1483,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 return (
                   <article
                     key={baseline.id}
+                    data-testid={`baseline-library-card:${baseline.id}`}
                     className={`rounded-[16px] border p-4 ${
                       uploadSuccessId === baseline.id || highlightedBaselineId === baseline.id
                         ? "border-cyan-300/20 bg-cyan-400/[0.04]"
@@ -1530,6 +1537,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                             onClick={() => void handleArchiveBaseline(baseline.id)}
                             disabled={archivingBaselineId === baseline.id || isArchived}
                             className="uppercase"
+                            data-testid={`baseline-library-archive:${baseline.id}`}
                           >
                             {archivingBaselineId === baseline.id ? "Archiving..." : "Archive"}
                           </FormButton>
