@@ -27,6 +27,8 @@ import { OverflowMenu } from "./_components/OverflowMenu";
 import { SetupModuleCard } from "./_components/SetupModuleCard";
 import { setBaselineName } from "./_components/selectionStore";
 import { BaselineUnlockProgress } from "@/src/components/baseline/BaselineUnlockProgress";
+import { getBaselineCardActionFlags } from "@/lib/baselineCardActions";
+import { partitionBaselines } from "@/lib/baselinePartition";
 
 interface BaselineDashboardProps {
   initialBaselines: BaselineDto[];
@@ -85,9 +87,6 @@ const getLibraryCapMessage = (data: unknown): string | null => {
 
 const sortBaselinesNewestFirst = (baselines: BaselineDto[]) =>
   [...baselines].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-const getMostRecentActiveBaselineId = (baselines: BaselineDto[]) =>
-  sortBaselinesNewestFirst(baselines).find((baseline) => baseline.status !== "ARCHIVED")?.id ?? null;
 
 const resolveNextActiveBaselineId = (
   baselines: BaselineDto[],
@@ -210,20 +209,17 @@ export function BaselineDashboard({
 
   const sortedBaselines = useMemo(
     () =>
-      [...baselines].sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      ),
+      [...baselines].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
     [baselines],
   );
-  const activeBaselines = useMemo(
-    () => sortedBaselines.filter((baseline) => baseline.status !== "ARCHIVED"),
-    [sortedBaselines],
+
+  const baselinePartition = useMemo(
+    () => partitionBaselines({ baselines, currentBaselineId: selectedBaselineId ?? null }),
+    [baselines, selectedBaselineId],
   );
-  const archivedBaselines = useMemo(
-    () => sortedBaselines.filter((baseline) => baseline.status === "ARCHIVED"),
-    [sortedBaselines],
-  );
+
+  const activeBaselines = baselinePartition.activeBaselines;
+  const archivedBaselines = baselinePartition.archivedBaselines;
   const activeBaselineCount = activeBaselines.length;
   const uploadLimitReached = activeBaselineCount >= BASELINE_LIBRARY_CAP;
 
@@ -273,11 +269,13 @@ export function BaselineDashboard({
     }
   }, []);
 
-  const activeBaselineId =
-    selectedBaselineId &&
-    activeBaselines.some((baseline) => baseline.id === selectedBaselineId)
-      ? selectedBaselineId
-      : getMostRecentActiveBaselineId(sortedBaselines) ?? null;
+  const activeBaselineId = baselinePartition.currentBaseline?.id ?? null;
+
+  const renderedActiveBaselines = useMemo(() => {
+    const current = baselinePartition.currentBaseline;
+    if (!current) return baselinePartition.libraryBaselines;
+    return [current, ...baselinePartition.libraryBaselines];
+  }, [baselinePartition.currentBaseline, baselinePartition.libraryBaselines]);
 
   useEffect(() => {
     if (!activeBaselineId) {
@@ -575,12 +573,18 @@ export function BaselineDashboard({
           </p>
         )
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3" data-testid="baseline-dashboard-list">
           <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
             {activeBaselineCount} of {BASELINE_LIBRARY_CAP} active baselines
           </p>
-          {activeBaselines.map((baseline) => {
+          {renderedActiveBaselines.map((baseline) => {
             const isSelected = baseline.id === activeBaselineId;
+            const actionFlags = getBaselineCardActionFlags({
+              isCurrentBaseline: isSelected,
+              isEditable: true,
+              isReady: true,
+              isArchived: baseline.status === "ARCHIVED",
+            });
             const cardClasses = [
               "rounded-2xl border border-white/10 bg-slate-950/40 p-4",
               isSelected ? "ring-2 ring-cyan-300/40" : "",
@@ -589,7 +593,7 @@ export function BaselineDashboard({
               .join(" ");
 
             return (
-              <div key={baseline.id} className={cardClasses}>
+              <div key={baseline.id} className={cardClasses} data-testid={`baseline-dashboard-card:${baseline.id}`}>
                 <div className="min-w-0">
                   <div className="flex min-w-0 items-center gap-2">
                     <p className="truncate text-sm font-semibold text-slate-100">
@@ -614,12 +618,14 @@ export function BaselineDashboard({
                     >
                       {isSelected ? "Selected" : "Use this baseline"}
                     </FormButton>
-                    {baseline.status !== "ARCHIVED" ? (
-                      <OverflowMenu
-                        onArchive={() => handleArchiveBaseline(baseline.id)}
-                        loading={archivingBaselineId === baseline.id}
-                        ariaLabel="Baseline overflow actions"
-                      />
+                    {actionFlags.showArchive ? (
+                      <div data-testid={`baseline-dashboard-archive:${baseline.id}`}>
+                        <OverflowMenu
+                          onArchive={() => handleArchiveBaseline(baseline.id)}
+                          loading={archivingBaselineId === baseline.id}
+                          ariaLabel={`Baseline overflow actions ${baseline.id}`}
+                        />
+                      </div>
                     ) : null}
                   </div>
                 </div>

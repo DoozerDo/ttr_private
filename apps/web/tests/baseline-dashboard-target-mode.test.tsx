@@ -63,15 +63,15 @@ describe("BaselineDashboard target mode", () => {
     });
   });
 
-  it("archives the selected baseline with the canonical id and reselects the newest remaining active baseline", async () => {
+  it("shows Archive only for non-selected baselines and archives without changing selection", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.url;
 
-      if (url.includes("/api/baselines/base-2/archive") && init?.method === "PATCH") {
+      if (url.includes("/api/baselines/base-1/archive") && init?.method === "PATCH") {
         return createResponse({
-          id: "base-2",
-          originalFilename: "resume-2.pdf",
-          createdAt: "2026-01-02T00:00:00.000Z",
+          id: "base-1",
+          originalFilename: "resume-1.pdf",
+          createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-04-01T00:00:00.000Z",
           status: "ARCHIVED",
           archivedAt: "2026-04-01T00:00:00.000Z",
@@ -83,9 +83,9 @@ describe("BaselineDashboard target mode", () => {
       if (url.includes("/api/baselines?includeArchived=true")) {
         return createResponse([
           {
-            id: "base-2",
-            originalFilename: "resume-2.pdf",
-            createdAt: "2026-01-02T00:00:00.000Z",
+            id: "base-1",
+            originalFilename: "resume-1.pdf",
+            createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-04-01T00:00:00.000Z",
             status: "ARCHIVED",
             archivedAt: "2026-04-01T00:00:00.000Z",
@@ -93,9 +93,9 @@ describe("BaselineDashboard target mode", () => {
             latestAssessmentSummary: null,
           },
           {
-            id: "base-1",
-            originalFilename: "resume-1.pdf",
-            createdAt: "2026-01-01T00:00:00.000Z",
+            id: "base-2",
+            originalFilename: "resume-2.pdf",
+            createdAt: "2026-01-02T00:00:00.000Z",
             updatedAt: "2026-01-02T00:00:00.000Z",
             status: "ACTIVE",
             sections: [],
@@ -165,15 +165,19 @@ describe("BaselineDashboard target mode", () => {
       );
     });
 
-    fireEvent.click(screen.getAllByRole("button", { name: /overflow actions/i })[0]);
+    const selectedCard = screen.getByTestId("baseline-dashboard-card:base-2");
+    expect(within(selectedCard).queryByRole("button", { name: /overflow actions/i })).toBeNull();
+
+    const otherCard = screen.getByTestId("baseline-dashboard-card:base-1");
+    fireEvent.click(within(otherCard).getByRole("button", { name: /overflow actions/i }));
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/baselines/base-2/archive",
+        "/api/baselines/base-1/archive",
         expect.objectContaining({ method: "PATCH" }),
       );
-      expect(mockRouterPush).toHaveBeenCalledWith("/baseline?baselineId=base-1");
+      expect(mockRouterPush).not.toHaveBeenCalled();
       expect(mockRouterRefresh).toHaveBeenCalled();
     });
   });

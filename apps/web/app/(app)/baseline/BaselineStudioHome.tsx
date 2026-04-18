@@ -23,6 +23,8 @@ import {
   type BaselineDto,
 } from "@/lib/baselines";
 import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
+import { getBaselineCardActionFlags } from "@/lib/baselineCardActions";
+import { partitionBaselines } from "@/lib/baselinePartition";
 import {
   parseComplianceError,
   readResponsePayload,
@@ -389,14 +391,12 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   const baselineAnalysisRequestRef = useRef<{ requestId: string; baselineId: string } | null>(null);
 
   const allBaselines = useMemo(() => sortBaselinesNewestFirst(baselineList), [baselineList]);
-  const activeBaselines = useMemo(
-    () => allBaselines.filter((baseline) => baseline.status !== "ARCHIVED"),
-    [allBaselines],
+  const baselinePartition = useMemo(
+    () => partitionBaselines({ baselines: baselineList, currentBaselineId: primaryBaselineId }),
+    [baselineList, primaryBaselineId],
   );
-  const libraryBaselines = useMemo(
-    () => activeBaselines.filter((baseline) => baseline.id !== primaryBaselineId),
-    [activeBaselines, primaryBaselineId],
-  );
+  const activeBaselines = baselinePartition.activeBaselines;
+  const libraryBaselines = baselinePartition.libraryBaselines;
   const uploadLimitReached = activeBaselines.length >= BETA_BASELINE_UPLOAD_LIMIT;
   const isEditableLibrary = libraryMode === "editable";
 
@@ -1461,9 +1461,14 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 Uploading a resume creates a baseline. Set one as current to use across the app.
               </p>
             </header>
-            <div className="space-y-3" data-testid="baseline-library-section">
+            <div
+              className="space-y-3"
+              data-testid="baseline-library-section"
+            >
               {libraryBaselines.slice(0, 3).map((baseline) => {
                 const isArchived = baseline.status === "ARCHIVED";
+                const isCurrentBaseline = baseline.id === primaryBaselineId;
+
                 const assessmentSummary = baseline.latestAssessmentSummary;
                 const activeBaselineSummary =
                   assessmentSummary ?? null;
@@ -1477,6 +1482,12 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 const canTargetJob = readinessState === "READY";
                 const setActiveDisabled = isLoading || isArchived || !isHydrated;
                 const isReadyBaseline = readinessState === "READY" && !isArchived;
+                const actionFlags = getBaselineCardActionFlags({
+                  isCurrentBaseline,
+                  isEditable: isEditableLibrary,
+                  isReady: isReadyBaseline,
+                  isArchived,
+                });
                 const baselineTargetRoleHref = `/target?baselineId=${encodeURIComponent(baseline.id)}`;
                 const baselineDetailsHref = getBaselineDetailsHref(baseline.id);
 
@@ -1531,7 +1542,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                             {formatCardActionLabel("Set current")}
                           </FormButton>
                         ) : null}
-                        {isEditableLibrary ? (
+                        {actionFlags.showArchive ? (
                           <FormButton
                             variant="ghost"
                             onClick={() => void handleArchiveBaseline(baseline.id)}
