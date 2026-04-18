@@ -73,6 +73,10 @@ function normalizeRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+function shouldDebugDocgen() {
+  return process.env.NODE_ENV !== 'production' || process.env.DEBUG_DOCGEN === 'true';
+}
+
 @Injectable()
 export class StudioArtifactsService {
   constructor(
@@ -468,6 +472,20 @@ export class StudioArtifactsService {
     jobId: string,
     patch: ArtifactPatch,
   ) {
+    if (shouldDebugDocgen()) {
+      const resumeStatus = patch.resumeStatus ?? null;
+      const coverLetterStatus = patch.coverLetterStatus ?? null;
+      if (resumeStatus || coverLetterStatus) {
+        // eslint-disable-next-line no-console
+        console.log('[DOCGEN][ARTIFACT_UPSERT]', {
+          userId,
+          baselineId,
+          jobId,
+          resumeStatus,
+          coverLetterStatus,
+        });
+      }
+    }
     const existing = await this.studioArtifactRepository.findOne({
       where: { userId, baselineId, jobId },
     });

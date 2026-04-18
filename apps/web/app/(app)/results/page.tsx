@@ -125,8 +125,10 @@ function deriveResultsGenerationPhase(statuses: {
 }, opts?: {
   recoveryInProgress?: boolean;
   generationStarted?: boolean;
+  artifactScope?: "both" | "resume_only";
 }): ResultsGenerationPhase {
-  const { resume, coverLetter } = statuses;
+  const { resume } = statuses;
+  const coverLetter = opts?.artifactScope === "resume_only" ? "completed" : statuses.coverLetter;
   if (opts?.recoveryInProgress && (resume === "failed" || coverLetter === "failed")) {
     return "generating";
   }
@@ -2166,7 +2168,7 @@ export default function ResultsPage() {
 
   const getDocumentPayload = () => {
     const jobIdValue = latest?.jobId?.trim() ?? "";
-    const baselineVersionIdValue = latest?.baselineVersionId?.trim() ?? "";
+    const baselineVersionIdValue = latest?.baselineVersionId?.trim() ?? currentBaselineVersionId?.trim() ?? "";
     return { jobId: jobIdValue, baselineVersionId: baselineVersionIdValue };
   };
 
@@ -2310,7 +2312,7 @@ export default function ResultsPage() {
     const analysisId = latest?.assessmentId?.trim() ?? "";
     const jobIdValue = latest?.jobId?.trim() ?? "";
     const baselineIdValue = latest?.baselineId?.trim() ?? "";
-    const baselineVersionIdValue = latest?.baselineVersionId?.trim() ?? "";
+    const baselineVersionIdValue = latest?.baselineVersionId?.trim() ?? currentBaselineVersionId?.trim() ?? "";
 
     if (!analysisId || !jobIdValue || !baselineIdValue || !baselineVersionIdValue) {
       setGenerationReadiness(READINESS_LOADING_STATE);
@@ -2545,6 +2547,7 @@ export default function ResultsPage() {
   const [generationRecoveryStage, setGenerationRecoveryStage] =
     useState<ResultsGenerationRecoveryStage>("idle");
   const [generationRecoveryExhausted, setGenerationRecoveryExhausted] = useState(false);
+  const [generationMutationError, setGenerationMutationError] = useState<string | null>(null);
 
   const normalizedDimensionScores = useMemo(
     () => normalizeDimensionScores(latest ?? null),
@@ -2584,6 +2587,8 @@ export default function ResultsPage() {
   );
   const canOpenStudio = canonicalResultsDecision.readinessState !== "BLOCKED";
   const shouldAutoRecoverGeneration = isDocumentGenerationUnlocked(activeScore);
+  const resultsArtifactScope =
+    canonicalResultsDecision.readinessState === "DRAFT" ? ("resume_only" as const) : ("both" as const);
   const generationRecoveryInProgress =
     shouldAutoRecoverGeneration &&
     generationRecoveryStage !== "idle" &&
@@ -2597,7 +2602,7 @@ export default function ResultsPage() {
     : resultsGenerationPhase;
   const generationPairIds = useMemo(() => {
     const baselineIdValue = latest?.baselineId?.trim() ?? "";
-    const baselineVersionIdValue = latest?.baselineVersionId?.trim() ?? "";
+    const baselineVersionIdValue = latest?.baselineVersionId?.trim() ?? currentBaselineVersionId?.trim() ?? "";
     const jobIdValue = latest?.jobId?.trim() ?? "";
     const analysisIdValue = latest?.assessmentId?.trim() ?? "";
     if (!baselineIdValue || !baselineVersionIdValue || !jobIdValue || !analysisIdValue) return null;
@@ -2607,16 +2612,69 @@ export default function ResultsPage() {
       jobId: jobIdValue,
       analysisId: analysisIdValue,
     };
-  }, [latest?.assessmentId, latest?.baselineId, latest?.baselineVersionId, latest?.jobId]);
+  }, [currentBaselineVersionId, latest?.assessmentId, latest?.baselineId, latest?.baselineVersionId, latest?.jobId]);
   const generationPairKey = useMemo(() => {
     if (!generationPairIds) return null;
     return `${generationPairIds.baselineId}:${generationPairIds.baselineVersionId}:${generationPairIds.jobId}:${generationPairIds.analysisId}`;
   }, [generationPairIds]);
+  const resolveGenerationPairIds = useCallback(async () => {
+    const baselineIdValue = latest?.baselineId?.trim() ?? "";
+    const jobIdValue = latest?.jobId?.trim() ?? "";
+    const analysisIdValue = latest?.assessmentId?.trim() ?? "";
+    if (!baselineIdValue || !jobIdValue || !analysisIdValue) return null;
+
+    const baselineVersionIdFromLatest = latest?.baselineVersionId?.trim() ?? "";
+    const baselineVersionIdFromState = currentBaselineVersionId?.trim() ?? "";
+    if (baselineVersionIdFromLatest) {
+      return {
+        baselineId: baselineIdValue,
+        baselineVersionId: baselineVersionIdFromLatest,
+        jobId: jobIdValue,
+        analysisId: analysisIdValue,
+      };
+    }
+
+    if (baselineVersionIdFromState) {
+      return {
+        baselineId: baselineIdValue,
+        baselineVersionId: baselineVersionIdFromState,
+        jobId: jobIdValue,
+        analysisId: analysisIdValue,
+      };
+    }
+
+    try {
+      const response = await fetch(`/api/baselines/${encodeURIComponent(baselineIdValue)}/versions`, {
+        cache: "no-store",
+      });
+      if (!response.ok) return null;
+      const versions = (await response.json()) as Array<{ id: string; versionNumber: number }>;
+      const resolved = resolveLatestBaselineVersionId({ versions });
+      if (!resolved) return null;
+      return {
+        baselineId: baselineIdValue,
+        baselineVersionId: resolved,
+        jobId: jobIdValue,
+        analysisId: analysisIdValue,
+      };
+    } catch (error) {
+      console.error("Failed to resolve generation pair ids", error);
+      return null;
+    }
+  }, [
+    currentBaselineVersionId,
+    latest?.assessmentId,
+    latest?.baselineId,
+    latest?.baselineVersionId,
+    latest?.jobId,
+  ]);
 
   const applyArtifactSnapshot = useCallback(
     (statuses: { resume: ResultsArtifactStatus; coverLetter: ResultsArtifactStatus }, phase: ResultsGenerationPhase) => {
       const completed =
-        statuses.resume === "completed" && statuses.coverLetter === "completed";
+        resultsArtifactScope === "resume_only"
+          ? statuses.resume === "completed"
+          : statuses.resume === "completed" && statuses.coverLetter === "completed";
       if (completed) {
         if (!hasCompletedGenerationRef.current) {
           hasCompletedGenerationRef.current = true;
@@ -2637,7 +2695,7 @@ export default function ResultsPage() {
       setResultsArtifactStatuses(statuses);
       setResultsGenerationPhase(phase);
     },
-    [],
+    [resultsArtifactScope],
   );
 
   useEffect(() => {
@@ -2649,6 +2707,7 @@ export default function ResultsPage() {
     setResultsGenerationPhase("not_started");
     setGenerationRecoveryStage("idle");
     setGenerationRecoveryExhausted(false);
+    setGenerationMutationError(null);
   }, [generationPairKey]);
   const studioHrefFromLatest = useMemo(() => {
     if (!generationPairIds) return studioHref;
@@ -2693,6 +2752,7 @@ export default function ResultsPage() {
             generationRecoveryStage !== "exhausted" &&
             !generationRecoveryExhausted,
           generationStarted,
+          artifactScope: resultsArtifactScope,
         });
         applyArtifactSnapshot(statuses, derivedPhase);
       } catch {
@@ -2710,6 +2770,7 @@ export default function ResultsPage() {
     generationPairIds,
     generationRecoveryExhausted,
     generationRecoveryStage,
+    resultsArtifactScope,
     shouldAutoRecoverGeneration,
   ]);
 
@@ -2740,16 +2801,21 @@ export default function ResultsPage() {
             generationRecoveryStage !== "exhausted" &&
             !generationRecoveryExhausted,
           generationStarted,
+          artifactScope: resultsArtifactScope,
         });
         applyArtifactSnapshot(statuses, derivedPhase);
         const terminalPhase = hasCompletedGenerationRef.current ? "generated" : derivedPhase;
-        if (terminalPhase !== "generating") {
+        const shouldContinueSystemOwnedRecoveryPolling =
+          shouldAutoRecoverGeneration &&
+          !generationRecoveryExhausted &&
+          (terminalPhase === "partial" || terminalPhase === "failed");
+        if (terminalPhase !== "generating" && !shouldContinueSystemOwnedRecoveryPolling) {
           window.clearInterval(interval);
         }
       } catch {
         // ignore
       }
-    }, 1500);
+    }, 400);
 
     return () => {
       cancelled = true;
@@ -2760,6 +2826,7 @@ export default function ResultsPage() {
     generationPairIds,
     generationRecoveryExhausted,
     generationRecoveryStage,
+    resultsArtifactScope,
     resultsGenerationPhase,
     shouldAutoRecoverGeneration,
   ]);
@@ -3218,17 +3285,22 @@ export default function ResultsPage() {
     recentIntent,
     resultsScoreBucket,
   ]);
-  const runGenerationRecovery = useCallback(
-    async (opts?: { force?: boolean }) => {
-      if (!generationPairIds) return;
+  const runGenerationRecoveryWithPairIds = useCallback(
+    async (
+      pairIds: NonNullable<typeof generationPairIds>,
+      opts?: { force?: boolean },
+    ) => {
+      const shouldDebugMutation = process.env.NODE_ENV !== "test";
       if (!shouldAutoRecoverGeneration) return;
       if (hasCompletedGenerationRef.current) return;
       if (resultsGenerationPhase === "generating" && !opts?.force) return;
 
+      const shouldAttemptCoverLetter = resultsArtifactScope !== "resume_only";
       const needsResume =
         resultsArtifactStatuses.resume === "missing" || resultsArtifactStatuses.resume === "failed";
       const needsCoverLetter =
-        resultsArtifactStatuses.coverLetter === "missing" || resultsArtifactStatuses.coverLetter === "failed";
+        shouldAttemptCoverLetter &&
+        (resultsArtifactStatuses.coverLetter === "missing" || resultsArtifactStatuses.coverLetter === "failed");
       if (!needsResume && !needsCoverLetter) {
         return;
       }
@@ -3236,17 +3308,29 @@ export default function ResultsPage() {
       const requestId = generationRecoveryRequestIdRef.current + 1;
       generationRecoveryRequestIdRef.current = requestId;
 
+      console.log("[RESULTS][MUTATION_START]", {
+        requestId,
+        artifactScope: resultsArtifactScope,
+        baselineId: pairIds.baselineId,
+        baselineVersionId: pairIds.baselineVersionId,
+        jobId: pairIds.jobId,
+        analysisId: pairIds.analysisId,
+        needsResume,
+        needsCoverLetter,
+      });
+
       hasStartedGenerationRef.current = true;
       setGenerationRecoveryExhausted(false);
       setGenerationRecoveryStage("primary_attempt");
+      setGenerationMutationError(null);
       generationRequestedAtRef.current = Date.now();
       setResultsGenerationPhase("generating");
 
       const baseFields = {
-        jobId: generationPairIds.jobId,
-        baselineId: generationPairIds.baselineId,
-        baselineVersionId: generationPairIds.baselineVersionId,
-        analysisId: generationPairIds.analysisId,
+        jobId: pairIds.jobId,
+        baselineId: pairIds.baselineId,
+        baselineVersionId: pairIds.baselineVersionId,
+        analysisId: pairIds.analysisId,
       };
 
       const callResume = async (mode: "primary" | "fallback") => {
@@ -3261,6 +3345,18 @@ export default function ResultsPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
+        if (!response.ok) {
+          const raw = await response.text().catch(() => "");
+          if (shouldDebugMutation) {
+            console.error("[RESULTS][MUTATION_ERROR][RESUME]", {
+              status: response.status,
+              body: raw.slice(0, 500),
+            });
+          }
+          setGenerationMutationError(
+            raw.trim().length ? `Resume generation failed (${response.status}).` : "Resume generation failed.",
+          );
+        }
         return response.ok;
       };
 
@@ -3276,12 +3372,26 @@ export default function ResultsPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
+        if (!response.ok) {
+          const raw = await response.text().catch(() => "");
+          if (shouldDebugMutation) {
+            console.error("[RESULTS][MUTATION_ERROR][COVER_LETTER]", {
+              status: response.status,
+              body: raw.slice(0, 500),
+            });
+          }
+          setGenerationMutationError(
+            raw.trim().length
+              ? `Cover letter generation failed (${response.status}).`
+              : "Cover letter generation failed.",
+          );
+        }
         return response.ok;
       };
 
       const attempt = async (mode: "primary" | "fallback", only?: Array<"resume" | "coverLetter">) => {
         const shouldResume = !only || only.includes("resume");
-        const shouldCover = !only || only.includes("coverLetter");
+        const shouldCover = shouldAttemptCoverLetter && (!only || only.includes("coverLetter"));
         const [resumeOk, coverOk] = await Promise.all([
           shouldResume ? callResume(mode) : Promise.resolve(true),
           shouldCover ? callCoverLetter(mode) : Promise.resolve(true),
@@ -3290,10 +3400,10 @@ export default function ResultsPage() {
       };
 
       try {
-        const first = await attempt("primary", [
-          ...(needsResume ? (["resume"] as const) : []),
-          ...(needsCoverLetter ? (["coverLetter"] as const) : []),
-        ]);
+        const firstOnly: Array<"resume" | "coverLetter"> = [];
+        if (needsResume) firstOnly.push("resume");
+        if (needsCoverLetter) firstOnly.push("coverLetter");
+        const first = await attempt("primary", firstOnly.length ? firstOnly : undefined);
         if (generationRecoveryRequestIdRef.current !== requestId) return;
         if (first.resumeOk && first.coverOk) {
           setGenerationRecoveryStage("idle");
@@ -3303,8 +3413,8 @@ export default function ResultsPage() {
         setGenerationRecoveryStage("retry_attempt");
         const retryOnly: Array<"resume" | "coverLetter"> = [];
         if (!first.resumeOk) retryOnly.push("resume");
-        if (!first.coverOk) retryOnly.push("coverLetter");
-        const second = await attempt("primary", retryOnly);
+        if (!first.coverOk && shouldAttemptCoverLetter) retryOnly.push("coverLetter");
+        const second = await attempt("primary", retryOnly.length ? retryOnly : undefined);
         if (generationRecoveryRequestIdRef.current !== requestId) return;
         if (second.resumeOk && second.coverOk) {
           setGenerationRecoveryStage("idle");
@@ -3314,8 +3424,8 @@ export default function ResultsPage() {
         setGenerationRecoveryStage("fallback_attempt");
         const fallbackOnly: Array<"resume" | "coverLetter"> = [];
         if (!second.resumeOk) fallbackOnly.push("resume");
-        if (!second.coverOk) fallbackOnly.push("coverLetter");
-        const third = await attempt("fallback", fallbackOnly);
+        if (!second.coverOk && shouldAttemptCoverLetter) fallbackOnly.push("coverLetter");
+        const third = await attempt("fallback", fallbackOnly.length ? fallbackOnly : undefined);
         if (generationRecoveryRequestIdRef.current !== requestId) return;
         if (third.resumeOk && third.coverOk) {
           setGenerationRecoveryStage("idle");
@@ -3330,7 +3440,20 @@ export default function ResultsPage() {
         setGenerationRecoveryExhausted(true);
       }
     },
-    [generationPairIds, resultsArtifactStatuses.coverLetter, resultsArtifactStatuses.resume, resultsGenerationPhase, shouldAutoRecoverGeneration],
+    [
+      resultsArtifactScope,
+      resultsArtifactStatuses.coverLetter,
+      resultsArtifactStatuses.resume,
+      resultsGenerationPhase,
+      shouldAutoRecoverGeneration,
+    ],
+  );
+  const runGenerationRecovery = useCallback(
+    async (opts?: { force?: boolean }) => {
+      if (!generationPairIds) return;
+      await runGenerationRecoveryWithPairIds(generationPairIds, opts);
+    },
+    [generationPairIds, runGenerationRecoveryWithPairIds],
   );
 
   useEffect(() => {
@@ -3380,19 +3503,34 @@ export default function ResultsPage() {
     : shouldAutoRecoverGeneration && generationRecoveryExhausted
       ? ("exhausted" as const)
       : null;
-  const triggerResultsGeneration = useCallback(() => {
+  const isResultsGenerationPrimaryAction = useMemo(() => {
+    const actionType = canonicalResultsDecision.primaryAction.type;
+    const label = canonicalResultsDecision.primaryAction.label.toLowerCase();
+    return actionType === "generate_documents" || actionType === "retry_generation" || label.includes("generate");
+  }, [canonicalResultsDecision.primaryAction.label, canonicalResultsDecision.primaryAction.type]);
+  const triggerResultsGeneration = useCallback(async () => {
     const actionType = canonicalResultsDecision.primaryAction.type;
     const label = canonicalResultsDecision.primaryAction.label.toLowerCase();
     const isGenerationAction =
       actionType === "generate_documents" || actionType === "retry_generation" || label.includes("generate");
     if (!isGenerationAction) return;
 
+    const resolvedPairIds = generationPairIds ?? (await resolveGenerationPairIds());
+    if (!resolvedPairIds) {
+      console.error("[RESULTS_UI][GENERATE_CLICK][MISSING_PAIR_IDS]", {
+        actionType,
+        destination: canonicalResultsDecision.primaryAction.destination,
+      });
+      setResultsGenerationPhase("failed");
+      return;
+    }
+
     console.log("[RESULTS_UI][GENERATE_CLICK]", {
       actionType,
       destination: canonicalResultsDecision.primaryAction.destination,
-      baselineId: generationPairIds?.baselineId ?? null,
-      jobId: generationPairIds?.jobId ?? null,
-      analysisId: generationPairIds?.analysisId ?? null,
+      baselineId: resolvedPairIds.baselineId,
+      jobId: resolvedPairIds.jobId,
+      analysisId: resolvedPairIds.analysisId,
     });
 
     if (hasCompletedGenerationRef.current) {
@@ -3401,7 +3539,10 @@ export default function ResultsPage() {
     }
 
     if (shouldAutoRecoverGeneration) {
-      void runGenerationRecovery(generationRecoveryExhausted ? { force: true } : undefined);
+      void runGenerationRecoveryWithPairIds(
+        resolvedPairIds,
+        generationRecoveryExhausted ? { force: true } : undefined,
+      );
       return;
     }
 
@@ -3415,11 +3556,10 @@ export default function ResultsPage() {
     canonicalResultsDecision.primaryAction.label,
     canonicalResultsDecision.primaryAction.type,
     generationRecoveryExhausted,
-    generationPairIds?.analysisId,
-    generationPairIds?.baselineId,
-    generationPairIds?.jobId,
+    generationPairIds,
     router,
-    runGenerationRecovery,
+    resolveGenerationPairIds,
+    runGenerationRecoveryWithPairIds,
     shouldAutoRecoverGeneration,
     studioHrefFromLatest,
   ]);
@@ -4636,11 +4776,14 @@ export default function ResultsPage() {
                   type="button"
                   data-testid="results-hero-primary-cta"
                   onClick={() => {
+                    if (process.env.NODE_ENV !== "production") {
+                      console.log("[RESULTS][GENERATE_CLICK]");
+                    }
                     oneClickResultsCta.onClick?.();
                     if (shouldAutoRecoverGeneration) {
                       void runGenerationRecovery({ force: true });
                     } else {
-                      triggerResultsGeneration();
+                      void triggerResultsGeneration();
                     }
                   }}
                   className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
@@ -4655,13 +4798,16 @@ export default function ResultsPage() {
                   {oneClickResultsCta.label}
                 </span>
               ) : oneClickResultsCta.href ? (
-                canonicalResultsDecision.primaryAction.kind === "invoke" ? (
+                isResultsGenerationPrimaryAction || canonicalResultsDecision.primaryAction.kind === "invoke" ? (
                   <button
                     type="button"
                     data-testid="results-hero-primary-cta"
                     onClick={() => {
+                      if (process.env.NODE_ENV !== "production") {
+                        console.log("[RESULTS][GENERATE_CLICK]");
+                      }
                       oneClickResultsCta.onClick?.();
-                      triggerResultsGeneration();
+                      void triggerResultsGeneration();
                     }}
                     className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
                   >
@@ -4680,6 +4826,11 @@ export default function ResultsPage() {
               ) : null
             ) : null}
           </div>
+          {generationMutationError ? (
+            <p className="mt-2 text-xs font-medium text-rose-200" data-testid="results-generation-mutation-error">
+              {generationMutationError}
+            </p>
+          ) : null}
         </section>
         {resultsGenerationPhase === "not_started" && showGenerationUnlockedPanel && !isStrongFitScore ? (
           <section

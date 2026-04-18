@@ -7,6 +7,10 @@ function shouldBypassTier() {
   return process.env.NODE_ENV !== "production" || process.env.TTR_BETA_BYPASS === "true";
 }
 
+function shouldDebugDocgen() {
+  return process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_DEBUG_DOCGEN === "true";
+}
+
 function readStatus(payload: Record<string, unknown>): string {
   const status =
     (typeof payload.status === "string" ? payload.status : "").trim().toLowerCase() ||
@@ -67,6 +71,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
+  if (shouldDebugDocgen()) {
+    const record = body && typeof body === "object" ? (body as Record<string, unknown>) : null;
+    console.log("[DOCGEN][REQUEST_RECEIVED][WEB][RESUME]", {
+      baselineId: typeof record?.baselineId === "string" ? record.baselineId : null,
+      baselineVersionId: typeof record?.baselineVersionId === "string" ? record.baselineVersionId : null,
+      jobId: typeof record?.jobId === "string" ? record.jobId : null,
+      analysisId: typeof record?.analysisId === "string" ? record.analysisId : null,
+      oneTap: Boolean(record?.oneTap),
+    });
+  }
+
   const headers: Record<string, string> = {
     Authorization: `Bearer ${auth.token}`,
     "Content-Type": "application/json",
@@ -82,6 +97,13 @@ export async function POST(req: NextRequest) {
     headers,
     body: JSON.stringify(body),
   });
+
+  if (shouldDebugDocgen()) {
+    console.log("[DOCGEN][UPSTREAM_RESPONSE][WEB][RESUME]", {
+      status: upstreamResponse.status,
+      ok: upstreamResponse.ok,
+    });
+  }
 
   const contentType = upstreamResponse.headers.get("content-type") ?? "";
   const responseHeaders = new Headers();

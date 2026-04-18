@@ -7,6 +7,10 @@ function shouldBypassTier() {
   return process.env.NODE_ENV !== "production" || process.env.TTR_BETA_BYPASS === "true";
 }
 
+function shouldDebugDocgen() {
+  return process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_DEBUG_DOCGEN === "true";
+}
+
 type CoverLetterRouteBody = {
   jobId?: string;
   baselineId?: string;
@@ -66,6 +70,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
+  if (shouldDebugDocgen()) {
+    console.log("[DOCGEN][REQUEST_RECEIVED][WEB][COVER_LETTER]", {
+      baselineId: typeof body.baselineId === "string" ? body.baselineId : null,
+      baselineVersionId: typeof body.baselineVersionId === "string" ? body.baselineVersionId : null,
+      jobId: typeof body.jobId === "string" ? body.jobId : null,
+      analysisId: typeof body.analysisId === "string" ? body.analysisId : null,
+      oneTap: Boolean(body.oneTap),
+    });
+  }
+
   const headers: Record<string, string> = {
     Authorization: `Bearer ${auth.token}`,
     "Content-Type": "application/json",
@@ -81,6 +95,13 @@ export async function POST(req: NextRequest) {
     headers,
     body: JSON.stringify(body),
   });
+
+  if (shouldDebugDocgen()) {
+    console.log("[DOCGEN][UPSTREAM_RESPONSE][WEB][COVER_LETTER]", {
+      status: response.status,
+      ok: response.ok,
+    });
+  }
 
   return relayApiResponse(response);
 }
