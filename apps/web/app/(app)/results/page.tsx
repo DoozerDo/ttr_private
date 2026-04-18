@@ -64,6 +64,7 @@ import { buildProductDecisionState } from "@/lib/productDecisionState";
 import { resolveCanonicalState } from "@/lib/canonicalDecision";
 import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
 import { isDocumentGenerationUnlocked } from "@/lib/documentGenerationGate";
+import { ResumePreview } from "@/app/(app)/studio/ResumePreview";
 import {
   buildWorkflowRequestKey,
   isWorkflowRequestStale,
@@ -72,6 +73,7 @@ import {
 } from "@/lib/workflowRequestGuard";
 import { deriveEvidenceLedger, type EvidenceLedger } from "@/lib/evidenceLedger";
 import { readRecentIntentState } from "@/src/lib/recentIntent";
+import { buildCoverLetterParagraphs } from "@/src/lib/studio/helpers";
 import { useGuidedMode } from "@/hooks/useGuidedMode";
 import { trackEvent } from "@/src/lib/analytics";
 import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
@@ -96,6 +98,10 @@ type BackendStudioArtifactsResponse = {
   resume?: BackendStudioArtifactRecord;
   coverLetter?: BackendStudioArtifactRecord;
 };
+
+function hasAnyArtifactStatus(statuses: { resume: ResultsArtifactStatus; coverLetter: ResultsArtifactStatus }): boolean {
+  return statuses.resume !== "missing" || statuses.coverLetter !== "missing";
+}
 
 function normalizeBackendArtifactStatus(status: unknown): ResultsArtifactStatus {
   const value = typeof status === "string" ? status.trim().toLowerCase() : "";
@@ -1067,7 +1073,7 @@ export function OpportunityMapSection({
       if (generationPhase === "generated") {
         return {
           headline: "Your documents are ready",
-          body: "Open Studio to review and adjust your drafts before applying.",
+        body: "Your drafts are ready below. Refinement comes next.",
         };
       }
       return {
@@ -2530,11 +2536,24 @@ export default function ResultsPage() {
     resume: ResultsArtifactStatus;
     coverLetter: ResultsArtifactStatus;
   }>({ resume: "missing", coverLetter: "missing" });
+  const hasFetchedArtifactsOnceRef = useRef(false);
+  const [hasFetchedArtifactsOnce, setHasFetchedArtifactsOnce] = useState(false);
+  const autoGenerationTriggeredRef = useRef<Set<string>>(new Set());
+  const runGenerationRecoveryWithPairIdsRef = useRef<
+    | null
+    | ((
+        pairIds: NonNullable<typeof generationPairIds>,
+        opts?: { force?: boolean },
+      ) => Promise<void>)
+  >(null);
+  const [resumeGenerationPayload, setResumeGenerationPayload] = useState<unknown>(null);
+  const [coverLetterGenerationPayload, setCoverLetterGenerationPayload] = useState<unknown>(null);
   const [hasCompletedGeneration, setHasCompletedGeneration] = useState(false);
   const hasCompletedGenerationRef = useRef(false);
   const hasStartedGenerationRef = useRef(false);
   const generationRequestedAtRef = useRef<number | null>(null);
   const generationRecoveryRequestIdRef = useRef(0);
+  const generationMutationSessionKeysRef = useRef<Set<string>>(new Set());
   const [generationRecoveryStage, setGenerationRecoveryStage] =
     useState<ResultsGenerationRecoveryStage>("idle");
   const [generationRecoveryExhausted, setGenerationRecoveryExhausted] = useState(false);
@@ -2579,7 +2598,9 @@ export default function ResultsPage() {
   const canOpenStudio = canonicalResultsDecision.readinessState !== "BLOCKED";
   const shouldAutoRecoverGeneration = isDocumentGenerationUnlocked(activeScore);
   const resultsArtifactScope =
-    canonicalResultsDecision.readinessState === "DRAFT" ? ("resume_only" as const) : ("both" as const);
+    canonicalResultsDecision.readinessState === "DRAFT" && !shouldAutoRecoverGeneration
+      ? ("resume_only" as const)
+      : ("both" as const);
   const generationRecoveryInProgress =
     shouldAutoRecoverGeneration &&
     generationRecoveryStage !== "idle" &&
@@ -2609,6 +2630,13 @@ export default function ResultsPage() {
     // Generation identity must not churn when baselineVersionId is resolved/changes.
     return `${generationPairIds.baselineId}:${generationPairIds.jobId}:${generationPairIds.analysisId}`;
   }, [generationPairIds]);
+  const autoGenerationSessionKey = useMemo(() => {
+    const baselineIdValue = latest?.baselineId?.trim() ?? "";
+    const jobIdValue = latest?.jobId?.trim() ?? "";
+    const analysisIdValue = latest?.assessmentId?.trim() ?? "";
+    if (!baselineIdValue || !jobIdValue || !analysisIdValue) return null;
+    return `${baselineIdValue}:${jobIdValue}:${analysisIdValue}`;
+  }, [latest?.assessmentId, latest?.baselineId, latest?.jobId]);
   const resolveGenerationPairIds = useCallback(async () => {
     const baselineIdValue = latest?.baselineId?.trim() ?? "";
     const jobIdValue = latest?.jobId?.trim() ?? "";
@@ -2694,12 +2722,17 @@ export default function ResultsPage() {
     hasCompletedGenerationRef.current = false;
     hasStartedGenerationRef.current = false;
     generationRequestedAtRef.current = null;
+    generationMutationSessionKeysRef.current = new Set();
     setHasCompletedGeneration(false);
+    hasFetchedArtifactsOnceRef.current = false;
+    setHasFetchedArtifactsOnce(false);
     setResultsArtifactStatuses({ resume: "missing", coverLetter: "missing" });
     setResultsGenerationPhase("not_started");
     setGenerationRecoveryStage("idle");
     setGenerationRecoveryExhausted(false);
     setGenerationMutationError(null);
+    setResumeGenerationPayload(null);
+    setCoverLetterGenerationPayload(null);
   }, [generationSessionKey]);
   const studioHrefFromLatest = useMemo(() => {
     if (!generationPairIds) return studioHref;
@@ -2747,6 +2780,19 @@ export default function ResultsPage() {
           artifactScope: resultsArtifactScope,
         });
         applyArtifactSnapshot(statuses, derivedPhase);
+
+        if (
+          shouldAutoRecoverGeneration &&
+          !generationStarted &&
+          resultsGenerationPhase === "not_started" &&
+          !hasAnyArtifactStatus(statuses)
+        ) {
+          const sessionKey = `${generationPairIds.baselineId}:${generationPairIds.jobId}:${generationPairIds.analysisId}`;
+          if (!autoGenerationTriggeredRef.current.has(sessionKey)) {
+            autoGenerationTriggeredRef.current.add(sessionKey);
+            void runGenerationRecoveryWithPairIdsRef.current?.(generationPairIds);
+          }
+        }
       } catch {
         // Best effort only.
       }
@@ -2763,6 +2809,7 @@ export default function ResultsPage() {
     generationRecoveryExhausted,
     generationRecoveryStage,
     resultsArtifactScope,
+    resultsGenerationPhase,
     shouldAutoRecoverGeneration,
   ]);
 
@@ -2783,6 +2830,10 @@ export default function ResultsPage() {
         const response = await fetch(backendUrl.toString(), { cache: "no-store" });
         const payload = await readResponsePayload(response);
         if (!response.ok) return;
+        if (!hasFetchedArtifactsOnceRef.current) {
+          hasFetchedArtifactsOnceRef.current = true;
+          setHasFetchedArtifactsOnce(true);
+        }
         const statuses = deriveResultsArtifactStatuses(payload);
         const generationStarted =
           hasStartedGenerationRef.current || typeof generationRequestedAtRef.current === "number";
@@ -2907,8 +2958,11 @@ export default function ResultsPage() {
       typeof activeScore === "number" &&
       isDocumentGenerationUnlocked(activeScore) &&
       canonicalUnverifiedRequirements.length > 0 &&
-      activeScore < 80,
-    [activeScore, canonicalUnverifiedRequirements.length],
+      activeScore < 80 &&
+      (effectiveResultsGenerationPhase === "generated" ||
+        effectiveResultsGenerationPhase === "failed" ||
+        effectiveResultsGenerationPhase === "partial"),
+    [activeScore, canonicalUnverifiedRequirements.length, effectiveResultsGenerationPhase],
   );
   const resetExpansionForm = useCallback(() => {
     setExpansionContext("");
@@ -3287,6 +3341,12 @@ export default function ResultsPage() {
       if (hasCompletedGenerationRef.current) return;
       if (resultsGenerationPhase === "generating" && !opts?.force) return;
 
+      const sessionKey = `${pairIds.baselineId}:${pairIds.jobId}:${pairIds.analysisId}`;
+      if (!opts?.force && generationMutationSessionKeysRef.current.has(sessionKey)) {
+        return;
+      }
+      generationMutationSessionKeysRef.current.add(sessionKey);
+
       const shouldAttemptCoverLetter = resultsArtifactScope !== "resume_only";
       const needsResume =
         resultsArtifactStatuses.resume === "missing" || resultsArtifactStatuses.resume === "failed";
@@ -3337,6 +3397,7 @@ export default function ResultsPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
+        const responsePayload = await readResponsePayload(response.clone());
         if (!response.ok) {
           const raw = await response.text().catch(() => "");
           if (shouldDebugMutation) {
@@ -3348,6 +3409,8 @@ export default function ResultsPage() {
           setGenerationMutationError(
             raw.trim().length ? `Resume generation failed (${response.status}).` : "Resume generation failed.",
           );
+        } else if (responsePayload) {
+          setResumeGenerationPayload(responsePayload);
         }
         return response.ok;
       };
@@ -3364,6 +3427,7 @@ export default function ResultsPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
+        const responsePayload = await readResponsePayload(response.clone());
         if (!response.ok) {
           const raw = await response.text().catch(() => "");
           if (shouldDebugMutation) {
@@ -3377,6 +3441,8 @@ export default function ResultsPage() {
               ? `Cover letter generation failed (${response.status}).`
               : "Cover letter generation failed.",
           );
+        } else if (responsePayload) {
+          setCoverLetterGenerationPayload(responsePayload);
         }
         return response.ok;
       };
@@ -3440,6 +3506,9 @@ export default function ResultsPage() {
       shouldAutoRecoverGeneration,
     ],
   );
+  useEffect(() => {
+    runGenerationRecoveryWithPairIdsRef.current = runGenerationRecoveryWithPairIds;
+  }, [runGenerationRecoveryWithPairIds]);
   const runGenerationRecovery = useCallback(
     async (opts?: { force?: boolean }) => {
       if (!generationPairIds) return;
@@ -4612,7 +4681,7 @@ export default function ResultsPage() {
                     : effectiveResultsGenerationPhase === "generating"
                       ? "We’re drafting your resume and cover letter now."
                       : effectiveResultsGenerationPhase === "generated"
-                        ? "Open Studio to review and adjust your drafts before applying."
+                        ? "Your drafts are ready below. Refinement comes next."
                         : effectiveResultsGenerationPhase === "failed"
                           ? "Retry generation, or open Studio to adjust inputs and try again."
                           : effectiveResultsGenerationPhase === "partial"
@@ -4644,7 +4713,7 @@ export default function ResultsPage() {
                 </p>
               ) : effectiveResultsGenerationPhase === "generated" ? (
                 <p className="mt-1 text-sm text-slate-300">
-                  Open Studio to review your resume and cover letter drafts.
+                  Review the drafts below, then refine in Studio if needed.
                 </p>
               ) : (
                 <p className="mt-1 text-sm text-slate-300">
@@ -4818,6 +4887,30 @@ export default function ResultsPage() {
               ) : null
             ) : null}
           </div>
+          {effectiveResultsGenerationPhase === "generated" ? (
+            <div className="mt-6 space-y-5" data-testid="results-generated-documents">
+              <div className="space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Documents</p>
+                <p className="text-lg font-semibold text-slate-50">Your drafts</p>
+                <p className="text-sm text-slate-300">
+                  Documents come first. Add more evidence after you review and refine these drafts.
+                </p>
+              </div>
+              {resumeGenerationPayload ? <ResumePreview payload={resumeGenerationPayload} /> : null}
+              {coverLetterGenerationPayload ? (
+                <div className="space-y-3" data-testid="cover-letter-preview">
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                    Preview of tailored cover letter
+                  </p>
+                  <div className="space-y-3 rounded-xl border border-white/10 bg-slate-950/40 p-4 text-sm leading-7 text-slate-100">
+                    {buildCoverLetterParagraphs(coverLetterGenerationPayload).map((paragraph, index) => (
+                      <p key={`results-cover-letter-paragraph-${index}`}>{paragraph}</p>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {generationMutationError ? (
             <p className="mt-2 text-xs font-medium text-rose-200" data-testid="results-generation-mutation-error">
               {generationMutationError}
