@@ -4239,8 +4239,6 @@ export default function ResultsPage() {
         }
 
         const params = new URLSearchParams(searchParams?.toString() ?? "");
-        params.delete("jobId");
-        params.delete("baselineId");
         params.set("assessmentId", createdAssessmentId);
         params.set("analysisId", createdAssessmentId);
         const query = params.toString();
@@ -4309,8 +4307,6 @@ export default function ResultsPage() {
       }
 
       const params = new URLSearchParams(searchParams?.toString() ?? "");
-      params.delete("jobId");
-      params.delete("baselineId");
       params.set("assessmentId", sanitizedData.assessmentId);
       params.set("analysisId", sanitizedData.assessmentId);
       const query = params.toString();
@@ -4372,7 +4368,7 @@ export default function ResultsPage() {
       const params = new URLSearchParams(searchParams?.toString() ?? "");
       params.delete("analysisId");
       params.delete("fitScoreId");
-      params.delete("jobId");
+      // Preserve baselineId/jobId in the URL so Target flow state isn't lost mid-session.
       params.set("assessmentId", latestForBaseline.assessmentId);
       const query = params.toString();
       const destination = query ? `/results?${query}` : "/results";
