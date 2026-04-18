@@ -393,6 +393,10 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     () => allBaselines.filter((baseline) => baseline.status !== "ARCHIVED"),
     [allBaselines],
   );
+  const libraryBaselines = useMemo(
+    () => activeBaselines.filter((baseline) => baseline.id !== primaryBaselineId),
+    [activeBaselines, primaryBaselineId],
+  );
   const uploadLimitReached = activeBaselines.length >= BETA_BASELINE_UPLOAD_LIMIT;
   const isEditableLibrary = libraryMode === "editable";
 
@@ -1452,15 +1456,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
               </p>
             </header>
             <div className="space-y-3">
-              {activeBaselines
-                .filter((baseline) => baseline.id !== primaryBaselineId)
-                .slice(0, 3)
-                .map((baseline) => {
-                const isPrimary = primaryBaselineId === baseline.id;
+              {libraryBaselines.slice(0, 3).map((baseline) => {
                 const isArchived = baseline.status === "ARCHIVED";
                 const assessmentSummary = baseline.latestAssessmentSummary;
                 const activeBaselineSummary =
-                  isPrimary ? primaryBaseline?.latestAssessmentSummary ?? assessmentSummary ?? null : assessmentSummary ?? null;
+                  assessmentSummary ?? null;
                 const baselineReadiness = buildBaselineReadinessContract({
                   baselineId: baseline.id,
                   summary: activeBaselineSummary,
@@ -1469,7 +1469,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 const isLoading = loadingBaselineId === baseline.id;
                 const readinessState = baselineReadiness.readinessState;
                 const canTargetJob = readinessState === "READY";
-                const setActiveDisabled = isLoading || isPrimary || isArchived || !isHydrated;
+                const setActiveDisabled = isLoading || isArchived || !isHydrated;
                 const isReadyBaseline = readinessState === "READY" && !isArchived;
                 const baselineTargetRoleHref = `/target?baselineId=${encodeURIComponent(baseline.id)}`;
                 const baselineDetailsHref = getBaselineDetailsHref(baseline.id);
@@ -1528,7 +1528,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                           <FormButton
                             variant="ghost"
                             onClick={() => void handleArchiveBaseline(baseline.id)}
-                            disabled={archivingBaselineId === baseline.id || isArchived || isPrimary}
+                            disabled={archivingBaselineId === baseline.id || isArchived}
                             className="uppercase"
                           >
                             {archivingBaselineId === baseline.id ? "Archiving..." : "Archive"}
@@ -1539,7 +1539,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   </article>
                 );
               })}
-              {!activeBaselines.some((baseline) => baseline.id !== primaryBaselineId) ? (
+              {libraryBaselines.length === 0 ? (
                 <p className="text-sm text-slate-400">
                   No other baselines yet. Upload another resume to create one.
                 </p>

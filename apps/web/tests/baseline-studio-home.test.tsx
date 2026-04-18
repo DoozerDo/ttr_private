@@ -1235,6 +1235,56 @@ describe("BaselineStudioHome", () => {
     expect(screen.getByText("0 of 3 active baselines")).toBeInTheDocument();
   });
 
+  it("shows Archive only on non-current baseline library cards", async () => {
+    render(
+      <BaselineStudioHome
+        baselines={[
+          createAnalyzedBaseline("base-1", "current.pdf", 90),
+          createAnalyzedBaseline("base-2", "other.pdf", 84),
+        ]}
+      />,
+    );
+
+    const currentSection = screen.getByRole("heading", { name: "Current baseline" }).closest("section");
+    expect(currentSection).not.toBeNull();
+    expect(within(currentSection as HTMLElement).queryByRole("button", { name: "Archive" })).toBeNull();
+
+    const librarySection = screen.getByRole("heading", { name: "Other baselines" }).closest("section");
+    expect(librarySection).not.toBeNull();
+    expect(within(librarySection as HTMLElement).getByText("other.pdf")).toBeInTheDocument();
+    expect(within(librarySection as HTMLElement).getByRole("button", { name: "Archive" })).toBeInTheDocument();
+    expect(within(librarySection as HTMLElement).queryByText("current.pdf")).toBeNull();
+  });
+
+  it("moves Archive visibility when changing current baseline", async () => {
+    render(
+      <BaselineStudioHome
+        baselines={[
+          createAnalyzedBaseline("base-1", "current.pdf", 90),
+          createAnalyzedBaseline("base-2", "other.pdf", 84),
+        ]}
+      />,
+    );
+
+    const librarySection = screen.getByRole("heading", { name: "Other baselines" }).closest("section");
+    expect(librarySection).not.toBeNull();
+
+    const setCurrentButton = within(librarySection as HTMLElement).getByRole("button", { name: /set current/i });
+    fireEvent.click(setCurrentButton);
+
+    await waitFor(() => {
+      const currentSection = screen.getByRole("heading", { name: "Current baseline" }).closest("section");
+      expect(currentSection).not.toBeNull();
+      expect(within(currentSection as HTMLElement).getByText("other.pdf")).toBeInTheDocument();
+      expect(within(currentSection as HTMLElement).queryByRole("button", { name: "Archive" })).toBeNull();
+    });
+
+    const refreshedLibrarySection = screen.getByRole("heading", { name: "Other baselines" }).closest("section");
+    expect(refreshedLibrarySection).not.toBeNull();
+    expect(within(refreshedLibrarySection as HTMLElement).getByText("current.pdf")).toBeInTheDocument();
+    expect(within(refreshedLibrarySection as HTMLElement).getByRole("button", { name: "Archive" })).toBeInTheDocument();
+  });
+
   it("uploads successfully from wrapped API payload and does not persist score history prematurely", async () => {
     let analyzeCalled = false;
 
