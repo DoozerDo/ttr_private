@@ -242,7 +242,7 @@ describe('ResumeService contract', () => {
     const { service } = buildService();
     await expect(
       service.generateResume('user-1', { ...baseRequest, baselineVersionId: '' }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
   it('returns canonical unsupported_input when the resume fixture lacks supported structure', async () => {
@@ -304,6 +304,42 @@ describe('ResumeService contract', () => {
 
     expect(applicationsService.upsertPreparedFromResumeGeneration).not.toHaveBeenCalled();
     expect(opportunitiesService.createFromResumeStudio).not.toHaveBeenCalled();
+  });
+
+  it('does not throw generation_blocked pre-start when oneTap=true and readiness would be blocked', async () => {
+    const { service } = buildService({
+      complianceFlags: [
+        {
+          code: 'full_block',
+          message: 'Missing verified evidence for core responsibilities.',
+          severity: ComplianceFlagSeverity.BLOCK,
+        },
+      ],
+      blocked: true,
+    });
+
+    const readinessSpy = jest.spyOn(service, 'getGenerationReadiness').mockResolvedValue({
+      status: 'blocked',
+      blocked: true,
+      compliance_flags: [],
+      reasons: [
+        {
+          code: 'full_block',
+          message: 'Missing verified evidence for core responsibilities.',
+        },
+      ],
+    });
+
+    await expect(
+      service.generateResume('user-1', { ...baseRequest, oneTap: true }),
+    ).rejects.toMatchObject({
+      response: {
+        code: expect.not.stringMatching(/^generation_blocked$/),
+      },
+      status: 422,
+    });
+
+    expect(readinessSpy).not.toHaveBeenCalled();
   });
 
   it('returns canonical unsupported_input when resume structure is missing', () => {

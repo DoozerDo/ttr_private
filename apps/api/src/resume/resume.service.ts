@@ -1376,7 +1376,10 @@ export class ResumeService {
       baselineVersionId: baselineVersionId,
     });
 
-    if (!options?.skipReadinessGate) {
+    const isVerifiedOnlyRequest =
+      Boolean(request.oneTap) || Boolean(options?.enforceOneTap);
+
+    if (!options?.skipReadinessGate && !isVerifiedOnlyRequest) {
       const readiness = await this.getGenerationReadiness(userId, request, {
         skipReadinessGate: true,
       });
@@ -1419,6 +1422,15 @@ export class ResumeService {
           return result;
         }
 
+        this.logger.warn('[resume-generation] readiness_blocked', {
+          userId,
+          baselineId: baseline.id,
+          baselineVersionId: baselineVersion.id,
+          jobId: jobId ?? null,
+          analysisId: analysisId ?? null,
+          oneTap: Boolean(request.oneTap),
+          readinessStatus: readiness.status,
+        });
         this.throwGenerationBlockedError(
           (readiness.reasons ?? []).map((reason) => ({
             code: reason.code,
@@ -2369,12 +2381,13 @@ export class ResumeService {
     });
 
     let generation: Awaited<ReturnType<ResumeService['generateResume']>> | null = null;
+    const preflightOneTap = Boolean(request.oneTap);
     try {
       generation = await this.generateResume(
         userId,
-        { ...request, oneTap: false },
+        { ...request, oneTap: preflightOneTap },
         {
-          enforceOneTap: false,
+          enforceOneTap: preflightOneTap,
           preflightOnly: true,
           skipReadinessGate: options?.skipReadinessGate ?? true,
         },
