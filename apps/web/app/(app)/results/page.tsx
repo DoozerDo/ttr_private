@@ -2604,9 +2604,10 @@ export default function ResultsPage() {
       analysisId: analysisIdValue,
     };
   }, [currentBaselineVersionId, latest?.assessmentId, latest?.baselineId, latest?.baselineVersionId, latest?.jobId]);
-  const generationPairKey = useMemo(() => {
+  const generationSessionKey = useMemo(() => {
     if (!generationPairIds) return null;
-    return `${generationPairIds.baselineId}:${generationPairIds.baselineVersionId}:${generationPairIds.jobId}:${generationPairIds.analysisId}`;
+    // Generation identity must not churn when baselineVersionId is resolved/changes.
+    return `${generationPairIds.baselineId}:${generationPairIds.jobId}:${generationPairIds.analysisId}`;
   }, [generationPairIds]);
   const resolveGenerationPairIds = useCallback(async () => {
     const baselineIdValue = latest?.baselineId?.trim() ?? "";
@@ -2699,7 +2700,7 @@ export default function ResultsPage() {
     setGenerationRecoveryStage("idle");
     setGenerationRecoveryExhausted(false);
     setGenerationMutationError(null);
-  }, [generationPairKey]);
+  }, [generationSessionKey]);
   const studioHrefFromLatest = useMemo(() => {
     if (!generationPairIds) return studioHref;
     return getStudioHref({

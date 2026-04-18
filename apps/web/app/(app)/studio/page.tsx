@@ -1344,6 +1344,16 @@ export default function StudioPage() {
     }),
     [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, requestedAnalysisId],
   );
+  const generationWorkflowScope = useMemo<WorkflowRequestScope>(
+    () => ({
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      // Generation identity must not churn when baselineVersionId is resolved/changes.
+      baselineVersionId: null,
+      analysisId: requestedAnalysisId || null,
+    }),
+    [effectiveBaselineId, effectiveJobId, requestedAnalysisId],
+  );
   const studioArtifactStorageKey = useMemo(
     () => getStudioArtifactStorageKey(effectiveJobId, effectiveBaselineId),
     [effectiveBaselineId, effectiveJobId],
@@ -1515,9 +1525,9 @@ export default function StudioPage() {
     studioArtifactStorageKey,
   ]);
   useEffect(() => {
-    const resumeKey = buildWorkflowRequestKey("resume", currentWorkflowScope);
-    const coverKey = buildWorkflowRequestKey("cover_letter", currentWorkflowScope);
-    const autoKey = buildWorkflowRequestKey("auto_generation", currentWorkflowScope);
+    const resumeKey = buildWorkflowRequestKey("resume", generationWorkflowScope);
+    const coverKey = buildWorkflowRequestKey("cover_letter", generationWorkflowScope);
+    const autoKey = buildWorkflowRequestKey("auto_generation", generationWorkflowScope);
 
     if (resumeGenerating && (!resumeKey || activeResumeGenerationRef.current?.requestKey !== resumeKey)) {
       setResumeGenerating(false);
@@ -1528,7 +1538,7 @@ export default function StudioPage() {
     if (autoGenerationInFlight && (!autoKey || activeAutoGenerationRef.current?.requestKey !== autoKey)) {
       setAutoGenerationInFlight(false);
     }
-  }, [autoGenerationInFlight, coverGenerating, currentWorkflowScope, resumeGenerating]);
+  }, [autoGenerationInFlight, coverGenerating, generationWorkflowScope, resumeGenerating]);
   const hasLoadedAnalysis = Boolean(
     requestedAnalysisId && !analysisLoading && !analysisError && analysisScore !== null,
   );
@@ -2875,8 +2885,8 @@ export default function StudioPage() {
     !coverState.artifactFailure;
   const autoGenerationSignature = useMemo(() => {
     if (!needsAutoGeneration) return null;
-    return buildWorkflowRequestKey("auto_generation", currentWorkflowScope);
-  }, [currentWorkflowScope, needsAutoGeneration]);
+    return buildWorkflowRequestKey("auto_generation", generationWorkflowScope);
+  }, [generationWorkflowScope, needsAutoGeneration]);
   useEffect(() => {
     if (!hasCompletedGeneration || !isInstantDraftExperience || !applicationContext) return;
     const signature = `${applicationPairSignature ?? "application_pair"}:${applicationContext.status}`;
@@ -4022,7 +4032,7 @@ export default function StudioPage() {
       return true;
     }
     if (!guardGenerationAction("resume")) return false;
-    const requestScope = currentWorkflowScope;
+    const requestScope = generationWorkflowScope;
     const request = beginStudioGenerationRequest("resume", requestScope);
     if (!request) return false;
     setUnlockGenerationConfirmation(null);
@@ -4500,7 +4510,7 @@ export default function StudioPage() {
       return true;
     }
     if (!guardGenerationAction("cover_letter")) return false;
-    const requestScope = currentWorkflowScope;
+    const requestScope = generationWorkflowScope;
     const request = beginStudioGenerationRequest("cover_letter", requestScope);
     if (!request) return false;
     setUnlockGenerationConfirmation(null);
@@ -4918,7 +4928,7 @@ export default function StudioPage() {
     if (autoGenerationSignatureRef.current === autoGenerationSignature) return;
     if (studioArtifactPresentationStateRef.current === "hydrated") return;
     if (suppressAutoGenerationRef.current) return;
-    const autoGenerationKey = buildWorkflowRequestKey("auto_generation", currentWorkflowScope);
+    const autoGenerationKey = buildWorkflowRequestKey("auto_generation", generationWorkflowScope);
     if (studioArtifactPairStatus !== "missing") return;
     if (resumeState.response || coverState.response || resumeState.artifactFailure || coverState.artifactFailure) return;
     if (resumeGenerating || coverGenerating || autoGenerationInFlight) return;
@@ -4982,7 +4992,7 @@ export default function StudioPage() {
     canProceedWithStudioDrafts,
     coverGenerating,
     hasCompletedGeneration,
-    currentWorkflowScope,
+    generationWorkflowScope,
     handleCoverDraft,
     handleResumeDraft,
     hasCoverLetterArtifact,
