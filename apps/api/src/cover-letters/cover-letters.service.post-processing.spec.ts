@@ -169,4 +169,102 @@ describe('cover letter post-processing', () => {
     expect(postProcessed.generation.document.closingParagraph).toBeTruthy();
     expect(postProcessed.generation.document.bodyParagraphs.every((paragraph) => paragraph.split(/\s+/).length <= 130)).toBe(true);
   });
+
+  it('does not flag keyword_echo_overuse when JD keywords appear naturally once', () => {
+    const { service } = buildService();
+    const jobContext = {
+      title: 'Platform Operations Manager',
+      company: 'Example Co',
+      responsibilities: [
+        'Own incident management and escalation workflows for production systems',
+        'Partner with engineering leadership on reliability and change management',
+        'Drive postmortems and continuous improvement across cross functional teams',
+      ],
+      requirements: [
+        'Experience with kubernetes, terraform, and on call operations',
+        'Strong stakeholder communication and operational rigor',
+        'Ability to translate requirements into measurable outcomes',
+      ],
+    };
+    const generation = {
+      document: {
+        senderHeading: { name: 'Synthetic Runner' },
+        salutation: 'Dear Hiring Team,',
+        opening: 'I am excited to apply for the Platform Operations Manager role at Example Co.',
+        bodyParagraphs: [
+          'In recent roles I owned incident response, postmortems, and escalation workflows and partnered with engineering leaders to improve reliability and change management.',
+          'I have hands-on experience with Kubernetes and Terraform and I focus on operational rigor, measurable outcomes, and clear stakeholder communication.',
+        ],
+        closingParagraph: 'I would welcome the chance to discuss how I can help your team deliver reliable systems.',
+        signoff: 'Sincerely,',
+        signatureName: 'Synthetic Runner',
+      },
+      content:
+        'Dear Hiring Team,\n\n' +
+        'I am excited to apply for the Platform Operations Manager role at Example Co.\n\n' +
+        'In recent roles I owned incident response, postmortems, and escalation workflows and partnered with engineering leaders to improve reliability and change management.\n\n' +
+        'I have hands-on experience with Kubernetes and Terraform and I focus on operational rigor, measurable outcomes, and clear stakeholder communication.\n\n' +
+        'I would welcome the chance to discuss how I can help your team deliver reliable systems.\n\n' +
+        'Sincerely,\n\n' +
+        'Synthetic Runner',
+      wordCount: 160,
+      greeting: 'Dear Hiring Team,',
+      paragraphs: ['Opening.', 'Body one.', 'Body two.'],
+      closingParagraphs: ['Closing.'],
+      paragraphEvidence: [],
+    };
+
+    const postProcessed = (service as any).applyCoverLetterPostProcessing(
+      generation,
+      jobContext,
+      'Synthetic Runner',
+    );
+
+    expect(postProcessed.flags).not.toContain('keyword_echo_overuse');
+  });
+
+  it('still flags keyword_echo_overuse when JD keywords are repeated excessively', () => {
+    const { service } = buildService();
+    const jobContext = {
+      title: 'Platform Operations Manager',
+      company: 'Example Co',
+      responsibilities: ['Operate kubernetes platform and drive kubernetes reliability initiatives'],
+      requirements: ['Deep kubernetes experience with kubernetes operations and kubernetes tooling'],
+    };
+    const repeated = 'kubernetes '.repeat(40).trim();
+    const generation = {
+      document: {
+        senderHeading: { name: 'Synthetic Runner' },
+        salutation: 'Dear Hiring Team,',
+        opening: `I am applying for the Platform Operations Manager role at Example Co. ${repeated}`,
+        bodyParagraphs: [`${repeated}`, `${repeated}`],
+        closingParagraph: `${repeated}`,
+        signoff: 'Sincerely,',
+        signatureName: 'Synthetic Runner',
+      },
+      content:
+        `Dear Hiring Team,\n\n` +
+        `I am applying for the Platform Operations Manager role at Example Co. ${repeated}\n\n` +
+        `${repeated}\n\n` +
+        `${repeated}\n\n` +
+        `${repeated}\n\n` +
+        `Sincerely,\n\n` +
+        `Synthetic Runner`,
+      wordCount: 260,
+      greeting: 'Dear Hiring Team,',
+      paragraphs: ['Opening.', 'Body one.', 'Body two.'],
+      closingParagraphs: ['Closing.'],
+      paragraphEvidence: [],
+    };
+
+    const postProcessed = (service as any).applyCoverLetterPostProcessing(
+      generation,
+      jobContext,
+      'Synthetic Runner',
+    );
+
+    expect(postProcessed.flags).toEqual(
+      expect.arrayContaining(['keyword_stuffing']),
+    );
+  });
 });

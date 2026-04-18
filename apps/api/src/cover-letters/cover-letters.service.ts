@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -701,12 +702,46 @@ export class CoverLettersService {
   }
 
   async getGenerationReadiness(userId: string, input: GenerateCoverLetterDto) {
-    const draft = await this.buildCoverLetterDraft(userId, input);
-    const flags = filterComplianceFlagsByCanonicalClaims(
-      draft.complianceResult.complianceFlags ?? [],
-      draft.analysisAssessment,
-    );
-    return this.buildReadinessFromFlags(flags);
+    try {
+      const draft = await this.buildCoverLetterDraft(userId, input);
+      const flags = filterComplianceFlagsByCanonicalClaims(
+        draft.complianceResult.complianceFlags ?? [],
+        draft.analysisAssessment,
+      );
+      return this.buildReadinessFromFlags(flags);
+    } catch (error) {
+      // Readiness is a preflight signal. If post-processing rejects the first-pass draft,
+      // return a limited readiness signal rather than surfacing a terminal generation failure.
+      if (error instanceof HttpException) {
+        const response = error.getResponse() as
+          | { code?: string; details?: { flags?: string[] } }
+          | { error?: { code?: string; details?: { flags?: string[] } } };
+        const payload = response && typeof response === 'object' ? response : null;
+        const code =
+          (payload as any)?.code ??
+          (payload as any)?.error?.code ??
+          null;
+        const flags =
+          (payload as any)?.details?.flags ??
+          (payload as any)?.error?.details?.flags ??
+          [];
+        if (code === 'generation_failed' && Array.isArray(flags) && flags.includes('keyword_echo_overuse')) {
+          return {
+            status: 'limited',
+            blocked: false,
+            compliance_flags: [],
+            reasons: [
+              {
+                code: 'keyword_echo_overuse',
+                message:
+                  'Cover letter generation is available, but the first draft needs minor revision to reduce repeated role keywords.',
+              },
+            ],
+          } as const;
+        }
+      }
+      throw error;
+    }
   }
 
   private buildReadinessFromFlags(flags: ComplianceFlag[]) {
@@ -1853,14 +1888,84 @@ export class CoverLettersService {
     if (new Set(paragraphOpeners).size !== paragraphOpeners.length) {
       flags.push('repetitive_openings');
     }
-    const keywordEchoCount = [
-      ...new Set(
+    const jobKeywordTokens = Array.from(
+      new Set(
         [...jobContext.responsibilities, ...jobContext.requirements]
           .flatMap((value) => value.toLowerCase().match(/[a-z0-9]+/g) ?? [])
           .filter((token) => token.length >= 4),
       ),
-    ].filter((token) => lowered.includes(token)).length;
-    if (keywordEchoCount > 12) {
+    );
+    const stopwords = new Set([
+      'with',
+      'from',
+      'that',
+      'this',
+      'your',
+      'will',
+      'have',
+      'their',
+      'they',
+      'them',
+      'into',
+      'over',
+      'more',
+      'work',
+      'role',
+      'team',
+      'teams',
+      'across',
+      'using',
+      'build',
+      'built',
+      'drive',
+      'driving',
+      'support',
+      'deliver',
+      'delivery',
+      'manage',
+      'managed',
+      'ensure',
+      'ensure',
+      'strong',
+      'high',
+      'level',
+      'years',
+      'experience',
+      'stakeholders',
+      'stakeholder',
+      'process',
+      'processes',
+      'systems',
+      'system',
+      'data',
+      'customer',
+      'customers',
+      'product',
+      'products',
+      'service',
+      'services',
+      'platform',
+      'platforms',
+    ]);
+    const filteredJobTokens = jobKeywordTokens
+      .filter((token) => !stopwords.has(token))
+      // Only consider distinctive keywords; shorter tokens are too common and create false positives.
+      .filter((token) => token.length >= 7);
+    const letterTokens = lowered.match(/[a-z0-9]+/g) ?? [];
+    const tokenFrequency = new Map<string, number>();
+    for (const token of letterTokens) {
+      if (token.length < 4) continue;
+      tokenFrequency.set(token, (tokenFrequency.get(token) ?? 0) + 1);
+    }
+    const repeatedEchoTokens = filteredJobTokens.filter((token) => (tokenFrequency.get(token) ?? 0) >= 3);
+    const repeatedEchoCount = repeatedEchoTokens.length;
+    const totalEchoOccurrences = repeatedEchoTokens.reduce(
+      (sum, token) => sum + (tokenFrequency.get(token) ?? 0),
+      0,
+    );
+    // Avoid false positives: a targeted letter will naturally share vocabulary with the JD once.
+    // Flag only when the same JD-derived tokens are being repeated across the letter.
+    if (repeatedEchoCount >= 8 && totalEchoOccurrences >= 30) {
       flags.push('keyword_echo_overuse');
     }
     if (this.detectResumeArtifactLeak(text)) {
