@@ -482,34 +482,44 @@ export class BaselineService {
     file: FileMetadata,
     parseResult: BaselineFileParseResult,
   ) {
-    const fileHash = await this.computeFileHash(file.path);
+    try {
+      const fileHash = await this.computeFileHash(file.path);
 
-    if (!fileHash) {
-      throw new BadRequestException('Baseline file hash is required');
-    }
+      if (!fileHash) {
+        throw new BadRequestException('Baseline file hash is required');
+      }
 
-    const duplicate = await this.findDuplicateBaseline(userId, fileHash);
-    if (duplicate) {
-      throw new ConflictException({
-        error: {
-          code: 'BASELINE_DUPLICATE',
-          message: 'This file has already been uploaded.',
-          existingBaselineId: duplicate.id,
-        },
+      const duplicate = await this.findDuplicateBaseline(userId, fileHash);
+      if (duplicate) {
+        throw new ConflictException({
+          error: {
+            code: 'BASELINE_DUPLICATE',
+            message: 'This file has already been uploaded.',
+            existingBaselineId: duplicate.id,
+          },
+        });
+      }
+
+      return await this.baselineRepository.manager.transaction(async (manager) => {
+        await this.enforceBaselineLimit(manager, userId);
+
+        return this.createBaselineRecord(
+          manager,
+          userId,
+          file,
+          fileHash,
+          parseResult,
+        );
       });
-    }
-
-    return this.baselineRepository.manager.transaction(async (manager) => {
-      await this.enforceBaselineLimit(manager, userId);
-
-      return this.createBaselineRecord(
-        manager,
-        userId,
-        file,
-        fileHash,
-        parseResult,
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? error.stack : undefined;
+      this.logger.error(
+        `[BASELINE][CREATE_ERROR] userId=${userId} message=${message}`,
+        stack,
       );
-    });
+      throw error;
+    }
   }
 
   async cloneBaselineForFitReview(
@@ -676,19 +686,19 @@ export class BaselineService {
     fileHash: string,
     parseResult?: BaselineFileParseResult,
   ): Promise<BaselineCreationResult> {
-    const existingActiveBaseline =
-      (
-        await manager.find(Baseline, {
-          where: {
-            userId,
-            status: BaselineStatus.ACTIVE,
-            isActive: true,
-          },
-          order: { createdAt: 'DESC' },
-          take: 1,
-        })
-      )?.[0] ?? null;
-    const shouldBecomeActive = !existingActiveBaseline;
+    if (process.env.NODE_ENV !== 'production') {
+      // eslint-disable-next-line no-console
+      console.log('[BASELINE][CREATE_START]', { userId });
+    }
+
+    const activePointerCount = await manager.count(Baseline, {
+      where: {
+        userId,
+        status: BaselineStatus.ACTIVE,
+        isActive: true,
+      },
+    });
+    const shouldBecomeActive = activePointerCount === 0;
 
     const sectionPayloads =
       parseResult?.sections?.map((section, index) => ({
@@ -765,15 +775,7 @@ export class BaselineService {
 
     await manager.save(policyEntities);
 
-    if (shouldBecomeActive) {
-      await this.setSingleActiveBaseline(manager, userId, savedBaseline.id);
-    }
-    savedBaseline.version = nextVersionNumber;
-    savedBaseline.versionNumber = nextVersionNumber;
-    savedBaseline.isActive = shouldBecomeActive;
-    savedBaseline.versions = [savedVersion];
-
-        let normalization: CanonicalNormalizationResult | undefined;
+    let normalization: CanonicalNormalizationResult | undefined;
     if (parseResult?.ingestion?.canonical) {
       normalization = normalizeExtractedToCanonicalV1(
         parseResult.ingestion.canonical,
@@ -789,11 +791,42 @@ export class BaselineService {
       );
     }
 
+    await manager.update(
+      Baseline,
+      { id: savedBaseline.id, userId },
+      {
+        version: nextVersionNumber,
+        versionNumber: nextVersionNumber,
+        status: BaselineStatus.ACTIVE,
+        archivedAt: null,
+        isActive: shouldBecomeActive,
+      },
+    );
+
     if (shouldBecomeActive) {
       await this.setSingleActiveBaseline(manager, userId, savedBaseline.id);
     }
-    const finalBaseline = await manager.save(savedBaseline);
-return {
+
+    const finalBaseline = {
+      ...savedBaseline,
+      version: nextVersionNumber,
+      versionNumber: nextVersionNumber,
+      status: BaselineStatus.ACTIVE,
+      archivedAt: null,
+      isActive: shouldBecomeActive,
+      versions: [savedVersion],
+    } as Baseline;
+
+    if (process.env.NODE_ENV !== 'production') {
+      // eslint-disable-next-line no-console
+      console.log('[BASELINE][CREATE_SUCCESS]', {
+        baselineId: finalBaseline.id,
+        isActive: finalBaseline.isActive,
+        status: finalBaseline.status,
+      });
+    }
+
+    return {
       baselineId: finalBaseline.id,
       baseline: finalBaseline,
       normalization,

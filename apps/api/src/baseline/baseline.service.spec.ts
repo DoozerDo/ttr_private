@@ -641,6 +641,54 @@ describe('BaselineService - library capacity', () => {
       { isActive: true },
     );
   });
+
+  it('creates a second baseline as non-active when an active baseline already exists', async () => {
+    const priorBaseline = {
+      id: 'prior-baseline',
+      userId: 'user-1',
+      version: 4,
+      versionNumber: 4,
+      status: BaselineStatus.ACTIVE,
+      isActive: true,
+      createdAt: new Date('2026-03-01T00:00:00.000Z'),
+    } as Baseline;
+
+    baselineRepository.findOne.mockImplementation(async ({ where, order }: any) => {
+      if (where?.hash) {
+        return null;
+      }
+      if (where?.userId === 'user-1' && order?.versionNumber) {
+        return priorBaseline;
+      }
+      return null;
+    });
+
+    transactionManager.count.mockImplementation(async (_entity: any, options: any) => {
+      if (options?.where?.isActive === true) {
+        return 1;
+      }
+      return 0;
+    });
+
+    const result = await service.createBaseline(
+      'user-1',
+      { originalname: 'resume-2.pdf', mimetype: 'application/pdf', path: '/tmp/resume-2.pdf' },
+      parseResult as any,
+    );
+
+    expect(result.baseline.versionNumber).toBe(5);
+    expect(result.baseline.isActive).toBe(false);
+    expect(transactionManager.update).not.toHaveBeenCalledWith(
+      Baseline,
+      { userId: 'user-1' },
+      { isActive: false },
+    );
+    expect(transactionManager.update).not.toHaveBeenCalledWith(
+      Baseline,
+      { id: result.baseline.id, userId: 'user-1' },
+      { isActive: true },
+    );
+  });
 });
 
 describe('BaselineService - reparse ingestion source', () => {

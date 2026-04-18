@@ -1028,12 +1028,20 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         const formData = new FormData();
         formData.append("file", file);
 
+        if (process.env.NODE_ENV !== "production") {
+          console.log("[UPLOAD][REQUEST]", { filename: file.name, size: file.size });
+        }
+
         const response = await fetch("/api/baselines", {
           method: "POST",
           credentials: "include",
           body: formData,
         });
         const payload = await readResponsePayload(response);
+
+        if (process.env.NODE_ENV !== "production") {
+          console.log("[UPLOAD][RESPONSE]", { status: response.status, ok: response.ok });
+        }
 
         if (!response.ok) {
           const compliance = parseComplianceError({ status: response.status, payload });
