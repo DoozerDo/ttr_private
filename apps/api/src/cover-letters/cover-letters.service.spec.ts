@@ -1,4 +1,4 @@
-import { BadRequestException, UnprocessableEntityException } from '@nestjs/common';
+import { UnprocessableEntityException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { CoverLettersService } from './cover-letters.service';
 import { Baseline } from '../baseline/baseline.entity';
@@ -155,11 +155,51 @@ const request = {
 };
 
 describe('CoverLettersService contract', () => {
-  it('throws BadRequest when baselineVersionId is missing', async () => {
+  it('allows generation when baselineVersionId is missing', async () => {
     const { service } = buildService();
-    await expect(
-      service.generateCoverLetter('user-1', { ...request, baselineVersionId: '' } as any),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    jest.spyOn(service as any, 'buildCoverLetterDraft').mockResolvedValue({
+      baseline,
+      baselineVersion,
+      job,
+      analysisAssessment: assessment,
+      allowedBlocks: [],
+      jobContext: {
+        id: 'job-1',
+        title: 'Program Manager',
+        company: 'Example Co',
+        responsibilities: [],
+        requirements: [],
+      },
+      jobContextAllowlist: { allowedCompanies: ['Example Co'], allowedRoleTitles: ['Program Manager'] },
+      closingTemplateKey: 'default',
+      generationInputsHash: 'hash',
+      generation: {
+        document: {
+          senderHeading: { name: 'Jordan Lee' },
+          salutation: 'Dear Hiring Team,',
+          opening: 'Opening.',
+          bodyParagraphs: ['Body one.', 'Body two.'],
+          closingParagraph: 'Closing.',
+          signoff: 'Sincerely,',
+          signatureName: 'Jordan Lee',
+        },
+        content: 'Dear Hiring Team,\\n\\nOpening.\\n\\nBody one.\\n\\nBody two.\\n\\nClosing.\\n\\nSincerely,\\n\\nJordan Lee',
+        wordCount: 260,
+        greeting: 'Dear Hiring Team,',
+        paragraphs: ['Opening.', 'Body one.', 'Body two.'],
+        closingParagraphs: ['Closing.'],
+        paragraphEvidence: [],
+      },
+      complianceResult: {
+        normalizedContent: 'valid',
+        complianceFlags: [],
+        blocked: false,
+        audit: { id: 'audit-1', baselineVersionHash: 'hash-1' },
+      },
+    });
+
+    const readiness = await service.getGenerationReadiness('user-1', { ...request, baselineVersionId: null } as any);
+    expect(readiness.status).toBe('ready');
   });
 
   it('returns readiness ready and allows generation in READY state', async () => {

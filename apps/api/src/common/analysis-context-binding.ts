@@ -9,7 +9,7 @@ type ValidateAnalysisContextInput = {
   analysisId: string;
   userId: string;
   jobId: string;
-  baselineVersionId: string;
+  baselineVersionId?: string | null;
   baselineId?: string | null;
 };
 
@@ -69,7 +69,7 @@ export async function validateAnalysisContext({
 }: ValidateAnalysisContextInput): Promise<FitAssessment> {
   const normalizedAnalysisId = analysisId.trim();
   const normalizedJobId = jobId?.trim() ?? '';
-  const normalizedBaselineVersionId = baselineVersionId?.trim() ?? '';
+  const normalizedBaselineVersionId = baselineVersionId?.trim() ?? null;
   const normalizedBaselineId = baselineId?.trim() ?? null;
   if (!normalizedAnalysisId) {
     throwTypedError(
@@ -84,7 +84,7 @@ export async function validateAnalysisContext({
         {
           jobId: normalizedJobId || null,
           baselineId: normalizedBaselineId,
-          baselineVersionId: normalizedBaselineVersionId || null,
+          baselineVersionId: normalizedBaselineVersionId,
         },
       ),
     );
@@ -128,14 +128,16 @@ export async function validateAnalysisContext({
   const receivedContext = {
     jobId: normalizedJobId || null,
     baselineId: normalizedBaselineId,
-    baselineVersionId: normalizedBaselineVersionId || null,
+    baselineVersionId: normalizedBaselineVersionId,
   };
 
   const baselineIdMismatch =
     Boolean(normalizedBaselineId) && assessment.baselineId !== normalizedBaselineId;
+  const shouldCompareBaselineVersionId = Boolean(normalizedBaselineVersionId);
   const contextMismatch =
     assessment.jobId !== normalizedJobId ||
-    analyzedBaselineVersion?.id !== normalizedBaselineVersionId ||
+    (shouldCompareBaselineVersionId &&
+      analyzedBaselineVersion?.id !== normalizedBaselineVersionId) ||
     baselineIdMismatch;
 
   if (contextMismatch) {

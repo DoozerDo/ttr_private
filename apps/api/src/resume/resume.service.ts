@@ -91,7 +91,7 @@ import { SyntheticMetadataInput } from '../synthetic/synthetic-metadata.types';
 
 export type GenerateResumeRequest = {
   baselineId: string;
-  baselineVersionId?: string;
+  baselineVersionId?: string | null;
   jobId?: string | null;
   analysisId?: string;
   oneTap?: boolean;
@@ -1309,15 +1309,12 @@ export class ResumeService {
       const shouldEnforceOneTap = options?.enforceOneTap ?? true;
       const preflightOnly = options?.preflightOnly ?? false;
       const baselineId = request.baselineId?.trim();
-      const baselineVersionId = request.baselineVersionId?.trim();
+      const baselineVersionId = request.baselineVersionId?.trim() || null;
       const jobId = request.jobId?.trim();
       const analysisId = request.analysisId?.trim();
 
       if (!baselineId) {
         throw new BadRequestException('baselineId is required');
-      }
-      if (!baselineVersionId) {
-        throw new BadRequestException('baselineVersionId is required');
       }
       if (!jobId) {
         throw new BadRequestException('jobId is required');
@@ -1353,9 +1350,14 @@ export class ResumeService {
         throw new NotFoundException('Baseline not found');
       }
 
-    const baselineVersion = await this.baselineVersionRepository.findOne({
-      where: { id: baselineVersionId, baselineId: baseline.id },
-    });
+    const baselineVersion = baselineVersionId
+      ? await this.baselineVersionRepository.findOne({
+          where: { id: baselineVersionId, baselineId: baseline.id },
+        })
+      : await this.baselineVersionRepository.findOne({
+          where: { baselineId: baseline.id },
+          order: { versionNumber: 'DESC' },
+        });
 
     if (!baselineVersion) {
       throw new NotFoundException('Baseline version not found');
@@ -1371,7 +1373,7 @@ export class ResumeService {
       userId,
       jobId,
       baselineId: baseline.id,
-      baselineVersionId: baselineVersion.id,
+      baselineVersionId: baselineVersionId,
     });
 
     if (!options?.skipReadinessGate) {

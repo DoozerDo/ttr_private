@@ -1164,7 +1164,7 @@ export default function StudioPage() {
     [baselines, selectedBaselineId],
   );
   useEffect(() => {
-    const activeBaselineId = selectedBaselineId || trimString(analysis?.baselineId);
+    const activeBaselineId = selectedBaselineId || trimId(analysis?.baselineId);
     if (!activeBaselineId) {
       setBaselineDetail(null);
       return;
@@ -1828,9 +1828,7 @@ export default function StudioPage() {
         score: analysisScore,
         generationReadiness: activeGenerationReadiness,
         hasCanonicalAssessment: Boolean(requestedAnalysisId) && !analysisError,
-        hasRequiredContext:
-          Boolean(effectiveJobId && effectiveBaselineId) &&
-          (Boolean(effectiveBaselineVersionId) || isNonProduction),
+        hasRequiredContext: Boolean(effectiveJobId && effectiveBaselineId),
         isPro,
         canGenerateDocuments: trustGateDecision.allowed,
         opportunityAlreadySaved: hasGeneratedOnce,

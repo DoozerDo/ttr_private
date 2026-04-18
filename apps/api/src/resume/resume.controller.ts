@@ -130,7 +130,7 @@ export class ResumeController {
 
   private parsePayload(body: ResumeRequestBody): GenerateResumeRequest {
     const baselineId = body.baselineId?.trim();
-    const baselineVersionId = body.baselineVersionId?.trim();
+    const baselineVersionId = body.baselineVersionId?.trim() || null;
     const jobId = body.jobId?.trim();
     const analysisId = body.analysisId?.trim();
     const oneTap = Boolean(body.oneTap);
@@ -140,14 +140,6 @@ export class ResumeController {
         error: {
           code: 'studio_not_ready',
           message: 'baselineId is required',
-        },
-      });
-    }
-    if (!baselineVersionId) {
-      throw new BadRequestException({
-        error: {
-          code: 'studio_not_ready',
-          message: 'baselineVersionId is required',
         },
       });
     }

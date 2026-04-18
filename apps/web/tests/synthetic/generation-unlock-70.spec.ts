@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { syntheticUserPassword } from "./synthetic-config";
 
 test.describe("70+ generation unlock (missing baselineVersionId)", () => {
-  test("Studio does not block on missing baselineVersionId and sends generation request", async ({ page }) => {
+  test("Studio does not block on missing baselineVersionId and sends generation requests", async ({ page }) => {
     test.setTimeout(180_000);
     // Uses the local dev seed user created by `npm -w apps/api run seed:local-score`.
     const email = "local-score-seed@targetthisrole.test";
@@ -91,6 +91,8 @@ test.describe("70+ generation unlock (missing baselineVersionId)", () => {
     );
 
     await expect(page.getByTestId("studio-generation-readiness")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/generation blocked/i)).toHaveCount(0);
+    await expect(page.getByText(/more input needed/i)).toHaveCount(0);
 
     const failures = observedResponses.filter((entry) => entry.status >= 400);
     expect(failures, `observed failing responses: ${JSON.stringify(failures, null, 2)}`).toEqual([]);
@@ -119,12 +121,20 @@ test.describe("70+ generation unlock (missing baselineVersionId)", () => {
 
     // Resume generation must send a request even without baselineVersionId.
     const resumeRequests: Array<Record<string, unknown>> = [];
+    const coverLetterRequests: Array<Record<string, unknown>> = [];
     page.on("request", (req) => {
       if (req.url().includes("/api/resume") && req.method() === "POST") {
         try {
           resumeRequests.push(req.postDataJSON() as Record<string, unknown>);
         } catch {
           resumeRequests.push({ parseError: true });
+        }
+      }
+      if (req.url().includes("/api/cover-letters") && req.method() === "POST") {
+        try {
+          coverLetterRequests.push(req.postDataJSON() as Record<string, unknown>);
+        } catch {
+          coverLetterRequests.push({ parseError: true });
         }
       }
     });
@@ -142,5 +152,19 @@ test.describe("70+ generation unlock (missing baselineVersionId)", () => {
       baselineId,
     });
     expect(Object.prototype.hasOwnProperty.call(resumeBody ?? {}, "baselineVersionId")).toBe(false);
+
+    const generateCoverLetterButton = page.getByTestId("studio-cover-generate-button");
+    await expect(generateCoverLetterButton).toBeEnabled();
+    await generateCoverLetterButton.click();
+
+    await expect.poll(() => coverLetterRequests.length, { timeout: 30_000 }).toBeGreaterThan(0);
+    const coverBody = coverLetterRequests[0] as Record<string, unknown>;
+    expect(coverBody).toMatchObject({
+      documentType: "cover_letter",
+      analysisId: assessmentId,
+      jobId,
+      baselineId,
+    });
+    expect(Object.prototype.hasOwnProperty.call(coverBody ?? {}, "baselineVersionId")).toBe(false);
   });
 });

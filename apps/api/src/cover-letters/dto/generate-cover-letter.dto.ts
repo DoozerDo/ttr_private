@@ -5,7 +5,7 @@ import type { DocumentStrategyPlanLike } from '../../document-strategy-plan.type
 export class GenerateCoverLetterDto {
   baselineId!: string;
 
-  baselineVersionId!: string;
+  baselineVersionId?: string | null;
 
   jobId!: string;
 

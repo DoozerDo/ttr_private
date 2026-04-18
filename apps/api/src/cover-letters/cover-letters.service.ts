@@ -745,9 +745,7 @@ export class CoverLettersService {
       throw new BadRequestException('Invalid user context');
     }
 
-    if (!input.baselineVersionId?.trim()) {
-      throw new BadRequestException('baselineVersionId is required');
-    }
+    const baselineVersionId = input.baselineVersionId?.trim() || null;
     if (!input.analysisId?.trim()) {
       throw new BadRequestException({
         error: {
@@ -757,12 +755,12 @@ export class CoverLettersService {
             expected: {
               jobId: input.jobId,
               baselineId: input.baselineId,
-              baselineVersionId: input.baselineVersionId,
+              baselineVersionId,
             },
             received: {
               jobId: input.jobId,
               baselineId: input.baselineId,
-              baselineVersionId: input.baselineVersionId,
+              baselineVersionId,
             },
           },
         },
@@ -787,9 +785,14 @@ export class CoverLettersService {
       throw new NotFoundException('Job not found');
     }
 
-    const baselineVersion = await this.baselineVersionRepository.findOne({
-      where: { baselineId: baseline.id, id: input.baselineVersionId.trim() },
-    });
+    const baselineVersion = baselineVersionId
+      ? await this.baselineVersionRepository.findOne({
+          where: { baselineId: baseline.id, id: baselineVersionId },
+        })
+      : await this.baselineVersionRepository.findOne({
+          where: { baselineId: baseline.id },
+          order: { versionNumber: 'DESC' },
+        });
 
     if (!baselineVersion) {
       throw new NotFoundException('Baseline version not found');
@@ -805,7 +808,7 @@ export class CoverLettersService {
       userId,
       jobId: job.id,
       baselineId: baseline.id,
-      baselineVersionId: baselineVersion.id,
+      baselineVersionId,
     });
 
     const oneTap = Boolean((input as unknown as { oneTap?: boolean })?.oneTap);
