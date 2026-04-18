@@ -1303,7 +1303,14 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   }, [baselineUpdatedNotice]);
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-6 2xl:px-8">
+    <div
+      className="mx-auto w-full max-w-6xl px-6 2xl:px-8"
+      data-baseline-renderer="studio-home"
+      data-baseline-build="archive-e2e-v1"
+      data-baseline-mode={isEditableLibrary ? "editable" : "readonly"}
+      data-current-baseline-id={primaryBaselineId ?? ""}
+      data-library-baseline-ids={libraryBaselines.map((baseline) => baseline.id).join(",")}
+    >
       <input
         ref={fileInputRef}
         type="file"
@@ -1461,10 +1468,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 Uploading a resume creates a baseline. Set one as current to use across the app.
               </p>
             </header>
-            <div
-              className="space-y-3"
-              data-testid="baseline-library-section"
-            >
+            <div className="space-y-3" data-testid="baseline-library-section">
               {libraryBaselines.slice(0, 3).map((baseline) => {
                 const isArchived = baseline.status === "ARCHIVED";
                 const isCurrentBaseline = baseline.id === primaryBaselineId;
@@ -1495,6 +1499,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   <article
                     key={baseline.id}
                     data-testid={`baseline-library-card:${baseline.id}`}
+                    data-archive-enabled={actionFlags.showArchive ? "true" : "false"}
                     className={`rounded-[16px] border p-4 ${
                       uploadSuccessId === baseline.id || highlightedBaselineId === baseline.id
                         ? "border-cyan-300/20 bg-cyan-400/[0.04]"

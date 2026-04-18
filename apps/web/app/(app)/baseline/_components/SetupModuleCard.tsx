@@ -1,10 +1,10 @@
 "use client";
 
-import type { ReactNode, CSSProperties } from "react";
+import type { ReactNode, CSSProperties, HTMLAttributes } from "react";
 
 import { ttrComponents, ttrTypography } from "../../ui/ttrStyles";
 
-type SetupModuleCardProps = {
+type SetupModuleCardProps = HTMLAttributes<HTMLElement> & {
   label: string;
   title: string;
   description?: string;
@@ -26,6 +26,7 @@ export function SetupModuleCard({
   className,
   containerStyle,
   titleClassName,
+  ...rest
 }: SetupModuleCardProps) {
   const mergedStyle = containerStyle
     ? { ...ttrComponents.basePanel, ...containerStyle }
@@ -40,6 +41,7 @@ export function SetupModuleCard({
       ]
         .filter(Boolean)
         .join(" ")}
+      {...rest}
     >
       <header className="flex flex-col gap-1 md:flex-row md:items-start md:justify-between">
         <div className="flex flex-col gap-1">

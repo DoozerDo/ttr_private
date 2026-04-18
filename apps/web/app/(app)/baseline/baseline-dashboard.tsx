@@ -485,6 +485,10 @@ export function BaselineDashboard({
       label="BASELINE"
       title=""
       description=""
+      data-baseline-renderer="dashboard"
+      data-baseline-build="archive-e2e-v1"
+      data-current-baseline-id={activeBaselineId ?? ""}
+      data-library-baseline-ids={baselinePartition.libraryBaselines.map((baseline) => baseline.id).join(",")}
       primaryAction={
         showBaselineCreationControls ? (
           <FormButton onClick={triggerUploadClick} disabled={isUploading || uploadLimitReached}>
@@ -593,7 +597,12 @@ export function BaselineDashboard({
               .join(" ");
 
             return (
-              <div key={baseline.id} className={cardClasses} data-testid={`baseline-dashboard-card:${baseline.id}`}>
+              <div
+                key={baseline.id}
+                className={cardClasses}
+                data-testid={`baseline-dashboard-card:${baseline.id}`}
+                data-archive-enabled={actionFlags.showArchive ? "true" : "false"}
+              >
                 <div className="min-w-0">
                   <div className="flex min-w-0 items-center gap-2">
                     <p className="truncate text-sm font-semibold text-slate-100">
