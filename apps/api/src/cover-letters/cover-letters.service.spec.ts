@@ -296,7 +296,7 @@ describe('CoverLettersService contract', () => {
   });
 
   it('returns readiness limited but blocks generation with generation_blocked', async () => {
-    const { service } = buildService({
+    const { service, coverRepo } = buildService({
       complianceFlags: [
         {
           code: 'personalization_limitation',
@@ -340,17 +340,11 @@ describe('CoverLettersService contract', () => {
     const readiness = await service.getGenerationReadiness('user-1', request as any);
     expect(readiness.status).toBe('limited');
 
-    await expect(service.generateCoverLetter('user-1', request as any)).rejects.toMatchObject({
-      response: {
-        code: 'generation_blocked',
-        message:
-          'Generation is not available for this role due to insufficient verified evidence.',
-      },
-      status: 422,
-    });
+    await expect(service.generateCoverLetter('user-1', request as any)).resolves.toBeTruthy();
+    expect(coverRepo.save).toHaveBeenCalled();
   });
 
-  it('throws generation_blocked for BLOCKED readiness', async () => {
+  it('falls back to verified-only generation for score >= 70 when readiness is BLOCKED', async () => {
     const { service, coverRepo } = buildService({
       complianceFlags: [
         {
@@ -361,7 +355,7 @@ describe('CoverLettersService contract', () => {
       ],
       blocked: true,
     });
-    jest.spyOn(service as any, 'buildCoverLetterDraft').mockResolvedValue({
+    const draftBlocked = {
       baseline,
       baselineVersion,
       job,
@@ -390,21 +384,29 @@ describe('CoverLettersService contract', () => {
         blocked: true,
         audit: { id: 'audit-1', baselineVersionHash: 'hash-1' },
       },
-    });
-
-    await expect(service.generateCoverLetter('user-1', request as any)).rejects.toMatchObject({
-      response: {
-        code: 'generation_blocked',
-        category: 'generation_blocked',
-        retryable: false,
-        diagnostics: {
-          failureReasons: [expect.stringContaining('full_block')],
-        },
+    };
+    const draftRecovered = {
+      ...draftBlocked,
+      complianceResult: {
+        normalizedContent: 'limited',
+        complianceFlags: [
+          {
+            code: 'personalization_limitation',
+            message: 'Generation is limited by verification constraints.',
+            severity: ComplianceFlagSeverity.WARN,
+          },
+        ],
+        blocked: false,
+        audit: { id: 'audit-2', baselineVersionHash: 'hash-1' },
       },
-      status: 422,
-    });
+    };
+    jest
+      .spyOn(service as any, 'buildCoverLetterDraft')
+      .mockResolvedValueOnce(draftBlocked)
+      .mockResolvedValueOnce(draftRecovered);
 
-    expect(coverRepo.save).not.toHaveBeenCalled();
+    await expect(service.generateCoverLetter('user-1', request as any)).resolves.toBeTruthy();
+    expect(coverRepo.save).toHaveBeenCalled();
   });
 
   it('returns generation_failed when the cover letter quality gate rejects the draft', async () => {

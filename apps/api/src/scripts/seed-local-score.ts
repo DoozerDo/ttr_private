@@ -79,6 +79,22 @@ async function ensureUser(): Promise<User> {
   const repository = dataSource.getRepository(User);
   let user = await repository.findOne({ where: { email: SEED_USER_EMAIL } });
   if (user) {
+    const needsProfile =
+      !user.profileCompletedAt ||
+      !user.roleTitle?.trim() ||
+      !user.intendedUse?.trim();
+
+    if (needsProfile) {
+      user = repository.merge(user, {
+        roleTitle: user.roleTitle?.trim() ? user.roleTitle : 'Product Marketing Lead',
+        intendedUse: user.intendedUse?.trim() ? user.intendedUse : 'job_search',
+        profileCompletedAt: user.profileCompletedAt ?? new Date(),
+      });
+      user = await repository.save(user);
+      console.log(`Updated seeded user profile fields: ${user.id}`);
+      return user;
+    }
+
     console.log(`User already exists: ${user.id}`);
     return user;
   }
@@ -90,6 +106,9 @@ async function ensureUser(): Promise<User> {
     lastName: 'Validator',
     passwordHash,
     emailConfirmed: true,
+    roleTitle: 'Product Marketing Lead',
+    intendedUse: 'job_search',
+    profileCompletedAt: new Date(),
     role: 'user',
     subscriptionTier: SubscriptionTier.FREE,
     accountType: AccountType.FREE,
@@ -113,7 +132,8 @@ async function ensureBaseline(userId: string): Promise<Baseline> {
 
   const baselineData: Partial<Baseline> = {
     userId,
-    version: 0,
+    // `analysis.run` expects baselineVersion (baseline.version) to be a positive integer.
+    version: 1,
     versionNumber: 1,
     originalFilename: 'local-score-seed-resume.pdf',
     mimeType: 'application/pdf',

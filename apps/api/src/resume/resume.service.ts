@@ -38,6 +38,7 @@ import { ApplicationsService } from '../applications/applications.service';
 import type { CxFitScoreSnapshot } from '../applications/applications.service';
 import { OpportunitiesService } from '../opportunities/opportunities.service';
 import { AUTO_GENERATE_THRESHOLD } from '../config/autoGenerateThreshold';
+import { VERIFIED_ONLY_GENERATION_THRESHOLD } from '../config/verifiedOnlyGenerationThreshold';
 import { CriticalFlowEventType, CriticalFlowTrackerService } from '../support/critical-flow-tracker.service';
 import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
 import { StudioArtifactsService } from '../studio-artifacts/studio-artifacts.service';
@@ -222,12 +223,15 @@ export class ResumeService {
     });
   }
 
-  private ensureOneTapAllowed(assessment?: FitAssessment | null) {
-    if (!assessment || assessment.overallScore < AUTO_GENERATE_THRESHOLD) {
+  private ensureOneTapAllowed(
+    assessment: FitAssessment | null | undefined,
+    minScore: number = AUTO_GENERATE_THRESHOLD,
+  ) {
+    if (!assessment || assessment.overallScore < minScore) {
       throw new UnprocessableEntityException({
         error: {
           code: 'fit_score_too_low',
-          message: `One tap resume generation requires fit score >= ${AUTO_GENERATE_THRESHOLD}.`,
+          message: `One tap resume generation requires fit score >= ${minScore}.`,
           details: { last_score: assessment?.overallScore ?? null },
         },
       });
@@ -1360,7 +1364,7 @@ export class ResumeService {
       throw new BadRequestException('Baseline version hash missing');
     }
 
-    await validateAnalysisContext({
+    const analysisAssessment = await validateAnalysisContext({
       analysisRepository: this.fitAssessmentRepository,
       baselineVersionRepository: this.baselineVersionRepository,
       analysisId,
@@ -1375,6 +1379,44 @@ export class ResumeService {
         skipReadinessGate: true,
       });
       if (readiness.status !== 'ready') {
+        const score = analysisAssessment?.overallScore ?? null;
+        if (
+          typeof score === 'number' &&
+          score >= VERIFIED_ONLY_GENERATION_THRESHOLD &&
+          jobId &&
+          !request.oneTap
+        ) {
+          this.logger.warn('[GENERATION_FALLBACK][resume]', {
+            baselineId: baseline.id,
+            jobId: jobId ?? null,
+            analysisId: analysisId ?? null,
+            score,
+            readinessStatus: readiness?.status,
+            complianceBlocked: false,
+            originalOneTap: Boolean(request.oneTap),
+            action: 'retry_verified_only',
+          });
+          const result = await this.generateResume(
+            userId,
+            { ...request, oneTap: true },
+            {
+              ...(options ?? {}),
+              enforceOneTap: true,
+              skipReadinessGate: true,
+            },
+            syntheticMetadata,
+          );
+          this.logger.warn('[GENERATION_FALLBACK_RESULT][resume]', {
+            baselineId: baseline.id,
+            jobId: jobId ?? null,
+            analysisId: analysisId ?? null,
+            score,
+            fallbackSucceeded: true,
+            finalPath: 'verified_only_generation',
+          });
+          return result;
+        }
+
         this.throwGenerationBlockedError(
           (readiness.reasons ?? []).map((reason) => ({
             code: reason.code,
@@ -1670,7 +1712,11 @@ export class ResumeService {
     const cxFitScoreSnapshot = this.buildCxFitScoreSnapshot(latestAssessment);
 
     if (request.oneTap && jobId && shouldEnforceOneTap) {
-      this.ensureOneTapAllowed(latestAssessment);
+      const minScore =
+        (analysisAssessment?.overallScore ?? 0) >= AUTO_GENERATE_THRESHOLD
+          ? AUTO_GENERATE_THRESHOLD
+          : VERIFIED_ONLY_GENERATION_THRESHOLD;
+      this.ensureOneTapAllowed(latestAssessment, minScore);
     }
 
     const outputHash = createHash('sha256')
@@ -1717,6 +1763,54 @@ export class ResumeService {
     const complianceBlocked = blocked;
 
     if (complianceBlocked) {
+      const score = analysisAssessment?.overallScore ?? null;
+      if (
+        typeof score === 'number' &&
+        score >= VERIFIED_ONLY_GENERATION_THRESHOLD &&
+        jobId &&
+        !request.oneTap
+      ) {
+        this.logger.warn('[GENERATION_FALLBACK][resume]', {
+          baselineId: baseline.id,
+          jobId: job?.id ?? jobId ?? null,
+          analysisId: analysisId ?? null,
+          score,
+          readinessStatus: null,
+          complianceBlocked: true,
+          originalOneTap: Boolean(request.oneTap),
+          action: 'retry_verified_only',
+        });
+        try {
+          const result = await this.generateResume(
+          userId,
+          { ...request, oneTap: true },
+          {
+            ...(options ?? {}),
+            enforceOneTap: true,
+            skipReadinessGate: true,
+          },
+          syntheticMetadata,
+        );
+          this.logger.warn('[GENERATION_FALLBACK_RESULT][resume]', {
+            baselineId: baseline.id,
+            jobId: job?.id ?? jobId ?? null,
+            analysisId: analysisId ?? null,
+            score,
+            fallbackSucceeded: true,
+            finalPath: 'verified_only_generation',
+          });
+          return result;
+        } catch (error) {
+          this.logger.error('[GENERATION_FALLBACK_FAILED][resume]', {
+            baselineId: baseline.id,
+            jobId: job?.id ?? jobId ?? null,
+            analysisId: analysisId ?? null,
+            score,
+            reason: 'verified_only_still_blocked',
+          });
+          throw error;
+        }
+      }
       experienceDiagnostics = {
         ...experienceDiagnostics,
         resumeGenerationStage: 'compliance_evaluation',
@@ -2272,7 +2366,7 @@ export class ResumeService {
       baselineVersionId: request.baselineVersionId?.trim() ?? '',
     });
 
-    let generation: Awaited<ReturnType<ResumeService['generateResume']>>;
+    let generation: Awaited<ReturnType<ResumeService['generateResume']>> | null = null;
     try {
       generation = await this.generateResume(
         userId,
@@ -2294,6 +2388,56 @@ export class ResumeService {
         ((responseRecord?.error as Record<string, unknown> | undefined)
           ?.code as string | undefined);
       if (code === 'generation_blocked' || code === 'generation_failed') {
+        const score = analysisAssessment?.overallScore ?? null;
+        if (
+          typeof score === 'number' &&
+          score >= VERIFIED_ONLY_GENERATION_THRESHOLD &&
+          request.jobId?.trim() &&
+          !request.oneTap
+        ) {
+          try {
+            generation = await this.generateResume(
+              userId,
+              { ...request, oneTap: true },
+              {
+                enforceOneTap: true,
+                preflightOnly: true,
+                skipReadinessGate: true,
+              },
+            );
+          } catch {
+            // fall through to original blocked envelope below.
+          }
+          if (generation) {
+            const flags = filterComplianceFlagsByCanonicalClaims(
+              generation.compliance_flags ?? [],
+              analysisAssessment,
+            );
+            const blocked = flags.some((flag) => flag.severity === 'block');
+            const warningFlags = flags.filter((flag) => flag.severity === 'warn');
+            return {
+              status: blocked ? 'blocked' : warningFlags.length > 0 ? 'limited' : 'ready',
+              blocked,
+              compliance_flags: flags,
+              reasons: blocked
+                ? [
+                    {
+                      code: 'full_block',
+                      message:
+                        'Some claims required for tailored generation could not be verified against your baseline.',
+                    },
+                  ]
+                : [
+                    {
+                      code: 'verified_only_generation',
+                      message:
+                        'Generation will proceed using only verified baseline evidence.',
+                    },
+                  ],
+            };
+          }
+        }
+
         const rawBlockers =
           (responseRecord?.blockers as Array<Record<string, unknown>> | undefined) ??
           (((responseRecord?.error as Record<string, unknown> | undefined)?.details as

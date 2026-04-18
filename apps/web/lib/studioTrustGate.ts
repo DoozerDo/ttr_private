@@ -204,9 +204,7 @@ export function normalizeGenerationPayload(
 }
 
 export function evaluateStudioTrustGate(params: TrustGateParams): TrustGateDecision {
-  const hasBaseline = Boolean(
-    params.baselineId && (params.baselineVersionId || params.allowMissingBaselineVersion),
-  );
+  const hasBaseline = Boolean(params.baselineId);
   const hasEvidence =
     params.hasMissingBaselineEvidenceIssue === true
       ? false

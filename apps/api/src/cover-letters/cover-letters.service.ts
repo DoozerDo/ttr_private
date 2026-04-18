@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -90,6 +91,7 @@ import { applySyntheticMetadata } from '../synthetic/synthetic-metadata.util';
 import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
 import { StudioArtifactsService } from '../studio-artifacts/studio-artifacts.service';
 import { ApplicationsService } from '../applications/applications.service';
+import { VERIFIED_ONLY_GENERATION_THRESHOLD } from '../config/verifiedOnlyGenerationThreshold';
 import type { ArtifactTraceAudit } from '../generation/artifact-trace-audit';
 import { buildArtifactFailurePayload } from '../generation/artifact-failure';
 import { polishCoverLetterGeneration } from '../language-style-pass';
@@ -179,6 +181,7 @@ export type CoverLetterGenerationResponse = {
 
 @Injectable()
 export class CoverLettersService {
+  private readonly logger = new Logger(CoverLettersService.name);
   private readonly coverLetterRepository: Repository<CoverLetter>;
   private readonly baselineRepository: Repository<Baseline>;
   private readonly baselineVersionRepository: Repository<BaselineVersion>;
@@ -230,6 +233,7 @@ export class CoverLettersService {
     input: GenerateCoverLetterDto,
     syntheticMetadata?: SyntheticMetadataInput,
   ): Promise<CoverLetterGenerationResponse> {
+    const requestedOneTap = Boolean((input as unknown as { oneTap?: boolean })?.oneTap);
     let draft: CoverLetterDraft;
     try {
       draft = await this.buildCoverLetterDraft(userId, input);
@@ -253,23 +257,124 @@ export class CoverLettersService {
       ),
     );
     if (readiness.status !== 'ready') {
-      this.throwGenerationBlockedError(
-        readiness.reasons.map((reason) => ({
-          code: reason.code,
-          message: reason.message,
-        })),
-      );
+      const score = draft.analysisAssessment?.overallScore ?? null;
+      if (
+        typeof score === 'number' &&
+        score >= VERIFIED_ONLY_GENERATION_THRESHOLD &&
+        !requestedOneTap
+      ) {
+        this.logger.warn('[GENERATION_FALLBACK][cover_letter]', {
+          baselineId: draft.baseline.id,
+          jobId: draft.job.id,
+          analysisId: draft.analysisAssessment?.id ?? null,
+          score,
+          readinessStatus: readiness?.status,
+          complianceBlocked: Boolean(draft.complianceResult.blocked),
+          originalOneTap: false,
+          action: 'retry_verified_only',
+        });
+        draft = await this.buildCoverLetterDraft(userId, {
+          ...(input as any),
+          oneTap: true,
+        });
+        const retryReadiness = this.buildReadinessFromFlags(
+          filterComplianceFlagsByCanonicalClaims(
+            draft.complianceResult.complianceFlags ?? [],
+            draft.analysisAssessment,
+          ),
+        );
+        if (retryReadiness.status === 'ready' || retryReadiness.status === 'limited') {
+          this.logger.warn('[GENERATION_FALLBACK_RESULT][cover_letter]', {
+            baselineId: draft.baseline.id,
+            jobId: draft.job.id,
+            analysisId: draft.analysisAssessment?.id ?? null,
+            score,
+            fallbackSucceeded: true,
+            finalPath: 'verified_only_generation',
+          });
+          // Proceed in verified-only mode; generation will be bounded by safeMode + reduced gap analysis.
+        } else {
+          this.logger.error('[GENERATION_FALLBACK_FAILED][cover_letter]', {
+            baselineId: draft.baseline.id,
+            jobId: draft.job.id,
+            analysisId: draft.analysisAssessment?.id ?? null,
+            score,
+            reason: 'verified_only_still_blocked',
+          });
+          this.throwGenerationBlockedError(
+            retryReadiness.reasons.map((reason) => ({
+              code: reason.code,
+              message: reason.message,
+            })),
+          );
+        }
+      } else {
+        this.throwGenerationBlockedError(
+          readiness.reasons.map((reason) => ({
+            code: reason.code,
+            message: reason.message,
+          })),
+        );
+      }
     }
 
     if (draft.complianceResult.blocked) {
-      this.throwGenerationBlockedError(
-        draft.complianceResult.complianceFlags.slice(0, 3).map((flag) => ({
-          code: flag.code ?? 'generation_blocked',
-          message:
-            flag.message ||
-            'Some claims required for tailored generation could not be verified against your baseline.',
-        })),
-      );
+      const score = draft.analysisAssessment?.overallScore ?? null;
+      if (
+        typeof score === 'number' &&
+        score >= VERIFIED_ONLY_GENERATION_THRESHOLD &&
+        !requestedOneTap
+      ) {
+        this.logger.warn('[GENERATION_FALLBACK][cover_letter]', {
+          baselineId: draft.baseline.id,
+          jobId: draft.job.id,
+          analysisId: draft.analysisAssessment?.id ?? null,
+          score,
+          readinessStatus: readiness?.status,
+          complianceBlocked: true,
+          originalOneTap: false,
+          action: 'retry_verified_only',
+        });
+        const retryDraft = await this.buildCoverLetterDraft(userId, {
+          ...(input as any),
+          oneTap: true,
+        });
+        if (retryDraft.complianceResult.blocked) {
+          this.logger.error('[GENERATION_FALLBACK_FAILED][cover_letter]', {
+            baselineId: retryDraft.baseline.id,
+            jobId: retryDraft.job.id,
+            analysisId: retryDraft.analysisAssessment?.id ?? null,
+            score,
+            reason: 'verified_only_still_blocked',
+          });
+          this.throwGenerationBlockedError(
+            retryDraft.complianceResult.complianceFlags.slice(0, 3).map((flag) => ({
+              code: flag.code ?? 'generation_blocked',
+              message:
+                flag.message ||
+                'Some claims required for tailored generation could not be verified against your baseline.',
+            })),
+          );
+        }
+        draft = retryDraft;
+        this.logger.warn('[GENERATION_FALLBACK_RESULT][cover_letter]', {
+          baselineId: draft.baseline.id,
+          jobId: draft.job.id,
+          analysisId: draft.analysisAssessment?.id ?? null,
+          score,
+          fallbackSucceeded: true,
+          finalPath: 'verified_only_generation',
+        });
+      } else {
+        this.throwGenerationBlockedError(
+          draft.complianceResult.complianceFlags.slice(0, 3).map((flag) => ({
+            code: flag.code ?? 'generation_blocked',
+            message:
+              flag.message ||
+              'Some claims required for tailored generation could not be verified against your baseline.',
+          })),
+        );
+      }
     }
 
     const dedupeKey = this.buildGenerationDedupeKey({
@@ -703,6 +808,8 @@ export class CoverLettersService {
       baselineVersionId: baselineVersion.id,
     });
 
+    const oneTap = Boolean((input as unknown as { oneTap?: boolean })?.oneTap);
+
     const policies = await this.baselineBlockPolicyRepository.find({
       where: { baselineVersionId: baselineVersion.id },
       relations: ['baselineSection'],
@@ -777,23 +884,25 @@ export class CoverLettersService {
     const complianceConstraints = this.normalizeComplianceConstraints(
       input.complianceConstraints,
     );
-    const requestSafeMode = complianceConstraints?.mode === 'strict';
     const latestAssessment = await this.fitAssessmentRepository.findOne({
       where: { userId, jobId: job.id, baselineId: baseline.id },
       order: { createdAt: 'DESC' },
     });
-    const gapInsights = this.gapAnalysisService.analyze({
-      baselineSections: allowedSections.map((section) => ({
-        content: section.content ?? '',
-      })),
-      jobRequirements: job.normalizedRequirements ?? [],
-      jobResponsibilities: job.normalizedResponsibilities ?? [],
-      dimensionPercents:
-        latestAssessment?.scoringV2?.rubric?.dimensionPercents ?? undefined,
-    });
+    const gapInsights = oneTap
+      ? { strengths: [], criticalGaps: [] }
+      : this.gapAnalysisService.analyze({
+          baselineSections: allowedSections.map((section) => ({
+            content: section.content ?? '',
+          })),
+          jobRequirements: job.normalizedRequirements ?? [],
+          jobResponsibilities: job.normalizedResponsibilities ?? [],
+          dimensionPercents:
+            latestAssessment?.scoringV2?.rubric?.dimensionPercents ?? undefined,
+        });
 
     let generation: CoverLetterGenerationResult;
     try {
+      const requestSafeMode = oneTap || complianceConstraints?.mode === 'strict';
       generation = this.generator.generate({
         baselineId: baseline.id,
         jobId: job.id,

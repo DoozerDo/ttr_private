@@ -568,7 +568,7 @@ function buildFailureFromBackendRecord(
 }
 
 function buildAssessmentAnalysisUrl(analysisId: string) {
-  const normalizedAnalysisId = trimString(analysisId);
+  const normalizedAnalysisId = trimId(analysisId);
   if (!normalizedAnalysisId) return "";
   return `/api/analysis/fit-assessments/${encodeURIComponent(normalizedAnalysisId)}`;
 }
@@ -581,6 +581,10 @@ function trimString(value: unknown): string {
     field: "value",
   });
   return sanitized === "We couldn’t display this result. Please retry." ? "" : sanitized;
+}
+
+function trimId(value: unknown): string {
+  return typeof value === "string" ? value.trim() : value == null ? "" : String(value).trim();
 }
 
 function normalizeClaimText(value: string): string {
@@ -717,19 +721,19 @@ export default function StudioPage() {
   const failedReadinessKeysRef = useRef<Set<string>>(new Set());
   const generationSectionRef = useRef<HTMLElement | null>(null);
   const requestedJobId = useMemo(
-    () => trimString(searchParams.get("jobId")),
+    () => trimId(searchParams.get("jobId")),
     [searchParamValue],
   );
   const requestedBaselineId = useMemo(
-    () => trimString(searchParams.get("baselineId")),
+    () => trimId(searchParams.get("baselineId")),
     [searchParamValue],
   );
   const requestedBaselineVersionId = useMemo(
-    () => trimString(searchParams.get("baselineVersionId")),
+    () => trimId(searchParams.get("baselineVersionId")),
     [searchParamValue],
   );
   const requestedAnalysisId = useMemo(
-    () => trimString(searchParams.get("analysisId") ?? searchParams.get("assessmentId")),
+    () => trimId(searchParams.get("analysisId") ?? searchParams.get("assessmentId")),
     [searchParamValue],
   );
   const isFromUnlock = useMemo(() => searchParams.get("fromUnlock") === "true", [searchParamValue]);
@@ -751,7 +755,7 @@ export default function StudioPage() {
     },
     [searchParamValue],
   );
-  const baselineIdFromQuery = useMemo(() => trimString(searchParams.get("baselineId")) || undefined, [searchParamValue]);
+  const baselineIdFromQuery = useMemo(() => trimId(searchParams.get("baselineId")) || undefined, [searchParamValue]);
   const entrySource = useMemo<"results" | "nav" | "direct" | "unknown">(() => {
     const explicitEntry = trimString(searchParams.get("entrySource")).toLowerCase();
     const allowed = new Set(["results", "nav", "direct", "unknown"]);
@@ -760,17 +764,29 @@ export default function StudioPage() {
       return explicitEntry as "results" | "nav" | "direct" | "unknown";
     }
 
-    if (!document.referrer) {
-      return "direct";
-    }
+    // This component is server-rendered (and hydrated) despite being a client component,
+    // so avoid direct `document` access which can throw under SSR.
+    const referrer: string =
+      typeof globalThis !== "undefined" &&
+      typeof (globalThis as unknown as { document?: { referrer?: unknown } }).document?.referrer === "string"
+        ? String((globalThis as unknown as { document: { referrer: string } }).document.referrer)
+        : "";
+
+    if (!referrer) return "direct";
+
+    const origin: string =
+      typeof globalThis !== "undefined" &&
+      typeof (globalThis as unknown as { location?: { origin?: unknown } }).location?.origin === "string"
+        ? String((globalThis as unknown as { location: { origin: string } }).location.origin)
+        : "";
 
     try {
-      const referrerUrl = new URL(document.referrer);
-      if (referrerUrl.origin === window.location.origin && referrerUrl.pathname === "/results") {
+      const referrerUrl = new URL(referrer);
+      if (origin && referrerUrl.origin === origin && referrerUrl.pathname === "/results") {
         return "results";
       }
     } catch {
-      return "unknown";
+      // ignore
     }
 
     return "unknown";
@@ -1315,10 +1331,10 @@ export default function StudioPage() {
     return getScoreBand(analysisScore);
   }, [analysisScore]);
   const isTopBand = scoreBand === ScoreBand.TOP;
-  const effectiveJobId = selectedJobId || trimString(analysis?.jobId);
-  const effectiveBaselineId = selectedBaselineId || trimString(analysis?.baselineId);
+  const effectiveJobId = selectedJobId || trimId(analysis?.jobId);
+  const effectiveBaselineId = selectedBaselineId || trimId(analysis?.baselineId);
   const effectiveBaselineVersionId =
-    selectedBaselineVersionId || trimString(analysis?.baselineVersionId);
+    selectedBaselineVersionId || trimId(analysis?.baselineVersionId);
   const currentWorkflowScope = useMemo<WorkflowRequestScope>(
     () => ({
       baselineId: effectiveBaselineId || null,
@@ -1530,7 +1546,7 @@ export default function StudioPage() {
     void router.replace(`/results?${params.toString()}`);
   }, [analysisScore, router, searchParams]);
   useEffect(() => {
-    if (!requestedAnalysisId || !effectiveJobId || !effectiveBaselineId || !effectiveBaselineVersionId) {
+    if (!requestedAnalysisId || !effectiveJobId || !effectiveBaselineId) {
       setGenerationReadiness(READINESS_LOADING_STATE);
       return;
     }
@@ -1538,7 +1554,7 @@ export default function StudioPage() {
       requestedAnalysisId,
       effectiveJobId,
       effectiveBaselineId,
-      effectiveBaselineVersionId,
+      effectiveBaselineVersionId ?? "none",
     ].join(":");
     if (lastReadinessKeyRef.current === readinessKey) {
       return;
@@ -1548,12 +1564,14 @@ export default function StudioPage() {
       return;
     }
 
-    const body = {
+    const body: Record<string, string> = {
       analysisId: requestedAnalysisId,
       jobId: effectiveJobId,
       baselineId: effectiveBaselineId,
-      baselineVersionId: effectiveBaselineVersionId,
     };
+    if (effectiveBaselineVersionId) {
+      body.baselineVersionId = effectiveBaselineVersionId;
+    }
     void (async () => {
       try {
         const [resumeResponse, coverResponse] = await Promise.all([
@@ -2825,9 +2843,6 @@ export default function StudioPage() {
         "This role scored strongly, but your selected resume does not support compliant generation yet."
       );
     }
-    if (!effectiveBaselineVersionId) {
-      return "Resume snapshot is still loading for this analysis.";
-    }
     if (analysisScore === null) {
       return "Fit score is unavailable for this role analysis.";
     }
@@ -3074,7 +3089,7 @@ export default function StudioPage() {
   }, [generationSupportState, recentIntent]);
   const guardGenerationAction = useCallback(
     (documentType: "resume" | "cover_letter" | "application") => {
-      if (!effectiveBaselineId || !effectiveJobId || !effectiveBaselineVersionId) {
+      if (!effectiveBaselineId || !effectiveJobId) {
         trackEvent("studio_generate_blocked", {
           score: analysisScore,
           blockerCodes: ["missing_pair_selection"],
@@ -3879,8 +3894,8 @@ export default function StudioPage() {
           return;
         }
         const nextAnalysis = payload as LatestAnalysis;
-        const nextAnalysisId = trimString((payload as { assessmentId?: unknown }).assessmentId);
-        const nextBaselineId = trimString((payload as { baselineId?: unknown }).baselineId);
+        const nextAnalysisId = trimId((payload as { assessmentId?: unknown }).assessmentId);
+        const nextBaselineId = trimId((payload as { baselineId?: unknown }).baselineId);
         if (!nextAnalysisId || !nextBaselineId) {
           setAnalysis(null);
           setAnalysisError(ANALYSIS_LOAD_ERROR_MESSAGE);
@@ -3906,9 +3921,9 @@ export default function StudioPage() {
           baselineId: nextAnalysis?.baselineId ?? null,
           baselineVersionId: nextAnalysis?.baselineVersionId ?? null,
         });
-        const analysisJobId = trimString((payload as { jobId?: unknown }).jobId);
-        const analysisBaselineId = trimString((payload as { baselineId?: unknown }).baselineId);
-        const analysisBaselineVersionId = trimString(
+        const analysisJobId = trimId((payload as { jobId?: unknown }).jobId);
+        const analysisBaselineId = trimId((payload as { baselineId?: unknown }).baselineId);
+        const analysisBaselineVersionId = trimId(
           (payload as { baselineVersionId?: unknown }).baselineVersionId,
         );
         if (analysisJobId) {
@@ -6008,7 +6023,17 @@ export default function StudioPage() {
           }}
         />
       ) : null}
-      <section className="space-y-5 rounded-[28px] bg-slate-900/45 p-6 md:p-8" data-testid="studio-generation-readiness">
+      <section
+        className="space-y-5 rounded-[28px] bg-slate-900/45 p-6 md:p-8"
+        data-testid="studio-generation-readiness"
+        data-runtime-analysis-id={requestedAnalysisId || ""}
+        data-runtime-job-id={effectiveJobId || ""}
+        data-runtime-baseline-id={effectiveBaselineId || ""}
+        data-runtime-baseline-version-id={effectiveBaselineVersionId || ""}
+        data-runtime-selected-job-id={selectedJobId || ""}
+        data-runtime-selected-baseline-id={selectedBaselineId || ""}
+        data-runtime-selected-baseline-version-id={selectedBaselineVersionId || ""}
+      >
         {confidenceUpgradeMessage ? (
           <div className="rounded-2xl border border-emerald-300/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-50">
             {confidenceUpgradeMessage}

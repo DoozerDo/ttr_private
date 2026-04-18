@@ -17,7 +17,7 @@ export function getNextMove(score: number): NextMove {
     };
   }
 
-  if (score > 70) {
+  if (score >= 70) {
     return {
       label: "Open Studio",
       action: "studio",

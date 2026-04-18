@@ -13,6 +13,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function installFetch(input: {
   score: number;
+  baselineVersionId?: string | null;
   scorePresentationMode?: "normal" | "caution" | "fix_first";
   likelyUnderestimatedFit?: boolean;
   scoreConfidence?: "high" | "medium" | "low";
@@ -34,6 +35,7 @@ function installFetch(input: {
 }) {
   const {
     score,
+    baselineVersionId = "base-version-1",
     scorePresentationMode = "normal",
     likelyUnderestimatedFit = false,
     scoreConfidence = "high",
@@ -53,7 +55,7 @@ function installFetch(input: {
         assessmentId: "analysis-current",
         jobId: "job-1",
         baselineId: "base-1",
-        baselineVersionId: "base-version-1",
+        baselineVersionId,
         score,
         scorePresentationMode,
         likelyUnderestimatedFit,
@@ -79,7 +81,7 @@ function installFetch(input: {
         assessmentId: "analysis-current",
         jobId: "job-1",
         baselineId: "base-1",
-        baselineVersionId: "base-version-1",
+        baselineVersionId,
         score,
         scorePresentationMode,
         likelyUnderestimatedFit,
@@ -117,7 +119,9 @@ function installFetch(input: {
       ]);
     }
     if (url.includes("/api/baselines/base-1/versions")) {
-      return jsonResponse([{ id: "base-version-1", versionNumber: 1 }]);
+      return jsonResponse(
+        baselineVersionId ? [{ id: baselineVersionId, versionNumber: 1 }] : [],
+      );
     }
     if (url.includes("/api/analysis/history")) {
       return jsonResponse({
@@ -159,6 +163,24 @@ describe("results gating", () => {
     overrideSearchParams({ assessmentId: "analysis-current" });
     const fetchMock = installFetch({
       score: 72,
+      unverifiedRequirements: ["Salesforce", "Workflow ownership"],
+      readinessStatus: "blocked",
+      readinessBlocked: true,
+    });
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    render(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
+    });
+  });
+
+  it("does not require a promoted baseline version to show generation CTA for 70+ scores", async () => {
+    overrideSearchParams({ assessmentId: "analysis-current" });
+    const fetchMock = installFetch({
+      score: 72,
+      baselineVersionId: null,
       unverifiedRequirements: ["Salesforce", "Workflow ownership"],
       readinessStatus: "blocked",
       readinessBlocked: true,
@@ -323,4 +345,3 @@ describe("results gating", () => {
     });
   });
 });
-

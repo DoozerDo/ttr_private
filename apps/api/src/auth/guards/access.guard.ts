@@ -21,6 +21,14 @@ export class AccessGuard implements CanActivate {
       return true;
     }
 
+    const requireAccessCode =
+      this.configService.get<string>('REQUIRE_ACCESS_CODE') ??
+      process.env.REQUIRE_ACCESS_CODE ??
+      'false';
+    if (requireAccessCode !== 'true') {
+      return true;
+    }
+
     const request = context.switchToHttp().getRequest<{
       user?: { userId?: string; id?: string; sub?: string; email?: string };
     }>();

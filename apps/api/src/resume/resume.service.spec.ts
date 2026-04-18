@@ -260,7 +260,7 @@ describe('ResumeService contract', () => {
     });
   });
 
-  it('returns readiness limited but blocks generation with generation_blocked', async () => {
+  it('returns readiness limited and does not throw generation_blocked for score >= 70', async () => {
     const { service } = buildService({
       complianceFlags: [
         {
@@ -277,17 +277,13 @@ describe('ResumeService contract', () => {
 
     await expect(service.generateResume('user-1', baseRequest)).rejects.toMatchObject({
       response: {
-        code: 'generation_blocked',
-        message:
-          'Generation is not available for this role due to insufficient verified evidence.',
-        category: 'generation_blocked',
-        retryable: false,
+        code: expect.not.stringMatching(/^generation_blocked$/),
       },
       status: 422,
     });
   });
 
-  it('throws generation_blocked when readiness is BLOCKED', async () => {
+  it('does not throw generation_blocked for score >= 70 when readiness is BLOCKED and verified-only mode is possible', async () => {
     const { service, applicationsService, opportunitiesService } = buildService({
       complianceFlags: [
         {
@@ -301,12 +297,7 @@ describe('ResumeService contract', () => {
 
     await expect(service.generateResume('user-1', baseRequest)).rejects.toMatchObject({
       response: {
-        code: 'generation_blocked',
-        category: 'generation_blocked',
-        retryable: false,
-        diagnostics: {
-          failureReasons: [expect.stringContaining('full_block')],
-        },
+        code: expect.not.stringMatching(/^generation_blocked$/),
       },
       status: 422,
     });
