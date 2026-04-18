@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import {
@@ -1045,7 +1045,7 @@ describe('BaselineService - score history persistence', () => {
     expect(result.latestAssessmentSummary.latestAssessmentCreatedAt).toBeInstanceOf(Date);
   });
 
-  it('archives the active baseline and promotes the newest remaining active baseline', async () => {
+  it('rejects attempts to archive the current active baseline', async () => {
     const archiveManager = {
       findOne: jest.fn().mockResolvedValue({
         id: 'b-3',
@@ -1053,19 +1053,31 @@ describe('BaselineService - score history persistence', () => {
         status: BaselineStatus.ACTIVE,
         isActive: true,
       }),
+      find: jest.fn(),
+      update: jest.fn(),
+    };
+    baselineRepository.manager.transaction.mockImplementation(async (cb: any) => cb(archiveManager));
+
+    await expect(service.archiveBaseline('user-1', 'b-3')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(archiveManager.update).not.toHaveBeenCalled();
+  });
+
+  it('archives a non-current baseline and does not change the active baseline pointer', async () => {
+    const archiveManager = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'b-1',
+        userId: 'user-1',
+        status: BaselineStatus.ACTIVE,
+        isActive: false,
+      }),
       find: jest.fn().mockResolvedValue([
-        {
-          id: 'b-3',
-          userId: 'user-1',
-          status: BaselineStatus.ACTIVE,
-          isActive: true,
-          createdAt: new Date('2026-03-03T00:00:00.000Z'),
-        },
         {
           id: 'b-2',
           userId: 'user-1',
           status: BaselineStatus.ACTIVE,
-          isActive: false,
+          isActive: true,
           createdAt: new Date('2026-03-02T00:00:00.000Z'),
         },
         {
@@ -1076,66 +1088,27 @@ describe('BaselineService - score history persistence', () => {
           createdAt: new Date('2026-03-01T00:00:00.000Z'),
         },
       ]),
-      save: jest.fn(async (payload: any) => payload),
+      update: jest.fn(async () => ({ affected: 1 })),
     };
     baselineRepository.manager.transaction.mockImplementation(async (cb: any) => cb(archiveManager));
 
-    const result = await service.archiveBaseline('user-1', 'b-3');
-
-    expect(archiveManager.save).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: 'b-3',
-          status: BaselineStatus.ARCHIVED,
-          isActive: false,
-          archivedAt: expect.any(Date),
-        }),
-        expect.objectContaining({
-          id: 'b-2',
-          status: BaselineStatus.ACTIVE,
-          isActive: true,
-        }),
-        expect.objectContaining({
-          id: 'b-1',
-          status: BaselineStatus.ACTIVE,
-          isActive: false,
-        }),
-      ]),
-    );
-    expect(result.status).toBe(BaselineStatus.ARCHIVED);
-    expect(result.isActive).toBe(false);
-  });
-
-  it('archives the only baseline and clears the active pointer', async () => {
-    const archiveManager = {
-      findOne: jest.fn().mockResolvedValue({
-        id: 'b-1',
-        userId: 'user-1',
-        status: BaselineStatus.ACTIVE,
-        isActive: true,
-      }),
-      find: jest.fn().mockResolvedValue([
-        {
-          id: 'b-1',
-          userId: 'user-1',
-          status: BaselineStatus.ACTIVE,
-          isActive: true,
-          createdAt: new Date('2026-03-01T00:00:00.000Z'),
-        },
-      ]),
-      save: jest.fn(async (payload: any) => payload),
-    };
-    baselineRepository.manager.transaction.mockImplementation(async (cb: any) => cb(archiveManager));
+    archiveManager.findOne.mockImplementationOnce(async () => ({
+      id: 'b-1',
+      userId: 'user-1',
+      status: BaselineStatus.ACTIVE,
+      isActive: false,
+    }));
+    archiveManager.findOne.mockImplementationOnce(async () => ({
+      id: 'b-1',
+      userId: 'user-1',
+      status: BaselineStatus.ARCHIVED,
+      isActive: false,
+      archivedAt: new Date('2026-03-10T00:00:00.000Z'),
+    }));
 
     const result = await service.archiveBaseline('user-1', 'b-1');
 
-    expect(archiveManager.save).toHaveBeenCalledWith([
-      expect.objectContaining({
-        id: 'b-1',
-        status: BaselineStatus.ARCHIVED,
-        isActive: false,
-      }),
-    ]);
+    expect(archiveManager.update).toHaveBeenCalled();
     expect(result.status).toBe(BaselineStatus.ARCHIVED);
     expect(result.isActive).toBe(false);
   });

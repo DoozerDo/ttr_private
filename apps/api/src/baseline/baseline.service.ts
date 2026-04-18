@@ -1089,74 +1089,96 @@ return {
     baselineId: string,
     status: BaselineStatus,
   ) {
-    return this.baselineRepository.manager.transaction(async (manager) => {
-      const baseline = await manager.findOne(Baseline, {
-        where: { id: baselineId, userId },
-      });
+    try {
+      return await this.baselineRepository.manager.transaction(async (manager) => {
+        const baseline = await manager.findOne(Baseline, {
+          where: { id: baselineId, userId },
+        });
 
-      if (!baseline) {
-        throw new NotFoundException('Baseline not found');
+        if (!baseline) {
+          throw new NotFoundException('Baseline not found');
+        }
+
+        if (baseline.status === status) {
+          return baseline;
+        }
+
+        if (status === BaselineStatus.ARCHIVED && baseline.isActive === true) {
+          throw new BadRequestException('Cannot archive current baseline');
+        }
+
+        const baselines = await manager.find(Baseline, {
+          where: { userId },
+          order: { createdAt: 'DESC' },
+        });
+
+        const nextActiveBaselineId =
+          status === BaselineStatus.ACTIVE
+            ? baseline.id
+            : baselines.find(
+                (item) => item.id !== baseline.id && item.status !== BaselineStatus.ARCHIVED,
+              )?.id ?? null;
+
+        this.logger.debug(
+          `updateBaselineStatus userId=${userId} baselineId=${baselineId} currentStatus=${baseline.status} currentIsActive=${baseline.isActive === true} targetStatus=${status} baselineCount=${baselines.length} nextActiveBaselineId=${nextActiveBaselineId ?? 'null'}`,
+        );
+
+        await manager.update(
+          Baseline,
+          { userId },
+          {
+            isActive: false,
+          },
+        );
+
+        if (nextActiveBaselineId) {
+          await manager.update(
+            Baseline,
+            { id: nextActiveBaselineId, userId },
+            {
+              isActive: true,
+              status: BaselineStatus.ACTIVE,
+              archivedAt: null,
+            },
+          );
+        }
+
+        await manager.update(
+          Baseline,
+          { id: baseline.id, userId },
+          {
+            status,
+            isActive: status === BaselineStatus.ACTIVE,
+            archivedAt: status === BaselineStatus.ARCHIVED ? new Date() : null,
+          },
+        );
+
+        const updated = await manager.findOne(Baseline, {
+          where: { id: baseline.id, userId },
+        });
+
+        return updated ?? baseline;
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? error.stack : undefined;
+      this.logger.error(
+        `[BASELINE][STATUS_UPDATE_FAILED] userId=${userId} baselineId=${baselineId} targetStatus=${status} message=${message}`,
+        stack,
+      );
+
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      if (error instanceof InternalServerErrorException) {
+        throw error;
       }
 
-      if (baseline.status === status) {
-        return baseline;
-      }
-
-      const archiveWasActive = baseline.isActive === true;
-
-      const baselines = await manager.find(Baseline, {
-        where: { userId },
-        order: { createdAt: 'DESC' },
-      });
-
-      this.logger.debug(
-        `updateBaselineStatus userId=${userId} baselineId=${baselineId} currentStatus=${baseline.status} currentIsActive=${archiveWasActive} targetStatus=${status} baselineCount=${baselines.length}`,
-      );
-
-      const nextActiveBaselineId =
-        status === BaselineStatus.ACTIVE
-          ? baseline.id
-          : baselines.find(
-              (item) => item.id !== baseline.id && item.status !== BaselineStatus.ARCHIVED,
-            )?.id ?? null;
-
-      this.logger.debug(
-        `updateBaselineStatus selectedActiveBaselineId=${nextActiveBaselineId ?? 'null'} fallbackApplied=${status === BaselineStatus.ARCHIVED && nextActiveBaselineId !== baseline.id}`,
-      );
-
-      const updatedBaselines = baselines.map((item) => {
-        const nextStatus =
-          item.id === baseline.id
-            ? status
-            : item.id === nextActiveBaselineId
-              ? BaselineStatus.ACTIVE
-              : item.status;
-        const nextIsActive = nextActiveBaselineId
-          ? item.id === nextActiveBaselineId
-          : false;
-
-        return {
-          ...item,
-          status: nextStatus,
-          archivedAt:
-            item.id === baseline.id
-              ? status === BaselineStatus.ARCHIVED
-                ? new Date()
-                : null
-              : nextStatus === BaselineStatus.ARCHIVED
-                ? item.archivedAt ?? null
-                : null,
-          isActive: nextIsActive,
-        };
-      });
-
-      await manager.save(updatedBaselines);
-
-      return (
-        updatedBaselines.find((item) => item.id === baseline.id) ??
-        baseline
-      );
-    });
+      throw new InternalServerErrorException(message || 'Baseline status update failed');
+    }
   }
 
   async getBaselineByIdForUser(
