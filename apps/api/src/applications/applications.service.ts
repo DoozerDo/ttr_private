@@ -435,11 +435,12 @@ export class ApplicationsService {
       where: { userId, fingerprint },
     });
 
-    if (!fallback) {
-      throw new NotFoundException('Application not found');
+    if (fallback) {
+      return fallback;
     }
 
-    return fallback;
+    // "No application exists yet" is an expected state before the user generates and saves artifacts.
+    return null;
   }
 
   async upsertApplicationForPair(

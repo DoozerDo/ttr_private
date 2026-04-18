@@ -65,7 +65,8 @@ export class ApplicationsController {
       throw new BadRequestException('Baseline and job are required.');
     }
 
-    return this.applicationsService.getApplicationForPair(userId, baselineId, jobId);
+    const application = await this.applicationsService.getApplicationForPair(userId, baselineId, jobId);
+    return application ?? {};
   }
 
   @Put('pair')
