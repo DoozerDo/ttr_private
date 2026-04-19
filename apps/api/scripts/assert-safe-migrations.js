@@ -28,3 +28,28 @@ if (content.includes(unsafeSql)) {
 console.log(
   `[assert-safe-migrations] OK: compiled migration is safe (${migrationPath})`,
 );
+
+const requiredMigrations = [
+  '2100000000000-BetaAccessCodes.js',
+  '2110000000000-AccessCodesAndUserProfile.js',
+  '2450000000000-BetaAccessApprovedRepair.js',
+];
+
+const requiredFound = requiredMigrations.filter((filename) =>
+  [
+    path.join(__dirname, '..', 'dist', 'migrations', filename),
+    path.join(__dirname, '..', 'dist', 'apps', 'api', 'src', 'migrations', filename),
+  ].some((candidate) => fs.existsSync(candidate)),
+);
+
+const missing = requiredMigrations.filter((filename) => !requiredFound.includes(filename));
+if (missing.length) {
+  console.error(
+    `[assert-safe-migrations] Missing required compiled migration(s): ${missing.join(', ')}`,
+  );
+  process.exit(1);
+}
+
+console.log(
+  `[assert-safe-migrations] OK: required compiled migrations present (${requiredFound.join(', ')})`,
+);

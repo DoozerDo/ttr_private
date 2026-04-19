@@ -174,6 +174,7 @@ async function bootstrap() {
       : shouldRunMigrationsRaw.toLowerCase() === 'true';
 
   if (shouldRunMigrations) {
+    console.log('[DB MIGRATIONS] Starting...');
     try {
       const migrations = await dataSource.runMigrations();
       if (migrations.length > 0) {
@@ -185,8 +186,10 @@ async function bootstrap() {
       } else {
         console.log('[DB MIGRATIONS] No pending migrations.');
       }
+      console.log('[DB MIGRATIONS] Completed.');
     } catch (error) {
       console.error('[DB MIGRATIONS] Failed to run migrations on startup.', error);
+      throw error;
     }
   } else {
     console.log('[DB MIGRATIONS] Skipped (TYPEORM_RUN_MIGRATIONS=false).');
@@ -252,6 +255,7 @@ async function bootstrap() {
   // required migrations for the running code. Temporary runtime fallbacks exist to
   // reduce blast radius, but the long-term fix is to run migrations before serving.
   await assertUsersBetaAccessApprovedColumnCompatible({ dataSource, config });
+  console.log('[SCHEMA CHECK] Schema compatibility passed.');
 
   await app.init();
   console.log('ROUTE_DUMP_START', new Date().toISOString());
