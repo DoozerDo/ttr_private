@@ -81,6 +81,9 @@ export class User {
   })
   subscriptionTier!: SubscriptionTier;
 
+  @Column({ type: 'boolean', default: false })
+  betaAccessApproved!: boolean;
+
   @Column({
     type: 'enum',
     enum: AccountType,

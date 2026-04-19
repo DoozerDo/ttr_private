@@ -39,6 +39,7 @@ type TieredRequest = Request & {
   user?: {
     id?: string;
     subscriptionTier?: SubscriptionTier;
+    betaAccessApproved?: boolean;
     entitlements?: Entitlements;
   };
 };

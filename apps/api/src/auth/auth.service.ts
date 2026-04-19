@@ -22,7 +22,7 @@ import { UsersService } from '../users/users.service';
 import { LoginDto, RedeemAccessCodeAndLoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { User } from '../users/user.entity';
-import { getEntitlementsForTier } from '../features/feature-gates';
+import { getEntitlementsForUser } from '../features/feature-gates';
 import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 import type { AuthResponseDto } from './dto/auth-response.dto';
 import { UserToken } from './user-token.entity';
@@ -604,8 +604,11 @@ export class AuthService {
 
   private buildAuthResponse(user: User): AuthResponseDto {
     const isFounder = this.isFounder(user.email);
-    const resolvedTier = isFounder ? SubscriptionTier.PRO : user.subscriptionTier;
-    const entitlements = getEntitlementsForTier(resolvedTier);
+    const entitlements = getEntitlementsForUser({
+      subscriptionTier: isFounder ? SubscriptionTier.PRO : user.subscriptionTier,
+      betaAccessApproved: user.betaAccessApproved,
+    });
+    const resolvedTier = entitlements.effectiveTier;
     const resolvedRole = isFounder ? 'admin' : user.role;
 
     const payload = {

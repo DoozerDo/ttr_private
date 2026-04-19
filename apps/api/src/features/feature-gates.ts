@@ -14,12 +14,13 @@ const paidTiers = new Set<SubscriptionTier>([
 
 const logger = new Logger('FeatureGates');
 
-type EntitlementReason = 'beta_unlocked';
+type EntitlementReason = 'beta_unlocked' | 'beta_user';
 
 export type Entitlements = {
   tier: SubscriptionTier;
   effectiveTier: SubscriptionTier;
   betaUnlockPro: boolean;
+  betaUserPro: boolean;
   reasons: EntitlementReason[];
 };
 
@@ -27,16 +28,22 @@ function isBetaUnlockProEnabled() {
   return process.env.BETA_UNLOCK_PRO === 'true';
 }
 
-export function getEntitlementsForTier(
-  tierInput?: SubscriptionTier | null,
-): Entitlements {
-  const tier = tierInput ?? SubscriptionTier.FREE;
+export function getEntitlementsForUser(input?: {
+  subscriptionTier?: SubscriptionTier | null;
+  betaAccessApproved?: boolean | null;
+}): Entitlements {
+  const tier = input?.subscriptionTier ?? SubscriptionTier.FREE;
   const betaUnlockPro = isBetaUnlockProEnabled();
-  const promotesToPro = betaUnlockPro && !paidTiers.has(tier);
+  const betaUserPro = Boolean(input?.betaAccessApproved);
+  const promotesToPro = (betaUserPro || betaUnlockPro) && !paidTiers.has(tier);
   const effectiveTier = promotesToPro ? SubscriptionTier.PRO : tier;
   const reasons: EntitlementReason[] = [];
 
-  if (promotesToPro) {
+  if (betaUserPro && !paidTiers.has(tier)) {
+    reasons.push('beta_user');
+  }
+
+  if (betaUnlockPro && !paidTiers.has(tier)) {
     reasons.push('beta_unlocked');
   }
 
@@ -44,19 +51,30 @@ export function getEntitlementsForTier(
     tier,
     effectiveTier,
     betaUnlockPro,
+    betaUserPro,
     reasons,
   };
+}
+
+export function getEntitlementsForTier(
+  tierInput?: SubscriptionTier | null,
+): Entitlements {
+  return getEntitlementsForUser({ subscriptionTier: tierInput ?? undefined });
 }
 
 export function resolveEntitlementsFromUser(user?: {
   entitlements?: Entitlements;
   subscriptionTier?: SubscriptionTier;
+  betaAccessApproved?: boolean;
 }): Entitlements {
   if (user?.entitlements) {
     return user.entitlements;
   }
 
-  return getEntitlementsForTier(user?.subscriptionTier ?? undefined);
+  return getEntitlementsForUser({
+    subscriptionTier: user?.subscriptionTier ?? undefined,
+    betaAccessApproved: user?.betaAccessApproved,
+  });
 }
 
 export function wouldBlock(
@@ -70,7 +88,7 @@ export function wouldBlock(
   }
 
   logger.log(
-    `Feature gate ${feature} would have blocked ${actualTier} (requires ${requiredTier}) but effective tier ${effectiveTier} is allowed via beta unlock.`,
+    `Feature gate ${feature} would have blocked ${actualTier} (requires ${requiredTier}) but effective tier ${effectiveTier} is allowed via beta entitlement.`,
   );
 }
 
