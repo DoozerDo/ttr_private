@@ -754,8 +754,8 @@ export class ResumeService {
     }));
   }
 
-  private buildMinimalResumeSections(baselineSections: BaselineSection[]): ResumeExportSection[] {
-    const sections = baselineSections
+  private buildMinimalResumeSections(baselineSections: BaselineSection[]): ResumeDraftSection[] {
+    const sections: ResumeDraftSection[] = baselineSections
       .filter((section) => typeof section.content === 'string' && section.content.trim().length > 0)
       .map((section) => ({
         id: section.id,
@@ -766,7 +766,7 @@ export class ResumeService {
         source: 'baseline',
         content: String(section.content ?? '').trim(),
         rawContent: String(section.content ?? '').trim(),
-        bullets: [] as Array<{ text: string }>,
+        bullets: [] as ResumeDraftSection['bullets'],
       }));
 
     const experienceText = sections
@@ -793,7 +793,22 @@ export class ResumeService {
           .map((sentence) => normalizeMinimalLine(sentence))
           .filter(Boolean)
           .slice(0, 2)
-          .map((text) => ({ text })),
+          .map((text, idx) => ({
+            id: `minimal-summary:${idx}`,
+            text,
+            source: {
+              baselineSectionId: 'minimal-summary',
+              baselineSectionType: BaselineSectionType.SUMMARY,
+              baselineSectionOrder: -1,
+              bulletIndex: idx,
+              sourceEvidenceIds: [],
+              anchorText: text,
+              anchorKind: 'sentence' as const,
+              exactBaselineBullet: false,
+            },
+            confidence: 'High' as const,
+            claimRisk: { level: 'None', flaggedTerms: [] },
+          })),
       });
     }
 
@@ -803,7 +818,22 @@ export class ResumeService {
       if (upperType !== 'EXPERIENCE') return;
       const bullets = extractBulletLines(section.content ?? '').slice(0, 8);
       if (bullets.length) {
-        section.bullets = bullets.map((text) => ({ text }));
+        section.bullets = bullets.map((text, idx) => ({
+          id: `${section.id}:minimal:${idx}`,
+          text,
+          source: {
+            baselineSectionId: String(section.id),
+            baselineSectionType: String(section.type ?? ''),
+            baselineSectionOrder: Number(section.order ?? 0),
+            bulletIndex: idx,
+            sourceEvidenceIds: [],
+            anchorText: text,
+            anchorKind: 'bullet_line' as const,
+            exactBaselineBullet: true,
+          },
+          confidence: 'High' as const,
+          claimRisk: { level: 'None', flaggedTerms: [] },
+        }));
       }
     });
 
@@ -1569,7 +1599,7 @@ export class ResumeService {
       .join('\n');
     const insufficientBaselineDetails =
       getInsufficientExtractedTextDetails(baselineText);
-    let forcedMinimalSections: ResumeExportSection[] | null = null;
+    let forcedMinimalSections: ResumeDraftSection[] | null = null;
     if (insufficientBaselineDetails) {
       const normalizedBaselineText = String(baselineText ?? '').trim();
       if (!normalizedBaselineText) {
@@ -1690,7 +1720,7 @@ export class ResumeService {
         : [job?.rawDescription ?? '', gapContextText].filter(Boolean).join('\n');
 
     let usedMinimalFallback = Boolean(forcedMinimalSections);
-    let sections: ResumeExportSection[] = forcedMinimalSections ?? [];
+    let sections: ResumeDraftSection[] = forcedMinimalSections ?? [];
     if (!forcedMinimalSections) {
       try {
         sections = this.sanitizeDraftSections(buildResumeDraftSections(resumeInputSections, {
@@ -1744,15 +1774,13 @@ export class ResumeService {
         ]);
       }
     }
-    const traceSourceSections = usedMinimalFallback ? [] : this.cloneDraftSections(sections as ResumeDraftSection[]);
+    const traceSourceSections = usedMinimalFallback ? [] : this.cloneDraftSections(sections);
     const claimRiskSummary = usedMinimalFallback
       ? null
       : summarizeClaimRisk(
-          sections.flatMap((section) =>
-            (section.bullets ?? [])
-              .map((bullet) => (bullet as { claimRisk?: unknown }).claimRisk)
-              .filter(Boolean),
-          ),
+          sections
+            .flatMap((section) => section.bullets ?? [])
+            .map((bullet) => bullet.claimRisk),
         );
     const identity = resolveBaselineIdentity(baseline);
     const normalizedDocument = buildNormalizedResumeDocument(
@@ -2006,10 +2034,19 @@ export class ResumeService {
 
     let resumeTraceAudit: ArtifactTraceAudit;
     if (usedMinimalFallback) {
-      resumeTraceAudit = { traceMap: {}, debugTrace: { passed: true } as any };
+      resumeTraceAudit = {
+        traceMap: {},
+        debugTrace: {
+          passed: true,
+          failures: [],
+          traceCoverage: 1,
+          unusedEvidence: [],
+          selectedEvidence: [],
+        },
+      };
     } else {
       resumeTraceAudit = this.buildResumeTraceAudit(
-        traceSourceSections as unknown as ResumeExportSection[],
+        traceSourceSections,
         resumeInputSections,
       );
     }
