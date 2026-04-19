@@ -13,7 +13,7 @@ import {
   type CanonicalDecisionResult,
   type CanonicalSurface,
 } from "@/lib/canonicalDecision";
-import { isDocumentGenerationUnlocked } from "@/lib/documentGenerationGate";
+import { isDocumentGenerationUnlocked, isMomentumGenerationAllowed } from "@/lib/documentGenerationGate";
 import {
   assertCanonicalRouteHref,
   getFitReviewHref,
@@ -101,6 +101,16 @@ function normalizeGenerationReadinessForResults(
 ): GenerationReadiness {
   if (surface !== "results") {
     return readiness;
+  }
+
+  if (isMomentumGenerationAllowed(score) && readiness.status !== "ready") {
+    return {
+      ...readiness,
+      status: "ready",
+      blocked: false,
+      badgeLabel: "READY",
+      summary: "You’re ready to generate. Strengthen these areas to improve results.",
+    };
   }
 
   if (typeof score === "number" && score < 70 && readiness.status === "ready") {

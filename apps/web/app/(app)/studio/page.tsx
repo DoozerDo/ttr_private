@@ -3138,6 +3138,7 @@ export default function StudioPage() {
     () =>
       resolveStudioArtifactGating({
         artifactType: "resume",
+        score: analysisScore ?? null,
         readiness: activeGenerationReadiness,
         responsePresent: Boolean(resumeState.response),
         generating: resumeGenerating || autoGenerationInFlight,
@@ -3158,6 +3159,7 @@ export default function StudioPage() {
     () =>
       resolveStudioArtifactGating({
         artifactType: "cover_letter",
+        score: analysisScore ?? null,
         readiness: activeGenerationReadiness,
         responsePresent: Boolean(coverState.response),
         generating: coverGenerating || autoGenerationInFlight,

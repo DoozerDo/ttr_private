@@ -582,6 +582,7 @@ export type AnalyticsEventMap = {
     action: "fit_review" | "verify_examples" | "open_studio_draft" | "open_studio";
     scoreBucket: ScoreBand | null;
     readinessStatus: ResultsPrimaryCtaReadinessStatus;
+    accessMode: "momentum" | "recovery";
   };
   artifact_viewed_with_confidence_level: {
     source: "studio";

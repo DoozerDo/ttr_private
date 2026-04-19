@@ -3,6 +3,7 @@ import type { GenerationReadiness } from "@/lib/generationReadiness";
 import type { GenerationProductReadiness } from "@/lib/generationProductReadiness";
 import type { DecisionFlowDataSource } from "@/lib/decisionFlowDebug";
 import { shouldGenerateDocuments, isSystemOwnedFinalizedGeneration } from "@/lib/documentGenerationContract";
+import { isMomentumGenerationAllowed } from "@/lib/documentGenerationGate";
 import { getFitReviewHref, getResultsHref, getStudioHref } from "@/src/navigation/routes";
 import {
   resolveWorkflowProgression,
@@ -238,6 +239,7 @@ function buildAnalysisNextAction(input: {
 }): CanonicalNextAction {
   const score = typeof input.score === "number" && Number.isFinite(input.score) ? input.score : null;
   const qualifiedForGeneration = shouldGenerateDocuments(score);
+  const momentumAllowed = isMomentumGenerationAllowed(score);
 
   if (input.surface === "target") {
     if (!qualifiedForGeneration) {
@@ -510,6 +512,7 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
     persistedAssessmentId: input.persistedAssessmentId ?? null,
   });
   const qualifiedForGeneration = shouldGenerateDocuments(score);
+  const momentumAllowed = isMomentumGenerationAllowed(score);
   const nextAction = resolveNextAction(input);
   return {
     surface: input.surface,
@@ -530,12 +533,12 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
             ? "IMPROVE"
             : !input.productReadiness.canOpenStudio
               ? "BLOCKED"
-              : score !== null && score >= 80
+              : momentumAllowed
                 ? "READY"
                 : "DRAFT"
           : !qualifiedForGeneration || !studioCanGenerateDocuments || !input.productReadiness.canOpenStudio
             ? "BLOCKED"
-            : score !== null && score >= 80
+            : momentumAllowed
               ? "READY"
               : "DRAFT",
     scoreSource: scoreCandidate?.source ?? "primary",
@@ -553,12 +556,12 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
             ? "generation_blocked"
             : !input.productReadiness.canOpenStudio
               ? "generation_blocked"
-              : score !== null && score >= 80
+              : momentumAllowed
                 ? "generation_ready"
                 : "generation_limited"
           : !qualifiedForGeneration || !studioCanGenerateDocuments || !input.productReadiness.canOpenStudio
             ? "generation_blocked"
-            : score !== null && score >= 80
+            : momentumAllowed
               ? "generation_ready"
               : "generation_limited",
     nextAction,

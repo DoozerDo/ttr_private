@@ -1,5 +1,5 @@
 import type { GenerationAuthorityState } from "@/lib/generationAuthority";
-import { isDocumentGenerationUnlocked } from "@/lib/documentGenerationGate";
+import { isDocumentGenerationUnlocked, isMomentumGenerationAllowed } from "@/lib/documentGenerationGate";
 import { resolveDocumentGenerationMode } from "@/lib/documentGenerationContract";
 
 export type GenerationReadinessContract = {
@@ -44,14 +44,16 @@ export function buildGenerationProductReadiness(
   if (typeof input.score !== "number") {
     reasonsBlocked.push("missing_score");
   }
-  if (!input.hasCanonicalAssessment) {
+  const score = typeof input.score === "number" ? input.score : null;
+  const momentumAllowed = isMomentumGenerationAllowed(score);
+
+  if (!input.hasCanonicalAssessment && !momentumAllowed) {
     reasonsBlocked.push("missing_canonical_assessment");
   }
   if (!input.hasRequiredContext) {
     reasonsBlocked.push("missing_required_context");
   }
 
-  const score = typeof input.score === "number" ? input.score : null;
   const scoreEligibleForGeneration = isDocumentGenerationUnlocked(score);
 
   if (!scoreEligibleForGeneration) {
@@ -59,7 +61,9 @@ export function buildGenerationProductReadiness(
   }
 
   const state: GenerationProductReadinessState =
-    scoreEligibleForGeneration && input.hasCanonicalAssessment && input.hasRequiredContext
+    scoreEligibleForGeneration &&
+    input.hasRequiredContext &&
+    (input.hasCanonicalAssessment || momentumAllowed)
       ? "ALLOWED"
       : "BLOCKED";
   const confidence: GenerationProductConfidence =

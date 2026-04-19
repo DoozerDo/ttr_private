@@ -1,6 +1,7 @@
 import type { GenerationReadiness, VerificationIssue } from "./generationReadiness";
 import type { TierGateError } from "./tiers";
 import { shouldGenerateDocuments } from "./documentGenerationContract";
+import { isMomentumGenerationAllowed } from "./documentGenerationGate";
 
 export type StudioArtifactAccessState = "allowed" | "tier_gated";
 export type StudioArtifactReadinessState = "ready" | "draft_only" | "blocked";
@@ -34,6 +35,7 @@ export function isDraftAnywayEligible(
 
 type ResolveInputs = {
   artifactType: "resume" | "cover_letter";
+  score: number | null;
   readiness: GenerationReadiness;
   responsePresent: boolean;
   generating: boolean;
@@ -52,6 +54,10 @@ const hasBlockingIssueForArtifact = (
 
 function resolveReadinessState(inputs: ResolveInputs): StudioArtifactReadinessState {
   const { readiness, artifactType } = inputs;
+
+  if (isMomentumGenerationAllowed(inputs.score)) {
+    return "ready";
+  }
 
   if (readiness.status === "blocked" || readiness.blocked) {
     const hasBlocker =

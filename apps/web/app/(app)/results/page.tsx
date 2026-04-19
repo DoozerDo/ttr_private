@@ -64,7 +64,7 @@ import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
 import { buildProductDecisionState } from "@/lib/productDecisionState";
 import { resolveCanonicalState } from "@/lib/canonicalDecision";
 import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
-import { isDocumentGenerationUnlocked } from "@/lib/documentGenerationGate";
+import { isDocumentGenerationUnlocked, isMomentumGenerationAllowed } from "@/lib/documentGenerationGate";
 import { ResumePreview } from "@/app/(app)/studio/ResumePreview";
 import {
   buildWorkflowRequestKey,
@@ -3203,14 +3203,14 @@ export default function ResultsPage() {
     ? "generating"
     : effectiveResultsGenerationPhase;
   const showImprovementModule =
-    !isStrongFitScore &&
     improvementSuggestions.length > 0 &&
-    !(
-      resultsReadiness.status === "blocked" &&
-      typeof activeScore === "number" &&
-      isDocumentGenerationUnlocked(activeScore) &&
-      activeScore < 80
-    );
+    (isStrongFitScore ||
+      !(
+        resultsReadiness.status === "blocked" &&
+        typeof activeScore === "number" &&
+        isDocumentGenerationUnlocked(activeScore) &&
+        activeScore < 80
+      ));
   const discoveredRoles = useMemo(
     () =>
       discoverCompetitiveRoles({
@@ -3324,6 +3324,12 @@ export default function ResultsPage() {
     return `Verify ${count} example${count === 1 ? "" : "s"} to unlock Studio`;
   }, [canonicalUnverifiedRequirements.length]);
   const secondaryAction = useMemo(() => {
+    if (isStrongFitScore) {
+      return {
+        label: "Improve Evidence First",
+        href: fitReviewPath,
+      };
+    }
     if (effectiveReadinessStatus === "limited") {
       return {
         label: "Verify examples",
@@ -3334,7 +3340,7 @@ export default function ResultsPage() {
       label: "View top drivers",
       href: advancedInsightsHref,
     };
-  }, [advancedInsightsHref, effectiveReadinessStatus, fitReviewPath]);
+  }, [advancedInsightsHref, effectiveReadinessStatus, fitReviewPath, isStrongFitScore]);
   const blockedResultsState: ResultsBlockedState | null = useMemo(() => {
     if (!latest || !isGenerationBlocked) return null;
     return buildCompetitiveBlockedResultsState({
@@ -3357,12 +3363,16 @@ export default function ResultsPage() {
     if (!latest) return null;
 
     const analyticsAction = mapResultsAnalyticsActionType(canonicalResultsDecision.primaryAction.type);
+    const isMomentum = isStrongFitScore;
 
     return {
-      label: canonicalResultsDecision.primaryAction.label,
+      label: isMomentum ? "Generate Resume & Cover Letter" : canonicalResultsDecision.primaryAction.label,
       href: canonicalResultsDecision.primaryAction.destination,
       disabled: !canonicalResultsDecision.primaryAction.isEnabled || (!canOpenStudio && canonicalResultsDecision.primaryAction.type === "open_studio"),
       description:
+        isMomentum
+          ? "You’re ready to generate. Strengthen these areas to improve results."
+          :
         canonicalResultsDecision.blockingReason?.message ??
         canonicalResultsDecision.supportingMessage ??
         blockedResultsState?.supportSummary ??
@@ -3374,6 +3384,7 @@ export default function ResultsPage() {
           action: analyticsAction,
           scoreBucket: resultsScoreBucket ?? null,
           readinessStatus: mapResultsAnalyticsReadinessStatus(canonicalResultsDecision.readinessState),
+          accessMode: isMomentum ? "momentum" : "recovery",
         });
       },
     };
@@ -3390,6 +3401,7 @@ export default function ResultsPage() {
     latest,
     recentIntent,
     resultsScoreBucket,
+    isStrongFitScore,
   ]);
   const runGenerationRecoveryWithPairIds = useCallback(
     async (

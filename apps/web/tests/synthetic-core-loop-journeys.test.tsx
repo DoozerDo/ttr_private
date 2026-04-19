@@ -300,6 +300,14 @@ function buildReadinessPayload(
 }
 
 function buildAnalyticsPayload(event: string, payload: Record<string, unknown>) {
+  if (event === "results_primary_cta_clicked" && payload.accessMode === undefined) {
+    const action = typeof payload.action === "string" ? payload.action : "";
+    return {
+      event,
+      ...payload,
+      accessMode: action === "open_studio" || action === "open_studio_draft" ? "momentum" : "recovery",
+    };
+  }
   return { event, ...payload };
 }
 
@@ -723,6 +731,7 @@ const scenarios: SyntheticJourneyScenario[] = [
           action: "open_studio",
           scoreBucket: "MID",
           readinessStatus: "limited",
+          accessMode: "momentum",
         }),
       }),
     },
@@ -849,6 +858,7 @@ const scenarios: SyntheticJourneyScenario[] = [
           action: "open_studio",
           scoreBucket: "MID",
           readinessStatus: "limited",
+          accessMode: "momentum",
         }),
       }),
     },
@@ -975,6 +985,7 @@ const scenarios: SyntheticJourneyScenario[] = [
           action: "fit_review",
           scoreBucket: "LOW",
           readinessStatus: "blocked",
+          accessMode: "recovery",
         }),
       }),
     },
@@ -1078,6 +1089,7 @@ const scenarios: SyntheticJourneyScenario[] = [
           action: "open_studio",
           scoreBucket: "MID",
           readinessStatus: "limited",
+          accessMode: "momentum",
         }),
       }),
     },
@@ -1207,6 +1219,7 @@ const scenarios: SyntheticJourneyScenario[] = [
           action: "open_studio",
           scoreBucket: "MID",
           readinessStatus: "limited",
+          accessMode: "momentum",
         }),
       }),
     },

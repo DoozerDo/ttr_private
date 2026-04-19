@@ -207,7 +207,7 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Generate Resume & Cover Letter" })).toBeInTheDocument();
     });
     expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
     expect(screen.queryByTestId("results-blocked-evidence-panel")).toBeNull();
@@ -295,7 +295,7 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
+      expect(screen.getByTestId("results-hero-primary-cta")).toBeInTheDocument();
     });
     expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
     expect(screen.queryByText("How to improve your fit")).toBeNull();
