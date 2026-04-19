@@ -200,6 +200,45 @@ describe('AuthService', () => {
     });
   });
 
+  it('treats betaAccessApproved users as PRO on login', async () => {
+    const payload: LoginDto = {
+      email: 'beta-user@example.com',
+      password: 'Password123',
+    };
+    const passwordHash = await bcrypt.hash(payload.password, 10);
+    const savedUser: User = {
+      id: 'beta-user-id',
+      email: payload.email,
+      firstName: 'Beta',
+      lastName: 'User',
+      emailConfirmed: true,
+      passwordHash,
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
+      role: 'user',
+      subscriptionTier: SubscriptionTier.FREE,
+      betaAccessApproved: true,
+      accountType: AccountType.FREE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    usersService.findByEmail.mockResolvedValue(savedUser);
+
+    const result = await service.login(payload);
+
+    expect(result.user).toMatchObject({
+      id: savedUser.id,
+      subscriptionTier: SubscriptionTier.PRO,
+    });
+    expect(result.user.entitlements.effectiveTier).toEqual(SubscriptionTier.PRO);
+  });
+
   it('returns UnauthorizedException when user is not found', async () => {
     const payload: LoginDto = {
       email: 'missing@example.com',
