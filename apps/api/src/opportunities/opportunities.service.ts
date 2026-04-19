@@ -606,7 +606,7 @@ export class OpportunitiesService {
       return 'improving_fit';
     }
     if (opportunity.status === OpportunityStatus.SAVED) {
-      return 'ready_to_apply';
+      return opportunity.savedGenerationCompleted ? 'ready_to_apply' : 'saved';
     }
     return 'saved';
   }

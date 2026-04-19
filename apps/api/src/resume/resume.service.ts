@@ -1375,6 +1375,18 @@ export class ResumeService {
       baselineId: baseline.id,
       baselineVersionId: baselineVersionId,
     });
+    const effectiveAssessment =
+      analysisAssessment ??
+      (jobId
+        ? await this.fitAssessmentRepository.findOne({
+            where: {
+              userId,
+              jobId,
+              baselineId: baseline.id,
+            },
+            order: { createdAt: 'DESC' },
+          })
+        : null);
 
     const isVerifiedOnlyRequest =
       Boolean(request.oneTap) || Boolean(options?.enforceOneTap);
@@ -1384,7 +1396,7 @@ export class ResumeService {
         skipReadinessGate: true,
       });
       if (readiness.status !== 'ready') {
-        const score = analysisAssessment?.overallScore ?? null;
+        const score = effectiveAssessment?.overallScore ?? null;
         if (
           typeof score === 'number' &&
           score >= VERIFIED_ONLY_GENERATION_THRESHOLD &&
@@ -1727,7 +1739,7 @@ export class ResumeService {
 
     if (request.oneTap && jobId && shouldEnforceOneTap) {
       const minScore =
-        (analysisAssessment?.overallScore ?? 0) >= AUTO_GENERATE_THRESHOLD
+        (effectiveAssessment?.overallScore ?? 0) >= AUTO_GENERATE_THRESHOLD
           ? AUTO_GENERATE_THRESHOLD
           : VERIFIED_ONLY_GENERATION_THRESHOLD;
       this.ensureOneTapAllowed(latestAssessment, minScore);
@@ -1777,7 +1789,7 @@ export class ResumeService {
     const complianceBlocked = blocked;
 
     if (complianceBlocked) {
-      const score = analysisAssessment?.overallScore ?? null;
+      const score = effectiveAssessment?.overallScore ?? null;
       if (
         typeof score === 'number' &&
         score >= VERIFIED_ONLY_GENERATION_THRESHOLD &&

@@ -4695,47 +4695,7 @@ export default function ResultsPage() {
     return query ? `/analyze?${query}` : "/analyze";
   }, [baselineId, jobId]);
 
-  useEffect(() => {
-    const previousScore = reanalysisDelta.previousScore;
-    const currentScoreValue = reanalysisDelta.currentScore;
-    if (typeof previousScore !== "number" || typeof currentScoreValue !== "number") return;
-    const upgraded = (previousScore <= 70 && currentScoreValue > 70) || currentScoreValue >= 85;
-    if (!upgraded) return;
-    const baselineIdValue = latest?.baselineId?.trim() ?? "";
-    const jobIdValue = latest?.jobId?.trim() ?? "";
-    if (!baselineIdValue || !jobIdValue) return;
-
-    const upgradeKey = `${jobIdValue}:${baselineIdValue}:${currentScoreValue}`;
-    if (upgradedOpportunityKeysRef.current.has(upgradeKey)) return;
-    upgradedOpportunityKeysRef.current.add(upgradeKey);
-
-    void (async () => {
-      try {
-        const response = await fetch("/api/opportunities", { cache: "no-store" });
-        if (!response.ok) return;
-        const opportunities = (await response.json()) as Array<{
-          id: string;
-          jobId?: string | null;
-          baselineId?: string | null;
-          status?: string | null;
-        }>;
-        const match = opportunities.find((entry) => {
-          const sameJob = (entry.jobId ?? "").trim() === jobIdValue;
-          const sameBaseline = (entry.baselineId ?? "").trim() === baselineIdValue;
-          return sameJob && sameBaseline;
-        });
-        if (!match?.id) return;
-        if (typeof match.status === "string" && match.status.trim() === "ready_to_apply") return;
-        await fetch(`/api/opportunities/${encodeURIComponent(match.id)}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "ready_to_apply" }),
-        });
-      } catch (error) {
-        console.error("Failed to update opportunity readiness", error);
-      }
-    })();
-  }, [latest?.baselineId, latest?.jobId, reanalysisDelta.currentScore, reanalysisDelta.previousScore]);
+  // Contract: opportunity status must not imply "ready_to_apply" until generation completion is recorded.
   const guidedOverlayConfig = useMemo(() => {
     if (!isGuidedActive) return null;
     if (!latest) {

@@ -258,7 +258,20 @@ export class CoverLettersService {
       ),
     );
     if (readiness.status !== 'ready') {
-      const score = draft.analysisAssessment?.overallScore ?? null;
+      const score =
+        draft.analysisAssessment?.overallScore ??
+        (draft.job?.id && draft.baseline?.id
+          ? (
+              await this.fitAssessmentRepository.findOne({
+                where: {
+                  userId,
+                  jobId: draft.job.id,
+                  baselineId: draft.baseline.id,
+                },
+                order: { createdAt: 'DESC' },
+              })
+            )?.overallScore ?? null
+          : null);
       if (
         typeof score === 'number' &&
         score >= VERIFIED_ONLY_GENERATION_THRESHOLD &&
