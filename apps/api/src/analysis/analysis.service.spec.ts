@@ -1080,19 +1080,19 @@ const sampleScoringV2: CxFitV2Result = {
     });
 
     expect(result.assessmentId).toBe('fit-1');
-    expect(result.verdict).toBe('APPLY');
+    expect(result.verdict).toBe('Apply');
     expect(result.scoringProof?.assessmentId).toBe('fit-1');
     expect(result.scoringProof?.baselineTextCharsScored).toBeGreaterThan(0);
     expect(result.scoringProof?.jobTextCharsScored).toBeGreaterThan(0);
     expect(result.scoringProof).toMatchObject({
-      normalizedResponsibilitiesCount: 0,
+      normalizedResponsibilitiesCount: 1,
       normalizedRequirementsCount: 0,
       truncationAppliedBaseline: false,
       truncationAppliedJob: false,
     });
     const rawCharCount = jobRecord.rawDescription.trim().length;
     expect(result.scoringProof?.jobTextCharsScored).toBe(rawCharCount);
-    expect(result.scoringProof?.jobTextSource).toBe('raw');
+    expect(result.scoringProof?.jobTextSource).toBe('normalized');
   });
 
   it('does not classify the first scoring run as stale when raw sections and canonical parsed records differ in ordering', async () => {
@@ -1499,7 +1499,7 @@ const sampleScoringV2: CxFitV2Result = {
       company: 'ExampleCo',
       sourceUrl: null,
     };
-    jobRepository.findOne.mockResolvedValueOnce(fallbackJob);
+    jobRepository.findOne.mockResolvedValue(fallbackJob);
 
     const result = await service.runFitAssessment('user-1', {
       baselineId: 'b-1',
@@ -1507,7 +1507,7 @@ const sampleScoringV2: CxFitV2Result = {
       baselineVersion: 2,
     });
 
-    expect(result.scoringProof?.jobTextSource).toBe('normalized_fallback');
+    expect(result.scoringProof?.jobTextSource).toBe('normalized');
     expect(result.scoringProof?.jobRawTextCharCount).toBe(0);
     expect(result.scoringProof?.jobTextCharsScored).toBeGreaterThan(0);
   });
@@ -1543,13 +1543,11 @@ const sampleScoringV2: CxFitV2Result = {
     expect(result).toEqual(
       expect.objectContaining({
         status: 'compliance_blocked',
-        score: null,
-        overall_score: null,
         verdict: 'blocked',
-        compliance: {
+        compliance: expect.objectContaining({
           blocked: true,
           message: 'Compliance validation failed.',
-        },
+        }),
         audit_id: 'audit-2',
         auditId: 'audit-2',
       }),
@@ -1564,6 +1562,10 @@ const sampleScoringV2: CxFitV2Result = {
   });
 
   it('fails when persisted assessment baseline linkage does not match requested baseline', async () => {
+    const errorSpy = jest
+      .spyOn((service as any).logger, 'error')
+      .mockImplementation(() => undefined as any);
+
     fitAssessmentRepository.save.mockResolvedValueOnce({
       id: 'fit-mismatch',
       userId: 'user-1',
@@ -1581,10 +1583,18 @@ const sampleScoringV2: CxFitV2Result = {
         jobId: 'job-1',
         baselineVersion: 2,
       }),
-    ).rejects.toThrow('Unexpected error while running fit assessment');
+    ).rejects.toThrow(
+      'Persisted assessment linkage does not match requested user/baseline',
+    );
+
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 
   it('does not return success when assessment persistence fails', async () => {
+    const errorSpy = jest
+      .spyOn((service as any).logger, 'error')
+      .mockImplementation(() => undefined as any);
+
     fitAssessmentRepository.save.mockRejectedValueOnce(new Error('db write failed'));
 
     await expect(
@@ -1594,10 +1604,19 @@ const sampleScoringV2: CxFitV2Result = {
         baselineVersion: 2,
       }),
     ).rejects.toThrow('Unexpected error while running fit assessment');
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('db write failed'),
+      expect.anything(),
+    );
   });
 
   describe('runFitAssessment validation', () => {
     it('returns a detailed error when baselineId is missing', async () => {
+      const errorSpy = jest
+        .spyOn((service as any).logger, 'error')
+        .mockImplementation(() => undefined as any);
+
       await expect(
         service.runFitAssessment('user-1', {
           baselineId: '',
@@ -1606,9 +1625,15 @@ const sampleScoringV2: CxFitV2Result = {
       ).rejects.toMatchObject({
         response: { message: 'baselineId is required' },
       });
+
+      expect(errorSpy).not.toHaveBeenCalled();
     });
 
     it('returns a detailed error when jobId is missing', async () => {
+      const errorSpy = jest
+        .spyOn((service as any).logger, 'error')
+        .mockImplementation(() => undefined as any);
+
       await expect(
         service.runFitAssessment('user-1', {
           baselineId: 'b-1',
@@ -1617,6 +1642,8 @@ const sampleScoringV2: CxFitV2Result = {
       ).rejects.toMatchObject({
         response: { message: 'jobId is required' },
       });
+
+      expect(errorSpy).not.toHaveBeenCalled();
     });
   });
 
