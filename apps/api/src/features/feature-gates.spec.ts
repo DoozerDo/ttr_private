@@ -8,6 +8,7 @@ import {
   resolveEntitlementsFromUser,
 } from './feature-gates';
 import { SubscriptionTier } from '../subscription/subscription-tier.enum';
+import { resolveUserTier } from '../subscription/resolve-user-tier';
 
 describe('feature gates', () => {
   it('blocks FREE tier for resume exports', () => {
@@ -36,7 +37,7 @@ describe('feature gates', () => {
       betaAccessApproved: true,
     });
 
-    expect(entitlements.tier).toBe(SubscriptionTier.FREE);
+    expect(entitlements.tier).toBe(SubscriptionTier.PRO);
     expect(entitlements.effectiveTier).toBe(SubscriptionTier.PRO);
     expect(() =>
       assertFeatureAvailable(entitlements, FeatureKey.COVER_LETTER_EXPORT),
@@ -50,5 +51,14 @@ describe('feature gates', () => {
     });
 
     expect(entitlements.effectiveTier).toBe(SubscriptionTier.PRO);
+  });
+
+  it('resolveUserTier returns PRO for beta-approved users', () => {
+    expect(
+      resolveUserTier({
+        subscriptionTier: SubscriptionTier.FREE,
+        betaAccessApproved: true,
+      }),
+    ).toBe(SubscriptionTier.PRO);
   });
 });

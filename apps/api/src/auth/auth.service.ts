@@ -617,6 +617,7 @@ export class AuthService {
       subscriptionTier: resolvedTier,
       role: resolvedRole,
       entitlements,
+      betaAccessApproved: Boolean(user.betaAccessApproved),
     };
 
     let accessToken: string;

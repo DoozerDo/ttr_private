@@ -1,5 +1,6 @@
 import { ForbiddenException, Logger } from '@nestjs/common';
 import { SubscriptionTier } from '../subscription/subscription-tier.enum';
+import { resolveUserTier } from '../subscription/resolve-user-tier';
 
 export enum FeatureKey {
   RESUME_EXPORT = 'RESUME_EXPORT',
@@ -32,18 +33,19 @@ export function getEntitlementsForUser(input?: {
   subscriptionTier?: SubscriptionTier | null;
   betaAccessApproved?: boolean | null;
 }): Entitlements {
-  const tier = input?.subscriptionTier ?? SubscriptionTier.FREE;
+  const inputTier = input?.subscriptionTier ?? SubscriptionTier.FREE;
+  const tier = resolveUserTier(input);
   const betaUnlockPro = isBetaUnlockProEnabled();
   const betaUserPro = Boolean(input?.betaAccessApproved);
-  const promotesToPro = (betaUserPro || betaUnlockPro) && !paidTiers.has(tier);
+  const promotesToPro = betaUnlockPro && !paidTiers.has(tier);
   const effectiveTier = promotesToPro ? SubscriptionTier.PRO : tier;
   const reasons: EntitlementReason[] = [];
 
-  if (betaUserPro && !paidTiers.has(tier)) {
+  if (betaUserPro) {
     reasons.push('beta_user');
   }
 
-  if (betaUnlockPro && !paidTiers.has(tier)) {
+  if (betaUnlockPro && !paidTiers.has(inputTier) && !betaUserPro) {
     reasons.push('beta_unlocked');
   }
 

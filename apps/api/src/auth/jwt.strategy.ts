@@ -13,6 +13,7 @@ type JwtPayload = {
   sub: string;
   email: string;
   subscriptionTier?: string;
+  betaAccessApproved?: boolean;
 };
 
 const ACCESS_TOKEN_COOKIE = 'access_token';
