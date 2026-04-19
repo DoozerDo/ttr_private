@@ -99,6 +99,16 @@ export type GenerateResumeRequest = {
   documentStrategyPlan?: DocumentStrategyPlanLike;
 };
 
+function buildVerifiedOnlyRequest(request: GenerateResumeRequest): GenerateResumeRequest {
+  return {
+    baselineId: request.baselineId,
+    baselineVersionId: request.baselineVersionId ?? null,
+    jobId: request.jobId ?? null,
+    analysisId: request.analysisId,
+    oneTap: true,
+  };
+}
+
 export type GenerateResumeOptions = {
   enforceOneTap?: boolean;
   preflightOnly?: boolean;
@@ -1415,7 +1425,7 @@ export class ResumeService {
           });
           const result = await this.generateResume(
             userId,
-            { ...request, oneTap: true },
+            buildVerifiedOnlyRequest(request),
             {
               ...(options ?? {}),
               enforceOneTap: true,
@@ -1809,7 +1819,7 @@ export class ResumeService {
         try {
           const result = await this.generateResume(
           userId,
-          { ...request, oneTap: true },
+          buildVerifiedOnlyRequest(request),
           {
             ...(options ?? {}),
             enforceOneTap: true,
@@ -2425,7 +2435,7 @@ export class ResumeService {
           try {
             generation = await this.generateResume(
               userId,
-              { ...request, oneTap: true },
+              buildVerifiedOnlyRequest(request),
               {
                 enforceOneTap: true,
                 preflightOnly: true,

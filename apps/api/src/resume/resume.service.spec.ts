@@ -354,6 +354,44 @@ describe('ResumeService contract', () => {
     expect(callArgs?.jobText).toBeNull();
   });
 
+  it('strips documentStrategyPlan when falling back to verified-only generation', async () => {
+    const { service } = buildService({
+      complianceFlags: [],
+      blocked: false,
+    });
+
+    const readinessSpy = jest.spyOn(service, 'getGenerationReadiness').mockResolvedValue({
+      status: 'blocked',
+      blocked: true,
+      compliance_flags: [],
+      reasons: [
+        {
+          code: 'full_block',
+          message: 'Missing verified evidence for core responsibilities.',
+        },
+      ],
+    });
+
+    const draftSpy = jest.spyOn(ResumeDraftBullets, 'buildResumeDraftSections');
+
+    await expect(
+      service.generateResume('user-1', {
+        ...baseRequest,
+        oneTap: false,
+        documentStrategyPlan: { version: 1, focus: 'tailor_more' } as any,
+      }),
+    ).rejects.toMatchObject({
+      status: 422,
+    });
+
+    expect(readinessSpy).toHaveBeenCalledTimes(1);
+    expect(draftSpy).toHaveBeenCalled();
+    const verifiedOnlyCall = draftSpy.mock.calls.find((call) => (call[1] as any)?.jobText === null);
+    expect(verifiedOnlyCall).toBeDefined();
+    const verifiedOnlyArgs = (verifiedOnlyCall?.[1] ?? {}) as { documentStrategyPlan?: unknown };
+    expect(verifiedOnlyArgs.documentStrategyPlan).toBeUndefined();
+  });
+
   it('returns canonical unsupported_input when resume structure is missing', () => {
     const { service } = buildService();
     const privateService = service as unknown as {
