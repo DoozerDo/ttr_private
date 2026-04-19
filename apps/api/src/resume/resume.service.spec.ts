@@ -394,6 +394,44 @@ describe('ResumeService contract', () => {
     expect(verifiedOnlyArgs.documentStrategyPlan).toBeUndefined();
   });
 
+  it('fail-soft returns a minimal baseline-derived preflight resume when draft build throws', async () => {
+    const originalContent = baseline.sections?.[0]?.content ?? '';
+    baseline.sections = [
+      {
+        ...baseSection,
+        content: [
+          'Senior Program Manager | Example Co | 2020–2024',
+          '• Owned support operations across global teams',
+          '• Reduced incident volume by improving playbooks',
+          '• Managed executive stakeholder updates',
+        ].join('\n'),
+      },
+    ];
+
+    const { service } = buildService({ blocked: false });
+    const draftSpy = jest
+      .spyOn(ResumeDraftBullets, 'buildResumeDraftSections')
+      .mockImplementation(() => {
+        throw new Error('boom');
+      });
+
+    await expect(
+      service.generateResume(
+        'user-1',
+        { ...baseRequest, oneTap: false },
+        { preflightOnly: true, skipReadinessGate: true, enforceOneTap: false },
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      status: 'success',
+      exportReady: true,
+      blocked: false,
+    });
+
+    draftSpy.mockRestore();
+    baseline.sections = [{ ...baseSection, content: originalContent }];
+  });
+
   it('returns canonical unsupported_input when resume structure is missing', () => {
     const { service } = buildService();
     const privateService = service as unknown as {

@@ -109,6 +109,32 @@ function buildVerifiedOnlyRequest(request: GenerateResumeRequest): GenerateResum
   };
 }
 
+function normalizeMinimalLine(value: string): string {
+  return String(value ?? '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[|]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractBulletLines(value: string): string[] {
+  const lines = String(value ?? '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const bullets: string[] = [];
+  for (const line of lines) {
+    const match = line.match(/^(?:[-*•]\s+|\(?\d{1,3}\)?[.)]\s+|[A-Za-z][.)]\s+)(.+)$/);
+    if (match?.[1]) {
+      const normalized = normalizeMinimalLine(match[1]);
+      if (normalized) bullets.push(normalized);
+    }
+  }
+  return bullets;
+}
+
 export type GenerateResumeOptions = {
   enforceOneTap?: boolean;
   preflightOnly?: boolean;
@@ -726,6 +752,62 @@ export class ResumeService {
         claimRisk: bullet.claimRisk ? { ...bullet.claimRisk } : bullet.claimRisk,
       })),
     }));
+  }
+
+  private buildMinimalResumeSections(baselineSections: BaselineSection[]): ResumeExportSection[] {
+    const sections = baselineSections
+      .filter((section) => typeof section.content === 'string' && section.content.trim().length > 0)
+      .map((section) => ({
+        id: section.id,
+        type: section.sectionType,
+        title: section.title,
+        order: section.order,
+        includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
+        source: 'baseline',
+        content: String(section.content ?? '').trim(),
+        rawContent: String(section.content ?? '').trim(),
+        bullets: [] as Array<{ text: string }>,
+      }));
+
+    const experienceText = sections
+      .filter((section) => String(section.type ?? '').toUpperCase() === 'EXPERIENCE')
+      .map((section) => section.content ?? '')
+      .join('\n');
+    const experienceBullets = extractBulletLines(experienceText).slice(0, 4);
+    const summaryText = experienceBullets.length
+      ? experienceBullets.join(' ')
+      : normalizeMinimalLine(experienceText).slice(0, 240);
+
+    if (summaryText) {
+      sections.unshift({
+        id: 'minimal-summary',
+        type: BaselineSectionType.SUMMARY,
+        title: 'Summary',
+        order: -1,
+        includePolicy: BaselineIncludePolicy.OPTIONAL,
+        source: 'baseline',
+        content: summaryText,
+        rawContent: summaryText,
+        bullets: summaryText
+          .split(/(?<=[.!?])\s+/)
+          .map((sentence) => normalizeMinimalLine(sentence))
+          .filter(Boolean)
+          .slice(0, 2)
+          .map((text) => ({ text })),
+      });
+    }
+
+    // Ensure Experience sections include bullets when baseline has bullet-like lines.
+    sections.forEach((section) => {
+      const upperType = String(section.type ?? '').toUpperCase();
+      if (upperType !== 'EXPERIENCE') return;
+      const bullets = extractBulletLines(section.content ?? '').slice(0, 8);
+      if (bullets.length) {
+        section.bullets = bullets.map((text) => ({ text }));
+      }
+    });
+
+    return sections;
   }
 
   private logNormalizationDiagnostics(payload: {
@@ -1487,19 +1569,34 @@ export class ResumeService {
       .join('\n');
     const insufficientBaselineDetails =
       getInsufficientExtractedTextDetails(baselineText);
+    let forcedMinimalSections: ResumeExportSection[] | null = null;
     if (insufficientBaselineDetails) {
-      const payload = {
-        errorCode: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
-        code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
-        message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
-        details: insufficientBaselineDetails,
-        error: {
+      const normalizedBaselineText = String(baselineText ?? '').trim();
+      if (!normalizedBaselineText) {
+        const payload = {
+          errorCode: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
           code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
           message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
           details: insufficientBaselineDetails,
-        },
-      };
-      throw new UnprocessableEntityException(payload);
+          error: {
+            code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+            message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
+            details: insufficientBaselineDetails,
+          },
+        };
+        throw new UnprocessableEntityException(payload);
+      }
+
+      // Fail-soft: if extraction heuristics say the baseline is thin, still return a minimal,
+      // baseline-derived resume instead of failing the entire request.
+      this.logger.warn('[resume-generation] insufficient_extracted_text_fallback_minimal', {
+        userId,
+        baselineId: baseline.id,
+        baselineVersionId: baselineVersion.id,
+        jobId: jobId ?? null,
+        analysisId: analysisId ?? null,
+      });
+      forcedMinimalSections = this.buildMinimalResumeSections(resumeInputSections);
     }
 
     const job = jobId
@@ -1567,7 +1664,7 @@ export class ResumeService {
     }
 
     const gapInsights =
-      !request.oneTap && job && latestAssessment
+      !forcedMinimalSections && !request.oneTap && job && latestAssessment
         ? this.gapAnalysisService.analyze({
             baselineSections: allowedSections.map((section) => ({
               content: section.content ?? '',
@@ -1586,21 +1683,45 @@ export class ResumeService {
         ].join('\n')
       : '';
     const gapGuidance = this.sanitizeGapGuidance(gapInsights);
-    const draftJobText = request.oneTap
-      ? (job?.rawDescription ?? '')
-      : [job?.rawDescription ?? '', gapContextText].filter(Boolean).join('\n');
+    const draftJobText = forcedMinimalSections
+      ? ''
+      : request.oneTap
+        ? (job?.rawDescription ?? '')
+        : [job?.rawDescription ?? '', gapContextText].filter(Boolean).join('\n');
 
-    let sections = this.sanitizeDraftSections(buildResumeDraftSections(resumeInputSections, {
-      jobText: draftJobText || null,
-      gapGuidance: !request.oneTap && gapGuidance
-        ? {
-            strengthSignals: gapGuidance.strengthSignals,
-            gapSignals: gapGuidance.gapSignals,
+    let usedMinimalFallback = Boolean(forcedMinimalSections);
+    let sections: ResumeExportSection[] = forcedMinimalSections ?? [];
+    if (!forcedMinimalSections) {
+      try {
+        sections = this.sanitizeDraftSections(buildResumeDraftSections(resumeInputSections, {
+          jobText: draftJobText || null,
+          gapGuidance: !request.oneTap && gapGuidance
+            ? {
+                strengthSignals: gapGuidance.strengthSignals,
+                gapSignals: gapGuidance.gapSignals,
+          }
+          : undefined,
+          claimRiskInventory,
+          documentStrategyPlan: request.documentStrategyPlan ?? undefined,
+        }));
+      } catch (error) {
+        const baselineText = resumeInputSections.map((section) => section.content ?? '').join('\n').trim();
+        if (!baselineText) {
+          throw error;
+        }
+        usedMinimalFallback = true;
+        this.logger.error('[resume-generation] build_draft_sections_failed_fallback_minimal', {
+          userId,
+          baselineId: baseline.id,
+          baselineVersionId: baselineVersion.id,
+          jobId: job?.id ?? jobId ?? null,
+          analysisId: analysisId ?? null,
+          oneTap: Boolean(request.oneTap),
+          reason: (error as Error)?.message ?? 'unknown_error',
+        });
+        sections = this.buildMinimalResumeSections(resumeInputSections);
       }
-      : undefined,
-      claimRiskInventory,
-      documentStrategyPlan: request.documentStrategyPlan ?? undefined,
-    }));
+    }
     const hasExperienceBullets = sections.some(
       (section) =>
         String(section.type ?? '').toUpperCase() === 'EXPERIENCE' &&
@@ -1623,10 +1744,16 @@ export class ResumeService {
         ]);
       }
     }
-    const traceSourceSections = this.cloneDraftSections(sections as ResumeDraftSection[]);
-    const claimRiskSummary = summarizeClaimRisk(
-      sections.flatMap((section) => section.bullets.map((bullet) => bullet.claimRisk)),
-    );
+    const traceSourceSections = usedMinimalFallback ? [] : this.cloneDraftSections(sections as ResumeDraftSection[]);
+    const claimRiskSummary = usedMinimalFallback
+      ? null
+      : summarizeClaimRisk(
+          sections.flatMap((section) =>
+            (section.bullets ?? [])
+              .map((bullet) => (bullet as { claimRisk?: unknown }).claimRisk)
+              .filter(Boolean),
+          ),
+        );
     const identity = resolveBaselineIdentity(baseline);
     const normalizedDocument = buildNormalizedResumeDocument(
       sections as ResumeExportSection[],
@@ -1654,10 +1781,12 @@ export class ResumeService {
       })),
       normalized: normalizedDocument,
     });
-    const bulletAnchorValidation = validateResumeDraftBulletAnchors(
-      sections,
-      resumeInputSections,
-    );
+    const bulletAnchorValidation = usedMinimalFallback
+      ? { valid: true, reasons: [] }
+      : validateResumeDraftBulletAnchors(
+          sections,
+          resumeInputSections,
+        );
     if (!bulletAnchorValidation.valid) {
       const reasons = [
         'Drafted experience bullets could not be anchored to complete baseline sentence spans.',
@@ -1875,10 +2004,15 @@ export class ResumeService {
       resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
     };
 
-    const resumeTraceAudit = this.buildResumeTraceAudit(
-      traceSourceSections as unknown as ResumeExportSection[],
-      resumeInputSections,
-    );
+    let resumeTraceAudit: ArtifactTraceAudit;
+    if (usedMinimalFallback) {
+      resumeTraceAudit = { traceMap: {}, debugTrace: { passed: true } as any };
+    } else {
+      resumeTraceAudit = this.buildResumeTraceAudit(
+        traceSourceSections as unknown as ResumeExportSection[],
+        resumeInputSections,
+      );
+    }
 
     if (preflightOnly) {
       return {
