@@ -8,6 +8,7 @@ import { requestLoggerMiddleware } from './common/middleware/request-logger.midd
 import { requestTimeoutMiddleware } from './common/middleware/request-timeout.middleware';
 import { initSentry } from './common/sentry';
 import { DataSource } from 'typeorm';
+import { assertUsersBetaAccessApprovedColumnCompatible } from './schema/schema-compatibility';
 
 type ExpressLayer = {
   name?: string;
@@ -246,6 +247,11 @@ async function bootstrap() {
   } catch (error) {
     console.error('[SCHEMA CHECK] Unable to verify bug_reports schema.', error);
   }
+
+  // Canonical schema compatibility gate: prevent serving traffic if the DB is behind
+  // required migrations for the running code. Temporary runtime fallbacks exist to
+  // reduce blast radius, but the long-term fix is to run migrations before serving.
+  await assertUsersBetaAccessApprovedColumnCompatible({ dataSource, config });
 
   await app.init();
   console.log('ROUTE_DUMP_START', new Date().toISOString());

@@ -1,10 +1,12 @@
 import { UsersService } from './users.service';
 import { Logger } from '@nestjs/common';
+import { resetBetaAccessSchemaCompatForTests } from './beta-access-schema-compat';
 
 describe('UsersService betaAccessApproved backwards compatibility', () => {
   beforeEach(() => {
     jest.restoreAllMocks();
     jest.clearAllMocks();
+    resetBetaAccessSchemaCompatForTests();
   });
 
   it('falls back when betaAccessApproved column is missing', async () => {

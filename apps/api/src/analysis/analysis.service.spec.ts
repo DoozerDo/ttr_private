@@ -32,6 +32,7 @@ import { WorkflowIdempotencyService } from '../common/workflow-idempotency.servi
 import type { CalibrationProfile } from './calibration-profiles';
 import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
 import { scoreCxFitV2, type CxFitV2Result } from './cx-fit-scoring-v2';
+import { resetBetaAccessSchemaCompatForTests } from '../users/beta-access-schema-compat';
 
 jest.mock('./cx-fit-scoring-v2', () => ({
   ...jest.requireActual('./cx-fit-scoring-v2'),
@@ -183,6 +184,7 @@ const sampleScoringV2: CxFitV2Result = {
 };
 
   beforeEach(async () => {
+    resetBetaAccessSchemaCompatForTests();
     (scoreCxFitV2 as unknown as jest.Mock).mockReturnValue(sampleScoringV2);
 
     baselineVersionRepository = {
@@ -1644,6 +1646,49 @@ const sampleScoringV2: CxFitV2Result = {
       });
 
       expect(errorSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getCalibration schema drift compatibility', () => {
+    it('falls back when betaAccessApproved column is missing', async () => {
+      const warnSpy = jest
+        .spyOn((service as any).logger, 'warn')
+        .mockImplementation(() => undefined as any);
+
+      usersRepository.findOne.mockRejectedValueOnce(
+        new Error('column User.betaAccessApproved does not exist'),
+      );
+
+      (usersRepository as any).createQueryBuilder = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({
+          id: 'user-1',
+          calibrationProfileName: null,
+          calibrationWeights: null,
+        }),
+      });
+
+      await expect(service.getCalibration('user-1')).resolves.toMatchObject({
+        ok: true,
+        profileName: expect.any(String),
+        weights: expect.any(Object),
+      });
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('missing users.betaAccessApproved'),
+      );
+    });
+
+    it('rethrows unrelated user lookup errors', async () => {
+      const warnSpy = jest
+        .spyOn((service as any).logger, 'warn')
+        .mockImplementation(() => undefined as any);
+
+      usersRepository.findOne.mockRejectedValueOnce(new Error('db down'));
+
+      await expect(service.getCalibration('user-1')).rejects.toThrow('db down');
+      expect(warnSpy).not.toHaveBeenCalled();
     });
   });
 

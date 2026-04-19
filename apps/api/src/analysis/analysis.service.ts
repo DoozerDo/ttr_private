@@ -94,6 +94,7 @@ import {
 import { SyntheticMetadataInput } from '../synthetic/synthetic-metadata.types';
 import { applySyntheticMetadata } from '../synthetic/synthetic-metadata.util';
 import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
+import { findUserByIdSchemaSafe } from '../users/beta-access-schema-compat';
 
 export type AnalysisRequest = {
   baselineId: string;
@@ -1639,7 +1640,17 @@ export class AnalysisService {
   }
 
   async getCalibration(userId: string) {
-    const user = await this.usersRepository.findOne({ where: { id: userId } });
+    const user = await findUserByIdSchemaSafe({
+      repo: this.usersRepository,
+      logger: this.logger,
+      userId,
+      operation: 'AnalysisService.getCalibration',
+      select: [
+        'user.id',
+        'user.calibrationProfileName',
+        'user.calibrationWeights',
+      ],
+    });
 
     if (!user) {
       throw new NotFoundException('User not found');
