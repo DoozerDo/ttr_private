@@ -29,7 +29,12 @@ export type ResolvePairGenerationLifecycleInput = {
 };
 
 function hasContext(baselineId: string | null, jobId: string | null): boolean {
-  return typeof baselineId === "string" && baselineId.trim() && typeof jobId === "string" && jobId.trim();
+  return (
+    typeof baselineId === "string" &&
+    baselineId.trim().length > 0 &&
+    typeof jobId === "string" &&
+    jobId.trim().length > 0
+  );
 }
 
 export function resolvePairGenerationLifecycle(
@@ -85,4 +90,3 @@ export function resolvePairGenerationLifecycle(
     blockingReason,
   };
 }
-
