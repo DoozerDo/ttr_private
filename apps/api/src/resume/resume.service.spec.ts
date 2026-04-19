@@ -17,6 +17,7 @@ import { CriticalFlowTrackerService } from '../support/critical-flow-tracker.ser
 import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
 import { BaselineSectionType } from '../baseline/baseline-section.entity';
 import { extractEvidenceUnitsFromLogicalUnits, reconstructLogicalTextUnits } from './resume-draft-bullets';
+import * as ResumeDraftBullets from './resume-draft-bullets';
 
 type MockRepo<T> = Partial<Record<keyof Repository<T>, jest.Mock>> & {
   findOne: jest.Mock;
@@ -139,6 +140,7 @@ const baseRequest: GenerateResumeRequest = {
 const buildService = (options?: {
   complianceFlags?: Array<{ code: string; message: string; severity: string }>;
   blocked?: boolean;
+  assessmentFindOneImpl?: (query: any) => any;
 }) => {
   const baselineRepo = buildRepo<Baseline>(baseline);
   const versionRepo = buildRepo<BaselineVersion>(baselineVersion);
@@ -146,6 +148,9 @@ const buildService = (options?: {
   policyRepo.find = jest.fn().mockResolvedValue([]);
   const jobRepo = buildRepo<Job>(job);
   const assessmentRepo = buildRepo<FitAssessment>(assessment);
+  if (options?.assessmentFindOneImpl) {
+    assessmentRepo.findOne = jest.fn().mockImplementation(options.assessmentFindOneImpl);
+  }
 
   const complianceService = {
     normalizeSectionsForOutput: jest.fn().mockImplementation((sections) => sections),
@@ -306,6 +311,9 @@ describe('ResumeService contract', () => {
     expect(opportunitiesService.createFromResumeStudio).not.toHaveBeenCalled();
   });
 
+  // Note: analysisId is required for generation requests. Readiness recovery is handled by
+  // verified-only generation (`oneTap`) rather than allowing analysis-less execution.
+
   it('does not throw generation_blocked pre-start when oneTap=true and readiness would be blocked', async () => {
     const { service } = buildService({
       complianceFlags: [
@@ -318,6 +326,7 @@ describe('ResumeService contract', () => {
       blocked: true,
     });
 
+    const draftSpy = jest.spyOn(ResumeDraftBullets, 'buildResumeDraftSections');
     const readinessSpy = jest.spyOn(service, 'getGenerationReadiness').mockResolvedValue({
       status: 'blocked',
       blocked: true,
@@ -340,6 +349,9 @@ describe('ResumeService contract', () => {
     });
 
     expect(readinessSpy).not.toHaveBeenCalled();
+    expect(draftSpy).toHaveBeenCalled();
+    const callArgs = draftSpy.mock.calls[0]?.[1] as { jobText?: unknown } | undefined;
+    expect(callArgs?.jobText).toBeNull();
   });
 
   it('returns canonical unsupported_input when resume structure is missing', () => {

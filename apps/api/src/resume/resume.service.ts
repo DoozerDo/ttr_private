@@ -1557,7 +1557,7 @@ export class ResumeService {
     }
 
     const gapInsights =
-      job && latestAssessment
+      !request.oneTap && job && latestAssessment
         ? this.gapAnalysisService.analyze({
             baselineSections: allowedSections.map((section) => ({
               content: section.content ?? '',
@@ -1576,13 +1576,13 @@ export class ResumeService {
         ].join('\n')
       : '';
     const gapGuidance = this.sanitizeGapGuidance(gapInsights);
-    const draftJobText = [job?.rawDescription ?? '', gapContextText]
-      .filter(Boolean)
-      .join('\n');
+    const draftJobText = request.oneTap
+      ? ''
+      : [job?.rawDescription ?? '', gapContextText].filter(Boolean).join('\n');
 
     let sections = this.sanitizeDraftSections(buildResumeDraftSections(resumeInputSections, {
       jobText: draftJobText || null,
-      gapGuidance: gapGuidance
+      gapGuidance: !request.oneTap && gapGuidance
         ? {
             strengthSignals: gapGuidance.strengthSignals,
             gapSignals: gapGuidance.gapSignals,
