@@ -135,6 +135,15 @@ describe("results generation transition", () => {
     );
     expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("Open in Studio");
     expect(screen.queryByText("Strong match. Ready for document generation.")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("results-hero-primary-cta"));
+    await waitFor(() => {
+      expect(mockRouterPush).toHaveBeenCalled();
+    });
+    const pushedHref = String(mockRouterPush.mock.calls.at(-1)?.[0] ?? "");
+    expect(pushedHref.startsWith("/studio")).toBe(true);
+    expect(pushedHref).toContain("baselineId=base-1");
+    expect(pushedHref).toContain("jobId=job-1");
     },
     15_000,
   );

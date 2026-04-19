@@ -836,6 +836,34 @@ export function buildStudioHrefFromResultsContext(input: {
   });
 }
 
+function normalizeHrefForComparison(href: string): string {
+  try {
+    const url = new URL(href, "https://example.local");
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return href.trim();
+  }
+}
+
+function resolveStudioNavigationHref(input: {
+  studioHrefFromLatest: string;
+  fallbackStudioHref: string;
+  currentResultsHref?: string | null;
+}): string {
+  const candidate = input.studioHrefFromLatest?.trim() || input.fallbackStudioHref.trim() || "/studio";
+  const normalizedCandidate = normalizeHrefForComparison(candidate);
+  const normalizedFallback = normalizeHrefForComparison(input.fallbackStudioHref.trim() || "/studio");
+
+  if (normalizedCandidate.startsWith("/results")) return normalizedFallback;
+
+  const current = input.currentResultsHref?.trim() ?? null;
+  if (current && normalizeHrefForComparison(current) === normalizedCandidate) {
+    return normalizedFallback;
+  }
+
+  return candidate;
+}
+
 type ScoreDriver = {
   key: ScoringContractV1DimensionKey;
   label: string;
@@ -2744,6 +2772,37 @@ export default function ResultsPage() {
       analysisId: generationPairIds.analysisId,
     });
   }, [generationPairIds, studioHref]);
+  const studioNavigationHref = useMemo(() => {
+    const currentResultsHref =
+      typeof window === "undefined"
+        ? null
+        : `${window.location.pathname}${window.location.search}`;
+
+    const fallbackStudioHref = buildStudioHrefFromResultsContext({
+      jobId: latest?.jobId ?? jobId ?? null,
+      baselineId: latest?.baselineId ?? baselineId ?? null,
+      baselineVersionId: latest?.baselineVersionId ?? currentBaselineVersionId ?? null,
+      analysisId: latest?.assessmentId ?? runIdentifier ?? null,
+      fromUnlock: justUnlocked,
+    });
+
+    return resolveStudioNavigationHref({
+      studioHrefFromLatest,
+      fallbackStudioHref,
+      currentResultsHref,
+    });
+  }, [
+    baselineId,
+    currentBaselineVersionId,
+    jobId,
+    justUnlocked,
+    latest?.assessmentId,
+    latest?.baselineId,
+    latest?.baselineVersionId,
+    latest?.jobId,
+    runIdentifier,
+    studioHrefFromLatest,
+  ]);
   const claimVerifications = useMemo(
     () => normalizeClaimVerifications(debugFields?.toolingCoverage?.claims),
     [debugFields?.toolingCoverage?.claims],
@@ -4799,16 +4858,17 @@ export default function ResultsPage() {
                   Generating...
                 </span>
               ) : effectiveResultsGenerationPhase === "generated" ? (
-                <a
+                <button
+                  type="button"
                   data-testid="results-hero-primary-cta"
-                  href={studioHrefFromLatest}
                   onClick={() => {
                     oneClickResultsCta.onClick?.();
+                    router.push(studioNavigationHref);
                   }}
                   className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
                 >
                   Open in Studio
-                </a>
+                </button>
               ) : effectiveResultsGenerationPhase === "partial" ? (
                 shouldAutoRecoverGeneration && !generationRecoveryExhausted ? (
                   <span
@@ -4818,16 +4878,17 @@ export default function ResultsPage() {
                     Finalizing...
                   </span>
                 ) : (
-                  <a
+                  <button
+                    type="button"
                     data-testid="results-hero-primary-cta"
-                    href={studioHrefFromLatest}
                     onClick={() => {
                       oneClickResultsCta.onClick?.();
+                      router.push(studioNavigationHref);
                     }}
                     className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
                   >
                     Open in Studio
-                  </a>
+                  </button>
                 )
               ) : effectiveResultsGenerationPhase === "failed" ? (
                 <button
