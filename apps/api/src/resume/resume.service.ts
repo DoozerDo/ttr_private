@@ -1587,7 +1587,7 @@ export class ResumeService {
       : '';
     const gapGuidance = this.sanitizeGapGuidance(gapInsights);
     const draftJobText = request.oneTap
-      ? ''
+      ? (job?.rawDescription ?? '')
       : [job?.rawDescription ?? '', gapContextText].filter(Boolean).join('\n');
 
     let sections = this.sanitizeDraftSections(buildResumeDraftSections(resumeInputSections, {

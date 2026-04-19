@@ -351,7 +351,7 @@ describe('ResumeService contract', () => {
     expect(readinessSpy).not.toHaveBeenCalled();
     expect(draftSpy).toHaveBeenCalled();
     const callArgs = draftSpy.mock.calls[0]?.[1] as { jobText?: unknown } | undefined;
-    expect(callArgs?.jobText).toBeNull();
+    expect(callArgs?.jobText).toBe(job.rawDescription);
   });
 
   it('strips documentStrategyPlan when falling back to verified-only generation', async () => {
@@ -386,7 +386,9 @@ describe('ResumeService contract', () => {
 
     expect(readinessSpy).toHaveBeenCalledTimes(1);
     expect(draftSpy).toHaveBeenCalled();
-    const verifiedOnlyCall = draftSpy.mock.calls.find((call) => (call[1] as any)?.jobText === null);
+    const verifiedOnlyCall = draftSpy.mock.calls.find(
+      (call) => (call[1] as any)?.jobText === job.rawDescription,
+    );
     expect(verifiedOnlyCall).toBeDefined();
     const verifiedOnlyArgs = (verifiedOnlyCall?.[1] ?? {}) as { documentStrategyPlan?: unknown };
     expect(verifiedOnlyArgs.documentStrategyPlan).toBeUndefined();
