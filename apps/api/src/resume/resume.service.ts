@@ -59,6 +59,7 @@ import { resolveBaselineSectionsForGeneration } from '../baseline/baseline-secti
 import {
   buildResumeDraftSections,
   extractEvidenceUnitsFromLogicalUnits,
+  extractJobKeywords,
   reconstructLogicalTextUnits,
   type ResumeDraftSection,
   validateResumeDraftBulletAnchors,
@@ -75,6 +76,7 @@ import type { DocumentStrategyPlanLike } from '../document-strategy-plan.types';
 import {
   buildBaselineEvidenceTermInventory,
   detectClaimRiskForBullet,
+  type ClaimRiskResult,
   summarizeClaimRisk,
 } from './claim-risk';
 import { validateAnalysisContext } from '../common/analysis-context-binding';
@@ -109,6 +111,8 @@ function buildVerifiedOnlyRequest(request: GenerateResumeRequest): GenerateResum
   };
 }
 
+const NO_CLAIM_RISK: ClaimRiskResult = { level: 'None', flaggedTerms: [] };
+
 function normalizeMinimalLine(value: string): string {
   return String(value ?? '')
     .replace(/\u00a0/g, ' ')
@@ -133,6 +137,33 @@ function extractBulletLines(value: string): string[] {
     }
   }
   return bullets;
+}
+
+function countKeywordOverlap(text: string, keywordSet: Set<string>): number {
+  const normalized = normalizeMinimalLine(text).toLowerCase();
+  if (!normalized) return 0;
+  let count = 0;
+  keywordSet.forEach((keyword) => {
+    if (keyword && normalized.includes(keyword)) count += 1;
+  });
+  return count;
+}
+
+function reorderCommaSeparatedPhrasesByKeywordOverlap(text: string, keywordSet: Set<string>): string {
+  const normalized = normalizeMinimalLine(text);
+  if (!normalized) return '';
+  const parts = normalized
+    .split(/,\s+/)
+    .map((part) => normalizeMinimalLine(part))
+    .filter(Boolean);
+  if (parts.length <= 1) return normalized;
+  const scored = parts.map((part, idx) => ({
+    idx,
+    part,
+    score: countKeywordOverlap(part, keywordSet),
+  }));
+  scored.sort((a, b) => b.score - a.score || a.idx - b.idx);
+  return scored.map((entry) => entry.part).join(', ');
 }
 
 export type GenerateResumeOptions = {
@@ -807,7 +838,7 @@ export class ResumeService {
               exactBaselineBullet: false,
             },
             confidence: 'High' as const,
-            claimRisk: { level: 'None', flaggedTerms: [] },
+            claimRisk: NO_CLAIM_RISK,
           })),
       });
     }
@@ -832,12 +863,130 @@ export class ResumeService {
             exactBaselineBullet: true,
           },
           confidence: 'High' as const,
-          claimRisk: { level: 'None', flaggedTerms: [] },
+          claimRisk: NO_CLAIM_RISK,
         }));
       }
     });
 
     return sections;
+  }
+
+  private applyJobAlignedPresentation(payload: {
+    sections: ResumeDraftSection[];
+    jobText: string | null;
+    dimensionScores?: FitAssessment['dimensionScores'] | null;
+    jobTitle?: string | null;
+  }): ResumeDraftSection[] {
+    const keywordList = extractJobKeywords(payload.jobText, 28);
+    const keywordSet = keywordList.length ? new Set(keywordList.map((kw) => kw.toLowerCase())) : new Set<string>();
+
+    const strongestDimensions = payload.dimensionScores
+      ? (Object.entries(payload.dimensionScores) as Array<[string, number]>)
+          .filter((entry) => typeof entry[1] === 'number' && Number.isFinite(entry[1]))
+          .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
+          .slice(0, 2)
+          .map(([key]) => key)
+      : [];
+
+    const nextSections = payload.sections.map((section) => {
+      if (String(section.type ?? '').toUpperCase() !== 'EXPERIENCE' || !Array.isArray(section.bullets)) {
+        return section;
+      }
+
+      const rewrittenBullets = section.bullets.map((bullet, idx) => {
+        const original = normalizeMinimalLine(bullet.text);
+        if (!original) return bullet;
+        const firstSentence = original.split(/(?<=[.!?])\s+/)[0] ?? original;
+        const reordered = keywordSet.size ? reorderCommaSeparatedPhrasesByKeywordOverlap(firstSentence, keywordSet) : firstSentence;
+        const rewritten = normalizeMinimalLine(reordered);
+        if (!rewritten || rewritten === original) return bullet;
+        return {
+          ...bullet,
+          text: rewritten,
+          source: {
+            ...bullet.source,
+            anchorText: bullet.source?.anchorText ?? bullet.text,
+            bulletIndex: typeof bullet.source?.bulletIndex === 'number' ? bullet.source.bulletIndex : idx,
+          },
+        };
+      });
+
+      return {
+        ...section,
+        bullets: rewrittenBullets,
+        content: section.content,
+      };
+    });
+
+    const experienceBullets = nextSections
+      .filter((section) => String(section.type ?? '').toUpperCase() === 'EXPERIENCE')
+      .flatMap((section) => section.bullets ?? [])
+      .map((bullet) => normalizeMinimalLine(bullet.text))
+      .filter(Boolean);
+
+    const rankedExperienceBullets = keywordSet.size
+      ? [...experienceBullets].sort((a, b) => countKeywordOverlap(b, keywordSet) - countKeywordOverlap(a, keywordSet))
+      : experienceBullets;
+
+    const topSignals = rankedExperienceBullets.slice(0, 2);
+    const positioningPrefix = payload.jobTitle ? `Targeting ${payload.jobTitle}. ` : '';
+    const dimensionPhrase = strongestDimensions.length
+      ? `Strengths: ${strongestDimensions.map((value) => value.replace(/([A-Z])/g, ' $1').trim()).join(', ')}. `
+      : '';
+    const summarySentence = topSignals.length
+      ? `${topSignals.join(' ')}`
+      : '';
+
+    const summaryText = normalizeMinimalLine(`${positioningPrefix}${dimensionPhrase}${summarySentence}`);
+    if (!summaryText) {
+      return nextSections;
+    }
+
+    const existingSummaryIndex = nextSections.findIndex(
+      (section) => String(section.type ?? '').toUpperCase() === 'SUMMARY',
+    );
+
+    const summaryBullets = summaryText
+      .split(/(?<=[.!?])\s+/)
+      .map((sentence) => normalizeMinimalLine(sentence))
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((text, idx) => ({
+        id: `aligned-summary:${idx}`,
+        text,
+        source: {
+          baselineSectionId: `aligned-summary`,
+          baselineSectionType: BaselineSectionType.SUMMARY,
+          baselineSectionOrder: -1,
+          bulletIndex: idx,
+          sourceEvidenceIds: [],
+          anchorText: text,
+          anchorKind: 'sentence' as const,
+          exactBaselineBullet: false,
+        },
+        confidence: 'High' as const,
+        claimRisk: NO_CLAIM_RISK,
+      }));
+
+    const alignedSummary: ResumeDraftSection = {
+      id: existingSummaryIndex >= 0 ? nextSections[existingSummaryIndex]!.id : 'aligned-summary',
+      type: BaselineSectionType.SUMMARY,
+      title: 'Summary',
+      order: -1,
+      includePolicy: BaselineIncludePolicy.OPTIONAL,
+      source: 'baseline',
+      bullets: summaryBullets,
+      content: summaryText,
+      rawContent: summaryText,
+    };
+
+    if (existingSummaryIndex >= 0) {
+      const replaced = [...nextSections];
+      replaced[existingSummaryIndex] = alignedSummary;
+      return replaced;
+    }
+
+    return [alignedSummary, ...nextSections];
   }
 
   private logNormalizationDiagnostics(payload: {
@@ -1763,6 +1912,13 @@ export class ResumeService {
         sections = this.buildMinimalResumeSections(resumeInputSections);
       }
     }
+
+    sections = this.applyJobAlignedPresentation({
+      sections,
+      jobText: job?.rawDescription ?? null,
+      dimensionScores: effectiveAssessment?.dimensionScores ?? null,
+      jobTitle: job?.title ?? null,
+    });
     const hasExperienceBullets = sections.some(
       (section) =>
         String(section.type ?? '').toUpperCase() === 'EXPERIENCE' &&
