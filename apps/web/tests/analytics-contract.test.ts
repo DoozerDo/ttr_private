@@ -128,6 +128,46 @@ describe("analytics contract", () => {
     );
   });
 
+  it("accepts target_cta_clicked for draft-capable flows (state=DRAFT)", async () => {
+    trackEvent(
+      "target_cta_clicked",
+      {
+        state: "DRAFT",
+        score: 78,
+        label: "Open Studio",
+        href: "/studio?analysisId=analysis-78&jobId=job-78&baselineId=base-78",
+        actionType: "open_studio_generate",
+      },
+      { userId: "user-1" },
+    );
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/analytics/event",
+        expect.objectContaining({
+          method: "POST",
+        }),
+      );
+    });
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+    const body = JSON.parse(String(init?.body ?? "{}")) as {
+      eventName: string;
+      properties: Record<string, unknown>;
+    };
+
+    expect(body.eventName).toBe("target_cta_clicked");
+    expect(body.properties).toEqual(
+      expect.objectContaining({
+        state: "DRAFT",
+        score: 78,
+        label: "Open Studio",
+        href: "/studio?analysisId=analysis-78&jobId=job-78&baselineId=base-78",
+        actionType: "open_studio_generate",
+      }),
+    );
+  });
+
   it("accepts the target momentum entry events with the route aware payload shapes", async () => {
     trackEvent(
       "target_momentum_entry_viewed",

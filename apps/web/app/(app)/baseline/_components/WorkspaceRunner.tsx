@@ -17,6 +17,7 @@ import { buildEvidenceLines, type ScoreBreakdown } from "@/lib/evidenceLines";
 import { getGenerationReadiness } from "@/lib/generationReadiness";
 import { getGenerationAuthorityState } from "@/lib/generationAuthority";
 import { buildGenerationProductReadiness } from "@/lib/generationProductReadiness";
+import { shouldGenerateDocuments } from "@/lib/documentGenerationContract";
 import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
 import {
   sanitizeRenderedTextList,
@@ -1036,6 +1037,7 @@ export function WorkspaceRunner({
         ? "You can generate documents, but some claims still need stronger evidence."
         : scoreBand?.summary ?? "";
   const blockingReasons = generationReadiness.verificationIssues.slice(0, 3);
+  const generationAllowedByScore = shouldGenerateDocuments(score);
 const showInterruptionState =
     activePairState === "interrupted_due_to_changes" ||
     activePairState === "auto_retrying" ||
@@ -2251,28 +2253,20 @@ const showInterruptionState =
             {score !== null ? (
               <div
                 className={`rounded-2xl border p-4 text-sm ${
-                  targetCta.state === "READY"
+                  generationAllowedByScore
                     ? "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
-                    : targetCta.state === "LIMITED"
-                      ? "border-cyan-300/35 bg-cyan-500/10 text-cyan-100"
-                      : "border-rose-300/35 bg-rose-500/10 text-rose-100"
+                    : "border-rose-300/35 bg-rose-500/10 text-rose-100"
                 }`}
               >
                 <p className="text-xs font-semibold uppercase tracking-[0.2em]">
-                  {targetCta.state === "READY"
-                    ? "Generation Ready"
-                    : targetCta.state === "LIMITED"
-                      ? "Generation Limited"
-                      : "Fit Review Needed"}
+                  {generationAllowedByScore ? "Generation Available" : "Improve Fit"}
                 </p>
                 <p className="mt-1 text-sm">
-                  {targetCta.state === "READY"
-                    ? "Ready to generate documents."
-                    : targetCta.state === "LIMITED"
-                      ? "You can generate documents, but the evidence still needs strengthening."
-                      : "Document generation is blocked. Start Fit Review to strengthen verification."}
+                  {generationAllowedByScore
+                    ? "You can generate draft documents for this role."
+                    : "Improve your fit before generating documents."}
                 </p>
-                {blockingReasons.length && targetCta.state !== "READY" ? (
+                {blockingReasons.length && !generationAllowedByScore ? (
                   <ul className="mt-2 space-y-1 text-slate-200">
                     {blockingReasons.map((reason, index) => (
                       <li key={`target-readiness-reason-${reason.code}-${index}`}>- {reason.explanation}</li>
@@ -2283,18 +2277,37 @@ const showInterruptionState =
             ) : null}
             {score !== null ? (
               <p className="text-sm font-medium text-slate-100">
-                {targetCta.state === "READY"
-                  ? "You are well aligned with this role and ready to generate tailored materials."
+                {generationAllowedByScore
+                  ? "You can generate documents for this role."
                   : "Document generation is not available yet. Improve the fit before generating."}
               </p>
             ) : null}
-            <a
-              href={targetCta.href}
-              onClick={handleGenerateClick}
-              className="inline-flex items-center justify-center whitespace-nowrap rounded-2xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
-            >
-              {targetCtaLabel}
-            </a>
+            {generationAllowedByScore ? (
+              <a
+                href={targetCta.href}
+                onClick={handleGenerateClick}
+                className="inline-flex items-center justify-center whitespace-nowrap rounded-2xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
+              >
+                {targetCtaLabel}
+              </a>
+            ) : (
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  disabled
+                  aria-disabled="true"
+                  className="inline-flex w-full items-center justify-center whitespace-nowrap rounded-2xl bg-slate-700/60 px-6 py-3 text-sm font-semibold text-slate-200 opacity-70"
+                >
+                  Generate documents
+                </button>
+                <a
+                  href={targetCta.href}
+                  className="inline-flex items-center justify-center whitespace-nowrap rounded-2xl border border-white/10 bg-white/5 px-6 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+                >
+                  Start Fit Review
+                </a>
+              </div>
+            )}
           </div>
         </div>
       ) : null}

@@ -5,7 +5,7 @@ import {
 import type { GenerationReadiness } from "@/lib/generationReadiness";
 import type { GenerationProductReadiness } from "@/lib/generationProductReadiness";
 
-export type TargetCtaState = "READY" | "LIMITED" | "BLOCKED";
+export type TargetCtaState = "READY" | "DRAFT" | "LIMITED" | "BLOCKED";
 
 export type TargetCtaActionType =
   | "open_studio_generate"

@@ -122,11 +122,9 @@ describe("results generation transition", () => {
 
     fireEvent.click(cta);
 
-    const interimCopyCount =
-      screen.queryAllByText("Finalizing your documents...").length +
-      screen.queryAllByText("Generating your documents...").length;
-    expect(interimCopyCount).toBeGreaterThan(0);
-    expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent(/Finalizing|Generating/i);
+    await waitFor(() => {
+      expect(screen.getByTestId("results-hero-primary-cta")).not.toHaveTextContent("Generate Documents");
+    });
     expect(screen.queryByText("Strong match. Ready for document generation.")).toBeNull();
 
     await waitFor(

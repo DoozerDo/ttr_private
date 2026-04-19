@@ -1,5 +1,6 @@
 import type { GenerationAuthorityState } from "@/lib/generationAuthority";
 import { isDocumentGenerationUnlocked } from "@/lib/documentGenerationGate";
+import { resolveDocumentGenerationMode } from "@/lib/documentGenerationContract";
 
 export type GenerationReadinessContract = {
   canGenerate: boolean;
@@ -99,6 +100,6 @@ export function buildGenerationProductReadiness(
     needsVerification,
     tier,
     canOpenStudio,
-    generationMode: confidence === "HIGH" ? "verified" : "draft",
+    generationMode: resolveDocumentGenerationMode(score) === "finalized" ? "verified" : "draft",
   };
 }

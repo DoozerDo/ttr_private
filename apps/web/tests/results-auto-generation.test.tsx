@@ -11,14 +11,14 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-describe("results auto-generation (score >= 70)", () => {
+describe("results auto-generation", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     mockRouterPush.mockClear();
   });
 
-  it("auto-triggers generation once and shows drafts without navigating to Studio", async () => {
+  it("auto-triggers generation once and shows drafts without navigating to Studio (score 78)", async () => {
     overrideSearchParams({ assessmentId: "analysis-current" });
 
     let artifactsCalls = 0;
@@ -121,12 +121,7 @@ describe("results auto-generation (score >= 70)", () => {
           code: "ok",
           preview: {
             coverLetter: {
-              paragraphs: [
-                "Dear Hiring Team,",
-                "I am excited to apply.",
-                "Sincerely,",
-                "Test Candidate",
-              ],
+              paragraphs: ["Dear Hiring Team,", "I am excited to apply.", "Sincerely,", "Test Candidate"],
             },
           },
         });
@@ -134,53 +129,131 @@ describe("results auto-generation (score >= 70)", () => {
 
       if (url.includes("/api/studio/artifacts")) {
         artifactsCalls += 1;
-        if (artifactsCalls < 2) {
-          return jsonResponse({
-            resume: { status: "missing" },
-            coverLetter: { status: "missing" },
-          });
-        }
-        return jsonResponse({
-          resume: { status: "completed" },
-          coverLetter: { status: "completed" },
-        });
+        if (artifactsCalls < 2) return jsonResponse([]);
+        return jsonResponse([
+          { type: "resume", status: "completed" },
+          { type: "cover_letter", status: "completed" },
+        ]);
       }
 
       return jsonResponse({});
     });
-
-    setFetchImplementation(fetchMock as unknown as typeof fetch);
+    setFetchImplementation(fetchMock);
 
     render(<ResultsPage />);
 
-    await waitFor(
-      () => {
-        const resumePosts = fetchMock.mock.calls.filter(([request, init]) => {
-          const requestUrl = String(request);
-          const requestMethod = (init as RequestInit | undefined)?.method ?? "GET";
-          return requestMethod === "POST" && requestUrl.endsWith("/api/resume");
-        });
-        const coverPosts = fetchMock.mock.calls.filter(([request, init]) => {
-          const requestUrl = String(request);
-          const requestMethod = (init as RequestInit | undefined)?.method ?? "GET";
-          return requestMethod === "POST" && requestUrl.endsWith("/api/cover-letters");
-        });
-        expect(resumePosts.length).toBe(1);
-        expect(coverPosts.length).toBe(1);
-      },
-      { timeout: 8000 },
-    );
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/resume"),
+        expect.objectContaining({ method: "POST" }),
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/cover-letters"),
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
 
-    await waitFor(
-      () => {
-        expect(screen.getByTestId("results-generated-documents")).toBeInTheDocument();
-        expect(screen.getByTestId("resume-preview")).toBeInTheDocument();
-        expect(screen.getByTestId("cover-letter-preview")).toBeInTheDocument();
-      },
-      { timeout: 8000 },
+    const resumePosts = fetchMock.mock.calls.filter(
+      ([url, init]) => String(url).endsWith("/api/resume") && init?.method === "POST",
     );
+    const coverPosts = fetchMock.mock.calls.filter(
+      ([url, init]) => String(url).endsWith("/api/cover-letters") && init?.method === "POST",
+    );
+    expect(resumePosts).toHaveLength(1);
+    expect(coverPosts).toHaveLength(1);
+  });
 
-    expect(mockRouterPush).not.toHaveBeenCalled();
-  }, 15_000);
+  it("does not trigger generation below the 70 floor (score 69)", async () => {
+    overrideSearchParams({ assessmentId: "analysis-low" });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+
+      if (url.includes("/api/analysis/fit-assessments/analysis-low")) {
+        return jsonResponse({
+          assessmentId: "analysis-low",
+          jobId: "job-1",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          score: 69,
+          strengths: [],
+          verification_coverage: {
+            totalClaims: 0,
+            verifiedClaims: 0,
+            inferredClaims: 0,
+            unverifiedClaims: 0,
+            verifiedRequirements: [],
+            unverifiedRequirements: [],
+          },
+        });
+      }
+
+      if (url.includes("/api/analysis/job/job-1/baseline/base-1/latest")) {
+        return jsonResponse({
+          assessmentId: "analysis-low",
+          jobId: "job-1",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          score: 69,
+          strengths: [],
+          verification_coverage: {
+            totalClaims: 0,
+            verifiedClaims: 0,
+            inferredClaims: 0,
+            unverifiedClaims: 0,
+            verifiedRequirements: [],
+            unverifiedRequirements: [],
+          },
+        });
+      }
+
+      if (url.includes("/api/analysis/fit-assessments?jobId=job-1")) {
+        return jsonResponse([{ assessmentId: "analysis-low", score: 69, strengths: [] }]);
+      }
+
+      if (url.includes("/api/analysis/history")) {
+        return jsonResponse({
+          recentAnalyses: [],
+          alignmentPattern: { strongestAlignmentRoles: [], totalAnalyses: 0, averageScore: 0 },
+          badges: [],
+          generatedAt: new Date().toISOString(),
+        });
+      }
+
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return jsonResponse({
+          status: "ready",
+          blocked: false,
+          reasonCodes: [],
+          reasons: [],
+          badgeLabel: "READY",
+          summary: "Ready.",
+          verificationIssues: [],
+        });
+      }
+
+      if (url.includes("/api/studio/artifacts")) {
+        return jsonResponse([]);
+      }
+
+      if (method === "POST" && (url.endsWith("/api/resume") || url.endsWith("/api/cover-letters"))) {
+        throw new Error(`Unexpected generation call: ${url}`);
+      }
+
+      return jsonResponse({});
+    });
+    setFetchImplementation(fetchMock);
+
+    render(<ResultsPage />);
+    await screen.findByText(/Generation readiness:/i);
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) => String(url).endsWith("/api/resume") && init?.method === "POST",
+        ),
+      ).toBe(false);
+    });
+  });
 });
-

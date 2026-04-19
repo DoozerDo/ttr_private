@@ -262,7 +262,7 @@ describe("BaselineWorkspace live score panel", () => {
     }
   });
 
-  it("blocks generation CTA when score is high but readiness is blocked", async () => {
+  it("keeps generation available when score is high even if readiness is blocked", async () => {
     stubWindowState();
     const setTimeoutSpy = blockAutoRunTimer();
 
@@ -319,12 +319,13 @@ describe("BaselineWorkspace live score panel", () => {
       fireEvent.click(screen.getByRole("button", { name: "Previous result for this role" }));
 
       await waitFor(() => {
-        expect(screen.getByText("Primary readiness")).toBeInTheDocument();
+        expect(screen.getByText("Generation Available")).toBeInTheDocument();
       });
 
-      expect(screen.getByText("Document generation is blocked. Start Fit Review to strengthen verification.")).toBeInTheDocument();
+      expect(screen.getByText("You can generate documents for this role.")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: /Generate documents/i })).toBeInTheDocument();
+      expect(screen.queryByText(/Document generation is blocked/i)).toBeNull();
       expect(screen.queryByRole("button", { name: "Retry scoring" })).toBeNull();
-      expect(screen.getByRole("link", { name: "Review current selection" })).toHaveAttribute("href", "/baseline");
       expect(screen.queryByRole("link", { name: "Generate Tailored Materials" })).toBeNull();
     } finally {
       setTimeoutSpy.mockRestore();

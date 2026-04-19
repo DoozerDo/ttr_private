@@ -270,6 +270,24 @@ describe("Studio auto-generation", () => {
     ).toHaveLength(1);
   });
 
+  it("auto-generates at exactly 70", async () => {
+    const fetchMock = installStrongFitFetches({ score: 70, readinessStatus: "limited" });
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Download Resume" })).toBeInTheDocument();
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/resume"),
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/cover-letters"),
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("shows an explicit error if auto-generation fails", async () => {
     installStrongFitFetches({ readinessStatus: "ready", resumeOk: false, coverOk: false });
 
@@ -286,6 +304,27 @@ describe("Studio auto-generation", () => {
   });
 
   it("hydrates existing artifacts without auto-starting again", async () => {
+    const memoryStorage = (() => {
+      const store = new Map<string, string>();
+      return {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          store.set(key, value);
+        },
+        removeItem: (key: string) => {
+          store.delete(key);
+        },
+        clear: () => {
+          store.clear();
+        },
+      } satisfies Pick<Storage, "getItem" | "setItem" | "removeItem" | "clear">;
+    })();
+
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: memoryStorage,
+    });
+
     const storageKey = "ttr:studio-artifacts:job-1:base-1";
     window.localStorage.setItem(
       storageKey,

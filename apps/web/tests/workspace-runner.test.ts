@@ -14,7 +14,7 @@ describe("buildResultsUrl", () => {
       baselineId: "baseline-789",
     });
     expect(url).toBe(
-      "/results?assessmentId=assessment-123&analysisId=assessment-123&jobId=job-456&baselineId=baseline-789",
+      "/results?jobId=job-456&assessmentId=assessment-123&baselineId=baseline-789",
     );
   });
 
@@ -30,7 +30,7 @@ describe("buildResultsUrl", () => {
     const url = buildResultsUrl({
       assessmentId: "assessment-123",
     });
-    expect(url).toBe("/results?assessmentId=assessment-123&analysisId=assessment-123");
+    expect(url).toBe("/results?assessmentId=assessment-123");
   });
 
   it("returns null when no identifiers are provided", () => {

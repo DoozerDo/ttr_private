@@ -4,7 +4,7 @@ import type {
   GenerationProductConfidence,
   GenerationProductReadinessState,
 } from "@/lib/generationProductReadiness";
-import { isDocumentGenerationUnlocked } from "@/lib/documentGenerationGate";
+import { shouldGenerateDocuments, resolveDocumentGenerationMode } from "@/lib/documentGenerationContract";
 import { getFitReviewHref, getStudioHref } from "@/src/navigation/routes";
 
 export type ResultsDecisionState = "BLOCKED" | "READY" | "IMPROVE" | "DRAFT";
@@ -27,7 +27,7 @@ export interface ResultsDecision {
 
 export function resolveResultsDecision(input: ResultsDecisionInput): ResultsDecision {
   const score = typeof input.score === "number" && Number.isFinite(input.score) ? input.score : null;
-  const generationAllowed = isDocumentGenerationUnlocked(score);
+  const generationAllowed = shouldGenerateDocuments(score);
   const scoreFloorBlocked = score !== null && !generationAllowed;
   const canonical = resolveCanonicalState({
     surface: "results",
@@ -67,12 +67,7 @@ export function resolveResultsDecision(input: ResultsDecisionInput): ResultsDeci
       needsVerification: generationAllowed ? score !== null && score < 90 : input.generationReadiness.needsVerification,
       tier: generationAllowed ? "generation_allowed" : "fit_review_only",
       canOpenStudio: generationAllowed,
-      generationMode:
-        generationAllowed && score !== null && score >= 90
-          ? "verified"
-          : input.generationReadiness.confidence === "HIGH"
-            ? "verified"
-            : "draft",
+      generationMode: resolveDocumentGenerationMode(score) === "finalized" ? "verified" : "draft",
     },
     studioHref: getStudioHref(),
     fitReviewHref: getFitReviewHref(),

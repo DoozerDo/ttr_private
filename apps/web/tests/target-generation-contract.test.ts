@@ -102,7 +102,7 @@ describe("target generation contract", () => {
     });
   });
 
-  it("routes limited readiness back to Fit Review instead of Studio", () => {
+  it("keeps Studio available for 70+ scores even when readiness is limited", () => {
     const generationReadiness = getGenerationReadiness(
       {
         score: 78,
@@ -129,21 +129,21 @@ describe("target generation contract", () => {
     });
 
     expect(contract).toMatchObject({
-      state: "LIMITED",
-      label: "Start Fit Review",
-      actionType: "resolve_gaps",
-      href: "/fit-review?analysisId=analysis-78&jobId=job-78&baselineId=base-78",
-      isStudioDestination: false,
+      state: "DRAFT",
+      label: "Open Studio",
+      actionType: "open_studio_generate",
+      href: "/studio?analysisId=analysis-78&jobId=job-78&baselineId=base-78",
+      isStudioDestination: true,
       score: 78,
     });
 
     const analyticsPayload = buildTargetCtaClickedAnalyticsPayload(contract);
     expect(analyticsPayload).toEqual({
-      state: "LIMITED",
+      state: "DRAFT",
       score: 78,
-      label: "Start Fit Review",
-      href: "/fit-review?analysisId=analysis-78&jobId=job-78&baselineId=base-78",
-      actionType: "resolve_gaps",
+      label: "Open Studio",
+      href: "/studio?analysisId=analysis-78&jobId=job-78&baselineId=base-78",
+      actionType: "open_studio_generate",
     });
   });
 

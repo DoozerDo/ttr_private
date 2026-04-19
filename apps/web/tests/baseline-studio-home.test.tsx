@@ -15,6 +15,7 @@ function createBaseline(
     latestFitScore: number | null;
     hasCompletedAssessment: boolean;
   },
+  latestBaselineScore: number | null = null,
 ) {
   return {
     id,
@@ -28,6 +29,7 @@ function createBaseline(
     hash: null,
     status: "ACTIVE" as const,
     archivedAt: null,
+    latestBaselineScore,
     latestAssessmentSummary,
     createdAt,
     updatedAt: createdAt,
@@ -36,7 +38,8 @@ function createBaseline(
 
 function createAnalyzedBaseline(id: string, filename = `${id}.pdf`, latestFitScore = 82) {
   return {
-    ...createBaseline(id, "2026-01-01T00:00:00.000Z", filename),
+    ...createBaseline(id, "2026-01-01T00:00:00.000Z", filename, undefined, 79),
+    latestBaselineScore: 79,
     latestAssessmentSummary: {
       latestAssessmentId: `assessment-${id}`,
       latestAssessmentCreatedAt: "2026-03-20T12:00:00.000Z",
@@ -113,12 +116,52 @@ describe("BaselineStudioHome", () => {
     expect(screen.queryByText("Your resume has been converted into a baseline.")).toBeNull();
     expect(screen.queryByText(/Your baseline is ready for targeting, but it still needs analysis/i)).toBeNull();
     expect(screen.getByRole("heading", { name: "Other baselines" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /target a role/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: "TARGET A ROLE" })).toBeNull();
+    expect(screen.getByRole("link", { name: "REVIEW BASELINE" })).toBeInTheDocument();
+    expect(
+      screen.getByText("You need to complete baseline verification before targeting roles."),
+    ).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: /view baseline details/i }).length).toBeGreaterThan(0);
     expect(screen.getByTestId("baseline-upload-surface")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /upload another resume/i }).length).toBeGreaterThan(0);
     expect(screen.queryByText("Used to create active baseline")).toBeNull();
     expect(screen.getByText(/No other baselines yet/i)).toBeInTheDocument();
+  });
+
+  it("shows TARGET A ROLE as the primary CTA when the current baseline is ready", async () => {
+    setFetchImplementation(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(
+      <BaselineStudioHome
+        baselines={[
+          createBaseline(
+            "base-1",
+            "2026-01-01T00:00:00.000Z",
+            "resume-1.pdf",
+            {
+              latestAssessmentId: null,
+              latestAssessmentCreatedAt: null,
+              latestFitScore: null,
+              hasCompletedAssessment: false,
+            },
+            79,
+          ),
+        ]}
+      />,
+    );
+
+    await screen.findByRole("heading", { name: "Current baseline" });
+    expect(screen.getByRole("link", { name: "TARGET A ROLE" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "REVIEW BASELINE" })).toBeNull();
+    expect(
+      screen.queryByText("You need to complete baseline verification before targeting roles."),
+    ).toBeNull();
   });
 
   it("shows the upload setup CTA when no baseline exists", async () => {
@@ -177,7 +220,7 @@ describe("BaselineStudioHome", () => {
       />,
     );
 
-    const targetRoleLink = () => screen.getAllByRole("link", { name: /target a role/i })[0];
+    const targetRoleLink = () => screen.getAllByRole("link", { name: "TARGET A ROLE" })[0];
 
     await screen.findByRole("heading", { name: "Current baseline" });
     await waitFor(() => {
@@ -215,7 +258,7 @@ describe("BaselineStudioHome", () => {
     expect(screen.queryByTestId("baseline-upload-surface")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Upload resume" })).toBeNull();
     expect(screen.getAllByRole("button", { name: /upload another resume/i }).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("link", { name: /target a role/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: "TARGET A ROLE" })).toBeNull();
   });
 
   it("shows the launch point for a qualified analyzed baseline", async () => {
@@ -243,9 +286,9 @@ describe("BaselineStudioHome", () => {
     expect(within(activeSection as HTMLElement).getByText("Version 1 (current)")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Upload resume" })).toBeNull();
     expect(screen.getAllByRole("link", { name: "View baseline details" }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: /target a role/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "TARGET A ROLE" }).length).toBeGreaterThan(0);
     await waitFor(() => {
-      expect(screen.getAllByRole("link", { name: /target a role/i })[0]).toHaveAttribute(
+      expect(screen.getAllByRole("link", { name: "TARGET A ROLE" })[0]).toHaveAttribute(
         "href",
         "/target?baselineId=base-1",
       );
@@ -350,7 +393,7 @@ describe("BaselineStudioHome", () => {
     await waitFor(() => {
       const currentSection = screen.getByRole("heading", { name: "Current baseline" }).closest("section");
       expect(currentSection).toBeTruthy();
-      expect(within(currentSection as HTMLElement).getByRole("link", { name: /target a role/i })).toHaveAttribute(
+      expect(within(currentSection as HTMLElement).getByRole("link", { name: "TARGET A ROLE" })).toHaveAttribute(
         "href",
         "/target?baselineId=base-1",
       );
@@ -443,7 +486,7 @@ describe("BaselineStudioHome", () => {
     expect(within(activeSection as HTMLElement).queryByText("Validated baseline")).toBeNull();
     expect(screen.queryByRole("button", { name: "Upload resume" })).toBeNull();
     expect(screen.getAllByRole("link", { name: "View baseline details" }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: /target a role/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "TARGET A ROLE" }).length).toBeGreaterThan(0);
     expect(screen.queryByRole("link", { name: "OPEN RESUME STUDIO" })).toBeNull();
   });
 
@@ -776,13 +819,13 @@ describe("BaselineStudioHome", () => {
             latestAssessmentCreatedAt: null,
             latestFitScore: null,
             hasCompletedAssessment: false,
-          }),
+          }, 30),
           createBaseline("base-new", "2026-01-03T00:00:00.000Z", "resume-new.pdf", {
             latestAssessmentId: "assessment-new",
             latestAssessmentCreatedAt: "2026-03-20T12:00:00.000Z",
             latestFitScore: 87,
             hasCompletedAssessment: true,
-          }),
+          }, 79),
         ]}
       />,
     );
@@ -790,7 +833,7 @@ describe("BaselineStudioHome", () => {
     await screen.findByRole("heading", { name: "Current baseline" });
     const activeSection = screen.getByRole("heading", { name: "Current baseline" }).closest("section");
     expect(activeSection).toBeTruthy();
-    expect(within(activeSection as HTMLElement).getAllByRole("link", { name: /target a role/i }).length).toBeGreaterThan(0);
+    expect(within(activeSection as HTMLElement).getAllByRole("link", { name: "TARGET A ROLE" }).length).toBeGreaterThan(0);
 
     const activeCard = within(screen.getAllByText("resume-new.pdf")[0].closest("article") as HTMLElement);
     expect(activeCard.getByText(/ready for targeting/i)).toBeInTheDocument();
@@ -909,25 +952,25 @@ describe("BaselineStudioHome", () => {
       latestAssessmentCreatedAt: null,
       latestFitScore: null,
       hasCompletedAssessment: false,
-    });
+    }, 30);
     const initialB = createBaseline("base-b", "2026-01-02T00:00:00.000Z", "resume-b.pdf", {
       latestAssessmentId: null,
       latestAssessmentCreatedAt: null,
       latestFitScore: null,
       hasCompletedAssessment: false,
-    });
+    }, 30);
     const refreshedA = createBaseline("base-a", "2026-01-01T00:00:00.000Z", "resume-a.pdf", {
       latestAssessmentId: "assessment-a",
       latestAssessmentCreatedAt: "2026-03-25T12:00:00.000Z",
       latestFitScore: 88,
       hasCompletedAssessment: true,
-    });
+    }, 79);
     const refreshedB = createBaseline("base-b", "2026-01-02T00:00:00.000Z", "resume-b.pdf", {
       latestAssessmentId: null,
       latestAssessmentCreatedAt: null,
       latestFitScore: null,
       hasCompletedAssessment: false,
-    });
+    }, 30);
 
     const fetchMock = vi.fn(async (input: RequestInfo) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;

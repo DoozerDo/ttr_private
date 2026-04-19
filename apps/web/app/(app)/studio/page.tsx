@@ -20,7 +20,6 @@ import { defaultClosingTemplateKey } from "@/lib/coverLetters";
 import { buildExportPayload } from "../lib/exportPayload";
 import { formatErrorMessage, readResponsePayload } from "@/lib/compliance/parseComplianceError";
 import { sanitizeRenderedTextValue } from "@/lib/renderedText";
-import { isDocumentGenerationUnlocked } from "@/lib/documentGenerationGate";
 import {
   applyTargetingExclusionsToReadiness,
   aggregateVerificationIssues,
@@ -66,6 +65,10 @@ import {
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
 import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
 import { buildProductDecisionState } from "@/lib/productDecisionState";
+import {
+  resolveDocumentGenerationMode,
+  shouldGenerateDocuments,
+} from "@/lib/documentGenerationContract";
 import { deriveEvidenceLedger } from "@/lib/evidenceLedger";
 import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
 import {
@@ -1545,7 +1548,7 @@ export default function StudioPage() {
   const lowFitRedirectedRef = useRef(false);
   useEffect(() => {
     if (analysisScore === null) return;
-    if (isDocumentGenerationUnlocked(analysisScore)) {
+    if (shouldGenerateDocuments(analysisScore)) {
       lowFitRedirectedRef.current = false;
       return;
     }
@@ -1698,7 +1701,7 @@ export default function StudioPage() {
   );
   const showEvidenceExpansion = useMemo(
     () =>
-      isDocumentGenerationUnlocked(analysisScore) &&
+      shouldGenerateDocuments(analysisScore) &&
       canonicalUnverifiedRequirements.length > 0,
     [analysisScore, canonicalUnverifiedRequirements.length],
   );
@@ -1840,7 +1843,7 @@ export default function StudioPage() {
         hasCanonicalAssessment: Boolean(requestedAnalysisId) && !analysisError,
         hasRequiredContext: Boolean(effectiveJobId && effectiveBaselineId),
         isPro,
-        canGenerateDocuments: trustGateDecision.allowed,
+        canGenerateDocuments: shouldGenerateDocuments(analysisScore),
         opportunityAlreadySaved: hasGeneratedOnce,
         analysisAssessmentId: requestedAnalysisId ?? null,
         analysisBaselineId: effectiveBaselineId ?? null,
@@ -1872,9 +1875,10 @@ export default function StudioPage() {
     ],
   );
   const productReadiness = productDecisionState.productReadiness;
-  const canGenerateDocuments = productDecisionState.canGenerateDocuments;
-  const qualifiedForGeneration = canGenerateDocuments && isDocumentGenerationUnlocked(analysisScore);
-  const studioDraftMode = productReadiness.generationMode === "draft" && isFromUnlock && !hasGeneratedOnce;
+  const canGenerateDocuments = shouldGenerateDocuments(analysisScore);
+  const qualifiedForGeneration = shouldGenerateDocuments(analysisScore);
+  const studioDraftMode =
+    resolveDocumentGenerationMode(analysisScore) === "draft" && isFromUnlock && !hasGeneratedOnce;
   const improveBaselineHref = useMemo(() => {
     const params = new URLSearchParams();
     if (requestedAnalysisId) params.set("analysisId", requestedAnalysisId);
@@ -2867,14 +2871,15 @@ export default function StudioPage() {
     setRecentIntent(readRecentIntentState());
   }, [requestedAnalysisId, effectiveJobId, effectiveBaselineId]);
   const generationSupportState = useMemo(() => {
-    if (studioCanonicalDecision.readinessState === "BLOCKED") return "blocked";
+    if (!qualifiedForGeneration) return "blocked";
+    if (activeGenerationReadiness.blocked) return "blocked";
     if (studioCanonicalDecision.readinessState === "LIMITED" || studioCanonicalDecision.readinessState === "DRAFT") {
       return "partial";
     }
     return "strong";
-  }, [studioCanonicalDecision.readinessState]);
-  const canProceedWithStudioDrafts = generationSupportState !== "blocked";
-  const isInstantDraftExperience = canProceedWithStudioDrafts && qualifiedForGeneration;
+  }, [activeGenerationReadiness.blocked, qualifiedForGeneration, studioCanonicalDecision.readinessState]);
+  const canProceedWithStudioDrafts = qualifiedForGeneration && !activeGenerationReadiness.blocked;
+  const isInstantDraftExperience = canProceedWithStudioDrafts;
   const needsAutoGeneration =
     isInstantDraftExperience &&
     !hasCompletedGeneration &&
@@ -3105,7 +3110,7 @@ export default function StudioPage() {
         });
         return false;
       }
-      if (generationSupportState === "blocked") {
+      if (activeGenerationReadiness.blocked) {
         trackEvent("studio_generate_blocked", {
           score: analysisScore,
           blockerCodes: generationBlockerCodes,
@@ -3118,6 +3123,7 @@ export default function StudioPage() {
     },
     [
       analysisScore,
+      activeGenerationReadiness.blocked,
       effectiveBaselineId,
       effectiveBaselineVersionId,
       effectiveJobId,

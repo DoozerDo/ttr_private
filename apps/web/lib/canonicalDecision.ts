@@ -2,7 +2,7 @@ import type { BaselineAssessmentSummaryDto } from "@/lib/baselines";
 import type { GenerationReadiness } from "@/lib/generationReadiness";
 import type { GenerationProductReadiness } from "@/lib/generationProductReadiness";
 import type { DecisionFlowDataSource } from "@/lib/decisionFlowDebug";
-import { isDocumentGenerationUnlocked } from "@/lib/documentGenerationGate";
+import { shouldGenerateDocuments, isSystemOwnedFinalizedGeneration } from "@/lib/documentGenerationContract";
 import { getFitReviewHref, getResultsHref, getStudioHref } from "@/src/navigation/routes";
 import {
   resolveWorkflowProgression,
@@ -237,7 +237,7 @@ function buildAnalysisNextAction(input: {
   forceFitReview?: boolean;
 }): CanonicalNextAction {
   const score = typeof input.score === "number" && Number.isFinite(input.score) ? input.score : null;
-  const qualifiedForGeneration = isDocumentGenerationUnlocked(score);
+  const qualifiedForGeneration = shouldGenerateDocuments(score);
 
   if (input.surface === "target") {
     if (!qualifiedForGeneration) {
@@ -396,16 +396,9 @@ function verifyAnalysisAgreement(
   }
 
   if (input.surface === "target") {
-    if (input.generationReadiness.status === "ready" && !input.productReadiness.canOpenStudio) {
-      const message = "[canonical-decision] target generation readiness ready but studio locked";
-      if (shouldFailOnMismatch()) throw new Error(message);
-      console.error(message);
-    }
-    if (input.generationReadiness.status !== "ready" && input.productReadiness.canOpenStudio) {
-      const message = "[canonical-decision] target product readiness canOpenStudio without ready generation";
-      if (shouldFailOnMismatch()) throw new Error(message);
-      console.error(message);
-    }
+    // Target surface treats score as the canonical generation eligibility signal.
+    // GenerationReadiness may be limited/blocked due to verification constraints, but that must not
+    // contradict score-based availability (score >= 70). Keep mismatch checks score-only here.
   }
 
   if (input.surface === "results" || input.surface === "studio") {
@@ -505,9 +498,8 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
       input.surface === "results"
         ? input.forceFitReview ||
           score === null ||
-          !isDocumentGenerationUnlocked(score) ||
-          !input.productReadiness.canOpenStudio ||
-          input.generationReadiness.status !== "ready"
+          !shouldGenerateDocuments(score) ||
+          !input.productReadiness.canOpenStudio
         : !studioCanGenerateDocuments || !input.productReadiness.canOpenStudio,
     routes: progressionRoutes,
     dataSource: input.dataSource ?? "fresh",
@@ -517,7 +509,7 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
     analysisBaselineVersionId: analysisCandidate?.baselineVersionId ?? null,
     persistedAssessmentId: input.persistedAssessmentId ?? null,
   });
-  const qualifiedForGeneration = isDocumentGenerationUnlocked(score);
+  const qualifiedForGeneration = shouldGenerateDocuments(score);
   const nextAction = resolveNextAction(input);
   return {
     surface: input.surface,
@@ -525,9 +517,11 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
     readinessState:
       input.surface === "target"
         ? qualifiedForGeneration && input.productReadiness.canOpenStudio
-          ? "READY"
+          ? isSystemOwnedFinalizedGeneration(score)
+            ? "READY"
+            : "DRAFT"
           : qualifiedForGeneration
-            ? "BLOCKED"
+            ? "DRAFT"
             : input.generationReadiness.status === "limited"
             ? "LIMITED"
             : "BLOCKED"
@@ -536,12 +530,12 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
             ? "IMPROVE"
             : !input.productReadiness.canOpenStudio
               ? "BLOCKED"
-              : score !== null && score >= 90
+              : score !== null && score >= 80
                 ? "READY"
                 : "DRAFT"
           : !qualifiedForGeneration || !studioCanGenerateDocuments || !input.productReadiness.canOpenStudio
             ? "BLOCKED"
-            : score !== null && score >= 90
+            : score !== null && score >= 80
               ? "READY"
               : "DRAFT",
     scoreSource: scoreCandidate?.source ?? "primary",
@@ -559,12 +553,12 @@ export function resolveCanonicalState(input: ResolveCanonicalStateInput): Canoni
             ? "generation_blocked"
             : !input.productReadiness.canOpenStudio
               ? "generation_blocked"
-              : score !== null && score >= 90
+              : score !== null && score >= 80
                 ? "generation_ready"
                 : "generation_limited"
           : !qualifiedForGeneration || !studioCanGenerateDocuments || !input.productReadiness.canOpenStudio
             ? "generation_blocked"
-            : score !== null && score >= 90
+            : score !== null && score >= 80
               ? "generation_ready"
               : "generation_limited",
     nextAction,
@@ -645,7 +639,7 @@ function mapWorkflowStateToReadinessState(
   generationReadiness: GenerationReadiness | null | undefined,
   forceFitReview?: boolean,
 ): CanonicalReadinessState {
-  const qualifiedForGeneration = isDocumentGenerationUnlocked(score);
+  const qualifiedForGeneration = shouldGenerateDocuments(score);
   switch (workflowState) {
     case "analysis_in_progress":
     case "generation_running":
@@ -667,19 +661,19 @@ function mapWorkflowStateToReadinessState(
     case "results_ready_studio_blocked":
     case "studio_blocked_for_evidence":
     case "generation_blocked":
-      return qualifiedForGeneration ? "BLOCKED" : "IMPROVE";
+      return qualifiedForGeneration ? "DRAFT" : "IMPROVE";
     case "returning_user_persisted_last_assessment":
       return "READY";
     case "studio_ready":
-      return qualifiedForGeneration && (score !== null && score >= 90 || productReadiness?.confidence === "HIGH")
+      return qualifiedForGeneration && (score !== null && score >= 80 || productReadiness?.confidence === "HIGH")
         ? "READY"
         : qualifiedForGeneration
           ? "DRAFT"
           : "IMPROVE";
     case "results_ready":
-      if (forceFitReview || score === null || !isDocumentGenerationUnlocked(score)) return "IMPROVE";
+      if (forceFitReview || score === null || !shouldGenerateDocuments(score)) return "IMPROVE";
       if (!productReadiness?.canOpenStudio) return "BLOCKED";
-      return score >= 90 || productReadiness?.confidence === "HIGH" ? "READY" : "DRAFT";
+      return score >= 80 || productReadiness?.confidence === "HIGH" ? "READY" : "DRAFT";
     default:
       return qualifiedForGeneration ? "READY" : "NOT_ANALYZED";
   }

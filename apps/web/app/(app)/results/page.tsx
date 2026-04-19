@@ -58,6 +58,7 @@ import {
 } from "@/lib/renderedText";
 import { buildProgressSummary } from "@/lib/progressSummary";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
+import { isSystemOwnedFinalizedGeneration, shouldGenerateDocuments } from "@/lib/documentGenerationContract";
 import { buildExportPayload } from "../lib/exportPayload";
 import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
 import { buildProductDecisionState } from "@/lib/productDecisionState";
@@ -2596,7 +2597,7 @@ export default function ResultsPage() {
     [productDecisionState.renderedGenerationReadiness],
   );
   const canOpenStudio = canonicalResultsDecision.readinessState !== "BLOCKED";
-  const shouldAutoRecoverGeneration = isDocumentGenerationUnlocked(activeScore);
+  const shouldAutoRecoverGeneration = shouldGenerateDocuments(activeScore);
   const resultsArtifactScope =
     canonicalResultsDecision.readinessState === "DRAFT" && !shouldAutoRecoverGeneration
       ? ("resume_only" as const)
@@ -3127,7 +3128,7 @@ export default function ResultsPage() {
     summarySnippet,
   ]);
   const isStrongFitScore = typeof activeScore === "number" && activeScore >= 80;
-  const shouldTreatGenerationAsSystemOwned = shouldAutoRecoverGeneration;
+  const shouldTreatGenerationAsSystemOwned = isSystemOwnedFinalizedGeneration(activeScore);
   const hasArtifactFailure =
     resultsArtifactStatuses.resume === "failed" || resultsArtifactStatuses.coverLetter === "failed";
   const suppressFailureUiDuringRecovery =

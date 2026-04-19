@@ -42,7 +42,7 @@ import {
   type SignalGraphViewModel,
 } from "@/lib/professionalSignals";
 import { publishBaselineUpdated, subscribeBaselineUpdated } from "@/src/lib/baseline-sync";
-import { BETA_BASELINE_UPLOAD_LIMIT } from "@/src/features/baseline/constants";
+import { BASELINE_USABLE_MIN_PERCENT, BETA_BASELINE_UPLOAD_LIMIT } from "@/src/features/baseline/constants";
 import {
   assertCanonicalRouteHref,
   getBaselineDetailsHref,
@@ -61,6 +61,11 @@ type ErrorPayload = {
   message?: unknown;
   latestAssessmentSummary?: BaselineAssessmentSummaryDto;
 };
+
+const TARGET_ROLE_CTA_LABEL = "TARGET A ROLE";
+const REVIEW_BASELINE_CTA_LABEL = "REVIEW BASELINE";
+const BASELINE_NEEDS_REVIEW_EXPLANATION =
+  "You need to complete baseline verification before targeting roles.";
 
 type BaselineStrengthState = "empty" | "needs_analysis" | "ready";
 type BaselineReadinessState = "NOT_ANALYZED" | "ANALYZING" | "READY";
@@ -252,15 +257,23 @@ function resolveCanonicalAssessmentSummary(
   )[0];
 }
 
+function resolveBaselineProgressPercent(baseline: BaselineDto | null): number | null {
+  if (!baseline) return null;
+  if (typeof baseline.latestBaselineScore === "number") return baseline.latestBaselineScore;
+  if (typeof baseline.originalBaselineScore === "number") return baseline.originalBaselineScore;
+  return null;
+}
+
 function buildBaselineReadinessContract({
-  baselineId,
-  summary,
+  baseline,
   isAnalyzing = false,
 }: {
-  baselineId: string | null;
-  summary?: BaselineAssessmentSummaryDto | null;
+  baseline: BaselineDto | null;
   isAnalyzing?: boolean;
 }): BaselinePageReadinessContract {
+  const baselineId = baseline?.id ?? null;
+  const progressPercent = resolveBaselineProgressPercent(baseline);
+  const summary = baseline?.latestAssessmentSummary ?? null;
   const latestAssessmentId = summary?.latestAssessmentId?.trim() ?? null;
   const routes = {
     baseline: "/baseline",
@@ -295,10 +308,10 @@ function buildBaselineReadinessContract({
     latestFitScore: summary?.latestFitScore ?? null,
     readinessState: isAnalyzing
       ? "ANALYZING"
-      : latestAssessmentId
+      : typeof progressPercent === "number" && progressPercent >= BASELINE_USABLE_MIN_PERCENT
         ? "READY"
         : "NOT_ANALYZED",
-    ctaLabel: "Target a role",
+    ctaLabel: TARGET_ROLE_CTA_LABEL,
     ctaHref: routes.target,
     actionType: "target_role",
     workflowState: progression.state,
@@ -447,8 +460,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   const primaryBaselineReadiness = useMemo(
     () =>
       buildBaselineReadinessContract({
-        baselineId: primaryBaseline?.id ?? primaryBaselineId ?? null,
-        summary: primaryBaseline?.latestAssessmentSummary ?? null,
+        baseline: primaryBaseline,
       }),
     [primaryBaseline, primaryBaselineId],
   );
@@ -1410,15 +1422,27 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 <p className="mt-1 text-xs text-slate-500">
                   Created from: {primaryBaseline.originalFilename}
                 </p>
+                {primaryBaselineReadiness.readinessState !== "READY" ? (
+                  <p className="mt-3 text-sm text-slate-300">
+                    {BASELINE_NEEDS_REVIEW_EXPLANATION}
+                  </p>
+                ) : null}
                 <div className="mt-4 flex flex-wrap gap-2">
                   {primaryBaselineReadiness.readinessState === "READY" ? (
                     <Link
                       href={targetRoleHref}
                       className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold uppercase text-cyan-50 transition hover:bg-cyan-400/15"
                     >
-                      Target a role
+                      {TARGET_ROLE_CTA_LABEL}
                     </Link>
-                  ) : null}
+                  ) : (
+                    <Link
+                      href={baselineDetailsHref}
+                      className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2.5 text-sm font-semibold uppercase text-white transition hover:bg-indigo-500"
+                    >
+                      {REVIEW_BASELINE_CTA_LABEL}
+                    </Link>
+                  )}
                   <Link
                     href={baselineDetailsHref}
                     className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold uppercase text-slate-100 transition hover:bg-white/10"
@@ -1481,12 +1505,8 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 const isArchived = baseline.status === "ARCHIVED";
                 const isCurrentBaseline = baseline.id === primaryBaselineId;
 
-                const assessmentSummary = baseline.latestAssessmentSummary;
-                const activeBaselineSummary =
-                  assessmentSummary ?? null;
                 const baselineReadiness = buildBaselineReadinessContract({
-                  baselineId: baseline.id,
-                  summary: activeBaselineSummary,
+                  baseline,
                   isAnalyzing: loadingBaselineId === baseline.id,
                 });
                 const isLoading = loadingBaselineId === baseline.id;
@@ -1528,7 +1548,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                             href={baselineTargetRoleHref}
                             className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold uppercase text-cyan-50 transition hover:bg-cyan-400/15"
                           >
-                            {formatCardActionLabel("Target a role")}
+                            {TARGET_ROLE_CTA_LABEL}
                           </Link>
                         ) : (
                           <FormButton

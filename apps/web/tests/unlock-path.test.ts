@@ -64,8 +64,8 @@ describe("unlock path state", () => {
     });
 
     expect(state.analysis).toBe("CURRENT");
-    expect(state.fitReview).toBe("CURRENT");
-    expect(state.studio).toBe("LOCKED");
+    expect(state.fitReview).toBe("UNLOCKED");
+    expect(state.studio).toBe("UNLOCKED");
   });
 
   it("keeps fit review locked when no active baseline exists", () => {
@@ -94,8 +94,8 @@ describe("unlock path state", () => {
       hasSavedOpportunity: false,
     });
 
-    expect(state.fitReview).toBe("CURRENT");
-    expect(state.studio).toBe("LOCKED");
+    expect(state.fitReview).toBe("UNLOCKED");
+    expect(state.studio).toBe("UNLOCKED");
   });
 
   it("shows studio current when readiness is ready", () => {

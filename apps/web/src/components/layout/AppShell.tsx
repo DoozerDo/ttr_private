@@ -27,22 +27,24 @@ type StoredContext = {
   hasBaseline: boolean;
   hasJob: boolean;
   lastAnalysis: StoredAnalysisRecord | null;
+  activeBaselineId: string | null;
 };
 
 const getStoredContext = (): StoredContext => {
   if (typeof window === "undefined") {
-    return { hasBaseline: false, hasJob: false, lastAnalysis: null };
+    return { hasBaseline: false, hasJob: false, lastAnalysis: null, activeBaselineId: null };
   }
 
   const stored = readLastAnalysis();
   if (!stored) {
-    return { hasBaseline: false, hasJob: false, lastAnalysis: null };
+    return { hasBaseline: false, hasJob: false, lastAnalysis: null, activeBaselineId: null };
   }
 
   return {
     hasBaseline: Boolean(stored.baselineId),
     hasJob: Boolean(stored.jobId),
     lastAnalysis: stored,
+    activeBaselineId: typeof stored.baselineId === "string" ? stored.baselineId : null,
   };
 };
 
@@ -93,6 +95,7 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
     hasBaseline: false,
     hasJob: false,
     lastAnalysis: null,
+    activeBaselineId: null,
   });
   const lastPath = useRef(pathname);
 
@@ -103,6 +106,7 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
 
     let baselinesOk = false;
     let jobsOk = false;
+    let activeBaselineId: string | null = stored.activeBaselineId;
 
     try {
       const baselineRes = await fetch("/api/baselines", {
@@ -115,10 +119,45 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
         const data = await safeJson<unknown>(baselineRes);
         if (Array.isArray(data)) {
           baselinesOk = data.length > 0;
+          const active =
+            data.find(
+              (entry): entry is { id: string; isActive?: boolean } =>
+                Boolean(entry) &&
+                typeof entry === "object" &&
+                typeof (entry as { id?: unknown }).id === "string" &&
+                Boolean((entry as { isActive?: unknown }).isActive),
+            ) ??
+            data.find(
+              (entry): entry is { id: string } =>
+                Boolean(entry) && typeof entry === "object" && typeof (entry as { id?: unknown }).id === "string",
+            ) ??
+            null;
+          activeBaselineId = active ? active.id : activeBaselineId;
         } else if (data && typeof data === "object") {
           const maybe = data as { items?: unknown[]; baselines?: unknown[] };
           if (Array.isArray(maybe.items)) baselinesOk = maybe.items.length > 0;
           if (Array.isArray(maybe.baselines)) baselinesOk = maybe.baselines.length > 0;
+          const baselineList = Array.isArray(maybe.items)
+            ? maybe.items
+            : Array.isArray(maybe.baselines)
+              ? maybe.baselines
+              : null;
+          if (baselineList?.length) {
+            const active =
+              baselineList.find(
+                (entry): entry is { id: string; isActive?: boolean } =>
+                  Boolean(entry) &&
+                  typeof entry === "object" &&
+                  typeof (entry as { id?: unknown }).id === "string" &&
+                  Boolean((entry as { isActive?: unknown }).isActive),
+              ) ??
+              baselineList.find(
+                (entry): entry is { id: string } =>
+                  Boolean(entry) && typeof entry === "object" && typeof (entry as { id?: unknown }).id === "string",
+              ) ??
+              null;
+            activeBaselineId = active ? active.id : activeBaselineId;
+          }
         } else {
           baselinesOk = stored.hasBaseline;
         }
@@ -156,7 +195,7 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
       jobsOk = stored.hasJob;
     }
 
-    setStoredContext({ ...getStoredContext(), hasBaseline: baselinesOk, hasJob: jobsOk });
+    setStoredContext({ ...getStoredContext(), hasBaseline: baselinesOk, hasJob: jobsOk, activeBaselineId });
     setHasBaseline(Boolean(baselinesOk));
     setHasJob(Boolean(jobsOk));
 
@@ -476,6 +515,17 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
                     readinessStatus={readinessStatus}
                     hasGeneratedDocuments={hasGeneratedDocuments}
                     hasSavedOpportunity={pathname.startsWith("/job-tracker")}
+                    onNavigate={(href) => {
+                      if (href === "/analyze" && pathname.startsWith("/baseline")) {
+                        const targetBaselineId = storedContext.activeBaselineId;
+                        const resolved = targetBaselineId
+                          ? `/target?baselineId=${encodeURIComponent(targetBaselineId)}`
+                          : "/target";
+                        router.push(resolved);
+                        return;
+                      }
+                      router.push(href);
+                    }}
                   />
                 </div>
                 <div className="flex shrink-0 items-center gap-3 self-start xl:pt-1">

@@ -256,4 +256,108 @@ describe("target workflow UI", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText("Score generated")).toBeNull();
   });
+
+  it("does not show blocked generation messaging when score is 78", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url === "/api/analysis/run") {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            score: 78,
+            strengths: ["Incident management"],
+            gaps: [],
+          }),
+        );
+      }
+      if (url.includes("/api/analysis/job/job-1/baseline/base-1/latest")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            score: 78,
+            strengths: ["Incident management"],
+            gaps: [],
+          }),
+        );
+      }
+      if (url.includes("/api/analysis/history")) {
+        return Promise.resolve(
+          createResponse({
+            recentAnalyses: [],
+            alignmentPattern: { strongestAlignmentRoles: [], totalAnalyses: 0, averageScore: 0 },
+            badges: [],
+            generatedAt: new Date().toISOString(),
+          }),
+        );
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock as typeof fetchMock);
+
+    render(<WorkspaceRunner baselineId="base-1" jobId="job-1" />);
+
+    await screen.findByText("Generation Available");
+    expect(screen.getByRole("link", { name: /Generate/i })).toBeInTheDocument();
+    expect(screen.queryByText(/Document generation is blocked/i)).toBeNull();
+    expect(screen.queryByText(/Document generation is not available yet/i)).toBeNull();
+    expect(screen.queryByText(/Fit Review Needed/i)).toBeNull();
+  });
+
+  it("disables generation and shows improve-fit messaging when score is 65", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url === "/api/analysis/run") {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            score: 65,
+            strengths: [],
+            gaps: [],
+          }),
+        );
+      }
+      if (url.includes("/api/analysis/job/job-1/baseline/base-1/latest")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            score: 65,
+            strengths: [],
+            gaps: [],
+          }),
+        );
+      }
+      if (url.includes("/api/analysis/history")) {
+        return Promise.resolve(
+          createResponse({
+            recentAnalyses: [],
+            alignmentPattern: { strongestAlignmentRoles: [], totalAnalyses: 0, averageScore: 0 },
+            badges: [],
+            generatedAt: new Date().toISOString(),
+          }),
+        );
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock as typeof fetchMock);
+
+    render(<WorkspaceRunner baselineId="base-1" jobId="job-1" />);
+
+    await screen.findByText("Improve Fit");
+    expect(screen.getByText("Improve your fit before generating documents.")).toBeInTheDocument();
+    const disabledGenerate = screen.getByRole("button", { name: "Generate documents" });
+    expect(disabledGenerate).toBeDisabled();
+    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
+  });
 });

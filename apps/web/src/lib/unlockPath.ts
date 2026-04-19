@@ -1,4 +1,4 @@
-import { isDocumentGenerationUnlocked } from "@/lib/documentGenerationGate";
+import { shouldGenerateDocuments } from "@/lib/documentGenerationContract";
 
 export type UnlockPathModuleState = "LOCKED" | "CURRENT" | "UNLOCKED" | "COMPLETE";
 
@@ -37,16 +37,10 @@ export function resolveUnlockPathState(input: UnlockPathInput): UnlockPathResolv
     matchesPath(input.currentPathname, "/job-tracker");
 
   const score = typeof input.score === "number" ? input.score : null;
-  const readinessReady = input.readinessStatus === "ready";
-  const studioEligible = isDocumentGenerationUnlocked(score);
+  const studioEligible = shouldGenerateDocuments(score);
   const hasActiveBaseline = input.baselineReady;
   const fitReviewRelevant = score !== null;
-  const fitReviewCurrent =
-    hasActiveBaseline &&
-    fitReviewRelevant &&
-    (!isDocumentGenerationUnlocked(score) || (isDocumentGenerationUnlocked(score) && !readinessReady));
-  const fitReviewComplete =
-    hasActiveBaseline && fitReviewRelevant && isDocumentGenerationUnlocked(score) && readinessReady;
+  const fitReviewEligible = hasActiveBaseline && fitReviewRelevant;
 
   const baseline: UnlockPathModuleState =
     isBaselineRoute ? "CURRENT" : input.baselineReady ? "COMPLETE" : "LOCKED";
@@ -60,13 +54,13 @@ export function resolveUnlockPathState(input: UnlockPathInput): UnlockPathResolv
           ? "COMPLETE"
           : "UNLOCKED";
 
-  const fitReview: UnlockPathModuleState = !hasActiveBaseline
+  const fitReview: UnlockPathModuleState = !fitReviewEligible
     ? "LOCKED"
-    : fitReviewCurrent
+    : isFitReviewRoute
       ? "CURRENT"
-      : fitReviewComplete
+      : input.readinessStatus === "ready"
         ? "COMPLETE"
-        : "LOCKED";
+        : "UNLOCKED";
 
   const studio: UnlockPathModuleState =
     !studioEligible

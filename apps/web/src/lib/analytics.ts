@@ -105,6 +105,12 @@ export type ScoreBucket = "under_60" | "60s" | "70s" | "80s" | "90_plus";
 export type ScrollDepth = 25 | 50 | 75 | 100;
 export type ResultsPrimaryCtaReadinessStatus = "ready" | "limited" | "blocked";
 
+// Product/UI generation states (score-driven).
+// - 70–79: DRAFT
+// - 80+: READY (system-owned finalized)
+// Readiness/trust signals can affect confidence/messaging but must not remove DRAFT from analytics.
+export type GenerationAnalyticsState = "READY" | "DRAFT" | "LIMITED" | "BLOCKED";
+
 export type AnalyticsEventMap = {
   landing_viewed: {
     referrer: string | null;
@@ -512,7 +518,7 @@ export type AnalyticsEventMap = {
     dataSource: "fresh" | "persisted" | "mixed";
   };
   studio_generation_state_viewed: {
-    state: "READY" | "LIMITED" | "BLOCKED";
+    state: GenerationAnalyticsState;
     score: number | null;
     blockerCount: number;
   };
@@ -527,13 +533,13 @@ export type AnalyticsEventMap = {
     documentType: "resume" | "cover_letter" | "application";
   };
   target_generation_state_viewed: {
-    state: "READY" | "LIMITED" | "BLOCKED";
+    state: GenerationAnalyticsState;
     score: number;
     baselineId: string;
     jobId: string;
   };
   target_cta_clicked: {
-    state: "READY" | "LIMITED" | "BLOCKED";
+    state: GenerationAnalyticsState;
     score: number | null;
     label: string;
     href: string;
