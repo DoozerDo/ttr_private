@@ -742,7 +742,7 @@ describe("Studio page UX", () => {
     expect(screen.getAllByTestId("studio-artifact-quality-panel")[0]).toHaveTextContent(
       "Built from verified experience",
     );
-    expect(screen.getAllByTestId("studio-artifact-quality-panel")[0]).toHaveTextContent("Confidence: High");
+    expect(screen.getAllByTestId("studio-artifact-quality-panel")[0]).toHaveTextContent("Evidence confidence: High");
     expect(screen.getAllByText("Improve this output").length).toBeGreaterThan(0);
   });
 
@@ -851,7 +851,7 @@ describe("Studio page UX", () => {
     fireEvent.click(generateResumeButton);
 
     await waitFor(() => {
-      expect(screen.getAllByRole("button", { name: /Generating/i }).length).toBeGreaterThanOrEqual(1);
+      expect(resumeGenerationRequestCount).toBe(2);
     });
     expect(screen.queryByText("Generating from your verified evidence...")).toBeNull();
 
@@ -1158,11 +1158,10 @@ describe("Studio page UX", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Generation blocked" })).toBeInTheDocument();
+      expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument();
     });
-    expect(screen.getByTestId("studio-decision-panel")).toHaveTextContent("Limited output: not ready yet.");
-    expect(screen.getAllByTestId("studio-artifact-quality-panel")[0]).toHaveTextContent("Output needs work");
-    expect(screen.getByRole("link", { name: "Start Fit Review" })).toHaveAttribute(
+    expect(screen.getByTestId("studio-blocked-primary-action")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Strengthen my experience" })).toHaveAttribute(
       "href",
       getFitReviewHref({
         jobId: "job-1",
@@ -1172,6 +1171,7 @@ describe("Studio page UX", () => {
         analysisId: "analysis-1",
       }),
     );
+    expect(screen.queryByRole("button", { name: "Generate draft anyway" })).toBeNull();
   });
 
   it("shows the current auto-adjust guidance for unsupported requirements", async () => {
@@ -1217,7 +1217,7 @@ describe("Studio page UX", () => {
     expect(screen.getAllByTestId("studio-artifact-quality-panel")[0]).toHaveTextContent(
       "Some claims are unverified. Strengthen for best results.",
     );
-    expect(screen.getAllByTestId("studio-artifact-quality-panel")[0]).toHaveTextContent("Confidence: Medium");
+    expect(screen.getAllByTestId("studio-artifact-quality-panel")[0]).toHaveTextContent("Evidence confidence: Medium");
     expect(screen.getAllByText("Improve this output").length).toBeGreaterThan(0);
   });
 

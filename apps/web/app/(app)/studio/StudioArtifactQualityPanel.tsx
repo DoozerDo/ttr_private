@@ -29,7 +29,7 @@ function confidenceCopy(confidence: ArtifactConfidence) {
   }
   return {
     badge: "Output needs work",
-    subtext: "This draft still needs stronger evidence before it is fully reliable.",
+    subtext: "Evidence support is still light. Strengthen the baseline to improve reliability.",
     panelTone: "border-slate-300/20 bg-slate-500/10",
     badgeTone: "bg-slate-500/15 text-slate-50 border-slate-300/20",
   };
@@ -39,10 +39,17 @@ function titleCaseConfidence(confidence: ArtifactConfidence): string {
   return confidence.charAt(0) + confidence.slice(1).toLowerCase();
 }
 
+function resolveDraftQualityLabel(score: number): "High" | "Medium" | "Low" {
+  if (score >= 85) return "High";
+  if (score >= 70) return "Medium";
+  return "Low";
+}
+
 export function StudioArtifactQualityPanel({ model, confidence, onVerifyClaim, onEditClaim, onDismissClaim }: Props) {
   if (!model) return null;
 
   const copy = confidenceCopy(confidence);
+  const draftQuality = resolveDraftQualityLabel(model.artifactScore);
 
   return (
     <section
@@ -57,8 +64,8 @@ export function StudioArtifactQualityPanel({ model, confidence, onVerifyClaim, o
           <p className="text-sm text-slate-100">{copy.subtext}</p>
         </div>
         <div className="text-right">
-          <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Output strength</p>
-          <p className="text-2xl font-semibold text-slate-50">{model.artifactScore}/100</p>
+          <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Draft quality</p>
+          <p className="text-2xl font-semibold text-slate-50">{draftQuality}</p>
         </div>
       </div>
 
@@ -67,7 +74,7 @@ export function StudioArtifactQualityPanel({ model, confidence, onVerifyClaim, o
           {model.missingEvidenceCount} claims can be strengthened
         </span>
         <span className="rounded-full border border-white/10 bg-slate-950/40 px-3 py-1">
-          Confidence: {titleCaseConfidence(confidence)}
+          Evidence confidence: {titleCaseConfidence(confidence)}
         </span>
       </div>
 

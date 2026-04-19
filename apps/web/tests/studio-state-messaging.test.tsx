@@ -137,7 +137,7 @@ function resolveStudioGenerationFallback(input: RequestInfo) {
   return Promise.resolve(createResponse({}));
 }
 
-function installBaselineFetches(readinessStatus: "ready" | "limited" | "blocked") {
+function installBaselineFetches(readinessStatus: "ready" | "limited" | "blocked", score = 88) {
   mockedStudioState = readinessStatus;
   setFetchImplementation(
     vi.fn((input: RequestInfo) => {
@@ -146,7 +146,17 @@ function installBaselineFetches(readinessStatus: "ready" | "limited" | "blocked"
         return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
       }
       if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
-        return Promise.resolve(createResponse({ score: 88, jobId: "job-1", baselineId: "base-1", baselineVersionId: "base-version-1" }));
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            score,
+            scoring_v2: { score },
+            scoringV2: { score },
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+          }),
+        );
       }
       if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
         return Promise.resolve(
@@ -178,33 +188,46 @@ describe("Studio state messaging", () => {
     });
   });
 
-  it("shows strong generation messaging when readiness is ready", async () => {
-    installBaselineFetches("ready");
+  it("shows action-first blocked guidance and draft-anyway fallback when evidence is blocked", async () => {
+    installBaselineFetches("blocked", 88);
     renderStudio();
 
-    await waitFor(() => expect(screen.getByText("Generation blocked")).toBeInTheDocument());
-    expect(screen.queryByTestId("studio-instant-draft-hero")).toBeNull();
-    expect(screen.getByText("What's holding this back")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("studio-blocked-primary-action")).toBeInTheDocument());
+    expect(screen.getByTestId("studio-blocked-message")).toHaveTextContent(
+      "We can’t generate strong documents yet because key experience isn’t clearly supported.",
+    );
+    expect(screen.getByRole("link", { name: "Strengthen my experience" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View fit review" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Generate draft anyway" })).toBeInTheDocument());
+
+    expect(screen.queryByText("Why generation is blocked")).toBeNull();
+    expect(screen.queryByText("Limited output: not ready yet.")).toBeNull();
+    expect(screen.queryByText("We couldn't generate a reliable result")).toBeNull();
   });
 
-  it("shows limited generation messaging when readiness is partial", async () => {
-    installBaselineFetches("limited");
+  it("hides draft-anyway fallback when score is under 70", async () => {
+    installBaselineFetches("blocked", 65);
     renderStudio();
 
-    await waitFor(() => expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument());
-    expect(screen.queryByTestId("studio-instant-draft-hero")).toBeNull();
-    expect(screen.getByText("Limited output: not ready yet.")).toBeInTheDocument();
-    expect(screen.getByText("What's holding this back")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("studio-blocked-primary-action")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Generate draft anyway" })).toBeNull();
   });
 
-  it("shows blocked guidance when compliance prevents generation", async () => {
-    installBaselineFetches("blocked");
+  it("shows action-first recovery for draft-only readiness without duplicate blocked messaging", async () => {
+    installBaselineFetches("limited", 78);
     renderStudio();
 
-    await waitFor(() => expect(screen.getAllByText("Generation blocked").length).toBeGreaterThan(0));
-    expect(screen.getByText("What's holding this back")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("studio-blocked-primary-action")).toBeInTheDocument());
     expect(
-      screen.getByText("This role is not ready for clean Studio output yet. Return to Fit Review to strengthen verified evidence."),
-    ).toBeInTheDocument();
+      screen.getAllByText((content) =>
+        content.startsWith("We can’t generate strong documents yet because key experience isn’t clearly supported."),
+      ).length,
+    ).toBe(1);
+    expect(screen.getByRole("link", { name: "Strengthen my experience" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View fit review" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Generate draft anyway" })).toBeInTheDocument();
+    expect(screen.queryByText("Why generation is blocked")).toBeNull();
+    expect(screen.queryByText("Limited output: not ready yet.")).toBeNull();
+    expect(screen.queryByText("We couldn't generate a reliable result")).toBeNull();
   });
 });

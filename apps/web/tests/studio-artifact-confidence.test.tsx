@@ -44,8 +44,8 @@ describe("StudioArtifactQualityPanel", () => {
 
     expect(screen.getByText("Strong Output")).toBeInTheDocument();
     expect(screen.getByText("Built from verified experience")).toBeInTheDocument();
-    expect(screen.getByText("Output strength")).toBeInTheDocument();
-    expect(screen.getByText("94/100")).toBeInTheDocument();
+    expect(screen.getByText("Draft quality")).toBeInTheDocument();
+    expect(screen.getByText("High")).toBeInTheDocument();
     expect(screen.getByText("0 claims can be strengthened")).toBeInTheDocument();
   });
 
@@ -66,7 +66,7 @@ describe("StudioArtifactQualityPanel", () => {
 
     expect(screen.getByText("Usable Output")).toBeInTheDocument();
     expect(screen.getByText("Some claims are unverified. Strengthen for best results.")).toBeInTheDocument();
-    expect(screen.getByText("78/100")).toBeInTheDocument();
+    expect(screen.getByText("Medium")).toBeInTheDocument();
     expect(screen.getByText("2 claims can be strengthened")).toBeInTheDocument();
     expect(screen.getByText("Salesforce ownership")).toBeInTheDocument();
 

@@ -38,7 +38,8 @@ import {
   type ArtifactQualityModel,
 } from "@/lib/artifactConfidence";
 import { normalizeClaimVerifications } from "@/lib/claimVerification";
-import { parseTierGateError, type TierGateError } from "@/lib/tiers";
+import { parseTierGateError, SubscriptionTier, type TierGateError } from "@/lib/tiers";
+import { isDraftAnywayEligible, resolveStudioArtifactGating } from "@/lib/studioArtifactGating";
 import { BaselineDto, BaselineVersionDto, listBaselines } from "@/lib/baselines";
 import { appendStrengtheningAddition } from "@/lib/baselines";
 import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
@@ -723,6 +724,8 @@ export default function StudioPage() {
   const studioDecisionLogKeyRef = useRef<string | null>(null);
   const failedReadinessKeysRef = useRef<Set<string>>(new Set());
   const generationSectionRef = useRef<HTMLElement | null>(null);
+  const draftAnywayRequestedRef = useRef(false);
+  const [draftAnywayRequested, setDraftAnywayRequested] = useState(false);
   const requestedJobId = useMemo(
     () => trimId(searchParams.get("jobId")),
     [searchParamValue],
@@ -1257,8 +1260,12 @@ export default function StudioPage() {
   }, []);
 
   const analysisScore = useMemo(() => {
-    const value = analysis?.scoring_v2?.score;
-    if (typeof value === "number") return value;
+    const v2 = (analysis as { scoring_v2?: { score?: unknown } | null } | null)?.scoring_v2?.score;
+    if (typeof v2 === "number") return v2;
+    const direct = (analysis as { score?: unknown } | null)?.score;
+    if (typeof direct === "number") return direct;
+    const overall = (analysis as { overallScore?: unknown } | null)?.overallScore;
+    if (typeof overall === "number") return overall;
     return null;
   }, [analysis]);
 
@@ -3100,8 +3107,79 @@ export default function StudioPage() {
     ];
     return tips.slice(0, recentIntent === "used_not_committed" ? 2 : 4);
   }, [generationSupportState, recentIntent]);
+
+  const generationInputSignature = useMemo(() => {
+    return JSON.stringify({
+      baselineId: effectiveBaselineId ?? null,
+      baselineVersionId: effectiveBaselineVersionId ?? null,
+      jobId: effectiveJobId ?? null,
+      analysisId: requestedAnalysisId ?? null,
+      resumeFocus,
+      excludedRequirements: Array.from(excludedTargetingLabels).sort(),
+      strategyRoleGoal: documentStrategyPlan?.summaryStrategy ?? null,
+    });
+  }, [
+    documentStrategyPlan?.summaryStrategy,
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    excludedTargetingLabels,
+    requestedAnalysisId,
+    resumeFocus,
+  ]);
+  const lastFailureSignatureRef = useRef<string | null>(null);
+  const inputsChangedSinceLastFailure = useMemo(() => {
+    if (!lastFailureSignatureRef.current) return true;
+    return lastFailureSignatureRef.current !== generationInputSignature;
+  }, [generationInputSignature]);
+  const canRetryGeneration = inputsChangedSinceLastFailure;
+
+  const resumeGating = useMemo(
+    () =>
+      resolveStudioArtifactGating({
+        artifactType: "resume",
+        readiness: activeGenerationReadiness,
+        responsePresent: Boolean(resumeState.response),
+        generating: resumeGenerating || autoGenerationInFlight,
+        hasFailure: Boolean(resumeState.error || resumeState.artifactFailure),
+        tierGateError: resumeState.tierGateError,
+      }),
+    [
+      autoGenerationInFlight,
+      activeGenerationReadiness,
+      resumeGenerating,
+      resumeState.artifactFailure,
+      resumeState.error,
+      resumeState.response,
+      resumeState.tierGateError,
+    ],
+  );
+  const coverGating = useMemo(
+    () =>
+      resolveStudioArtifactGating({
+        artifactType: "cover_letter",
+        readiness: activeGenerationReadiness,
+        responsePresent: Boolean(coverState.response),
+        generating: coverGenerating || autoGenerationInFlight,
+        hasFailure: Boolean(coverState.error || coverState.artifactFailure),
+        tierGateError: coverState.tierGateError,
+      }),
+    [
+      autoGenerationInFlight,
+      coverGenerating,
+      coverState.artifactFailure,
+      coverState.error,
+      coverState.response,
+      coverState.tierGateError,
+      activeGenerationReadiness,
+    ],
+  );
+
   const guardGenerationAction = useCallback(
-    (documentType: "resume" | "cover_letter" | "application") => {
+    (
+      documentType: "resume" | "cover_letter" | "application",
+      opts?: { allowVerifiedOnlyFallback?: boolean },
+    ) => {
       if (!effectiveBaselineId || !effectiveJobId) {
         trackEvent("studio_generate_blocked", {
           score: analysisScore,
@@ -3110,7 +3188,30 @@ export default function StudioPage() {
         });
         return false;
       }
+      if (documentType === "cover_letter" && !isPro) {
+        setCoverState((current) => ({
+          ...current,
+          tierGateError:
+            current.tierGateError ??
+            ({
+              message: "This feature is available on the Pro plan.",
+              requiredTier: SubscriptionTier.Pro,
+              currentTier: SubscriptionTier.Free,
+              code: "TIER_GATED",
+              status: 403,
+            } satisfies TierGateError),
+        }));
+        trackEvent("studio_generate_blocked", {
+          score: analysisScore,
+          blockerCodes: ["tier_gate"],
+          documentType,
+        });
+        return false;
+      }
       if (activeGenerationReadiness.blocked) {
+        if (opts?.allowVerifiedOnlyFallback && shouldGenerateDocuments(analysisScore)) {
+          return true;
+        }
         trackEvent("studio_generate_blocked", {
           score: analysisScore,
           blockerCodes: generationBlockerCodes,
@@ -4029,7 +4130,7 @@ export default function StudioPage() {
     setSelectedBaselineVersionId(analysis.baselineVersionId);
   }, [analysis?.baselineVersionId, versions]);
 
-  const handleResumeDraft = async (): Promise<boolean> => {
+  const handleResumeDraft = async (opts?: { verifiedOnly?: boolean; bypassReadinessGate?: boolean }): Promise<boolean> => {
     if (
       studioArtifactPresentationStateRef.current === "hydrated" &&
       hasResumeArtifact &&
@@ -4037,7 +4138,7 @@ export default function StudioPage() {
     ) {
       return true;
     }
-    if (!guardGenerationAction("resume")) return false;
+    if (!guardGenerationAction("resume", { allowVerifiedOnlyFallback: Boolean(opts?.verifiedOnly) })) return false;
     const requestScope = generationWorkflowScope;
     const request = beginStudioGenerationRequest("resume", requestScope);
     if (!request) return false;
@@ -4056,7 +4157,7 @@ export default function StudioPage() {
       setIsResumeEditMode(false);
       setResumeEditError(null);
     }
-    if (!canProceedWithStudioDrafts) {
+    if (!opts?.bypassReadinessGate && !canProceedWithStudioDrafts) {
       finishStudioGenerationRequest("resume", request, "blocked", requestScope);
       setResumeState((current) => ({
         ...current,
@@ -4085,12 +4186,12 @@ export default function StudioPage() {
     setResumeState((current) => ({
       ...current,
       error: null,
-      tierGateError: null,
+      tierGateError: inputsChangedSinceLastFailure ? null : current.tierGateError,
       artifactFailure: null,
     }));
     setResumeWarningFlags([]);
     setResumeAuditId(undefined);
-    const payload = normalizeGenerationPayload(buildResumePayload(false), "resume");
+    const payload = normalizeGenerationPayload(buildResumePayload(Boolean(opts?.verifiedOnly)), "resume");
     try {
       const response = await fetch("/api/resume", {
         method: "POST",
@@ -4115,6 +4216,16 @@ export default function StudioPage() {
           responseStatus: response.status,
           requestId: request.requestId,
         });
+        if (
+          response.status === 403 &&
+          responsePayload &&
+          typeof responsePayload === "object" &&
+          (responsePayload as Record<string, unknown>).errorCode === "TIER_GATED"
+        ) {
+          const tierGate = parseTierGateError({ status: response.status, payload: responsePayload });
+          setResumeState((current) => ({ ...current, tierGateError: tierGate }));
+          return false;
+        }
         const tierGate = parseTierGateError({ status: response.status, payload: responsePayload });
         if (tierGate) {
           setResumeState((current) => ({ ...current, tierGateError: tierGate }));
@@ -4141,9 +4252,11 @@ export default function StudioPage() {
               ...current,
               error: [blockedState.body, ...blockedState.reasons].filter(Boolean).join(" "),
             }));
+            lastFailureSignatureRef.current = generationInputSignature;
             return false;
           }
         }
+        lastFailureSignatureRef.current = generationInputSignature;
         throw new Error(formatErrorMessage(responsePayload, "Resume generation failed."));
       }
       const presenter = presentResumeGeneration(responsePayload);
@@ -4168,6 +4281,7 @@ export default function StudioPage() {
         }));
         setResumeWarningFlags([]);
         setResumeAuditId(undefined);
+        lastFailureSignatureRef.current = generationInputSignature;
         return false;
       }
       if (presenter.status === "error") {
@@ -4184,6 +4298,7 @@ export default function StudioPage() {
         }));
         setResumeWarningFlags([]);
         setResumeAuditId(undefined);
+        lastFailureSignatureRef.current = generationInputSignature;
         return false;
       }
       if (presenter.status === "unknown") {
@@ -4231,6 +4346,7 @@ export default function StudioPage() {
           ...current,
           error: GENERATION_TRUST_FALLBACK_ERROR,
         }));
+        lastFailureSignatureRef.current = generationInputSignature;
         return false;
       }
 
@@ -4507,7 +4623,7 @@ export default function StudioPage() {
     }
   }
 
-  const handleCoverDraft = async (): Promise<boolean> => {
+  const handleCoverDraft = async (opts?: { verifiedOnly?: boolean; bypassReadinessGate?: boolean }): Promise<boolean> => {
     if (
       studioArtifactPresentationStateRef.current === "hydrated" &&
       hasCoverLetterArtifact &&
@@ -4515,12 +4631,12 @@ export default function StudioPage() {
     ) {
       return true;
     }
-    if (!guardGenerationAction("cover_letter")) return false;
+    if (!guardGenerationAction("cover_letter", { allowVerifiedOnlyFallback: Boolean(opts?.verifiedOnly) })) return false;
     const requestScope = generationWorkflowScope;
     const request = beginStudioGenerationRequest("cover_letter", requestScope);
     if (!request) return false;
     setUnlockGenerationConfirmation(null);
-    if (!canProceedWithStudioDrafts) {
+    if (!opts?.bypassReadinessGate && !canProceedWithStudioDrafts) {
       finishStudioGenerationRequest("cover_letter", request, "blocked", requestScope);
       setCoverState((current) => ({
         ...current,
@@ -4549,13 +4665,13 @@ export default function StudioPage() {
     setCoverState((current) => ({
       ...current,
       error: null,
-      tierGateError: null,
+      tierGateError: inputsChangedSinceLastFailure ? null : current.tierGateError,
       artifactFailure: null,
     }));
     setCoverWarningFlags([]);
     setCoverAuditId(undefined);
     setCoverLetterComplianceBlocked(null);
-    const payload = normalizeGenerationPayload(buildCoverLetterPayload(false), "cover_letter");
+    const payload = normalizeGenerationPayload(buildCoverLetterPayload(Boolean(opts?.verifiedOnly)), "cover_letter");
     try {
       const response = await fetch("/api/cover-letters", {
         method: "POST",
@@ -4580,6 +4696,16 @@ export default function StudioPage() {
           responseStatus: response.status,
           requestId: request.requestId,
         });
+        if (
+          response.status === 403 &&
+          responsePayload &&
+          typeof responsePayload === "object" &&
+          (responsePayload as Record<string, unknown>).errorCode === "TIER_GATED"
+        ) {
+          const tierGate = parseTierGateError({ status: response.status, payload: responsePayload });
+          setCoverState((current) => ({ ...current, tierGateError: tierGate }));
+          return false;
+        }
         if (response.status === 409) {
           const existingId = readDuplicateCoverLetterId(responsePayload);
           if (existingId) {
@@ -4605,9 +4731,11 @@ export default function StudioPage() {
               reasonCode: "compliance_blocked",
             });
             applyCoverLetterComplianceBlocked(blockedState);
+            lastFailureSignatureRef.current = generationInputSignature;
             return false;
           }
         }
+        lastFailureSignatureRef.current = generationInputSignature;
         const tierGate = parseTierGateError({ status: response.status, payload: responsePayload });
         if (tierGate) {
           setCoverState((current) => ({ ...current, tierGateError: tierGate }));
@@ -4642,6 +4770,7 @@ export default function StudioPage() {
           reasons: initialPresenter.display.reasons,
           cta: initialPresenter.display.cta,
         });
+        lastFailureSignatureRef.current = generationInputSignature;
         return false;
       }
       if (initialPresenter.status !== "success") {
@@ -4690,6 +4819,7 @@ export default function StudioPage() {
           ...current,
           error: GENERATION_TRUST_FALLBACK_ERROR,
         }));
+        lastFailureSignatureRef.current = generationInputSignature;
         return false;
       }
 
@@ -4810,6 +4940,15 @@ export default function StudioPage() {
     },
     [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, requestedAnalysisId],
   );
+
+  const handleGenerateDraftAnyway = useCallback(async () => {
+    if (draftAnywayRequestedRef.current) return;
+    draftAnywayRequestedRef.current = true;
+    setDraftAnywayRequested(true);
+
+    await handleResumeDraft({ verifiedOnly: true, bypassReadinessGate: true });
+    await handleCoverDraft({ verifiedOnly: true, bypassReadinessGate: true });
+  }, [handleCoverDraft, handleResumeDraft]);
 
   const openClaimEditModal = useCallback(
     (claim: ArtifactClaimRef) => {
@@ -5682,7 +5821,7 @@ export default function StudioPage() {
         >
           Refine
         </Link>
-        {activeArtifactFailure ? (
+        {activeArtifactFailure && canRetryGeneration ? (
           <FormButton
             variant="secondary"
             onClick={
@@ -5693,7 +5832,7 @@ export default function StudioPage() {
           >
             Retry
           </FormButton>
-        ) : showGenericRetry ? (
+        ) : showGenericRetry && canRetryGeneration ? (
           <FormButton
             variant="secondary"
             onClick={() => {
@@ -5706,7 +5845,7 @@ export default function StudioPage() {
           </FormButton>
         ) : null}
       </div>
-      {activeArtifactFailure ? (
+      {activeArtifactFailure && canRetryGeneration ? (
         <ArtifactFailureState
           failure={activeArtifactFailure}
           onRetry={
@@ -5994,6 +6133,40 @@ export default function StudioPage() {
     coverState,
   });
 
+  const showReadinessRecoveryExperience =
+    (resumeGating.accessState === "allowed" &&
+      (resumeGating.primaryBlocker === "readiness_block" || resumeGating.primaryBlocker === "draft_only")) ||
+    (coverGating.accessState === "allowed" &&
+      (coverGating.primaryBlocker === "readiness_block" || coverGating.primaryBlocker === "draft_only")) ||
+    (pageTruth.state === "blocked_evidence" &&
+      (!shouldGenerateDocuments(analysisScore) || productReadiness?.state === "BLOCKED"));
+
+  const draftAnywayEligible =
+    isDraftAnywayEligible(analysisScore, resumeGating) || isDraftAnywayEligible(analysisScore, coverGating);
+
+  const readinessImpactedArtifacts = useMemo(() => {
+    const impacted: string[] = [];
+    if (
+      resumeGating.accessState === "allowed" &&
+      (resumeGating.readinessState === "blocked" || resumeGating.readinessState === "draft_only")
+    ) {
+      impacted.push("Resume");
+    }
+    if (
+      coverGating.accessState === "allowed" &&
+      (coverGating.readinessState === "blocked" || coverGating.readinessState === "draft_only")
+    ) {
+      impacted.push("Cover letter");
+    }
+    return impacted;
+  }, [coverGating.accessState, coverGating.readinessState, resumeGating.accessState, resumeGating.readinessState]);
+  const readinessMessageScopeSuffix =
+    readinessImpactedArtifacts.length === 0
+      ? ""
+      : readinessImpactedArtifacts.length === 1
+        ? ` (${readinessImpactedArtifacts[0]})`
+        : ` (${readinessImpactedArtifacts.join(" + ")})`;
+
   const showPrimaryGeneratingNotice =
     pageTruth.isGenerating && (pageTruth.state === "ready" || pageTruth.state === "draftable_limited");
   const showInstantDraftHero =
@@ -6002,10 +6175,30 @@ export default function StudioPage() {
     pageTruth.state === "generated_reviewable" ||
     (pageTruth.state === "failed" && (hasCompletedGeneration || Boolean(resumeState.response) || Boolean(coverState.response)));
 
+  const highestImpactEvidenceActions = useMemo(() => {
+    const candidates = canonicalUnverifiedRequirements.length
+      ? canonicalUnverifiedRequirements
+      : evidenceLedger.remainingWeakAreas;
+    return candidates
+      .map((value) => String(value ?? "").replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .slice(0, 2);
+  }, [canonicalUnverifiedRequirements, evidenceLedger.remainingWeakAreas]);
+  const strengthenPrimaryHref = useMemo(() => {
+    const focus = highestImpactEvidenceActions[0];
+    return focus ? buildClaimVerificationHref(focus) : fitReviewHref;
+  }, [buildClaimVerificationHref, fitReviewHref, highestImpactEvidenceActions]);
+
+  const showArtifactMaterials =
+    !studioBlockedByNextAction &&
+    (!studioGenerationRenderState.isBlocked ||
+      resumeGating.primaryBlocker === "tier_gate" ||
+      coverGating.primaryBlocker === "tier_gate");
+
   return (
     <PageShell className="space-y-4 pb-4">
       {showInstantDraftHero ? instantDraftHero : null}
-      {pageTruth.state === "blocked_evidence" ? unlockEntryPanel : null}
+      {showReadinessRecoveryExperience ? unlockEntryPanel : null}
       {unlockGenerationLoadingMessage && showPrimaryGeneratingNotice ? (
         <Alert intent="info" title="Verified evidence in use">
           {unlockGenerationLoadingMessage}
@@ -6048,107 +6241,180 @@ export default function StudioPage() {
         data-runtime-selected-baseline-id={selectedBaselineId || ""}
         data-runtime-selected-baseline-version-id={selectedBaselineVersionId || ""}
       >
+        {null}
         {confidenceUpgradeMessage ? (
           <div className="rounded-2xl border border-emerald-300/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-50">
             {confidenceUpgradeMessage}
           </div>
         ) : null}
-        {studioDraftMode ? (
+        {studioDraftMode || draftAnywayRequested ? (
           <div
             className="rounded-2xl border border-amber-300/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-50"
             data-testid="studio-results-ready-banner"
           >
-            {generationSupportState === "partial"
-              ? "Generated from partially verified evidence. Add verified examples to strengthen it."
-              : "Generated from verified evidence."}
+            {draftAnywayRequested
+              ? "This draft is based only on your current verified experience. It may need stronger evidence before it is competitive."
+              : generationSupportState === "partial"
+                ? "Generated from partially verified evidence. Add verified examples to strengthen it."
+                : "Generated from verified evidence."}
           </div>
         ) : null}
-        <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-            {generationSupportState === "strong"
-              ? "Ready"
-              : generationSupportState === "partial"
-                ? "Draft"
-                : "Blocked"}
-          </p>
-          <p className="text-sm text-slate-300">
-            {typeof analysisScore === "number" ? `Fit score ${Math.round(analysisScore)} ? ` : "Fit score unavailable ? "}
-            {(selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company")} -{" "}
-            {(selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Unknown role")}
-          </p>
-          <h1 className="text-3xl font-semibold tracking-tight text-slate-50 md:text-[34px]">
-            {authorityStateTitle}
-          </h1>
-          <p className="text-base leading-7 text-slate-200">{authorityStateExplanation}</p>
-          <p className="text-sm font-medium text-slate-200">{primaryNextAction.label}</p>
-          <p className="text-sm text-slate-400">
-            {generationSupportState === "strong"
-              ? "Generated from verified evidence."
-              : generationSupportState === "partial"
-                ? "Generated from partially verified evidence. Verify key claims to strengthen it."
-                : "Based on your analyzed role context and verified baseline evidence."}
-          </p>
-        </div>
-        <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-decision-panel">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Decision + Action</p>
-          <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-50">
-            {generationSupportState === "strong"
-              ? "Strong output: you can use this now with confidence."
-              : generationSupportState === "partial"
-              ? "Draft output: usable now, stronger with refinement."
-              : "Limited output: not ready yet."}
-          </h2>
-          <p className="mt-2 text-sm text-slate-200">
-            {generationSupportState === "strong"
-              ? "Built directly from your verified experience and aligned to the role."
-              : generationSupportState === "partial"
-                ? "Built from partially verified evidence and aligned to key role requirements."
-                : "Built from your verified experience, but a few signals still need strengthening."}
-          </p>
-          {generationSupportState !== "strong" ? (
-            <div className="mt-4 space-y-2">
-              <p className="text-sm font-semibold text-slate-100">
-                {generationSupportState === "partial" ? "Why this is still worth using" : "What's holding this back"}
+        {showReadinessRecoveryExperience && !studioDraftMode ? (
+          <>
+            <section className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-blocked-primary-action">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                Strengthen your experience to unlock stronger documents
               </p>
-              <ul className="space-y-1 text-sm text-slate-300">
-                {(canonicalUnverifiedRequirements.length
-                  ? canonicalUnverifiedRequirements.slice(0, 4)
-                  : evidenceLedger.remainingWeakAreas.slice(0, 4)
-                ).map((item) => (
-                  <li
-                    key={`studio-decision-gap-${item}`}
-                    className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2"
+              <p className="text-sm text-slate-300">
+                Use the highest-impact evidence gaps from this analysis.
+              </p>
+              <div className="space-y-2">
+                {highestImpactEvidenceActions.map((action) => (
+                  <Link
+                    key={`studio-strengthen-action-${action}`}
+                    href={buildClaimVerificationHref(action)}
+                    className="block rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.06]"
                   >
-                    {item}
-                  </li>
+                    {action}
+                  </Link>
                 ))}
-              </ul>
-              <p className="text-sm font-semibold text-slate-100">
-                {generationSupportState === "partial" ? "If you want to sharpen it" : "Fastest way to improve"}
-              </p>
-              <ul className="space-y-1 text-sm text-slate-300">
-                {generationSupportState === "partial" ? (
-                  <>
-                    <li>This draft is grounded in baseline evidence and can be strengthened later.</li>
-                    <li>Run Fit Review later if you want stronger positioning.</li>
-                  </>
-                ) : (
-                  <>
-                    <li>Run Fit Review to strengthen missing areas.</li>
-                    <li>Add measurable outcomes to your baseline experience.</li>
-                  </>
-                )}
-              </ul>
+              </div>
+              <div className="flex flex-wrap gap-3 pt-1">
+                <Link
+                  href={strengthenPrimaryHref}
+                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                >
+                  Strengthen my experience
+                </Link>
+                <Link
+                  href={fitReviewHref}
+                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
+                >
+                  View fit review
+                </Link>
+              </div>
+            </section>
+
+            <div className="rounded-2xl border border-amber-300/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-50" data-testid="studio-blocked-message">
+              We can’t generate strong documents yet because key experience isn’t clearly supported.{readinessMessageScopeSuffix}
             </div>
-          ) : null}
-        </div>
-        <StudioArtifactQualityPanel
-          model={artifactQuality}
-          confidence={artifactQuality.confidence}
-          onVerifyClaim={verifyClaim}
-          onEditClaim={openClaimEditModal}
-          onDismissClaim={dismissClaim}
-        />
+
+            {draftAnywayEligible ? (
+            <section className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-draft-anyway">
+              <p className="text-sm font-semibold text-slate-100">Draft mode</p>
+              <p className="text-sm text-slate-300">
+                Generate a draft using only verified baseline inputs. No inferred experience is added.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <FormButton
+                  onClick={() => void handleGenerateDraftAnyway()}
+                  disabled={pageTruth.isGenerating || resumeGenerating || coverGenerating}
+                >
+                  Generate draft anyway
+                </FormButton>
+              </div>
+            </section>
+            ) : null}
+
+            {prioritizedStrengtheningSuggestions.length ? (
+              <section
+                className="rounded-2xl border border-sky-300/25 bg-slate-950/35 p-4"
+                data-testid="studio-strengthening-guidance"
+              >
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-100">
+                    Fastest ways to strengthen this
+                  </p>
+                </div>
+                <ul className="mt-3 space-y-2 text-sm text-slate-300">
+                  {prioritizedStrengtheningSuggestions.slice(0, 2).map((suggestion) => (
+                    <li key={`studio-strengthen-${suggestion.requirement}`}>
+                      <Link
+                        href={buildClaimVerificationHref(suggestion.requirement)}
+                        className="inline-flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 font-semibold text-slate-100 transition hover:bg-white/[0.06]"
+                      >
+                        <span>{suggestion.action}</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                {generationSupportState === "strong"
+                  ? "Ready"
+                  : generationSupportState === "partial"
+                    ? "Draft"
+                    : "Blocked"}
+              </p>
+              <p className="text-sm text-slate-300">
+                {typeof analysisScore === "number" ? `Fit score ${Math.round(analysisScore)} · ` : "Fit score unavailable · "}
+                {(selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company")} ·{" "}
+                {(selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Unknown role")}
+              </p>
+              <h1 className="text-3xl font-semibold tracking-tight text-slate-50 md:text-[34px]">
+                {authorityStateTitle}
+              </h1>
+              <p className="text-base leading-7 text-slate-200">{authorityStateExplanation}</p>
+              <p className="text-sm font-medium text-slate-200">{primaryNextAction.label}</p>
+              <p className="text-sm text-slate-400">
+                {generationSupportState === "strong"
+                  ? "Generated from verified evidence."
+                  : generationSupportState === "partial"
+                    ? "Generated from partially verified evidence. Verify key claims to strengthen it."
+                    : "Based on your analyzed role context and verified baseline evidence."}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-decision-panel">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Decision + Action</p>
+              <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-50">
+                {generationSupportState === "strong"
+                  ? "Strong output: you can use this now with confidence."
+                  : generationSupportState === "partial"
+                    ? "Draft output: usable now, stronger with refinement."
+                    : "Limited output: not ready yet."}
+              </h2>
+              <p className="mt-2 text-sm text-slate-200">
+                {generationSupportState === "strong"
+                  ? "Built directly from your verified experience and aligned to the role."
+                  : generationSupportState === "partial"
+                    ? "Built from partially verified evidence and aligned to key role requirements."
+                    : "Built from your verified experience, but a few signals still need strengthening."}
+              </p>
+              {generationSupportState !== "strong" ? (
+                <div className="mt-4 space-y-2">
+                  <p className="text-sm font-semibold text-slate-100">
+                    {generationSupportState === "partial" ? "Why this is still worth using" : "What's holding this back"}
+                  </p>
+                  <ul className="space-y-1 text-sm text-slate-300">
+                    {(canonicalUnverifiedRequirements.length
+                      ? canonicalUnverifiedRequirements.slice(0, 4)
+                      : evidenceLedger.remainingWeakAreas.slice(0, 4)
+                    ).map((item) => (
+                      <li
+                        key={`studio-decision-gap-${item}`}
+                        className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2"
+                      >
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+            <StudioArtifactQualityPanel
+              model={artifactQuality}
+              confidence={artifactQuality.confidence}
+              onVerifyClaim={verifyClaim}
+              onEditClaim={openClaimEditModal}
+              onDismissClaim={dismissClaim}
+            />
+          </>
+        )}
         {hasCompletedGeneration ? (
           <>
             {documentCritique ? (
@@ -6185,7 +6451,7 @@ export default function StudioPage() {
           {generationSupportState === "partial" ? (
             <>
               <FormButton
-                onClick={handleResumeDraft}
+                onClick={() => void handleResumeDraft()}
                 disabled={resumeGenerating}
                 className="bg-indigo-600 text-white hover:bg-indigo-500"
               >
@@ -6193,7 +6459,7 @@ export default function StudioPage() {
               </FormButton>
               <FormButton
                 variant="secondary"
-                onClick={handleCoverDraft}
+                onClick={() => void handleCoverDraft()}
                 disabled={coverGenerating}
               >
                 {coverGenerating ? "Generating..." : "Generate Cover Letter Draft"}
@@ -6236,7 +6502,7 @@ export default function StudioPage() {
           ) : (
             <>
               <FormButton
-                onClick={handleResumeDraft}
+                onClick={() => void handleResumeDraft()}
                 disabled={resumeGenerating}
                 className="bg-indigo-600 text-white hover:bg-indigo-500"
               >
@@ -6246,7 +6512,7 @@ export default function StudioPage() {
               </FormButton>
               <FormButton
                 variant="secondary"
-                onClick={handleCoverDraft}
+                onClick={() => void handleCoverDraft()}
                 disabled={coverGenerating}
               >
                 {coverGenerating
@@ -6295,7 +6561,7 @@ export default function StudioPage() {
             </p>
           ) : null}
         </section>
-      ) : generationSupportState === "blocked" && !studioDraftMode ? (
+      ) : !showReadinessRecoveryExperience && generationSupportState === "blocked" && !studioDraftMode ? (
         <RouteStateShell
           testId="studio-evidence-blocked-panel"
           tone="warning"
@@ -6308,7 +6574,8 @@ export default function StudioPage() {
           }
         />
       ) : null}
-      {prioritizedStrengtheningSuggestions.length > 0 &&
+      {!showReadinessRecoveryExperience &&
+      prioritizedStrengtheningSuggestions.length > 0 &&
       (generationSupportState !== "strong" ||
         recentIntent === "refine_intent" ||
         recentIntent === "used_not_committed") ? (
@@ -6573,7 +6840,7 @@ export default function StudioPage() {
       <StudioNextMove move={studioNextMove} />
       <DocumentStrategyPlanSummary plan={documentStrategyPlan} />
 
-      {!studioGenerationRenderState.isBlocked && !studioBlockedByNextAction ? (
+      {showArtifactMaterials ? (
       <>
       <section className="space-y-1 px-1">
         <h2 className="text-xl font-semibold text-slate-100">Your application materials</h2>
@@ -6879,7 +7146,7 @@ export default function StudioPage() {
           <div className="flex flex-wrap gap-2">
             <FormButton
               variant="secondary"
-              onClick={handleCoverDraft}
+              onClick={() => void handleCoverDraft()}
               disabled={coverGenerating}
               data-testid="studio-cover-generate-button"
             >
@@ -6933,7 +7200,7 @@ export default function StudioPage() {
               </ul>
             ) : null}
             <div className="flex flex-wrap items-center gap-3">
-              <FormButton onClick={handleCoverDraft} disabled={coverGenerating}>
+              <FormButton onClick={() => void handleCoverDraft()} disabled={coverGenerating}>
                 Regenerate safely
               </FormButton>
               {coverLetterComplianceBlocked.cta ? (
@@ -6948,11 +7215,33 @@ export default function StudioPage() {
           </div>
         ) : null}
 
-        {coverState.tierGateError ? (
-          <Alert intent="warning">
-            {coverState.tierGateError.message ??
-              "Cover letter export is limited by your subscription tier."}
-          </Alert>
+        {coverGating.primaryBlocker === "tier_gate" && coverState.tierGateError ? (
+          <section
+            className="space-y-3 rounded-2xl border border-amber-300/35 bg-amber-500/10 p-4 text-amber-50 shadow-sm"
+            data-testid="studio-cover-tier-gate"
+          >
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-100">
+                Plan required
+              </p>
+              <h3 className="text-base font-semibold text-slate-50">Cover letter generation requires Pro</h3>
+              <p className="text-sm text-amber-50">This feature is available on the Pro plan.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href="/pricing"
+                className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-amber-300 px-5 py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-amber-200"
+              >
+                Upgrade to Pro
+              </Link>
+              <Link
+                href={fitReviewHref}
+                className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
+              >
+                View fit review
+              </Link>
+            </div>
+          </section>
         ) : null}
         {coverWarningFlags.length ? null : null}
         {coverState.error && !coverLetterComplianceBlocked ? null : null}
@@ -7128,9 +7417,18 @@ export default function StudioPage() {
                 </p>
                 <p className="text-sm text-slate-200">{toConstraintMessage(coverState.error)}</p>
                 <div className="flex justify-end">
-                  <FormButton onClick={handleCoverDraft} disabled={coverGenerating}>
-                    Retry generation
-                  </FormButton>
+                  {canRetryGeneration ? (
+                    <FormButton onClick={() => void handleCoverDraft()} disabled={coverGenerating}>
+                      Retry generation
+                    </FormButton>
+                  ) : (
+                    <Link
+                      href={fitReviewHref}
+                      className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
+                    >
+                      Strengthen my experience
+                    </Link>
+                  )}
                 </div>
               </div>
             ) : (
