@@ -6231,6 +6231,7 @@ export default function StudioPage() {
         coverGenerating ||
         autoGenerationInFlight,
     ),
+    hasAnyArtifacts: Boolean(hasCompletedGeneration || resumeState.response || coverState.response),
     resumeState,
     coverState,
   });

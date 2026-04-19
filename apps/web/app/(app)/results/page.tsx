@@ -942,6 +942,8 @@ type OpportunityMapSectionProps = {
     scoreImproved: boolean | null;
     gapsResolvable: boolean;
   };
+  finalGenerationOutcome?: "generated" | "needs_attention" | null;
+  finalGenerationMessage?: string | null;
   generationPhase?: ResultsGenerationPhase;
   generationRecoveryUi?: "finalizing" | "exhausted" | null;
 };
@@ -1029,6 +1031,8 @@ export function OpportunityMapSection({
   blockedState,
   predictiveUnlock,
   weakFitRecovery,
+  finalGenerationOutcome = null,
+  finalGenerationMessage = null,
   generationPhase = "not_started",
   generationRecoveryUi = null,
 }: OpportunityMapSectionProps) {
@@ -1090,6 +1094,20 @@ export function OpportunityMapSection({
             : "You can generate now. Tighten a few examples to strengthen the output."
           : "Your profile is grounded enough to generate in Studio.";
   const decisionNarrative = useMemo(() => {
+    if (finalGenerationOutcome === "generated") {
+      return {
+        headline: "Your documents are ready",
+        body: finalGenerationMessage || "Your drafts are ready below. Refinement comes next.",
+      };
+    }
+    if (finalGenerationOutcome === "needs_attention") {
+      return {
+        headline: "Generation needs attention",
+        body:
+          finalGenerationMessage ||
+          "At least one draft did not complete. Open Studio to retry and review whatâ€™s available.",
+      };
+    }
     if (generationRecoveryUi === "finalizing") {
       return {
         headline: "Finalizing your documents...",
@@ -2889,7 +2907,11 @@ export default function ResultsPage() {
   useEffect(() => {
     if (!generationPairIds) return;
     if (hasCompletedGenerationRef.current) return;
-    if (!generationLifecycle.shouldPoll) return;
+
+    // Always fetch at least once to reconcile server-side artifact truth, even if polling is not active.
+    const shouldFetchArtifacts =
+      generationLifecycle.shouldPoll || !hasAnyArtifactStatus(resultsArtifactStatuses);
+    if (!shouldFetchArtifacts) return;
 
     let cancelled = false;
     const fetchArtifacts = async () => {
@@ -2918,6 +2940,7 @@ export default function ResultsPage() {
         applyArtifactSnapshot(statuses, derivedPhase);
 
         if (
+          generationLifecycle.shouldPoll &&
           shouldAutoRecoverGeneration &&
           !generationStarted &&
           resultsGenerationPhase === "not_started" &&
@@ -3676,6 +3699,9 @@ export default function ResultsPage() {
     if (!generationPairIds) return;
     if (generationRecoveryExhausted) return;
     if (generationRecoveryStage !== "idle") return;
+    const generationStarted =
+      hasStartedGenerationRef.current || typeof generationRequestedAtRef.current === "number";
+    if (generationStarted) return;
     const hasArtifactFailure =
       resultsArtifactStatuses.resume === "failed" || resultsArtifactStatuses.coverLetter === "failed";
     if (!hasArtifactFailure) return;
@@ -4808,13 +4834,19 @@ export default function ResultsPage() {
           pairWorkflowState.pairStatus === "generation_failed" ? (
             <>
               <p className="mt-2 text-sm font-medium text-slate-200">
-                {pairWorkflowState.pairStatus === "generating"
+                {opportunityMapGenerationRecoveryUi === "finalizing"
+                  ? "Finalizing your documents..."
+                  : pairWorkflowState.pairStatus === "generating"
                   ? "Generating your documents..."
                   : pairWorkflowState.pairStatus === "generated"
                     ? "Your documents are ready."
                     : "Generation failed."}
               </p>
-              {pairWorkflowState.pairStatus === "generating" ? (
+              {opportunityMapGenerationRecoveryUi === "finalizing" ? (
+                <p className="mt-1 text-sm text-slate-300">
+                  Keep this tab open. Weâ€™ll update as soon as the drafts are ready.
+                </p>
+              ) : pairWorkflowState.pairStatus === "generating" ? (
                 <p className="mt-1 text-sm text-slate-300">
                   Keep this tab open. You can review drafts in Studio as soon as they finish.
                 </p>
@@ -4822,13 +4854,13 @@ export default function ResultsPage() {
                 <p className="mt-1 text-sm text-slate-300">
                   Review the drafts below, then refine in Studio if needed.
                 </p>
-              ) : (
+              ) : generationRecoveryExhausted ? (
                 <p className="mt-1 text-sm text-slate-300">
-                  Resume:{" "}
+                  Draft status:{" "}
                   <span className="font-medium text-slate-100">{pairWorkflowState.resumeStatus}</span> · Cover letter:{" "}
                   <span className="font-medium text-slate-100">{pairWorkflowState.coverLetterStatus}</span>
                 </p>
-              )}
+              ) : null}
             </>
           ) : canonicalResultsDecision.readinessState === "READY" ? (
             <>
@@ -4861,8 +4893,11 @@ export default function ResultsPage() {
             </>
           )}
           <div className="mt-3">
-            {oneClickResultsCta ? (
-              pairWorkflowState.primaryCta === "fix_context" ? (
+            {(() => {
+              const heroPrimaryCta = opportunityMapPrimaryCta ?? oneClickResultsCta;
+              const isOverrideCta = heroPrimaryCta !== oneClickResultsCta;
+              if (!heroPrimaryCta) return null;
+              return pairWorkflowState.primaryCta === "fix_context" ? (
                 <button
                   type="button"
                   data-testid="results-hero-primary-cta"
@@ -4884,7 +4919,7 @@ export default function ResultsPage() {
                   type="button"
                   data-testid="results-hero-primary-cta"
                   onClick={() => {
-                    oneClickResultsCta.onClick?.();
+                    oneClickResultsCta?.onClick?.();
                     router.push(studioNavigationHref);
                   }}
                   className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
@@ -4892,12 +4927,12 @@ export default function ResultsPage() {
                   Open in Studio
                 </button>
               ) : pairWorkflowState.primaryCta === "generate" ? (
-                oneClickResultsCta.disabled ? (
+                heroPrimaryCta.disabled ? (
                   <span
                     data-testid="results-hero-primary-cta"
                     className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2 text-sm font-semibold text-slate-400"
                   >
-                    {oneClickResultsCta.label}
+                    {heroPrimaryCta.label}
                   </span>
                 ) : (
                   <button
@@ -4907,26 +4942,28 @@ export default function ResultsPage() {
                       if (process.env.NODE_ENV !== "production") {
                         console.log("[RESULTS][GENERATE_CLICK]");
                       }
-                      oneClickResultsCta.onClick?.();
-                      if (shouldAutoRecoverGeneration) {
-                        void runGenerationRecovery({ force: true });
-                      } else {
-                        void triggerResultsGeneration();
+                      heroPrimaryCta.onClick?.();
+                      if (!isOverrideCta) {
+                        if (shouldAutoRecoverGeneration) {
+                          void runGenerationRecovery(generationRecoveryExhausted ? { force: true } : undefined);
+                        } else {
+                          void triggerResultsGeneration();
+                        }
                       }
                     }}
                     className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
                   >
-                    {oneClickResultsCta.label}
+                    {heroPrimaryCta.label}
                   </button>
                 )
-              ) : oneClickResultsCta.disabled ? (
+              ) : heroPrimaryCta.disabled ? (
                 <span
                   data-testid="results-hero-primary-cta"
                   className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2 text-sm font-semibold text-slate-400"
                 >
-                  {oneClickResultsCta.label}
+                  {heroPrimaryCta.label}
                 </span>
-              ) : oneClickResultsCta.href ? (
+              ) : heroPrimaryCta.href ? (
                 isResultsGenerationPrimaryAction || canonicalResultsDecision.primaryAction.kind === "invoke" ? (
                   <button
                     type="button"
@@ -4935,25 +4972,25 @@ export default function ResultsPage() {
                       if (process.env.NODE_ENV !== "production") {
                         console.log("[RESULTS][GENERATE_CLICK]");
                       }
-                      oneClickResultsCta.onClick?.();
+                      heroPrimaryCta.onClick?.();
                       void triggerResultsGeneration();
                     }}
                     className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
                   >
-                    {oneClickResultsCta.label}
+                    {heroPrimaryCta.label}
                   </button>
                 ) : (
                   <a
                     data-testid="results-hero-primary-cta"
-                    href={oneClickResultsCta.href}
-                    onClick={oneClickResultsCta.onClick}
+                    href={heroPrimaryCta.href}
+                    onClick={heroPrimaryCta.onClick}
                     className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
                   >
-                    {oneClickResultsCta.label}
+                    {heroPrimaryCta.label}
                   </a>
                 )
               ) : null
-            ) : null}
+            })()}
           </div>
           {pairWorkflowState.pairStatus === "generated" ? (
             <div className="mt-6 space-y-5" data-testid="results-generated-documents">
@@ -5147,6 +5184,21 @@ export default function ResultsPage() {
                     weakFitRecovery={weakFitRecovery}
                     reliabilityFacts={reliabilityFacts}
                     secondaryAction={secondaryAction}
+                    finalGenerationOutcome={
+                      pairWorkflowState.pairStatus === "generated"
+                        ? "generated"
+                        : pairWorkflowState.pairStatus === "generation_failed" &&
+                            (pairWorkflowState.resumeStatus === "ready" ||
+                              pairWorkflowState.coverLetterStatus === "ready")
+                          ? "needs_attention"
+                          : null
+                    }
+                    finalGenerationMessage={
+                      pairWorkflowState.pairStatus === "generated" &&
+                      (pairWorkflowState.resumeStatus === "failed" || pairWorkflowState.coverLetterStatus === "failed")
+                        ? "Draft created using available experience. You can refine it further."
+                        : null
+                    }
                     generationPhase={generationCuePhase}
                     generationRecoveryUi={opportunityMapGenerationRecoveryUi}
                   />

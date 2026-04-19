@@ -118,12 +118,12 @@ describe("results generation transition", () => {
     render(<ResultsPage />);
 
     const cta = await screen.findByTestId("results-hero-primary-cta");
-    expect(cta).toHaveTextContent("Generate Documents");
+    expect(cta).toHaveTextContent("Generate Resume & Cover Letter");
 
     fireEvent.click(cta);
 
     await waitFor(() => {
-      expect(screen.getByTestId("results-hero-primary-cta")).not.toHaveTextContent("Generate Documents");
+      expect(screen.getByTestId("results-hero-primary-cta")).not.toHaveTextContent("Generate Resume & Cover Letter");
     });
     expect(screen.queryByText("Strong match. Ready for document generation.")).toBeNull();
 

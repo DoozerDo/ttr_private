@@ -10,6 +10,7 @@ describe("Studio page truth matrix", () => {
       trustGate: { allowed: false, reason: "blocked", baselineStatusLabel: "incomplete", roleAlignmentLabel: "needs improvement" },
       hasCompletedGeneration: false,
       isGenerating: true,
+      hasAnyArtifacts: false,
       resumeState: { error: null, artifactFailure: null },
       coverState: { error: null, artifactFailure: null },
     });
@@ -25,6 +26,7 @@ describe("Studio page truth matrix", () => {
       trustGate: { allowed: true, reason: null, baselineStatusLabel: "verified", roleAlignmentLabel: "strong match" },
       hasCompletedGeneration: false,
       isGenerating: true,
+      hasAnyArtifacts: false,
       resumeState: { error: null, artifactFailure: null },
       coverState: { error: null, artifactFailure: { explanation: "Cover generation failed" } },
     });
@@ -40,6 +42,7 @@ describe("Studio page truth matrix", () => {
       trustGate: { allowed: true, reason: null, baselineStatusLabel: "verified", roleAlignmentLabel: "strong match" },
       hasCompletedGeneration: true,
       isGenerating: false,
+      hasAnyArtifacts: true,
       resumeState: { error: null, artifactFailure: null },
       coverState: { error: null, artifactFailure: null },
     });
@@ -55,6 +58,7 @@ describe("Studio page truth matrix", () => {
       trustGate: { allowed: true, reason: null, baselineStatusLabel: "verified", roleAlignmentLabel: "competitive" },
       hasCompletedGeneration: false,
       isGenerating: true,
+      hasAnyArtifacts: false,
       resumeState: { error: null, artifactFailure: null },
       coverState: { error: null, artifactFailure: null },
     });
@@ -63,4 +67,3 @@ describe("Studio page truth matrix", () => {
     expect(truth.isGenerating).toBe(true);
   });
 });
-

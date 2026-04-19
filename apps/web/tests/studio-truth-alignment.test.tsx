@@ -310,8 +310,8 @@ describe("Studio truth alignment", () => {
     renderStudio();
 
     await waitFor(() => expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText("Document generation needs attention")).toBeInTheDocument());
     await waitFor(() => expect(screen.getByTestId("studio-instant-resume-panel")).toBeInTheDocument());
+    expect(screen.queryByText("Document generation needs attention")).toBeNull();
     expect(screen.queryByText(/We are generating your application draft now/i)).toBeNull();
     expect(screen.queryByText(/Generation blocked/i)).toBeNull();
   });

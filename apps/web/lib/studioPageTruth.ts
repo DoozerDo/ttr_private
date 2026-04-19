@@ -25,11 +25,22 @@ type BuildStudioPageTruthInput = {
   trustGate?: TrustGateDecision | null;
   hasCompletedGeneration: boolean;
   isGenerating: boolean;
+  hasAnyArtifacts: boolean;
   resumeState: DocumentStateLike;
   coverState: DocumentStateLike;
 };
 
 export function buildStudioPageTruth(input: BuildStudioPageTruthInput): StudioPageTruth {
+  if (input.hasAnyArtifacts) {
+    if (input.isGenerating) {
+      if (input.generationSupportState === "partial") {
+        return { state: "draftable_limited", isGenerating: true };
+      }
+      return { state: "ready", isGenerating: true };
+    }
+    return { state: "generated_reviewable", isGenerating: false };
+  }
+
   const hasArtifactFailure = Boolean(
     input.resumeState?.error ||
       input.coverState?.error ||
