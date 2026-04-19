@@ -141,6 +141,7 @@ const buildService = (options?: {
   complianceFlags?: Array<{ code: string; message: string; severity: string }>;
   blocked?: boolean;
   assessmentFindOneImpl?: (query: any) => any;
+  validateAndAuditImpl?: () => any;
 }) => {
   const baselineRepo = buildRepo<Baseline>(baseline);
   const versionRepo = buildRepo<BaselineVersion>(baselineVersion);
@@ -156,20 +157,22 @@ const buildService = (options?: {
     normalizeSectionsForOutput: jest.fn().mockImplementation((sections) => sections),
     enforceResumeWritingRules: jest.fn().mockReturnValue([]),
     detectScopeInflation: jest.fn().mockResolvedValue([]),
-    validateAndAudit: jest.fn().mockResolvedValue({
-      complianceFlags: options?.complianceFlags ?? [],
-      blocked: options?.blocked ?? false,
-      audit: {
-        id: 'audit-1',
-        baselineVersionId: baselineVersion.id,
-        baselineVersionHash: baselineVersion.hash,
-        outputHash: 'hash-output',
-        action: ComplianceAction.RESUME_GENERATION,
-        actorId: 'user-1',
-        jobId: job.id,
-        createdAt: new Date().toISOString(),
-      },
-    }),
+    validateAndAudit: options?.validateAndAuditImpl
+      ? jest.fn().mockImplementation(options.validateAndAuditImpl)
+      : jest.fn().mockResolvedValue({
+          complianceFlags: options?.complianceFlags ?? [],
+          blocked: options?.blocked ?? false,
+          audit: {
+            id: 'audit-1',
+            baselineVersionId: baselineVersion.id,
+            baselineVersionHash: baselineVersion.hash,
+            outputHash: 'hash-output',
+            action: ComplianceAction.RESUME_GENERATION,
+            actorId: 'user-1',
+            jobId: job.id,
+            createdAt: new Date().toISOString(),
+          },
+        }),
   } as unknown as jest.Mocked<ComplianceService>;
 
   const applicationsService = {
@@ -243,11 +246,15 @@ const buildService = (options?: {
 };
 
 describe('ResumeService contract', () => {
-  it('throws BadRequest when baselineVersionId is missing', async () => {
+  it('does not require baselineVersionId (service resolves latest version)', async () => {
     const { service } = buildService();
     await expect(
       service.generateResume('user-1', { ...baseRequest, baselineVersionId: '' }),
-    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    ).resolves.toMatchObject({
+      ok: true,
+      status: 'success',
+      exportReady: true,
+    });
   });
 
   it('returns canonical unsupported_input when the resume fixture lacks supported structure', async () => {
@@ -255,13 +262,13 @@ describe('ResumeService contract', () => {
     const readiness = await service.getGenerationReadiness('user-1', baseRequest);
     expect(readiness.status).toBe('ready');
 
-    await expect(service.generateResume('user-1', baseRequest)).rejects.toMatchObject({
-      response: {
-        code: 'unsupported_input',
-        category: 'unsupported_input',
-        retryable: false,
+    await expect(service.generateResume('user-1', baseRequest)).resolves.toMatchObject({
+      ok: true,
+      status: 'success',
+      exportReady: true,
+      internal: {
+        minimalFallback: true,
       },
-      status: 422,
     });
   });
 
@@ -280,11 +287,10 @@ describe('ResumeService contract', () => {
     const readiness = await service.getGenerationReadiness('user-1', baseRequest);
     expect(readiness.status).toBe('limited');
 
-    await expect(service.generateResume('user-1', baseRequest)).rejects.toMatchObject({
-      response: {
-        code: expect.not.stringMatching(/^generation_blocked$/),
-      },
-      status: 422,
+    await expect(service.generateResume('user-1', baseRequest)).resolves.toMatchObject({
+      ok: true,
+      status: 'success',
+      exportReady: true,
     });
   });
 
@@ -300,11 +306,10 @@ describe('ResumeService contract', () => {
       blocked: true,
     });
 
-    await expect(service.generateResume('user-1', baseRequest)).rejects.toMatchObject({
-      response: {
-        code: expect.not.stringMatching(/^generation_blocked$/),
-      },
-      status: 422,
+    await expect(service.generateResume('user-1', baseRequest)).resolves.toMatchObject({
+      ok: true,
+      status: 'success',
+      exportReady: true,
     });
 
     expect(applicationsService.upsertPreparedFromResumeGeneration).not.toHaveBeenCalled();
@@ -341,11 +346,10 @@ describe('ResumeService contract', () => {
 
     await expect(
       service.generateResume('user-1', { ...baseRequest, oneTap: true }),
-    ).rejects.toMatchObject({
-      response: {
-        code: expect.not.stringMatching(/^generation_blocked$/),
-      },
-      status: 422,
+    ).resolves.toMatchObject({
+      ok: true,
+      status: 'success',
+      exportReady: true,
     });
 
     expect(readinessSpy).not.toHaveBeenCalled();
@@ -380,8 +384,10 @@ describe('ResumeService contract', () => {
         oneTap: false,
         documentStrategyPlan: { version: 1, focus: 'tailor_more' } as any,
       }),
-    ).rejects.toMatchObject({
-      status: 422,
+    ).resolves.toMatchObject({
+      ok: true,
+      status: 'success',
+      exportReady: true,
     });
 
     expect(readinessSpy).toHaveBeenCalledTimes(1);
@@ -430,6 +436,29 @@ describe('ResumeService contract', () => {
 
     draftSpy.mockRestore();
     baseline.sections = [{ ...baseSection, content: originalContent }];
+  });
+
+  it('top-level fail-safe returns a minimal resume when downstream compliance throws', async () => {
+    const { service } = buildService({
+      validateAndAuditImpl: () => {
+        throw new Error('compliance blew up');
+      },
+    });
+
+    await expect(
+      service.generateResume(
+        'user-1',
+        { ...baseRequest, oneTap: false },
+        { preflightOnly: true, skipReadinessGate: true, enforceOneTap: false },
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      status: 'success',
+      exportReady: true,
+      quality: 'draft',
+      compliance_flags: [],
+      compliance_blocked: false,
+    });
   });
 
   it('returns canonical unsupported_input when resume structure is missing', () => {

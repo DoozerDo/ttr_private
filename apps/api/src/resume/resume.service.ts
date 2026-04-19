@@ -1408,6 +1408,11 @@ export class ResumeService {
     options?: GenerateResumeOptions,
     syntheticMetadata?: SyntheticMetadataInput,
   ): Promise<ResumeGenerationResponse> {
+    let baselineForFailSafe: Baseline | null = null;
+    let baselineVersionForFailSafe: BaselineVersion | null = null;
+    let minimalDraftSectionsForFailSafe: ResumeDraftSection[] | null = null;
+    let jobIdForFailSafe: string | null = null;
+    let analysisIdForFailSafe: string | null = null;
     const recordResumeEvent = (success: boolean) => {
       void this.criticalFlowTrackerService?.recordCriticalFlowEvent({
         flow: success
@@ -1434,6 +1439,8 @@ export class ResumeService {
       const baselineVersionId = request.baselineVersionId?.trim() || null;
       const jobId = request.jobId?.trim();
       const analysisId = request.analysisId?.trim();
+      jobIdForFailSafe = jobId ?? null;
+      analysisIdForFailSafe = analysisId ?? null;
 
       if (!baselineId) {
         throw new BadRequestException('baselineId is required');
@@ -1467,6 +1474,7 @@ export class ResumeService {
       relations: ['sections', 'parsedRecords'],
       order: { sections: { order: 'ASC' }, parsedRecords: { createdAt: 'DESC' } },
     });
+      baselineForFailSafe = baseline ?? null;
 
       if (!baseline) {
         throw new NotFoundException('Baseline not found');
@@ -1480,6 +1488,7 @@ export class ResumeService {
           where: { baselineId: baseline.id },
           order: { versionNumber: 'DESC' },
         });
+    baselineVersionForFailSafe = baselineVersion ?? null;
 
     if (!baselineVersion) {
       throw new NotFoundException('Baseline version not found');
@@ -1593,6 +1602,8 @@ export class ResumeService {
     );
     const resumeInputSections =
       this.promoteExperienceLikeSections(allowedSections);
+
+    minimalDraftSectionsForFailSafe = this.buildMinimalResumeSections(resumeInputSections);
 
     const baselineText = allowedSections
       .map((section) => section.content ?? '')
@@ -2263,6 +2274,119 @@ export class ResumeService {
     });
     return response;
     } catch (error) {
+      const hasBaselineText =
+        Boolean(minimalDraftSectionsForFailSafe) &&
+        (minimalDraftSectionsForFailSafe ?? []).some(
+          (section) => (section.content ?? '').trim().length > 0,
+        );
+
+      if (hasBaselineText && baselineForFailSafe && baselineVersionForFailSafe && minimalDraftSectionsForFailSafe) {
+        // Top-level fail-safe: never return a full resume generation failure when baseline content exists.
+        // This fallback is baseline-only and intentionally skips tailoring, trace auditing, and compliance enforcement.
+        this.logger.error('[resume-generation] top_level_fail_safe_minimal', {
+          userId,
+          baselineId: baselineForFailSafe.id,
+          baselineVersionId: baselineVersionForFailSafe.id,
+          jobId: jobIdForFailSafe,
+          analysisId: analysisIdForFailSafe,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+
+        const identity = resolveBaselineIdentity(baselineForFailSafe);
+        let normalizedDocument: NormalizedResumeDocument | null = null;
+        try {
+          normalizedDocument = buildNormalizedResumeDocument(
+            minimalDraftSectionsForFailSafe as unknown as ResumeExportSection[],
+            identity,
+          );
+        } catch {
+          normalizedDocument = null;
+        }
+
+        const minimalAuditId = `minimal:${Date.now()}`;
+        const response: ResumeGenerationResponse = {
+          ok: true,
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          blocked: false,
+          baselineId: baselineForFailSafe.id,
+          baselineVersionId: baselineVersionForFailSafe.id,
+          jobId: jobIdForFailSafe,
+          sections: this.complianceService.normalizeSectionsForOutput(
+            minimalDraftSectionsForFailSafe as unknown as ResumeExportSection[],
+          ) as unknown as ResumeExportSection[],
+          compliance_flags: [],
+          compliance_blocked: false,
+          audit_id: minimalAuditId,
+          auditId: minimalAuditId,
+          baseline_version_hash: baselineVersionForFailSafe.hash ?? null,
+          quality: 'draft',
+          traceMap: {},
+          debugTrace: {
+            passed: true,
+            failures: [],
+            traceCoverage: 1,
+            unusedEvidence: [],
+            selectedEvidence: [],
+          },
+          exports: { docx: false, pdf: false },
+          preview: {
+            resume: normalizedDocument,
+          },
+          trackerEntryId: null,
+          trackerStatus: null,
+          opportunityId: null,
+          claimRiskSummary: null,
+          gapAnalysis: null,
+          gapGuidance: null,
+          display: this.buildSuccessDisplayPayload(),
+          safeDisplay: this.buildSuccessDisplayPayload(),
+          internal: {
+            minimalFallback: true,
+            failureReason: error instanceof Error ? error.message : String(error),
+          },
+        };
+
+        try {
+          void this.studioArtifactsService.recordResumeSuccess({
+            userId,
+            baselineId: studioArtifactContext.baselineId,
+            jobId: studioArtifactContext.jobId,
+            baselineVersionId: studioArtifactContext.baselineVersionId,
+            baselineVersionHash: studioArtifactContext.baselineVersionHash,
+            jobFingerprint: studioArtifactContext.jobFingerprint,
+            inputsHash: studioArtifactContext.inputsHash,
+            responseBody: response as unknown as Record<string, unknown>,
+            content: normalizedDocument ? JSON.stringify(normalizedDocument) : '',
+            metadata: {
+              auditId: minimalAuditId,
+              baselineVersionHash: baselineVersionForFailSafe.hash ?? null,
+              analysisId: studioArtifactContext.analysisId,
+            },
+          });
+        } catch {
+          // ignore fail-safe persistence failures
+        }
+
+        if (dedupeKey && reservationRunId) {
+          try {
+            void this.workflowIdempotencyService.complete({
+              userId,
+              operationName: 'generation.resume',
+              dedupeKey,
+              runId: reservationRunId,
+              responseBody: response,
+            });
+          } catch {
+            // ignore fail-safe idempotency completion failures
+          }
+        }
+
+        recordResumeEvent(true);
+        return response;
+      }
+
       recordResumeEvent(false);
       void this.studioArtifactsService.recordResumeFailure({
         userId,
