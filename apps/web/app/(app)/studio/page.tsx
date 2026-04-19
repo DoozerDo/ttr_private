@@ -40,6 +40,9 @@ import {
 import { normalizeClaimVerifications } from "@/lib/claimVerification";
 import { parseTierGateError, SubscriptionTier, type TierGateError } from "@/lib/tiers";
 import { isDraftAnywayEligible, resolveStudioArtifactGating } from "@/lib/studioArtifactGating";
+import { resolvePairWorkflowState, type PairWorkflowArtifactStatus } from "@/lib/pairWorkflowState";
+import { resolvePairGenerationLifecycle } from "@/lib/pairGenerationLifecycle";
+import { tryAcquirePairGenerationLatch, releasePairGenerationLatch } from "@/lib/pairGenerationLatch";
 import { BaselineDto, BaselineVersionDto, listBaselines } from "@/lib/baselines";
 import { appendStrengtheningAddition } from "@/lib/baselines";
 import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
@@ -1882,7 +1885,6 @@ export default function StudioPage() {
     ],
   );
   const productReadiness = productDecisionState.productReadiness;
-  const canGenerateDocuments = shouldGenerateDocuments(analysisScore);
   const qualifiedForGeneration = shouldGenerateDocuments(analysisScore);
   const studioDraftMode =
     resolveDocumentGenerationMode(analysisScore) === "draft" && isFromUnlock && !hasGeneratedOnce;
@@ -1932,6 +1934,82 @@ export default function StudioPage() {
     [coverState.response],
   );
   const hasCoverLetterDraft = coverPresenter.status === "success" && Boolean(coverState.response);
+
+  const pairWorkflowState = useMemo(() => {
+    const resumeStatus: PairWorkflowArtifactStatus = resumeGenerating || autoGenerationInFlight
+      ? "generating"
+      : resumePresenter.status === "success" && Boolean(resumeState.response)
+        ? "ready"
+        : resumePresenter.status === "blocked" || resumePresenter.status === "error"
+          ? "failed"
+          : resumeState.response
+            ? "pending"
+            : "missing";
+    const coverLetterStatus: PairWorkflowArtifactStatus = coverGenerating || autoGenerationInFlight
+      ? "generating"
+      : coverPresenter.status === "success" && Boolean(coverState.response)
+        ? "ready"
+        : coverPresenter.status === "blocked" || coverPresenter.status === "error"
+          ? "failed"
+          : coverState.response
+            ? "pending"
+            : "missing";
+
+    return resolvePairWorkflowState({
+      baselineId: effectiveBaselineId ?? null,
+      jobId: effectiveJobId ?? null,
+      canonicalDecision: productDecisionState.canonicalDecision,
+      analysisStatus: analysisError ? "failed" : requestedAnalysisId ? "complete" : "idle",
+      artifacts: {
+        resume: resumeStatus,
+        coverLetter: coverLetterStatus,
+      },
+    });
+  }, [
+    analysisError,
+    autoGenerationInFlight,
+    coverGenerating,
+    coverPresenter.status,
+    coverState.response,
+    effectiveBaselineId,
+    effectiveJobId,
+    productDecisionState.canonicalDecision,
+    requestedAnalysisId,
+    resumeGenerating,
+    resumePresenter.status,
+    resumeState.response,
+  ]);
+
+  const canGenerateDocuments = pairWorkflowState.canGenerate;
+  const generationLifecycle = useMemo(
+    () =>
+      resolvePairGenerationLifecycle({
+        baselineId: effectiveBaselineId ?? null,
+        jobId: effectiveJobId ?? null,
+        score: pairWorkflowState.score,
+        resumeStatus: pairWorkflowState.resumeStatus,
+        coverLetterStatus: pairWorkflowState.coverLetterStatus,
+        kickoffInFlight: autoGenerationInFlight || resumeGenerating || coverGenerating,
+      }),
+    [
+      autoGenerationInFlight,
+      coverGenerating,
+      effectiveBaselineId,
+      effectiveJobId,
+      pairWorkflowState.coverLetterStatus,
+      pairWorkflowState.resumeStatus,
+      pairWorkflowState.score,
+      resumeGenerating,
+    ],
+  );
+
+  useEffect(() => {
+    if (!effectiveBaselineId || !effectiveJobId) return;
+    if (generationLifecycle.phase === "generated" || generationLifecycle.phase === "failed" || generationLifecycle.phase === "partial") {
+      releasePairGenerationLatch(`${effectiveBaselineId}:${effectiveJobId}`);
+    }
+  }, [effectiveBaselineId, effectiveJobId, generationLifecycle.phase]);
+
   const documentCritique = useMemo(
     () =>
       buildDocumentCritique({
@@ -2321,42 +2399,35 @@ export default function StudioPage() {
     }
   }, [effectiveBaselineId, effectiveJobId, hasGeneratedDocumentPair, roleMatchFinalPass, roleMatchFinalSignature]);
   const studioGenerationRenderState = useMemo(() => {
-    const isGenerating = resumeGenerating || coverGenerating || autoGenerationInFlight;
+    const isGenerating = pairWorkflowState.pairStatus === "generating";
     const artifactType =
-      coverGenerating || (coverPresenter.status === "success" && Boolean(coverState.response))
+      pairWorkflowState.coverLetterStatus === "ready" || pairWorkflowState.coverLetterStatus === "generating"
         ? "cover_letter"
-        : resumeGenerating || (resumePresenter.status === "success" && Boolean(resumeState.response))
+        : pairWorkflowState.resumeStatus === "ready" || pairWorkflowState.resumeStatus === "generating"
           ? "resume"
           : null;
     const shouldShowTrustSummary =
-      canGenerateDocuments &&
-      ((resumePresenter.status === "success" && Boolean(resumeState.response)) ||
-        (coverPresenter.status === "success" && Boolean(coverState.response)));
+      pairWorkflowState.canGenerate && (pairWorkflowState.resumeStatus === "ready" || pairWorkflowState.coverLetterStatus === "ready");
     return {
-      isBlocked: !canGenerateDocuments,
-      isReady: canGenerateDocuments,
+      isBlocked: !pairWorkflowState.canGenerate,
+      isReady: pairWorkflowState.canGenerate,
       isFromUnlock,
       isFirstGenerationAfterUnlock,
       isGenerating,
-      hasGenerated: hasCompletedGeneration,
+      hasGenerated: pairWorkflowState.pairStatus === "generated",
       artifactType,
       shouldShowTrustSummary,
       shouldShowUnlockEntry: isFromUnlock,
       shouldShowEnhancedLoadingCopy: isFromUnlock && isGenerating && !hasGeneratedOnce,
     };
   }, [
-    canGenerateDocuments,
-    coverGenerating,
-    autoGenerationInFlight,
-    coverPresenter.status,
-    coverState.response,
-    hasCompletedGeneration,
     hasGeneratedOnce,
     isFirstGenerationAfterUnlock,
     isFromUnlock,
-    resumeGenerating,
-    resumePresenter.status,
-    resumeState.response,
+    pairWorkflowState.canGenerate,
+    pairWorkflowState.coverLetterStatus,
+    pairWorkflowState.pairStatus,
+    pairWorkflowState.resumeStatus,
   ]);
   const resumeTrustSummaryVisible =
     studioGenerationRenderState.shouldShowTrustSummary &&
@@ -4132,7 +4203,9 @@ export default function StudioPage() {
     setSelectedBaselineVersionId(analysis.baselineVersionId);
   }, [analysis?.baselineVersionId, versions]);
 
-  const handleResumeDraft = async (opts?: { verifiedOnly?: boolean; bypassReadinessGate?: boolean }): Promise<boolean> => {
+  const handleResumeDraft = async (
+    opts?: { verifiedOnly?: boolean; bypassReadinessGate?: boolean; sessionKey?: string },
+  ): Promise<boolean> => {
     if (
       studioArtifactPresentationStateRef.current === "hydrated" &&
       hasResumeArtifact &&
@@ -4140,6 +4213,13 @@ export default function StudioPage() {
     ) {
       return true;
     }
+    if (generationLifecycle.phase === "generated") return false;
+    if (!generationLifecycle.canStartGeneration) return false;
+    const latchAcquired = tryAcquirePairGenerationLatch({
+      pairKey: effectiveBaselineId && effectiveJobId ? `${effectiveBaselineId}:${effectiveJobId}` : null,
+      sessionKey: opts?.sessionKey ?? `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:resume:${Date.now()}`,
+    });
+    if (!latchAcquired) return false;
     if (!guardGenerationAction("resume", { allowVerifiedOnlyFallback: Boolean(opts?.verifiedOnly) })) return false;
     const requestScope = generationWorkflowScope;
     const request = beginStudioGenerationRequest("resume", requestScope);
@@ -4625,7 +4705,9 @@ export default function StudioPage() {
     }
   }
 
-  const handleCoverDraft = async (opts?: { verifiedOnly?: boolean; bypassReadinessGate?: boolean }): Promise<boolean> => {
+  const handleCoverDraft = async (
+    opts?: { verifiedOnly?: boolean; bypassReadinessGate?: boolean; sessionKey?: string },
+  ): Promise<boolean> => {
     if (
       studioArtifactPresentationStateRef.current === "hydrated" &&
       hasCoverLetterArtifact &&
@@ -4633,6 +4715,13 @@ export default function StudioPage() {
     ) {
       return true;
     }
+    if (generationLifecycle.phase === "generated") return false;
+    if (!generationLifecycle.canStartGeneration) return false;
+    const latchAcquired = tryAcquirePairGenerationLatch({
+      pairKey: effectiveBaselineId && effectiveJobId ? `${effectiveBaselineId}:${effectiveJobId}` : null,
+      sessionKey: opts?.sessionKey ?? `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:cover:${Date.now()}`,
+    });
+    if (!latchAcquired) return false;
     if (!guardGenerationAction("cover_letter", { allowVerifiedOnlyFallback: Boolean(opts?.verifiedOnly) })) return false;
     const requestScope = generationWorkflowScope;
     const request = beginStudioGenerationRequest("cover_letter", requestScope);
@@ -4948,9 +5037,10 @@ export default function StudioPage() {
     draftAnywayRequestedRef.current = true;
     setDraftAnywayRequested(true);
 
-    await handleResumeDraft({ verifiedOnly: true, bypassReadinessGate: true });
-    await handleCoverDraft({ verifiedOnly: true, bypassReadinessGate: true });
-  }, [handleCoverDraft, handleResumeDraft]);
+    const sessionKey = `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:draft_anyway:${Date.now()}`;
+    await handleResumeDraft({ verifiedOnly: true, bypassReadinessGate: true, sessionKey });
+    await handleCoverDraft({ verifiedOnly: true, bypassReadinessGate: true, sessionKey });
+  }, [effectiveBaselineId, effectiveJobId, handleCoverDraft, handleResumeDraft]);
 
   const openClaimEditModal = useCallback(
     (claim: ArtifactClaimRef) => {
@@ -5082,6 +5172,14 @@ export default function StudioPage() {
     if (hasCompletedGeneration) return;
     if (!canProceedWithStudioDrafts) return;
     if (!autoGenerationKey) return;
+
+    if (!generationLifecycle.canStartGeneration) return;
+    const latchAcquired = tryAcquirePairGenerationLatch({
+      pairKey: effectiveBaselineId && effectiveJobId ? `${effectiveBaselineId}:${effectiveJobId}` : null,
+      sessionKey: autoGenerationSignature,
+    });
+    if (!latchAcquired) return;
+
     autoGenerationSignatureRef.current = autoGenerationSignature;
     activeAutoGenerationRef.current = {
       requestId: autoGenerationSignature,
@@ -5099,9 +5197,10 @@ export default function StudioPage() {
           score: analysisScore,
           generationTarget: "resume_and_cover_letter",
         });
+        const sessionKey = autoGenerationSignature;
         const [resumeSucceeded, coverSucceeded] = await Promise.all([
-          handleResumeDraft(),
-          handleCoverDraft(),
+          handleResumeDraft({ sessionKey }),
+          handleCoverDraft({ sessionKey }),
         ]);
         const autoSucceeded = resumeSucceeded && coverSucceeded;
         if (autoSucceeded) {
@@ -5838,8 +5937,9 @@ export default function StudioPage() {
           <FormButton
             variant="secondary"
             onClick={() => {
-              void handleResumeDraft();
-              void handleCoverDraft();
+              const sessionKey = `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:retry_both:${Date.now()}`;
+              void handleResumeDraft({ sessionKey });
+              void handleCoverDraft({ sessionKey });
             }}
             disabled={autoGenerationInFlight}
           >

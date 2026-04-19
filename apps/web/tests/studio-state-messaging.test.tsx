@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, vi } from "vitest";
 
 import StudioPage from "@/app/(app)/studio/page";
@@ -139,8 +139,7 @@ function resolveStudioGenerationFallback(input: RequestInfo) {
 
 function installBaselineFetches(readinessStatus: "ready" | "limited" | "blocked", score = 88) {
   mockedStudioState = readinessStatus;
-  setFetchImplementation(
-    vi.fn((input: RequestInfo) => {
+  const fetchMock = vi.fn((input: RequestInfo) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       if (url.includes("/api/baselines/base-1/versions")) {
         return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
@@ -174,8 +173,9 @@ function installBaselineFetches(readinessStatus: "ready" | "limited" | "blocked"
         );
       }
       return resolveStudioGenerationFallback(input);
-    }),
-  );
+    });
+  setFetchImplementation(fetchMock);
+  return fetchMock;
 }
 
 describe("Studio state messaging", () => {
@@ -189,7 +189,7 @@ describe("Studio state messaging", () => {
   });
 
   it("shows action-first blocked guidance and draft-anyway fallback when evidence is blocked", async () => {
-    installBaselineFetches("blocked", 88);
+    const fetchMock = installBaselineFetches("blocked", 88);
     renderStudio();
 
     await waitFor(() => expect(screen.getByTestId("studio-blocked-primary-action")).toBeInTheDocument());
@@ -199,6 +199,12 @@ describe("Studio state messaging", () => {
     expect(screen.getByRole("link", { name: "Strengthen my experience" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View fit review" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Generate draft anyway" })).toBeInTheDocument());
+    fireEvent.doubleClick(screen.getByRole("button", { name: "Generate draft anyway" }));
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.map((args) => String(args[0]));
+      expect(calls.filter((url) => url.endsWith("/api/resume")).length).toBeLessThanOrEqual(1);
+      expect(calls.filter((url) => url.endsWith("/api/cover-letters")).length).toBeLessThanOrEqual(1);
+    });
 
     expect(screen.queryByText("Why generation is blocked")).toBeNull();
     expect(screen.queryByText("Limited output: not ready yet.")).toBeNull();

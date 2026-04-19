@@ -63,6 +63,9 @@ import { buildExportPayload } from "../lib/exportPayload";
 import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
 import { buildProductDecisionState } from "@/lib/productDecisionState";
 import { resolveCanonicalState } from "@/lib/canonicalDecision";
+import { resolvePairWorkflowState, type PairWorkflowArtifactStatus } from "@/lib/pairWorkflowState";
+import { resolvePairGenerationLifecycle } from "@/lib/pairGenerationLifecycle";
+import { tryAcquirePairGenerationLatch, releasePairGenerationLatch } from "@/lib/pairGenerationLatch";
 import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
 import { isDocumentGenerationUnlocked, isMomentumGenerationAllowed } from "@/lib/documentGenerationGate";
 import { ResumePreview } from "@/app/(app)/studio/ResumePreview";
@@ -124,6 +127,13 @@ function deriveResultsArtifactStatuses(payload: unknown): {
     resume: normalizeBackendArtifactStatus(record.resume?.status),
     coverLetter: normalizeBackendArtifactStatus(record.coverLetter?.status),
   };
+}
+
+function toPairWorkflowArtifactStatus(status: ResultsArtifactStatus): PairWorkflowArtifactStatus {
+  if (status === "completed") return "ready";
+  if (status === "in_progress") return "generating";
+  if (status === "failed") return "failed";
+  return "missing";
 }
 
 function deriveResultsGenerationPhase(statuses: {
@@ -2624,7 +2634,6 @@ export default function ResultsPage() {
     () => productDecisionState.renderedGenerationReadiness,
     [productDecisionState.renderedGenerationReadiness],
   );
-  const canOpenStudio = canonicalResultsDecision.readinessState !== "BLOCKED";
   const shouldAutoRecoverGeneration = shouldGenerateDocuments(activeScore);
   const resultsArtifactScope =
     canonicalResultsDecision.readinessState === "DRAFT" && !shouldAutoRecoverGeneration
@@ -2641,6 +2650,72 @@ export default function ResultsPage() {
   const effectiveResultsGenerationPhase: ResultsGenerationPhase = generationRecoveryInProgress
     ? "generating"
     : resultsGenerationPhase;
+
+  const pairWorkflowState = useMemo(() => {
+    const resume = toPairWorkflowArtifactStatus(resultsArtifactStatuses.resume);
+    const coverLetter = resultsArtifactScope === "resume_only"
+      ? "missing"
+      : toPairWorkflowArtifactStatus(resultsArtifactStatuses.coverLetter);
+    const generationInflight = effectiveResultsGenerationPhase === "generating";
+    const exhausted =
+      generationRecoveryExhausted &&
+      (resume === "missing" || resume === "pending") &&
+      (coverLetter === "missing" || coverLetter === "pending");
+    return resolvePairWorkflowState({
+      baselineId: (baselineId ?? null) as string | null,
+      jobId: (jobId ?? null) as string | null,
+      canonicalDecision: canonicalResultsDecision,
+      artifacts: {
+        resume: exhausted ? "failed" : generationInflight && resume === "missing" ? "pending" : resume,
+        coverLetter: exhausted
+          ? "failed"
+          : generationInflight && coverLetter === "missing"
+            ? "pending"
+            : coverLetter,
+      },
+    });
+  }, [
+    baselineId,
+    canonicalResultsDecision,
+    effectiveResultsGenerationPhase,
+    generationRecoveryExhausted,
+    jobId,
+    resultsArtifactScope,
+    resultsArtifactStatuses.coverLetter,
+    resultsArtifactStatuses.resume,
+  ]);
+
+  const canOpenStudio = pairWorkflowState.primaryCta !== "fix_context" && pairWorkflowState.score !== null;
+
+  const generationLifecycle = useMemo(
+    () =>
+      resolvePairGenerationLifecycle({
+        baselineId: baselineId ?? null,
+        jobId: jobId ?? null,
+        score: pairWorkflowState.score,
+        resumeStatus: pairWorkflowState.resumeStatus,
+        coverLetterStatus: pairWorkflowState.coverLetterStatus,
+        kickoffInFlight: generationRecoveryInProgress,
+      }),
+    [
+      baselineId,
+      generationRecoveryInProgress,
+      jobId,
+      pairWorkflowState.coverLetterStatus,
+      pairWorkflowState.resumeStatus,
+      pairWorkflowState.score,
+    ],
+  );
+
+  useEffect(() => {
+    if (!pairWorkflowState.pairStatus || pairWorkflowState.pairStatus === "generating") return;
+    // Terminal stop: release session latch so an explicit retry can re-acquire.
+    if (pairWorkflowState.pairStatus === "generated" || pairWorkflowState.pairStatus === "generation_failed") {
+      if (pairWorkflowState.score !== null && baselineId && jobId) {
+        releasePairGenerationLatch(`${baselineId}:${jobId}`);
+      }
+    }
+  }, [baselineId, jobId, pairWorkflowState.pairStatus, pairWorkflowState.score]);
   const generationPairIds = useMemo(() => {
     const baselineIdValue = latest?.baselineId?.trim() ?? "";
     const baselineVersionIdValue = latest?.baselineVersionId?.trim() ?? currentBaselineVersionId?.trim() ?? "";
@@ -2814,6 +2889,7 @@ export default function ResultsPage() {
   useEffect(() => {
     if (!generationPairIds) return;
     if (hasCompletedGenerationRef.current) return;
+    if (!generationLifecycle.shouldPoll) return;
 
     let cancelled = false;
     const fetchArtifacts = async () => {
@@ -2848,7 +2924,11 @@ export default function ResultsPage() {
           !hasAnyArtifactStatus(statuses)
         ) {
           const sessionKey = `${generationPairIds.baselineId}:${generationPairIds.jobId}:${generationPairIds.analysisId}`;
-          if (!autoGenerationTriggeredRef.current.has(sessionKey)) {
+          const acquired = tryAcquirePairGenerationLatch({
+            pairKey: `${generationPairIds.baselineId}:${generationPairIds.jobId}`,
+            sessionKey,
+          });
+          if (acquired && !autoGenerationTriggeredRef.current.has(sessionKey)) {
             autoGenerationTriggeredRef.current.add(sessionKey);
             void runGenerationRecoveryWithPairIdsRef.current?.(generationPairIds);
           }
@@ -2866,6 +2946,7 @@ export default function ResultsPage() {
   }, [
     applyArtifactSnapshot,
     generationPairIds,
+    generationLifecycle.shouldPoll,
     generationRecoveryExhausted,
     generationRecoveryStage,
     resultsArtifactScope,
@@ -2876,6 +2957,7 @@ export default function ResultsPage() {
   useEffect(() => {
     if (!generationPairIds) return;
     if (hasCompletedGenerationRef.current) return;
+    if (!generationLifecycle.shouldPoll) return;
     if (resultsGenerationPhase !== "generating") return;
 
     let cancelled = false;
@@ -3648,6 +3730,18 @@ export default function ResultsPage() {
       actionType === "generate_documents" || actionType === "retry_generation" || label.includes("generate");
     if (!isGenerationAction) return;
 
+    if (generationLifecycle && !generationLifecycle.canStartGeneration) {
+      return;
+    }
+
+    const latchAcquired = tryAcquirePairGenerationLatch({
+      pairKey: baselineId && jobId ? `${baselineId}:${jobId}` : null,
+      sessionKey: autoGenerationSessionKey ?? generationSessionKey ?? null,
+    });
+    if (!latchAcquired) {
+      return;
+    }
+
     const resolvedPairIds = generationPairIds ?? (await resolveGenerationPairIds());
     if (!resolvedPairIds) {
       console.error("[RESULTS_UI][GENERATE_CLICK][MISSING_PAIR_IDS]", {
@@ -3685,11 +3779,16 @@ export default function ResultsPage() {
       router.push(studioHrefFromLatest);
     }, 50);
   }, [
+    autoGenerationSessionKey,
+    baselineId,
     canonicalResultsDecision.primaryAction.destination,
     canonicalResultsDecision.primaryAction.label,
     canonicalResultsDecision.primaryAction.type,
+    generationLifecycle,
     generationRecoveryExhausted,
     generationPairIds,
+    generationSessionKey,
+    jobId,
     router,
     resolveGenerationPairIds,
     runGenerationRecoveryWithPairIds,
@@ -4705,9 +4804,9 @@ export default function ResultsPage() {
           className={`rounded-2xl border p-4 ${
             scorePresentationMode === "fix_first"
                 ? "border-amber-300/30 bg-amber-500/10"
-                : canonicalResultsDecision.readinessState === "READY"
+                : pairWorkflowState.pairStatus === "generated"
                   ? "border-emerald-300/30 bg-emerald-500/10"
-                  : canonicalResultsDecision.readinessState === "DRAFT"
+                  : pairWorkflowState.pairStatus === "generating" || pairWorkflowState.pairStatus === "generation_failed"
                     ? "border-amber-300/30 bg-amber-500/10"
                     : "border-slate-700/60 bg-slate-900/45"
           }`}
@@ -4716,78 +4815,58 @@ export default function ResultsPage() {
             className={`text-sm font-semibold ${
               scorePresentationMode === "fix_first"
                   ? "text-amber-100"
-                  : canonicalResultsDecision.readinessState === "READY"
+                  : pairWorkflowState.pairStatus === "generated"
                     ? "text-emerald-100"
-                    : canonicalResultsDecision.readinessState === "DRAFT"
+                    : pairWorkflowState.pairStatus === "generating" || pairWorkflowState.pairStatus === "generation_failed"
                       ? "text-amber-100"
                       : "text-amber-100"
             }`}
           >
             {scorePresentationMode === "fix_first"
                 ? "We may be underestimating your fit."
-                : shouldAutoRecoverGeneration && generationRecoveryExhausted
-                  ? "We hit an issue generating your documents"
-                : suppressFailureUiUntilRecoveryStarts
-                    ? "Finalizing your documents..."
-                    : effectiveResultsGenerationPhase === "generating"
-                      ? "Generating your documents..."
-                      : effectiveResultsGenerationPhase === "generated"
-                        ? "Your documents are ready"
-                        : effectiveResultsGenerationPhase === "failed"
-                          ? "Generation failed"
-                          : effectiveResultsGenerationPhase === "partial"
-                            ? "Generation needs attention"
-                            : resultsDecision.headline}
+                : pairWorkflowState.pairStatus === "generating"
+                  ? "Generating your documents..."
+                  : pairWorkflowState.pairStatus === "generated"
+                    ? "Your documents are ready"
+                    : pairWorkflowState.pairStatus === "generation_failed"
+                      ? "Generation failed"
+                      : resultsDecision.headline}
           </p>
           <p className="mt-1 text-sm text-slate-100">
             {scorePresentationMode === "fix_first"
                 ? "This score looks low confidence. Fix the evidence story first, then rerun generation."
-                : shouldAutoRecoverGeneration && generationRecoveryExhausted
-                  ? "We hit an issue generating your documents. Please try again."
-                : suppressFailureUiUntilRecoveryStarts
-                    ? "Finalizing your documents..."
-                    : effectiveResultsGenerationPhase === "generating"
-                      ? "We’re drafting your resume and cover letter now."
-                      : effectiveResultsGenerationPhase === "generated"
-                        ? "Your drafts are ready below. Refinement comes next."
-                        : effectiveResultsGenerationPhase === "failed"
-                          ? "Retry generation, or open Studio to adjust inputs and try again."
-                          : effectiveResultsGenerationPhase === "partial"
-                            ? "Some drafts finished, but at least one needs a retry."
-                            : resultsDecision.subtext}
+                : pairWorkflowState.pairStatus === "generating"
+                  ? "We’re drafting your resume and cover letter now."
+                  : pairWorkflowState.pairStatus === "generated"
+                    ? "Your drafts are ready below. Refinement comes next."
+                    : pairWorkflowState.pairStatus === "generation_failed"
+                      ? "Retry generation, or open Studio to adjust inputs and try again."
+                      : resultsDecision.subtext}
           </p>
-          {effectiveResultsGenerationPhase !== "not_started" ? (
+          {pairWorkflowState.pairStatus === "generating" ||
+          pairWorkflowState.pairStatus === "generated" ||
+          pairWorkflowState.pairStatus === "generation_failed" ? (
             <>
               <p className="mt-2 text-sm font-medium text-slate-200">
-                {shouldAutoRecoverGeneration && generationRecoveryExhausted
-                  ? "We hit an issue generating your documents."
-                  : suppressFailureUiUntilRecoveryStarts
-                    ? "Finalizing your documents..."
-                    : effectiveResultsGenerationPhase === "generating"
-                      ? "Generating your documents..."
-                      : effectiveResultsGenerationPhase === "generated"
-                        ? "Your documents are ready."
-                        : effectiveResultsGenerationPhase === "failed"
-                          ? "Generation failed."
-                          : "Some documents need attention."}
+                {pairWorkflowState.pairStatus === "generating"
+                  ? "Generating your documents..."
+                  : pairWorkflowState.pairStatus === "generated"
+                    ? "Your documents are ready."
+                    : "Generation failed."}
               </p>
-              {suppressFailureUiUntilRecoveryStarts ? (
-                <p className="mt-1 text-sm text-slate-300">
-                  Keep this tab open. We’ll update as soon as the drafts are ready.
-                </p>
-              ) : effectiveResultsGenerationPhase === "generating" ? (
+              {pairWorkflowState.pairStatus === "generating" ? (
                 <p className="mt-1 text-sm text-slate-300">
                   Keep this tab open. You can review drafts in Studio as soon as they finish.
                 </p>
-              ) : effectiveResultsGenerationPhase === "generated" ? (
+              ) : pairWorkflowState.pairStatus === "generated" ? (
                 <p className="mt-1 text-sm text-slate-300">
                   Review the drafts below, then refine in Studio if needed.
                 </p>
               ) : (
                 <p className="mt-1 text-sm text-slate-300">
                   Resume:{" "}
-                  <span className="font-medium text-slate-100">{resultsArtifactStatuses.resume}</span> · Cover letter:{" "}
-                  <span className="font-medium text-slate-100">{resultsArtifactStatuses.coverLetter}</span>
+                  <span className="font-medium text-slate-100">{pairWorkflowState.resumeStatus}</span> · Cover letter:{" "}
+                  <span className="font-medium text-slate-100">{pairWorkflowState.coverLetterStatus}</span>
                 </p>
               )}
             </>
@@ -4823,53 +4902,24 @@ export default function ResultsPage() {
           )}
           <div className="mt-3">
             {oneClickResultsCta ? (
-              canonicalResultsDecision.readinessState === "BLOCKED" && isStrongFitScore ? (
-                oneClickResultsCta.disabled ? (
-                  <span
-                    data-testid="results-hero-primary-cta"
-                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2 text-sm font-semibold text-slate-400"
-                  >
-                    {oneClickResultsCta.label}
-                  </span>
-                ) : oneClickResultsCta.href ? (
-                  <a
-                    data-testid="results-hero-primary-cta"
-                    href={oneClickResultsCta.href}
-                    onClick={oneClickResultsCta.onClick}
-                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
-                  >
-                    {oneClickResultsCta.label}
-                  </a>
-                ) : null
-              ) : canonicalResultsDecision.readinessState === "BLOCKED" ? (
-                <p className="text-sm font-medium text-slate-200">You&apos;ll address this in Fit Review.</p>
-              ) : shouldAutoRecoverGeneration && generationRecoveryExhausted ? (
+              pairWorkflowState.primaryCta === "fix_context" ? (
                 <button
                   type="button"
                   data-testid="results-hero-primary-cta"
-                  onClick={() => {
-                    oneClickResultsCta.onClick?.();
-                    void runGenerationRecovery({ force: true });
-                  }}
+                  onClick={() => router.push("/baseline")}
                   className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
                 >
-                  Try again
+                  Return to Baseline
                 </button>
-              ) : suppressFailureUiUntilRecoveryStarts ? (
-                <span
-                  data-testid="results-hero-primary-cta"
-                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2 text-sm font-semibold text-slate-200"
-                >
-                  Finalizing...
-                </span>
-              ) : effectiveResultsGenerationPhase === "generating" ? (
+              ) : pairWorkflowState.pairStatus === "generating" ? (
                 <span
                   data-testid="results-hero-primary-cta"
                   className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2 text-sm font-semibold text-slate-200"
                 >
                   Generating...
                 </span>
-              ) : effectiveResultsGenerationPhase === "generated" ? (
+              ) : pairWorkflowState.primaryCta === "view_documents" ||
+                pairWorkflowState.primaryCta === "open_studio" ? (
                 <button
                   type="button"
                   data-testid="results-hero-primary-cta"
@@ -4881,46 +4931,34 @@ export default function ResultsPage() {
                 >
                   Open in Studio
                 </button>
-              ) : effectiveResultsGenerationPhase === "partial" ? (
-                shouldAutoRecoverGeneration && !generationRecoveryExhausted ? (
+              ) : pairWorkflowState.primaryCta === "generate" ? (
+                oneClickResultsCta.disabled ? (
                   <span
                     data-testid="results-hero-primary-cta"
-                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2 text-sm font-semibold text-slate-200"
+                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2 text-sm font-semibold text-slate-400"
                   >
-                    Finalizing...
+                    {oneClickResultsCta.label}
                   </span>
                 ) : (
                   <button
                     type="button"
                     data-testid="results-hero-primary-cta"
                     onClick={() => {
+                      if (process.env.NODE_ENV !== "production") {
+                        console.log("[RESULTS][GENERATE_CLICK]");
+                      }
                       oneClickResultsCta.onClick?.();
-                      router.push(studioNavigationHref);
+                      if (shouldAutoRecoverGeneration) {
+                        void runGenerationRecovery({ force: true });
+                      } else {
+                        void triggerResultsGeneration();
+                      }
                     }}
                     className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
                   >
-                    Open in Studio
+                    {oneClickResultsCta.label}
                   </button>
                 )
-              ) : effectiveResultsGenerationPhase === "failed" ? (
-                <button
-                  type="button"
-                  data-testid="results-hero-primary-cta"
-                  onClick={() => {
-                    if (process.env.NODE_ENV !== "production") {
-                      console.log("[RESULTS][GENERATE_CLICK]");
-                    }
-                    oneClickResultsCta.onClick?.();
-                    if (shouldAutoRecoverGeneration) {
-                      void runGenerationRecovery({ force: true });
-                    } else {
-                      void triggerResultsGeneration();
-                    }
-                  }}
-                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
-                >
-                  {shouldAutoRecoverGeneration ? "Try again" : "Retry generation"}
-                </button>
               ) : oneClickResultsCta.disabled ? (
                 <span
                   data-testid="results-hero-primary-cta"
@@ -4957,7 +4995,7 @@ export default function ResultsPage() {
               ) : null
             ) : null}
           </div>
-          {effectiveResultsGenerationPhase === "generated" ? (
+          {pairWorkflowState.pairStatus === "generated" ? (
             <div className="mt-6 space-y-5" data-testid="results-generated-documents">
               <div className="space-y-1">
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Documents</p>

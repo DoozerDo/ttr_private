@@ -32,6 +32,7 @@ function installFetch(input: {
   }>;
   readinessStatus?: "ready" | "blocked";
   readinessBlocked?: boolean;
+  artifacts?: { resume?: "missing" | "in_progress" | "completed" | "failed"; coverLetter?: "missing" | "in_progress" | "completed" | "failed" } | null;
 }) {
   const {
     score,
@@ -46,6 +47,7 @@ function installFetch(input: {
     criticalGaps = [],
     readinessStatus = "ready",
     readinessBlocked = false,
+    artifacts = null,
   } = input;
 
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -151,6 +153,30 @@ function installFetch(input: {
             : [],
       });
     }
+    if (url.includes("/api/resume/generate") && init?.method === "POST") {
+      return jsonResponse({
+        status: "success",
+        preview: {
+          resume: { summary: "Generated summary", experience: [] },
+        },
+        exports: { docx: true, pdf: true },
+      });
+    }
+    if (url.includes("/api/cover-letters/generate") && init?.method === "POST") {
+      return jsonResponse({
+        status: "success",
+        preview: {
+          coverLetter: { paragraphs: ["Hello there.", "Thanks for considering me."] },
+        },
+        exports: { docx: true, pdf: true },
+      });
+    }
+    if (url.includes("/api/studio/artifacts")) {
+      return jsonResponse({
+        resume: artifacts?.resume ? { status: artifacts.resume } : null,
+        coverLetter: artifacts?.coverLetter ? { status: artifacts.coverLetter } : null,
+      });
+    }
     if (url.includes("/api/opportunities") && init?.method === "POST") {
       return jsonResponse({ id: "opp-1" });
     }
@@ -217,6 +243,8 @@ describe("results gating", () => {
     expect(screen.queryByText("Promising fit. Not ready to generate yet.")).toBeNull();
     expect(screen.getAllByText("Strong match. Ready for document generation.").length).toBeGreaterThan(0);
   });
+
+  // Primary workflow UI assertions live in pair-workflow-state.test.ts and the CTA label tests above.
 
   it("does not hard-block over-70 results into a competitive blocked evidence state", async () => {
     overrideSearchParams({ assessmentId: "analysis-current" });
@@ -342,6 +370,34 @@ describe("results gating", () => {
 
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "Generate Documents" })).toBeNull();
+    });
+  });
+
+  it("does not duplicate generation POSTs for the same pair on re-render", async () => {
+    overrideSearchParams({ assessmentId: "analysis-current" });
+    const fetchMock = installFetch({
+      score: 78,
+      readinessStatus: "blocked",
+      readinessBlocked: true,
+    });
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    const { rerender } = render(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
+    });
+
+    rerender(<ResultsPage />);
+    rerender(<ResultsPage />);
+
+    // Let any effects settle.
+    await waitFor(() => {
+      const calls = (fetchMock as unknown as ReturnType<typeof vi.fn>).mock.calls.map((args) => String(args[0]));
+      const resumePosts = calls.filter((url) => url.includes("/api/resume/generate")).length;
+      const coverPosts = calls.filter((url) => url.includes("/api/cover-letters/generate")).length;
+      expect(resumePosts).toBeLessThanOrEqual(1);
+      expect(coverPosts).toBeLessThanOrEqual(1);
     });
   });
 });
