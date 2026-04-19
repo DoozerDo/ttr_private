@@ -203,6 +203,26 @@ function getDuplicateUploadMessage(data: unknown): string | null {
   );
 }
 
+function getLibraryCapMessage(data: unknown): string | null {
+  if (!data || typeof data !== "object") return null;
+  const maybeCode = (data as { code?: unknown }).code;
+  const errorBody = (data as { error?: Record<string, unknown> }).error;
+  const capCode =
+    (typeof maybeCode === "string" ? maybeCode : undefined) ??
+    (typeof errorBody?.code === "string" ? errorBody.code : undefined);
+
+  if (capCode !== "BASELINE_LIBRARY_CAP_REACHED") return null;
+
+  return (
+    (typeof errorBody?.message === "string"
+      ? sanitizeRenderedTextValue(errorBody.message, {
+          endpoint: "baseline-studio-home",
+          field: "error.message",
+        })
+      : null) ?? `Maximum of ${BETA_BASELINE_UPLOAD_LIMIT} active baselines reached.`
+  );
+}
+
 function getUploadedBaselineRecord(data: unknown): BaselineDto | null {
   if (!data || typeof data !== "object") return null;
   const payload = data as Record<string, unknown>;
@@ -390,6 +410,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   const [baselineUpdatedNotice, setBaselineUpdatedNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [duplicateError, setDuplicateError] = useState<string | null>(null);
+  const [capacityError, setCapacityError] = useState<string | null>(null);
   const [insufficientTextError, setInsufficientTextError] =
     useState<ParsedInsufficientExtractedTextError | null>(null);
   const [archivingBaselineId, setArchivingBaselineId] = useState<string | null>(null);
@@ -1031,6 +1052,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
       setIsUploading(true);
       setError(null);
       setDuplicateError(null);
+      setCapacityError(null);
       setInsufficientTextError(null);
       setUploadSuccessId(null);
       setHighlightedBaselineId(null);
@@ -1082,6 +1104,12 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             }
 
             setDuplicateError("This resume is already in your Baseline Library.");
+            return;
+          }
+
+          const capMessage = getLibraryCapMessage(payload);
+          if (capMessage) {
+            setCapacityError(capMessage);
             return;
           }
 
@@ -1341,6 +1369,36 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         data-testid="baseline-upload-input"
       />
       <div className="flex flex-col gap-6">
+        {capacityError || duplicateError || insufficientTextError || error ? (
+          <section
+            className="rounded-[18px] border border-rose-300/20 bg-rose-500/10 px-4 py-4 text-slate-100"
+            data-testid="baseline-upload-error"
+          >
+            <p className="text-sm font-semibold">
+              {capacityError
+                ? "Upload unavailable"
+                : duplicateError
+                  ? "Resume already uploaded"
+                  : insufficientTextError
+                    ? "We couldn’t read enough text from that file"
+                    : "Upload failed"}
+            </p>
+            <p className="mt-1 text-sm text-slate-200">
+              {capacityError ??
+                duplicateError ??
+                (insufficientTextError
+                  ? "Try re-exporting your resume as a text-based PDF or upload a DOCX."
+                  : error)}
+            </p>
+            {insufficientTextError?.details?.tips?.length ? (
+              <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-slate-200">
+                {insufficientTextError.details.tips.slice(0, 3).map((tip) => (
+                  <li key={tip}>{tip}</li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
+        ) : null}
         {!isValidatedBaselineState ? (
           <section className="rounded-[28px] bg-slate-900/40 p-6 md:p-8">
             <div className="max-w-3xl space-y-5">

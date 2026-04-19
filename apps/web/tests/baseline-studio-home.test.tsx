@@ -1392,6 +1392,81 @@ describe("BaselineStudioHome", () => {
     });
     expect(screen.queryByText("Your baseline is ready")).toBeNull();
   });
+
+  it("surfaces 409 library cap conflicts as an actionable upload error", async () => {
+    setFetchImplementation(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      if (url.includes("/api/baselines") && init?.method === "POST") {
+        return createJsonResponse(
+          {
+            error: {
+              code: "BASELINE_LIBRARY_CAP_REACHED",
+              message: "You can store up to 3 active resumes in your library.",
+              details: { activeCount: 3, maxCount: 3 },
+            },
+          },
+          false,
+          409,
+        );
+      }
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return createJsonResponse([]);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    const { container } = render(<BaselineStudioHome baselines={[]} />);
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(fileInput).not.toBeNull();
+
+    const file = new File(["resume content"], "uploaded.pdf", { type: "application/pdf" });
+    fireEvent.change(fileInput as HTMLInputElement, { target: { files: [file] } });
+
+    await screen.findByTestId("baseline-upload-error");
+    expect(screen.getByText("Upload unavailable")).toBeInTheDocument();
+    expect(screen.getByText("You can store up to 3 active resumes in your library.")).toBeInTheDocument();
+  });
+
+  it("surfaces 409 duplicate conflicts as an actionable upload error", async () => {
+    setFetchImplementation(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      if (url.includes("/api/baselines") && init?.method === "POST") {
+        return createJsonResponse(
+          {
+            error: {
+              code: "BASELINE_DUPLICATE",
+              message: "This file has already been uploaded.",
+              existingBaselineId: "base-1",
+            },
+          },
+          false,
+          409,
+        );
+      }
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return createJsonResponse([createBaseline("base-1", "2026-01-01T00:00:00.000Z", "uploaded.pdf")]);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    const { container } = render(<BaselineStudioHome baselines={[]} />);
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(fileInput).not.toBeNull();
+
+    const file = new File(["resume content"], "uploaded.pdf", { type: "application/pdf" });
+    fireEvent.change(fileInput as HTMLInputElement, { target: { files: [file] } });
+
+    await screen.findByTestId("baseline-upload-error");
+    expect(screen.getByTestId("baseline-upload-error")).toHaveTextContent(
+      "This resume is already in your Baseline Library.",
+    );
+  });
 });
 
 

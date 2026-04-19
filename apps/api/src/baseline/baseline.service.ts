@@ -674,6 +674,7 @@ export class BaselineService {
       where: {
         userId,
         hash,
+        status: BaselineStatus.ACTIVE,
       },
       order: { createdAt: 'DESC' },
     });

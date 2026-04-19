@@ -601,6 +601,62 @@ describe('BaselineService - library capacity', () => {
     });
   });
 
+  it('returns a structured duplicate conflict when the same file hash exists on an active baseline', async () => {
+    baselineRepository.findOne.mockImplementation(async ({ where }: any) => {
+      if (where?.hash && where?.status === BaselineStatus.ACTIVE) {
+        return {
+          id: 'baseline-dup',
+          userId: 'user-1',
+          hash: 'hash-1',
+          status: BaselineStatus.ACTIVE,
+          createdAt: new Date('2026-03-01T00:00:00.000Z'),
+        } as Baseline;
+      }
+      return null;
+    });
+
+    await expect(
+      service.createBaseline(
+        'user-1',
+        { originalname: 'resume.pdf', mimetype: 'application/pdf', path: '/tmp/resume.pdf' },
+        parseResult as any,
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: 'BASELINE_DUPLICATE',
+        },
+      },
+    });
+  });
+
+  it('does not treat archived baseline hashes as duplicates for uploads', async () => {
+    baselineRepository.findOne.mockImplementation(async ({ where }: any) => {
+      if (where?.hash) {
+        // Even if an archived baseline exists with this hash, the duplicate lookup
+        // only considers ACTIVE baselines.
+        return null;
+      }
+      return null;
+    });
+
+    const result = await service.createBaseline(
+      'user-1',
+      { originalname: 'resume.pdf', mimetype: 'application/pdf', path: '/tmp/resume.pdf' },
+      parseResult as any,
+    );
+
+    expect(result.baselineId).toBeDefined();
+    expect(baselineRepository.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          hash: 'hash-1',
+          status: BaselineStatus.ACTIVE,
+        }),
+      }),
+    );
+  });
+
   it('increments the active baseline version and keeps only one active baseline', async () => {
     const priorBaseline = {
       id: 'prior-baseline',
