@@ -3278,6 +3278,16 @@ export default function StudioPage() {
       resumeState.tierGateError,
     ],
   );
+  const isLowQualityDraft = hasCompletedGeneration && artifactQuality.confidence === "LOW";
+  const isMediumQualityDraft = hasCompletedGeneration && artifactQuality.confidence === "MEDIUM";
+  const isHighQualityDraft = hasCompletedGeneration && artifactQuality.confidence === "HIGH";
+  const [showFullLowQualityResume, setShowFullLowQualityResume] = useState(false);
+  const [showFullLowQualityCover, setShowFullLowQualityCover] = useState(false);
+
+  useEffect(() => {
+    setShowFullLowQualityResume(false);
+    setShowFullLowQualityCover(false);
+  }, [effectiveBaselineId, effectiveJobId, artifactQuality.confidence]);
   const coverGating = useMemo(
     () =>
       resolveStudioArtifactGating({
@@ -5084,6 +5094,12 @@ export default function StudioPage() {
     [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, requestedAnalysisId],
   );
 
+  const handleRegenerateDraft = useCallback(async () => {
+    const sessionKey = `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:regenerate:${Date.now()}`;
+    await handleResumeDraft({ sessionKey });
+    await handleCoverDraft({ sessionKey });
+  }, [effectiveBaselineId, effectiveJobId, handleCoverDraft, handleResumeDraft]);
+
   const handleGenerateDraftAnyway = useCallback(async () => {
     if (draftAnywayRequestedRef.current) return;
     draftAnywayRequestedRef.current = true;
@@ -6118,23 +6134,52 @@ export default function StudioPage() {
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Resume</p>
-                    <p className="text-sm text-slate-300">Application ready</p>
+                    <p className="text-sm text-slate-300">
+                      {isLowQualityDraft ? "Draft (low quality)" : "Application ready"}
+                    </p>
                   </div>
                 </div>
                 <div className="space-y-4 rounded-xl border border-white/10 bg-slate-950/40 p-3">
-                  <ResumePreview
-                    payload={resumeState.response}
-                    model={effectiveResumeModel}
-                    fallbackText={resumePreviewText}
-                    claimHighlights={visibleImprovableClaims}
-                    isEditing={false}
-                    hasUnsavedChanges={false}
-                    onEnterEditMode={handleEnterResumeEditMode}
-                    onSaveEdits={handleSaveResumeEdits}
-                    onCancelEdits={handleCancelResumeEdits}
-                    onSummaryChange={handleResumeSummaryChange}
-                    onBulletChange={handleResumeBulletChange}
-                  />
+                  {isLowQualityDraft && !showFullLowQualityResume ? (
+                    <div className="space-y-3" data-testid="studio-low-quality-resume-preview">
+                      <div className="rounded-xl border border-amber-300/25 bg-amber-500/5 p-3">
+                        <p className="text-sm font-semibold text-amber-100">This draft needs another pass.</p>
+                        <p className="mt-1 text-sm text-slate-200">
+                          Usable only as a rough starting point. Regenerate after verifying evidence.
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Excerpt</p>
+                        <pre className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-100">
+{resumePreviewText.slice(0, 900)}
+{resumePreviewText.length > 900 ? "\n\n…(excerpt truncated)" : ""}
+                        </pre>
+                      </div>
+                      <details className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                        <summary
+                          className="cursor-pointer text-sm font-semibold text-slate-100"
+                          data-testid="studio-low-quality-resume-view-full"
+                          onClick={() => setShowFullLowQualityResume(true)}
+                        >
+                          View full draft anyway
+                        </summary>
+                      </details>
+                    </div>
+                  ) : (
+                    <ResumePreview
+                      payload={resumeState.response}
+                      model={effectiveResumeModel}
+                      fallbackText={resumePreviewText}
+                      claimHighlights={visibleImprovableClaims}
+                      isEditing={false}
+                      hasUnsavedChanges={false}
+                      onEnterEditMode={handleEnterResumeEditMode}
+                      onSaveEdits={handleSaveResumeEdits}
+                      onCancelEdits={handleCancelResumeEdits}
+                      onSummaryChange={handleResumeSummaryChange}
+                      onBulletChange={handleResumeBulletChange}
+                    />
+                  )}
                 </div>
                 {resumeCopyStatus ? (
                   <p className="mt-2 text-xs font-medium text-emerald-200">{resumeCopyStatus}</p>
@@ -6146,15 +6191,47 @@ export default function StudioPage() {
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Cover Letter</p>
-                    <p className="text-sm text-slate-300">Application ready</p>
+                    <p className="text-sm text-slate-300">
+                      {isLowQualityDraft ? "Draft (low quality)" : "Application ready"}
+                    </p>
                   </div>
                 </div>
                 <div className="space-y-3 rounded-xl border border-white/10 bg-slate-950/40 p-3">
-                  {coverLetterParagraphs.slice(0, 4).map((paragraph, index) => (
-                    <p key={`instant-cover-paragraph-${index}`} className="text-sm leading-6 text-slate-200">
-                      {paragraph}
-                    </p>
-                  ))}
+                  {isLowQualityDraft && !showFullLowQualityCover ? (
+                    <div className="space-y-3" data-testid="studio-low-quality-cover-preview">
+                      <div className="rounded-xl border border-amber-300/25 bg-amber-500/5 p-3">
+                        <p className="text-sm font-semibold text-amber-100">This draft needs another pass.</p>
+                        <p className="mt-1 text-sm text-slate-200">
+                          Usable only as a rough starting point. Regenerate after verifying evidence.
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Excerpt</p>
+                        <div className="mt-2 space-y-3">
+                          {coverLetterParagraphs.slice(0, 2).map((paragraph, index) => (
+                            <p key={`instant-cover-excerpt-${index}`} className="text-sm leading-6 text-slate-200">
+                              {paragraph}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                      <details className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                        <summary
+                          className="cursor-pointer text-sm font-semibold text-slate-100"
+                          data-testid="studio-low-quality-cover-view-full"
+                          onClick={() => setShowFullLowQualityCover(true)}
+                        >
+                          View full draft anyway
+                        </summary>
+                      </details>
+                    </div>
+                  ) : (
+                    coverLetterParagraphs.slice(0, 4).map((paragraph, index) => (
+                      <p key={`instant-cover-paragraph-${index}`} className="text-sm leading-6 text-slate-200">
+                        {paragraph}
+                      </p>
+                    ))
+                  )}
                 </div>
                 {coverCopyStatus ? (
                   <p className="mt-2 text-xs font-medium text-emerald-200">{coverCopyStatus}</p>
@@ -6527,28 +6604,43 @@ export default function StudioPage() {
             <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-decision-panel">
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Decision + Action</p>
               <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-50">
-                {generationSupportState === "strong"
-                  ? "Strong output: you can use this now with confidence."
-                  : generationSupportState === "partial"
-                    ? "Draft output: usable now, stronger with refinement."
-                    : "Limited output: not ready yet."}
+                {hasCompletedGeneration
+                  ? isLowQualityDraft
+                    ? "This draft needs another pass."
+                    : isMediumQualityDraft
+                      ? "Draft output: usable now, stronger with refinement."
+                      : "Strong output: ready to refine in Studio."
+                  : generationSupportState === "strong"
+                    ? "Draft output: ready to refine in Studio."
+                    : generationSupportState === "partial"
+                      ? "Draft output: usable now, stronger with refinement."
+                      : "Limited output: not ready yet."}
               </h2>
               <p className="mt-2 text-sm text-slate-200">
-                {generationSupportState === "strong"
-                  ? "Built directly from your verified experience and aligned to the role."
-                  : generationSupportState === "partial"
-                    ? "Built from partially verified evidence and aligned to key role requirements."
-                    : "Built from your verified experience, but a few signals still need strengthening."}
+                {hasCompletedGeneration
+                  ? isLowQualityDraft
+                    ? "The current output is usable only as a rough starting point. Review the issues below, then regenerate or refine from verified evidence."
+                    : isMediumQualityDraft
+                      ? "Usable now, but tightening evidence and refinement will materially improve the result."
+                      : "Built from your verified experience and aligned to the role. Review and refine as needed before applying."
+                  : generationSupportState === "strong"
+                    ? "Built directly from verified evidence and aligned to the role."
+                    : generationSupportState === "partial"
+                      ? "Built from partially verified evidence and aligned to key role requirements."
+                      : "Built from your verified experience, but a few signals still need strengthening."}
               </p>
-              {generationSupportState !== "strong" ? (
+              {hasCompletedGeneration && (isLowQualityDraft || isMediumQualityDraft) ? (
                 <div className="mt-4 space-y-2">
                   <p className="text-sm font-semibold text-slate-100">
-                    {generationSupportState === "partial" ? "Why this is still worth using" : "What's holding this back"}
+                    {isMediumQualityDraft ? "What to improve next" : "What's holding this back"}
                   </p>
                   <ul className="space-y-1 text-sm text-slate-300">
-                    {(canonicalUnverifiedRequirements.length
-                      ? canonicalUnverifiedRequirements.slice(0, 4)
-                      : evidenceLedger.remainingWeakAreas.slice(0, 4)
+                    {(
+                      artifactQuality.improvableClaims.length
+                        ? artifactQuality.improvableClaims.slice(0, 4).map((claim) => claim.text)
+                        : canonicalUnverifiedRequirements.length
+                          ? canonicalUnverifiedRequirements.slice(0, 4)
+                          : evidenceLedger.remainingWeakAreas.slice(0, 4)
                     ).map((item) => (
                       <li
                         key={`studio-decision-gap-${item}`}
@@ -6558,6 +6650,28 @@ export default function StudioPage() {
                       </li>
                     ))}
                   </ul>
+                  {isLowQualityDraft ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <FormButton
+                        onClick={() => void handleRegenerateDraft()}
+                        disabled={pageTruth.isGenerating || resumeGenerating || coverGenerating}
+                        data-testid="studio-low-quality-regenerate"
+                      >
+                        Regenerate draft
+                      </FormButton>
+                      <Link
+                        href={
+                          artifactQuality.improvableClaims[0]?.text
+                            ? buildClaimVerificationHref(artifactQuality.improvableClaims[0].text)
+                            : fitReviewHref
+                        }
+                        className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
+                        data-testid="studio-low-quality-verify-evidence"
+                      >
+                        Verify evidence
+                      </Link>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -7251,19 +7365,62 @@ export default function StudioPage() {
               </p>
             ) : null}
             <div className="space-y-4 rounded-xl border border-white/10 bg-slate-950/40 p-3">
-              <ResumePreview
-                payload={resumeState.response}
-                model={effectiveResumeModel}
-                fallbackText={resumePreviewText}
-                claimHighlights={visibleImprovableClaims}
-                isEditing={isResumeEditMode}
-                hasUnsavedChanges={hasUnsavedResumeEdits}
-                onEnterEditMode={handleEnterResumeEditMode}
-                onSaveEdits={handleSaveResumeEdits}
-                onCancelEdits={handleCancelResumeEdits}
-                onSummaryChange={handleResumeSummaryChange}
-                onBulletChange={handleResumeBulletChange}
-              />
+              {isLowQualityDraft && !showFullLowQualityResume ? (
+                <div className="space-y-3" data-testid="studio-low-quality-resume-preview-main">
+                  <div className="rounded-xl border border-amber-300/25 bg-amber-500/5 p-3">
+                    <p className="text-sm font-semibold text-amber-100">This draft needs another pass.</p>
+                    <p className="mt-1 text-sm text-slate-200">
+                      The current output is usable only as a rough starting point. Review the issues above, verify evidence, then regenerate.
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <FormButton
+                        onClick={() => void handleRegenerateDraft()}
+                        disabled={pageTruth.isGenerating || resumeGenerating || coverGenerating}
+                        data-testid="studio-low-quality-regenerate-main"
+                      >
+                        Regenerate draft
+                      </FormButton>
+                      <Link
+                        href={fitReviewHref}
+                        className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
+                        data-testid="studio-low-quality-verify-evidence-main"
+                      >
+                        Verify evidence
+                      </Link>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Excerpt</p>
+                    <pre className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-100">
+{resumePreviewText.slice(0, 1200)}
+{resumePreviewText.length > 1200 ? "\n\n…(excerpt truncated)" : ""}
+                    </pre>
+                  </div>
+                  <details className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                    <summary
+                      className="cursor-pointer text-sm font-semibold text-slate-100"
+                      data-testid="studio-low-quality-resume-view-full-main"
+                      onClick={() => setShowFullLowQualityResume(true)}
+                    >
+                      View full draft anyway
+                    </summary>
+                  </details>
+                </div>
+              ) : (
+                <ResumePreview
+                  payload={resumeState.response}
+                  model={effectiveResumeModel}
+                  fallbackText={resumePreviewText}
+                  claimHighlights={visibleImprovableClaims}
+                  isEditing={isResumeEditMode}
+                  hasUnsavedChanges={hasUnsavedResumeEdits}
+                  onEnterEditMode={handleEnterResumeEditMode}
+                  onSaveEdits={handleSaveResumeEdits}
+                  onCancelEdits={handleCancelResumeEdits}
+                  onSummaryChange={handleResumeSummaryChange}
+                  onBulletChange={handleResumeBulletChange}
+                />
+              )}
             </div>
             {trackerEntryId ? (
               <div className="rounded-2xl border border-amber-400/40 bg-amber-500/5 p-4">
@@ -7531,7 +7688,50 @@ export default function StudioPage() {
                 <VerifiedGenerationTrustSummary testId="studio-cover-trust-summary" />
               ) : null}
               <div className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-3">
-                {coverLetterParagraphs.length ? (
+                {isLowQualityDraft && !showFullLowQualityCover ? (
+                  <div className="space-y-3" data-testid="studio-low-quality-cover-preview-main">
+                    <div className="rounded-xl border border-amber-300/25 bg-amber-500/5 p-3">
+                      <p className="text-sm font-semibold text-amber-100">This draft needs another pass.</p>
+                      <p className="mt-1 text-sm text-slate-200">
+                        Usable only as a rough starting point. Verify evidence, then regenerate.
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <FormButton
+                          onClick={() => void handleRegenerateDraft()}
+                          disabled={pageTruth.isGenerating || resumeGenerating || coverGenerating}
+                          data-testid="studio-low-quality-regenerate-cover-main"
+                        >
+                          Regenerate draft
+                        </FormButton>
+                        <Link
+                          href={fitReviewHref}
+                          className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
+                        >
+                          Verify evidence
+                        </Link>
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Excerpt</p>
+                      <div className="mt-2 space-y-3">
+                        {coverLetterParagraphs.slice(0, 2).map((paragraph, index) => (
+                          <p key={`cover-letter-excerpt-${index}`} className="text-sm leading-[1.7] text-slate-200">
+                            {paragraph}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                    <details className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                      <summary
+                        className="cursor-pointer text-sm font-semibold text-slate-100"
+                        data-testid="studio-low-quality-cover-view-full-main"
+                        onClick={() => setShowFullLowQualityCover(true)}
+                      >
+                        View full draft anyway
+                      </summary>
+                    </details>
+                  </div>
+                ) : coverLetterParagraphs.length ? (
                   <div className="mx-auto flex w-full max-w-[760px] flex-col space-y-4 rounded-2xl border border-white/10 bg-slate-950/80 p-6 shadow-inner">
                     {coverLetterParagraphs.map((paragraph, index) => {
                       const lines = paragraph.split(/\r?\n/);
