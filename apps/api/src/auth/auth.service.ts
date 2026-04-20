@@ -186,7 +186,7 @@ export class AuthService {
       }
 
       this.logger.log(`Login token generation starting userId=${user.id}`);
-      return this.buildAuthResponse(user);
+      return await this.buildAuthResponse(user);
     } catch (error) {
       if (error instanceof HttpException) {
         this.logger.warn(
@@ -214,7 +214,7 @@ export class AuthService {
 
     await this.accessCodesService.redeemCodeForUser(user, payload.code);
 
-    return this.buildAuthResponse(user);
+    return await this.buildAuthResponse(user);
   }
 
   async confirmEmail(token: string): Promise<{ success: true; message: string }> {
@@ -602,11 +602,23 @@ export class AuthService {
     }
   }
 
-  private buildAuthResponse(user: User): AuthResponseDto {
+  private async buildAuthResponse(user: User): Promise<AuthResponseDto> {
     const isFounder = this.isFounder(user.email);
+
+    // Canonical rule: beta-approved users resolve to PRO even without a paid tier.
+    // Beta approval is sourced from either the durable user flag or an active redeemed access code.
+    const betaAccessApproved = isFounder
+      ? true
+      : user?.id
+        ? await this.accessCodesService.resolveBetaAccessApproved({
+            userId: user.id,
+            betaAccessApproved: user.betaAccessApproved,
+          })
+        : Boolean(user.betaAccessApproved);
+
     const entitlements = getEntitlementsForUser({
       subscriptionTier: isFounder ? SubscriptionTier.PRO : user.subscriptionTier,
-      betaAccessApproved: user.betaAccessApproved,
+      betaAccessApproved,
     });
     const resolvedTier = entitlements.effectiveTier;
     const resolvedRole = isFounder ? 'admin' : user.role;
@@ -617,7 +629,7 @@ export class AuthService {
       subscriptionTier: resolvedTier,
       role: resolvedRole,
       entitlements,
-      betaAccessApproved: Boolean(user.betaAccessApproved),
+      betaAccessApproved,
     };
 
     let accessToken: string;

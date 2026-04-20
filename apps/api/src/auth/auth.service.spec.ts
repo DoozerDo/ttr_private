@@ -37,6 +37,7 @@ describe('AuthService', () => {
     redeemCodeForUser: jest.Mock;
     redeemAssignedCodeForUser: jest.Mock;
     userHasActiveAccess: jest.Mock;
+    resolveBetaAccessApproved: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -66,6 +67,7 @@ describe('AuthService', () => {
             redeemCodeForUser: jest.fn(),
             redeemAssignedCodeForUser: jest.fn().mockResolvedValue(false),
             userHasActiveAccess: jest.fn().mockResolvedValue(false),
+            resolveBetaAccessApproved: jest.fn(),
           },
         },
         {
@@ -113,6 +115,12 @@ describe('AuthService', () => {
     configService = module.get(ConfigService);
     adminUsersService = module.get(AdminUsersService);
     accessCodesService = module.get(AccessCodesService);
+    accessCodesService.resolveBetaAccessApproved.mockImplementation(
+      async (input: { userId: string; betaAccessApproved?: boolean | null }) => {
+        if (input.betaAccessApproved === true) return true;
+        return Boolean(await accessCodesService.userHasActiveAccess(input.userId));
+      },
+    );
     userTokensRepository = module.get(getRepositoryToken(UserToken));
     jest.spyOn(jwtService, 'sign').mockReturnValue('signed-token');
   });
@@ -236,6 +244,47 @@ describe('AuthService', () => {
       id: savedUser.id,
       subscriptionTier: SubscriptionTier.PRO,
     });
+    expect(result.user.entitlements.effectiveTier).toEqual(SubscriptionTier.PRO);
+  });
+
+  it('treats redeemed access code users as PRO on login even when betaAccessApproved is false', async () => {
+    const payload: LoginDto = {
+      email: 'beta-code-user@example.com',
+      password: 'Password123',
+    };
+    const passwordHash = await bcrypt.hash(payload.password, 10);
+    const savedUser: User = {
+      id: 'beta-code-user-id',
+      email: payload.email,
+      firstName: 'Beta',
+      lastName: 'CodeUser',
+      emailConfirmed: true,
+      passwordHash,
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
+      role: 'user',
+      subscriptionTier: SubscriptionTier.FREE,
+      betaAccessApproved: false,
+      accountType: AccountType.FREE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    usersService.findByEmail.mockResolvedValue(savedUser);
+    accessCodesService.userHasActiveAccess.mockResolvedValueOnce(true);
+
+    const result = await service.login(payload);
+
+    expect(result.user).toMatchObject({
+      id: savedUser.id,
+      subscriptionTier: SubscriptionTier.PRO,
+    });
+    expect(result.user.entitlements.tier).toEqual(SubscriptionTier.PRO);
     expect(result.user.entitlements.effectiveTier).toEqual(SubscriptionTier.PRO);
   });
 

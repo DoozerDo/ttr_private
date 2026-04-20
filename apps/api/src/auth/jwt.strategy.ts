@@ -8,6 +8,7 @@ import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 import type { AuthUserDto } from './dto/auth-response.dto';
 import type { Request } from 'express';
 import { isFounderEmail } from './founder-access';
+import { AccessCodesService } from '../access-codes/access-codes.service';
 
 type JwtPayload = {
   sub: string;
@@ -65,6 +66,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
     private readonly configService: ConfigService,
     private readonly usersService: UsersService,
+    private readonly accessCodesService: AccessCodesService,
   ) {
     const jwtSecret = configService.get<string>('JWT_SECRET');
 
@@ -94,9 +96,19 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       user.email,
       this.configService.get<string>('FOUNDER_EMAILS'),
     );
+
+    const betaAccessApproved = isFounder
+      ? true
+      : user?.id
+        ? await this.accessCodesService.resolveBetaAccessApproved({
+            userId: user.id,
+            betaAccessApproved: user.betaAccessApproved,
+          })
+        : Boolean(user.betaAccessApproved);
+
     const entitlements = getEntitlementsForUser({
       subscriptionTier: isFounder ? SubscriptionTier.PRO : user.subscriptionTier,
-      betaAccessApproved: user.betaAccessApproved,
+      betaAccessApproved,
     });
     const resolvedTier = entitlements.effectiveTier;
     const resolvedRole = isFounder ? 'admin' : user.role;

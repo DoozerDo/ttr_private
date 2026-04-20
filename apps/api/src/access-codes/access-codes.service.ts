@@ -139,6 +139,17 @@ export class AccessCodesService {
     return count > 0;
   }
 
+  async resolveBetaAccessApproved(input: {
+    userId: string;
+    betaAccessApproved?: boolean | null;
+  }): Promise<boolean> {
+    if (input.betaAccessApproved === true) {
+      return true;
+    }
+
+    return this.userHasActiveAccess(input.userId);
+  }
+
   async redeemCodeForUser(user: User, rawCode: string): Promise<void> {
     const codeHash = hashCode(normalizeCode(rawCode));
     const code = await this.accessCodesRepository.findOne({ where: { codeHash } });
