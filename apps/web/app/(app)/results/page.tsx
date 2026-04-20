@@ -2916,11 +2916,17 @@ export default function ResultsPage() {
     let cancelled = false;
     const fetchArtifacts = async () => {
       try {
+        if (!generationPairIds.baselineVersionId?.trim()) {
+          console.error("[RESULTS][ARTIFACTS] Missing baselineVersionId; blocking artifacts fetch.", {
+            baselineId: generationPairIds.baselineId,
+            jobId: generationPairIds.jobId,
+          });
+          return;
+        }
         const backendUrl = new URL("/api/studio/artifacts", window.location.origin);
         backendUrl.searchParams.set("baselineId", generationPairIds.baselineId);
         backendUrl.searchParams.set("baselineVersionId", generationPairIds.baselineVersionId);
         backendUrl.searchParams.set("jobId", generationPairIds.jobId);
-        backendUrl.searchParams.set("analysisId", generationPairIds.analysisId);
         const response = await fetch(backendUrl.toString(), { cache: "no-store" });
         const payload = await readResponsePayload(response);
         if (cancelled) return;
@@ -2987,11 +2993,17 @@ export default function ResultsPage() {
     const interval = window.setInterval(async () => {
       if (cancelled) return;
       try {
+        if (!generationPairIds.baselineVersionId?.trim()) {
+          console.error("[RESULTS][ARTIFACTS] Missing baselineVersionId; blocking artifacts poll.", {
+            baselineId: generationPairIds.baselineId,
+            jobId: generationPairIds.jobId,
+          });
+          return;
+        }
         const backendUrl = new URL("/api/studio/artifacts", window.location.origin);
         backendUrl.searchParams.set("baselineId", generationPairIds.baselineId);
         backendUrl.searchParams.set("baselineVersionId", generationPairIds.baselineVersionId);
         backendUrl.searchParams.set("jobId", generationPairIds.jobId);
-        backendUrl.searchParams.set("analysisId", generationPairIds.analysisId);
         const response = await fetch(backendUrl.toString(), { cache: "no-store" });
         const payload = await readResponsePayload(response);
         if (!response.ok) return;

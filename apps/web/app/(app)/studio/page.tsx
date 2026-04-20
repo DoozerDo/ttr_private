@@ -1496,11 +1496,63 @@ export default function StudioPage() {
 
     void (async () => {
       try {
+        const hasBaselineId = Boolean(effectiveBaselineId);
+        const hasJobId = Boolean(effectiveJobId);
+        let resolvedBaselineVersionId = effectiveBaselineVersionId;
+        const hasBaselineVersionId = Boolean(resolvedBaselineVersionId);
+
+        // The artifacts API requires baselineId + baselineVersionId + jobId. Do not call without them.
+        if (!hasBaselineId || !hasJobId) {
+          throw new Error("Missing required artifacts context");
+        }
+
+        if (!hasBaselineVersionId) {
+          console.error("[STUDIO][ARTIFACTS] Missing baselineVersionId; attempting to resolve from baseline versions.", {
+            baselineId: effectiveBaselineId,
+            jobId: effectiveJobId,
+            analysisId: requestedAnalysisId ?? null,
+          });
+          try {
+            const versionsResponse = await fetch(
+              `/api/baselines/${encodeURIComponent(effectiveBaselineId)}/versions`,
+              { cache: "no-store" },
+            );
+            const versionsPayload = await readResponsePayload(versionsResponse);
+            if (versionsResponse.ok && Array.isArray(versionsPayload)) {
+              const versions = versionsPayload
+                .map((record) => {
+                  if (!record || typeof record !== "object") return null;
+                  const candidate = record as { id?: unknown; versionNumber?: unknown };
+                  const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
+                  const versionNumber =
+                    typeof candidate.versionNumber === "number" ? candidate.versionNumber : Number(candidate.versionNumber);
+                  if (!id || !Number.isFinite(versionNumber)) return null;
+                  return { id, versionNumber };
+                })
+                .filter((value): value is { id: string; versionNumber: number } => Boolean(value));
+              const resolved = versions.sort((a, b) => b.versionNumber - a.versionNumber)[0]?.id ?? null;
+              if (resolved) {
+                resolvedBaselineVersionId = resolved;
+              }
+            }
+          } catch {
+            // fall through to cache fallback below
+          }
+        }
+
+        if (!resolvedBaselineVersionId) {
+          console.error("[STUDIO][ARTIFACTS] baselineVersionId still missing; blocking artifacts fetch.", {
+            baselineId: effectiveBaselineId,
+            jobId: effectiveJobId,
+            analysisId: requestedAnalysisId ?? null,
+          });
+          throw new Error("Missing baselineVersionId");
+        }
+
         const backendUrl = new URL("/api/studio/artifacts", window.location.origin);
-        if (effectiveBaselineId) backendUrl.searchParams.set("baselineId", effectiveBaselineId);
-        if (effectiveBaselineVersionId) backendUrl.searchParams.set("baselineVersionId", effectiveBaselineVersionId);
-        if (effectiveJobId) backendUrl.searchParams.set("jobId", effectiveJobId);
-        if (requestedAnalysisId) backendUrl.searchParams.set("analysisId", requestedAnalysisId);
+        backendUrl.searchParams.set("baselineId", effectiveBaselineId);
+        backendUrl.searchParams.set("baselineVersionId", resolvedBaselineVersionId);
+        backendUrl.searchParams.set("jobId", effectiveJobId);
 
         const response = await fetch(backendUrl.toString(), { cache: "no-store" });
         const payload = await readResponsePayload(response);
