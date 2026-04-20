@@ -129,7 +129,7 @@ describe("results generation transition", () => {
 
     await waitFor(
       () => {
-        expect(screen.getAllByText("Your documents are ready").length).toBeGreaterThan(0);
+        expect(screen.getAllByText("Your documents are ready.").length).toBe(1);
       },
       { timeout: 6000 },
     );
@@ -259,7 +259,7 @@ describe("results generation transition", () => {
     expect(screen.queryByText(/Resume:/)).toBeNull();
 
     await waitFor(() => {
-      expect(screen.getAllByText("Your documents are ready").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Your documents are ready.").length).toBe(1);
     });
     expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("Open in Studio");
     expect(mockRouterPush).not.toHaveBeenCalled();
@@ -446,7 +446,7 @@ describe("results generation transition", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getAllByText("Your documents are ready").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Your documents are ready.").length).toBe(1);
     });
     expect(screen.queryByText("Strong match. Ready for document generation.")).toBeNull();
     expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent("Open in Studio");
@@ -575,7 +575,7 @@ describe("results generation transition", () => {
 
       await waitFor(
         () => {
-          expect(screen.getAllByText(/Your documents are ready/i).length).toBeGreaterThan(0);
+          expect(screen.getAllByText("Your documents are ready.").length).toBe(1);
         },
         { timeout: 10_000 },
       );

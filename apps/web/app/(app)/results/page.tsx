@@ -1096,8 +1096,8 @@ export function OpportunityMapSection({
   const decisionNarrative = useMemo(() => {
     if (finalGenerationOutcome === "generated") {
       return {
-        headline: "Your documents are ready",
-        body: finalGenerationMessage || "Your drafts are ready below. Refinement comes next.",
+        headline: "Review and refine in Studio",
+        body: finalGenerationMessage || "Review and refine your documents in Studio.",
       };
     }
     if (finalGenerationOutcome === "needs_attention") {
@@ -1129,8 +1129,8 @@ export function OpportunityMapSection({
       }
       if (generationPhase === "generated") {
         return {
-          headline: "Your documents are ready",
-        body: "Your drafts are ready below. Refinement comes next.",
+          headline: "Review and refine in Studio",
+          body: "Review and refine your documents in Studio.",
         };
       }
       return {
@@ -3335,7 +3335,7 @@ export default function ResultsPage() {
         : "Generating your documents...";
     }
     if (generationCuePhase === "generated") {
-      return "Your documents are ready.";
+      return "Review and refine your documents in Studio.";
     }
     if (generationCuePhase === "failed" || generationCuePhase === "partial") {
       return "Generation needs attention.";
@@ -3378,6 +3378,8 @@ export default function ResultsPage() {
     });
   }, [improvementSuggestions.length, recentIntent, resultsScoreBucket, showImprovementModule]);
   const showGenerationUnlockedPanel = Boolean(latest) && justUnlocked && !isGenerationBlocked && !isStrongFitScore;
+  const isPostGenerationState = pairWorkflowState.pairStatus === "generated";
+  const isGeneratingState = pairWorkflowState.pairStatus === "generating";
   const evidenceLedger = useMemo(
     () =>
       deriveEvidenceLedger(latest, {
@@ -4813,7 +4815,7 @@ export default function ResultsPage() {
                 : pairWorkflowState.pairStatus === "generating"
                   ? "Generating your documents..."
                   : pairWorkflowState.pairStatus === "generated"
-                    ? "Your documents are ready"
+                    ? "Your documents are ready."
                     : pairWorkflowState.pairStatus === "generation_failed"
                       ? "Generation failed"
                       : resultsDecision.headline}
@@ -4824,13 +4826,12 @@ export default function ResultsPage() {
                 : pairWorkflowState.pairStatus === "generating"
                   ? "We’re drafting your resume and cover letter now."
                   : pairWorkflowState.pairStatus === "generated"
-                    ? "Your drafts are ready below. Refinement comes next."
+                    ? "Review and refine your documents in Studio."
                     : pairWorkflowState.pairStatus === "generation_failed"
                       ? "Retry generation, or open Studio to adjust inputs and try again."
                       : resultsDecision.subtext}
           </p>
           {pairWorkflowState.pairStatus === "generating" ||
-          pairWorkflowState.pairStatus === "generated" ||
           pairWorkflowState.pairStatus === "generation_failed" ? (
             <>
               <p className="mt-2 text-sm font-medium text-slate-200">
@@ -4838,9 +4839,7 @@ export default function ResultsPage() {
                   ? "Finalizing your documents..."
                   : pairWorkflowState.pairStatus === "generating"
                   ? "Generating your documents..."
-                  : pairWorkflowState.pairStatus === "generated"
-                    ? "Your documents are ready."
-                    : "Generation failed."}
+                  : "Generation failed."}
               </p>
               {opportunityMapGenerationRecoveryUi === "finalizing" ? (
                 <p className="mt-1 text-sm text-slate-300">
@@ -4849,10 +4848,6 @@ export default function ResultsPage() {
               ) : pairWorkflowState.pairStatus === "generating" ? (
                 <p className="mt-1 text-sm text-slate-300">
                   Keep this tab open. You can review drafts in Studio as soon as they finish.
-                </p>
-              ) : pairWorkflowState.pairStatus === "generated" ? (
-                <p className="mt-1 text-sm text-slate-300">
-                  Review the drafts below, then refine in Studio if needed.
                 </p>
               ) : generationRecoveryExhausted ? (
                 <p className="mt-1 text-sm text-slate-300">
@@ -5163,45 +5158,64 @@ export default function ResultsPage() {
               }
               className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
             />
-          ) : (
+          ) : isGeneratingState ? null : (
             <div className="space-y-7">
               <div className="space-y-7">
-                  <OpportunityMapSection
-                    assessmentId={latest?.assessmentId ?? null}
-                    score={activeScore}
-                    scoreBreakdown={scoreBreakdown}
-                    verdict={opportunityVerdict}
-                    nextAction={primaryNextAction}
-                    advantageSignals={advantageSignals}
-                    primaryCta={opportunityMapPrimaryCta}
-                    evidenceLedger={evidenceLedger}
-                    scoreAnalysisHref="#advanced-insights"
-                    readiness={resultsReadiness}
-                    verificationCoverage={verificationCoverage}
-                    canonicalCoverage={latest?.verification_coverage ?? null}
-                    blockedState={blockedResultsState}
-                    predictiveUnlock={predictiveUnlock}
-                    weakFitRecovery={weakFitRecovery}
-                    reliabilityFacts={reliabilityFacts}
-                    secondaryAction={secondaryAction}
-                    finalGenerationOutcome={
-                      pairWorkflowState.pairStatus === "generated"
-                        ? "generated"
-                        : pairWorkflowState.pairStatus === "generation_failed" &&
-                            (pairWorkflowState.resumeStatus === "ready" ||
-                              pairWorkflowState.coverLetterStatus === "ready")
-                          ? "needs_attention"
+                {(() => {
+                  const opportunityMapSection = (
+                    <OpportunityMapSection
+                      assessmentId={latest?.assessmentId ?? null}
+                      score={activeScore}
+                      scoreBreakdown={scoreBreakdown}
+                      verdict={opportunityVerdict}
+                      nextAction={primaryNextAction}
+                      advantageSignals={advantageSignals}
+                      primaryCta={opportunityMapPrimaryCta}
+                      evidenceLedger={evidenceLedger}
+                      scoreAnalysisHref="#advanced-insights"
+                      readiness={resultsReadiness}
+                      verificationCoverage={verificationCoverage}
+                      canonicalCoverage={latest?.verification_coverage ?? null}
+                      blockedState={blockedResultsState}
+                      predictiveUnlock={predictiveUnlock}
+                      weakFitRecovery={weakFitRecovery}
+                      reliabilityFacts={reliabilityFacts}
+                      secondaryAction={secondaryAction}
+                      finalGenerationOutcome={
+                        pairWorkflowState.pairStatus === "generated"
+                          ? "generated"
+                          : pairWorkflowState.pairStatus === "generation_failed" &&
+                              (pairWorkflowState.resumeStatus === "ready" ||
+                                pairWorkflowState.coverLetterStatus === "ready")
+                            ? "needs_attention"
+                            : null
+                      }
+                      finalGenerationMessage={
+                        pairWorkflowState.pairStatus === "generated" &&
+                        (pairWorkflowState.resumeStatus === "failed" || pairWorkflowState.coverLetterStatus === "failed")
+                          ? "Draft created using available experience. You can refine it further."
                           : null
-                    }
-                    finalGenerationMessage={
-                      pairWorkflowState.pairStatus === "generated" &&
-                      (pairWorkflowState.resumeStatus === "failed" || pairWorkflowState.coverLetterStatus === "failed")
-                        ? "Draft created using available experience. You can refine it further."
-                        : null
-                    }
-                    generationPhase={generationCuePhase}
-                    generationRecoveryUi={opportunityMapGenerationRecoveryUi}
-                  />
+                      }
+                      generationPhase={generationCuePhase}
+                      generationRecoveryUi={opportunityMapGenerationRecoveryUi}
+                    />
+                  );
+
+                  if (isGeneratingState) return null;
+                  if (!isPostGenerationState) return opportunityMapSection;
+
+                  return (
+                    <details
+                      className="rounded-2xl border border-white/10 bg-slate-950/35 p-4"
+                      data-testid="results-analysis-collapsed"
+                    >
+                      <summary className="cursor-pointer text-sm font-semibold text-slate-200">
+                        View fit analysis
+                      </summary>
+                      <div className="mt-5">{opportunityMapSection}</div>
+                    </details>
+                  );
+                })()}
                   {applicationInsights.length ? (
                     <section className="rounded-2xl border border-sky-300/30 bg-sky-500/10 p-4">
                       <h3 className="text-lg font-semibold text-slate-100">Based on your past applications</h3>
