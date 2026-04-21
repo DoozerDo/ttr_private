@@ -16,6 +16,7 @@ import { FormButton } from "@/components/FormButton";
 import { InsufficientExtractedText } from "@/components/compliance/InsufficientExtractedText";
 import {
   archiveBaseline,
+  BaselineMutationError,
   describeBaselineMutationError,
   setCurrentBaseline,
   isBaselineAnalyzedFromSummary,
@@ -409,7 +410,8 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   const [highlightedBaselineId, setHighlightedBaselineId] = useState<string | null>(null);
   const [postUploadCtaBaselineId, setPostUploadCtaBaselineId] = useState<string | null>(null);
   const [baselineUpdatedNotice, setBaselineUpdatedNotice] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
   const [duplicateError, setDuplicateError] = useState<string | null>(null);
   const [capacityError, setCapacityError] = useState<string | null>(null);
   const [insufficientTextError, setInsufficientTextError] =
@@ -734,6 +736,22 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     const payload = (await response.json()) as BaselineDto[];
     setBaselineList(payload);
     setBaselineDetails({});
+    setPageError(null);
+    setPrimaryBaselineId((current) => {
+      const activeBaselines = sortBaselinesNewestFirst(payload).filter(
+        (baseline) => baseline.status !== "ARCHIVED",
+      );
+      const canonicalCurrentId =
+        activeBaselines.find((baseline) => baseline.isActive === true)?.id ?? null;
+      const requestedId =
+        typeof current === "string" && current
+          ? activeBaselines.some((baseline) => baseline.id === current)
+            ? current
+            : null
+          : null;
+
+      return requestedId ?? canonicalCurrentId ?? activeBaselines[0]?.id ?? null;
+    });
 
     if (process.env.NODE_ENV !== "production") {
       payload.forEach((baseline) => {
@@ -784,7 +802,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
       const requestId = createRequestId();
       setPrimaryBaselineId(baselineId);
       setLoadingBaselineId(baselineId);
-      setError(null);
+      setPageError(null);
       baselineDetailsRequestRef.current = { requestId, baselineId };
 
       try {
@@ -794,6 +812,15 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         });
 
         if (!response.ok) {
+          if (response.status === 404) {
+            // Selected baseline went stale (archived/deleted elsewhere). Rehydrate and fall back.
+            try {
+              await refreshBaselineLibrary();
+            } catch (refreshError) {
+              console.error("Unable to refresh Baseline Library after missing baseline detail", refreshError);
+            }
+            return null;
+          }
           throw new Error("Unable to load baseline analysis right now.");
         }
 
@@ -834,7 +861,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           baselineId,
           message: fetchError instanceof Error ? fetchError.message : String(fetchError),
         });
-        setError(
+        setPageError(
           fetchError instanceof Error
             ? fetchError.message
             : "Unable to load baseline analysis right now.",
@@ -847,7 +874,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         }
       }
     },
-    [scrollToAnalysis],
+    [refreshBaselineLibrary, scrollToAnalysis],
   );
 
   const runCanonicalBaselineAnalysis = useCallback(
@@ -855,11 +882,14 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
       const requestId = createRequestId();
       setPrimaryBaselineId(baselineId);
       setLoadingBaselineId(baselineId);
-      setError(null);
+      setPageError(null);
       baselineAnalysisRequestRef.current = { requestId, baselineId };
 
       try {
         const loadedBaseline = await fetchBaselineDetails(baselineId);
+        if (!loadedBaseline) {
+          return;
+        }
         if (
           baselineAnalysisRequestRef.current?.requestId !== requestId ||
           primaryBaselineIdRef.current !== baselineId
@@ -933,7 +963,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           baselineId,
           message: runError instanceof Error ? runError.message : String(runError),
         });
-        setError(
+        setPageError(
           runError instanceof Error
             ? runError.message
             : "Unable to run baseline analysis right now.",
@@ -1067,7 +1097,8 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
       }
 
       setIsUploading(true);
-      setError(null);
+      setUploadError(null);
+      setPageError(null);
       setDuplicateError(null);
       setCapacityError(null);
       setInsufficientTextError(null);
@@ -1135,7 +1166,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
               ? (payload as Record<string, unknown>).message ??
                 (payload as Record<string, unknown>).error
               : undefined;
-          setError(
+          setUploadError(
             typeof fallbackMessage === "string"
               ? fallbackMessage
               : "Unable to upload resume right now.",
@@ -1145,7 +1176,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
 
         const baselineRecord = getUploadedBaselineRecord(payload);
         if (!baselineRecord) {
-          setError("Unable to upload resume right now.");
+          setUploadError("Unable to upload resume right now.");
           return;
         }
 
@@ -1219,7 +1250,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         }
       } catch (uploadError) {
         console.error("Upload failed", uploadError);
-        setError("Unable to upload resume right now.");
+        setUploadError("Unable to upload resume right now.");
       } finally {
         setIsUploading(false);
         if (fileInputRef.current) {
@@ -1234,7 +1265,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     async (baselineId: string) => {
       if (loadingBaselineId === baselineId) return;
       setLoadingBaselineId(baselineId);
-      setError(null);
+      setPageError(null);
 
       try {
         await setCurrentBaseline(baselineId);
@@ -1260,7 +1291,15 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           baselineId,
           setCurrentError,
         });
-        setError(describeBaselineMutationError(setCurrentError, "set current"));
+        if (setCurrentError instanceof BaselineMutationError && setCurrentError.status === 404) {
+          try {
+            await refreshBaselineLibrary();
+          } catch (refreshError) {
+            console.error("Unable to refresh baseline library after missing baseline on set current", refreshError);
+          }
+          return;
+        }
+        setPageError(describeBaselineMutationError(setCurrentError, "set current"));
       } finally {
         setLoadingBaselineId(null);
       }
@@ -1272,7 +1311,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     async (baselineId: string) => {
       if (archivingBaselineId === baselineId) return;
       setArchivingBaselineId(baselineId);
-      setError(null);
+      setPageError(null);
 
       try {
         if (process.env.NODE_ENV !== "production") {
@@ -1321,7 +1360,15 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           baselineId,
           archiveError,
         });
-        setError(describeBaselineMutationError(archiveError, "archive"));
+        if (archiveError instanceof BaselineMutationError && archiveError.status === 404) {
+          try {
+            await refreshBaselineLibrary();
+          } catch (refreshError) {
+            console.error("Unable to refresh baseline library after missing baseline on archive", refreshError);
+          }
+          return;
+        }
+        setPageError(describeBaselineMutationError(archiveError, "archive"));
       } finally {
         setArchivingBaselineId(null);
       }
@@ -1424,7 +1471,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         data-testid="baseline-upload-input"
       />
       <div className="flex flex-col gap-6">
-        {capacityError || duplicateError || insufficientTextError || error ? (
+        {capacityError || duplicateError || insufficientTextError || uploadError ? (
           <section
             className="rounded-[18px] border border-rose-300/20 bg-rose-500/10 px-4 py-4 text-slate-100"
             data-testid="baseline-upload-error"
@@ -1443,7 +1490,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 duplicateError ??
                 (insufficientTextError
                   ? "Try re-exporting your resume as a text-based PDF or upload a DOCX."
-                  : error)}
+                  : uploadError)}
             </p>
             {insufficientTextError?.details?.tips?.length ? (
               <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-slate-200">
@@ -1453,6 +1500,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
               </ul>
             ) : null}
           </section>
+        ) : null}
+        {pageError ? (
+          <Alert intent="error" title="Something went wrong">
+            <p className="text-sm text-current">{pageError}</p>
+          </Alert>
         ) : null}
         {!isValidatedBaselineState ? (
           <section className="rounded-[28px] bg-slate-900/40 p-6 md:p-8">

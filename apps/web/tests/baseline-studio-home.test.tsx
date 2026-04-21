@@ -1483,6 +1483,32 @@ describe("BaselineStudioHome", () => {
     expect(screen.getByText("You can store up to 3 active resumes in your library.")).toBeInTheDocument();
   });
 
+  it("shows Upload failed only for true upload mutation failures", async () => {
+    setFetchImplementation(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      if (url.includes("/api/baselines") && init?.method === "POST") {
+        return createJsonResponse({ message: "Nope" }, false, 500);
+      }
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return createJsonResponse([]);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    const { container } = render(<BaselineStudioHome baselines={[]} />);
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(fileInput).not.toBeNull();
+
+    const file = new File(["resume content"], "uploaded.pdf", { type: "application/pdf" });
+    fireEvent.change(fileInput as HTMLInputElement, { target: { files: [file] } });
+
+    await screen.findByTestId("baseline-upload-error");
+    expect(screen.getByTestId("baseline-upload-error")).toHaveTextContent("Upload failed");
+  });
+
   it("surfaces 409 duplicate conflicts as an actionable upload error", async () => {
     setFetchImplementation(async (input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -1519,6 +1545,74 @@ describe("BaselineStudioHome", () => {
     expect(screen.getByTestId("baseline-upload-error")).toHaveTextContent(
       "This resume is already in your Baseline Library.",
     );
+  });
+
+  it("does not show Upload failed when archiving a stale baseline id and falling back succeeds", async () => {
+    setFetchImplementation(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      if (url.includes("/api/baselines/base-2/archive") && init?.method === "PATCH") {
+        return createJsonResponse({ message: "Baseline not found" }, false, 404);
+      }
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return createJsonResponse([createAnalyzedBaseline("base-1", "current.pdf", 90, true)]);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(
+      <BaselineStudioHome
+        baselines={[
+          createAnalyzedBaseline("base-1", "current.pdf", 90, true),
+          createAnalyzedBaseline("base-2", "other.pdf", 84, false),
+        ]}
+      />,
+    );
+
+    const libraryCard = screen.getByTestId("baseline-library-card:base-2");
+    fireEvent.click(within(libraryCard).getByRole("button", { name: "Archive" }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("baseline-library-card:base-2")).toBeNull();
+    });
+    expect(screen.getByText("current.pdf")).toBeInTheDocument();
+    expect(screen.queryByTestId("baseline-upload-error")).toBeNull();
+  });
+
+  it("does not show Upload failed when setting current on a stale baseline id and falling back succeeds", async () => {
+    setFetchImplementation(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      if (url.includes("/api/baselines/base-2/current") && init?.method === "PATCH") {
+        return createJsonResponse({ message: "Baseline not found" }, false, 404);
+      }
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return createJsonResponse([createAnalyzedBaseline("base-1", "current.pdf", 90, true)]);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(
+      <BaselineStudioHome
+        baselines={[
+          createAnalyzedBaseline("base-1", "current.pdf", 90, true),
+          createAnalyzedBaseline("base-2", "other.pdf", 84, false),
+        ]}
+      />,
+    );
+
+    const libraryCard = screen.getByTestId("baseline-library-card:base-2");
+    fireEvent.click(within(libraryCard).getByRole("button", { name: /set current/i }));
+
+    await waitFor(() => {
+      const root = screen.getByTestId("baseline-current-section").closest('[data-baseline-renderer="studio-home"]');
+      expect(root).toHaveAttribute("data-current-baseline-id", "base-1");
+    });
+    expect(screen.queryByTestId("baseline-upload-error")).toBeNull();
   });
 });
 
