@@ -6,7 +6,7 @@ function hasConstraint(error: ValidationError, key: string): boolean {
 
 export function bugReportValidationExceptionFactory(errors: ValidationError[]) {
   const hasMessageError = errors.some((error) => {
-    if (error.property !== 'message') return false;
+    if (error.property !== 'message' && error.property !== 'description') return false;
     return (
       hasConstraint(error, 'isNotEmpty') ||
       hasConstraint(error, 'minLength') ||

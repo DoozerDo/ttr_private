@@ -25,6 +25,11 @@ type BugReportCreateResponse = {
   status: "submission_success";
   message: string;
   reportId: string;
+  storedReportId?: string | null;
+  deliveredToGithub?: boolean;
+  issueNumber?: number | null;
+  issueUrl?: string | null;
+  sentryEventId?: string | null;
 };
 
 type BugReportFailureResponse = {
@@ -39,7 +44,9 @@ type BugReportFailureResponse = {
 };
 
 type SupportConfigResponse = {
+  bugReportingAvailable?: boolean;
   githubConfigured?: boolean;
+  storageConfigured?: boolean;
   sentryConfigured?: boolean;
   projectAssignmentEnabled?: boolean;
 };
@@ -192,7 +199,14 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
           return;
         }
 
-        if (payload && "githubConfigured" in payload && payload.githubConfigured === false) {
+        const bugReportingAvailable =
+          payload && "bugReportingAvailable" in payload
+            ? payload.bugReportingAvailable !== false
+            : payload && "githubConfigured" in payload
+              ? payload.githubConfigured !== false
+              : true;
+
+        if (!bugReportingAvailable) {
           setAvailability({
             kind: "disabled",
             message: DEFAULT_DISABLED_MESSAGE,
@@ -313,7 +327,11 @@ export function ReportBugModal({ open, onClose, userId }: ReportBugModalProps) {
         });
         const payload = (await response.json().catch(() => null)) as BugReportCreateResponse | BugReportFailureResponse | null;
 
-        if (response.ok) {
+        const isSubmissionSuccess =
+          Boolean(response.ok) &&
+          Boolean(payload && "status" in payload && payload.status === "submission_success");
+
+        if (isSubmissionSuccess) {
           setSubmitState("success");
           setStatusMessage(
             payload && "message" in payload && payload.message

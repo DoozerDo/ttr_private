@@ -118,6 +118,8 @@ describe('SupportService', () => {
 
     expect(result.issueNumber).toBe(123);
     expect(result.issueUrl).toBe(issueResponse.html_url);
+    expect(result.storedReportId).toBeNull();
+    expect(result.deliveredToGithub).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -165,6 +167,7 @@ describe('SupportService', () => {
     const result = await service.reportBug(report, user);
 
     expect(result.issueNumber).toBe(321);
+    expect(result.deliveredToGithub).toBe(true);
   });
 
   it('throws a friendly error when GitHub API rejects the request', async () => {
@@ -222,9 +225,43 @@ describe('SupportService', () => {
       response: expect.objectContaining({
         code: 'support_config_unavailable',
         message:
-          'Bug reporting is disabled because GitHub bug reporting is not configured in this environment. Save a draft and check Support history later.',
+          'Bug reporting is disabled in this environment. Save a draft and check Support history later.',
       }),
     });
+  });
+
+  it('stores bug reports when GitHub bug reporting is not configured but durable storage is available', async () => {
+    const configService = {
+      get(key: string) {
+        switch (key) {
+          case 'APP_ENV':
+            return 'test';
+          default:
+            return undefined;
+        }
+      },
+    } as ConfigService;
+
+    const createReport = jest.fn().mockResolvedValue({
+      id: 'stored-uuid-1',
+      status: 'OPEN',
+      severity: 'NEW',
+      createdAt: new Date('2026-03-18T00:00:00.000Z'),
+    });
+
+    const bugReportsService = { createReport } as any;
+
+    const fetchMock = jest.fn();
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
+    const service = new SupportService(configService, bugReportsService);
+    const result = await service.reportBug(report, user);
+
+    expect(result.issueNumber).toBeUndefined();
+    expect(result.storedReportId).toBe('stored-uuid-1');
+    expect(result.deliveredToGithub).toBe(false);
+    expect(createReport).toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('returns MISCONFIGURED support status when GitHub env vars are missing', () => {

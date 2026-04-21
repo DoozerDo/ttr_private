@@ -17,7 +17,9 @@ function installSupportFetch(overrides?: {
   config?: Response | ReturnType<typeof createResponse>;
   reportBug?: Response | ReturnType<typeof createResponse>;
 }) {
-  const configResponse = overrides?.config ?? createResponse({ githubConfigured: true });
+  const configResponse =
+    overrides?.config ??
+    createResponse({ bugReportingAvailable: true, githubConfigured: true, storageConfigured: true });
   const reportResponse =
     overrides?.reportBug ?? createResponse({ status: "submission_success", message: "Thanks. Your report was submitted successfully.", reportId: "bug-123" });
 
@@ -63,9 +65,40 @@ describe("ReportBugModal", () => {
     });
   });
 
+  it("does not treat non-success payloads as successful submits even when response is ok", async () => {
+    installSupportFetch({
+      reportBug: createResponse(
+        {
+          status: "service_unavailable",
+          message: "Bug reporting is temporarily unavailable.",
+          supportPath: "/support/history",
+        },
+        true,
+        200,
+      ),
+    });
+
+    render(<ReportBugModal open onClose={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /send issue report/i })).not.toBeDisabled();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("What went wrong?"), {
+      target: { value: "Submit button does nothing on production." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send issue report/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Bug reporting is temporarily unavailable.")).toBeInTheDocument();
+    });
+    expect(screen.getByPlaceholderText("What went wrong?")).toHaveValue(
+      "Submit button does nothing on production.",
+    );
+  });
+
   it("shows an explicit disabled state when bug reporting is not configured", async () => {
     installSupportFetch({
-      config: createResponse({ githubConfigured: false }),
+      config: createResponse({ bugReportingAvailable: false, githubConfigured: false }),
     });
 
     render(<ReportBugModal open onClose={() => {}} />);
@@ -77,6 +110,26 @@ describe("ReportBugModal", () => {
     });
     expect(screen.getByRole("button", { name: /send issue report/i })).toBeDisabled();
     expect(screen.getByRole("link", { name: /support history/i })).toHaveAttribute("href", "/support/history");
+  });
+
+  it("allows submissions when GitHub is not configured but bug reporting storage is available", async () => {
+    installSupportFetch({
+      config: createResponse({ bugReportingAvailable: true, githubConfigured: false, storageConfigured: true }),
+    });
+
+    render(<ReportBugModal open onClose={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /send issue report/i })).not.toBeDisabled();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("What went wrong?"), {
+      target: { value: "Bug reporting should still work without GitHub configured." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send issue report/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Thanks. Your report was submitted successfully.")).toBeInTheDocument();
+    });
   });
 
   it("shows a retryable error when submission fails", async () => {

@@ -8,6 +8,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  ValidateIf,
   MaxLength,
 } from 'class-validator';
 
@@ -34,11 +35,29 @@ function toNumber(value: unknown): number | undefined {
 
 export class ReportBugDto {
   @Transform(({ value }) => trimValue(value))
+  @ValidateIf((obj) => !obj.description)
   @IsString()
   @IsNotEmpty()
   @MinLength(10)
   @MaxLength(4000)
-  message!: string;
+  message?: string;
+
+  // Legacy compatibility: older clients submitted `description` instead of `message`.
+  @Transform(({ value }) => trimValue(value))
+  @ValidateIf((obj) => !obj.message)
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(10)
+  @MaxLength(4000)
+  description?: string;
+
+  // Frontend currently submits a freeform `details` textarea; accept it explicitly so it is not
+  // stripped by `whitelist: true` and can be persisted / included in downstream diagnostics.
+  @Transform(({ value }) => trimValue(value))
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  details?: string;
 
   @Transform(({ value }) => trimValue(value))
   @IsOptional()
@@ -99,10 +118,22 @@ export class ReportBugDto {
   @MaxLength(128)
   jobId?: string;
 
+  @Transform(({ value }) => trimValue(value))
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  assessmentId?: string;
+
   @Transform(({ value }) => toNumber(value))
   @IsOptional()
   @IsNumber()
   score?: number;
+
+  @Transform(({ value }) => trimValue(value))
+  @IsOptional()
+  @IsString()
+  @MaxLength(256)
+  nextAction?: string;
 
   @IsOptional()
   @IsObject()

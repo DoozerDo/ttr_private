@@ -87,6 +87,8 @@ describe('SupportController', () => {
       issueNumber: 123,
       issueUrl: 'https://github.com/org/repo/issues/123',
       sentryEventId: 'event-1',
+      storedReportId: 'stored-uuid-1',
+      deliveredToGithub: true,
     });
 
     const result = await controller.reportBug(
@@ -97,6 +99,8 @@ describe('SupportController', () => {
     expect(result).toMatchObject({
       status: 'submission_success',
       reportId: '123',
+      storedReportId: 'stored-uuid-1',
+      deliveredToGithub: true,
       issueNumber: 123,
       issueUrl: 'https://github.com/org/repo/issues/123',
       sentryEventId: 'event-1',

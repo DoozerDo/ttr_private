@@ -3,6 +3,7 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  Logger,
   Post,
   Query,
   Req,
@@ -29,6 +30,8 @@ const reportBugValidationPipe = new ValidationPipe({
 
 @Controller('support')
 export class SupportController {
+  private readonly logger = new Logger(SupportController.name);
+
   constructor(
     private readonly supportService: SupportService,
     private readonly criticalFlowTrackerService: CriticalFlowTrackerService,
@@ -37,13 +40,49 @@ export class SupportController {
   @Post('report-bug')
   @UsePipes(reportBugValidationPipe)
   async reportBug(@Body() payload: ReportBugDto, @Req() request: SupportRequest) {
-    const result = await this.supportService.reportBug(payload, request.user);
+    const rawBody = (request as unknown as { body?: unknown })?.body;
+    const payloadKeys =
+      rawBody && typeof rawBody === 'object' ? Object.keys(rawBody as Record<string, unknown>) : [];
+    const hasLegacyDescription = payloadKeys.includes('description') && !payloadKeys.includes('message');
+    const canonicalMessage = payload.message ?? payload.description ?? '';
+    const normalizedPayload = {
+      ...payload,
+      message: canonicalMessage,
+    } as ReportBugDto & { message: string };
+    const messageLength = canonicalMessage ? canonicalMessage.trim().length : null;
+
+    this.logger.log({
+      event: 'support_report_bug_hit',
+      userId: request.user?.id,
+      payloadKeys,
+      hasLegacyDescription,
+      messageLength,
+    });
+
+    const result = await this.supportService.reportBug(normalizedPayload, request.user);
+    this.logger.log({
+      event: 'support_report_bug_success',
+      userId: request.user?.id,
+      issueNumber: result.issueNumber ?? null,
+      storedReportId: result.storedReportId ?? null,
+      deliveredToGithub: result.deliveredToGithub,
+      sentryEventId: result.sentryEventId ?? null,
+    });
+
+    const reportId = result.issueNumber ? String(result.issueNumber) : (result.storedReportId ?? 'unknown');
+    const message = result.issueNumber
+      ? `Bug reported successfully. Reference: #${result.issueNumber}.`
+      : result.storedReportId
+        ? `Bug report received. Reference: ${result.storedReportId}.`
+        : 'Bug report received.';
     return {
       status: 'submission_success',
-      message: 'Bug reported successfully.',
-      reportId: String(result.issueNumber),
-      issueNumber: result.issueNumber,
-      issueUrl: result.issueUrl,
+      message,
+      reportId,
+      storedReportId: result.storedReportId,
+      deliveredToGithub: result.deliveredToGithub,
+      issueNumber: result.issueNumber ?? null,
+      issueUrl: result.issueUrl ?? null,
       sentryEventId: result.sentryEventId,
     };
   }

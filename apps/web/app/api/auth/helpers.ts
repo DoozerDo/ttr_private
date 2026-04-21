@@ -7,6 +7,8 @@ import {
   UpstreamApiConfigError,
 } from "../_lib/serverApiConfig";
 
+const LEGACY_AUTH_COOKIE_NAME = "ttr_token";
+
 export type RequireAuthTokenSuccess = {
   token: string;
   error?: never;
@@ -36,7 +38,10 @@ export function requireAuthToken(req: NextRequest): RequireAuthTokenResult {
     req.headers.get("authorization") ?? req.headers.get("Authorization"),
   );
 
-  const cookieToken = req.cookies.get(AUTH_COOKIE_NAME)?.value ?? "";
+  const cookieToken =
+    req.cookies.get(AUTH_COOKIE_NAME)?.value ??
+    req.cookies.get(LEGACY_AUTH_COOKIE_NAME)?.value ??
+    "";
   const token = headerToken || cookieToken;
 
   if (!token) {

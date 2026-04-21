@@ -5,10 +5,13 @@ import {
   HttpStatus,
   Injectable,
   Logger,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { AuthUserDto } from '../auth/dto/auth-response.dto';
+import type { BugReportsService } from '../bug-reports/bug-reports.service';
+import type { CreateBugReportDto } from '../bug-reports/dto/create-bug-report.dto';
 import { captureSupportEvent, isSentryEnabled } from '../common/sentry';
 import { AutoErrorDto, AutoErrorType } from './dto/auto-error.dto';
 import type { ReportBugDto } from './dto/report-bug.dto';
@@ -116,6 +119,8 @@ export type ReportBugResult = {
   issueNumber?: number;
   issueUrl?: string;
   sentryEventId: string | null;
+  storedReportId: string | null;
+  deliveredToGithub: boolean;
 };
 
 const SUPPORT_CONFIG_UNAVAILABLE_CODE = 'support_config_unavailable';
@@ -126,7 +131,7 @@ function createSupportConfigUnavailableException() {
     {
       code: SUPPORT_CONFIG_UNAVAILABLE_CODE,
       message:
-        'Bug reporting is disabled because GitHub bug reporting is not configured in this environment. Save a draft and check Support history later.',
+        'Bug reporting is disabled in this environment. Save a draft and check Support history later.',
     },
     HttpStatus.SERVICE_UNAVAILABLE,
   );
@@ -226,7 +231,8 @@ function sanitizeLine(value?: string, fallback = 'Not provided.'): string {
 }
 
 export function deriveSeverity(report: ReportBugDto): SeverityLevel | null {
-  const aggregated = `${report.message} ${report.tryingToDo ?? ''} ${report.expected ?? ''}`.toLowerCase();
+  const message = report.message ?? report.description ?? '';
+  const aggregated = `${message} ${report.details ?? ''} ${report.tryingToDo ?? ''} ${report.expected ?? ''}`.toLowerCase();
 
   for (const keyword of SEVERITY_KEYWORDS.high) {
     if (aggregated.includes(keyword)) {
@@ -302,10 +308,32 @@ function describeScreenshot(report: ReportBugDto): string {
   return `Provided (~${Math.round(sizeBytes / 1024)} KiB). TODO: persist screenshot artifacts to durable storage once available.`;
 }
 
-export function formatIssueBody({ report, user, environment, timestamp, sessionId, appVersion, userAgent }: FormatIssueBodyParams): string {
-  return [
+export function formatIssueBody({
+  report,
+  user,
+  environment,
+  timestamp,
+  sessionId,
+  appVersion,
+  userAgent,
+}: FormatIssueBodyParams): string {
+  const lines = [
     'User Report:',
-    report.message,
+    report.message ?? report.description ?? 'Not provided.',
+  ];
+
+  const extraDetails = report.details?.trim() || null;
+  const tryingToDo = report.tryingToDo?.trim() || null;
+  const expected = report.expected?.trim() || null;
+
+  if (extraDetails || tryingToDo || expected) {
+    lines.push('', 'Additional details:');
+    if (extraDetails) lines.push(`- details: ${extraDetails}`);
+    if (tryingToDo) lines.push(`- trying to do: ${tryingToDo}`);
+    if (expected) lines.push(`- expected: ${expected}`);
+  }
+
+  lines.push(
     '',
     'Context:',
     `- route: ${report.route ?? 'unknown'}`,
@@ -317,12 +345,16 @@ export function formatIssueBody({ report, user, environment, timestamp, sessionI
     `- app version: ${appVersion ?? 'unknown'}`,
     `- baseline id: ${report.baselineId ?? 'unknown'}`,
     `- job id: ${report.jobId ?? 'unknown'}`,
+    `- assessment id: ${report.assessmentId ?? 'unknown'}`,
+    `- next action: ${report.nextAction ?? 'unknown'}`,
     `- last user action: ${report.lastUserAction ?? 'unknown'}`,
     '',
     'Environment:',
     `- user agent: ${userAgent ?? 'unknown'}`,
     `- environment: ${environment}`,
-  ].join('\n');
+  );
+
+  return lines.join('\n');
 }
 
 const HISTORY_PAGE_SIZE = 25;
@@ -579,28 +611,29 @@ function issueBelongsToUser(body: string | null | undefined, userId: string): bo
 export class SupportService {
   private readonly logger = new Logger(SupportService.name);
   private readonly bugReportingEnabled: boolean;
+  private readonly bugReportsService: BugReportsService | null;
   private readonly reportTimestamps = new Map<string, number>();
   private readonly autoErrorBuckets = new Map<string, AutoErrorIssueBucket>();
   private readonly autoErrorUserHits = new Map<string, number[]>();
   private readonly autoErrorGlobalHits: number[] = [];
   private readonly stillSeeingSignals = new Map<number, StillSeeingSignalRecord>();
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    @Optional() bugReportsService?: BugReportsService,
+  ) {
     const owner = this.configService.get<string>('GITHUB_BUG_REPORT_OWNER');
     const repo = this.configService.get<string>('GITHUB_BUG_REPORT_REPO');
     const token = this.configService.get<string>('GITHUB_BUG_REPORT_TOKEN');
     this.bugReportingEnabled = Boolean(owner && repo && token);
+    this.bugReportsService = bugReportsService ?? null;
 
     if (!this.bugReportingEnabled) {
-      this.logger.error('Bug reporting misconfigured: missing GitHub credentials');
+      this.logger.warn('GitHub bug reporting is disabled: missing GitHub credentials');
     }
   }
 
   async reportBug(report: ReportBugDto, user: AuthUserDto): Promise<ReportBugResult> {
-    if (!this.bugReportingEnabled) {
-      throw createSupportConfigUnavailableException();
-    }
-
     this.enforceRateLimit(user.id);
 
     const environment =
@@ -611,40 +644,98 @@ export class SupportService {
 
     const timestamp = new Date().toISOString();
     const sentryEventId = await this.safeCaptureSupportEvent(report, user, environment);
+    const canonicalMessage = report.message ?? report.description ?? '';
+    const normalizedReport = {
+      ...report,
+      message: canonicalMessage,
+    } as ReportBugDto & { message: string };
 
-    const severity = deriveSeverity(report);
-    const suggestedArea = deriveArea(report);
-    const labels = ['bug', 'beta'];
-    if (suggestedArea) labels.push(suggestedArea.label);
-    if (severity) labels.push(`severity:${severity}`);
+    let storedReportId: string | null = null;
+    let storageError: unknown = null;
 
-    const title = buildIssueTitle(report.message);
-    const userAgent = report.userAgent?.trim() || null;
-    const sessionId = report.sessionId?.trim() || null;
-    const appVersion = report.appVersion?.trim() || null;
-    const body = formatIssueBody({
-      report,
-      user,
-      environment,
-      timestamp,
-      sessionId,
-      appVersion,
-      userAgent,
-    });
+    if (this.bugReportsService) {
+      try {
+        storedReportId = await this.persistBugReportToDatabase(normalizedReport, user, {
+          environment,
+          receivedAt: timestamp,
+          sentryEventId,
+        });
+      } catch (error) {
+        storageError = error;
+        this.logger.error('Support bug report persistence failed', {
+          userId: user.id,
+          route: report.route ?? null,
+          baselineId: report.baselineId ?? null,
+          jobId: report.jobId ?? null,
+          assessmentId: report.assessmentId ?? null,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
 
-    const issue = await this.createGitHubIssue({ title, body, labels });
-    await this.assignIssueToProject(issue.id);
+    let issue: { number: number; html_url: string; id: number } | null = null;
+    let deliveredToGithub = false;
+
+    if (this.bugReportingEnabled) {
+      try {
+        const severity = deriveSeverity(normalizedReport);
+        const suggestedArea = deriveArea(normalizedReport);
+        const labels = ['bug', 'beta'];
+        if (suggestedArea) labels.push(suggestedArea.label);
+        if (severity) labels.push(`severity:${severity}`);
+
+        const title = buildIssueTitle(normalizedReport.message);
+        const userAgent = normalizedReport.userAgent?.trim() || null;
+        const sessionId = normalizedReport.sessionId?.trim() || null;
+        const appVersion = normalizedReport.appVersion?.trim() || null;
+        const body = formatIssueBody({
+          report: normalizedReport,
+          user,
+          environment,
+          timestamp,
+          sessionId,
+          appVersion,
+          userAgent,
+        });
+
+        issue = await this.createGitHubIssue({ title, body, labels });
+        deliveredToGithub = true;
+        await this.assignIssueToProject(issue.id);
+      } catch (error) {
+        deliveredToGithub = false;
+        this.logger.error('Support bug report GitHub delivery failed', {
+          userId: user.id,
+          storedReportId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    if (!storedReportId && !issue) {
+      if (!this.bugReportingEnabled && !this.bugReportsService) {
+        throw createSupportConfigUnavailableException();
+      }
+
+      if (storageError) {
+        throw storageError instanceof HttpException ? storageError : createBugReportFailedException();
+      }
+
+      throw createBugReportFailedException();
+    }
 
     return {
-      issueNumber: issue.number,
-      issueUrl: issue.html_url,
+      issueNumber: issue?.number,
+      issueUrl: issue?.html_url,
       sentryEventId,
+      storedReportId,
+      deliveredToGithub,
     };
   }
 
   getSupportStatus() {
+    const bugReportingAvailable = Boolean(this.bugReportsService) || this.bugReportingEnabled;
     return {
-      bugReporting: this.bugReportingEnabled ? 'READY' : 'MISCONFIGURED',
+      bugReporting: bugReportingAvailable ? 'READY' : 'MISCONFIGURED',
     } as const;
   }
 
@@ -1042,10 +1133,53 @@ export class SupportService {
   async getConfiguration() {
     const projectColumnId = this.configService.get<string>('GITHUB_BUG_REPORT_PROJECT_COLUMN_ID');
     return {
+      bugReportingAvailable: Boolean(this.bugReportsService) || this.bugReportingEnabled,
       githubConfigured: this.bugReportingEnabled,
+      storageConfigured: Boolean(this.bugReportsService),
       sentryConfigured: isSentryEnabled(),
       projectAssignmentEnabled: Boolean(projectColumnId),
     };
+  }
+
+  private async persistBugReportToDatabase(
+    report: ReportBugDto & { message: string },
+    user: AuthUserDto,
+    metadata: { environment: string; receivedAt: string; sentryEventId: string | null },
+  ): Promise<string> {
+    if (!this.bugReportsService) {
+      throw new Error('Bug report storage is not configured');
+    }
+
+    const payload: CreateBugReportDto = {
+      whatHappened: report.message,
+      attemptedAction: report.tryingToDo ?? report.details ?? undefined,
+      expectedBehavior: report.expected ?? undefined,
+      reporterEmail: report.email ?? undefined,
+      route: report.route ?? undefined,
+      pageLabel: undefined,
+      appVersion: report.appVersion ?? undefined,
+      gitSha: undefined,
+      baselineId: report.baselineId ?? undefined,
+      assessmentId: report.assessmentId ?? undefined,
+      fitScore: typeof report.score === 'number' ? String(report.score) : undefined,
+      browserInfo: report.userAgent ?? undefined,
+      viewport: undefined,
+      runtimeContext: {
+        source: 'support/report-bug',
+        environment: metadata.environment,
+        receivedAt: metadata.receivedAt,
+        clientTimestamp: report.timestamp ?? null,
+        pageUrl: report.pageUrl ?? null,
+        jobId: report.jobId ?? null,
+        sessionId: report.sessionId ?? null,
+        nextAction: report.nextAction ?? null,
+        sentryEventId: metadata.sentryEventId,
+        analysisContext: report.analysisContext ?? null,
+      },
+    };
+
+    const saved = await this.bugReportsService.createReport(payload, user);
+    return saved.id;
   }
 
   private async assignIssueToProject(issueId: number): Promise<boolean> {
