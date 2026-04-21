@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { backendFetch, isBackendUnavailableResponse } from "../_lib/backendFetch";
 import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "./helpers";
+import { AUTH_COOKIE_NAME } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -46,12 +47,40 @@ export async function POST(req: NextRequest) {
   let response: Response;
 
   if (contentType.toLowerCase().includes("multipart/form-data")) {
-    const formData = await req.formData();
+    // For multipart uploads, preserve the original stream + boundary.
+    // Parsing via `req.formData()` can destroy the boundary and/or buffer the payload.
+    const incomingAuthHeader = req.headers.get("authorization");
+    const incomingCookieHeader = req.headers.get("cookie");
+    const csrfHeader = req.headers.get("x-csrf-token");
+
+    const tokenFromCookie =
+      req.cookies.get(AUTH_COOKIE_NAME)?.value ?? auth.token ?? "";
+    const outgoingAuth =
+      incomingAuthHeader?.trim() || (tokenFromCookie ? `Bearer ${tokenFromCookie}` : "");
+
+    const proxiedHeaders: Record<string, string> = {};
+    if (outgoingAuth) {
+      proxiedHeaders.Authorization = outgoingAuth;
+    }
+    if (incomingCookieHeader) {
+      proxiedHeaders.Cookie = incomingCookieHeader;
+    }
+    if (csrfHeader) {
+      proxiedHeaders["x-csrf-token"] = csrfHeader;
+    }
+    // Preserve multipart boundary exactly.
+    proxiedHeaders["content-type"] = contentType;
+    const contentLength = req.headers.get("content-length");
+    if (contentLength) {
+      proxiedHeaders["content-length"] = contentLength;
+    }
 
     response = await backendFetch(`${baseUrl}/baselines`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${auth.token}` },
-      body: formData,
+      headers: proxiedHeaders,
+      // @ts-expect-error - undici requires duplex when streaming request bodies in Node.
+      duplex: "half",
+      body: req.body,
     });
   } else {
     const body = await req.json();
