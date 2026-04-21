@@ -17,6 +17,7 @@ import { InsufficientExtractedText } from "@/components/compliance/InsufficientE
 import {
   archiveBaseline,
   describeBaselineMutationError,
+  setCurrentBaseline,
   isBaselineAnalyzedFromSummary,
   getLatestRoleAnalysisFitScore,
   type BaselineAssessmentSummaryDto,
@@ -425,9 +426,20 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   const baselineAnalysisRequestRef = useRef<{ requestId: string; baselineId: string } | null>(null);
 
   const allBaselines = useMemo(() => sortBaselinesNewestFirst(baselineList), [baselineList]);
+  const currentBaselineId = useMemo(
+    () =>
+      sortBaselinesNewestFirst(baselineList).find(
+        (baseline) => baseline.status !== "ARCHIVED" && baseline.isActive === true,
+      )?.id ?? null,
+    [baselineList],
+  );
   const baselinePartition = useMemo(
-    () => partitionBaselines({ baselines: baselineList, currentBaselineId: primaryBaselineId }),
-    [baselineList, primaryBaselineId],
+    () =>
+      partitionBaselines({
+        baselines: baselineList,
+        currentBaselineId: currentBaselineId ?? primaryBaselineId,
+      }),
+    [baselineList, currentBaselineId, primaryBaselineId],
   );
   const activeBaselines = baselinePartition.activeBaselines;
   const libraryBaselines = baselinePartition.libraryBaselines;
@@ -441,6 +453,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   useEffect(() => {
     primaryBaselineIdRef.current = primaryBaselineId;
   }, [primaryBaselineId]);
+
+  useEffect(() => {
+    if (!currentBaselineId) return;
+    setPrimaryBaselineId((current) => (current === currentBaselineId ? current : currentBaselineId));
+  }, [currentBaselineId]);
 
   useEffect(() => {
     if (!activeBaselines.length) {
@@ -1213,6 +1230,44 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     [canReplaceActiveBaseline, fetchBaselineDetails, isUploading, primaryBaselineId, refreshBaselineLibrary, uploadLimitReached],
   );
 
+  const handleSetCurrentBaseline = useCallback(
+    async (baselineId: string) => {
+      if (loadingBaselineId === baselineId) return;
+      setLoadingBaselineId(baselineId);
+      setError(null);
+
+      try {
+        await setCurrentBaseline(baselineId);
+
+        // Make the switch visible immediately, then rehydrate from the server for canonical truth.
+        setBaselineList((current) =>
+          current.map((item) =>
+            item.id === baselineId
+              ? { ...item, isActive: true, status: "ACTIVE", archivedAt: null }
+              : { ...item, isActive: false },
+          ),
+        );
+        setPrimaryBaselineId(baselineId);
+        publishBaselineUpdated({ baselineId, source: "baseline" });
+
+        try {
+          await refreshBaselineLibrary();
+        } catch (refreshError) {
+          console.error("Unable to refresh baseline library after setting current", refreshError);
+        }
+      } catch (setCurrentError) {
+        console.error("Unable to set current baseline", {
+          baselineId,
+          setCurrentError,
+        });
+        setError(describeBaselineMutationError(setCurrentError, "set current"));
+      } finally {
+        setLoadingBaselineId(null);
+      }
+    },
+    [loadingBaselineId, refreshBaselineLibrary],
+  );
+
   const handleArchiveBaseline = useCallback(
     async (baselineId: string) => {
       if (archivingBaselineId === baselineId) return;
@@ -1356,7 +1411,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
       data-baseline-renderer="studio-home"
       data-baseline-build="archive-e2e-v1"
       data-baseline-mode={isEditableLibrary ? "editable" : "readonly"}
-      data-current-baseline-id={primaryBaselineId ?? ""}
+      data-current-baseline-id={currentBaselineId ?? primaryBaselineId ?? ""}
       data-library-baseline-ids={libraryBaselines.map((baseline) => baseline.id).join(",")}
     >
       <input
@@ -1561,7 +1616,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             <div className="space-y-3" data-testid="baseline-library-section">
               {libraryBaselines.slice(0, 3).map((baseline) => {
                 const isArchived = baseline.status === "ARCHIVED";
-                const isCurrentBaseline = baseline.id === primaryBaselineId;
+                const isCurrentBaseline = baseline.isActive === true;
 
                 const baselineReadiness = buildBaselineReadinessContract({
                   baseline,
@@ -1610,7 +1665,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                           </Link>
                         ) : (
                           <FormButton
-                            onClick={() => setPrimaryBaselineId(baseline.id)}
+                            onClick={() => handleSetCurrentBaseline(baseline.id)}
                             disabled={setActiveDisabled}
                             className="bg-indigo-600 uppercase text-white hover:bg-indigo-500"
                           >
@@ -1626,7 +1681,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                         {isReadyBaseline ? (
                           <FormButton
                             variant="ghost"
-                            onClick={() => setPrimaryBaselineId(baseline.id)}
+                            onClick={() => handleSetCurrentBaseline(baseline.id)}
                             disabled={setActiveDisabled}
                             className="uppercase"
                           >

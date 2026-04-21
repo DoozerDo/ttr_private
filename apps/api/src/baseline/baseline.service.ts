@@ -1118,6 +1118,36 @@ export class BaselineService {
     return this.updateBaselineStatus(userId, baselineId, BaselineStatus.ACTIVE);
   }
 
+  async setCurrentBaseline(userId: string, baselineId: string) {
+    if (process.env.NODE_ENV !== 'production') {
+      // eslint-disable-next-line no-console
+      console.log('[BASELINE][SET_CURRENT]', { baselineId, userId });
+    }
+
+    return this.baselineRepository.manager.transaction(async (manager) => {
+      const baseline = await manager.findOne(Baseline, {
+        where: { id: baselineId, userId },
+      });
+
+      if (!baseline) {
+        throw new NotFoundException('Baseline not found');
+      }
+
+      if (baseline.status === BaselineStatus.ARCHIVED) {
+        throw new BadRequestException('Cannot set an archived baseline as current');
+      }
+
+      // Single source of truth for "current baseline" is `Baseline.isActive`.
+      await this.setSingleActiveBaseline(manager, userId, baseline.id);
+
+      const updated = await manager.findOne(Baseline, {
+        where: { id: baseline.id, userId },
+      });
+
+      return updated ?? ({ ...baseline, isActive: true } as Baseline);
+    });
+  }
+
   private async updateBaselineStatus(
     userId: string,
     baselineId: string,

@@ -16,13 +16,14 @@ function createBaseline(
     hasCompletedAssessment: boolean;
   },
   latestBaselineScore: number | null = null,
+  isActive = false,
 ) {
   return {
     id,
     userId: "user-1",
     version: 1,
     versionNumber: 1,
-    isActive: true,
+    isActive,
     originalFilename: filename,
     mimeType: "application/pdf",
     storagePath: `/tmp/${id}`,
@@ -36,9 +37,14 @@ function createBaseline(
   };
 }
 
-function createAnalyzedBaseline(id: string, filename = `${id}.pdf`, latestFitScore = 82) {
+function createAnalyzedBaseline(
+  id: string,
+  filename = `${id}.pdf`,
+  latestFitScore = 82,
+  isActive = false,
+) {
   return {
-    ...createBaseline(id, "2026-01-01T00:00:00.000Z", filename, undefined, 79),
+    ...createBaseline(id, "2026-01-01T00:00:00.000Z", filename, undefined, 79, isActive),
     latestBaselineScore: 79,
     latestAssessmentSummary: {
       latestAssessmentId: `assessment-${id}`,
@@ -403,6 +409,28 @@ describe("BaselineStudioHome", () => {
   });
 
   it("promotes a baseline to current only when Set Active is clicked", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+
+      if (url.includes("/api/baselines/base-2/current") && init?.method === "PATCH") {
+        return createJsonResponse({ ...createAnalyzedBaseline("base-2", "resume-2.pdf", 79), isActive: true });
+      }
+
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return createJsonResponse([
+          { ...createAnalyzedBaseline("base-1", "resume-1.pdf", 82), isActive: false },
+          { ...createAnalyzedBaseline("base-2", "resume-2.pdf", 79), isActive: true },
+        ]);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    setFetchImplementation(fetchMock);
+
     render(
       <BaselineStudioHome
         baselines={[
@@ -1282,8 +1310,8 @@ describe("BaselineStudioHome", () => {
     render(
       <BaselineStudioHome
         baselines={[
-          createAnalyzedBaseline("base-1", "current.pdf", 90),
-          createAnalyzedBaseline("base-2", "other.pdf", 84),
+          createAnalyzedBaseline("base-1", "current.pdf", 90, true),
+          createAnalyzedBaseline("base-2", "other.pdf", 84, false),
         ]}
       />,
     );
@@ -1302,11 +1330,33 @@ describe("BaselineStudioHome", () => {
   });
 
   it("moves Archive visibility when changing current baseline", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+
+      if (url.includes("/api/baselines/base-2/current") && init?.method === "PATCH") {
+        return createJsonResponse(createAnalyzedBaseline("base-2", "other.pdf", 84, true));
+      }
+
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return createJsonResponse([
+          createAnalyzedBaseline("base-1", "current.pdf", 90, false),
+          createAnalyzedBaseline("base-2", "other.pdf", 84, true),
+        ]);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    setFetchImplementation(fetchMock);
+
     render(
       <BaselineStudioHome
         baselines={[
-          createAnalyzedBaseline("base-1", "current.pdf", 90),
-          createAnalyzedBaseline("base-2", "other.pdf", 84),
+          createAnalyzedBaseline("base-1", "current.pdf", 90, true),
+          createAnalyzedBaseline("base-2", "other.pdf", 84, false),
         ]}
       />,
     );
@@ -1320,6 +1370,9 @@ describe("BaselineStudioHome", () => {
       expect(within(currentSection).getByText("other.pdf")).toBeInTheDocument();
       expect(within(currentSection).queryByRole("button", { name: "Archive" })).toBeNull();
     });
+
+    const root = screen.getByTestId("baseline-current-section").closest('[data-baseline-renderer="studio-home"]');
+    expect(root).toHaveAttribute("data-current-baseline-id", "base-2");
 
     const refreshedLibraryCard = screen.getByTestId("baseline-library-card:base-1");
     expect(within(refreshedLibraryCard).getByText("current.pdf")).toBeInTheDocument();

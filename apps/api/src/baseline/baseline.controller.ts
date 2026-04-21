@@ -297,6 +297,21 @@ export class BaselineController {
     return stripBaselineVersioning(baseline as unknown as Record<string, unknown>);
   }
 
+  @Patch(':id/current')
+  async setCurrentBaseline(
+    @Param('id') id: string,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    const baseline = await this.baselineService.setCurrentBaseline(userId, id);
+    return stripBaselineVersioning(baseline as unknown as Record<string, unknown>);
+  }
+
   @Get(':id')
   async getBaseline(
     @Param('id') id: string,

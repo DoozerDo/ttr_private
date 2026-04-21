@@ -285,6 +285,14 @@ export async function restoreBaseline(id: string) {
   return ensureJsonResponse(response, "Restore");
 }
 
+export async function setCurrentBaseline(id: string) {
+  const response = await fetch(`${BASELINE_API_PATH}/${encodeURIComponent(id)}/current`, {
+    method: "PATCH",
+    credentials: "include",
+  });
+  return ensureJsonResponse(response, "Set current");
+}
+
 export async function deleteBaseline(id: string) {
   const response = await fetch(`${BASELINE_API_PATH}/${encodeURIComponent(id)}/delete`, {
     method: "DELETE",

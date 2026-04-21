@@ -1168,6 +1168,126 @@ describe('BaselineService - score history persistence', () => {
     expect(archiveManager.update).not.toHaveBeenCalled();
   });
 
+  it('sets a new current baseline and demotes the previous current baseline', async () => {
+    const store = new Map<string, any>([
+      [
+        'b-1',
+        {
+          id: 'b-1',
+          userId: 'user-1',
+          status: BaselineStatus.ACTIVE,
+          isActive: true,
+          createdAt: new Date('2026-03-01T00:00:00.000Z'),
+        },
+      ],
+      [
+        'b-2',
+        {
+          id: 'b-2',
+          userId: 'user-1',
+          status: BaselineStatus.ACTIVE,
+          isActive: false,
+          createdAt: new Date('2026-03-02T00:00:00.000Z'),
+        },
+      ],
+    ]);
+
+    const manager = {
+      findOne: jest.fn(async (_entity: any, options: any) => {
+        const id = options?.where?.id as string | undefined;
+        const userId = options?.where?.userId as string | undefined;
+        if (!id || !userId) return null;
+        const value = store.get(id);
+        return value && value.userId === userId ? value : null;
+      }),
+      find: jest.fn(),
+      update: jest.fn(async (_entity: any, criteria: any, partial: any) => {
+        let affected = 0;
+        for (const baseline of store.values()) {
+          if (baseline.userId !== criteria.userId) continue;
+          if (criteria.id && baseline.id !== criteria.id) continue;
+          Object.assign(baseline, partial);
+          affected += 1;
+        }
+        return { affected };
+      }),
+    };
+
+    baselineRepository.manager.transaction.mockImplementation(async (cb: any) => cb(manager));
+
+    const updated = await service.setCurrentBaseline('user-1', 'b-2');
+
+    expect(updated.isActive).toBe(true);
+    expect(store.get('b-1')?.isActive).toBe(false);
+    expect(store.get('b-2')?.isActive).toBe(true);
+    expect(manager.update).toHaveBeenCalledTimes(2);
+  });
+
+  it('allows archiving a former current baseline immediately after switching current baseline', async () => {
+    const store = new Map<string, any>([
+      [
+        'b-1',
+        {
+          id: 'b-1',
+          userId: 'user-1',
+          status: BaselineStatus.ACTIVE,
+          isActive: true,
+          createdAt: new Date('2026-03-01T00:00:00.000Z'),
+          archivedAt: null,
+        },
+      ],
+      [
+        'b-2',
+        {
+          id: 'b-2',
+          userId: 'user-1',
+          status: BaselineStatus.ACTIVE,
+          isActive: false,
+          createdAt: new Date('2026-03-02T00:00:00.000Z'),
+          archivedAt: null,
+        },
+      ],
+    ]);
+
+    const manager = {
+      findOne: jest.fn(async (_entity: any, options: any) => {
+        const id = options?.where?.id as string | undefined;
+        const userId = options?.where?.userId as string | undefined;
+        if (!id || !userId) return null;
+        const value = store.get(id);
+        return value && value.userId === userId ? value : null;
+      }),
+      find: jest.fn(async (entity: any, options: any) => {
+        if (entity !== Baseline) return [];
+        if (options?.where?.userId !== 'user-1') return [];
+        return [...store.values()].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      }),
+      update: jest.fn(async (_entity: any, criteria: any, partial: any) => {
+        let affected = 0;
+        for (const baseline of store.values()) {
+          if (baseline.userId !== criteria.userId) continue;
+          if (criteria.id && baseline.id !== criteria.id) continue;
+          Object.assign(baseline, partial);
+          affected += 1;
+        }
+        return { affected };
+      }),
+    };
+
+    baselineRepository.manager.transaction.mockImplementation(async (cb: any) => cb(manager));
+
+    await service.setCurrentBaseline('user-1', 'b-2');
+
+    const archived = await service.archiveBaseline('user-1', 'b-1');
+    expect(archived.status).toBe(BaselineStatus.ARCHIVED);
+    expect(archived.isActive).toBe(false);
+    expect(store.get('b-2')?.isActive).toBe(true);
+
+    await expect(service.archiveBaseline('user-1', 'b-2')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
   it('archives a non-current baseline and does not change the active baseline pointer', async () => {
     const archiveManager = {
       findOne: jest.fn().mockResolvedValue({
