@@ -213,6 +213,18 @@ describe("BaselineStudioHome", () => {
         return createJsonResponse(createAnalyzedBaseline("base-2", "resume-2.pdf", 84));
       }
 
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return createJsonResponse([
+          createAnalyzedBaseline("base-2", "resume-2.pdf", 84),
+          {
+            ...createAnalyzedBaseline("base-1", "resume-1.pdf", 79),
+            status: "ARCHIVED" as const,
+            archivedAt: "2026-04-01T00:00:00.000Z",
+            isActive: false,
+          },
+        ]);
+      }
+
       throw new Error(`Unexpected fetch: ${url}`);
     });
     setFetchImplementation(fetchMock);
@@ -558,6 +570,7 @@ describe("BaselineStudioHome", () => {
 
   it("renders the major baseline sections in the intended order", async () => {
     render(<BaselineStudioHome baselines={[createAnalyzedBaseline("base-1", "resume-1.pdf", 82)]} />);
+    await screen.findByTestId("baseline-current-section");
 
     expect(screen.queryByRole("heading", { name: "Your baseline is ready" })).toBeNull();
     const activeHeading = screen.getByRole("heading", { name: "Current baseline" });
@@ -889,6 +902,8 @@ describe("BaselineStudioHome", () => {
         ]}
       />,
     );
+
+    await screen.findByTestId("baseline-current-section");
 
     expect(screen.queryByText(/Last analyzed/i)).toBeNull();
     expect(screen.queryByText(/Last role analysis:/i)).toBeNull();
@@ -1316,6 +1331,8 @@ describe("BaselineStudioHome", () => {
       />,
     );
 
+    await screen.findByTestId("baseline-current-section");
+
     const currentSection = screen.getByTestId("baseline-current-section");
     expect(within(currentSection).queryByRole("button", { name: "Archive" })).toBeNull();
 
@@ -1612,6 +1629,171 @@ describe("BaselineStudioHome", () => {
       const root = screen.getByTestId("baseline-current-section").closest('[data-baseline-renderer="studio-home"]');
       expect(root).toHaveAttribute("data-current-baseline-id", "base-1");
     });
+    expect(screen.queryByTestId("baseline-upload-error")).toBeNull();
+  });
+
+  it("supports the full baseline lifecycle without contradictory banners", async () => {
+    const listState: any[] = [];
+    let uploadCount = 0;
+
+    const base1 = {
+      ...createAnalyzedBaseline("base-1", "resume-1.pdf", 82, true),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    const base2 = {
+      ...createAnalyzedBaseline("base-2", "resume-2.pdf", 79, false),
+      createdAt: "2026-02-01T00:00:00.000Z",
+      updatedAt: "2026-02-01T00:00:00.000Z",
+    };
+    const base3 = {
+      ...createAnalyzedBaseline("base-3", "resume-3.pdf", 77, false),
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+    };
+
+    const updateList = (next: any[]) => {
+      listState.length = 0;
+      listState.push(...next);
+    };
+
+    updateList([]);
+
+    setFetchImplementation(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+
+      // IMPORTANT: handle the explicit analyze route before the generic /api/baselines POST handler.
+      // Otherwise /api/baselines/analyze is mistakenly treated as an upload and corrupts the lifecycle state.
+      if (url.includes("/api/baselines/analyze") && init?.method === "POST") {
+        return createJsonResponse({
+          id: "analysis-ok",
+          latestAssessmentSummary: {
+            latestAssessmentId: "assessment-ok",
+            latestAssessmentCreatedAt: "2026-01-10T00:05:00.000Z",
+            latestFitScore: 82,
+            hasCompletedAssessment: true,
+          },
+        });
+      }
+
+      if (url.includes("/api/baselines") && init?.method === "POST") {
+        uploadCount += 1;
+        const baselineRecord = uploadCount === 1 ? base1 : uploadCount === 2 ? base2 : base3;
+        const baseline = {
+          ...baselineRecord,
+          // Canonical behavior: first upload becomes current, later uploads do not change current.
+          isActive: listState.length === 0,
+          status: "ACTIVE" as const,
+          archivedAt: null,
+        };
+
+        const next = [...listState];
+        next.push(baseline);
+        updateList(next);
+
+        return createJsonResponse({
+          baseline,
+          baselineId: baseline.id,
+          schemaVersion: "baseline_schema_v1",
+          userVerified: false,
+          rolesCount: 0,
+          toolsCount: 0,
+          flagsSummary: { missingFields: 0, lowConfidence: 0 },
+        });
+      }
+
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        // Return a fresh array instance to mimic real JSON fetch semantics and avoid state updates
+        // being skipped due to referential equality.
+        return createJsonResponse(listState.map((item) => ({ ...item })));
+      }
+
+      if (url.includes("/api/baselines/base-2/current") && init?.method === "PATCH") {
+        updateList([{ ...base1, isActive: false }, { ...base2, isActive: true }]);
+        return createJsonResponse({ ...base2, isActive: true });
+      }
+
+      if (url.includes("/api/baselines/base-1/archive") && init?.method === "PATCH") {
+        const archived = {
+          ...base1,
+          status: "ARCHIVED" as const,
+          isActive: false,
+          archivedAt: "2026-03-10T00:00:00.000Z",
+        };
+        updateList(listState.map((item) => (item.id === "base-1" ? archived : item)));
+        return createJsonResponse(archived);
+      }
+
+      if (url.includes("/api/baselines/base-1")) return createJsonResponse(base1);
+      if (url.includes("/api/baselines/base-2")) return createJsonResponse(base2);
+      if (url.includes("/api/baselines/base-3")) return createJsonResponse(base3);
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    // 1) Upload baseline 1
+    const { container, unmount } = render(<BaselineStudioHome baselines={[]} />);
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(fileInput).not.toBeNull();
+    fireEvent.change(fileInput as HTMLInputElement, {
+      target: { files: [new File(["resume 1"], "resume-1.pdf", { type: "application/pdf" })] },
+    });
+    await waitFor(() => expect(screen.getAllByText("resume-1.pdf").length).toBeGreaterThan(0));
+    await waitFor(() => expect(fileInput).not.toBeDisabled());
+    expect(screen.queryByTestId("baseline-upload-error")).toBeNull();
+
+    // 6) Upload baseline 2 (while base-1 is current)
+    fireEvent.change(fileInput as HTMLInputElement, {
+      target: { files: [new File(["resume 2"], "resume-2.pdf", { type: "application/pdf" })] },
+    });
+    await waitFor(() => expect(screen.getAllByText("resume-2.pdf").length).toBeGreaterThan(0));
+    await waitFor(() => expect(fileInput).not.toBeDisabled());
+    expect(screen.queryByTestId("baseline-upload-error")).toBeNull();
+
+    // 3) Set baseline 2 current
+    const baseline2Card = screen.getByText("resume-2.pdf").closest("article");
+    expect(baseline2Card).toBeTruthy();
+    fireEvent.click(within(baseline2Card as HTMLElement).getByRole("button", { name: /set current/i }));
+
+    await waitFor(() => {
+      const currentSection = screen.getByTestId("baseline-current-section");
+      expect(within(currentSection).getByText("resume-2.pdf")).toBeInTheDocument();
+    });
+    expect(screen.getAllByText("Current")).toHaveLength(1);
+
+    // 5) Archive former current baseline 1
+    await waitFor(() => {
+      const libraryHeading = screen.getByRole("heading", { name: "Other baselines" });
+      const librarySection = libraryHeading.closest("section");
+      expect(librarySection).toBeTruthy();
+      expect(within(librarySection as HTMLElement).queryByText("resume-1.pdf")).toBeTruthy();
+    });
+    const libraryHeading = screen.getByRole("heading", { name: "Other baselines" });
+    const librarySection = libraryHeading.closest("section") as HTMLElement;
+    const baseline1LibraryCard = within(librarySection).getByText("resume-1.pdf").closest("article") as HTMLElement;
+    fireEvent.click(within(baseline1LibraryCard).getByRole("button", { name: "Archive" }));
+    await waitFor(() => expect(within(librarySection).queryByText("resume-1.pdf")).toBeNull());
+    expect(screen.queryByTestId("baseline-upload-error")).toBeNull();
+
+    // 6) Upload baseline 3
+    fireEvent.change(fileInput as HTMLInputElement, {
+      target: { files: [new File(["resume 3"], "resume-3.pdf", { type: "application/pdf" })] },
+    });
+    await waitFor(() => expect(screen.getAllByText("resume-3.pdf").length).toBeGreaterThan(0));
+    await waitFor(() => expect(fileInput).not.toBeDisabled());
+    expect(screen.queryByTestId("baseline-upload-error")).toBeNull();
+
+    // 7) Refresh page (new mount with canonical list)
+    unmount();
+    render(<BaselineStudioHome baselines={listState as any} />);
+    await screen.findByTestId("baseline-current-section");
+    const currentSectionAfterRefresh = screen.getByTestId("baseline-current-section");
+    expect(within(currentSectionAfterRefresh).getByText("resume-2.pdf")).toBeInTheDocument();
+    expect(screen.getAllByText("Current")).toHaveLength(1);
     expect(screen.queryByTestId("baseline-upload-error")).toBeNull();
   });
 });

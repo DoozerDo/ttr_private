@@ -297,6 +297,7 @@ function buildBaselineReadinessContract({
   const progressPercent = resolveBaselineProgressPercent(baseline);
   const summary = baseline?.latestAssessmentSummary ?? null;
   const latestAssessmentId = summary?.latestAssessmentId?.trim() ?? null;
+  const hasAnalyzedSummary = isBaselineAnalyzedFromSummary(summary);
   const routes = {
     baseline: "/baseline",
     target: baselineId ? `/target?baselineId=${encodeURIComponent(baselineId)}` : "/target",
@@ -324,13 +325,14 @@ function buildBaselineReadinessContract({
   return {
     activeBaselineId: baselineId,
     baselineId,
-    hasCompletedAssessment: Boolean(latestAssessmentId),
+    hasCompletedAssessment: hasAnalyzedSummary,
     latestAssessmentId,
     latestAssessmentCreatedAt: summary?.latestAssessmentCreatedAt?.trim() ?? null,
     latestFitScore: summary?.latestFitScore ?? null,
     readinessState: isAnalyzing
       ? "ANALYZING"
-      : typeof progressPercent === "number" && progressPercent >= BASELINE_USABLE_MIN_PERCENT
+      : hasAnalyzedSummary ||
+          (typeof progressPercent === "number" && progressPercent >= BASELINE_USABLE_MIN_PERCENT)
         ? "READY"
         : "NOT_ANALYZED",
     ctaLabel: TARGET_ROLE_CTA_LABEL,
@@ -1053,7 +1055,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             ? "Signal added. New experience included."
             : scoreDelta > 0
               ? "Signal improved. We strengthened how this experience is described."
-              : "Saved. We’ll incorporate this as more evidence becomes available.";
+              : "Saved. We'll incorporate this as more evidence becomes available.";
 
       setStrengtheningFeedbackBySignalId((current) => ({
         ...current,
@@ -1219,32 +1221,41 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           });
         }
 
-        const analysisPayload = (await readResponsePayload(analysisResponse)) as ErrorPayload | null;
-        if (!analysisResponse.ok) {
-          if (process.env.NODE_ENV !== "production") {
-            console.debug("[BaselineStudioHome] upload analyze failed", {
+        try {
+          const analysisPayload = (await readResponsePayload(analysisResponse)) as ErrorPayload | null;
+          if (!analysisResponse.ok) {
+            if (process.env.NODE_ENV !== "production") {
+              console.debug("[BaselineStudioHome] upload analyze failed", {
+                uploadedBaselineId: baselineRecord.id,
+                status: analysisResponse.status,
+                payload: analysisPayload,
+              });
+            }
+            // Upload already succeeded; keep this non-fatal and do not show an "Upload failed" banner.
+            setPageError(
+              typeof analysisPayload?.message === "string"
+                ? analysisPayload.message
+                : "Upload succeeded, but analysis did not complete successfully.",
+            );
+          } else if (process.env.NODE_ENV !== "production") {
+            console.debug("[BaselineStudioHome] upload analysis complete", {
               uploadedBaselineId: baselineRecord.id,
-              status: analysisResponse.status,
-              payload: analysisPayload,
+              hasCompletedAssessment:
+                analysisPayload?.latestAssessmentSummary?.hasCompletedAssessment ?? false,
+              latestFitScore: analysisPayload?.latestAssessmentSummary?.latestFitScore ?? null,
             });
           }
-          throw new Error(
-            typeof analysisPayload?.message === "string"
-              ? analysisPayload.message
-              : "Unable to analyze the uploaded resume right now.",
-          );
+        } catch (analysisError) {
+          console.error("[BaselineStudioHome] upload analyze unexpected failure", analysisError);
+          setPageError("Upload succeeded, but analysis did not complete successfully.");
         }
 
-        if (process.env.NODE_ENV !== "production") {
-          console.debug("[BaselineStudioHome] upload analysis complete", {
-            uploadedBaselineId: baselineRecord.id,
-            hasCompletedAssessment:
-              analysisPayload?.latestAssessmentSummary?.hasCompletedAssessment ?? false,
-            latestFitScore: analysisPayload?.latestAssessmentSummary?.latestFitScore ?? null,
-          });
+        try {
+          await refreshBaselineLibrary();
+        } catch (refreshError) {
+          console.error("Unable to refresh Baseline Library after upload", refreshError);
+          setPageError("Upload succeeded, but the Baseline Library could not be refreshed right now.");
         }
-
-        await refreshBaselineLibrary();
         if (shouldPromoteToCurrent) {
           await fetchBaselineDetails(baselineRecord.id);
         }
@@ -1479,10 +1490,10 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             <p className="text-sm font-semibold">
               {capacityError
                 ? "Upload unavailable"
-                : duplicateError
-                  ? "Resume already uploaded"
+                  : duplicateError
+                    ? "Resume already uploaded"
                   : insufficientTextError
-                    ? "We couldn’t read enough text from that file"
+                    ? "We couldn't read enough text from that file"
                     : "Upload failed"}
             </p>
             <p className="mt-1 text-sm text-slate-200">
