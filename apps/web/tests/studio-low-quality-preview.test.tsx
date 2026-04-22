@@ -130,7 +130,13 @@ describe("studio low-quality preview gating", () => {
           baselineVersionId: "base-version-1",
           company: "Acme",
           title: "Director of Support",
-          verification_coverage: { totalClaims: 2, verifiedClaims: 2, inferredClaims: 0, unverifiedClaims: 0 },
+          verification_coverage: {
+            totalClaims: 2,
+            verifiedClaims: 2,
+            inferredClaims: 0,
+            unverifiedClaims: 0,
+            unverifiedRequirements: ["Python", "Snowflake"],
+          },
         });
       }
       if (url.includes("/api/resume/readiness")) return jsonResponse({ status: "blocked", reasons: [{ code: "full_block", message: "Unverified Python" }], compliance_flags: [] });
@@ -160,8 +166,18 @@ describe("studio low-quality preview gating", () => {
       expect(screen.getByTestId("studio-decision-panel")).toBeInTheDocument();
     });
 
+    expect(screen.queryByText(/needs another pass/i)).toBeNull();
+    expect(screen.queryByText(/draft \(low quality\)/i)).toBeNull();
+    expect(screen.getByTestId("studio-low-quality-demoted-label")).toBeInTheDocument();
+    expect(screen.getByTestId("studio-decision-panel")).toHaveTextContent(/Draft output: ready to refine in Studio\./i);
+
     expect(screen.queryByTestId("studio-low-quality-resume-preview-main")).toBeNull();
     expect(screen.queryByTestId("studio-low-quality-cover-preview-main")).toBeNull();
     expect(screen.queryByText(/View full draft anyway/i)).toBeNull();
+
+    // Verification CTAs should not be part of the primary visible flow at score >= 80.
+    expect(screen.queryAllByRole("button", { name: /verify/i }).length).toBe(0);
+    expect(screen.queryAllByRole("link", { name: /verify/i }).length).toBe(0);
+    expect(screen.getByTestId("studio-optional-evidence-details")).toBeInTheDocument();
   });
 });

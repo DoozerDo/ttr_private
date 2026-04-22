@@ -391,14 +391,14 @@ describe("Studio generation authority", () => {
     setupFetch("limited");
     renderStudio();
 
-    await screen.findByTestId("studio-decision-panel");
-    const decisionPanel = screen.getByTestId("studio-decision-panel");
-    expect(screen.getByTestId("studio-generation-readiness")).toHaveTextContent(/\b(Usable|Ready)\b/);
-    expect(decisionPanel).toHaveTextContent(/ready to refine in studio/i);
-    expect(decisionPanel).toHaveTextContent(/Built directly from (?:your )?verified (?:experience|evidence) and aligned to the role\./i);
-    expect(screen.getAllByRole("button", { name: /generate resume/i }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("button", { name: /generate cover letter/i }).length).toBeGreaterThan(0);
-  });
+    await screen.findByTestId("studio-decision-panel"); 
+    const decisionPanel = screen.getByTestId("studio-decision-panel"); 
+    expect(screen.getByTestId("studio-generation-readiness")).toHaveTextContent(/Usable|Ready/i); 
+    expect(decisionPanel).toHaveTextContent(/ready to refine in studio/i); 
+    expect(decisionPanel).toHaveTextContent(/Built directly from (?:your )?verified (?:experience|evidence) and aligned to the role\./i); 
+    expect(screen.getAllByRole("button", { name: /generate resume/i }).length).toBeGreaterThan(0); 
+    expect(screen.getAllByRole("button", { name: /generate cover letter/i }).length).toBeGreaterThan(0); 
+  }); 
 
   it("BLOCKED shows blocked status and remediation CTA", async () => { 
     setupFetch("blocked", 75); 
@@ -415,7 +415,16 @@ describe("Studio generation authority", () => {
 
     await screen.findByTestId("studio-decision-panel");
     expect(screen.queryByTestId("studio-blocked-message")).toBeNull();
+    expect(screen.queryByText(/needs another pass/i)).toBeNull();
     expect(screen.getByTestId("studio-decision-panel")).toHaveTextContent(/ready to refine in studio/i);
+
+    // Primary generation CTAs should appear before optional evidence strengthening.
+    const generateResume = screen.getAllByRole("button", { name: /generate resume/i })[0];
+    const optionalEvidence = screen.getByTestId("studio-optional-evidence-details");
+    const toggle = screen.getByTestId("studio-optional-evidence-toggle");
+    expect(optionalEvidence).toContainElement(toggle);
+    expect(generateResume.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryAllByRole("button", { name: /verify/i }).length).toBe(0);
   });
 
   it("blocked generation action does not proceed and routes to remediation", async () => {

@@ -3109,30 +3109,30 @@ export default function StudioPage() {
     isInstantDraftExperience,
     requestedAnalysisId,
   ]);
-  const authorityStateTitle =
-    generationSupportState === "blocked"
-      ? "Generation blocked"
-      : hasCompletedGeneration
-        ? applicationContext?.status?.toLowerCase() === "applied"
-          ? "Your application is tracked"
-          : "Your application is ready"
-        : autoGenerationInFlight || studioArtifactPairStatus === "in_progress"
-          ? "We are generating your application draft now"
-          : studioArtifactPairStatus === "failed"
-            ? "Your draft needs another pass"
-        : "You are a strong match. We are building your application draft";
-  const authorityStateExplanation =
-    generationSupportState === "blocked"
-      ? "This role is not ready for clean Studio output yet. Return to Fit Review to strengthen verified evidence."
-      : hasCompletedGeneration
-        ? applicationContext?.status?.toLowerCase() === "applied"
-          ? "Your application is marked applied and your materials are ready whenever you need them."
-          : "Download your resume and cover letter, then apply to this role."
-        : autoGenerationInFlight || studioArtifactPairStatus === "in_progress"
-          ? "We are generating both drafts from your verified baseline evidence now."
-          : studioArtifactPairStatus === "failed"
-            ? "The previous attempt could not be completed. Retry to generate a fresh draft from the current verified inputs."
-        : "We can start immediately from your verified baseline evidence and role analysis.";
+  const authorityStateTitle = 
+    generationSupportState === "blocked" 
+      ? "Generation blocked" 
+      : hasCompletedGeneration 
+        ? applicationContext?.status?.toLowerCase() === "applied" 
+          ? "Your application is tracked" 
+          : "Your application is ready" 
+        : autoGenerationInFlight || studioArtifactPairStatus === "in_progress" 
+          ? "We are generating your application draft now" 
+          : studioArtifactPairStatus === "failed" && !generateNowEligible
+            ? "Your draft needs another pass" 
+        : "You are a strong match. We are building your application draft"; 
+  const authorityStateExplanation = 
+    generationSupportState === "blocked" 
+      ? "This role is not ready for clean Studio output yet. Return to Fit Review to strengthen verified evidence." 
+      : hasCompletedGeneration 
+        ? applicationContext?.status?.toLowerCase() === "applied" 
+          ? "Your application is marked applied and your materials are ready whenever you need them." 
+          : "Download your resume and cover letter, then apply to this role." 
+        : autoGenerationInFlight || studioArtifactPairStatus === "in_progress" 
+          ? "We are generating both drafts from your baseline evidence now." 
+          : studioArtifactPairStatus === "failed" && !generateNowEligible
+            ? "The previous attempt could not be completed. Retry to generate a fresh draft from the current inputs." 
+        : "We can start immediately from your baseline evidence and role analysis."; 
   const authorityReasons = useMemo(() => {
     const reasons: string[] = [];
     activeGenerationReadiness.verificationIssues.forEach((issue) => {
@@ -3294,11 +3294,13 @@ export default function StudioPage() {
   const showLowQualityRecoveryLane = isLowQualityDraft && !generateNowEligible;
   const [showFullLowQualityResume, setShowFullLowQualityResume] = useState(false); 
   const [showFullLowQualityCover, setShowFullLowQualityCover] = useState(false); 
+  const [showOptionalEvidenceDetails, setShowOptionalEvidenceDetails] = useState(false);
 
   useEffect(() => { 
     setShowFullLowQualityResume(false); 
     setShowFullLowQualityCover(false); 
-  }, [effectiveBaselineId, effectiveJobId, artifactQuality.confidence]); 
+    setShowOptionalEvidenceDetails(false);
+  }, [effectiveBaselineId, effectiveJobId, artifactQuality.confidence, requestedAnalysisId]); 
   const coverGating = useMemo(
     () =>
       resolveStudioArtifactGating({
@@ -6254,51 +6256,53 @@ export default function StudioPage() {
           </div>
         </div>
       ) : null}
-      {!hasCompletedGeneration && studioArtifactPairStatus === "failed" ? (
-        <RouteStateShell
-          tone="warning"
-          eyebrow="Needs another pass"
-          title="Your draft is ready to retry"
-          body={
-            <p className="text-sm text-slate-100">
-              We could not finish the last draft attempt. Use retry to generate a fresh version from the current verified inputs.
-            </p>
-          }
-        />
-      ) : (
-        <RouteStateShell
-          tone="success"
-          eyebrow="Drafting"
-          title="Your draft is taking shape"
-          body={
-            <p className="text-sm text-slate-100">
-              We are preparing your resume and cover letter from the verified evidence already in place.
-            </p>
-          }
-        />
-      )}
-      <details id="studio-fit-reasoning" className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-        <summary className="cursor-pointer text-sm font-semibold text-slate-100">
-          Why this is a strong match
-        </summary>
-        <div className="mt-4 space-y-3">
-          <div className="rounded-xl border border-white/10 bg-slate-950/40 p-4">
-            <p className="text-sm font-semibold text-slate-100">Fit confirmation</p>
-            <p className="mt-1 text-sm text-slate-300">
-              You are above the Studio generation floor and your verified baseline supports clean drafting.
-            </p>
-          </div>
-          <StudioArtifactQualityPanel
-            model={artifactQuality}
-            confidence={artifactQuality.confidence}
-            onVerifyClaim={verifyClaim}
-            onEditClaim={openClaimEditModal}
-            onDismissClaim={dismissClaim}
-          />
-          <div className="rounded-xl border border-white/10 bg-slate-950/40 p-4">
-            <p className="text-sm font-semibold text-slate-100">Evidence and rationale</p>
-            <ul className="mt-3 space-y-2 text-sm text-slate-300">
-              {evidenceLedger.entries.slice(0, 4).map((entry) => (
+      {!hasCompletedGeneration && studioArtifactPairStatus === "failed" && !generateNowEligible ? ( 
+        <RouteStateShell 
+          tone="warning" 
+          eyebrow="Needs another pass" 
+          title="Your draft is ready to retry" 
+          body={ 
+            <p className="text-sm text-slate-100"> 
+              We could not finish the last draft attempt. Use retry to generate a fresh version from the current verified inputs. 
+            </p> 
+          } 
+        /> 
+      ) : ( 
+        <RouteStateShell 
+          tone="success" 
+          eyebrow="Drafting" 
+          title="Your draft is taking shape" 
+          body={ 
+            <p className="text-sm text-slate-100"> 
+              We are preparing your resume and cover letter from the baseline evidence already in place. 
+            </p> 
+          } 
+        /> 
+      )} 
+      <details id="studio-fit-reasoning" className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"> 
+        <summary className="cursor-pointer text-sm font-semibold text-slate-100"> 
+          Why this is a strong match 
+        </summary> 
+        <div className="mt-4 space-y-3"> 
+          <div className="rounded-xl border border-white/10 bg-slate-950/40 p-4"> 
+            <p className="text-sm font-semibold text-slate-100">Fit confirmation</p> 
+            <p className="mt-1 text-sm text-slate-300"> 
+              You are above the Studio generation floor and your baseline supports clean drafting. 
+            </p> 
+          </div> 
+          {!generateNowEligible ? (
+            <StudioArtifactQualityPanel
+              model={artifactQuality}
+              confidence={artifactQuality.confidence}
+              onVerifyClaim={verifyClaim}
+              onEditClaim={openClaimEditModal}
+              onDismissClaim={dismissClaim}
+            />
+          ) : null}
+          <div className="rounded-xl border border-white/10 bg-slate-950/40 p-4"> 
+            <p className="text-sm font-semibold text-slate-100">Evidence and rationale</p> 
+            <ul className="mt-3 space-y-2 text-sm text-slate-300"> 
+              {evidenceLedger.entries.slice(0, 4).map((entry) => ( 
                 <li key={`instant-evidence-${entry.id}`} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
                   <p className="text-slate-100">
                     {String(entry.text ?? "")
@@ -6616,30 +6620,42 @@ export default function StudioPage() {
                     : "Based on your analyzed role context and verified baseline evidence."} 
               </p> 
             </div>
-            <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-decision-panel">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Decision + Action</p>
-              <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-50"> 
-                {hasCompletedGeneration 
-                  ? showLowQualityRecoveryLane 
-                    ? "This draft needs another pass." 
-                    : isMediumQualityDraft 
-                      ? "Draft output: usable now, stronger with refinement." 
-                      : "Strong output: ready to refine in Studio." 
-                  : generationSupportState === "strong" 
-                    ? "Draft output: ready to refine in Studio."
+            <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-decision-panel"> 
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Decision + Action</p> 
+              {generateNowEligible && isLowQualityDraft ? (
+                <p
+                  className="mt-1 text-xs font-medium text-slate-400"
+                  data-testid="studio-low-quality-demoted-label"
+                >
+                  Quality signal: low confidence (non-blocking)
+                </p>
+              ) : null}
+              <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-50">  
+                {hasCompletedGeneration  
+                  ? showLowQualityRecoveryLane  
+                    ? "This draft needs another pass."  
+                    : generateNowEligible && isLowQualityDraft
+                      ? "Draft output: ready to refine in Studio."
+                    : isMediumQualityDraft  
+                      ? "Draft output: usable now, stronger with refinement."  
+                      : "Strong output: ready to refine in Studio."  
+                  : generationSupportState === "strong"  
+                    ? "Draft output: ready to refine in Studio." 
                     : generationSupportState === "partial"
                       ? "Draft output: usable now, stronger with refinement."
                       : "Limited output: not ready yet."}
               </h2>
-              <p className="mt-2 text-sm text-slate-200"> 
-                {hasCompletedGeneration 
-                  ? showLowQualityRecoveryLane 
-                    ? "The current output is usable only as a rough starting point. Review the issues below, then regenerate or refine from verified evidence." 
-                    : isMediumQualityDraft 
-                      ? "Usable now, but tightening evidence and refinement will materially improve the result." 
+              <p className="mt-2 text-sm text-slate-200">  
+                {hasCompletedGeneration  
+                  ? showLowQualityRecoveryLane  
+                    ? "The current output is usable only as a rough starting point. Review the issues below, then regenerate or refine from verified evidence."  
+                    : generateNowEligible && isLowQualityDraft
+                      ? "Generated with conservative truth bounds from your baseline evidence. Review and refine as needed before applying."
+                    : isMediumQualityDraft  
+                      ? "Usable now, but tightening evidence and refinement will materially improve the result."  
                       : "Built from your verified experience and aligned to the role. Review and refine as needed before applying." 
-                  : generationSupportState === "strong" 
-                    ? "Built directly from verified evidence and aligned to the role."
+                  : generationSupportState === "strong"  
+                    ? "Built directly from verified evidence and aligned to the role." 
                     : generationSupportState === "partial"
                       ? "Built from partially verified evidence and aligned to key role requirements."
                       : "Built from your verified experience, but a few signals still need strengthening."}
@@ -6689,16 +6705,18 @@ export default function StudioPage() {
                   ) : null}
                 </div>
               ) : null}
-            </div>
-            <StudioArtifactQualityPanel
-              model={artifactQuality}
-              confidence={artifactQuality.confidence}
-              onVerifyClaim={verifyClaim}
-              onEditClaim={openClaimEditModal}
-              onDismissClaim={dismissClaim}
-            />
-          </>
-        )}
+            </div> 
+            {!generateNowEligible ? (
+              <StudioArtifactQualityPanel
+                model={artifactQuality}
+                confidence={artifactQuality.confidence}
+                onVerifyClaim={verifyClaim}
+                onEditClaim={openClaimEditModal}
+                onDismissClaim={dismissClaim}
+              />
+            ) : null}
+          </> 
+        )} 
         {hasCompletedGeneration ? (
           <>
             {documentCritique ? (
@@ -6858,13 +6876,14 @@ export default function StudioPage() {
           }
         />
       ) : null}
-      {!showReadinessRecoveryExperience &&
-      prioritizedStrengtheningSuggestions.length > 0 &&
-      (generationSupportState !== "strong" ||
-        recentIntent === "refine_intent" ||
-        recentIntent === "used_not_committed") ? (
-        <section
-          className="rounded-2xl border border-sky-300/25 bg-slate-950/35 p-4"
+      {!showReadinessRecoveryExperience && 
+      prioritizedStrengtheningSuggestions.length > 0 && 
+      !generateNowEligible &&
+      (generationSupportState !== "strong" || 
+        recentIntent === "refine_intent" || 
+        recentIntent === "used_not_committed") ? ( 
+        <section 
+          className="rounded-2xl border border-sky-300/25 bg-slate-950/35 p-4" 
           data-testid="studio-strengthening-guidance"
         >
           <div className="space-y-1">
@@ -6950,38 +6969,10 @@ export default function StudioPage() {
           </div>
         </div> 
       ) : null} 
-      {showOptionalEvidenceStrengthening ? (
-        <details
-          className="rounded-2xl border border-white/15 bg-slate-950/35 p-4"
-          data-testid="studio-optional-evidence-details"
-        >
-          <summary className="cursor-pointer text-sm font-semibold text-slate-100">
-            Optional: strengthen evidence
-          </summary>
-          <div className="mt-3 space-y-3">
-            <p className="text-sm text-slate-300">
-              If you want tighter tailoring to the role, you can strengthen evidence for these signals.
-            </p>
-            <ul className="space-y-1 text-sm text-slate-200">
-              {canonicalUnverifiedRequirements.slice(0, 6).map((requirement) => (
-                <li key={`studio-optional-evidence-${requirement}`}>- {requirement}</li>
-              ))}
-            </ul>
-            <div className="flex flex-wrap gap-2">
-              <Link
-                href={fitReviewHref}
-                className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
-              >
-                Strengthen evidence (optional)
-              </Link>
-            </div>
-          </div>
-        </details>
-      ) : null}
-      {showEvidenceExpansion ? ( 
-        <section className="rounded-2xl border border-white/15 bg-slate-950/35 p-4" data-testid="studio-evidence-expansion"> 
-          <h2 className="text-base font-semibold text-slate-100">Prove this experience instead</h2> 
-          <p className="mt-1 text-sm text-slate-300">
+      {showEvidenceExpansion ? (  
+        <section className="rounded-2xl border border-white/15 bg-slate-950/35 p-4" data-testid="studio-evidence-expansion">  
+          <h2 className="text-base font-semibold text-slate-100">Prove this experience instead</h2>  
+          <p className="mt-1 text-sm text-slate-300"> 
             Only include experience that is real and defensible.
           </p>
           <div className="mt-3 space-y-3">
@@ -7148,14 +7139,14 @@ export default function StudioPage() {
         <Alert intent="warning" title="Resume snapshot unavailable">
           {versionsError}
         </Alert>
-      ) : null}
-
-      <StudioNextMove move={studioNextMove} />
-      <DocumentStrategyPlanSummary plan={documentStrategyPlan} />
-
-      {showArtifactMaterials ? (
-      <>
-      <section className="space-y-1 px-1">
+      ) : null} 
+ 
+      <StudioNextMove move={studioNextMove} /> 
+      {!generateNowEligible ? <DocumentStrategyPlanSummary plan={documentStrategyPlan} /> : null} 
+ 
+      {showArtifactMaterials ? ( 
+      <> 
+      <section className="space-y-1 px-1"> 
         <h2 className="text-xl font-semibold text-slate-100">Your application materials</h2>
         <p className="text-sm text-slate-300">
           Generate, preview, and export your resume and cover letter.
@@ -7838,14 +7829,101 @@ export default function StudioPage() {
             )
           )
         ) : null}
-      </section>
-      </>
-      ) : null}
+      </section> 
+      </> 
+      ) : null} 
 
-      <details className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-        <summary className="cursor-pointer text-sm font-semibold text-slate-200">
-          Role and evidence
-        </summary>
+      {generateNowEligible ? <DocumentStrategyPlanSummary plan={documentStrategyPlan} /> : null}
+
+      {showOptionalEvidenceStrengthening ? (
+        <section
+          className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+          data-testid="studio-optional-evidence-details"
+        >
+          <button
+            type="button"
+            className="flex w-full items-center justify-between text-left text-sm font-semibold text-slate-200"
+            onClick={() => setShowOptionalEvidenceDetails((current) => !current)}
+            data-testid="studio-optional-evidence-toggle"
+          >
+            <span>Optional: strengthen evidence</span>
+            <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+              {showOptionalEvidenceDetails ? "Hide" : "Show"}
+            </span>
+          </button>
+          {showOptionalEvidenceDetails ? (
+            <div className="mt-3 space-y-4" data-testid="studio-optional-evidence-content">
+            <p className="text-sm text-slate-300">
+              Evidence can improve tailoring, but it is not required to generate or refine documents at this score.
+            </p>
+
+            {isLowQualityDraft ? (
+              <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                  Quality signal
+                </p>
+                <p className="mt-1 text-sm text-slate-200">
+                  Low confidence means the draft stayed conservative. You can strengthen key signals and regenerate if you want
+                  a tighter version.
+                </p>
+              </div>
+            ) : null}
+
+            {canonicalUnverifiedRequirements.length ? (
+              <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                  Unverified role signals
+                </p>
+                <ul className="mt-2 space-y-1 text-sm text-slate-200">
+                  {canonicalUnverifiedRequirements.slice(0, 8).map((requirement) => (
+                    <li key={`studio-optional-evidence-${requirement}`}>- {requirement}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {prioritizedStrengtheningSuggestions.length ? (
+              <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                  Highest-impact improvements
+                </p>
+                <ul className="mt-2 space-y-2 text-sm text-slate-200">
+                  {prioritizedStrengtheningSuggestions.slice(0, 4).map((suggestion) => (
+                    <li key={`studio-optional-strengthen-${suggestion.requirement}`}>
+                      {suggestion.action}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href={fitReviewHref}
+                className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+              >
+                Strengthen evidence (optional)
+              </Link>
+            </div>
+
+            <div className="pt-1">
+              <StudioArtifactQualityPanel
+                model={artifactQuality}
+                confidence={artifactQuality.confidence}
+                onVerifyClaim={verifyClaim}
+                onEditClaim={openClaimEditModal}
+                onDismissClaim={dismissClaim}
+              />
+            </div>
+          </div>
+          ) : null}
+        </section>
+      ) : null}
+ 
+      <details className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4"> 
+        <summary className="cursor-pointer text-sm font-semibold text-slate-200"> 
+          Role and evidence 
+        </summary> 
         <div className="mt-3 space-y-3">
           <p className="text-sm text-slate-300">
             <span className="font-semibold text-slate-100">
