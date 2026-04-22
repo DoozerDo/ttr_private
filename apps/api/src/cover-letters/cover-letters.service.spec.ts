@@ -335,7 +335,7 @@ describe('CoverLettersService contract', () => {
     buildDraftSpy.mockRestore();
   });
 
-  it('returns readiness limited but blocks generation with generation_blocked', async () => {
+  it('returns readiness limited but blocks generation with generation_blocked', async () => { 
     const { service, coverRepo } = buildService({
       complianceFlags: [
         {
@@ -380,13 +380,61 @@ describe('CoverLettersService contract', () => {
     const readiness = await service.getGenerationReadiness('user-1', request as any);
     expect(readiness.status).toBe('limited');
 
-    await expect(service.generateCoverLetter('user-1', request as any)).resolves.toBeTruthy();
-    expect(coverRepo.save).toHaveBeenCalled();
-  });
+    await expect(service.generateCoverLetter('user-1', request as any)).resolves.toBeTruthy(); 
+    expect(coverRepo.save).toHaveBeenCalled(); 
+  }); 
+ 
+  it('does not return readiness BLOCKED for score >= 80 when verification gaps exist (verified-only lane)', async () => { 
+    const { service } = buildService({ 
+      complianceFlags: [ 
+        { 
+          code: 'full_block', 
+          message: 'Missing verified evidence for role-critical statements.', 
+          severity: ComplianceFlagSeverity.BLOCK, 
+        }, 
+      ], 
+      blocked: true, 
+    }); 
+    jest.spyOn(service as any, 'buildCoverLetterDraft').mockResolvedValue({ 
+      baseline, 
+      baselineVersion, 
+      job, 
+      analysisAssessment: assessment, 
+      allowedBlocks: [], 
+      jobContext: { 
+        id: 'job-1', 
+        title: 'Program Manager', 
+        company: 'Example Co', 
+        responsibilities: [], 
+        requirements: [], 
+      }, 
+      jobContextAllowlist: { allowedCompanies: ['Example Co'], allowedRoleTitles: ['Program Manager'] }, 
+      closingTemplateKey: 'default', 
+      generationInputsHash: 'hash', 
+      generation: { document: { opening: '', bodyParagraphs: [], closingParagraph: '' } }, 
+      complianceResult: { 
+        normalizedContent: 'blocked', 
+        complianceFlags: [ 
+          { 
+            code: 'full_block', 
+            message: 'Missing verified evidence for role-critical statements.', 
+            severity: ComplianceFlagSeverity.BLOCK, 
+          }, 
+        ], 
+        blocked: true, 
+        audit: { id: 'audit-1', baselineVersionHash: 'hash-1' }, 
+      }, 
+    }); 
+ 
+    const readiness = await service.getGenerationReadiness('user-1', request as any); 
+    expect(readiness.status).toBe('limited'); 
+    expect(readiness.blocked).toBe(false); 
+    expect(readiness.reasons[0]?.code).toBe('verified_only_generation'); 
+  }); 
 
-  it('falls back to verified-only generation for score >= 70 when readiness is BLOCKED', async () => {
-    const { service, coverRepo } = buildService({
-      complianceFlags: [
+  it('falls back to verified-only generation for score >= 70 when readiness is BLOCKED', async () => { 
+    const { service, coverRepo } = buildService({ 
+      complianceFlags: [ 
         {
           code: 'full_block',
           message: 'Missing verified evidence for role-critical statements.',

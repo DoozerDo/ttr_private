@@ -272,7 +272,7 @@ describe('ResumeService contract', () => {
     });
   });
 
-  it('returns readiness limited and does not throw generation_blocked for score >= 70', async () => {
+  it('returns readiness limited and does not throw generation_blocked for score >= 70', async () => { 
     const { service } = buildService({
       complianceFlags: [
         {
@@ -292,7 +292,25 @@ describe('ResumeService contract', () => {
       status: 'success',
       exportReady: true,
     });
-  });
+  }); 
+ 
+  it('does not return readiness BLOCKED for score >= 80 when verification gaps exist (verified-only lane)', async () => { 
+    const { service } = buildService(); 
+ 
+    jest.spyOn(service, 'generateResume').mockRejectedValue({ 
+      response: { 
+        code: 'generation_blocked', 
+        blockers: [ 
+          { code: 'full_block', message: 'Missing verified evidence for core responsibilities.' }, 
+        ], 
+      }, 
+    } as any); 
+ 
+    const readiness = await service.getGenerationReadiness('user-1', baseRequest); 
+    expect(readiness.status).toBe('limited'); 
+    expect(readiness.blocked).toBe(false); 
+    expect(readiness.reasons[0]?.code).toBe('verified_only_generation'); 
+  }); 
 
   it('does not throw generation_blocked for score >= 70 when readiness is BLOCKED and verified-only mode is possible', async () => {
     const { service, applicationsService, opportunitiesService } = buildService({

@@ -1,7 +1,7 @@
 import type { GenerationReadiness, VerificationIssue } from "./generationReadiness";
 import type { TierGateError } from "./tiers";
 import { shouldGenerateDocuments } from "./documentGenerationContract";
-import { isMomentumGenerationAllowed } from "./documentGenerationGate";
+import { isGenerateNowEligible } from "./documentGenerationGate";
 
 export type StudioArtifactAccessState = "allowed" | "tier_gated";
 export type StudioArtifactReadinessState = "ready" | "draft_only" | "blocked";
@@ -55,7 +55,8 @@ const hasBlockingIssueForArtifact = (
 function resolveReadinessState(inputs: ResolveInputs): StudioArtifactReadinessState {
   const { readiness, artifactType } = inputs;
 
-  if (isMomentumGenerationAllowed(inputs.score)) {
+  // Score >= 80 is a "generate now" lane: do not block on evidence gaps.
+  if (isGenerateNowEligible(inputs.score)) {
     return "ready";
   }
 

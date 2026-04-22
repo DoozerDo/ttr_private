@@ -714,18 +714,38 @@ export class CoverLettersService {
     };
   }
 
-  async getGenerationReadiness(userId: string, input: GenerateCoverLetterDto) {
-    try {
-      const draft = await this.buildCoverLetterDraft(userId, input);
-      const flags = filterComplianceFlagsByCanonicalClaims(
-        draft.complianceResult.complianceFlags ?? [],
-        draft.analysisAssessment,
-      );
-      return this.buildReadinessFromFlags(flags);
-    } catch (error) {
-      // Readiness is a preflight signal. If post-processing rejects the first-pass draft,
-      // return a limited readiness signal rather than surfacing a terminal generation failure.
-      if (error instanceof HttpException) {
+  async getGenerationReadiness(userId: string, input: GenerateCoverLetterDto) { 
+    try { 
+      const draft = await this.buildCoverLetterDraft(userId, input); 
+      const flags = filterComplianceFlagsByCanonicalClaims( 
+        draft.complianceResult.complianceFlags ?? [], 
+        draft.analysisAssessment, 
+      ); 
+      const readiness = this.buildReadinessFromFlags(flags); 
+      const score = draft.analysisAssessment?.overallScore ?? null; 
+      if ( 
+        typeof score === 'number' && 
+        score >= VERIFIED_ONLY_GENERATION_THRESHOLD && 
+        readiness.status === 'blocked' 
+      ) { 
+        // Contract: score >= 80 should never be blocked for evidence gaps; proceed verified-only. 
+        return { 
+          ...readiness, 
+          status: 'limited', 
+          blocked: false, 
+          reasons: [ 
+            { 
+              code: 'verified_only_generation', 
+              message: 'Generation will proceed using only verified baseline evidence.', 
+            }, 
+          ], 
+        } as const; 
+      } 
+      return readiness; 
+    } catch (error) { 
+      // Readiness is a preflight signal. If post-processing rejects the first-pass draft, 
+      // return a limited readiness signal rather than surfacing a terminal generation failure. 
+      if (error instanceof HttpException) { 
         const response = error.getResponse() as
           | { code?: string; details?: { flags?: string[] } }
           | { error?: { code?: string; details?: { flags?: string[] } } };

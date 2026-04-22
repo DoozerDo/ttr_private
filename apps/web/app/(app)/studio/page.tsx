@@ -69,10 +69,11 @@ import {
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
 import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
 import { buildProductDecisionState } from "@/lib/productDecisionState";
-import {
-  resolveDocumentGenerationMode,
-  shouldGenerateDocuments,
-} from "@/lib/documentGenerationContract";
+import { 
+  resolveDocumentGenerationMode, 
+  shouldGenerateDocuments, 
+} from "@/lib/documentGenerationContract"; 
+import { isGenerateNowEligible } from "@/lib/documentGenerationGate";
 import { deriveEvidenceLedger } from "@/lib/evidenceLedger";
 import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
 import {
@@ -1262,15 +1263,16 @@ export default function StudioPage() {
     setVersionRefreshSignal((prev) => prev + 1);
   }, []);
 
-  const analysisScore = useMemo(() => {
-    const v2 = (analysis as { scoring_v2?: { score?: unknown } | null } | null)?.scoring_v2?.score;
-    if (typeof v2 === "number") return v2;
-    const direct = (analysis as { score?: unknown } | null)?.score;
-    if (typeof direct === "number") return direct;
-    const overall = (analysis as { overallScore?: unknown } | null)?.overallScore;
-    if (typeof overall === "number") return overall;
-    return null;
-  }, [analysis]);
+  const analysisScore = useMemo(() => { 
+    const v2 = (analysis as { scoring_v2?: { score?: unknown } | null } | null)?.scoring_v2?.score; 
+    if (typeof v2 === "number") return v2; 
+    const direct = (analysis as { score?: unknown } | null)?.score; 
+    if (typeof direct === "number") return direct; 
+    const overall = (analysis as { overallScore?: unknown } | null)?.overallScore; 
+    if (typeof overall === "number") return overall; 
+    return null; 
+  }, [analysis]); 
+  const generateNowEligible = isGenerateNowEligible(analysisScore);
 
   const coverLetterJobContext = useMemo(() => {
     const jobWithExtras = selectedJob as Job & {
@@ -1761,11 +1763,16 @@ export default function StudioPage() {
         .filter((label) => !excludedTargetingLabels.has(label.toLowerCase())),
     [analysis?.verification_coverage?.unverifiedRequirements, excludedTargetingLabels],
   );
-  const showEvidenceExpansion = useMemo(
-    () =>
-      shouldGenerateDocuments(analysisScore) &&
-      canonicalUnverifiedRequirements.length > 0,
-    [analysisScore, canonicalUnverifiedRequirements.length],
+  const showEvidenceExpansion = useMemo( 
+    () => 
+      shouldGenerateDocuments(analysisScore) && 
+      canonicalUnverifiedRequirements.length > 0 &&
+      !generateNowEligible, 
+    [analysisScore, canonicalUnverifiedRequirements.length, generateNowEligible], 
+  ); 
+  const showOptionalEvidenceStrengthening = useMemo(
+    () => shouldGenerateDocuments(analysisScore) && canonicalUnverifiedRequirements.length > 0 && generateNowEligible,
+    [analysisScore, canonicalUnverifiedRequirements.length, generateNowEligible],
   );
   const autoEvidenceSuggestions = useMemo(() => {
     const map = new Map<string, ReturnType<typeof buildEvidenceSuggestion>>();
@@ -1935,11 +1942,11 @@ export default function StudioPage() {
       requestedAnalysisId,
       trustGateDecision.allowed,
     ],
-  );
-  const productReadiness = productDecisionState.productReadiness;
-  const qualifiedForGeneration = shouldGenerateDocuments(analysisScore);
-  const studioDraftMode =
-    resolveDocumentGenerationMode(analysisScore) === "draft" && isFromUnlock && !hasGeneratedOnce;
+  ); 
+  const productReadiness = productDecisionState.productReadiness; 
+  const qualifiedForGeneration = shouldGenerateDocuments(analysisScore); 
+  const studioDraftMode = 
+    resolveDocumentGenerationMode(analysisScore) === "draft" && isFromUnlock && !hasGeneratedOnce; 
   const improveBaselineHref = useMemo(() => {
     const params = new URLSearchParams();
     if (requestedAnalysisId) params.set("analysisId", requestedAnalysisId);
@@ -2997,19 +3004,21 @@ export default function StudioPage() {
     requestedAnalysisId,
     canGenerateDocuments,
   ]);
-  useEffect(() => {
-    setRecentIntent(readRecentIntentState());
-  }, [requestedAnalysisId, effectiveJobId, effectiveBaselineId]);
-  const generationSupportState = useMemo(() => {
-    if (!qualifiedForGeneration) return "blocked";
-    if (activeGenerationReadiness.blocked) return "blocked";
-    if (studioCanonicalDecision.readinessState === "LIMITED" || studioCanonicalDecision.readinessState === "DRAFT") {
-      return "partial";
-    }
-    return "strong";
-  }, [activeGenerationReadiness.blocked, qualifiedForGeneration, studioCanonicalDecision.readinessState]);
-  const canProceedWithStudioDrafts = qualifiedForGeneration && !activeGenerationReadiness.blocked;
-  const isInstantDraftExperience = canProceedWithStudioDrafts;
+  useEffect(() => { 
+    setRecentIntent(readRecentIntentState()); 
+  }, [requestedAnalysisId, effectiveJobId, effectiveBaselineId]); 
+  const generationSupportState = useMemo(() => { 
+    if (!qualifiedForGeneration) return "blocked"; 
+    // Product contract: score >= 80 is a "generate now" lane. Do not block Studio on evidence gaps.
+    if (activeGenerationReadiness.blocked && !generateNowEligible) return "blocked"; 
+    if (studioCanonicalDecision.readinessState === "LIMITED" || studioCanonicalDecision.readinessState === "DRAFT") { 
+      return "partial"; 
+    } 
+    return "strong"; 
+  }, [activeGenerationReadiness.blocked, generateNowEligible, qualifiedForGeneration, studioCanonicalDecision.readinessState]); 
+  const canProceedWithStudioDrafts =
+    qualifiedForGeneration && (!activeGenerationReadiness.blocked || generateNowEligible); 
+  const isInstantDraftExperience = canProceedWithStudioDrafts; 
   const needsAutoGeneration =
     isInstantDraftExperience &&
     !hasCompletedGeneration &&
@@ -3277,17 +3286,19 @@ export default function StudioPage() {
       resumeState.response,
       resumeState.tierGateError,
     ],
-  );
-  const isLowQualityDraft = hasCompletedGeneration && artifactQuality.confidence === "LOW";
-  const isMediumQualityDraft = hasCompletedGeneration && artifactQuality.confidence === "MEDIUM";
-  const isHighQualityDraft = hasCompletedGeneration && artifactQuality.confidence === "HIGH";
-  const [showFullLowQualityResume, setShowFullLowQualityResume] = useState(false);
-  const [showFullLowQualityCover, setShowFullLowQualityCover] = useState(false);
+  ); 
+  const isLowQualityDraft = hasCompletedGeneration && artifactQuality.confidence === "LOW"; 
+  const isMediumQualityDraft = hasCompletedGeneration && artifactQuality.confidence === "MEDIUM"; 
+  const isHighQualityDraft = hasCompletedGeneration && artifactQuality.confidence === "HIGH"; 
+  // Low-confidence is still a signal, but score >= 80 must not block or degrade access to usable artifacts.
+  const showLowQualityRecoveryLane = isLowQualityDraft && !generateNowEligible;
+  const [showFullLowQualityResume, setShowFullLowQualityResume] = useState(false); 
+  const [showFullLowQualityCover, setShowFullLowQualityCover] = useState(false); 
 
-  useEffect(() => {
-    setShowFullLowQualityResume(false);
-    setShowFullLowQualityCover(false);
-  }, [effectiveBaselineId, effectiveJobId, artifactQuality.confidence]);
+  useEffect(() => { 
+    setShowFullLowQualityResume(false); 
+    setShowFullLowQualityCover(false); 
+  }, [effectiveBaselineId, effectiveJobId, artifactQuality.confidence]); 
   const coverGating = useMemo(
     () =>
       resolveStudioArtifactGating({
@@ -4335,7 +4346,8 @@ export default function StudioPage() {
     }));
     setResumeWarningFlags([]);
     setResumeAuditId(undefined);
-    const payload = normalizeGenerationPayload(buildResumePayload(Boolean(opts?.verifiedOnly)), "resume");
+    const verifiedOnly = Boolean(opts?.verifiedOnly) || generateNowEligible;
+    const payload = normalizeGenerationPayload(buildResumePayload(verifiedOnly), "resume"); 
     try {
       const response = await fetch("/api/resume", {
         method: "POST",
@@ -4454,11 +4466,11 @@ export default function StudioPage() {
           const retryResponse = await fetch("/api/resume", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              ...normalizeGenerationPayload(buildResumePayload(false), "resume"),
-              trustGateMode: "strict",
-            }),
-          });
+            body: JSON.stringify({ 
+              ...normalizeGenerationPayload(buildResumePayload(generateNowEligible), "resume"), 
+              trustGateMode: "strict", 
+            }), 
+          }); 
           const retryPayload = await readResponsePayload(retryResponse);
           if (!retryResponse.ok) {
             throw new Error(formatErrorMessage(retryPayload, "Resume generation failed."));
@@ -4824,7 +4836,8 @@ export default function StudioPage() {
     setCoverWarningFlags([]);
     setCoverAuditId(undefined);
     setCoverLetterComplianceBlocked(null);
-    const payload = normalizeGenerationPayload(buildCoverLetterPayload(Boolean(opts?.verifiedOnly)), "cover_letter");
+    const verifiedOnly = Boolean(opts?.verifiedOnly) || generateNowEligible;
+    const payload = normalizeGenerationPayload(buildCoverLetterPayload(verifiedOnly), "cover_letter"); 
     try {
       const response = await fetch("/api/cover-letters", {
         method: "POST",
@@ -4935,11 +4948,11 @@ export default function StudioPage() {
           const retryResponse = await fetch("/api/cover-letters", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              ...normalizeGenerationPayload(buildCoverLetterPayload(false), "cover_letter"),
-              trustGateMode: "strict",
-            }),
-          });
+            body: JSON.stringify({ 
+              ...normalizeGenerationPayload(buildCoverLetterPayload(generateNowEligible), "cover_letter"), 
+              trustGateMode: "strict", 
+            }), 
+          }); 
           const retryPayload = await readResponsePayload(retryResponse);
           if (!retryResponse.ok) {
             throw new Error(formatErrorMessage(retryPayload, "Cover letter generation failed."));
@@ -6133,15 +6146,15 @@ export default function StudioPage() {
               <section className="rounded-2xl border border-white/10 bg-slate-950/45 p-4" data-testid="studio-instant-resume-panel">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Resume</p>
-                    <p className="text-sm text-slate-300">
-                      {isLowQualityDraft ? "Draft (low quality)" : "Application ready"}
-                    </p>
-                  </div>
-                </div>
-                <div className="space-y-4 rounded-xl border border-white/10 bg-slate-950/40 p-3">
-                  {isLowQualityDraft && !showFullLowQualityResume ? (
-                    <div className="space-y-3" data-testid="studio-low-quality-resume-preview">
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Resume</p> 
+                    <p className="text-sm text-slate-300"> 
+                      {showLowQualityRecoveryLane ? "Draft (low quality)" : "Application ready"} 
+                    </p> 
+                  </div> 
+                </div> 
+                <div className="space-y-4 rounded-xl border border-white/10 bg-slate-950/40 p-3"> 
+                  {showLowQualityRecoveryLane && !showFullLowQualityResume ? ( 
+                    <div className="space-y-3" data-testid="studio-low-quality-resume-preview"> 
                       <div className="rounded-xl border border-amber-300/25 bg-amber-500/5 p-3">
                         <p className="text-sm font-semibold text-amber-100">This draft needs another pass.</p>
                         <p className="mt-1 text-sm text-slate-200">
@@ -6190,15 +6203,15 @@ export default function StudioPage() {
               <section className="rounded-2xl border border-white/10 bg-slate-950/45 p-4" data-testid="studio-instant-cover-panel">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Cover Letter</p>
-                    <p className="text-sm text-slate-300">
-                      {isLowQualityDraft ? "Draft (low quality)" : "Application ready"}
-                    </p>
-                  </div>
-                </div>
-                <div className="space-y-3 rounded-xl border border-white/10 bg-slate-950/40 p-3">
-                  {isLowQualityDraft && !showFullLowQualityCover ? (
-                    <div className="space-y-3" data-testid="studio-low-quality-cover-preview">
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Cover Letter</p> 
+                    <p className="text-sm text-slate-300"> 
+                      {showLowQualityRecoveryLane ? "Draft (low quality)" : "Application ready"} 
+                    </p> 
+                  </div> 
+                </div> 
+                <div className="space-y-3 rounded-xl border border-white/10 bg-slate-950/40 p-3"> 
+                  {showLowQualityRecoveryLane && !showFullLowQualityCover ? ( 
+                    <div className="space-y-3" data-testid="studio-low-quality-cover-preview"> 
                       <div className="rounded-xl border border-amber-300/25 bg-amber-500/5 p-3">
                         <p className="text-sm font-semibold text-amber-100">This draft needs another pass.</p>
                         <p className="mt-1 text-sm text-slate-200">
@@ -6593,47 +6606,49 @@ export default function StudioPage() {
               </h1>
               <p className="text-base leading-7 text-slate-200">{authorityStateExplanation}</p>
               <p className="text-sm font-medium text-slate-200">{primaryNextAction.label}</p>
-              <p className="text-sm text-slate-400">
-                {generationSupportState === "strong"
-                  ? "Generated from verified evidence."
-                  : generationSupportState === "partial"
-                    ? "Generated from partially verified evidence. Verify key claims to strengthen it."
-                    : "Based on your analyzed role context and verified baseline evidence."}
-              </p>
+              <p className="text-sm text-slate-400"> 
+                {generationSupportState === "strong" 
+                  ? "Generated from verified evidence." 
+                  : generationSupportState === "partial" 
+                    ? generateNowEligible
+                      ? "Generated with conservative truth bounds from your baseline evidence."
+                      : "Generated from partially verified evidence. Verify key claims to strengthen it." 
+                    : "Based on your analyzed role context and verified baseline evidence."} 
+              </p> 
             </div>
             <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-decision-panel">
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Decision + Action</p>
-              <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-50">
-                {hasCompletedGeneration
-                  ? isLowQualityDraft
-                    ? "This draft needs another pass."
-                    : isMediumQualityDraft
-                      ? "Draft output: usable now, stronger with refinement."
-                      : "Strong output: ready to refine in Studio."
-                  : generationSupportState === "strong"
+              <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-50"> 
+                {hasCompletedGeneration 
+                  ? showLowQualityRecoveryLane 
+                    ? "This draft needs another pass." 
+                    : isMediumQualityDraft 
+                      ? "Draft output: usable now, stronger with refinement." 
+                      : "Strong output: ready to refine in Studio." 
+                  : generationSupportState === "strong" 
                     ? "Draft output: ready to refine in Studio."
                     : generationSupportState === "partial"
                       ? "Draft output: usable now, stronger with refinement."
                       : "Limited output: not ready yet."}
               </h2>
-              <p className="mt-2 text-sm text-slate-200">
-                {hasCompletedGeneration
-                  ? isLowQualityDraft
-                    ? "The current output is usable only as a rough starting point. Review the issues below, then regenerate or refine from verified evidence."
-                    : isMediumQualityDraft
-                      ? "Usable now, but tightening evidence and refinement will materially improve the result."
-                      : "Built from your verified experience and aligned to the role. Review and refine as needed before applying."
-                  : generationSupportState === "strong"
+              <p className="mt-2 text-sm text-slate-200"> 
+                {hasCompletedGeneration 
+                  ? showLowQualityRecoveryLane 
+                    ? "The current output is usable only as a rough starting point. Review the issues below, then regenerate or refine from verified evidence." 
+                    : isMediumQualityDraft 
+                      ? "Usable now, but tightening evidence and refinement will materially improve the result." 
+                      : "Built from your verified experience and aligned to the role. Review and refine as needed before applying." 
+                  : generationSupportState === "strong" 
                     ? "Built directly from verified evidence and aligned to the role."
                     : generationSupportState === "partial"
                       ? "Built from partially verified evidence and aligned to key role requirements."
                       : "Built from your verified experience, but a few signals still need strengthening."}
               </p>
-              {hasCompletedGeneration && (isLowQualityDraft || isMediumQualityDraft) ? (
-                <div className="mt-4 space-y-2">
-                  <p className="text-sm font-semibold text-slate-100">
-                    {isMediumQualityDraft ? "What to improve next" : "What's holding this back"}
-                  </p>
+              {hasCompletedGeneration && (showLowQualityRecoveryLane || isMediumQualityDraft) ? ( 
+                <div className="mt-4 space-y-2"> 
+                  <p className="text-sm font-semibold text-slate-100"> 
+                    {isMediumQualityDraft ? "What to improve next" : "What's holding this back"} 
+                  </p> 
                   <ul className="space-y-1 text-sm text-slate-300">
                     {(
                       artifactQuality.improvableClaims.length
@@ -6650,12 +6665,12 @@ export default function StudioPage() {
                       </li>
                     ))}
                   </ul>
-                  {isLowQualityDraft ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <FormButton
-                        onClick={() => void handleRegenerateDraft()}
-                        disabled={pageTruth.isGenerating || resumeGenerating || coverGenerating}
-                        data-testid="studio-low-quality-regenerate"
+                  {showLowQualityRecoveryLane ? ( 
+                    <div className="mt-3 flex flex-wrap gap-2"> 
+                      <FormButton 
+                        onClick={() => void handleRegenerateDraft()} 
+                        disabled={pageTruth.isGenerating || resumeGenerating || coverGenerating} 
+                        data-testid="studio-low-quality-regenerate" 
                       >
                         Regenerate draft
                       </FormButton>
@@ -6905,14 +6920,15 @@ export default function StudioPage() {
           </p>
         </div>
       ) : null}
-      {requestedAnalysisId &&
-      (activeGenerationReadiness.status === "blocked" || activeGenerationReadiness.status === "limited") &&
-      canonicalUnverifiedRequirements.length ? (
-        <div
-          id="studio-auto-adjust-panel"
-          className="rounded-2xl border border-amber-300/40 bg-amber-500/10 px-4 py-3"
-          data-testid="studio-auto-adjust-panel"
-        >
+      {requestedAnalysisId && 
+      (activeGenerationReadiness.status === "blocked" || activeGenerationReadiness.status === "limited") && 
+      canonicalUnverifiedRequirements.length &&
+      !generateNowEligible ? ( 
+        <div 
+          id="studio-auto-adjust-panel" 
+          className="rounded-2xl border border-amber-300/40 bg-amber-500/10 px-4 py-3" 
+          data-testid="studio-auto-adjust-panel" 
+        > 
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-100">
             Fix this in one step
           </p>
@@ -6932,11 +6948,39 @@ export default function StudioPage() {
               Remove unsupported requirements and continue
             </FormButton>
           </div>
-        </div>
+        </div> 
+      ) : null} 
+      {showOptionalEvidenceStrengthening ? (
+        <details
+          className="rounded-2xl border border-white/15 bg-slate-950/35 p-4"
+          data-testid="studio-optional-evidence-details"
+        >
+          <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+            Optional: strengthen evidence
+          </summary>
+          <div className="mt-3 space-y-3">
+            <p className="text-sm text-slate-300">
+              If you want tighter tailoring to the role, you can strengthen evidence for these signals.
+            </p>
+            <ul className="space-y-1 text-sm text-slate-200">
+              {canonicalUnverifiedRequirements.slice(0, 6).map((requirement) => (
+                <li key={`studio-optional-evidence-${requirement}`}>- {requirement}</li>
+              ))}
+            </ul>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href={fitReviewHref}
+                className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+              >
+                Strengthen evidence (optional)
+              </Link>
+            </div>
+          </div>
+        </details>
       ) : null}
-      {showEvidenceExpansion ? (
-        <section className="rounded-2xl border border-white/15 bg-slate-950/35 p-4" data-testid="studio-evidence-expansion">
-          <h2 className="text-base font-semibold text-slate-100">Prove this experience instead</h2>
+      {showEvidenceExpansion ? ( 
+        <section className="rounded-2xl border border-white/15 bg-slate-950/35 p-4" data-testid="studio-evidence-expansion"> 
+          <h2 className="text-base font-semibold text-slate-100">Prove this experience instead</h2> 
           <p className="mt-1 text-sm text-slate-300">
             Only include experience that is real and defensible.
           </p>
@@ -7365,8 +7409,8 @@ export default function StudioPage() {
               </p>
             ) : null}
             <div className="space-y-4 rounded-xl border border-white/10 bg-slate-950/40 p-3">
-              {isLowQualityDraft && !showFullLowQualityResume ? (
-                <div className="space-y-3" data-testid="studio-low-quality-resume-preview-main">
+              {showLowQualityRecoveryLane && !showFullLowQualityResume ? ( 
+                <div className="space-y-3" data-testid="studio-low-quality-resume-preview-main"> 
                   <div className="rounded-xl border border-amber-300/25 bg-amber-500/5 p-3">
                     <p className="text-sm font-semibold text-amber-100">This draft needs another pass.</p>
                     <p className="mt-1 text-sm text-slate-200">
@@ -7687,9 +7731,9 @@ export default function StudioPage() {
               {coverTrustSummaryVisible ? (
                 <VerifiedGenerationTrustSummary testId="studio-cover-trust-summary" />
               ) : null}
-              <div className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-3">
-                {isLowQualityDraft && !showFullLowQualityCover ? (
-                  <div className="space-y-3" data-testid="studio-low-quality-cover-preview-main">
+              <div className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-3"> 
+                {showLowQualityRecoveryLane && !showFullLowQualityCover ? ( 
+                  <div className="space-y-3" data-testid="studio-low-quality-cover-preview-main"> 
                     <div className="rounded-xl border border-amber-300/25 bg-amber-500/5 p-3">
                       <p className="text-sm font-semibold text-amber-100">This draft needs another pass.</p>
                       <p className="mt-1 text-sm text-slate-200">

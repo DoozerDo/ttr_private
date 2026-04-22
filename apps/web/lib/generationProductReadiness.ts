@@ -1,5 +1,9 @@
 import type { GenerationAuthorityState } from "@/lib/generationAuthority";
-import { isDocumentGenerationUnlocked, isMomentumGenerationAllowed } from "@/lib/documentGenerationGate";
+import {
+  isDocumentGenerationUnlocked,
+  isGenerateNowEligible,
+  isMomentumGenerationAllowed,
+} from "@/lib/documentGenerationGate";
 import { resolveDocumentGenerationMode } from "@/lib/documentGenerationContract";
 
 export type GenerationReadinessContract = {
@@ -46,6 +50,7 @@ export function buildGenerationProductReadiness(
   }
   const score = typeof input.score === "number" ? input.score : null;
   const momentumAllowed = isMomentumGenerationAllowed(score);
+  const generateNowEligible = isGenerateNowEligible(score);
 
   if (!input.hasCanonicalAssessment && !momentumAllowed) {
     reasonsBlocked.push("missing_canonical_assessment");
@@ -74,7 +79,9 @@ export function buildGenerationProductReadiness(
           ? "HIGH"
           : "MEDIUM"
       : "LOW";
-  const needsVerification = state === "ALLOWED" ? confidence !== "HIGH" : true;
+  // Product contract: score >= 80 should not block or require verification as a prerequisite
+  // for generating usable artifacts. Evidence strengthening remains optional.
+  const needsVerification = state === "ALLOWED" ? (generateNowEligible ? false : confidence !== "HIGH") : true;
   const canOpenStudio = state === "ALLOWED";
   const canGenerate = state === "ALLOWED";
   const canExport = canGenerate && input.isPro;

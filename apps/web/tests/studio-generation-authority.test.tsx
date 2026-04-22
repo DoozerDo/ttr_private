@@ -400,13 +400,22 @@ describe("Studio generation authority", () => {
     expect(screen.getAllByRole("button", { name: /generate cover letter/i }).length).toBeGreaterThan(0);
   });
 
-  it("BLOCKED shows blocked status and remediation CTA", async () => {
-    setupFetch("blocked");
+  it("BLOCKED shows blocked status and remediation CTA", async () => { 
+    setupFetch("blocked", 75); 
+    renderStudio(); 
+ 
+    const blockedMessage = await screen.findByTestId("studio-blocked-message"); 
+    expect(blockedMessage).toHaveTextContent(/can.?t generate/i); 
+    expect(screen.getAllByRole("link", { name: /strengthen my experience/i }).length).toBeGreaterThan(0); 
+  }); 
+ 
+  it("score >= 80 does not block on readiness BLOCKED (generate-now contract)", async () => {
+    setupFetch("blocked", 84);
     renderStudio();
 
-    const blockedMessage = await screen.findByTestId("studio-blocked-message");
-    expect(blockedMessage).toHaveTextContent(/can.?t generate/i);
-    expect(screen.getAllByRole("link", { name: /strengthen my experience/i }).length).toBeGreaterThan(0);
+    await screen.findByTestId("studio-decision-panel");
+    expect(screen.queryByTestId("studio-blocked-message")).toBeNull();
+    expect(screen.getByTestId("studio-decision-panel")).toHaveTextContent(/ready to refine in studio/i);
   });
 
   it("blocked generation action does not proceed and routes to remediation", async () => {

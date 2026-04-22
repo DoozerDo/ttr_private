@@ -53,7 +53,7 @@ describe("studio low-quality preview gating", () => {
     vi.restoreAllMocks();
   });
 
-  it("does not show full previews by default for LOW quality drafts, and reveals them via disclosure", async () => {
+  it("gates LOW quality drafts below the generate-now threshold behind excerpt + disclosure", async () => {
     overrideSearchParams({ analysisId: "analysis-1" });
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -64,7 +64,7 @@ describe("studio low-quality preview gating", () => {
       if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
         return jsonResponse({
           assessmentId: "analysis-1",
-          scoring_v2: { score: 84 },
+          scoring_v2: { score: 79 },
           jobId: "job-1",
           baselineId: "base-1",
           baselineVersionId: "base-version-1",
@@ -111,5 +111,57 @@ describe("studio low-quality preview gating", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("studio-low-quality-resume-preview-main")).toBeNull();
     });
+  });
+
+  it("does not gate LOW-confidence artifacts at score >= 80 (generate now lane)", async () => {
+    overrideSearchParams({ analysisId: "analysis-1" });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return jsonResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]);
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return jsonResponse({
+          assessmentId: "analysis-1",
+          scoring_v2: { score: 84 },
+          jobId: "job-1",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          company: "Acme",
+          title: "Director of Support",
+          verification_coverage: { totalClaims: 2, verifiedClaims: 2, inferredClaims: 0, unverifiedClaims: 0 },
+        });
+      }
+      if (url.includes("/api/resume/readiness")) return jsonResponse({ status: "blocked", reasons: [{ code: "full_block", message: "Unverified Python" }], compliance_flags: [] });
+      if (url.includes("/api/cover-letters/readiness")) return jsonResponse({ status: "blocked", reasons: [{ code: "full_block", message: "Unverified Snowflake" }], compliance_flags: [] });
+      if (url.includes("/api/studio/artifacts")) {
+        return jsonResponse({
+          status: "COMPLETED",
+          baselineId: "base-1",
+          jobId: "job-1",
+          baselineVersionId: "base-version-1",
+          resume: { status: "COMPLETED", responseBody: { status: "success", preview: { resume: { heading: { name: "Alex Candidate" } } } } },
+          coverLetter: { status: "COMPLETED", responseBody: { status: "success", preview: { coverLetter: { paragraphs: ["Dear Hiring Team,", "Body"] } } } },
+        });
+      }
+      if (url.includes("/api/jobs")) return jsonResponse([{ id: "job-1", company: "Acme", title: "Director of Support", archivedAt: null, isArchived: false }]);
+      if (url.includes("/api/baselines")) return jsonResponse([{ id: "base-1", originalFilename: "Leadership Resume", version: 1 }]);
+      if (url.includes("/api/applications")) return jsonResponse([]);
+      if (url.includes("/api/opportunities")) return jsonResponse([]);
+      return jsonResponse({});
+    });
+
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-decision-panel")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("studio-low-quality-resume-preview-main")).toBeNull();
+    expect(screen.queryByTestId("studio-low-quality-cover-preview-main")).toBeNull();
+    expect(screen.queryByText(/View full draft anyway/i)).toBeNull();
   });
 });

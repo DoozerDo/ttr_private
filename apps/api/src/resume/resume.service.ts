@@ -2838,11 +2838,11 @@ export class ResumeService {
     };
   }
 
-  async getGenerationReadiness(
-    userId: string,
-    request: GenerateResumeRequest,
-    options?: { skipReadinessGate?: boolean },
-  ) {
+  async getGenerationReadiness( 
+    userId: string, 
+    request: GenerateResumeRequest, 
+    options?: { skipReadinessGate?: boolean }, 
+  ) { 
     const analysisAssessment = await validateAnalysisContext({
       analysisRepository: this.fitAssessmentRepository,
       baselineVersionRepository: this.baselineVersionRepository,
@@ -2865,8 +2865,8 @@ export class ResumeService {
           skipReadinessGate: options?.skipReadinessGate ?? true,
         },
       );
-    } catch (error) {
-      const response = (error as { response?: unknown })?.response;
+    } catch (error) { 
+      const response = (error as { response?: unknown })?.response; 
       const responseRecord =
         response && typeof response === 'object'
           ? (response as Record<string, unknown>)
@@ -2875,14 +2875,16 @@ export class ResumeService {
         (responseRecord?.code as string | undefined) ??
         ((responseRecord?.error as Record<string, unknown> | undefined)
           ?.code as string | undefined);
-      if (code === 'generation_blocked' || code === 'generation_failed') {
-        const score = analysisAssessment?.overallScore ?? null;
-        if (
-          typeof score === 'number' &&
-          score >= VERIFIED_ONLY_GENERATION_THRESHOLD &&
-          request.jobId?.trim() &&
-          !request.oneTap
-        ) {
+      if (code === 'generation_blocked' || code === 'generation_failed') { 
+        const score = analysisAssessment?.overallScore ?? null; 
+        const generateNowEligible =
+          typeof score === 'number' && score >= VERIFIED_ONLY_GENERATION_THRESHOLD;
+        if ( 
+          typeof score === 'number' && 
+          score >= VERIFIED_ONLY_GENERATION_THRESHOLD && 
+          request.jobId?.trim() && 
+          !request.oneTap 
+        ) { 
           try {
             generation = await this.generateResume(
               userId,
@@ -2896,18 +2898,32 @@ export class ResumeService {
           } catch {
             // fall through to original blocked envelope below.
           }
-          if (generation) {
-            const flags = filterComplianceFlagsByCanonicalClaims(
-              generation.compliance_flags ?? [],
-              analysisAssessment,
-            );
-            const blocked = flags.some((flag) => flag.severity === 'block');
-            const warningFlags = flags.filter((flag) => flag.severity === 'warn');
-            return {
-              status: blocked ? 'blocked' : warningFlags.length > 0 ? 'limited' : 'ready',
-              blocked,
-              compliance_flags: flags,
-              reasons: blocked
+          if (generation) { 
+            const flags = filterComplianceFlagsByCanonicalClaims( 
+              generation.compliance_flags ?? [], 
+              analysisAssessment, 
+            ); 
+            const blocked = flags.some((flag) => flag.severity === 'block'); 
+            const warningFlags = flags.filter((flag) => flag.severity === 'warn'); 
+            if (generateNowEligible && blocked) {
+              // Contract: score >= 80 should never be blocked for evidence gaps; proceed verified-only.
+              return {
+                status: 'limited' as const,
+                blocked: false,
+                compliance_flags: flags,
+                reasons: [
+                  {
+                    code: 'verified_only_generation',
+                    message: 'Generation will proceed using only verified baseline evidence.',
+                  },
+                ],
+              };
+            }
+            return { 
+              status: blocked ? 'blocked' : warningFlags.length > 0 ? 'limited' : 'ready', 
+              blocked, 
+              compliance_flags: flags, 
+              reasons: blocked 
                 ? [
                     {
                       code: 'full_block',
@@ -2924,7 +2940,7 @@ export class ResumeService {
                   ],
             };
           }
-        }
+        } 
 
         const rawBlockers =
           (responseRecord?.blockers as Array<Record<string, unknown>> | undefined) ??
@@ -2942,30 +2958,46 @@ export class ResumeService {
               'Some claims required for tailored generation could not be verified against your baseline.',
           }))
           .slice(0, 3);
-        return {
-          status: 'blocked' as const,
-          blocked: true,
-          compliance_flags: [],
-          reasons:
-            reasons.length > 0
-              ? reasons
-              : [
-                  {
-                    code: 'full_block',
-                    message:
-                      'Some claims required for tailored generation could not be verified against your baseline.',
-                  },
-                ],
-        };
-      }
-      throw error;
-    }
-    const flags = filterComplianceFlagsByCanonicalClaims(
-      generation.compliance_flags ?? [],
-      analysisAssessment,
-    );
-    const blocked = flags.some((flag) => flag.severity === 'block');
-    const warningFlags = flags.filter((flag) => flag.severity === 'warn');
+        if (generateNowEligible) {
+          return {
+            status: 'limited' as const,
+            blocked: false,
+            compliance_flags: [],
+            reasons: [
+              {
+                code: 'verified_only_generation',
+                message: 'Generation will proceed using only verified baseline evidence.',
+              },
+            ],
+          };
+        }
+        return { 
+          status: 'blocked' as const, 
+          blocked: true, 
+          compliance_flags: [], 
+          reasons: 
+            reasons.length > 0 
+              ? reasons 
+              : [ 
+                  { 
+                    code: 'full_block', 
+                    message: 
+                      'Some claims required for tailored generation could not be verified against your baseline.', 
+                  }, 
+                ], 
+        }; 
+      } 
+      throw error; 
+    } 
+    const flags = filterComplianceFlagsByCanonicalClaims( 
+      generation.compliance_flags ?? [], 
+      analysisAssessment, 
+    ); 
+    const blocked = flags.some((flag) => flag.severity === 'block'); 
+    const warningFlags = flags.filter((flag) => flag.severity === 'warn'); 
+    const score = analysisAssessment?.overallScore ?? null;
+    const generateNowEligible =
+      typeof score === 'number' && score >= VERIFIED_ONLY_GENERATION_THRESHOLD;
     if (warningFlags.length > 0 || blocked) {
       this.logger.warn(
         `[resume-readiness] userId=${userId} baselineId=${request.baselineId ?? 'null'} baselineVersionId=${request.baselineVersionId ?? 'null'} jobId=${request.jobId ?? 'null'} status=${blocked ? 'blocked' : 'limited'} flags=${flags
@@ -2987,29 +3019,42 @@ export class ResumeService {
           .join(' | ')}`,
       );
     }
-    return {
-      status: blocked ? 'blocked' : warningFlags.length > 0 ? 'limited' : 'ready',
-      blocked,
-      compliance_flags: flags,
-      reasons:
-        blocked
-          ? [
-              {
-                code: 'full_block',
-                message:
-                  'Some claims required for tailored generation could not be verified against your baseline.',
-              },
-            ]
-          : warningFlags.length > 0
-            ? [
-                {
-                  code: 'personalization_limitation',
-                  message:
-                    'This role scored highly, but document generation is currently limited by verification constraints.',
-                },
-              ]
-            : [],
-    };
-  }
-}
+    if (generateNowEligible && blocked) {
+      return {
+        status: 'limited' as const,
+        blocked: false,
+        compliance_flags: flags,
+        reasons: [
+          {
+            code: 'verified_only_generation',
+            message: 'Generation will proceed using only verified baseline evidence.',
+          },
+        ],
+      };
+    }
+    return { 
+      status: blocked ? 'blocked' : warningFlags.length > 0 ? 'limited' : 'ready', 
+      blocked, 
+      compliance_flags: flags, 
+      reasons: 
+        blocked 
+          ? [ 
+              { 
+                code: 'full_block', 
+                message: 
+                  'Some claims required for tailored generation could not be verified against your baseline.', 
+              }, 
+            ] 
+          : warningFlags.length > 0 
+            ? [ 
+                { 
+                  code: 'personalization_limitation', 
+                  message: 
+                    'This role scored highly, but document generation is currently limited by verification constraints.', 
+                }, 
+              ] 
+            : [], 
+    }; 
+  } 
+} 
 
