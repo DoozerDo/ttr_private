@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, UnprocessableEntityException } from '@nestjs/common';
 import type { Express } from 'express';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { ZodError } from 'zod';
 import { normalizeText } from '../scoring/fit-score/fit-score.utils';
 import { extractJobToolRequirements } from '../scoring/fit-score/tool-extractor';
 import { BaselineSectionType } from './baseline-section.entity';
@@ -57,6 +58,21 @@ export class BaselineIngestionService {
         flow: CriticalFlowEventType.BASELINE_PARSED_FAILURE,
         areaOrRoute: 'baseline',
       });
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      if (error instanceof ZodError) {
+        throw new UnprocessableEntityException({
+          error: {
+            code: 'BASELINE_CANONICAL_PARSE_FAILED',
+            message: 'We could not normalize this baseline into a supported structure.',
+            issues: error.issues.map((issue) => ({
+              path: issue.path.join('.'),
+              message: issue.message,
+            })),
+          },
+        });
+      }
       throw error;
     }
   }
