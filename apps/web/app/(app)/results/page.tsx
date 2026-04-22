@@ -2896,6 +2896,81 @@ export default function ResultsPage() {
     runIdentifier,
     studioHrefFromLatest,
   ]);
+
+  // Product contract: at score >= 80, Results is not a stopping point. Route directly into Studio.
+  const hasTrackedResultsCompletedRef = useRef(false);
+  const autoRoutedToStudioRef = useRef(false);
+  const shouldAutoRouteToStudio = useMemo(
+    () => typeof activeScore === "number" && isMomentumGenerationAllowed(activeScore),
+    [activeScore],
+  );
+  const autoRouteStudioHref = useMemo(() => {
+    if (!shouldAutoRouteToStudio) return null;
+
+    const resolvedBaselineId = (latest?.baselineId ?? baselineId ?? "").trim();
+    const resolvedJobId = (latest?.jobId ?? jobId ?? "").trim();
+    const resolvedAnalysisId = (latest?.assessmentId ?? runIdentifier ?? "").trim();
+    const resolvedBaselineVersionId = (latest?.baselineVersionId ?? currentBaselineVersionId ?? "").trim();
+
+    if (!resolvedBaselineId || !resolvedJobId || !resolvedAnalysisId) return null;
+
+    return getStudioHref({
+      baselineId: resolvedBaselineId,
+      jobId: resolvedJobId,
+      analysisId: resolvedAnalysisId,
+      baselineVersionId: resolvedBaselineVersionId || null,
+      fromUnlock: justUnlocked,
+    });
+  }, [
+    baselineId,
+    currentBaselineVersionId,
+    jobId,
+    justUnlocked,
+    latest?.assessmentId,
+    latest?.baselineId,
+    latest?.baselineVersionId,
+    latest?.jobId,
+    runIdentifier,
+    shouldAutoRouteToStudio,
+  ]);
+
+  useEffect(() => {
+    if (!autoRouteStudioHref) return;
+    if (autoRoutedToStudioRef.current) return;
+    autoRoutedToStudioRef.current = true;
+
+    // Preserve key funnel analytics even though Results UI no longer renders for score >= 80.
+    trackEvent("results_completed", {
+      source: "results",
+      score: typeof activeScore === "number" ? activeScore : null,
+      baselineId: latest?.baselineId ?? baselineId ?? null,
+      jobId: latest?.jobId ?? jobId ?? null,
+      autoRouted: true,
+    });
+    trackEvent("auto_routed_to_studio", {
+      source: "results",
+      score: typeof activeScore === "number" ? activeScore : null,
+      href: autoRouteStudioHref,
+    });
+
+    router.replace(autoRouteStudioHref);
+  }, [activeScore, autoRouteStudioHref, baselineId, jobId, latest?.baselineId, latest?.jobId, router]);
+
+  useEffect(() => {
+    if (hasTrackedResultsCompletedRef.current) return;
+    if (shouldAutoRouteToStudio) return; // Score >= 80 is tracked in the auto-route lane.
+    if (!latest) return;
+    if (typeof activeScore !== "number") return;
+
+    hasTrackedResultsCompletedRef.current = true;
+    trackEvent("results_completed", {
+      source: "results",
+      score: activeScore,
+      baselineId: latest?.baselineId ?? baselineId ?? null,
+      jobId: latest?.jobId ?? jobId ?? null,
+      autoRouted: false,
+    });
+  }, [activeScore, baselineId, jobId, latest, shouldAutoRouteToStudio]);
   const claimVerifications = useMemo(
     () => normalizeClaimVerifications(debugFields?.toolingCoverage?.claims),
     [debugFields?.toolingCoverage?.claims],
@@ -4751,6 +4826,12 @@ export default function ResultsPage() {
     isGuidedActive,
     latest,
   ]);
+
+  if (shouldAutoRouteToStudio) {
+    // Results is not a stopping point for score >= 80.
+    // We still run effects (including analytics + router.replace), but render no Results UI.
+    return null;
+  }
 
   return (
     <PageShell className="results-page-theme">

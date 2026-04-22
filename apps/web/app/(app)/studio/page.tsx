@@ -7926,13 +7926,13 @@ export default function StudioPage() {
                     >
                       <p className="text-sm font-semibold text-slate-100">{claim.text}</p>
                       <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => openClaimEditModal(claim.text)}
-                          className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.06]"
-                        >
-                          Edit before verifying
-                        </button>
+                         <button
+                           type="button"
+                           onClick={() => openClaimEditModal(claim)}
+                           className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.06]"
+                         >
+                           Edit before verifying
+                         </button>
                         <Link
                           href={buildClaimVerificationHref(claim.text)}
                           className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"

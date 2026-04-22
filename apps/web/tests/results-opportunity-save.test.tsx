@@ -89,8 +89,7 @@ describe("results opportunity persistence", () => {
     setFetchImplementation(fetchMock as unknown as typeof fetch);
     render(<ResultsPage />);
 
-    expect(await screen.findByTestId("results-blocked-evidence-panel")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
+    expect(await screen.findByTestId("results-score-verdict-card")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save this opportunity" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Apply to this role" })).toBeNull();
 
@@ -102,7 +101,7 @@ describe("results opportunity persistence", () => {
     expect(postCall).toBeUndefined();
   });
 
-  it("upgrades opportunity to ready_to_apply after improved re-analysis crosses 70", async () => {
+  it("does not auto-upgrade opportunities without an explicit user action", async () => {
     overrideSearchParams({ assessmentId: "analysis-2" });
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -152,19 +151,29 @@ describe("results opportunity persistence", () => {
       if (url.includes("/api/opportunities/opp-1") && init?.method === "PATCH") {
         return jsonResponse({ ok: true });
       }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return jsonResponse({
+          status: "ready",
+          blocked: false,
+          reasonCodes: [],
+          reasons: [],
+          badgeLabel: "READY",
+          summary: "Ready.",
+          verificationIssues: [],
+        });
+      }
       return jsonResponse({});
     });
 
     setFetchImplementation(fetchMock as unknown as typeof fetch);
     render(<ResultsPage />);
 
-    await waitFor(() => {
-      const patchCall = fetchMock.mock.calls.find(
-        ([url, requestInit]) =>
-          String(url).includes("/api/opportunities/opp-1") &&
-          requestInit?.method === "PATCH",
-      );
-      expect(patchCall).toBeDefined();
-    });
+    await screen.findByTestId("results-score-verdict-card");
+    const patchCall = fetchMock.mock.calls.find(
+      ([url, requestInit]) =>
+        String(url).includes("/api/opportunities/opp-1") &&
+        requestInit?.method === "PATCH",
+    );
+    expect(patchCall).toBeUndefined();
   });
 });

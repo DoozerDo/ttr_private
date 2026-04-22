@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
 
 import ResultsPage from "@/app/(app)/results/page";
-import { overrideSearchParams, setFetchImplementation } from "@/tests/setup";
+import { mockRouterReplace, overrideSearchParams, setFetchImplementation } from "@/tests/setup";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -233,15 +233,15 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Generate Resume & Cover Letter" })).toBeInTheDocument();
+      expect(mockRouterReplace).toHaveBeenCalled();
     });
-    expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
-    expect(screen.queryByTestId("results-blocked-evidence-panel")).toBeNull();
-    expect(screen.queryByText("How to improve your fit")).toBeNull();
-    expect(screen.queryByText("Apply moment")).toBeNull();
-    expect(screen.queryByTestId("results-improvement-cta")).toBeNull();
-    expect(screen.queryByText("Promising fit. Not ready to generate yet.")).toBeNull();
-    expect(screen.getAllByText("Strong match. Ready for document generation.").length).toBeGreaterThan(0);
+    const href = String(mockRouterReplace.mock.calls.at(-1)?.[0] ?? "");
+    expect(href.startsWith("/studio")).toBe(true);
+    expect(href).toContain("jobId=job-1");
+    expect(href).toContain("baselineId=base-1");
+
+    // Results UI should not render for score >= 80.
+    expect(screen.queryByTestId("results-hero-primary-cta")).toBeNull();
   });
 
   // Primary workflow UI assertions live in pair-workflow-state.test.ts and the CTA label tests above.
@@ -323,12 +323,15 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("results-hero-primary-cta")).toBeInTheDocument();
+      expect(mockRouterReplace).toHaveBeenCalled();
     });
-    expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
-    expect(screen.queryByText("How to improve your fit")).toBeNull();
-    expect(screen.queryByText("Apply moment")).toBeNull();
-    expect(screen.queryByTestId("results-improvement-cta")).toBeNull();
+    const href = String(mockRouterReplace.mock.calls.at(-1)?.[0] ?? "");
+    expect(href.startsWith("/studio")).toBe(true);
+    expect(href).toContain("jobId=job-1");
+    expect(href).toContain("baselineId=base-1");
+    expect(href).toContain("analysisId=assessment-good");
+
+    expect(screen.queryByTestId("results-hero-primary-cta")).toBeNull();
   });
 
   it("leads with fix-first guidance when score confidence is low", async () => {

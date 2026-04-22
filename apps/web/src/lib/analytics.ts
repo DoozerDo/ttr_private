@@ -76,6 +76,8 @@ export const ANALYTICS_EVENT_NAMES = [
   "results_radar_viewed",
   "results_radar_axis_hovered",
   "results_primary_cta_clicked",
+  "results_completed",
+  "auto_routed_to_studio",
   "artifact_viewed_with_confidence_level",
   "improve_output_panel_viewed",
   "critique_panel_viewed",
@@ -583,6 +585,18 @@ export type AnalyticsEventMap = {
     scoreBucket: ScoreBand | null;
     readinessStatus: ResultsPrimaryCtaReadinessStatus;
     accessMode: "momentum" | "recovery";
+  };
+  results_completed: {
+    source: "results";
+    score: number | null;
+    baselineId: string | null;
+    jobId: string | null;
+    autoRouted: boolean;
+  };
+  auto_routed_to_studio: {
+    source: "results";
+    score: number | null;
+    href: string;
   };
   artifact_viewed_with_confidence_level: {
     source: "studio";

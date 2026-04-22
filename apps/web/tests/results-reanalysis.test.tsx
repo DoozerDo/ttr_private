@@ -22,7 +22,7 @@ describe("results re-analysis loop", () => {
           jobId: "job-1",
           baselineId: "base-1",
           baselineVersionId: "base-version-1",
-          score: 80,
+          score: 79,
           strengths: ["Incident management", "SLA ownership"],
         });
       }
@@ -33,7 +33,7 @@ describe("results re-analysis loop", () => {
         return jsonResponse([
           {
             assessmentId: "analysis-current",
-            score: 80,
+            score: 79,
             strengths: ["Incident management", "SLA ownership"],
           },
           {
@@ -65,7 +65,7 @@ describe("results re-analysis loop", () => {
 
     expect(await screen.findByText("Updated Baseline Detected")).toBeInTheDocument();
     expect(await screen.findByText(/You['’]ve improved your fit/)).toBeInTheDocument();
-    expect(await screen.findByText("+12 points (68 -> 80)")).toBeInTheDocument();
+    expect(await screen.findByText("+11 points (68 -> 79)")).toBeInTheDocument();
     expect((await screen.findAllByText(/Your materials are ready to generate now/)).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
   });

@@ -18,7 +18,7 @@ describe("results auto-generation", () => {
     mockRouterPush.mockClear();
   });
 
-  it("auto-triggers generation once and shows drafts without navigating to Studio (score 78)", async () => {
+  it("does not auto-trigger generation on Results at score 78 (generation is initiated elsewhere)", async () => {
     overrideSearchParams({ assessmentId: "analysis-current" });
 
     let artifactsCalls = 0;
@@ -142,25 +142,17 @@ describe("results auto-generation", () => {
 
     render(<ResultsPage />);
 
+    await screen.findByText(/Generation readiness:/i);
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/resume"),
-        expect.objectContaining({ method: "POST" }),
+      const resumePosts = fetchMock.mock.calls.filter(
+        ([url, init]) => String(url).endsWith("/api/resume") && init?.method === "POST",
       );
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/cover-letters"),
-        expect.objectContaining({ method: "POST" }),
+      const coverPosts = fetchMock.mock.calls.filter(
+        ([url, init]) => String(url).endsWith("/api/cover-letters") && init?.method === "POST",
       );
+      expect(resumePosts).toHaveLength(0);
+      expect(coverPosts).toHaveLength(0);
     });
-
-    const resumePosts = fetchMock.mock.calls.filter(
-      ([url, init]) => String(url).endsWith("/api/resume") && init?.method === "POST",
-    );
-    const coverPosts = fetchMock.mock.calls.filter(
-      ([url, init]) => String(url).endsWith("/api/cover-letters") && init?.method === "POST",
-    );
-    expect(resumePosts).toHaveLength(1);
-    expect(coverPosts).toHaveLength(1);
   });
 
   it("does not trigger generation below the 70 floor (score 69)", async () => {

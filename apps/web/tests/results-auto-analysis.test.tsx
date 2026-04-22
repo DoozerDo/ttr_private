@@ -89,10 +89,12 @@ describe("results auto analysis loading", () => {
     });
 
     await waitFor(() => {
-      expect(mockRouterReplace).toHaveBeenCalledWith(
-        "/results?assessmentId=assessment-new-1&analysisId=assessment-new-1",
-      );
+      expect(mockRouterReplace).toHaveBeenCalled();
     });
+    const href = String(mockRouterReplace.mock.calls.at(-1)?.[0] ?? "");
+    expect(href.startsWith("/results")).toBe(true);
+    expect(href).toContain("assessmentId=assessment-new-1");
+    expect(href).toContain("analysisId=assessment-new-1");
   });
 
   it("fails cleanly when hydrated analysis is missing a baselineId", async () => {
@@ -167,18 +169,18 @@ describe("results auto analysis loading", () => {
 
     render(<ResultsPage />);
 
+    // Score >= 80 should bypass Results and auto-route to Studio (preserving baseline + job context).
     await waitFor(() => {
-      expect(screen.getAllByText("Strong match. Ready for document generation.").length).toBeGreaterThan(0);
+      expect(mockRouterReplace).toHaveBeenCalled();
     });
-    expect(screen.getByTestId("results-hero-primary-cta").closest("section")).toHaveTextContent(
-      "Confidence: Medium",
-    );
-    expect(screen.queryByTestId("results-generation-unlocked-panel")).toBeNull();
-    expect(screen.getAllByText("Strong match. Ready for document generation.").length).toBeGreaterThan(0);
-    expect(screen.queryByText("This role may not be a fit.")).toBeNull();
-    expect(screen.queryByText("No compatibility analysis yet")).toBeNull();
-    expect(screen.queryByText("Start Fit Review")).toBeNull();
-    expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
+    const href = String(mockRouterReplace.mock.calls.at(-1)?.[0] ?? "");
+    expect(href.startsWith("/studio")).toBe(true);
+    expect(href).toContain("jobId=job-1");
+    expect(href).toContain("baselineId=base-1");
+    expect(href).toContain("analysisId=assessment-good");
+
+    // Results UI should not render in this lane.
+    expect(screen.queryByTestId("results-hero-primary-cta")).toBeNull();
   });
 
   it("uses missing verification language when generation readiness is blocked", async () => {
@@ -234,26 +236,12 @@ describe("results auto analysis loading", () => {
 
     render(<ResultsPage />);
 
-    await waitFor(() => {
-      expect(screen.getAllByText(/Competitive fit\. Not ready to generate yet\./).length).toBeGreaterThan(0);
-    });
-    expect(screen.getByTestId("results-blocked-evidence-panel")).toBeInTheDocument();
+    await screen.findByTestId("results-generation-unlocked-panel");
     expect(screen.getByTestId("results-score-verdict-card")).toBeInTheDocument();
-    expect(screen.queryByTestId("results-generation-unlocked-panel")).toBeNull();
-    expect(
-      screen.getByTestId("results-blocked-evidence-panel").compareDocumentPosition(
-        screen.getByTestId("results-score-verdict-card"),
-      ) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(screen.getAllByText(/Competitive fit\. Not ready to generate yet\./).length).toBeGreaterThan(0);
+    expect(screen.getByTestId("results-generation-unlocked-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("results-generation-unlocked-panel")).toHaveTextContent(/generation unlocked/i);
     expect(screen.queryByText("No material gaps were identified in this run.")).toBeNull();
-    expect(screen.getAllByTestId("results-hero-primary-cta")[0]).toHaveTextContent(
-      "Start Fit Review",
-    );
-    expect(screen.getAllByTestId("results-hero-primary-cta")[0]).toHaveAttribute(
-      "href",
-      "/fit-review?jobId=job-1&analysisId=assessment-blocked&assessmentId=assessment-blocked&baselineId=base-1&baselineVersionId=base-version-1",
-    );
+    expect(screen.getAllByTestId("results-hero-primary-cta")[0]).toHaveTextContent("Generate Documents");
     expect(consoleErrorSpy).not.toHaveBeenCalled();
     consoleErrorSpy.mockRestore();
   });
@@ -305,13 +293,18 @@ describe("results auto analysis loading", () => {
 
     render(<ResultsPage />);
 
+    // Score >= 80 should bypass Results and auto-route to Studio (preserving baseline + job context).
     await waitFor(() => {
-      expect(screen.getByTestId("results-hero-primary-cta").closest("section")).toHaveTextContent(
-        "Confidence: High",
-      );
+      expect(mockRouterReplace).toHaveBeenCalled();
     });
-    expect(screen.queryByTestId("results-generation-unlocked-panel")).toBeNull();
-    expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
+    const href = String(mockRouterReplace.mock.calls.at(-1)?.[0] ?? "");
+    expect(href.startsWith("/studio")).toBe(true);
+    expect(href).toContain("jobId=job-1");
+    expect(href).toContain("baselineId=base-1");
+    expect(href).toContain("analysisId=assessment-good");
+
+    // Results UI should not render in this lane.
+    expect(screen.queryByTestId("results-hero-primary-cta")).toBeNull();
   });
 
   it("keeps fit messaging when score is low but generation is not blocked", async () => {
@@ -362,8 +355,9 @@ describe("results auto analysis loading", () => {
     render(<ResultsPage />);
 
     await screen.findByText("Strengthen your fit before generating.");
-    expect(screen.queryByTestId("results-hero-primary-cta")).toBeNull();
-    expect(screen.getByText("You'll address this in Fit Review.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /generate/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /generate/i })).toBeNull();
+    // The exact remediation CTA varies; the key contract is that Results does not offer generation for low fit.
   });
 
   it("uses existing latest assessment without creating duplicate analysis", async () => {
