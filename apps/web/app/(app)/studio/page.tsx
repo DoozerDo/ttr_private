@@ -5478,14 +5478,22 @@ export default function StudioPage() {
     evidenceSummaryBullets,
   ]);
 
-  const activeArtifactFailure = resumeState.artifactFailure ?? coverState.artifactFailure ?? null;
-  const showGenericRetry = !activeArtifactFailure && studioArtifactPairStatus === "failed";
+  // Canonical post-generation authority:
+  // Once we have *any* usable output, we do not surface lifecycle failure language in the hero/top summary.
+  // Failures still render at the specific artifact card level (resume/cover) where they govern the next action.
+  const lifecycleArtifactFailure = resumeState.artifactFailure ?? coverState.artifactFailure ?? null;
+  const suppressTopLevelFailureLanguage = hasCompletedGeneration;
+  const topLevelArtifactFailure = suppressTopLevelFailureLanguage ? null : lifecycleArtifactFailure;
+  const showGenericRetry =
+    !suppressTopLevelFailureLanguage &&
+    !topLevelArtifactFailure &&
+    studioArtifactPairStatus === "failed";
   const studioNextMove = useMemo(
     () =>
       resolveStudioNextMove({
         decision: studioCanonicalDecision,
         analysisScore,
-        artifactFailure: activeArtifactFailure,
+        artifactFailure: topLevelArtifactFailure,
         actions: {
           generateResume: () => {
             void handleResumeDraft();
@@ -5519,7 +5527,7 @@ export default function StudioPage() {
         },
       }),
     [
-      activeArtifactFailure,
+      topLevelArtifactFailure,
       studioCanonicalDecision,
       analysisScore,
       coverState.artifactFailure,
@@ -6078,11 +6086,11 @@ export default function StudioPage() {
         >
           Refine
         </Link>
-        {activeArtifactFailure && canRetryGeneration ? (
+        {topLevelArtifactFailure && canRetryGeneration ? (
           <FormButton
             variant="secondary"
             onClick={
-              activeArtifactFailure.artifactType === "cover_letter"
+              topLevelArtifactFailure.artifactType === "cover_letter"
                 ? handleRetryCoverGeneration
                 : handleRetryResumeGeneration
             }
@@ -6103,18 +6111,18 @@ export default function StudioPage() {
           </FormButton>
         ) : null}
       </div>
-      {activeArtifactFailure && canRetryGeneration ? (
+      {topLevelArtifactFailure && canRetryGeneration ? (
         <ArtifactFailureState
-          failure={activeArtifactFailure}
+          failure={topLevelArtifactFailure}
           onRetry={
-            activeArtifactFailure.artifactType === "cover_letter"
+            topLevelArtifactFailure.artifactType === "cover_letter"
               ? handleRetryCoverGeneration
               : handleRetryResumeGeneration
           }
           retryLabel="Retry"
         />
       ) : null}
-      {!activeArtifactFailure && (autoGenerationInFlight || studioArtifactPairStatus === "in_progress") ? (
+      {!topLevelArtifactFailure && (autoGenerationInFlight || studioArtifactPairStatus === "in_progress") ? (
         <RouteStateShell
           tone="neutral"
           eyebrow="In progress"
@@ -6126,7 +6134,7 @@ export default function StudioPage() {
           }
         />
       ) : null}
-      {hasCompletedGeneration ? (
+      {hasCompletedGeneration && !generateNowEligible ? (
         <div className="space-y-5">
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -6833,8 +6841,8 @@ export default function StudioPage() {
           {generationSupportState === "partial" ? (
             generateNowEligible ? (
               <p className="text-sm font-medium text-slate-200" data-testid="studio-auto-generation-status">
-                {activeArtifactFailure
-                  ? "Generation failed. Retry below."
+                {lifecycleArtifactFailure && !hasCompletedGeneration
+                  ? "Generation needs a retry."
                   : autoGenerationInFlight || resumeGenerating || coverGenerating || studioArtifactPairStatus === "in_progress" || needsAutoGeneration
                     ? "Generating your resume and cover letter…"
                     : "Preparing your documents…"}
@@ -7412,11 +7420,32 @@ export default function StudioPage() {
         ) : null}
 
         {resumeState.artifactFailure ? (
-          <ArtifactFailureState
-            failure={resumeState.artifactFailure}
-            onRetry={() => void handleResumeDraft()}
-            retryLabel="Retry resume generation"
-          />
+          hasCompletedGeneration ? (
+            <div
+              className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
+              data-testid="resume-partial-retry-panel"
+            >
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-slate-100">Resume generation needs a retry</p>
+                <p className="text-sm text-slate-300">
+                  We produced usable output for this role, but the resume draft needs one more generation pass to
+                  complete.
+                </p>
+                <p className="text-xs text-slate-400">{resumeState.artifactFailure.explanation}</p>
+              </div>
+              <div className="flex justify-end">
+                <FormButton variant="secondary" onClick={() => void handleResumeDraft()}>
+                  Retry resume generation
+                </FormButton>
+              </div>
+            </div>
+          ) : (
+            <ArtifactFailureState
+              failure={resumeState.artifactFailure}
+              onRetry={() => void handleResumeDraft()}
+              retryLabel="Retry resume generation"
+            />
+          )
         ) : resumePresenter.display && resumePresenter.status !== "blocked" ? (
           <div className="space-y-2 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
             <p className="text-sm font-semibold text-slate-100">{resumePresenter.display.title}</p>
@@ -7763,11 +7792,32 @@ export default function StudioPage() {
         ) : null}
 
         {coverState.artifactFailure ? (
-          <ArtifactFailureState
-            failure={coverState.artifactFailure}
-            onRetry={() => void handleCoverDraft()}
-            retryLabel="Retry cover letter generation"
-          />
+          hasCompletedGeneration ? (
+            <div
+              className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
+              data-testid="cover-partial-retry-panel"
+            >
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-slate-100">Cover letter generation needs a retry</p>
+                <p className="text-sm text-slate-300">
+                  We produced usable output for this role, but the cover letter draft needs one more generation pass to
+                  complete.
+                </p>
+                <p className="text-xs text-slate-400">{coverState.artifactFailure.explanation}</p>
+              </div>
+              <div className="flex justify-end">
+                <FormButton variant="secondary" onClick={() => void handleCoverDraft()}>
+                  Retry cover letter generation
+                </FormButton>
+              </div>
+            </div>
+          ) : (
+            <ArtifactFailureState
+              failure={coverState.artifactFailure}
+              onRetry={() => void handleCoverDraft()}
+              retryLabel="Retry cover letter generation"
+            />
+          )
         ) : coverPresenter.display && !coverLetterComplianceBlocked && coverPresenter.status !== "blocked" ? (
           <div className="space-y-2 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
             <p className="text-sm font-semibold text-slate-100">{coverPresenter.display.title}</p>

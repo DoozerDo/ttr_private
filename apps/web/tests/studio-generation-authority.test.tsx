@@ -485,6 +485,77 @@ describe("Studio generation authority", () => {
     );
   });
 
+  it("does not show lifecycle failure language once usable output exists (resume succeeds, cover fails)", async () => {
+    setFetchImplementation(
+      vi.fn((input: RequestInfo, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        if (url.includes("/api/baselines/base-1/versions")) {
+          return Promise.resolve(
+            createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+          );
+        }
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+          return Promise.resolve(
+            createResponse({
+              assessmentId: "analysis-1",
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: "base-version-1",
+              company: "Acme",
+              title: "Director of Support",
+              scoring_v2: { score: 92 },
+              verification_coverage: {
+                totalClaims: 3,
+                verifiedClaims: 3,
+                inferredClaims: 0,
+                unverifiedClaims: 0,
+                unverifiedRequirements: [],
+              },
+            }),
+          );
+        }
+        if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+          return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        }
+        if (url.includes("/api/resume") && init?.method === "POST") {
+          return Promise.resolve(
+            createResponse({
+              status: "success",
+              generationStatus: "success",
+              exports: { docx: true, pdf: true },
+              preview: {
+                resume: {
+                  heading: { name: "Test Candidate", contactLine: "test@example.com" },
+                  summary: "Verified support leader aligned to the role.",
+                  experience: [{ company: "Acme", roleTitle: "Director of Support", bullets: ["Delivered results."] }],
+                  education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+                  competencies: ["Customer strategy"],
+                },
+              },
+            }),
+          );
+        }
+        if (url.includes("/api/cover-letters") && init?.method === "POST") {
+          return Promise.resolve(createResponse({ message: "Cover letter failed." }, false, 500));
+        }
+        if (url.includes("/api/resume/export") || url.includes("/api/cover-letters/export")) {
+          return Promise.resolve(createResponse(new Blob(["export"], { type: "application/pdf" })));
+        }
+        return Promise.resolve(createResponse({}));
+      }),
+    );
+
+    renderStudio();
+
+    await screen.findAllByTestId("resume-preview", {}, { timeout: 5000 });
+
+    expect(screen.getAllByText(/your application is ready/i)).toHaveLength(1);
+    expect(screen.queryByText(/generation did not complete/i)).toBeNull();
+    expect(screen.queryByText(/resume generation did not complete/i)).toBeNull();
+    expect(screen.queryByText(/cover letter generation did not complete/i)).toBeNull();
+    expect(screen.queryByText(/previous attempt could not be completed/i)).toBeNull();
+  });
+
   it("score < 80 preserves manual generation CTAs", async () => {
     setupFetch("ready", 79);
     renderStudio();
