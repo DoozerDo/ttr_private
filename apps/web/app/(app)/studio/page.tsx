@@ -3053,6 +3053,17 @@ export default function StudioPage() {
       autoGenerationInFlight ||
       studioArtifactPairStatus === "in_progress" ||
       needsAutoGeneration);
+  // In the generate-now lane, avoid a "not generated yet" flash before the auto-generation effect fires.
+  const resumeGenerateNowPending =
+    generateNowEligible &&
+    !resumeState.response &&
+    !resumeState.error &&
+    !resumeState.artifactFailure;
+  const coverGenerateNowPending =
+    generateNowEligible &&
+    !coverState.response &&
+    !coverState.error &&
+    !coverState.artifactFailure;
   useEffect(() => {
     if (!hasCompletedGeneration || !isInstantDraftExperience || !applicationContext) return;
     const signature = `${applicationPairSignature ?? "application_pair"}:${applicationContext.status}`;
@@ -7555,7 +7566,7 @@ export default function StudioPage() {
             ) : null}
 
           </div>
-        ) : resumeState.artifactFailure ? null : resumeAutoGenerating ? (
+        ) : resumeState.artifactFailure ? null : resumeAutoGenerating || resumeGenerateNowPending ? (
           <EmptyState title="Generating your resume..." body="This usually finishes in a moment." />
         ) : (
           <EmptyState
@@ -7906,9 +7917,13 @@ export default function StudioPage() {
               </div>
             ) : coverState.artifactFailure ? null : (
               <EmptyState
-                title={coverAutoGenerating ? "Generating your cover letter..." : "Cover letter not generated yet"}
+                title={
+                  coverAutoGenerating || coverGenerateNowPending
+                    ? "Generating your cover letter..."
+                    : "Cover letter not generated yet"
+                }
                 body={
-                  coverAutoGenerating
+                  coverAutoGenerating || coverGenerateNowPending
                     ? "This usually finishes in a moment."
                     : "Generate your cover letter to create a tailored introduction."
                 }
