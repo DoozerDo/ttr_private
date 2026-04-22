@@ -1,3 +1,8 @@
+# NOTE: Compatibility shim.
+# Some deploy pipelines historically referenced `infra/docker/web.Dockerfile`.
+# Keep this Dockerfile behavior aligned with `apps/web/Dockerfile` so old
+# config cannot build stale/incorrect images.
+
 FROM node:20.19.5 AS deps
 ARG GIT_SHA=unknown
 WORKDIR /usr/src/app
@@ -31,3 +36,4 @@ COPY --from=deps /usr/src/app/node_modules ./node_modules
 COPY --from=builder /usr/src/app ./
 EXPOSE 8080
 CMD ["sh","-lc","npm -w apps/web run start -- -H 0.0.0.0 -p ${PORT:-8080}"]
+

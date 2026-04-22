@@ -19,7 +19,7 @@ jobs:
       matrix:
         include:
           - name: web
-            dockerfile: infra/docker/web.Dockerfile
+            dockerfile: apps/web/Dockerfile
           - name: api
             dockerfile: infra/docker/api.Dockerfile
           - name: proxy
@@ -55,6 +55,8 @@ jobs:
         with:
           context: .
           file: ${{ matrix.dockerfile }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           push: true
           tags: |
             ghcr.io/doozerdo/ttr_private-${{ matrix.name }}:dev
