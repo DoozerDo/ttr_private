@@ -383,19 +383,112 @@ describe("Studio generation authority", () => {
     expect(readiness).toHaveTextContent(/Ready|Usable/);
     expect(decisionPanel).toHaveTextContent(/ready to refine in studio/i);
     expect(decisionPanel).not.toHaveTextContent(/use this now with confidence/i);
-    expect(screen.getAllByRole("button", { name: /generate resume/i }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("button", { name: /generate cover letter/i }).length).toBeGreaterThan(0);
+
+    // Score >= 80: generation starts automatically on entry.
+    await screen.findByTestId("resume-completion-panel");
+    await screen.findByTestId("cover-completion-panel");
+    expect(screen.queryByRole("button", { name: /generate resume/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /generate cover letter/i })).toBeNull();
   });
 
-  it("LIMITED shows limited status and constrained CTA label without Studio Ready copy", async () => {
-    setupFetch("limited");
+  it("score >= 80 renders generating states (no not-generated empty states) while auto-generation is in flight", async () => {
+    let resolveResume: ((value: ReturnType<typeof createResponse>) => void) | null = null;
+    let resolveCover: ((value: ReturnType<typeof createResponse>) => void) | null = null;
+    const deferredResume = new Promise<ReturnType<typeof createResponse>>((resolve) => {
+      resolveResume = resolve;
+    });
+    const deferredCover = new Promise<ReturnType<typeof createResponse>>((resolve) => {
+      resolveCover = resolve;
+    });
+
+    setFetchImplementation(
+      vi.fn((input: RequestInfo) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        if (url.includes("/api/baselines/base-1/versions")) {
+          return Promise.resolve(
+            createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+          );
+        }
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+          return Promise.resolve(
+            createResponse({
+              assessmentId: "analysis-1",
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: "base-version-1",
+              company: "Acme",
+              title: "Director of Support",
+              scoring_v2: { score: 92 },
+              verification_coverage: {
+                totalClaims: 3,
+                verifiedClaims: 3,
+                inferredClaims: 0,
+                unverifiedClaims: 0,
+                unverifiedRequirements: [],
+              },
+            }),
+          );
+        }
+        if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+          return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        }
+        if (url.includes("/api/resume/export") || url.includes("/api/cover-letters/export")) {
+          return Promise.resolve(createResponse(new Blob(["export"], { type: "application/pdf" })));
+        }
+        if (url.includes("/api/resume")) {
+          return deferredResume;
+        }
+        if (url.includes("/api/cover-letters")) {
+          return deferredCover;
+        }
+        return Promise.resolve(createResponse({}));
+      }),
+    );
+
+    renderStudio();
+    await screen.findByTestId("studio-decision-panel");
+
+    expect(screen.queryByText("Resume not generated yet")).toBeNull();
+    expect(screen.queryByText("Cover letter not generated yet")).toBeNull();
+    expect(screen.getByText("Generating your resume...")).toBeInTheDocument();
+    expect(screen.getByText("Generating your cover letter...")).toBeInTheDocument();
+
+    resolveResume?.(
+      createResponse({
+        status: "success",
+        generationStatus: "success",
+        exports: { docx: true, pdf: true },
+        preview: {
+          resume: {
+            heading: { name: "Test Candidate", contactLine: "test@example.com" },
+            summary: "Verified support leader aligned to the role.",
+            experience: [{ company: "Acme", roleTitle: "Director of Support", bullets: ["Delivered results."] }],
+            education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+            competencies: ["Customer strategy"],
+          },
+        },
+      }),
+    );
+    resolveCover?.(
+      createResponse({
+        status: "success",
+        generationStatus: "success",
+        exports: { docx: true, pdf: true },
+        preview: {
+          coverLetter: { paragraphs: ["Dear Hiring Team,", "Sincerely,", "Test Candidate"] },
+        },
+      }),
+    );
+  });
+
+  it("score < 80 preserves manual generation CTAs", async () => {
+    setupFetch("ready", 79);
     renderStudio();
 
     await screen.findByTestId("studio-decision-panel"); 
     const decisionPanel = screen.getByTestId("studio-decision-panel"); 
-    expect(screen.getByTestId("studio-generation-readiness")).toHaveTextContent(/Usable|Ready/i); 
-    expect(decisionPanel).toHaveTextContent(/ready to refine in studio/i); 
-    expect(decisionPanel).toHaveTextContent(/Built directly from (?:your )?verified (?:experience|evidence) and aligned to the role\./i); 
+    expect(screen.getByTestId("studio-generation-readiness")).toHaveTextContent(/Draft|Ready|Usable/i); 
+    expect(decisionPanel).toHaveTextContent(/Draft output/i); 
     expect(screen.getAllByRole("button", { name: /generate resume/i }).length).toBeGreaterThan(0); 
     expect(screen.getAllByRole("button", { name: /generate cover letter/i }).length).toBeGreaterThan(0); 
   }); 
@@ -419,12 +512,17 @@ describe("Studio generation authority", () => {
     expect(screen.getByTestId("studio-decision-panel")).toHaveTextContent(/ready to refine in studio/i);
     expect(screen.queryByTestId("studio-artifact-quality-panel")).toBeNull();
 
-    // Primary generation CTAs should appear before optional evidence strengthening.
-    const generateResume = screen.getAllByRole("button", { name: /generate resume/i })[0];
-    const optionalEvidence = screen.getByTestId("studio-optional-evidence-details");
-    const toggle = screen.getByTestId("studio-optional-evidence-toggle");
-    expect(optionalEvidence).toContainElement(toggle);
-    expect(generateResume.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Score >= 80 auto-generates; no manual "Generate" CTAs on entry.
+    expect(screen.queryByRole("button", { name: /generate resume/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /generate cover letter/i })).toBeNull();
+    await waitFor(() => {
+      expect(
+        screen.queryByText(/Generating your resume/i) ?? screen.queryByTestId("resume-completion-panel"),
+      ).not.toBeNull();
+    });
+
+    // Evidence strengthening remains optional/collapsed.
+    expect(screen.getByTestId("studio-optional-evidence-details")).toBeInTheDocument();
     expect(screen.queryAllByRole("button", { name: /verify/i }).length).toBe(0);
   });
 
@@ -433,7 +531,11 @@ describe("Studio generation authority", () => {
     renderStudio();
 
     await screen.findByTestId("studio-blocked-message");
-    expect(mockRouterPush).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(mockRouterPush).toHaveBeenCalled();
+    });
+    const destinations = mockRouterPush.mock.calls.map(([arg]) => String(arg));
+    expect(destinations.some((href) => href.startsWith("/results"))).toBe(true);
   });
 
   it.skip("suppresses 0 / 0 coverage and shows honest fallback", async () => {
@@ -605,15 +707,13 @@ describe("Studio generation authority", () => {
 
     renderStudio();
 
-    fireEvent.click(await screen.findByRole("link", { name: /generate documents/i }));
-
     const completionPanel = await screen.findByTestId("resume-completion-panel");
     expect(completionPanel).toHaveTextContent("Completed");
     expect(completionPanel).toHaveTextContent("Your export is ready");
     expect(completionPanel).toHaveTextContent(
       "The export matches the draft reviewed in Studio.",
     );
-    const handoffPanel = screen.getByTestId("studio-opportunities-handoff");
+    const handoffPanel = screen.getAllByTestId("studio-opportunities-handoff")[0];
     expect(handoffPanel).toHaveTextContent("Save this role to Opportunities");
     expect(handoffPanel).toHaveTextContent("Save to Opportunities");
     expect(handoffPanel).toHaveTextContent("Refine baseline later");
@@ -629,8 +729,8 @@ describe("Studio generation authority", () => {
         }),
       );
     });
-    expect(screen.queryByRole("button", { name: /generate resume/i })).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /generate cover letter/i }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /generate resume/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /generate cover letter/i })).toBeNull();
     expect(screen.queryByText("Generation blocked")).toBeNull();
   });
 
@@ -640,13 +740,10 @@ describe("Studio generation authority", () => {
     setupResumeSuccessFetch();
     renderStudio();
 
-    const generateResume = await screen.findByRole("button", { name: /generate resume/i });
-    fireEvent.click(generateResume);
-
     const completionPanel = await screen.findByTestId("resume-completion-panel");
     expect(completionPanel).toHaveTextContent("Your export is ready and tracked");
     expect(completionPanel).toHaveTextContent("Keep momentum in Opportunities");
-    expect(screen.getByTestId("studio-opportunities-handoff")).toBeInTheDocument();
+    expect(screen.getAllByTestId("studio-opportunities-handoff").length).toBeGreaterThan(0);
   });
 
   it.skip("nudges toward saving when the artifact was used but the role is not yet committed", async () => {
@@ -664,7 +761,7 @@ describe("Studio generation authority", () => {
 
   it("shows targeted strengthening guidance for refine intent", async () => {
     recordArtifactRefineIntent();
-    setupFetch("limited");
+    setupFetch("limited", 79);
     renderStudio();
 
     const guidance = await screen.findByTestId("studio-strengthening-guidance");

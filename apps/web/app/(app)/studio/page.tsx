@@ -532,7 +532,12 @@ function writeStoredStudioArtifacts(key: string, snapshot: StoredStudioArtifactS
 
 function getBackendArtifactStatus(record: BackendStudioArtifactRecord | null | undefined) {
   const status = trimString(record?.status).toLowerCase();
-  if (status === "completed") return "completed" as const;
+  if (status === "completed") {
+    // Some upstream records report `completed` even when no response body is available.
+    // Studio can only treat an artifact as completed when the payload needed to render it exists.
+    const responseBody = (record as unknown as { responseBody?: unknown } | null)?.responseBody;
+    return responseBody == null ? ("missing" as const) : ("completed" as const);
+  }
   if (status === "in_progress") return "in_progress" as const;
   if (status === "failed") return "failed" as const;
   return "missing" as const;
@@ -3020,6 +3025,7 @@ export default function StudioPage() {
     qualifiedForGeneration && (!activeGenerationReadiness.blocked || generateNowEligible); 
   const isInstantDraftExperience = canProceedWithStudioDrafts; 
   const needsAutoGeneration =
+    generateNowEligible &&
     isInstantDraftExperience &&
     !hasCompletedGeneration &&
     studioArtifactPairStatus === "missing" &&
@@ -3031,6 +3037,22 @@ export default function StudioPage() {
     if (!needsAutoGeneration) return null;
     return buildWorkflowRequestKey("auto_generation", generationWorkflowScope);
   }, [generationWorkflowScope, needsAutoGeneration]);
+  const resumeAutoGenerating =
+    generateNowEligible &&
+    !hasResumeArtifact &&
+    !resumeState.artifactFailure &&
+    (resumeGenerating ||
+      autoGenerationInFlight ||
+      studioArtifactPairStatus === "in_progress" ||
+      needsAutoGeneration);
+  const coverAutoGenerating =
+    generateNowEligible &&
+    !hasCoverLetterArtifact &&
+    !coverState.artifactFailure &&
+    (coverGenerating ||
+      autoGenerationInFlight ||
+      studioArtifactPairStatus === "in_progress" ||
+      needsAutoGeneration);
   useEffect(() => {
     if (!hasCompletedGeneration || !isInstantDraftExperience || !applicationContext) return;
     const signature = `${applicationPairSignature ?? "application_pair"}:${applicationContext.status}`;
@@ -4288,7 +4310,7 @@ export default function StudioPage() {
     ) {
       return true;
     }
-    if (generationLifecycle.phase === "generated") return false;
+    if (generationLifecycle.phase === "generated" && hasResumeArtifact) return false;
     if (!generationLifecycle.canStartGeneration) return false;
     const latchAcquired = tryAcquirePairGenerationLatch({
       pairKey: effectiveBaselineId && effectiveJobId ? `${effectiveBaselineId}:${effectiveJobId}` : null,
@@ -4499,6 +4521,21 @@ export default function StudioPage() {
           analysisId: requestedAnalysisId || undefined,
           reasonCode: "validation_failed",
         });
+        if (generateNowEligible) {
+          // Generate-now contract: do not block the artifact on trust-validation failures.
+          // We keep the first successful payload so the user always gets usable documents.
+          setResumeState((current) => ({
+            ...current,
+            response: responsePayload,
+            artifactFailure: null,
+            error: null,
+          }));
+          setStudioArtifactPairStatus("completed");
+          studioArtifactPresentationStateRef.current = "generated";
+          setResumeWarningFlags(extractComplianceWarnings(responsePayload));
+          setResumeAuditId(normalizeAuditId(responsePayload));
+          return true;
+        }
         setStudioArtifactPairStatus("failed");
         setResumeState((current) => ({
           ...current,
@@ -4791,7 +4828,7 @@ export default function StudioPage() {
     ) {
       return true;
     }
-    if (generationLifecycle.phase === "generated") return false;
+    if (generationLifecycle.phase === "generated" && hasCoverLetterArtifact) return false;
     if (!generationLifecycle.canStartGeneration) return false;
     const latchAcquired = tryAcquirePairGenerationLatch({
       pairKey: effectiveBaselineId && effectiveJobId ? `${effectiveBaselineId}:${effectiveJobId}` : null,
@@ -4982,6 +5019,21 @@ export default function StudioPage() {
           analysisId: requestedAnalysisId || undefined,
           reasonCode: "validation_failed",
         });
+        if (generateNowEligible) {
+          // Generate-now contract: do not block the artifact on trust-validation failures.
+          // Preserve the first successful payload so Studio always has a cover letter to refine/export.
+          setCoverState((current) => ({
+            ...current,
+            response: responsePayload,
+            artifactFailure: null,
+            error: null,
+          }));
+          setStudioArtifactPairStatus("completed");
+          studioArtifactPresentationStateRef.current = "generated";
+          setCoverWarningFlags(extractComplianceWarnings(responsePayload));
+          setCoverAuditId(normalizeAuditId(responsePayload));
+          return true;
+        }
         setStudioArtifactPairStatus("failed");
         setCoverState((current) => ({
           ...current,
@@ -5281,10 +5333,9 @@ export default function StudioPage() {
           generationTarget: "resume_and_cover_letter",
         });
         const sessionKey = autoGenerationSignature;
-        const [resumeSucceeded, coverSucceeded] = await Promise.all([
-          handleResumeDraft({ sessionKey }),
-          handleCoverDraft({ sessionKey }),
-        ]);
+        // Generation is guarded by a pair-level latch; run sequentially so both artifacts can be produced.
+        const resumeSucceeded = await handleResumeDraft({ sessionKey });
+        const coverSucceeded = await handleCoverDraft({ sessionKey });
         const autoSucceeded = resumeSucceeded && coverSucceeded;
         if (autoSucceeded) {
           trackEvent("studio_auto_generation_succeeded", {
@@ -5989,13 +6040,24 @@ export default function StudioPage() {
         <p className="max-w-3xl text-base leading-7 text-slate-200">{authorityStateExplanation}</p>
       </div>
       <div className="flex flex-wrap gap-3">
-        <FormButton onClick={handlePrimaryResumeAction} disabled={resumeGenerating || autoGenerationInFlight}>
+        <FormButton
+          onClick={handlePrimaryResumeAction}
+          disabled={
+            resumeGenerating ||
+            autoGenerationInFlight ||
+            (generateNowEligible && !hasResumeArtifact && !resumeState.artifactFailure)
+          }
+        >
           Resume
         </FormButton>
         <FormButton
           variant="secondary"
           onClick={handlePrimaryCoverAction}
-          disabled={coverGenerating || autoGenerationInFlight}
+          disabled={
+            coverGenerating ||
+            autoGenerationInFlight ||
+            (generateNowEligible && !hasCoverLetterArtifact && !coverState.artifactFailure)
+          }
         >
           Cover Letter
         </FormButton>
@@ -6383,12 +6445,13 @@ export default function StudioPage() {
   });
 
   const showReadinessRecoveryExperience =
-    (resumeGating.accessState === "allowed" &&
+    !generateNowEligible &&
+    ((resumeGating.accessState === "allowed" &&
       (resumeGating.primaryBlocker === "readiness_block" || resumeGating.primaryBlocker === "draft_only")) ||
-    (coverGating.accessState === "allowed" &&
-      (coverGating.primaryBlocker === "readiness_block" || coverGating.primaryBlocker === "draft_only")) ||
-    (pageTruth.state === "blocked_evidence" &&
-      (!shouldGenerateDocuments(analysisScore) || productReadiness?.state === "BLOCKED"));
+      (coverGating.accessState === "allowed" &&
+        (coverGating.primaryBlocker === "readiness_block" || coverGating.primaryBlocker === "draft_only")) ||
+      (pageTruth.state === "blocked_evidence" &&
+        (!shouldGenerateDocuments(analysisScore) || productReadiness?.state === "BLOCKED")));
 
   const draftAnywayEligible =
     isDraftAnywayEligible(analysisScore, resumeGating) || isDraftAnywayEligible(analysisScore, coverGating);
@@ -6469,7 +6532,11 @@ export default function StudioPage() {
           )}
         </Alert>
       ) : null}
-      {pageTruth.state === "ready" && isGuidedActive && guidedStep === "GENERATE" && !studioBlockedByNextAction ? (
+      {pageTruth.state === "ready" &&
+      isGuidedActive &&
+      guidedStep === "GENERATE" &&
+      !studioBlockedByNextAction &&
+      !generateNowEligible ? (
         <GuidedOverlay
           headline="Now this role is ready for tailored output."
           body="Generate your resume now, then save the opportunity."
@@ -6748,28 +6815,38 @@ export default function StudioPage() {
         ) : null}
         <div className="flex flex-wrap items-center gap-3">
           {generationSupportState === "partial" ? (
-            <>
-              <FormButton
-                onClick={() => void handleResumeDraft()}
-                disabled={resumeGenerating}
-                className="bg-indigo-600 text-white hover:bg-indigo-500"
-              >
-                {resumeGenerating ? "Generating..." : "Generate Resume Draft"}
-              </FormButton>
-              <FormButton
-                variant="secondary"
-                onClick={() => void handleCoverDraft()}
-                disabled={coverGenerating}
-              >
-                {coverGenerating ? "Generating..." : "Generate Cover Letter Draft"}
-              </FormButton>
-              <Link
-                href={fitReviewHref}
-                className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
-              >
-                Improve baseline
-              </Link>
-            </>
+            generateNowEligible ? (
+              <p className="text-sm font-medium text-slate-200" data-testid="studio-auto-generation-status">
+                {activeArtifactFailure
+                  ? "Generation failed. Retry below."
+                  : autoGenerationInFlight || resumeGenerating || coverGenerating || studioArtifactPairStatus === "in_progress" || needsAutoGeneration
+                    ? "Generating your resume and cover letter…"
+                    : "Preparing your documents…"}
+              </p>
+            ) : (
+              <>
+                <FormButton
+                  onClick={() => void handleResumeDraft()}
+                  disabled={resumeGenerating}
+                  className="bg-indigo-600 text-white hover:bg-indigo-500"
+                >
+                  {resumeGenerating ? "Generating..." : "Generate Resume Draft"}
+                </FormButton>
+                <FormButton
+                  variant="secondary"
+                  onClick={() => void handleCoverDraft()}
+                  disabled={coverGenerating}
+                >
+                  {coverGenerating ? "Generating..." : "Generate Cover Letter Draft"}
+                </FormButton>
+                <Link
+                  href={fitReviewHref}
+                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
+                >
+                  Improve baseline
+                </Link>
+              </>
+            )
           ) : primaryNextAction.type === "start_fit_review" ? (
             <Link
               href={fitReviewHref}
@@ -6799,26 +6876,28 @@ export default function StudioPage() {
               Resolve gaps before generating
             </Link>
           ) : (
-            <>
-              <FormButton
-                onClick={() => void handleResumeDraft()}
-                disabled={resumeGenerating}
-                className="bg-indigo-600 text-white hover:bg-indigo-500"
-              >
-                {resumeGenerating
-                  ? "Generating..."
-                  : "Generate Resume Draft"}
-              </FormButton>
-              <FormButton
-                variant="secondary"
-                onClick={() => void handleCoverDraft()}
-                disabled={coverGenerating}
-              >
-                {coverGenerating
-                  ? "Generating..."
-                  : "Generate Cover Letter Draft"}
-              </FormButton>
-            </>
+            generateNowEligible ? null : (
+              <>
+                <FormButton
+                  onClick={() => void handleResumeDraft()}
+                  disabled={resumeGenerating}
+                  className="bg-indigo-600 text-white hover:bg-indigo-500"
+                >
+                  {resumeGenerating
+                    ? "Generating..."
+                    : "Generate Resume Draft"}
+                </FormButton>
+                <FormButton
+                  variant="secondary"
+                  onClick={() => void handleCoverDraft()}
+                  disabled={coverGenerating}
+                >
+                  {coverGenerating
+                    ? "Generating..."
+                    : "Generate Cover Letter Draft"}
+                </FormButton>
+              </>
+            )
           )}
         </div>
       </section>
@@ -7138,7 +7217,7 @@ export default function StudioPage() {
         </Alert>
       ) : null} 
  
-      <StudioNextMove move={studioNextMove} /> 
+      {!generateNowEligible ? <StudioNextMove move={studioNextMove} /> : null} 
       {!generateNowEligible ? <DocumentStrategyPlanSummary plan={documentStrategyPlan} /> : null} 
  
       {showArtifactMaterials ? ( 
@@ -7191,7 +7270,7 @@ export default function StudioPage() {
           </Alert>
         ) : null}
         {resumeWarningFlags.length ? null : null}
-        {resumeNeedsBaselineDetail ? (
+        {resumeNeedsBaselineDetail && !generateNowEligible ? (
           <div className="space-y-3 rounded-2xl border border-sky-300/35 bg-sky-500/10 p-4">
             <p className="text-sm font-semibold text-slate-100">
               More detail needed to generate a strong resume
@@ -7471,6 +7550,8 @@ export default function StudioPage() {
             ) : null}
 
           </div>
+        ) : resumeState.artifactFailure ? null : resumeAutoGenerating ? (
+          <EmptyState title="Generating your resume..." body="This usually finishes in a moment." />
         ) : (
           <EmptyState
             title="Resume not generated yet"
@@ -7488,16 +7569,16 @@ export default function StudioPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <FormButton
-              variant="secondary"
-              onClick={() => void handleCoverDraft()}
-              disabled={coverGenerating}
-              data-testid="studio-cover-generate-button"
-            >
-              {coverGenerating
-                ? "Generating..."
-                : "Generate Cover Letter"}
-            </FormButton>
+            {!generateNowEligible ? (
+              <FormButton
+                variant="secondary"
+                onClick={() => void handleCoverDraft()}
+                disabled={coverGenerating}
+                data-testid="studio-cover-generate-button"
+              >
+                {coverGenerating ? "Generating..." : "Generate Cover Letter"}
+              </FormButton>
+            ) : null}
             {showCoverDownloadActions ? (
               <>
                 <FormButton
@@ -7818,10 +7899,14 @@ export default function StudioPage() {
                   )}
                 </div>
               </div>
-            ) : (
+            ) : coverState.artifactFailure ? null : (
               <EmptyState
-                title="Cover letter not generated yet"
-                body="Generate your cover letter to create a tailored introduction."
+                title={coverAutoGenerating ? "Generating your cover letter..." : "Cover letter not generated yet"}
+                body={
+                  coverAutoGenerating
+                    ? "This usually finishes in a moment."
+                    : "Generate your cover letter to create a tailored introduction."
+                }
               />
             )
           )
