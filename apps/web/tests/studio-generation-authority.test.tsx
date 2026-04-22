@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, vi } from "vitest";
 
 import StudioPage from "@/app/(app)/studio/page";
@@ -378,9 +378,13 @@ describe("Studio generation authority", () => {
     renderStudio();
 
     await screen.findByTestId("studio-decision-panel");
+    const hero = screen.getByTestId("studio-instant-draft-hero");
     const readiness = screen.getByTestId("studio-generation-readiness");
     const decisionPanel = screen.getByTestId("studio-decision-panel");
-    expect(readiness).toHaveTextContent(/Ready|Usable/);
+    // Score >= 80: generate-now lane. The hero is the single authority; the READY summary is suppressed.
+    expect(within(hero).getByRole("heading", { level: 1 })).toBeInTheDocument();
+    expect(within(readiness).queryByTestId("studio-ready-secondary-summary")).toBeNull();
+    expect(within(readiness).queryByRole("heading", { level: 1 })).toBeNull();
     expect(decisionPanel).toHaveTextContent(/ready to refine in studio/i);
     expect(decisionPanel).not.toHaveTextContent(/use this now with confidence/i);
 

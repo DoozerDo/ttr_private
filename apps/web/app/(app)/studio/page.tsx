@@ -6659,7 +6659,9 @@ export default function StudioPage() {
           </>
         ) : (
           <>
-            <div className="space-y-2">
+            {!generateNowEligible ? (
+
+              <div className="space-y-2" data-testid="studio-ready-secondary-summary">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
                 {generationSupportState === "strong"
                   ? "Ready"
@@ -6686,7 +6688,10 @@ export default function StudioPage() {
                       : "Generated from partially verified evidence. Verify key claims to strengthen it." 
                     : "Based on your analyzed role context and verified baseline evidence."} 
               </p> 
-            </div>
+
+              </div>
+
+            ) : null}
             <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-decision-panel"> 
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Decision + Action</p> 
               {generateNowEligible ? (
