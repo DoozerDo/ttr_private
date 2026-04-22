@@ -15,10 +15,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20.x'
 
@@ -27,6 +27,18 @@ jobs:
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
+
+      - name: Prepare CI API env file
+        run: |
+          # docker-compose.dev.yml expects this local-only file to exist.
+          # In CI we create a safe, non-secret placeholder so the stack can start on fresh runners.
+          mkdir -p apps/api
+          cat > apps/api/.env.development.local <<'EOF'
+          # CI placeholder env. Do NOT put secrets here.
+          # Compose provides required runtime vars via `environment:` defaults.
+          OPENAI_API_KEY=
+          SENTRY_DSN=
+          EOF
 
       - name: Start Docker dev stack
         run: docker compose -f infra/docker/docker-compose.dev.yml up --build -d
