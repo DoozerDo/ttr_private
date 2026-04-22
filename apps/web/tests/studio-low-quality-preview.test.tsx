@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { vi } from "vitest";
 
 import StudioPage from "@/app/(app)/studio/page";
@@ -168,8 +168,10 @@ describe("studio low-quality preview gating", () => {
 
     expect(screen.queryByText(/needs another pass/i)).toBeNull();
     expect(screen.queryByText(/draft \(low quality\)/i)).toBeNull();
-    expect(screen.getByTestId("studio-low-quality-demoted-label")).toBeInTheDocument();
+    expect(screen.getByTestId("studio-confidence-label")).toHaveTextContent(/Confidence:\s*medium/i);
     expect(screen.getByTestId("studio-decision-panel")).toHaveTextContent(/Draft output: ready to refine in Studio\./i);
+    expect(screen.queryByText(/usable output/i)).toBeNull();
+    expect(screen.queryByTestId("studio-artifact-quality-panel")).toBeNull();
 
     expect(screen.queryByTestId("studio-low-quality-resume-preview-main")).toBeNull();
     expect(screen.queryByTestId("studio-low-quality-cover-preview-main")).toBeNull();
@@ -179,5 +181,16 @@ describe("studio low-quality preview gating", () => {
     expect(screen.queryAllByRole("button", { name: /verify/i }).length).toBe(0);
     expect(screen.queryAllByRole("link", { name: /verify/i }).length).toBe(0);
     expect(screen.getByTestId("studio-optional-evidence-details")).toBeInTheDocument();
+    expect(screen.queryByText(/\bPython\b/i)).toBeNull();
+
+    fireEvent.click(screen.getByTestId("studio-optional-evidence-toggle"));
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-optional-evidence-content")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-optional-evidence-cards")).toBeInTheDocument();
+    });
+    const cards = within(screen.getByTestId("studio-optional-evidence-cards"));
+    expect(cards.getByText(/\bPython\b/i)).toBeInTheDocument();
+    expect(cards.getByText(/\bSnowflake\b/i)).toBeInTheDocument();
+    expect(cards.getAllByRole("link", { name: /verify this/i }).length).toBeGreaterThan(0);
   });
 });

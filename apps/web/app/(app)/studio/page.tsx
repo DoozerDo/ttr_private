@@ -6622,12 +6622,9 @@ export default function StudioPage() {
             </div>
             <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-decision-panel"> 
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Decision + Action</p> 
-              {generateNowEligible && isLowQualityDraft ? (
-                <p
-                  className="mt-1 text-xs font-medium text-slate-400"
-                  data-testid="studio-low-quality-demoted-label"
-                >
-                  Quality signal: low confidence (non-blocking)
+              {generateNowEligible ? (
+                <p className="mt-1 text-xs font-medium text-slate-400" data-testid="studio-confidence-label">
+                  Confidence: {artifactQuality.confidence === "HIGH" ? "high" : "medium"} (non-blocking)
                 </p>
               ) : null}
               <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-50">  
@@ -7858,15 +7855,9 @@ export default function StudioPage() {
             </p>
 
             {isLowQualityDraft ? (
-              <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-                  Quality signal
-                </p>
-                <p className="mt-1 text-sm text-slate-200">
-                  Low confidence means the draft stayed conservative. You can strengthen key signals and regenerate if you want
-                  a tighter version.
-                </p>
-              </div>
+              <p className="text-sm text-slate-300">
+                Confidence is non-blocking. Strengthen key signals and regenerate if you want tighter tailoring.
+              </p>
             ) : null}
 
             {canonicalUnverifiedRequirements.length ? (
@@ -7906,17 +7897,99 @@ export default function StudioPage() {
               </Link>
             </div>
 
-            <div className="pt-1">
-              <StudioArtifactQualityPanel
-                model={artifactQuality}
-                confidence={artifactQuality.confidence}
-                onVerifyClaim={verifyClaim}
-                onEditClaim={openClaimEditModal}
-                onDismissClaim={dismissClaim}
-              />
-            </div>
-          </div>
-          ) : null}
+            {(canonicalUnverifiedRequirements.length || artifactQuality.improvableClaims.length) ? (
+              <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3" data-testid="studio-optional-evidence-cards">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                  Evidence cards
+                </p>
+                <div className="mt-3 space-y-3">
+                  {canonicalUnverifiedRequirements.slice(0, 8).map((requirement) => (
+                    <div
+                      key={`studio-evidence-card-${requirement}`}
+                      className="flex flex-col gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3"
+                    >
+                      <p className="text-sm font-semibold text-slate-100">{requirement}</p>
+                      <div className="flex flex-wrap gap-2">
+                        <Link
+                          href={buildClaimVerificationHref(requirement)}
+                          className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                        >
+                          Verify this
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                  {artifactQuality.improvableClaims.slice(0, 6).map((claim) => (
+                    <div
+                      key={`studio-improvable-card-${claim.text}`}
+                      className="flex flex-col gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3"
+                    >
+                      <p className="text-sm font-semibold text-slate-100">{claim.text}</p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openClaimEditModal(claim.text)}
+                          className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.06]"
+                        >
+                          Edit before verifying
+                        </button>
+                        <Link
+                          href={buildClaimVerificationHref(claim.text)}
+                          className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                        >
+                          Verify this
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {claimEditDraft ? (
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4 py-6 backdrop-blur-sm"
+                data-testid="studio-claim-edit-modal"
+              >
+                <div className="w-full max-w-2xl rounded-3xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                      Edit before verifying
+                    </p>
+                    <h2 className="text-2xl font-semibold tracking-tight text-slate-50">
+                      Refine this claim so it stays anchored to real experience
+                    </h2>
+                    <p className="text-sm text-slate-300">Confirm the wording before sending it to the evidence flow.</p>
+                  </div>
+                  <label className="mt-5 block space-y-2 text-sm text-slate-300">
+                    Claim text
+                    <textarea
+                      value={claimEditText}
+                      onChange={(event) => setClaimEditText(event.target.value)}
+                      className="min-h-[140px] w-full rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm leading-7 text-slate-100 outline-none transition focus:border-sky-300/40"
+                    />
+                  </label>
+                  <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={cancelClaimEdit}
+                      className="rounded-xl border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-white/20 hover:text-white"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveEditedClaim}
+                      className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                    >
+                      Verify edited claim
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div> 
+          ) : null} 
         </section>
       ) : null}
  
@@ -8013,50 +8086,9 @@ export default function StudioPage() {
       </details>
       ) : null}
 
-      {claimEditDraft ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4 py-6 backdrop-blur-sm">
-          <div className="w-full max-w-2xl rounded-3xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                Edit before verifying
-              </p>
-              <h2 className="text-2xl font-semibold tracking-tight text-slate-50">
-                Refine this claim so it stays anchored to real experience
-              </h2>
-              <p className="text-sm text-slate-300">
-                Confirm the wording before sending it to the evidence flow.
-              </p>
-            </div>
-            <label className="mt-5 block space-y-2 text-sm text-slate-300">
-              Claim text
-              <textarea
-                value={claimEditText}
-                onChange={(event) => setClaimEditText(event.target.value)}
-                className="min-h-[140px] w-full rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm leading-7 text-slate-100 outline-none transition focus:border-sky-300/40"
-              />
-            </label>
-            <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={cancelClaimEdit}
-                className="rounded-xl border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-white/20 hover:text-white"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={saveEditedClaim}
-                className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
-              >
-                Verify edited claim
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </PageShell>
-  );
-}
+    </PageShell> 
+  ); 
+} 
 
 
 

@@ -417,6 +417,7 @@ describe("Studio generation authority", () => {
     expect(screen.queryByTestId("studio-blocked-message")).toBeNull();
     expect(screen.queryByText(/needs another pass/i)).toBeNull();
     expect(screen.getByTestId("studio-decision-panel")).toHaveTextContent(/ready to refine in studio/i);
+    expect(screen.queryByTestId("studio-artifact-quality-panel")).toBeNull();
 
     // Primary generation CTAs should appear before optional evidence strengthening.
     const generateResume = screen.getAllByRole("button", { name: /generate resume/i })[0];
