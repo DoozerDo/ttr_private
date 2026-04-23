@@ -6345,6 +6345,21 @@ export default function StudioPage() {
         setShowFullLowQualityResume(true);
       }
 
+      const clearHighlights = () => {
+        document
+          .querySelectorAll<HTMLElement>('[data-studio-focus-highlight="true"]')
+          .forEach((node) => node.removeAttribute("data-studio-focus-highlight"));
+      };
+
+      const highlight = (element: HTMLElement | null) => {
+        if (!element) return;
+        clearHighlights();
+        element.setAttribute("data-studio-focus-highlight", "true");
+        window.setTimeout(() => {
+          element.removeAttribute("data-studio-focus-highlight");
+        }, 1800);
+      };
+
       const focusElement = (element: HTMLElement | null) => {
         if (!element) return false;
         element.scrollIntoView?.({ block: "start" });
@@ -6353,8 +6368,12 @@ export default function StudioPage() {
       };
 
       if (target.type === "summary") {
-        const el = document.querySelector<HTMLElement>('[data-testid="studio-resume-summary-section"]');
-        focusElement(el);
+        const section = document.querySelector<HTMLElement>('[data-testid="studio-resume-summary-section"]');
+        const header = document.querySelector<HTMLElement>('[data-testid="studio-resume-summary-header"]');
+        const expanded = header?.getAttribute("aria-expanded") === "true";
+        if (header && !expanded) header.click();
+        highlight(section);
+        focusElement(section);
         return;
       }
 
@@ -6363,6 +6382,9 @@ export default function StudioPage() {
       );
       if (!header) return;
 
+      const roleBlock = document.querySelector<HTMLElement>(
+        `[data-studio-role-block=\"true\"][data-role-index=\"${target.index}\"]`,
+      );
       const expanded = header.getAttribute("aria-expanded") === "true";
       if (!expanded) {
         header.click();
@@ -6373,6 +6395,7 @@ export default function StudioPage() {
         const refreshed = document.querySelector<HTMLElement>(
           `[data-testid="studio-resume-experience-role-header-${target.index}"]`,
         );
+        highlight(roleBlock);
         focusElement(refreshed);
       }, 0);
     },

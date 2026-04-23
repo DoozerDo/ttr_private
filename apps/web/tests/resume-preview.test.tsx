@@ -46,6 +46,93 @@ describe("ResumePreview", () => {
     expect(screen.getByText("Improved release quality through tighter cross-team planning.")).toBeInTheDocument();
   });
 
+  it("defaults to Preview Mode (summary collapsed, only 2 most recent roles shown) until toggled", () => {
+    render(
+      <ResumePreview
+        payload={{
+          preview: {
+            resume: {
+              heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+              summary: "Summary exists",
+              competencies: ["Leadership", "Delivery"],
+              education: [{ degree: "B.S.", institution: "University" }],
+              experience: [
+                {
+                  company: "Employer One",
+                  roleTitle: "Role One",
+                  bullets: ["Role1 Bullet 1"],
+                },
+                {
+                  company: "Employer Two",
+                  roleTitle: "Role Two",
+                  bullets: ["Role2 Bullet 1"],
+                },
+                {
+                  company: "Employer Three",
+                  roleTitle: "Role Three",
+                  bullets: ["Role3 Bullet 1"],
+                },
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    // Summary is collapsed by default.
+    expect(screen.queryByText("Summary exists")).toBeNull();
+
+    // Only first two roles are visible by default.
+    expect(screen.getByText("Employer One")).toBeInTheDocument();
+    expect(screen.getByText("Employer Two")).toBeInTheDocument();
+    expect(screen.queryByText("Employer Three")).toBeNull();
+
+    // Hidden sections stay hidden until toggled.
+    expect(screen.queryByText("Core Competencies")).toBeNull();
+    expect(screen.queryByText("Education")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("studio-resume-show-full-toggle"));
+    expect(screen.getByText("Employer Three")).toBeInTheDocument();
+    expect(screen.getByText("Core Competencies")).toBeInTheDocument();
+    expect(screen.getByText("Education")).toBeInTheDocument();
+  });
+
+  it("Edit Mode expands sections and renders editable controls without requiring toggles", () => {
+    render(
+      <ResumePreview
+        payload={{
+          preview: {
+            resume: {
+              heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+              summary: "Summary exists",
+              experience: [
+                {
+                  company: "Employer One",
+                  roleTitle: "Role One",
+                  bullets: ["Role1 Bullet 1"],
+                },
+                {
+                  company: "Employer Two",
+                  roleTitle: "Role Two",
+                  bullets: ["Role2 Bullet 1"],
+                },
+              ],
+            },
+          },
+        }}
+        isEditing
+        hasUnsavedChanges
+        onEnterEditMode={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("All sections are expanded for editing. Save changes when you're done.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Resume summary")).toBeInTheDocument();
+    expect(screen.getByLabelText("Resume bullet 1-1")).toBeInTheDocument();
+    expect(screen.getByLabelText("Resume bullet 2-1")).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-resume-show-full-toggle")).toBeNull();
+  });
+
   it("renders each experience entry in a distinct visual block", () => {
     render(
       <ResumePreview
@@ -132,6 +219,9 @@ describe("ResumePreview", () => {
         }}
       />,
     );
+
+    // Education is hidden in Preview Mode until expanded.
+    fireEvent.click(screen.getByTestId("studio-resume-show-full-toggle"));
 
     const msMatches = screen.getAllByText(
       /Master of Science in Interactive Entertainment Design & Production/,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   ResumeEducation,
   ResumeExperience,
@@ -194,13 +194,33 @@ export function ResumePreview({
       )
     : [];
 
+  const [showFullResume, setShowFullResume] = useState(false);
+  const [summaryExpanded, setSummaryExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!isEditing) return;
+    setShowFullResume(true);
+    setSummaryExpanded(true);
+  }, [isEditing]);
+
+  const hasHiddenContent = useMemo(() => {
+    if (isEditing) return false;
+    return experiences.length > 2 || competencies.length > 0 || education.length > 0;
+  }, [competencies.length, education.length, experiences.length, isEditing]);
+
+  const visibleExperiences = useMemo(() => {
+    const withIndex = experiences.map((entry, index) => ({ entry, index }));
+    if (isEditing || showFullResume) return withIndex;
+    return withIndex.slice(0, 2);
+  }, [experiences, isEditing, showFullResume]);
+
   return (
     <div className="space-y-8" data-testid="studio-resume-workspace-root">
       <div className="space-y-8" data-testid="resume-preview">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 pb-4">
         <div className="space-y-1">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-            Preview of tailored resume
+            {isEditing ? "Edit mode" : "Preview mode"}
           </p>
           <p className="text-2xl font-semibold tracking-tight text-slate-50">
             {toText(model.heading?.name) || "Candidate"}
@@ -245,34 +265,59 @@ export function ResumePreview({
       </div>
 
       {isEditing ? (
-        <p className="text-xs text-slate-400">
-          Edits are user controlled and may affect final review.
-        </p>
+        <div className="rounded-2xl border border-sky-300/20 bg-sky-500/5 px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-200">Edit mode</p>
+          <p className="mt-1 text-xs text-slate-200">
+            All sections are expanded for editing. Save changes when you&apos;re done.
+          </p>
+        </div>
       ) : null}
 
       {summary ? (
         <section
-          className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/30 p-5"
+          className="rounded-2xl border border-white/10 bg-slate-950/30 p-5 data-[studio-focus-highlight=true]:ring-2 data-[studio-focus-highlight=true]:ring-amber-300/60"
           data-testid="studio-resume-summary-section"
           tabIndex={-1}
         >
-          <h3 className="text-xs font-semibold uppercase tracking-[0.32em] text-slate-400">
-            Professional Summary
-          </h3>
           {isEditing ? (
-            <textarea
-              aria-label="Resume summary"
-              value={summary}
-              onChange={(event) => onSummaryChange?.(event.target.value)}
-              className="min-h-[110px] w-full rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3 text-sm leading-7 text-slate-100 outline-none transition focus:border-sky-300/40"
-            />
+            <div className="space-y-3">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.32em] text-slate-400">
+                Professional Summary
+              </h3>
+              <textarea
+                aria-label="Resume summary"
+                value={summary}
+                onChange={(event) => onSummaryChange?.(event.target.value)}
+                className="min-h-[110px] w-full rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3 text-sm leading-7 text-slate-100 outline-none transition focus:border-sky-300/40"
+              />
+            </div>
           ) : (
-            <p className="max-w-3xl text-sm leading-7 text-slate-200/90">{summary}</p>
+            <div className="space-y-3">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between text-left"
+                aria-expanded={summaryExpanded}
+                onClick={() => setSummaryExpanded((current) => !current)}
+                data-testid="studio-resume-summary-header"
+              >
+                <span className="text-xs font-semibold uppercase tracking-[0.32em] text-slate-400">
+                  Professional Summary
+                </span>
+                <span className="text-sm font-semibold text-slate-300" aria-hidden>
+                  {summaryExpanded ? "▾" : "▸"}
+                </span>
+              </button>
+              {summaryExpanded ? (
+                <p className="max-w-3xl text-sm leading-7 text-slate-200/90">{summary}</p>
+              ) : (
+                <p className="text-xs text-slate-400">Collapsed. Click to review.</p>
+              )}
+            </div>
           )}
         </section>
       ) : null}
 
-      {competencies.length ? (
+      {(isEditing || showFullResume) && competencies.length ? (
         <section className="space-y-2">
           <h3 className="text-xs font-semibold uppercase tracking-[0.32em] text-slate-400">
             Core Competencies
@@ -290,13 +335,26 @@ export function ResumePreview({
         </section>
       ) : null}
 
-      {experiences.length ? (
+      {!visibleExperiences.length && hasHiddenContent ? (
+        <div className="pt-1">
+          <button
+            type="button"
+            className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.06]"
+            onClick={() => setShowFullResume((current) => !current)}
+            data-testid="studio-resume-show-full-toggle"
+          >
+            {showFullResume ? "Hide full resume" : "Show full resume"}
+          </button>
+        </div>
+      ) : null}
+
+      {visibleExperiences.length ? (
         <section className="space-y-4" data-testid="studio-resume-experience-section">
           <h3 className="text-xs font-semibold uppercase tracking-[0.32em] text-slate-400">
             Professional Experience
           </h3>
           <div className="space-y-6" data-testid="studio-resume-experience-accordion">
-            {experiences.map((entry, experienceIndex) => {
+            {visibleExperiences.map(({ entry, index: experienceIndex }) => {
               const expanded = expandedExperienceIndex === experienceIndex;
               const headerId = `studio-resume-experience-role-header-${experienceIndex}`;
               const bodyId = `studio-resume-experience-role-body-${experienceIndex}`;
@@ -304,45 +362,68 @@ export function ResumePreview({
               return (
                 <article
                   key={`${entry.company}-${entry.roleTitle}-${experienceIndex}`}
-                  className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/30"
+                  className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/30 data-[studio-focus-highlight=true]:ring-2 data-[studio-focus-highlight=true]:ring-amber-300/60"
                   data-testid="experience-entry-block"
+                  data-studio-role-block="true"
+                  data-role-index={experienceIndex}
                 >
-                  <button
-                    type="button"
-                    aria-expanded={expanded}
-                    aria-controls={bodyId}
-                    onClick={() =>
-                      setExpandedExperienceIndex((current) =>
-                        current === experienceIndex ? null : experienceIndex,
-                      )
-                    }
-                    className={`flex w-full items-start justify-between gap-3 px-6 py-5 text-left transition hover:bg-white/[0.03] ${
-                      expanded ? "border-b border-white/10" : ""
-                    }`}
-                    data-testid={headerId}
-                  >
-                    <div className="space-y-1">
-                      <p className="text-lg font-semibold text-slate-50">{entry.company}</p>
-                      <p className="text-base font-medium text-slate-200">
-                        {[entry.roleTitle, entry.location].filter(Boolean).join(" | ")}
-                      </p>
-                      <p className="text-xs text-slate-400">
-                        {entry.bullets.length} {entry.bullets.length === 1 ? "bullet" : "bullets"}
-                      </p>
-                    </div>
-                    <div className="flex items-start gap-3 text-right">
-                      {entry.dateRange ? (
-                        <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500/80">
-                          {entry.dateRange}
+                  {isEditing ? (
+                    <div className="flex items-start justify-between gap-3 border-b border-white/10 px-6 py-5 text-left">
+                      <div className="space-y-1">
+                        <p className="text-lg font-semibold text-slate-50">{entry.company}</p>
+                        <p className="text-base font-medium text-slate-200">
+                          {[entry.roleTitle, entry.location].filter(Boolean).join(" | ")}
                         </p>
-                      ) : null}
-                      <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                        {expanded ? "Collapse" : "Expand"}
-                      </span>
+                        <p className="text-xs text-slate-400">
+                          {entry.bullets.length} {entry.bullets.length === 1 ? "bullet" : "bullets"}
+                        </p>
+                      </div>
+                      <div className="flex items-start gap-3 text-right">
+                        {entry.dateRange ? (
+                          <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500/80">
+                            {entry.dateRange}
+                          </p>
+                        ) : null}
+                      </div>
                     </div>
-                  </button>
+                  ) : (
+                    <button
+                      type="button"
+                      aria-expanded={expanded}
+                      aria-controls={bodyId}
+                      onClick={() =>
+                        setExpandedExperienceIndex((current) =>
+                          current === experienceIndex ? null : experienceIndex,
+                        )
+                      }
+                      className={`flex w-full items-start justify-between gap-3 px-6 py-5 text-left transition hover:bg-white/[0.03] ${
+                        expanded ? "border-b border-white/10" : ""
+                      }`}
+                      data-testid={headerId}
+                    >
+                      <div className="space-y-1">
+                        <p className="text-lg font-semibold text-slate-50">{entry.company}</p>
+                        <p className="text-base font-medium text-slate-200">
+                          {[entry.roleTitle, entry.location].filter(Boolean).join(" | ")}
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {entry.bullets.length} {entry.bullets.length === 1 ? "bullet" : "bullets"}
+                        </p>
+                      </div>
+                      <div className="flex items-start gap-3 text-right">
+                        {entry.dateRange ? (
+                          <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500/80">
+                            {entry.dateRange}
+                          </p>
+                        ) : null}
+                        <span className="text-sm font-semibold text-slate-300" aria-hidden>
+                          {expanded ? "▾" : "▸"}
+                        </span>
+                      </div>
+                    </button>
+                  )}
 
-                  {expanded ? (
+                  {isEditing || expanded ? (
                     <div id={bodyId} className="px-6 pb-6 pt-4" data-testid={bodyId}>
                       <div className="rounded-xl border border-white/10 bg-slate-950/35 p-5">
                         <ul className="space-y-2 pl-5 text-sm leading-7 text-slate-200/90">
@@ -386,10 +467,27 @@ export function ResumePreview({
               );
             })}
           </div>
+          {hasHiddenContent ? (
+            <div className="pt-2">
+              <button
+                type="button"
+                className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.06]"
+                onClick={() => setShowFullResume((current) => !current)}
+                data-testid="studio-resume-show-full-toggle"
+              >
+                {showFullResume ? "Hide full resume" : "Show full resume"}
+              </button>
+              {!showFullResume ? (
+                <p className="mt-2 text-xs text-slate-400">
+                  Preview shows summary + 2 most recent roles. Expand for full resume sections.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </section>
       ) : null}
 
-      {education.length ? (
+      {(isEditing || showFullResume) && education.length ? (
         <section className="space-y-3">
           <h3 className="text-xs font-semibold uppercase tracking-[0.32em] text-slate-400">
             Education

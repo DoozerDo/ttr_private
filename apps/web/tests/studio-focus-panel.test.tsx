@@ -21,6 +21,10 @@ function StudioFocusHarness({ payload }: { payload: unknown }) {
     : [];
 
   const focusResumeTarget = (target: { type: "summary" } | { type: "role"; index: number }) => {
+    document
+      .querySelectorAll<HTMLElement>('[data-studio-focus-highlight="true"]')
+      .forEach((node) => node.removeAttribute("data-studio-focus-highlight"));
+
     const focusElement = (element: HTMLElement | null) => {
       if (!element) return false;
       element.focus?.();
@@ -29,6 +33,10 @@ function StudioFocusHarness({ payload }: { payload: unknown }) {
 
     if (target.type === "summary") {
       const el = document.querySelector<HTMLElement>('[data-testid="studio-resume-summary-section"]');
+      const header = document.querySelector<HTMLElement>('[data-testid="studio-resume-summary-header"]');
+      const expanded = header?.getAttribute("aria-expanded") === "true";
+      if (header && !expanded) header.click();
+      el?.setAttribute("data-studio-focus-highlight", "true");
       focusElement(el);
       return;
     }
@@ -39,6 +47,10 @@ function StudioFocusHarness({ payload }: { payload: unknown }) {
     if (!header) return;
     const expanded = header.getAttribute("aria-expanded") === "true";
     if (!expanded) header.click();
+    const block = document.querySelector<HTMLElement>(
+      `[data-studio-role-block=\"true\"][data-role-index=\"${target.index}\"]`,
+    );
+    block?.setAttribute("data-studio-focus-highlight", "true");
     focusElement(header);
   };
 
@@ -205,6 +217,7 @@ describe("Studio Focus Panel", () => {
     const summary = screen.getByTestId("studio-resume-summary-section");
 
     await waitFor(() => expect(summary).toHaveFocus());
+    expect(summary.getAttribute("data-studio-focus-highlight")).toBe("true");
   });
 
   it("role actions expand the target role and keep the rest collapsed", async () => {
@@ -241,6 +254,11 @@ describe("Studio Focus Panel", () => {
       expect(screen.getByTestId("studio-resume-experience-role-body-0")).toBeInTheDocument(),
     );
     expect(screen.queryByTestId("studio-resume-experience-role-body-1")).toBeNull();
+    expect(
+      document.querySelector('[data-studio-role-block="true"][data-role-index="0"]')?.getAttribute(
+        "data-studio-focus-highlight",
+      ),
+    ).toBe("true");
 
     fireEvent.click(screen.getByTestId("studio-focus-action-role-1"));
     await waitFor(() =>
