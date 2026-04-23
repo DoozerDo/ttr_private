@@ -24,7 +24,7 @@ export function StudioFocusPanel({ primary, secondary }: Props) {
           Recommended next moves
         </p>
         <p className="text-sm text-slate-200">
-          Start here to make the resume stronger, faster.
+          Improve your resume while completing your application.
         </p>
       </div>
 

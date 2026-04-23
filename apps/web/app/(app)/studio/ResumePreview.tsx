@@ -468,7 +468,7 @@ export function ResumePreview({
             })}
           </div>
           {hasHiddenContent ? (
-            <div className="mt-2 border-t border-white/10 pt-4">
+            <div className="mt-4 border-t border-white/10 pt-5">
               <button
                 type="button"
                 className="w-full rounded-xl border border-white/15 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.06]"

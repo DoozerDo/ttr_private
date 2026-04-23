@@ -6464,6 +6464,30 @@ export default function StudioPage() {
     if (studioFocusRole1) studioFocusSecondary.push(studioFocusRole1);
   }
 
+  const readyHeaderMode = isReadySuccessState && !isApplicationApplied
+    ? hasUsableResume && !hasUsableCoverLetter
+      ? "resume_only"
+      : !hasUsableResume && hasUsableCoverLetter
+        ? "cover_only"
+        : hasUsableResume && hasUsableCoverLetter
+          ? "application"
+          : "application"
+    : null;
+
+  const heroHeadline = readyHeaderMode === "resume_only" || readyHeaderMode === "cover_only"
+    ? "Complete your application"
+    : workflowAuthority.headline;
+  const heroBody = readyHeaderMode === "resume_only"
+    ? "Your resume is ready. Generate and review your cover letter to finish your application."
+    : readyHeaderMode === "cover_only"
+      ? "Your cover letter is ready. Generate and review your resume to finish your application."
+      : workflowAuthority.body;
+
+  const shouldPrimaryCompleteCover =
+    readyHeaderMode === "resume_only" && !autoGenerationInFlight && studioArtifactPairStatus !== "in_progress";
+  const shouldPrimaryCompleteResume =
+    readyHeaderMode === "cover_only" && !autoGenerationInFlight && studioArtifactPairStatus !== "in_progress";
+
   const instantDraftHero = appliedMomentumHero ?? (isInstantDraftExperience ? (
     <section
       className="space-y-5 rounded-[28px] border border-emerald-300/20 bg-[linear-gradient(180deg,rgba(16,185,129,0.16),rgba(15,23,42,0.82))] p-6 md:p-8 shadow-[0_24px_60px_rgba(15,23,42,0.35)]"
@@ -6486,9 +6510,9 @@ export default function StudioPage() {
                 : "Instant draft"}
         </p>
         <h1 className="text-3xl font-semibold tracking-tight text-slate-50 md:text-[36px]">
-          {workflowAuthority.headline}
+          {heroHeadline}
         </h1>
-        <p className="max-w-3xl text-base leading-7 text-slate-200">{workflowAuthority.body}</p>
+        <p className="max-w-3xl text-base leading-7 text-slate-200">{heroBody}</p>
         {isReadySuccessState && !isApplicationApplied && hasUsableResume && !hasUsableCoverLetter ? (
           <p className="text-sm font-medium text-slate-100">
             Resume ready. Complete your cover letter.
@@ -6514,28 +6538,55 @@ export default function StudioPage() {
             Apply to this role
           </FormButton>
         ) : null}
-        <FormButton
-          variant={isReadySuccessState ? "secondary" : undefined}
-          onClick={handlePrimaryResumeAction}
-          disabled={
-            resumeGenerating ||
-            autoGenerationInFlight ||
-            (generateNowEligible && !hasResumeArtifact && !resumeState.artifactFailure)
-          }
-        >
-          {hasResumeArtifact || generateNowEligible ? "Resume" : "Generate Resume"}
-        </FormButton>
-        <FormButton
-          variant="secondary"
-          onClick={handlePrimaryCoverAction}
-          disabled={
-            coverGenerating ||
-            autoGenerationInFlight ||
-            (generateNowEligible && !hasCoverLetterArtifact && !coverState.artifactFailure)
-          }
-        >
-          {hasCoverLetterArtifact || generateNowEligible ? "Cover Letter" : "Generate Cover Letter"}
-        </FormButton>
+        {shouldPrimaryCompleteCover ? (
+          <FormButton
+            onClick={handlePrimaryCoverAction}
+            disabled={
+              coverGenerating ||
+              autoGenerationInFlight ||
+              (generateNowEligible && !isReadySuccessState && !hasCoverLetterArtifact && !coverState.artifactFailure)
+            }
+          >
+            Complete cover letter
+          </FormButton>
+        ) : shouldPrimaryCompleteResume ? (
+          <FormButton
+            onClick={handlePrimaryResumeAction}
+            disabled={
+              resumeGenerating ||
+              autoGenerationInFlight ||
+              (generateNowEligible && !isReadySuccessState && !hasResumeArtifact && !resumeState.artifactFailure)
+            }
+          >
+            Complete resume
+          </FormButton>
+        ) : null}
+        {!shouldPrimaryCompleteResume ? (
+          <FormButton
+            variant={isApplicationFullyReady || isReadySuccessState || shouldPrimaryCompleteCover ? "secondary" : undefined}
+            onClick={handlePrimaryResumeAction}
+            disabled={
+              resumeGenerating ||
+              autoGenerationInFlight ||
+              (generateNowEligible && !isReadySuccessState && !hasResumeArtifact && !resumeState.artifactFailure)
+            }
+          >
+            {hasResumeArtifact || generateNowEligible ? "Resume" : "Generate Resume"}
+          </FormButton>
+        ) : null}
+        {!shouldPrimaryCompleteCover ? (
+          <FormButton
+            variant={isApplicationFullyReady || isReadySuccessState || shouldPrimaryCompleteResume ? "secondary" : undefined}
+            onClick={handlePrimaryCoverAction}
+            disabled={
+              coverGenerating ||
+              autoGenerationInFlight ||
+              (generateNowEligible && !isReadySuccessState && !hasCoverLetterArtifact && !coverState.artifactFailure)
+            }
+          >
+            {hasCoverLetterArtifact || generateNowEligible ? "Cover Letter" : "Generate Cover Letter"}
+          </FormButton>
+        ) : null}
         <Link
           href={fitReviewHref}
           className="inline-flex items-center justify-center px-1 py-2 text-sm font-semibold text-slate-100 underline decoration-slate-400/70 underline-offset-4 transition hover:decoration-slate-200"
@@ -7843,7 +7894,16 @@ export default function StudioPage() {
       ) : null} 
  
       {!generateNowEligible && !isReadySuccessState ? <StudioNextMove move={studioNextMove} /> : null} 
-      {!generateNowEligible && !isReadySuccessState ? <DocumentStrategyPlanSummary plan={documentStrategyPlan} /> : null} 
+      {!generateNowEligible && !isReadySuccessState ? (
+        <details className="rounded-2xl border border-white/10 bg-white/[0.03] p-4" data-testid="studio-document-strategy-details">
+          <summary className="cursor-pointer text-sm font-semibold text-slate-200">
+            Document strategy
+          </summary>
+          <div className="mt-3">
+            <DocumentStrategyPlanSummary plan={documentStrategyPlan} />
+          </div>
+        </details>
+      ) : null} 
  
       {showArtifactMaterials ? ( 
       <> 
@@ -7970,13 +8030,6 @@ export default function StudioPage() {
               retryLabel="Retry resume generation"
             />
           )
-        ) : resumePresenter.display && resumePresenter.status !== "blocked" ? (
-          <div className="space-y-2 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-            <p className="text-sm font-semibold text-slate-100">{resumePresenter.display.title}</p>
-            <p className="text-sm text-slate-300">{resumePresenter.display.description}</p>
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Next step</p>
-            <p className="text-sm text-slate-200">{workflowAuthority.nextStepHint}</p>
-          </div>
         ) : null}
 
         {isResumeDownloadLocked ? (
@@ -8474,7 +8527,16 @@ export default function StudioPage() {
       </> 
       ) : null} 
 
-      {generateNowEligible ? <DocumentStrategyPlanSummary plan={documentStrategyPlan} /> : null}
+      {generateNowEligible ? (
+        <details className="rounded-2xl border border-white/10 bg-white/[0.03] p-4" data-testid="studio-document-strategy-details">
+          <summary className="cursor-pointer text-sm font-semibold text-slate-200">
+            Document strategy
+          </summary>
+          <div className="mt-3">
+            <DocumentStrategyPlanSummary plan={documentStrategyPlan} />
+          </div>
+        </details>
+      ) : null}
 
       {showOptionalEvidenceStrengthening ? (
         <section
