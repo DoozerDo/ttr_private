@@ -6818,6 +6818,56 @@ export default function StudioPage() {
     workflowAuthority.workflowState,
   ]);
 
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+
+    const resumeRenderer = showLowQualityRecoveryLane && !showFullLowQualityResume
+      ? "low_quality_excerpt"
+      : generatedResumeModel
+        ? "structured_preview"
+        : resumePreviewText
+          ? "fallback_text"
+          : "none";
+
+    const coverRenderer = showLowQualityRecoveryLane && !showFullLowQualityCover
+      ? "low_quality_excerpt"
+      : coverLetterParagraphs.length
+        ? "bounded_preview"
+        : coverState.response
+          ? "unknown_payload"
+          : "none";
+
+    console.debug("[artifactRenderer]", {
+      page: "studio",
+      confidence: artifactQuality.confidence,
+      generationPhase: generationLifecycle.phase,
+      readyState: workflowAuthority.workflowState,
+      resume: {
+        renderer: resumeRenderer,
+        rawRendererUsed: resumeRenderer === "fallback_text",
+        previewTextLength: resumePreviewText.length,
+      },
+      coverLetter: {
+        renderer: coverRenderer,
+        rawRendererUsed: false,
+        paragraphCount: coverLetterParagraphs.length,
+        bodyTextLength: coverLetterParagraphs.join("\n\n").length,
+      },
+      reason: "render",
+    });
+  }, [
+    artifactQuality.confidence,
+    coverLetterParagraphs,
+    coverState.response,
+    generatedResumeModel,
+    generationLifecycle.phase,
+    resumePreviewText,
+    showFullLowQualityCover,
+    showFullLowQualityResume,
+    showLowQualityRecoveryLane,
+    workflowAuthority.workflowState,
+  ]);
+
   // Avoid flashing blocked/recovery UI before analysis hydration resolves score + readiness.
   const showReadinessRecoveryExperience =
     hasLoadedAnalysis &&
@@ -8298,7 +8348,10 @@ export default function StudioPage() {
                     </details>
                   </div>
                 ) : coverLetterParagraphs.length ? (
-                  <div className="mx-auto flex w-full max-w-[760px] flex-col space-y-4 rounded-2xl border border-white/10 bg-slate-950/80 p-6 shadow-inner">
+                  <div
+                    className="mx-auto flex w-full max-w-[760px] flex-col space-y-4 rounded-2xl border border-white/10 bg-slate-950/80 p-6 shadow-inner"
+                    data-testid="studio-cover-letter-preview-body"
+                  >
                     {coverLetterParagraphs.map((paragraph, index) => {
                       const lines = paragraph.split(/\r?\n/);
                       const isGreeting = index === 0 && /^dear\b/i.test(lines[0] ?? "");

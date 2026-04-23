@@ -5137,11 +5137,54 @@ export default function ResultsPage() {
                   <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
                     Preview of tailored cover letter
                   </p>
-                  <div className="space-y-3 rounded-xl border border-white/10 bg-slate-950/40 p-4 text-sm leading-7 text-slate-100">
-                    {buildCoverLetterParagraphs(coverLetterGenerationPayload).map((paragraph, index) => (
-                      <p key={`results-cover-letter-paragraph-${index}`}>{paragraph}</p>
-                    ))}
-                  </div>
+                  {(() => {
+                    const paragraphs = buildCoverLetterParagraphs(coverLetterGenerationPayload);
+                    const previewParagraphs = paragraphs.slice(0, 4);
+                    const truncated = paragraphs.length > previewParagraphs.length;
+                    const previewTextLength = previewParagraphs.join("\n\n").length;
+                    const bodyTextLength = paragraphs.join("\n\n").length;
+
+                    if (process.env.NODE_ENV === "development") {
+                      console.debug("[artifactRenderer]", {
+                        page: "results",
+                        artifactType: "cover_letter",
+                        confidence: productReadiness.confidence,
+                        generationPhase: effectiveResultsGenerationPhase,
+                        pairStatus: pairWorkflowState.pairStatus,
+                        renderer: "bounded_preview",
+                        rawRendererUsed: false,
+                        previewParagraphCount: previewParagraphs.length,
+                        bodyParagraphCount: paragraphs.length,
+                        previewTextLength,
+                        bodyTextLength,
+                        reason: "completed_generation",
+                      });
+                    }
+
+                    return (
+                      <div
+                        className="max-h-64 overflow-auto space-y-3 rounded-xl border border-white/10 bg-slate-950/40 p-4 text-sm leading-7 text-slate-100"
+                        data-testid="results-cover-letter-preview-body"
+                      >
+                        {previewParagraphs.map((paragraph, index) => (
+                          <p key={`results-cover-letter-paragraph-${index}`}>{paragraph}</p>
+                        ))}
+                        {truncated ? (
+                          <p className="text-xs text-slate-400">
+                            Preview truncated.{" "}
+                            {studioHref ? (
+                              <a href={studioHref} className="underline underline-offset-2 hover:text-slate-200">
+                                Open Studio
+                              </a>
+                            ) : (
+                              "Open Studio"
+                            )}{" "}
+                            to view and refine the full cover letter.
+                          </p>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : null}
             </div>
