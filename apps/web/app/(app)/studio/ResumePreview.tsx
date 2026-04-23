@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type {
   ResumeEducation,
   ResumeExperience,
@@ -144,6 +144,7 @@ export function ResumePreview({
   onBulletChange,
 }: Props) {
   const model = useMemo(() => modelOverride ?? readResumeModel(payload), [modelOverride, payload]);
+  const [expandedExperienceIndex, setExpandedExperienceIndex] = useState<number | null>(null);
 
   if (!model) {
     if (!fallbackText) return null;
@@ -193,7 +194,8 @@ export function ResumePreview({
     : [];
 
   return (
-    <div className="space-y-6" data-testid="resume-preview">
+    <div className="space-y-6" data-testid="studio-resume-workspace-root">
+      <div className="space-y-6" data-testid="resume-preview">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 pb-4">
         <div className="space-y-1">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
@@ -284,63 +286,98 @@ export function ResumePreview({
       ) : null}
 
       {experiences.length ? (
-        <section className="space-y-4">
+        <section className="space-y-4" data-testid="studio-resume-experience-section">
           <h3 className="text-xs font-semibold uppercase tracking-[0.32em] text-slate-400">
             Professional Experience
           </h3>
-          <div className="space-y-5">
-            {experiences.map((entry, experienceIndex) => (
-              <article
-                key={`${entry.company}-${entry.roleTitle}-${experienceIndex}`}
-                className="rounded-2xl border border-white/10 bg-slate-950/35 px-5 py-4"
-                data-testid="experience-entry-block"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="space-y-1">
-                    <p className="text-base font-semibold text-slate-50">{entry.company}</p>
-                    <p className="text-sm font-medium text-slate-200">
-                      {[entry.roleTitle, entry.location].filter(Boolean).join(" | ")}
-                    </p>
-                  </div>
-                  {entry.dateRange ? (
-                    <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
-                      {entry.dateRange}
-                    </p>
+          <div className="space-y-3" data-testid="studio-resume-experience-accordion">
+            {experiences.map((entry, experienceIndex) => {
+              const expanded = expandedExperienceIndex === experienceIndex;
+              const headerId = `studio-resume-experience-role-header-${experienceIndex}`;
+              const bodyId = `studio-resume-experience-role-body-${experienceIndex}`;
+
+              return (
+                <article
+                  key={`${entry.company}-${entry.roleTitle}-${experienceIndex}`}
+                  className="rounded-2xl border border-white/10 bg-slate-950/35"
+                  data-testid="experience-entry-block"
+                >
+                  <button
+                    type="button"
+                    aria-expanded={expanded}
+                    aria-controls={bodyId}
+                    onClick={() =>
+                      setExpandedExperienceIndex((current) =>
+                        current === experienceIndex ? null : experienceIndex,
+                      )
+                    }
+                    className="flex w-full items-start justify-between gap-3 rounded-2xl px-5 py-4 text-left transition hover:bg-white/[0.03]"
+                    data-testid={headerId}
+                  >
+                    <div className="space-y-1">
+                      <p className="text-base font-semibold text-slate-50">{entry.company}</p>
+                      <p className="text-sm font-medium text-slate-200">
+                        {[entry.roleTitle, entry.location].filter(Boolean).join(" | ")}
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        {entry.bullets.length} {entry.bullets.length === 1 ? "bullet" : "bullets"}
+                      </p>
+                    </div>
+                    <div className="flex items-start gap-3 text-right">
+                      {entry.dateRange ? (
+                        <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+                          {entry.dateRange}
+                        </p>
+                      ) : null}
+                      <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                        {expanded ? "Collapse" : "Expand"}
+                      </span>
+                    </div>
+                  </button>
+
+                  {expanded ? (
+                    <div id={bodyId} className="px-5 pb-5" data-testid={bodyId}>
+                      <div className="rounded-xl border border-white/10 bg-slate-950/40 p-4">
+                        <ul className="space-y-3 pl-5 text-sm leading-7 text-slate-200">
+                          {entry.bullets.map((bullet, bulletIndex) => (
+                            <li
+                              key={`${entry.company}-${entry.roleTitle}-bullet-${bulletIndex}`}
+                              className="marker:text-slate-500"
+                            >
+                              {isEditing ? (
+                                <textarea
+                                  aria-label={`Resume bullet ${experienceIndex + 1}-${bulletIndex + 1}`}
+                                  value={bullet}
+                                  onChange={(event) =>
+                                    onBulletChange?.(experienceIndex, bulletIndex, event.target.value)
+                                  }
+                                  className="min-h-[72px] w-full rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2 text-sm leading-7 text-slate-100 outline-none transition focus:border-sky-300/40"
+                                />
+                              ) : (
+                                <span
+                                  className={
+                                    matchesHighlightedClaim(bullet, claimHighlights)
+                                      ? "rounded-sm border-b border-dotted border-amber-300/80 pb-0.5 text-slate-50"
+                                      : undefined
+                                  }
+                                  title={
+                                    matchesHighlightedClaim(bullet, claimHighlights)
+                                      ? "Not yet verified"
+                                      : undefined
+                                  }
+                                >
+                                  {bullet}
+                                </span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
                   ) : null}
-                </div>
-                <ul className="mt-4 space-y-3 pl-5 text-sm leading-7 text-slate-200">
-                  {entry.bullets.map((bullet, bulletIndex) => (
-                    <li key={`${entry.company}-${entry.roleTitle}-bullet-${bulletIndex}`} className="marker:text-slate-500">
-                      {isEditing ? (
-                        <textarea
-                          aria-label={`Resume bullet ${experienceIndex + 1}-${bulletIndex + 1}`}
-                          value={bullet}
-                          onChange={(event) =>
-                            onBulletChange?.(experienceIndex, bulletIndex, event.target.value)
-                          }
-                          className="min-h-[72px] w-full rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2 text-sm leading-7 text-slate-100 outline-none transition focus:border-sky-300/40"
-                        />
-                      ) : (
-                        <span
-                          className={
-                            matchesHighlightedClaim(bullet, claimHighlights)
-                              ? "rounded-sm border-b border-dotted border-amber-300/80 pb-0.5 text-slate-50"
-                              : undefined
-                          }
-                          title={
-                            matchesHighlightedClaim(bullet, claimHighlights)
-                              ? "Not yet verified"
-                              : undefined
-                          }
-                        >
-                          {bullet}
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </article>
-            ))}
+                </article>
+              );
+            })}
           </div>
         </section>
       ) : null}
@@ -359,6 +396,7 @@ export function ResumePreview({
           </ul>
         </section>
       ) : null}
+      </div>
     </div>
   );
 }

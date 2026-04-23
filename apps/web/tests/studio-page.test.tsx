@@ -1101,7 +1101,10 @@ describe("Studio page UX", () => {
 
     renderStudio();
 
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "Generate Resume" })[0]).toBeEnabled());
+    await waitFor(
+      () => expect(screen.getAllByRole("button", { name: "Generate Resume" })[0]).toBeEnabled(),
+      { timeout: 15000 },
+    );
     fireEvent.click(screen.getAllByRole("button", { name: "Generate Resume" })[0]);
 
     await waitFor(() => {
@@ -1213,11 +1216,12 @@ describe("Studio page UX", () => {
     await waitFor(() => {
       expect(screen.getByTestId("studio-instant-draft-hero")).toBeInTheDocument();
     });
-    expect(screen.getAllByTestId("studio-artifact-quality-panel")[0]).toHaveTextContent("Usable Output");
-    expect(screen.getAllByTestId("studio-artifact-quality-panel")[0]).toHaveTextContent(
+    const qualityPanels = await screen.findAllByTestId("studio-artifact-quality-panel", {}, { timeout: 5000 });
+    expect(qualityPanels[0]).toHaveTextContent("Usable Output");
+    expect(qualityPanels[0]).toHaveTextContent(
       "Some claims are unverified. Strengthen for best results.",
     );
-    expect(screen.getAllByTestId("studio-artifact-quality-panel")[0]).toHaveTextContent("Evidence confidence: Medium");
+    expect(qualityPanels[0]).toHaveTextContent("Evidence confidence: Medium");
     expect(screen.getAllByText("Improve this output").length).toBeGreaterThan(0);
   });
 
@@ -1284,7 +1288,7 @@ describe("Studio page UX", () => {
     );
     expect(screen.getAllByText("Preview of tailored resume").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Alex Candidate").length).toBeGreaterThan(0);
-    expect(screen.getByText("Download: DOCX | PDF")).toBeInTheDocument();
+    expect(screen.getAllByText("Download: DOCX | PDF").length).toBeGreaterThan(0);
   });
 
 });

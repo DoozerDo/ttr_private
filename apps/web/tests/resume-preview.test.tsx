@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { ResumePreview } from "@/app/(app)/studio/ResumePreview";
 
 describe("ResumePreview", () => {
@@ -36,6 +36,10 @@ describe("ResumePreview", () => {
 
   it("renders discrete bullet list items", () => {
     render(<ResumePreview payload={payload} />);
+    // Collapsed by default: bullets should not be rendered yet.
+    expect(screen.queryByText("Led live operations roadmap delivery across multiple game releases.")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("studio-resume-experience-role-header-0"));
     const bullets = screen.getAllByRole("listitem");
     expect(bullets).toHaveLength(2);
     expect(screen.getByText("Led live operations roadmap delivery across multiple game releases.")).toBeInTheDocument();
