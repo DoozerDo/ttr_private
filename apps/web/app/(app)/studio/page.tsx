@@ -3512,6 +3512,34 @@ export default function StudioPage() {
     ],
   );
 
+  const isCoverFailureRetryEligible = useMemo(() => {
+    const failure = coverState.artifactFailure;
+    if (!failure) return false;
+
+    // Never retry into a readiness block (e.g., insufficient verified evidence).
+    if (coverGating.primaryBlocker === "readiness_block") return false;
+
+    // Only allow retries for transient/system-ish failures.
+    const retryableCategories: StudioArtifactFailurePresentation["category"][] = [
+      "generation_failed",
+      "generation_timeout",
+      "invalid_pair_state",
+    ];
+    return failure.retryable && retryableCategories.includes(failure.category);
+  }, [coverGating.primaryBlocker, coverState.artifactFailure]);
+
+  const isCoverFailureNonRetryable = useMemo(() => {
+    const failure = coverState.artifactFailure;
+    if (!failure) return false;
+    if (coverGating.primaryBlocker === "readiness_block") return true;
+    const nonRetryableCategories: StudioArtifactFailurePresentation["category"][] = [
+      "generation_blocked",
+      "insufficient_verified_evidence",
+      "unsupported_input",
+    ];
+    return nonRetryableCategories.includes(failure.category) || !failure.retryable;
+  }, [coverGating.primaryBlocker, coverState.artifactFailure]);
+
   const guardGenerationAction = useCallback(
     (
       documentType: "resume" | "cover_letter" | "application",
@@ -8308,30 +8336,82 @@ export default function StudioPage() {
 
         {coverState.artifactFailure ? (
           hasCompletedGeneration ? (
-            <div
-              className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
-              data-testid="cover-partial-retry-panel"
-            >
-              <div className="space-y-1">
-                <p className="text-sm font-semibold text-slate-100">Cover letter generation needs a retry</p>
-                <p className="text-sm text-slate-300">
-                  We produced usable output for this role, but the cover letter draft needs one more generation pass to
-                  complete.
-                </p>
-                <p className="text-xs text-slate-400">{coverState.artifactFailure.explanation}</p>
+            isCoverFailureRetryEligible ? (
+              <div
+                className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
+                data-testid="cover-partial-retry-panel"
+              >
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-slate-100">Cover letter generation needs a retry</p>
+                  <p className="text-sm text-slate-300">
+                    We produced usable output for this role, but the cover letter draft needs one more generation pass
+                    to complete.
+                  </p>
+                  <p className="text-xs text-slate-400">{coverState.artifactFailure.explanation}</p>
+                </div>
+                <div className="flex justify-end">
+                  <FormButton variant="secondary" onClick={() => void handleCoverDraft()}>
+                    Retry cover letter generation
+                  </FormButton>
+                </div>
               </div>
-              <div className="flex justify-end">
-                <FormButton variant="secondary" onClick={() => void handleCoverDraft()}>
-                  Retry cover letter generation
-                </FormButton>
+            ) : isCoverFailureNonRetryable ? (
+              <div
+                className="space-y-3 rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4"
+                data-testid="cover-generation-blocked-panel"
+              >
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-amber-100">Cover letter generation is blocked</p>
+                  <p className="text-sm text-slate-200">
+                    Add more verified experience to generate a complete cover letter.
+                  </p>
+                </div>
+                <div className="flex justify-end">
+                  <FormButton
+                    variant="secondary"
+                    onClick={() => focusResumeTarget({ type: "role", index: 0 })}
+                    data-testid="studio-cover-blocked-improve-resume"
+                  >
+                    Improve your resume
+                  </FormButton>
+                </div>
               </div>
-            </div>
+            ) : (
+              <ArtifactFailureState
+                failure={coverState.artifactFailure}
+                onRetry={() => void handleCoverDraft()}
+                retryLabel="Retry cover letter generation"
+              />
+            )
           ) : (
-            <ArtifactFailureState
-              failure={coverState.artifactFailure}
-              onRetry={() => void handleCoverDraft()}
-              retryLabel="Retry cover letter generation"
-            />
+            isCoverFailureRetryEligible ? (
+              <ArtifactFailureState
+                failure={coverState.artifactFailure}
+                onRetry={() => void handleCoverDraft()}
+                retryLabel="Retry cover letter generation"
+              />
+            ) : (
+              <div
+                className="space-y-3 rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4"
+                data-testid="cover-generation-blocked-panel"
+              >
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-amber-100">Cover letter generation is blocked</p>
+                  <p className="text-sm text-slate-200">
+                    Add more verified experience to generate a complete cover letter.
+                  </p>
+                </div>
+                <div className="flex justify-end">
+                  <FormButton
+                    variant="secondary"
+                    onClick={() => focusResumeTarget({ type: "role", index: 0 })}
+                    data-testid="studio-cover-blocked-improve-resume"
+                  >
+                    Improve your resume
+                  </FormButton>
+                </div>
+              </div>
+            )
           )
         ) : coverPresenter.display && !coverLetterComplianceBlocked && coverPresenter.status !== "blocked" ? (
           <div className="space-y-2 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
@@ -8458,26 +8538,44 @@ export default function StudioPage() {
             </div>
           ) : (
             coverState.error ? (
-              <div className="space-y-3 rounded-2xl border border-rose-400/30 bg-rose-500/5 p-4">
-                <p className="text-sm font-semibold text-slate-100">
-                  Cover letter generation is currently limited for this role
-                </p>
-                <p className="text-sm text-slate-200">{toConstraintMessage(coverState.error)}</p>
-                <div className="flex justify-end">
-                  {canRetryGeneration ? (
-                    <FormButton onClick={() => void handleCoverDraft()} disabled={coverGenerating}>
-                      Retry generation
-                    </FormButton>
-                  ) : (
-                    <Link
-                      href={fitReviewHref}
-                      className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
+              coverGating.primaryBlocker === "readiness_block" ? (
+                <div className="space-y-3 rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4">
+                  <p className="text-sm font-semibold text-amber-100">Cover letter generation is blocked</p>
+                  <p className="text-sm text-slate-200">
+                    Add more verified experience to generate a complete cover letter.
+                  </p>
+                  <div className="flex justify-end">
+                    <FormButton
+                      variant="secondary"
+                      onClick={() => focusResumeTarget({ type: "role", index: 0 })}
+                      data-testid="studio-cover-blocked-improve-resume"
                     >
-                      Strengthen my experience
-                    </Link>
-                  )}
+                      Improve your resume
+                    </FormButton>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-3 rounded-2xl border border-rose-400/30 bg-rose-500/5 p-4">
+                  <p className="text-sm font-semibold text-slate-100">
+                    Cover letter generation is currently limited for this role
+                  </p>
+                  <p className="text-sm text-slate-200">{toConstraintMessage(coverState.error)}</p>
+                  <div className="flex justify-end">
+                    {canRetryGeneration ? (
+                      <FormButton onClick={() => void handleCoverDraft()} disabled={coverGenerating}>
+                        Retry generation
+                      </FormButton>
+                    ) : (
+                      <Link
+                        href={fitReviewHref}
+                        className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
+                      >
+                        Strengthen my experience
+                      </Link>
+                    )}
+                  </div>
+                </div>
+              )
             ) : coverState.artifactFailure ? null : (
               <EmptyState
                 title={
