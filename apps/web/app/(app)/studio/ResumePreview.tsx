@@ -219,8 +219,8 @@ export function ResumePreview({
       <div className="space-y-8" data-testid="resume-preview">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 pb-4">
         <div className="space-y-1">
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-            {isEditing ? "Edit mode" : "Preview mode"}
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
+            Tailored resume
           </p>
           <p className="text-2xl font-semibold tracking-tight text-slate-50">
             {toText(model.heading?.name) || "Candidate"}
@@ -275,7 +275,7 @@ export function ResumePreview({
 
       {summary ? (
         <section
-          className="rounded-2xl border border-white/10 bg-slate-950/30 p-5 data-[studio-focus-highlight=true]:ring-2 data-[studio-focus-highlight=true]:ring-amber-300/60"
+          className="rounded-2xl border border-white/10 bg-slate-950/20 p-5 data-[studio-focus-highlight=true]:ring-2 data-[studio-focus-highlight=true]:ring-amber-300/60"
           data-testid="studio-resume-summary-section"
           tabIndex={-1}
         >
@@ -362,7 +362,7 @@ export function ResumePreview({
               return (
                 <article
                   key={`${entry.company}-${entry.roleTitle}-${experienceIndex}`}
-                  className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/30 data-[studio-focus-highlight=true]:ring-2 data-[studio-focus-highlight=true]:ring-amber-300/60"
+                  className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/20 data-[studio-focus-highlight=true]:ring-2 data-[studio-focus-highlight=true]:ring-amber-300/60"
                   data-testid="experience-entry-block"
                   data-studio-role-block="true"
                   data-role-index={experienceIndex}
@@ -468,10 +468,10 @@ export function ResumePreview({
             })}
           </div>
           {hasHiddenContent ? (
-            <div className="pt-2">
+            <div className="mt-2 border-t border-white/10 pt-4">
               <button
                 type="button"
-                className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.06]"
+                className="w-full rounded-xl border border-white/15 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.06]"
                 onClick={() => setShowFullResume((current) => !current)}
                 data-testid="studio-resume-show-full-toggle"
               >

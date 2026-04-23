@@ -3480,6 +3480,7 @@ export default function StudioPage() {
   const hasUsableCoverLetter = coverPresenter.status === "success" && Boolean(coverState.response);
   // Canonical READY truth: if we have any usable output, behave as READY. Confidence only modulates tone.
   const isReadySuccessState = hasUsableResume || hasUsableCoverLetter;
+  const isApplicationFullyReady = hasUsableResume && hasUsableCoverLetter;
   const [showFullLowQualityResume, setShowFullLowQualityResume] = useState(false); 
   const [showFullLowQualityCover, setShowFullLowQualityCover] = useState(false); 
   const [showOptionalEvidenceDetails, setShowOptionalEvidenceDetails] = useState(false);
@@ -6473,7 +6474,11 @@ export default function StudioPage() {
           {isReadySuccessState
             ? isApplicationApplied
               ? "Application complete"
-              : "Application ready"
+              : hasUsableResume && hasUsableCoverLetter
+                ? "Application ready"
+                : hasUsableResume
+                  ? "Resume ready"
+                  : "Cover letter ready"
             : autoGenerationInFlight || studioArtifactPairStatus === "in_progress"
               ? "Building your draft"
               : studioArtifactPairStatus === "failed"
@@ -6484,6 +6489,16 @@ export default function StudioPage() {
           {workflowAuthority.headline}
         </h1>
         <p className="max-w-3xl text-base leading-7 text-slate-200">{workflowAuthority.body}</p>
+        {isReadySuccessState && !isApplicationApplied && hasUsableResume && !hasUsableCoverLetter ? (
+          <p className="text-sm font-medium text-slate-100">
+            Resume ready. Complete your cover letter.
+          </p>
+        ) : null}
+        {isReadySuccessState && !isApplicationApplied && !hasUsableResume && hasUsableCoverLetter ? (
+          <p className="text-sm font-medium text-slate-100">
+            Cover letter ready. Complete your resume.
+          </p>
+        ) : null}
         {isReadySuccessState ? (
           <p className="text-xs font-medium text-slate-200" data-testid="studio-confidence-label">
             Confidence: {artifactQuality.confidence.toLowerCase()} (non-blocking)
@@ -6491,7 +6506,7 @@ export default function StudioPage() {
         ) : null}
       </div>
       <div className="flex flex-wrap gap-3">
-        {isReadySuccessState && !isApplicationApplied ? (
+        {isApplicationFullyReady && !isApplicationApplied ? (
           <FormButton
             onClick={handleApplyToThisRole}
             data-testid="studio-primary-cta-apply"
@@ -7870,9 +7885,7 @@ export default function StudioPage() {
             </FormButton>
           </div>
         ) : null}
-        {showResumeDownloadActions ? (
-          <p className="text-xs text-slate-400">Download: DOCX | PDF</p>
-        ) : null}
+        {/* Resume download actions are rendered as buttons; no extra status line needed here. */}
 
         {resumeState.tierGateError ? (
           <Alert intent="warning">
@@ -7928,64 +7941,6 @@ export default function StudioPage() {
           <Alert intent="warning" title="Resume edits are currently unavailable">
             {resumeEditError}
           </Alert>
-        ) : null}
-
-        {resumePresenter.status === "success" && resumeState.response ? (
-          <section
-            className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4"
-            data-testid="studio-opportunities-handoff"
-          >
-            <div className="space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-                Keep momentum
-              </p>
-              <h2 className="text-base font-semibold text-slate-50">
-                {trackerEntryId ? "Continue this role in Opportunities" : "Save this role to Opportunities"}
-              </h2>
-              <p className="text-sm text-slate-200">
-                {trackerEntryId
-                  ? "Update status and keep the application loop moving after export."
-                  : "Save the role so you can track progress after using the artifact."}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {trackerEntryId ? (
-                <FormButton onClick={handleOpenTracker}>Continue in Opportunities</FormButton>
-              ) : (
-                <Link
-                  href="/job-tracker"
-                  onClick={() => {
-                    recordOpportunityCommitIntent();
-                    setRecentIntent(readRecentIntentState());
-                    trackEvent("opportunity_commit_intent", {
-                      source: "studio",
-                      analysisId: requestedAnalysisId || undefined,
-                      hasTrackerEntry: false,
-                      action: "save",
-                    });
-                  }}
-                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
-                >
-                  Save to Opportunities
-                </Link>
-              )}
-              <Link
-                href={fitReviewHref}
-                onClick={() => {
-                  recordArtifactRefineIntent();
-                  setRecentIntent(readRecentIntentState());
-                  trackEvent("artifact_refine_intent", {
-                    source: "studio",
-                    analysisId: requestedAnalysisId || undefined,
-                    reason: workflowAuthority.workflowState,
-                  });
-                }}
-                className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
-              >
-                Refine baseline later
-              </Link>
-            </div>
-          </section>
         ) : null}
 
         {resumeState.artifactFailure ? (
@@ -8069,22 +8024,14 @@ export default function StudioPage() {
             ) : null}
           </div>
         ) : resumePresenter.status === "success" && resumeState.response ? (
-          <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-            {unlockGenerationConfirmation ? (
-              <p
-                className="text-xs font-medium uppercase tracking-[0.2em] text-emerald-200"
-                data-testid="studio-unlock-generation-confirmation"
-              >
-                {unlockGenerationConfirmation}
-              </p>
-            ) : null}
-            {resumeWarningFlags.length ? (
-              <p className="text-xs text-amber-200">
-                Verification signals detected. Personalization may be limited. See
-                Results for details.
-              </p>
-            ) : null}
-            <div className="space-y-4 rounded-xl border border-white/10 bg-slate-950/40 p-3">
+          <div
+            className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
+            data-testid="studio-resume-ready-panel"
+          >
+            <p className="text-sm text-slate-200">
+              Your resume is ready. Download or refine below.
+            </p>
+            <div className="space-y-4 rounded-xl border border-white/10 bg-slate-950/30 p-3">
               {showLowQualityRecoveryLane && !showFullLowQualityResume ? ( 
                 <div className="space-y-3" data-testid="studio-low-quality-resume-preview-main"> 
                   <div className="rounded-xl border border-amber-300/25 bg-amber-500/5 p-3">
@@ -8142,20 +8089,47 @@ export default function StudioPage() {
                 />
               )}
             </div>
-            {trackerEntryId ? (
-              <div className="rounded-2xl border border-amber-400/40 bg-amber-500/5 p-4">
-                <p className="text-xs uppercase tracking-[0.3em] text-amber-200">
-                  Track this application
-                </p>
-                <p className="text-sm text-slate-100">
-                  Save this role and update status after applying.
-                </p>
-                <div className="mt-3 flex justify-end">
-                  <FormButton onClick={handleOpenTracker}>
-                    Track Application
-                  </FormButton>
+            {!isApplicationApplied ? (
+              <section
+                className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/20 p-4"
+                data-testid="studio-opportunities-handoff"
+              >
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                    Keep momentum
+                  </p>
+                  <h2 className="text-base font-semibold text-slate-50">
+                    {trackerEntryId ? "Continue this role in Opportunities" : "Save this role to Opportunities"}
+                  </h2>
+                  <p className="text-sm text-slate-200">
+                    {trackerEntryId
+                      ? "Update status and keep the application loop moving after export."
+                      : "Save the role so you can track progress after using the artifact."}
+                  </p>
                 </div>
-              </div>
+                <div className="flex flex-wrap gap-2">
+                  {trackerEntryId ? (
+                    <FormButton onClick={handleOpenTracker}>Continue in Opportunities</FormButton>
+                  ) : (
+                    <Link
+                      href="/job-tracker"
+                      onClick={() => {
+                        recordOpportunityCommitIntent();
+                        setRecentIntent(readRecentIntentState());
+                        trackEvent("opportunity_commit_intent", {
+                          source: "studio",
+                          analysisId: requestedAnalysisId || undefined,
+                          hasTrackerEntry: false,
+                          action: "save",
+                        });
+                      }}
+                      className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                    >
+                      Save to Opportunities
+                    </Link>
+                  )}
+                </div>
+              </section>
             ) : null}
 
           </div>
@@ -8277,66 +8251,7 @@ export default function StudioPage() {
             </div>
           </section>
         ) : null}
-        {coverWarningFlags.length ? null : null}
-        {coverState.error && !coverLetterComplianceBlocked ? null : null}
-
-        {!coverLetterComplianceBlocked && coverPresenter.status === "success" && coverState.response ? (
-          <section
-            className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4"
-            data-testid="studio-opportunities-handoff"
-          >
-            <div className="space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-                Keep momentum
-              </p>
-              <h2 className="text-base font-semibold text-slate-50">
-                {trackerEntryId ? "Continue this role in Opportunities" : "Save this role to Opportunities"}
-              </h2>
-              <p className="text-sm text-slate-200">
-                {trackerEntryId
-                  ? "Update status and keep the application loop moving after export."
-                  : "Save the role so you can track progress after using the artifact."}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {trackerEntryId ? (
-                <FormButton onClick={handleOpenTracker}>Continue in Opportunities</FormButton>
-              ) : (
-                <Link
-                  href="/job-tracker"
-                  onClick={() => {
-                    recordOpportunityCommitIntent();
-                    setRecentIntent(readRecentIntentState());
-                    trackEvent("opportunity_commit_intent", {
-                      source: "studio",
-                      analysisId: requestedAnalysisId || undefined,
-                      hasTrackerEntry: false,
-                      action: "save",
-                    });
-                  }}
-                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
-                >
-                  Save to Opportunities
-                </Link>
-              )}
-              <Link
-                href={fitReviewHref}
-                onClick={() => {
-                  recordArtifactRefineIntent();
-                  setRecentIntent(readRecentIntentState());
-                  trackEvent("artifact_refine_intent", {
-                    source: "studio",
-                    analysisId: requestedAnalysisId || undefined,
-                    reason: workflowAuthority.workflowState,
-                  });
-                }}
-                className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
-              >
-                Refine baseline later
-              </Link>
-            </div>
-          </section>
-        ) : null}
+        {/* Opportunities handoff is rendered below the resume preview for post-review flow. */}
 
         {coverState.artifactFailure ? (
           hasCompletedGeneration ? (
@@ -8396,7 +8311,10 @@ export default function StudioPage() {
 
         {!coverLetterComplianceBlocked ? (
           coverPresenter.status === "success" && coverState.response ? (
-            <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+            <div
+              className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
+              data-testid="studio-cover-ready-panel"
+            >
               {unlockGenerationConfirmation ? (
                 <p
                   className="text-xs font-medium uppercase tracking-[0.2em] text-emerald-200"

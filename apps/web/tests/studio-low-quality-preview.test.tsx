@@ -162,8 +162,8 @@ describe("studio low-quality preview gating", () => {
 
     renderStudio();
 
-    await screen.findByTestId("resume-completion-panel");
-    await screen.findByTestId("cover-completion-panel");
+    await screen.findByTestId("studio-resume-ready-panel");
+    await screen.findByTestId("studio-cover-ready-panel");
 
     expect(screen.queryByText(/needs another pass/i)).toBeNull();
     expect(screen.queryByText(/draft \(low quality\)/i)).toBeNull();

@@ -243,8 +243,8 @@ describe("Studio auto-generation", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByTestId("resume-completion-panel")).toBeInTheDocument();
-      expect(screen.getByTestId("cover-completion-panel")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-resume-ready-panel")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-cover-ready-panel")).toBeInTheDocument();
     }, { timeout: 6000 });
 
     const resumeBodies = readPostBodies(fetchMock, "/api/resume");
@@ -283,8 +283,8 @@ describe("Studio auto-generation", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByTestId("resume-completion-panel")).toBeInTheDocument();
-      expect(screen.getByTestId("cover-completion-panel")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-resume-ready-panel")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-cover-ready-panel")).toBeInTheDocument();
     }, { timeout: 6000 });
 
     const resumeBodies = readPostBodies(fetchMock, "/api/resume");
@@ -433,8 +433,8 @@ describe("Studio auto-generation", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByTestId("resume-completion-panel")).toBeInTheDocument();
-      expect(screen.getByTestId("cover-completion-panel")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-resume-ready-panel")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-cover-ready-panel")).toBeInTheDocument();
     }, { timeout: 6000 });
   }, 15000);
 

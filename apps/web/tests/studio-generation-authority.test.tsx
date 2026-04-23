@@ -387,8 +387,8 @@ describe("Studio generation authority", () => {
     expect(within(readiness).queryByRole("heading", { level: 1 })).toBeNull();
 
     // Score >= 80: generation starts automatically on entry.
-    await screen.findByTestId("resume-completion-panel");
-    await screen.findByTestId("cover-completion-panel");
+    await screen.findByTestId("studio-resume-ready-panel");
+    await screen.findByTestId("studio-cover-ready-panel");
     // Success-state polish: one obvious primary action (apply) and reduced mid-page noise.
     expect(await screen.findByTestId("studio-primary-cta-apply")).toBeInTheDocument();
     expect(screen.queryByTestId("studio-decision-panel")).toBeNull();
@@ -597,11 +597,11 @@ describe("Studio generation authority", () => {
     expect(screen.queryByRole("button", { name: /generate cover letter/i })).toBeNull();
     await waitFor(() => {
       expect(
-        screen.queryByText(/Generating your resume/i) ?? screen.queryByTestId("resume-completion-panel"),
+        screen.queryByText(/Generating your resume/i) ?? screen.queryByTestId("studio-resume-ready-panel"),
       ).not.toBeNull();
     });
-    await screen.findByTestId("resume-completion-panel");
-    await screen.findByTestId("cover-completion-panel");
+    await screen.findByTestId("studio-resume-ready-panel");
+    await screen.findByTestId("studio-cover-ready-panel");
     expect(screen.getByTestId("studio-primary-cta-apply")).toBeInTheDocument();
     expect(screen.queryByTestId("studio-decision-panel")).toBeNull();
     expect(mockRouterReplace).not.toHaveBeenCalledWith(expect.stringMatching(/^\/results/));
@@ -792,16 +792,11 @@ describe("Studio generation authority", () => {
 
     renderStudio();
 
-    const completionPanel = await screen.findByTestId("resume-completion-panel");
-    expect(completionPanel).toHaveTextContent("Completed");
-    expect(completionPanel).toHaveTextContent("Your export is ready");
-    expect(completionPanel).toHaveTextContent(
-      "The export matches the draft reviewed in Studio.",
-    );
+    const completionPanel = await screen.findByTestId("studio-resume-ready-panel");
+    expect(completionPanel).toHaveTextContent("Your resume is ready. Download or refine below.");
     const handoffPanel = screen.getAllByTestId("studio-opportunities-handoff")[0];
     expect(handoffPanel).toHaveTextContent("Save this role to Opportunities");
     expect(handoffPanel).toHaveTextContent("Save to Opportunities");
-    expect(handoffPanel).toHaveTextContent("Refine baseline later");
     fireEvent.click(screen.getByRole("button", { name: "Download DOCX" }));
     await waitFor(() => {
       expect(trackEventMock).toHaveBeenCalledWith(
@@ -825,9 +820,8 @@ describe("Studio generation authority", () => {
     setupResumeSuccessFetch();
     renderStudio();
 
-    const completionPanel = await screen.findByTestId("resume-completion-panel");
-    expect(completionPanel).toHaveTextContent("Your export is ready and tracked");
-    expect(completionPanel).toHaveTextContent("Keep momentum in Opportunities");
+    const completionPanel = await screen.findByTestId("studio-resume-ready-panel");
+    expect(completionPanel).toHaveTextContent("Your resume is ready. Download or refine below.");
     expect(screen.getAllByTestId("studio-opportunities-handoff").length).toBeGreaterThan(0);
   });
 
@@ -839,9 +833,8 @@ describe("Studio generation authority", () => {
     const generateResume = await screen.findByRole("button", { name: /generate resume/i });
     fireEvent.click(generateResume);
 
-    const completionPanel = await screen.findByTestId("resume-completion-panel");
-    expect(completionPanel).toHaveTextContent("Your export is ready");
-    expect(completionPanel).toHaveTextContent("Save this role to Opportunities to keep momentum");
+    const completionPanel = await screen.findByTestId("studio-resume-ready-panel");
+    expect(completionPanel).toHaveTextContent("Your resume is ready. Download or refine below.");
   });
 
   it("shows targeted strengthening guidance for refine intent", async () => {
