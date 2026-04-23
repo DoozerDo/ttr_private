@@ -274,7 +274,7 @@ export function buildProductDecisionState(
               : canonicalDecision.readinessState === "DRAFT"
                 ? "limited"
                 : "blocked",
-          blocked: canonicalDecision.readinessState !== "READY",
+          blocked: canonicalDecision.readinessState === "BLOCKED",
           badgeLabel:
             canonicalDecision.readinessState === "READY"
               ? "READY"

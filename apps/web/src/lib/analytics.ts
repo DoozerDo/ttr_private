@@ -35,6 +35,17 @@ export const ANALYTICS_EVENT_NAMES = [
   "studio_cover_letter_copied",
   "studio_application_ready_viewed",
   "studio_application_completed_viewed",
+  "unlock_flow_entered",
+  "unlock_flow_completed",
+  "unlock_flow_skipped",
+  "unlock_reanalysis_succeeded",
+  "unlock_reanalysis_failed",
+  "unlock_outcome_viewed",
+  "unlock_generation_started",
+  "generation_ready_shell_viewed",
+  "generation_ready_shell_started",
+  "generation_ready_shell_failed",
+  "generation_ready_shell_dismissed",
   "studio_apply_clicked",
   "studio_next_role_clicked",
   "application_progress_viewed",
@@ -99,6 +110,15 @@ export const ANALYTICS_EVENT_NAMES = [
   "claim_dismissed",
   "artifact_regenerated",
   "confidence_upgraded",
+  "workflow_surface_authority_viewed",
+  "artifact_state_normalized_viewed",
+  "artifact_retry_started",
+  "artifact_retry_failed",
+  "stale_artifact_suppressed",
+  "low_confidence_artifact_viewed",
+  "workflow_activity_started",
+  "workflow_activity_completed",
+  "workflow_contract_violation_detected",
 ] as const;
 
 export type AnalyticsEventName = (typeof ANALYTICS_EVENT_NAMES)[number];
@@ -298,6 +318,176 @@ export type AnalyticsEventMap = {
     score: number | null;
     currentStatus: string | null;
     totalApplicationsCount?: number | null;
+  };
+  unlock_flow_entered: {
+    source: "studio";
+    baselineId: string | null;
+    jobId: string | null;
+    dimension: string | null;
+    evidence_count: number;
+  };
+  unlock_flow_completed: {
+    source: "studio";
+    baselineId: string | null;
+    jobId: string | null;
+    dimension: string;
+    evidence_count: number;
+  };
+  unlock_flow_skipped: {
+    source: "studio";
+    baselineId: string | null;
+    jobId: string | null;
+    dimension: string | null;
+    evidence_count: number;
+  };
+  unlock_reanalysis_succeeded: {
+    source: "studio";
+    prior_score: number | null;
+    new_score: number | null;
+    score_delta: number | null;
+    prior_readiness: "ready" | "limited" | "blocked" | null;
+    new_readiness: "ready" | "limited" | "blocked" | null;
+    outcome_state: "unlocked_ready" | "improved_still_blocked" | "no_material_change" | "reanalysis_failed";
+  };
+  unlock_reanalysis_failed: {
+    source: "studio";
+    prior_score: number | null;
+    new_score: number | null;
+    score_delta: number | null;
+    prior_readiness: "ready" | "limited" | "blocked" | null;
+    new_readiness: "ready" | "limited" | "blocked" | null;
+    outcome_state: "unlocked_ready" | "improved_still_blocked" | "no_material_change" | "reanalysis_failed";
+  };
+  unlock_outcome_viewed: {
+    source: "studio";
+    prior_score: number | null;
+    new_score: number | null;
+    score_delta: number | null;
+    prior_readiness: "ready" | "limited" | "blocked" | null;
+    new_readiness: "ready" | "limited" | "blocked" | null;
+    outcome_state: "unlocked_ready" | "improved_still_blocked" | "no_material_change" | "reanalysis_failed";
+  };
+  unlock_generation_started: {
+    source: "studio";
+    prior_score: number | null;
+    new_score: number | null;
+    score_delta: number | null;
+    prior_readiness: "ready" | "limited" | "blocked" | null;
+    new_readiness: "ready" | "limited" | "blocked" | null;
+    outcome_state: "unlocked_ready" | "improved_still_blocked" | "no_material_change" | "reanalysis_failed";
+  };
+  generation_ready_shell_viewed: {
+    source: "studio";
+    fit_score: number | null;
+    readiness_state: string | null;
+    outcome_state: "unlocked_ready" | "improved_still_blocked" | "no_material_change" | "reanalysis_failed" | null;
+  };
+  generation_ready_shell_started: {
+    source: "studio";
+    fit_score: number | null;
+    readiness_state: string | null;
+    outcome_state: "unlocked_ready" | "improved_still_blocked" | "no_material_change" | "reanalysis_failed" | null;
+    entrypoint: "shell" | "post_unlock";
+  };
+  generation_ready_shell_failed: {
+    source: "studio";
+    fit_score: number | null;
+    readiness_state: string | null;
+    outcome_state: "unlocked_ready" | "improved_still_blocked" | "no_material_change" | "reanalysis_failed" | null;
+    failure_category: string | null;
+    retryable: boolean;
+  };
+  generation_ready_shell_dismissed: {
+    source: "studio";
+    fit_score: number | null;
+    readiness_state: string | null;
+    outcome_state: "unlocked_ready" | "improved_still_blocked" | "no_material_change" | "reanalysis_failed" | null;
+    reason: "open_workspace" | "dismiss";
+  };
+  workflow_surface_authority_viewed: {
+    surface: "results" | "studio";
+    canonical_state:
+      | "hard_blocked"
+      | "unlock_required"
+      | "post_unlock_outcome"
+      | "generation_ready"
+      | "generation_in_progress"
+      | "documents_ready"
+      | "partial_documents"
+      | "generation_failed";
+    trust_tone: "blocked" | "recovery" | "ready" | "in_progress" | "complete" | "failure";
+    primary_action_destination: "fit_review" | "studio_unlock" | "studio_generate" | "studio_workspace" | "results";
+  };
+  artifact_state_normalized_viewed: {
+    surface: "results" | "studio";
+    artifact_display_state: string;
+    resume_state: string;
+    cover_state: string;
+    resume_confidence: string | null;
+    cover_confidence: string | null;
+    primary_action: string;
+  };
+  artifact_retry_started: {
+    surface: "results" | "studio";
+    artifact_display_state: string;
+    resume_state: string;
+    cover_state: string;
+    resume_confidence: string | null;
+    cover_confidence: string | null;
+    primary_action: string;
+  };
+  artifact_retry_failed: {
+    surface: "results" | "studio";
+    artifact_display_state: string;
+    resume_state: string;
+    cover_state: string;
+    resume_confidence: string | null;
+    cover_confidence: string | null;
+    primary_action: string;
+    failure_category: string | null;
+    message?: string;
+  };
+  stale_artifact_suppressed: {
+    surface: "results" | "studio";
+    artifact_display_state: string;
+    resume_state: string;
+    cover_state: string;
+    resume_confidence: string | null;
+    cover_confidence: string | null;
+    primary_action: string;
+  };
+  low_confidence_artifact_viewed: {
+    surface: "results" | "studio";
+    artifact_display_state: string;
+    resume_state: string;
+    cover_state: string;
+    resume_confidence: string | null;
+    cover_confidence: string | null;
+    primary_action: string;
+  };
+  workflow_activity_started: {
+    surface: "results" | "studio";
+    operation_type: "analysis_running" | "unlock_reanalysis_running" | "generation_running";
+  };
+  workflow_activity_completed: {
+    surface: "results" | "studio";
+    operation_type: "analysis_running" | "unlock_reanalysis_running" | "generation_running";
+    outcome: "success" | "failure";
+    duration_ms: number;
+  };
+  workflow_contract_violation_detected: {
+    violation_type: string;
+    surface: "results" | "studio" | "unknown";
+    canonical_state: string | null;
+    trust_tone: string | null;
+    unlock_active: boolean;
+    post_unlock_active: boolean;
+    generation_ready_active: boolean;
+    failure_active: boolean;
+    stale_preview_suppressed: boolean;
+    stale_preview_rendered: boolean;
+    resume_state: string | null;
+    cover_state: string | null;
   };
   studio_apply_clicked: {
     source: "studio";

@@ -183,6 +183,178 @@ describe("results auto analysis loading", () => {
     expect(screen.queryByTestId("results-hero-primary-cta")).toBeNull();
   });
 
+  it("renders a canonical workflow authority panel when documents are ready (no presentation drift)", async () => {
+    overrideSearchParams({ analysisId: "assessment-ready" });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/analysis/fit-assessments/assessment-ready")) {
+        return jsonResponse({
+          assessmentId: "assessment-ready",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          jobId: "job-1",
+          score: 79,
+          strengths: ["Strong leadership", "Operational rigor"],
+          verification_coverage: {
+            totalClaims: 3,
+            verifiedClaims: 3,
+            inferredClaims: 0,
+            unverifiedClaims: 0,
+            verifiedRequirements: ["Leadership", "Operations", "Systems"],
+            unverifiedRequirements: [],
+          },
+        });
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return jsonResponse([{ id: "base-version-1", versionNumber: 1 }]);
+      }
+      if (url.includes("/api/analysis/fit-assessments?jobId=job-1")) {
+        return jsonResponse([]);
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return jsonResponse({
+          status: "ready",
+          blocked: false,
+          reasonCodes: [],
+          reasons: [],
+          badgeLabel: "READY",
+          summary: "Ready for generation.",
+          verificationIssues: [],
+        });
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        return jsonResponse({
+          resume: { status: "COMPLETED" },
+          coverLetter: { status: "COMPLETED" },
+        });
+      }
+      return jsonResponse({}, 200);
+    });
+
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+    render(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("results-workflow-authority")).toBeInTheDocument();
+    });
+
+    const authority = screen.getByTestId("results-workflow-authority");
+    await waitFor(() => {
+      expect(authority.querySelector("[data-testid='workflow-authority-headline']")?.textContent ?? "").toContain(
+        "Your tailored documents are ready.",
+      );
+    });
+    expect(authority.querySelector("[data-testid='workflow-authority-eyebrow']")).toBeTruthy();
+    expect(authority.querySelector("[data-testid='results-hero-primary-cta']")?.textContent ?? "").toContain(
+      "Apply to this role",
+    );
+  });
+
+  it("renders generation_failed consistently when artifacts are failed and retryable", async () => {
+    overrideSearchParams({ analysisId: "assessment-failed" });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/analysis/fit-assessments/assessment-failed")) {
+        return jsonResponse({
+          assessmentId: "assessment-failed",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          jobId: "job-1",
+          score: 79,
+          strengths: [],
+          verification_coverage: { totalClaims: 0, verifiedClaims: 0, inferredClaims: 0, unverifiedClaims: 0 },
+        });
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return jsonResponse([{ id: "base-version-1", versionNumber: 1 }]);
+      }
+      if (url.includes("/api/analysis/fit-assessments?jobId=job-1")) {
+        return jsonResponse([]);
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return jsonResponse({ status: "ready", blocked: false, reasons: [], verificationIssues: [] });
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        return jsonResponse({
+          resume: { status: "FAILED" },
+          coverLetter: { status: "FAILED" },
+        });
+      }
+      return jsonResponse({}, 200);
+    });
+
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+    render(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("results-workflow-authority")).toBeInTheDocument();
+    });
+
+    const authority = screen.getByTestId("results-workflow-authority");
+    await waitFor(() => {
+      expect(authority.querySelector("[data-testid='workflow-authority-headline']")?.textContent ?? "").toContain(
+        "Document generation failed.",
+      );
+    });
+    expect(authority.querySelector("[data-testid='results-hero-primary-cta']")?.textContent ?? "").toContain(
+      "Retry generation",
+    );
+  });
+
+  it("renders generation_in_progress consistently when artifacts are generating", async () => {
+    overrideSearchParams({ analysisId: "assessment-generating" });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/analysis/fit-assessments/assessment-generating")) {
+        return jsonResponse({
+          assessmentId: "assessment-generating",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          jobId: "job-1",
+          score: 79,
+          strengths: [],
+          verification_coverage: { totalClaims: 0, verifiedClaims: 0, inferredClaims: 0, unverifiedClaims: 0 },
+        });
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return jsonResponse([{ id: "base-version-1", versionNumber: 1 }]);
+      }
+      if (url.includes("/api/analysis/fit-assessments?jobId=job-1")) {
+        return jsonResponse([]);
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return jsonResponse({ status: "ready", blocked: false, reasons: [], verificationIssues: [] });
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        return jsonResponse({
+          resume: { status: "IN_PROGRESS" },
+          coverLetter: { status: "IN_PROGRESS" },
+        });
+      }
+      return jsonResponse({}, 200);
+    });
+
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+    render(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("results-workflow-authority")).toBeInTheDocument();
+    });
+
+    const authority = screen.getByTestId("results-workflow-authority");
+    await waitFor(() => {
+      expect(authority.querySelector("[data-testid='workflow-authority-headline']")?.textContent ?? "").toContain(
+        "Generating your documents...",
+      );
+    });
+    expect(authority.querySelector("[data-testid='results-hero-primary-cta']")?.textContent ?? "").toContain(
+      "Open workspace",
+    );
+  });
+
   it("uses missing verification language when generation readiness is blocked", async () => {
     overrideSearchParams({ analysisId: "assessment-blocked", justUnlocked: "true" });
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -241,7 +413,7 @@ describe("results auto analysis loading", () => {
     expect(screen.getByTestId("results-generation-unlocked-panel")).toBeInTheDocument();
     expect(screen.getByTestId("results-generation-unlocked-panel")).toHaveTextContent(/generation unlocked/i);
     expect(screen.queryByText("No material gaps were identified in this run.")).toBeNull();
-    expect(screen.getAllByTestId("results-hero-primary-cta")[0]).toHaveTextContent("Generate Documents");
+    expect(screen.getAllByTestId("results-hero-primary-cta")[0]).toHaveTextContent("Fix evidence gaps");
     expect(consoleErrorSpy).not.toHaveBeenCalled();
     consoleErrorSpy.mockRestore();
   });
@@ -354,7 +526,7 @@ describe("results auto analysis loading", () => {
 
     render(<ResultsPage />);
 
-    await screen.findByText("Strengthen your fit before generating.");
+    await screen.findByText("Generation is blocked.");
     expect(screen.queryByRole("button", { name: /generate/i })).toBeNull();
     expect(screen.queryByRole("link", { name: /generate/i })).toBeNull();
     // The exact remediation CTA varies; the key contract is that Results does not offer generation for low fit.

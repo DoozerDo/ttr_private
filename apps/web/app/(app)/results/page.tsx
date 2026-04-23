@@ -64,12 +64,19 @@ import { buildExportPayload } from "../lib/exportPayload";
 import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
 import { buildProductDecisionState } from "@/lib/productDecisionState";
 import { resolveCanonicalState } from "@/lib/canonicalDecision";
+import { resolveWorkflowAuthority } from "@/lib/resolveWorkflowAuthority";
 import { resolvePairWorkflowState, type PairWorkflowArtifactStatus } from "@/lib/pairWorkflowState";
 import { resolvePairGenerationLifecycle } from "@/lib/pairGenerationLifecycle";
 import { tryAcquirePairGenerationLatch, releasePairGenerationLatch } from "@/lib/pairGenerationLatch";
 import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
 import { isDocumentGenerationUnlocked, isMomentumGenerationAllowed } from "@/lib/documentGenerationGate";
 import { ResultsDocumentsTeaserSection } from "@/components/results/ResultsDocumentsTeaserSection";
+import { WorkflowAuthorityPanel } from "@/components/workflow/WorkflowAuthorityPanel";
+import { WorkflowActivityBanner } from "@/components/workflow/WorkflowActivityBanner";
+import { resolveFitReviewGaps } from "@/lib/fitReviewResolver";
+import { useWorkflowActivityTracker } from "@/lib/workflowActivityTracker";
+import { useWorkflowGuardrails } from "@/lib/workflowGuardrails";
+import type { ScoreBreakdown, ScoreBreakdownDimensionKey } from "@/lib/evidenceLines";
 import {
   buildWorkflowRequestKey,
   isWorkflowRequestStale,
@@ -82,7 +89,8 @@ import { useGuidedMode } from "@/hooks/useGuidedMode";
 import { trackEvent } from "@/src/lib/analytics";
 import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
 import type { ResultsPrimaryCtaReadinessStatus } from "@/src/lib/analytics";
-import { getStudioHref } from "@/src/navigation/routes";
+import { getFitReviewHref, getStudioHref } from "@/src/navigation/routes";
+import { resolveWorkflowOrchestrator } from "@/lib/workflowOrchestrator";
 
 type ResultsArtifactStatus = "missing" | "in_progress" | "completed" | "failed";
 type ResultsGenerationPhase = "not_started" | "generating" | "generated" | "failed" | "partial";
@@ -1120,7 +1128,7 @@ export function OpportunityMapSection({
         headline: "Generation needs attention",
         body:
           finalGenerationMessage ||
-          "At least one draft did not complete. Open Studio to retry and review whatâ€™s available.",
+          "At least one draft did not complete. Open Studio to retry and review what’s available.",
       };
     }
     if (generationRecoveryUi === "finalizing") {
@@ -2051,6 +2059,12 @@ export default function ResultsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
+  const {
+    snapshot: workflowActivity,
+    run: runWorkflowActivity,
+    start: startWorkflowActivity,
+    stop: stopWorkflowActivity,
+  } = useWorkflowActivityTracker({ surface: "results", trackEvent });
   const runIdentifier = useMemo(() => {
     const candidate =
       searchParams?.get("assessmentId") ??
@@ -2166,6 +2180,38 @@ export default function ResultsPage() {
     const total_score = dimensions.reduce((sum, dimension) => sum + dimension.score, 0);
     return { total_score, dimensions };
   }, [latest?.score_breakdown, latest?.scoring_v2?.rubric]);
+
+  const scoreBreakdownForFitReview = useMemo<ScoreBreakdown | null>(() => {
+    if (!scoreBreakdown?.dimensions?.length) return null;
+    const allowed: ReadonlySet<ScoreBreakdownDimensionKey> = new Set([
+      "role_scope_and_seniority",
+      "support_operations_and_process_rigor",
+      "tooling_and_platform_experience",
+      "domain_and_business_context",
+      "change_leadership_and_customer_advocacy",
+    ]);
+
+    const dimensions = scoreBreakdown.dimensions
+      .map((dimension) => {
+        if (!dimension) return null;
+        const key = String(dimension.key ?? "").trim();
+        if (!allowed.has(key as ScoreBreakdownDimensionKey)) return null;
+        return {
+          key: key as ScoreBreakdownDimensionKey,
+          label: String(dimension.label ?? key),
+          score: typeof dimension.score === "number" ? dimension.score : Number(dimension.score) || 0,
+          weight: typeof dimension.weight === "number" ? dimension.weight : Number(dimension.weight) || 0,
+        };
+      })
+      .filter((dimension): dimension is ScoreBreakdown["dimensions"][number] => Boolean(dimension));
+
+    if (!dimensions.length) return null;
+    const total_score =
+      typeof scoreBreakdown.total_score === "number"
+        ? scoreBreakdown.total_score
+        : dimensions.reduce((sum, dimension) => sum + dimension.score, 0);
+    return { total_score, dimensions };
+  }, [scoreBreakdown]);
 
   const scoringV2 = latest?.scoring_v2 ?? null;
   const scoreConfidenceReasons = latest?.scoreConfidenceReasons ?? scoringV2?.scoreConfidenceReasons ?? [];
@@ -2597,6 +2643,328 @@ export default function ResultsPage() {
   ]);
 
   const canOpenStudio = pairWorkflowState.primaryCta !== "fix_context" && pairWorkflowState.score !== null;
+  const sharedWorkflowAuthority = useMemo(
+    () =>
+      resolveWorkflowAuthority({
+        score: typeof activeScore === "number" ? activeScore : null,
+        generationReadiness: resultsReadiness,
+        resumeState: {
+          hasOutput: pairWorkflowState.resumeStatus === "ready",
+          failed: pairWorkflowState.resumeStatus === "failed",
+        },
+        coverState: {
+          hasOutput: pairWorkflowState.coverLetterStatus === "ready",
+          failed: pairWorkflowState.coverLetterStatus === "failed",
+        },
+        isPro: true,
+        hasGeneratedOnce: pairWorkflowState.pairStatus === "generated",
+        isHydrating: Boolean(loadingLatest || loading),
+      }),
+    [
+      activeScore,
+      loading,
+      loadingLatest,
+      pairWorkflowState.coverLetterStatus,
+      pairWorkflowState.pairStatus,
+      pairWorkflowState.resumeStatus,
+      resultsReadiness,
+    ],
+  );
+
+  const unlockRequirementCandidates = useMemo(() => {
+    const fromCoverage = Array.isArray(latest?.verification_coverage?.unverifiedRequirements)
+      ? latest?.verification_coverage?.unverifiedRequirements
+      : [];
+    const fromIssues = resultsReadiness.verificationIssues
+      .map((issue) => issue.claim)
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+
+    return Array.from(
+      new Set([...fromCoverage, ...fromIssues].map((value) => String(value ?? "").replace(/\s+/g, " ").trim())),
+    )
+      .filter(Boolean)
+      .slice(0, 12);
+  }, [latest?.verification_coverage?.unverifiedRequirements, resultsReadiness.verificationIssues]);
+
+  const resultsUnlockSuggestion = useMemo(() => {
+    return resolveFitReviewGaps({
+      gapAnalysis: {
+        unverifiedRequirements: unlockRequirementCandidates,
+      },
+      scoreBreakdown: scoreBreakdownForFitReview,
+    });
+  }, [scoreBreakdownForFitReview, unlockRequirementCandidates]);
+
+  const studioUnlockHref = useMemo(() => {
+    const resolvedBaselineId = latest?.baselineId ?? baselineId ?? null;
+    const resolvedJobId = latest?.jobId ?? jobId ?? null;
+    const resolvedAnalysisId = latest?.assessmentId ?? runIdentifier ?? null;
+    const resolvedBaselineVersionId = latest?.baselineVersionId ?? currentBaselineVersionId ?? null;
+    const dimension = resultsUnlockSuggestion.primaryGap.dimension;
+    const missingEvidence = resultsUnlockSuggestion.primaryGap.missingEvidence;
+
+    if (!missingEvidence.length) {
+      return getFitReviewHref({
+        baselineId: resolvedBaselineId,
+        jobId: resolvedJobId,
+        baselineVersionId: resolvedBaselineVersionId,
+        assessmentId: resolvedAnalysisId,
+        analysisId: resolvedAnalysisId,
+      });
+    }
+
+    return getStudioHref({
+      baselineId: resolvedBaselineId,
+      jobId: resolvedJobId,
+      baselineVersionId: resolvedBaselineVersionId,
+      assessmentId: resolvedAnalysisId,
+      analysisId: resolvedAnalysisId,
+      fromUnlock: true,
+      unlockDimension: dimension,
+      missingEvidence,
+    });
+  }, [
+    baselineId,
+    currentBaselineVersionId,
+    jobId,
+    latest?.assessmentId,
+    latest?.baselineId,
+    latest?.baselineVersionId,
+    latest?.jobId,
+    resultsUnlockSuggestion.primaryGap.dimension,
+    resultsUnlockSuggestion.primaryGap.missingEvidence,
+    runIdentifier,
+  ]);
+
+  const workflowOrchestrator = useMemo(() => {
+    const mapStatus = (value: PairWorkflowArtifactStatus): "missing" | "generating" | "ready" | "failed" => {
+      if (value === "ready") return "ready";
+      if (value === "failed") return "failed";
+      if (value === "generating" || value === "pending") return "generating";
+      return "missing";
+    };
+
+    const hasResume = pairWorkflowState.resumeStatus === "ready";
+    const hasCoverLetter = pairWorkflowState.coverLetterStatus === "ready";
+
+    return resolveWorkflowOrchestrator({
+      surface: "results",
+      score: typeof activeScore === "number" ? activeScore : null,
+      generationReadiness: resultsReadiness,
+      workflowAuthority: sharedWorkflowAuthority,
+      artifact: {
+        hasResume,
+        hasCoverLetter,
+        pairStatus: pairWorkflowState.pairStatus ?? null,
+        generating: pairWorkflowState.pairStatus === "generating",
+        failure:
+          pairWorkflowState.pairStatus === "generation_failed"
+            ? { category: "generation_failed", retryable: true }
+            : null,
+      },
+      resume: {
+        status: mapStatus(pairWorkflowState.resumeStatus),
+        confidence: productReadiness.confidence ?? null,
+        failure:
+          pairWorkflowState.resumeStatus === "failed"
+            ? { category: "generation_failed", retryable: !Boolean(resultsReadiness.blocked) }
+            : null,
+      },
+      coverLetter: {
+        status: mapStatus(pairWorkflowState.coverLetterStatus),
+        confidence: productReadiness.confidence ?? null,
+        failure:
+          pairWorkflowState.coverLetterStatus === "failed"
+            ? { category: "generation_failed", retryable: !Boolean(resultsReadiness.blocked) }
+            : null,
+      },
+      artifactQuality: { confidence: productReadiness.confidence ?? null },
+      searchParamsString: searchParams?.toString() ?? "",
+      unlockDismissed: true,
+      unlockReanalysisFailure: null,
+      postUnlock: {
+        active: false,
+        dismissed: true,
+        priorScore: null,
+        priorReadiness: null,
+        newReadiness: null,
+        reanalysisFailed: false,
+        generationAllowedNow: false,
+        returnToEvidenceHref: "",
+      },
+      generationReady: { dismissed: true, phase: "ready" },
+      resumeFailure: null,
+      coverFailure: null,
+      activity: workflowActivity,
+      allowStaleArtifactPreview: false,
+    });
+  }, [
+    activeScore,
+    pairWorkflowState.coverLetterStatus,
+    pairWorkflowState.pairStatus,
+    pairWorkflowState.resumeStatus,
+    productReadiness.confidence,
+    resultsReadiness,
+    resultsReadiness.blocked,
+    searchParams,
+    sharedWorkflowAuthority,
+    workflowActivity,
+  ]);
+
+  const workflowSurfaceAuthority = workflowOrchestrator.authorityState;
+
+  const workflowSurfaceAuthorityTrackedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const signature = [
+      workflowSurfaceAuthority.canonicalState,
+      workflowSurfaceAuthority.trustTone,
+      workflowSurfaceAuthority.primaryAction.destination,
+    ].join("|");
+    if (workflowSurfaceAuthorityTrackedRef.current === signature) return;
+    workflowSurfaceAuthorityTrackedRef.current = signature;
+
+    trackEvent("workflow_surface_authority_viewed", {
+      surface: "results",
+      canonical_state: workflowSurfaceAuthority.canonicalState,
+      trust_tone: workflowSurfaceAuthority.trustTone,
+      primary_action_destination: workflowSurfaceAuthority.primaryAction.destination,
+    });
+  }, [
+    trackEvent,
+    workflowSurfaceAuthority.canonicalState,
+    workflowSurfaceAuthority.primaryAction.destination,
+    workflowSurfaceAuthority.trustTone,
+  ]);
+
+  const normalizedArtifacts = workflowOrchestrator.artifactState;
+
+  const normalizedArtifactsPanelModel = useMemo(() => {
+    const state = normalizedArtifacts.artifactDisplayState;
+
+    const headline = normalizedArtifacts.primaryArtifactTruth.headline;
+    const body = normalizedArtifacts.primaryArtifactTruth.body;
+
+    if (state === "none") return null;
+
+    if (state === "both_ready_high_confidence") {
+      return { canonicalState: "documents_ready" as const, trustTone: "complete" as const, headline, body };
+    }
+
+    if (state === "both_ready_mixed_confidence") {
+      return { canonicalState: "documents_ready" as const, trustTone: "ready" as const, headline, body };
+    }
+
+    if (state === "stale_output_hidden") {
+      return {
+        canonicalState: workflowSurfaceAuthority.canonicalState,
+        trustTone: workflowSurfaceAuthority.trustTone,
+        headline,
+        body,
+      };
+    }
+
+    if (state === "both_failed_retryable") {
+      return { canonicalState: "generation_failed" as const, trustTone: "failure" as const, headline, body };
+    }
+
+    if (state === "both_failed_non_retryable") {
+      return { canonicalState: "hard_blocked" as const, trustTone: "blocked" as const, headline, body };
+    }
+
+    if (state === "partial_failure_retryable" || state === "partial_failure_non_retryable") {
+      return { canonicalState: "partial_documents" as const, trustTone: "recovery" as const, headline, body };
+    }
+
+    if (state === "resume_only_ready" || state === "cover_only_ready") {
+      return { canonicalState: "partial_documents" as const, trustTone: "recovery" as const, headline, body };
+    }
+
+    return { canonicalState: "partial_documents" as const, trustTone: "recovery" as const, headline, body };
+  }, [
+    normalizedArtifacts.artifactDisplayState,
+    normalizedArtifacts.primaryArtifactTruth.body,
+    normalizedArtifacts.primaryArtifactTruth.headline,
+    workflowSurfaceAuthority.canonicalState,
+    workflowSurfaceAuthority.trustTone,
+  ]);
+
+  useWorkflowGuardrails({
+    surface: "results",
+    orchestrator: workflowOrchestrator,
+    rendered: {
+      workflowAuthorityPanel: true,
+      unlockFlow: false,
+      postUnlockOutcome: false,
+      generationReadyShell: false,
+      artifactTruthPanel: Boolean(normalizedArtifactsPanelModel),
+      staleArtifactPreview: false,
+      activityBanner: true,
+    },
+    context: {
+      failureActive: workflowSurfaceAuthority.canonicalState === "generation_failed",
+      resumeState: pairWorkflowState.resumeStatus,
+      coverState: pairWorkflowState.coverLetterStatus,
+    },
+    orchestratorViolations: workflowOrchestrator.diagnostics?.violations ?? null,
+    trackEvent,
+  });
+
+  const normalizedArtifactsTrackedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const signature = [
+      normalizedArtifacts.artifactDisplayState,
+      pairWorkflowState.resumeStatus,
+      pairWorkflowState.coverLetterStatus,
+      productReadiness.confidence ?? "none",
+      normalizedArtifacts.primaryAction.action,
+    ].join("|");
+
+    if (normalizedArtifactsTrackedRef.current === signature) return;
+    normalizedArtifactsTrackedRef.current = signature;
+
+    trackEvent("artifact_state_normalized_viewed", {
+      surface: "results",
+      artifact_display_state: normalizedArtifacts.artifactDisplayState,
+      resume_state: pairWorkflowState.resumeStatus,
+      cover_state: pairWorkflowState.coverLetterStatus,
+      resume_confidence: productReadiness.confidence ?? null,
+      cover_confidence: productReadiness.confidence ?? null,
+      primary_action: normalizedArtifacts.primaryAction.action,
+    });
+
+    if (normalizedArtifacts.shouldSuppressStalePreview) {
+      trackEvent("stale_artifact_suppressed", {
+        surface: "results",
+        artifact_display_state: normalizedArtifacts.artifactDisplayState,
+        resume_state: pairWorkflowState.resumeStatus,
+        cover_state: pairWorkflowState.coverLetterStatus,
+        resume_confidence: productReadiness.confidence ?? null,
+        cover_confidence: productReadiness.confidence ?? null,
+        primary_action: normalizedArtifacts.primaryAction.action,
+      });
+    }
+
+    if (normalizedArtifacts.shouldShowLowConfidenceWarning) {
+      trackEvent("low_confidence_artifact_viewed", {
+        surface: "results",
+        artifact_display_state: normalizedArtifacts.artifactDisplayState,
+        resume_state: pairWorkflowState.resumeStatus,
+        cover_state: pairWorkflowState.coverLetterStatus,
+        resume_confidence: productReadiness.confidence ?? null,
+        cover_confidence: productReadiness.confidence ?? null,
+        primary_action: normalizedArtifacts.primaryAction.action,
+      });
+    }
+  }, [
+    normalizedArtifacts.artifactDisplayState,
+    normalizedArtifacts.primaryAction.action,
+    normalizedArtifacts.shouldShowLowConfidenceWarning,
+    normalizedArtifacts.shouldSuppressStalePreview,
+    pairWorkflowState.coverLetterStatus,
+    pairWorkflowState.resumeStatus,
+    productReadiness.confidence,
+    trackEvent,
+  ]);
 
   const generationLifecycle = useMemo(
     () =>
@@ -2789,6 +3157,15 @@ export default function ResultsPage() {
     runIdentifier,
     studioHrefFromLatest,
   ]);
+  const studioGenerateHref = useMemo(() => {
+    try {
+      const url = new URL(studioNavigationHref, "https://example.local");
+      url.searchParams.set("intent", "generate");
+      return `${url.pathname}${url.search}`;
+    } catch {
+      return studioNavigationHref;
+    }
+  }, [studioNavigationHref]);
 
   // Product contract: at score >= 80, Results is not a stopping point. Route directly into Studio.
   const hasTrackedResultsCompletedRef = useRef(false);
@@ -3576,6 +3953,8 @@ export default function ResultsPage() {
       setGenerationMutationError(null);
       generationRequestedAtRef.current = Date.now();
       setResultsGenerationPhase("generating");
+      startWorkflowActivity("generation_running");
+      let activityOutcome: "success" | "failure" = "failure";
 
       const baseFields = {
         jobId: pairIds.jobId,
@@ -3657,6 +4036,7 @@ export default function ResultsPage() {
       };
 
       try {
+      try {
         const firstOnly: Array<"resume" | "coverLetter"> = [];
         if (needsResume) firstOnly.push("resume");
         if (needsCoverLetter) firstOnly.push("coverLetter");
@@ -3664,6 +4044,7 @@ export default function ResultsPage() {
         if (generationRecoveryRequestIdRef.current !== requestId) return;
         if (first.resumeOk && first.coverOk) {
           setGenerationRecoveryStage("idle");
+          activityOutcome = "success";
           return;
         }
 
@@ -3675,6 +4056,7 @@ export default function ResultsPage() {
         if (generationRecoveryRequestIdRef.current !== requestId) return;
         if (second.resumeOk && second.coverOk) {
           setGenerationRecoveryStage("idle");
+          activityOutcome = "success";
           return;
         }
 
@@ -3686,6 +4068,7 @@ export default function ResultsPage() {
         if (generationRecoveryRequestIdRef.current !== requestId) return;
         if (third.resumeOk && third.coverOk) {
           setGenerationRecoveryStage("idle");
+          activityOutcome = "success";
           return;
         }
 
@@ -3696,12 +4079,17 @@ export default function ResultsPage() {
         setGenerationRecoveryStage("exhausted");
         setGenerationRecoveryExhausted(true);
       }
+      } finally {
+        await stopWorkflowActivity("generation_running", activityOutcome);
+      }
     },
     [
       resultsArtifactScope,
       resultsArtifactStatuses.coverLetter,
       resultsArtifactStatuses.resume,
       resultsGenerationPhase,
+      startWorkflowActivity,
+      stopWorkflowActivity,
       shouldAutoRecoverGeneration,
     ],
   );
@@ -4410,15 +4798,20 @@ export default function ResultsPage() {
           jobId: targetJobId,
           baselineId: targetBaselineId,
         });
-        const runResponse = await fetch("/api/analysis/run", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            jobId: targetJobId,
-            baselineId: targetBaselineId,
-          }),
-        });
+        const runResponse = await runWorkflowActivity(
+          "analysis_running",
+          () =>
+            fetch("/api/analysis/run", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify({
+                jobId: targetJobId,
+                baselineId: targetBaselineId,
+              }),
+            }),
+          { outcomeFromResult: (res) => (res.ok ? "success" : "failure") },
+        );
         console.log("SCORING RESPONSE:", runResponse);
 
         const runPayload = await readResponsePayload(runResponse.clone());
@@ -4698,15 +5091,20 @@ export default function ResultsPage() {
     setReanalysisRunning(true);
     setError(null);
     try {
-      const response = await fetch("/api/analysis/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          jobId: targetJobId,
-          baselineId: targetBaselineId,
-        }),
-      });
+      const response = await runWorkflowActivity(
+        "analysis_running",
+        () =>
+          fetch("/api/analysis/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({
+              jobId: targetJobId,
+              baselineId: targetBaselineId,
+            }),
+          }),
+        { outcomeFromResult: (res) => (res.ok ? "success" : "failure") },
+      );
       console.log("SCORING RESPONSE:", response);
       const payload = await readResponsePayload(response.clone());
       if (!response.ok) {
@@ -4768,6 +5166,7 @@ export default function ResultsPage() {
 
   return (
     <PageShell className="results-page-theme">
+      <WorkflowActivityBanner tracker={workflowActivity} />
       <div className="space-y-5">
         <PageHeader
           title="Your result"
@@ -4776,35 +5175,31 @@ export default function ResultsPage() {
           }
         />
         {scorePresentationMode !== "normal" ? (
-          <section
-            className={`rounded-2xl border p-4 ${
-              scorePresentationMode === "fix_first"
-                ? "border-amber-300/30 bg-amber-500/10"
-                : "border-sky-300/30 bg-sky-500/10"
-            }`}
-          >
-            <p
-              className={`text-sm font-semibold ${
-                scorePresentationMode === "fix_first" ? "text-amber-100" : "text-sky-100"
-              }`}
-            >
-              {scorePresentationMode === "fix_first"
-                ? "We may be underestimating your fit."
-                : "This score has some uncertainty."}
-            </p>
-            <p className="mt-1 text-sm text-slate-100">
-              {scorePresentationMode === "fix_first"
-                ? "We found relevant experience, but the resume does not clearly show ownership for this role."
-                : "Relevant evidence is present, but some signals are still mixed or partially translated."}
-            </p>
-            {scoreConfidenceReasons.length ? (
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-100">
-                {scoreConfidenceReasons.slice(0, 2).map((reason: string) => (
-                  <li key={reason}>{reason}</li>
-                ))}
-              </ul>
-            ) : null}
-          </section>
+          <WorkflowAuthorityPanel
+            testId="results-score-uncertainty"
+            eyebrow={scorePresentationMode === "fix_first" ? "Low confidence" : "Uncertainty"}
+            model={{
+              canonicalState: workflowSurfaceAuthority.canonicalState,
+              headline:
+                scorePresentationMode === "fix_first"
+                  ? "We may be underestimating your fit."
+                  : "This score has some uncertainty.",
+              body:
+                scorePresentationMode === "fix_first"
+                  ? "We found relevant experience, but the resume does not clearly show ownership for this role."
+                  : "Relevant evidence is present, but some signals are still mixed or partially translated.",
+              trustTone: scorePresentationMode === "fix_first" ? "recovery" : "ready",
+            }}
+            supporting={
+              scoreConfidenceReasons.length ? (
+                <ul className="list-disc space-y-1 pl-5 text-sm text-slate-100">
+                  {scoreConfidenceReasons.slice(0, 2).map((reason: string) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              ) : null
+            }
+          />
         ) : null}
         {false ? (
           <section className="rounded-2xl border border-amber-300/30 bg-amber-500/10 p-4">
@@ -4814,230 +5209,179 @@ export default function ResultsPage() {
             </p>
           </section>
         ) : null}
-        <section
-          className={`rounded-2xl border p-4 ${
-            scorePresentationMode === "fix_first"
-                ? "border-amber-300/30 bg-amber-500/10"
-                : pairWorkflowState.pairStatus === "generated"
-                  ? "border-emerald-300/30 bg-emerald-500/10"
-                  : pairWorkflowState.pairStatus === "generating" || pairWorkflowState.pairStatus === "generation_failed"
-                    ? "border-amber-300/30 bg-amber-500/10"
-                    : "border-slate-700/60 bg-slate-900/45"
-          }`}
-        >
-          <p
-            className={`text-sm font-semibold ${
-              scorePresentationMode === "fix_first"
-                  ? "text-amber-100"
-                  : pairWorkflowState.pairStatus === "generated"
-                    ? "text-emerald-100"
-                    : pairWorkflowState.pairStatus === "generating" || pairWorkflowState.pairStatus === "generation_failed"
-                      ? "text-amber-100"
-                      : "text-amber-100"
-            }`}
-          >
-            {scorePresentationMode === "fix_first"
-                ? "We may be underestimating your fit."
-                : pairWorkflowState.pairStatus === "generating"
-                  ? "Generating your documents..."
-                  : pairWorkflowState.pairStatus === "generated"
-                    ? "Your documents are ready."
-                    : pairWorkflowState.pairStatus === "generation_failed"
-                      ? "Generation failed"
-                      : resultsDecision.headline}
-          </p>
-          <p className="mt-1 text-sm text-slate-100">
-            {scorePresentationMode === "fix_first"
-                ? "This score looks low confidence. Fix the evidence story first, then rerun generation."
-                : pairWorkflowState.pairStatus === "generating"
-                  ? "We’re drafting your resume and cover letter now."
-                  : pairWorkflowState.pairStatus === "generated"
-                    ? "Review and refine your documents in Studio."
-                    : pairWorkflowState.pairStatus === "generation_failed"
-                      ? "Retry generation, or open Studio to adjust inputs and try again."
-                      : resultsDecision.subtext}
-          </p>
-          {pairWorkflowState.pairStatus === "generating" ||
-          pairWorkflowState.pairStatus === "generation_failed" ? (
-            <>
-              <p className="mt-2 text-sm font-medium text-slate-200">
-                {opportunityMapGenerationRecoveryUi === "finalizing"
-                  ? "Finalizing your documents..."
-                  : pairWorkflowState.pairStatus === "generating"
-                  ? "Generating your documents..."
-                  : "Generation failed."}
-              </p>
-              {opportunityMapGenerationRecoveryUi === "finalizing" ? (
-                <p className="mt-1 text-sm text-slate-300">
-                  Keep this tab open. Weâ€™ll update as soon as the drafts are ready.
-                </p>
-              ) : pairWorkflowState.pairStatus === "generating" ? (
-                <p className="mt-1 text-sm text-slate-300">
-                  Keep this tab open. You can review drafts in Studio as soon as they finish.
-                </p>
-              ) : generationRecoveryExhausted ? (
-                <p className="mt-1 text-sm text-slate-300">
-                  Draft status:{" "}
-                  <span className="font-medium text-slate-100">{pairWorkflowState.resumeStatus}</span> · Cover letter:{" "}
-                  <span className="font-medium text-slate-100">{pairWorkflowState.coverLetterStatus}</span>
-                </p>
-              ) : null}
-            </>
-          ) : canonicalResultsDecision.readinessState === "READY" ? (
-            <>
-              <p className="mt-2 text-sm font-medium text-emerald-100">
-                Confidence: {productReadiness.confidence === "HIGH" ? "High" : "Medium"}
-              </p>
-              <p className="mt-1 text-sm text-emerald-50">
-                {productReadiness.confidence === "HIGH"
-                  ? "Your profile is grounded enough to generate in Studio."
-                  : "Your materials are ready to generate now. Review them in Studio before applying."}
-              </p>
-              <p className="mt-1 text-xs text-emerald-100/80">Review the draft in Studio before applying.</p>
-            </>
-          ) : (
-            <>
-              <p className="mt-2 text-sm font-medium text-slate-200">
-                {productReadiness.confidence === "HIGH"
-                  ? "Confidence: High"
-                  : productReadiness.confidence === "MEDIUM"
-                    ? "Confidence: Medium"
-                    : "Confidence: Low"}
-              </p>
-              <p className="mt-1 text-sm text-slate-300">
-                {productReadiness.confidence === "HIGH"
-                  ? "Your profile is grounded enough to generate in Studio."
-                  : productReadiness.confidence === "MEDIUM"
-                    ? "A few details still need sharper grounding."
-                    : "This result still needs stronger grounding before generation."}
-              </p>
-            </>
-          )}
-          <div className="mt-3">
-            {(() => {
-              const heroPrimaryCta = opportunityMapPrimaryCta ?? oneClickResultsCta;
-              const isOverrideCta = heroPrimaryCta !== oneClickResultsCta;
-              if (!heroPrimaryCta) return null;
-              return pairWorkflowState.primaryCta === "fix_context" ? (
-                <button
-                  type="button"
-                  data-testid="results-hero-primary-cta"
-                  onClick={() => router.push("/baseline")}
-                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
-                >
-                  Return to Baseline
-                </button>
-              ) : pairWorkflowState.pairStatus === "generating" ? (
-                <span
-                  data-testid="results-hero-primary-cta"
-                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2 text-sm font-semibold text-slate-200"
-                >
-                  Generating...
-                </span>
-              ) : pairWorkflowState.primaryCta === "view_documents" ||
-                pairWorkflowState.primaryCta === "open_studio" ? (
-                <button
-                  type="button"
-                  data-testid="results-hero-primary-cta"
-                  onClick={() => {
+        <div className="space-y-6">
+          <WorkflowAuthorityPanel
+            testId="results-workflow-authority"
+            model={{
+              canonicalState: workflowSurfaceAuthority.canonicalState,
+              headline:
+                scorePresentationMode === "fix_first"
+                  ? "We may be underestimating your fit."
+                  : workflowSurfaceAuthority.headline,
+              body:
+                scorePresentationMode === "fix_first"
+                  ? "This score looks low confidence. Fix the evidence story first, then rerun generation."
+                  : workflowSurfaceAuthority.body,
+              trustTone: scorePresentationMode === "fix_first" ? "recovery" : workflowSurfaceAuthority.trustTone,
+            }}
+            primaryAction={(() => {
+              const action = workflowSurfaceAuthority.primaryAction;
+              if (action.destination === "studio_unlock") {
+                return { label: action.label, onClick: () => router.push(studioUnlockHref), testId: "results-hero-primary-cta" };
+              }
+              if (action.destination === "studio_generate") {
+                return { label: action.label, onClick: () => router.push(studioGenerateHref), testId: "results-hero-primary-cta" };
+              }
+              if (action.destination === "fit_review") {
+                return { label: action.label, onClick: () => router.push(fitReviewPath), testId: "results-hero-primary-cta" };
+              }
+              if (action.destination === "studio_workspace") {
+                return {
+                  label: action.label,
+                  onClick: () => {
                     oneClickResultsCta?.onClick?.();
                     router.push(studioNavigationHref);
-                  }}
-                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
-                >
-                  Open in Studio
-                </button>
-              ) : pairWorkflowState.primaryCta === "generate" ? (
-                heroPrimaryCta.disabled ? (
-                  <span
-                    data-testid="results-hero-primary-cta"
-                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2 text-sm font-semibold text-slate-400"
-                  >
-                    {heroPrimaryCta.label}
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    data-testid="results-hero-primary-cta"
-                    onClick={() => {
-                      if (process.env.NODE_ENV !== "production") {
-                        console.log("[RESULTS][GENERATE_CLICK]");
-                      }
-                      heroPrimaryCta.onClick?.();
-                      if (!isOverrideCta) {
-                        if (shouldAutoRecoverGeneration) {
-                          void runGenerationRecovery(generationRecoveryExhausted ? { force: true } : undefined);
-                        } else {
-                          void triggerResultsGeneration();
-                        }
-                      }
-                    }}
-                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
-                  >
-                    {heroPrimaryCta.label}
-                  </button>
-                )
-              ) : heroPrimaryCta.disabled ? (
-                <span
-                  data-testid="results-hero-primary-cta"
-                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2 text-sm font-semibold text-slate-400"
-                >
-                  {heroPrimaryCta.label}
-                </span>
-              ) : heroPrimaryCta.href ? (
-                isResultsGenerationPrimaryAction || canonicalResultsDecision.primaryAction.kind === "invoke" ? (
-                  <button
-                    type="button"
-                    data-testid="results-hero-primary-cta"
-                    onClick={() => {
-                      if (process.env.NODE_ENV !== "production") {
-                        console.log("[RESULTS][GENERATE_CLICK]");
-                      }
-                      heroPrimaryCta.onClick?.();
-                      void triggerResultsGeneration();
-                    }}
-                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
-                  >
-                    {heroPrimaryCta.label}
-                  </button>
-                ) : (
-                  <a
-                    data-testid="results-hero-primary-cta"
-                    href={heroPrimaryCta.href}
-                    onClick={heroPrimaryCta.onClick}
-                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
-                  >
-                    {heroPrimaryCta.label}
-                  </a>
-                )
-              ) : null
+                  },
+                  testId: "results-hero-primary-cta",
+                };
+              }
+              return { label: action.label, onClick: () => router.push(studioNavigationHref), testId: "results-hero-primary-cta" };
             })()}
-          </div>
-          {pairWorkflowState.pairStatus === "generated" ? (
-            <div className="mt-6 space-y-5" data-testid="results-generated-documents">
-              <div className="space-y-1">
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Documents</p>
-                <p className="text-lg font-semibold text-slate-50">Your drafts</p>
-                <p className="text-sm text-slate-300">
-                  Documents come first. Add more evidence after you review and refine these drafts.
-                </p>
+            secondaryAction={workflowSurfaceAuthority.secondaryAction ? {
+              label: workflowSurfaceAuthority.secondaryAction.label,
+              onClick: () => {
+                const dest = workflowSurfaceAuthority.secondaryAction?.destination;
+                if (dest === "fit_review") router.push(fitReviewPath);
+                else if (dest === "studio_generate") router.push(studioGenerateHref);
+                else if (dest === "studio_unlock") router.push(studioUnlockHref);
+                else if (dest === "studio_workspace") router.push(studioNavigationHref);
+              },
+              testId: "results-hero-secondary-cta",
+              variant: "secondary",
+            } : null}
+            supporting={
+              <div className="space-y-2">
+                {workflowSurfaceAuthority.canonicalState === "generation_in_progress" ||
+                workflowSurfaceAuthority.canonicalState === "generation_failed" ? (
+                  <>
+                    <p className="text-sm font-medium text-slate-200">
+                      {opportunityMapGenerationRecoveryUi === "finalizing"
+                        ? "Finalizing your documents..."
+                        : workflowSurfaceAuthority.canonicalState === "generation_in_progress"
+                          ? "Generating your documents..."
+                          : "Generation failed."}
+                    </p>
+                    {opportunityMapGenerationRecoveryUi === "finalizing" ? (
+                      <p className="text-sm text-slate-300">
+                        Keep this tab open. We'll update as soon as the drafts are ready.
+                      </p>
+                    ) : workflowSurfaceAuthority.canonicalState === "generation_in_progress" ? (
+                      <p className="text-sm text-slate-300">
+                        Keep this tab open. You can review drafts in Studio as soon as they finish.
+                      </p>
+                    ) : generationRecoveryExhausted ? (
+                      <p className="text-sm text-slate-300">
+                        Draft status:{" "}
+                        <span className="font-medium text-slate-100">{pairWorkflowState.resumeStatus}</span> · Cover letter:{" "}
+                        <span className="font-medium text-slate-100">{pairWorkflowState.coverLetterStatus}</span>
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm font-medium text-slate-200">
+                      {productReadiness.confidence === "HIGH"
+                        ? "Confidence: High"
+                        : productReadiness.confidence === "MEDIUM"
+                          ? "Confidence: Medium"
+                          : "Confidence: Low"}
+                    </p>
+                    <p className="text-sm text-slate-300">
+                      {productReadiness.confidence === "HIGH"
+                        ? "Your profile is grounded enough to generate in Studio."
+                        : productReadiness.confidence === "MEDIUM"
+                          ? "A few details still need sharper grounding."
+                          : "This result still needs stronger grounding before generation."}
+                    </p>
+                  </>
+                )}
               </div>
-              <ResultsDocumentsTeaserSection
-                resumePayload={resumeGenerationPayload}
-                coverLetterPayload={coverLetterGenerationPayload}
-                studioHref={studioNavigationHref}
-                confidence={productReadiness.confidence ?? null}
-                generationPhase={effectiveResultsGenerationPhase ?? null}
-                pairStatus={pairWorkflowState.pairStatus ?? null}
+            }
+          />
+          {normalizedArtifactsPanelModel &&
+          (workflowSurfaceAuthority.canonicalState === "documents_ready" ||
+            workflowSurfaceAuthority.canonicalState === "partial_documents" ||
+            normalizedArtifacts.artifactDisplayState === "stale_output_hidden") ? (
+            <div className="space-y-5" data-testid="results-generated-documents">
+              <WorkflowAuthorityPanel
+                testId="results-artifact-truth"
+                eyebrow="Documents"
+                model={normalizedArtifactsPanelModel}
+                supporting={
+                  normalizedArtifacts.shouldShowLowConfidenceWarning ? (
+                    <p className="text-sm text-slate-200" data-testid="results-low-confidence-documents-warning">
+                      One draft is low confidence. Review closely in Studio before exporting.
+                    </p>
+                  ) : null
+                }
+                primaryAction={
+                  normalizedArtifacts.primaryAction
+                    ? {
+                        label: normalizedArtifacts.primaryAction.label,
+                        testId: "results-artifact-primary-cta",
+                        onClick: () => {
+                          const action = normalizedArtifacts.primaryAction.action;
+                          if (action === "return_to_evidence") return router.push(fitReviewPath);
+                          if (action === "retry_both" || action === "retry_failed_artifact") {
+                            trackEvent("artifact_retry_started", {
+                              surface: "results",
+                              artifact_display_state: normalizedArtifacts.artifactDisplayState,
+                              resume_state: pairWorkflowState.resumeStatus,
+                              cover_state: pairWorkflowState.coverLetterStatus,
+                              resume_confidence: productReadiness.confidence ?? null,
+                              cover_confidence: productReadiness.confidence ?? null,
+                              primary_action: action,
+                            });
+                            return router.push(studioGenerateHref);
+                          }
+                          return router.push(studioNavigationHref);
+                        },
+                      }
+                    : null
+                }
+                secondaryAction={
+                  normalizedArtifacts.secondaryAction
+                    ? {
+                        label: normalizedArtifacts.secondaryAction.label,
+                        testId: "results-artifact-secondary-cta",
+                        variant: "secondary",
+                        onClick: () => {
+                          const action = normalizedArtifacts.secondaryAction?.action;
+                          if (action === "return_to_evidence") return router.push(fitReviewPath);
+                          return router.push(studioNavigationHref);
+                        },
+                      }
+                    : null
+                }
               />
+              {!normalizedArtifacts.shouldSuppressStalePreview ? (
+                <ResultsDocumentsTeaserSection
+                  resumePayload={pairWorkflowState.resumeStatus === "ready" ? resumeGenerationPayload : null}
+                  coverLetterPayload={pairWorkflowState.coverLetterStatus === "ready" ? coverLetterGenerationPayload : null}
+                  studioHref={studioNavigationHref}
+                  confidence={productReadiness.confidence ?? null}
+                  generationPhase={effectiveResultsGenerationPhase ?? null}
+                  pairStatus={pairWorkflowState.pairStatus ?? null}
+                />
+              ) : null}
             </div>
           ) : null}
           {generationMutationError ? (
-            <p className="mt-2 text-xs font-medium text-rose-200" data-testid="results-generation-mutation-error">
+            <p className="text-xs font-medium text-rose-200" data-testid="results-generation-mutation-error">
               {generationMutationError}
             </p>
           ) : null}
-        </section>
+        </div>
         {resultsGenerationPhase === "not_started" && showGenerationUnlockedPanel && !isStrongFitScore ? (
           <section
             className="rounded-2xl border border-emerald-300/30 bg-emerald-500/10 p-4"
@@ -5171,7 +5515,7 @@ export default function ResultsPage() {
                   <FormButton
                     variant="ghost"
                     onClick={() => void loadLatest({ interactive: true, allowCreate: true })}
-                    disabled={!jobId || !baselineId || loading || loadingLatest}
+                    disabled={!jobId || !baselineId || loading || loadingLatest || workflowActivity.isActive}
                   >
                     {loadingLatest ? "PREPARING..." : "ANALYZE A ROLE"}
                   </FormButton>

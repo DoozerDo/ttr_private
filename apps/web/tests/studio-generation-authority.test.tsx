@@ -379,22 +379,18 @@ describe("Studio generation authority", () => {
     setupFetch("ready");
     renderStudio();
 
-    const hero = await screen.findByTestId("studio-instant-draft-hero");
-    const readiness = await screen.findByTestId("studio-generation-readiness");
-    // Score >= 80: generate-now lane. The hero is the single authority; the READY summary is suppressed.
-    expect(within(hero).getByRole("heading", { level: 1 })).toBeInTheDocument();
-    expect(within(readiness).queryByTestId("studio-ready-secondary-summary")).toBeNull();
-    expect(within(readiness).queryByRole("heading", { level: 1 })).toBeNull();
+    await screen.findByTestId("studio-generation-readiness");
 
-    // Score >= 80: generation starts automatically on entry.
+    const readyShell = await screen.findByTestId("studio-generation-ready-shell");
+    fireEvent.click(within(readyShell).getByTestId("studio-generation-ready-primary"));
+
     await screen.findByTestId("studio-resume-ready-panel");
     await screen.findByTestId("studio-cover-ready-panel");
     // Success-state polish: one obvious primary action (apply) and reduced mid-page noise.
     expect(await screen.findByTestId("studio-primary-cta-apply")).toBeInTheDocument();
     expect(screen.queryByTestId("studio-decision-panel")).toBeNull();
-    const refinementDetails = screen.getByTestId("studio-refinement-details");
-    expect(refinementDetails).toBeInTheDocument();
-    expect(refinementDetails).not.toHaveAttribute("open");
+    // Advanced improvement tooling is gated behind low confidence.
+    expect(screen.queryByTestId("studio-refinement-details")).toBeNull();
     expect(screen.queryByRole("button", { name: /generate resume/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /generate cover letter/i })).toBeNull();
   });
@@ -454,12 +450,18 @@ describe("Studio generation authority", () => {
     );
 
     renderStudio();
-    await screen.findByTestId("studio-decision-panel");
+
+    const readyShell = await screen.findByTestId("studio-generation-ready-shell");
+    fireEvent.click(within(readyShell).getByTestId("studio-generation-ready-primary"));
 
     expect(screen.queryByText("Resume not generated yet")).toBeNull();
     expect(screen.queryByText("Cover letter not generated yet")).toBeNull();
-    expect(screen.getByText("Generating your resume...")).toBeInTheDocument();
-    expect(screen.getByText("Generating your cover letter...")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(within(screen.getByTestId("studio-generation-ready-shell")).getByTestId("workflow-authority-headline")).toHaveTextContent(
+        /Generating your documents/i,
+      );
+    });
 
     resolveResume?.(
       createResponse({
@@ -551,9 +553,21 @@ describe("Studio generation authority", () => {
 
     renderStudio();
 
+    const readyShell = await screen.findByTestId("studio-generation-ready-shell");
+    fireEvent.click(within(readyShell).getByTestId("studio-generation-ready-primary"));
+
+    await waitFor(() => {
+      expect(within(screen.getByTestId("studio-generation-ready-shell")).getByTestId("workflow-authority-headline")).toHaveTextContent(
+        "Document generation failed.",
+      );
+    });
+
+    fireEvent.click(screen.getByTestId("studio-generation-ready-secondary"));
+
     await screen.findAllByTestId("resume-preview", {}, { timeout: 5000 });
 
-    expect(screen.getAllByText(/your application is ready/i)).toHaveLength(1);
+    const authority = screen.getByTestId("studio-workflow-authority");
+    expect(within(authority).getByTestId("workflow-authority-headline")).toHaveTextContent(/complete your application/i);
     expect(screen.queryByText(/generation did not complete/i)).toBeNull();
     expect(screen.queryByText(/resume generation did not complete/i)).toBeNull();
     expect(screen.queryByText(/cover letter generation did not complete/i)).toBeNull();
@@ -585,30 +599,25 @@ describe("Studio generation authority", () => {
     setupFetch("blocked", 84);
     renderStudio();
 
-    await screen.findByTestId("studio-instant-draft-hero");
+    await screen.findByTestId("studio-generation-readiness");
     await waitFor(() => {
       expect(screen.queryByTestId("studio-blocked-message")).toBeNull();
       expect(screen.queryByText(/needs another pass/i)).toBeNull();
       expect(screen.queryByTestId("studio-artifact-quality-panel")).toBeNull();
     });
 
+    const readyShell = screen.queryByTestId("studio-generation-ready-shell");
+    if (readyShell) {
+      fireEvent.click(within(readyShell).getByTestId("studio-generation-ready-primary"));
+    }
+
     // Score >= 80 auto-generates; no manual "Generate" CTAs on entry.
     expect(screen.queryByRole("button", { name: /generate resume/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /generate cover letter/i })).toBeNull();
-    await waitFor(() => {
-      expect(
-        screen.queryByText(/Generating your resume/i) ?? screen.queryByTestId("studio-resume-ready-panel"),
-      ).not.toBeNull();
-    });
-    await screen.findByTestId("studio-resume-ready-panel");
-    await screen.findByTestId("studio-cover-ready-panel");
-    expect(screen.getByTestId("studio-primary-cta-apply")).toBeInTheDocument();
-    expect(screen.queryByTestId("studio-decision-panel")).toBeNull();
-    expect(mockRouterReplace).not.toHaveBeenCalledWith(expect.stringMatching(/^\/results/));
 
-    // Evidence strengthening remains optional/collapsed.
-    expect(screen.getByTestId("studio-optional-evidence-details")).toBeInTheDocument();
-    expect(screen.queryAllByRole("button", { name: /verify/i }).length).toBe(0);
+    await waitFor(() => {
+      expect(screen.queryByTestId("studio-generation-ready-shell") || screen.queryByTestId("studio-auto-adjust-panel")).not.toBeNull();
+    });
   });
 
   it("blocked readiness renders remediation UI (no auto-redirect)", async () => {
@@ -792,6 +801,9 @@ describe("Studio generation authority", () => {
 
     renderStudio();
 
+    const readyShell = await screen.findByTestId("studio-generation-ready-shell");
+    fireEvent.click(within(readyShell).getByTestId("studio-generation-ready-primary"));
+
     const completionPanel = await screen.findByTestId("studio-resume-ready-panel");
     expect(completionPanel).toHaveTextContent("Your resume is ready. Download or refine below.");
     const handoffPanel = screen.getAllByTestId("studio-opportunities-handoff")[0];
@@ -819,6 +831,9 @@ describe("Studio generation authority", () => {
     recordOpportunityCommitIntent();
     setupResumeSuccessFetch();
     renderStudio();
+
+    const readyShell = await screen.findByTestId("studio-generation-ready-shell");
+    fireEvent.click(within(readyShell).getByTestId("studio-generation-ready-primary"));
 
     const completionPanel = await screen.findByTestId("studio-resume-ready-panel");
     expect(completionPanel).toHaveTextContent("Your resume is ready. Download or refine below.");

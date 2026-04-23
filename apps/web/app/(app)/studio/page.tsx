@@ -20,6 +20,12 @@ import { defaultClosingTemplateKey } from "@/lib/coverLetters";
 import { buildExportPayload } from "../lib/exportPayload";
 import { formatErrorMessage, readResponsePayload } from "@/lib/compliance/parseComplianceError";
 import { sanitizeRenderedTextValue } from "@/lib/renderedText";
+import { resolveWorkflowOrchestrator, resolveWorkflowUnlockContext } from "@/lib/workflowOrchestrator";
+import { WorkflowAuthorityPanel } from "@/components/workflow/WorkflowAuthorityPanel";
+import { WorkflowActivityBanner } from "@/components/workflow/WorkflowActivityBanner";
+import { useWorkflowActivityTracker } from "@/lib/workflowActivityTracker";
+import { useWorkflowGuardrails } from "@/lib/workflowGuardrails";
+import type { PostUnlockReadiness } from "@/lib/postUnlockOutcomeModel";
 import {
   applyTargetingExclusionsToReadiness,
   aggregateVerificationIssues,
@@ -91,7 +97,10 @@ import {
 } from "@/lib/workflowRequestGuard";
 import { useGuidedMode } from "@/hooks/useGuidedMode";
 import { type JobDto } from "@/lib/jobs";
-import { getFitReviewHref } from "@/src/navigation/routes";
+import { getFitReviewHref, getStudioHref } from "@/src/navigation/routes";
+import { UnlockPanel } from "./_components/UnlockPanel";
+import { PostUnlockOutcomeShell } from "./_components/PostUnlockOutcomeShell";
+import { GenerationReadyShell, type GenerationReadyShellFailure } from "./_components/GenerationReadyShell";
 import {
   buildCoverLetterParagraphs,
   copyTextToClipboard,
@@ -556,9 +565,11 @@ function getBackendArtifactStatus(record: BackendStudioArtifactRecord | null | u
 function getBackendPairStatus(payload: BackendStudioArtifactsResponse | null | undefined) {
   const resumeStatus = getBackendArtifactStatus(payload?.resume);
   const coverStatus = getBackendArtifactStatus(payload?.coverLetter);
-  if (resumeStatus === "completed" || coverStatus === "completed") return "completed" as const;
+  // Prioritize active generation above completed artifacts so Studio can render a coherent
+  // "generation in progress" authority even when one artifact is already available.
   if (resumeStatus === "in_progress" || coverStatus === "in_progress") return "in_progress" as const;
   if (resumeStatus === "failed" || coverStatus === "failed") return "failed" as const;
+  if (resumeStatus === "completed" || coverStatus === "completed") return "completed" as const;
   return "missing" as const;
 }
 
@@ -738,6 +749,55 @@ export default function StudioPage() {
   const { isGuidedActive, currentStep: guidedStep, advanceStep, completeGuidedMode } = useGuidedMode();
   const searchParams = useSearchParams();
   const searchParamValue = searchParams.toString();
+  const unlockContext = useMemo(
+    () => resolveWorkflowUnlockContext({ toString: () => searchParamValue }),
+    [searchParamValue],
+  );
+  const {
+    snapshot: workflowActivity,
+    run: runWorkflowActivity,
+    start: startWorkflowActivity,
+    stop: stopWorkflowActivity,
+    isOperationActive: isWorkflowOperationActive,
+  } = useWorkflowActivityTracker({ surface: "studio", trackEvent });
+  const [unlockFlowDismissed, setUnlockFlowDismissed] = useState(false);
+  const [unlockSubmitting, setUnlockSubmitting] = useState(false);
+  const [unlockSubmitError, setUnlockSubmitError] = useState<string | null>(null);
+  const [unlockReanalysisFailure, setUnlockReanalysisFailure] = useState<{
+    priorScore: number | null;
+    priorReadiness: PostUnlockReadiness | null;
+    message: string;
+  } | null>(null);
+  const unlockFlowActive =
+    unlockContext.isUnlockFlow && unlockContext.missingEvidence.length > 0 && !unlockFlowDismissed;
+  const unlockFlowTrackedRef = useRef(false);
+
+  const postUnlockParams = useMemo(() => {
+    const params = new URLSearchParams(searchParamValue);
+    const postUnlock = (params.get("postUnlock") ?? "").trim();
+    const priorScoreRaw = (params.get("priorScore") ?? "").trim();
+    const priorReadinessRaw = (params.get("priorReadiness") ?? "").trim().toLowerCase();
+    const priorScore = priorScoreRaw ? Number(priorScoreRaw) : null;
+    const normalizedScore = Number.isFinite(priorScore as number) ? (priorScore as number) : null;
+    const priorReadiness: PostUnlockReadiness | null =
+      priorReadinessRaw === "ready" || priorReadinessRaw === "limited" || priorReadinessRaw === "blocked"
+        ? (priorReadinessRaw as PostUnlockReadiness)
+        : null;
+    return {
+      active: postUnlock === "1" || postUnlock === "true",
+      priorScore: normalizedScore,
+      priorReadiness,
+    };
+  }, [searchParamValue]);
+  const [postUnlockDismissed, setPostUnlockDismissed] = useState(false);
+  const postUnlockActive = postUnlockParams.active && !postUnlockDismissed;
+  const postUnlockTrackedRef = useRef(false);
+  const [postUnlockRetrying, setPostUnlockRetrying] = useState(false);
+  const [postUnlockRetryError, setPostUnlockRetryError] = useState<string | null>(null);
+  const [generationReadyDismissed, setGenerationReadyDismissed] = useState(false);
+  const [generationReadyPhase, setGenerationReadyPhase] = useState<"ready" | "generating" | "failed">("ready");
+  const [generationReadyFailure, setGenerationReadyFailure] = useState<GenerationReadyShellFailure | null>(null);
+  const generationReadyTrackedRef = useRef(false);
   const trackedStudioOpenRef = useRef(false);
   const lastReadinessKeyRef = useRef<string | null>(null);
   const studioDecisionLogKeyRef = useRef<string | null>(null);
@@ -762,6 +822,9 @@ export default function StudioPage() {
     [searchParamValue],
   );
   const isFromUnlock = useMemo(() => searchParams.get("fromUnlock") === "true", [searchParamValue]);
+  const studioIntent = useMemo(() => trimString(searchParams.get("intent")).toLowerCase(), [searchParamValue]);
+  const hasGenerateIntent = studioIntent === "generate";
+  const generationIntentHandledRef = useRef(false);
   const verifiedClaimParams = useMemo(
     () => {
       const rawClaims =
@@ -816,6 +879,35 @@ export default function StudioPage() {
 
     return "unknown";
   }, [searchParamValue]);
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    if (!isFromUnlock) return;
+    if (!unlockContext.isUnlockFlow) {
+      console.warn("[studio unlock] fromUnlock=true but unlockDimension missing/invalid", {
+        fromUnlock: true,
+        unlockDimension: unlockContext.dimension,
+        evidenceCount: unlockContext.missingEvidence.length,
+      });
+      return;
+    }
+    if (unlockContext.isUnlockFlow && unlockContext.missingEvidence.length === 0) {
+      console.warn("[studio unlock] unlock flow missing evidence items", {
+        unlockDimension: unlockContext.dimension,
+      });
+    }
+  }, [isFromUnlock, unlockContext.dimension, unlockContext.isUnlockFlow, unlockContext.missingEvidence.length]);
+  useEffect(() => {
+    if (!unlockFlowActive) return;
+    if (unlockFlowTrackedRef.current) return;
+    unlockFlowTrackedRef.current = true;
+    trackEvent("unlock_flow_entered", {
+      source: "studio",
+      baselineId: requestedBaselineId ?? null,
+      jobId: requestedJobId ?? null,
+      dimension: unlockContext.dimension,
+      evidence_count: unlockContext.missingEvidence.length,
+    });
+  }, [requestedBaselineId, requestedJobId, unlockContext.dimension, unlockContext.missingEvidence.length, unlockFlowActive]);
   useEffect(() => {
     if (trackedStudioOpenRef.current) {
       return;
@@ -947,6 +1039,12 @@ export default function StudioPage() {
   const [, setCoverAuditId] = useState<string | undefined>();
   const [coverLetterComplianceBlocked, setCoverLetterComplianceBlocked] =
     useState<CoverLetterComplianceBlocked | null>(null);
+
+  const resumeStateSnapshotRef = useRef(resumeState);
+  resumeStateSnapshotRef.current = resumeState;
+  const coverStateSnapshotRef = useRef(coverState);
+  coverStateSnapshotRef.current = coverState;
+
   const [refinementInstructions, setRefinementInstructions] = useState<RefinementPreset[]>([]);
   const [refinementApplying, setRefinementApplying] = useState(false);
   const [refinementStatusMessage, setRefinementStatusMessage] = useState<string | null>(null);
@@ -1458,6 +1556,19 @@ export default function StudioPage() {
     suppressAutoGenerationRef.current = true;
     let cancelled = false;
 
+    if (process.env.NODE_ENV === "development") {
+      console.info("[studio] artifact_hydration_started", {
+        area: "studio",
+        operation: "hydrate_artifacts",
+        status: "info",
+        code: "artifact_hydration_started",
+        baselineId: effectiveBaselineId || null,
+        baselineVersionId: effectiveBaselineVersionId || null,
+        jobId: effectiveJobId || null,
+        analysisId: requestedAnalysisId ?? null,
+      });
+    }
+
     const applyHydratedPayload = (payload: BackendStudioArtifactsResponse | StoredStudioArtifactSnapshot | null) => {
       if (!payload || cancelled) return;
       const resumeResponse = isBackendStudioArtifactsResponse(payload)
@@ -1566,17 +1677,54 @@ export default function StudioPage() {
           throw new Error("Missing baselineVersionId");
         }
 
-        const backendUrl = new URL("/api/studio/artifacts", window.location.origin);
-        backendUrl.searchParams.set("baselineId", effectiveBaselineId);
-        backendUrl.searchParams.set("baselineVersionId", resolvedBaselineVersionId);
-        backendUrl.searchParams.set("jobId", effectiveJobId);
+        const artifactsParams = new URLSearchParams();
+        artifactsParams.set("baselineId", effectiveBaselineId);
+        artifactsParams.set("baselineVersionId", resolvedBaselineVersionId);
+        artifactsParams.set("jobId", effectiveJobId);
+        const artifactsUrl = `/api/studio/artifacts?${artifactsParams.toString()}`;
+        if (process.env.NODE_ENV === "development") {
+          console.info("[studio] artifact_hydration_fetch", {
+            area: "studio",
+            operation: "hydrate_artifacts",
+            status: "info",
+            code: "artifact_hydration_fetch",
+            url: artifactsUrl,
+          });
+        }
 
-        const response = await fetch(backendUrl.toString(), { cache: "no-store" });
+        const response = await fetch(artifactsUrl, {
+          cache: "no-store",
+        });
         const payload = await readResponsePayload(response);
         if (cancelled) return;
         if (response.ok && payload && typeof payload === "object" && !Array.isArray(payload)) {
+          const payloadRecord = payload as Record<string, unknown>;
           applyHydratedPayload(payload as BackendStudioArtifactsResponse);
           setStudioArtifactsHydrated(true);
+          if (process.env.NODE_ENV === "development") {
+            const resumeRecord = (payloadRecord as { resume?: unknown }).resume as
+              | { responseBody?: unknown; status?: unknown }
+              | null
+              | undefined;
+            const coverRecord = (payloadRecord as { coverLetter?: unknown }).coverLetter as
+              | { responseBody?: unknown; status?: unknown }
+              | null
+              | undefined;
+            console.info("[studio] artifact_hydration_succeeded", {
+              area: "studio",
+              operation: "hydrate_artifacts",
+              status: "info",
+              code: "artifact_hydration_succeeded",
+              baselineId: effectiveBaselineId || null,
+              baselineVersionId: resolvedBaselineVersionId || null,
+              jobId: effectiveJobId || null,
+              analysisId: requestedAnalysisId ?? null,
+              hasResume: Boolean(resumeRecord),
+              hasResumeResponseBody: Boolean(resumeRecord?.responseBody),
+              hasCoverLetter: Boolean(coverRecord),
+              hasCoverLetterResponseBody: Boolean(coverRecord?.responseBody),
+            });
+          }
           return;
         }
       } catch {
@@ -2117,6 +2265,18 @@ export default function StudioPage() {
     () => presentResumeGeneration(resumeState.response),
     [resumeState.response],
   );
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    if (!resumeState.response) return;
+    console.info("[studio] resume_presenter_resolved", {
+      area: "studio",
+      operation: "present_resume",
+      status: "info",
+      code: "resume_presenter_resolved",
+      presenterStatus: resumePresenter.status,
+      hasExportableContent: resumePresenter.hasExportableContent,
+    });
+  }, [resumePresenter.hasExportableContent, resumePresenter.status, resumeState.response]);
   const generatedResumeModel = useMemo(
     () => readResumeModel(resumeState.response),
     [resumeState.response],
@@ -3183,7 +3343,7 @@ export default function StudioPage() {
     setRecentIntent(readRecentIntentState()); 
   }, [requestedAnalysisId, effectiveJobId, effectiveBaselineId]); 
   const canProceedWithStudioDrafts =
-    qualifiedForGeneration && (!activeGenerationReadiness.blocked || generateNowEligible); 
+    qualifiedForGeneration && activeGenerationReadiness.status === "ready"; 
   const isInstantDraftExperience = canProceedWithStudioDrafts; 
   const resumeSingleFlightInFlight = useMemo(
     () =>
@@ -3481,14 +3641,28 @@ export default function StudioPage() {
   // Canonical READY truth: if we have any usable output, behave as READY. Confidence only modulates tone.
   const isReadySuccessState = hasUsableResume || hasUsableCoverLetter;
   const isApplicationFullyReady = hasUsableResume && hasUsableCoverLetter;
+  const suppressAutoGenerationForGenerationReadyShell =
+    !generationReadyDismissed &&
+    generationReadyPhase === "ready" &&
+    workflowAuthority.workflowState === "READY" &&
+    workflowAuthority.primaryAction === "GENERATE" &&
+    activeGenerationReadiness.status === "ready" &&
+    !activeGenerationReadiness.blocked &&
+    studioArtifactPairStatus === "missing" &&
+    !resumeState.response &&
+    !coverState.response &&
+    !resumeState.artifactFailure &&
+    !coverState.artifactFailure;
   const [showFullLowQualityResume, setShowFullLowQualityResume] = useState(false); 
   const [showFullLowQualityCover, setShowFullLowQualityCover] = useState(false); 
   const [showOptionalEvidenceDetails, setShowOptionalEvidenceDetails] = useState(false);
+  const [allowStaleArtifactPreview, setAllowStaleArtifactPreview] = useState(false);
 
   useEffect(() => { 
     setShowFullLowQualityResume(false); 
     setShowFullLowQualityCover(false); 
     setShowOptionalEvidenceDetails(false);
+    setAllowStaleArtifactPreview(false);
   }, [effectiveBaselineId, effectiveJobId, artifactQuality.confidence, requestedAnalysisId]); 
   const coverGating = useMemo(
     () =>
@@ -4003,43 +4177,280 @@ export default function StudioPage() {
   }, []);
   const runAnalysisRefreshAfterExpansion = useCallback(async () => {
     if (!effectiveJobId || !effectiveBaselineId) return;
-    const response = await fetch("/api/analysis/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        job_id: effectiveJobId,
-        baseline_id: effectiveBaselineId,
-        baseline_version_id: effectiveBaselineVersionId || undefined,
-      }),
+    await runWorkflowActivity("analysis_running", async () => {
+      const response = await fetch("/api/analysis/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          job_id: effectiveJobId,
+          baseline_id: effectiveBaselineId,
+          baseline_version_id: effectiveBaselineVersionId || undefined,
+        }),
+      });
+      const payload = await readResponsePayload(response);
+      if (!response.ok || !payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw new Error(formatErrorMessage(payload, "Analysis refresh failed after saving evidence."));
+      }
+      const record = payload as Record<string, unknown>;
+      const nextAnalysisId =
+        (typeof record.assessmentId === "string" && record.assessmentId.trim()) ||
+        (typeof record.id === "string" && record.id.trim()) ||
+        requestedAnalysisId;
+      const nextBaselineVersionId =
+        (typeof record.baselineVersionId === "string" && record.baselineVersionId.trim()) ||
+        effectiveBaselineVersionId;
+      const params = new URLSearchParams();
+      if (nextAnalysisId) params.set("analysisId", nextAnalysisId);
+      if (effectiveJobId) params.set("jobId", effectiveJobId);
+      if (effectiveBaselineId) params.set("baselineId", effectiveBaselineId);
+      if (nextBaselineVersionId) params.set("baselineVersionId", nextBaselineVersionId);
+      const exclusions = Array.from(excludedTargetingLabels);
+      exclusions.forEach((value) => params.append("excludedRequirements", value));
+      await router.replace(`/studio?${params.toString()}`);
     });
-    const payload = await readResponsePayload(response);
-    if (!response.ok || !payload || typeof payload !== "object" || Array.isArray(payload)) {
-      throw new Error(formatErrorMessage(payload, "Analysis refresh failed after saving evidence."));
-    }
-    const record = payload as Record<string, unknown>;
-    const nextAnalysisId =
-      (typeof record.assessmentId === "string" && record.assessmentId.trim()) ||
-      (typeof record.id === "string" && record.id.trim()) ||
-      requestedAnalysisId;
-    const nextBaselineVersionId =
-      (typeof record.baselineVersionId === "string" && record.baselineVersionId.trim()) ||
-      effectiveBaselineVersionId;
-    const params = new URLSearchParams();
-    if (nextAnalysisId) params.set("analysisId", nextAnalysisId);
-    if (effectiveJobId) params.set("jobId", effectiveJobId);
-    if (effectiveBaselineId) params.set("baselineId", effectiveBaselineId);
-    if (nextBaselineVersionId) params.set("baselineVersionId", nextBaselineVersionId);
-    const exclusions = Array.from(excludedTargetingLabels);
-    exclusions.forEach((value) => params.append("excludedRequirements", value));
-    await router.replace(`/studio?${params.toString()}`);
   }, [
     effectiveBaselineId,
     effectiveBaselineVersionId,
     effectiveJobId,
     excludedTargetingLabels,
+    runWorkflowActivity,
     requestedAnalysisId,
     router,
   ]);
+
+  const runAnalysisRefreshAfterUnlock = useCallback(
+    async (prior: { score: number | null; readiness: PostUnlockReadiness | null }) => {
+      if (!effectiveJobId || !effectiveBaselineId) return;
+      await runWorkflowActivity("unlock_reanalysis_running", async () => {
+        const response = await fetch("/api/analysis/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            job_id: effectiveJobId,
+            baseline_id: effectiveBaselineId,
+            baseline_version_id: effectiveBaselineVersionId || undefined,
+          }),
+        });
+        const payload = await readResponsePayload(response);
+        if (!response.ok || !payload || typeof payload !== "object" || Array.isArray(payload)) {
+          throw new Error(formatErrorMessage(payload, "Re-evaluation failed. Please retry."));
+        }
+        const record = payload as Record<string, unknown>;
+        const nextAnalysisId =
+          (typeof record.assessmentId === "string" && record.assessmentId.trim()) ||
+          (typeof record.id === "string" && record.id.trim()) ||
+          requestedAnalysisId;
+        const nextBaselineVersionId =
+          (typeof record.baselineVersionId === "string" && record.baselineVersionId.trim()) ||
+          effectiveBaselineVersionId;
+
+        const params = new URLSearchParams();
+        if (nextAnalysisId) params.set("analysisId", nextAnalysisId);
+        if (effectiveJobId) params.set("jobId", effectiveJobId);
+        if (effectiveBaselineId) params.set("baselineId", effectiveBaselineId);
+        if (nextBaselineVersionId) params.set("baselineVersionId", nextBaselineVersionId);
+        const exclusions = Array.from(excludedTargetingLabels);
+        exclusions.forEach((value) => params.append("excludedRequirements", value));
+
+        params.set("postUnlock", "1");
+        if (typeof prior.score === "number" && Number.isFinite(prior.score)) {
+          params.set("priorScore", String(Math.round(prior.score)));
+        }
+        if (prior.readiness) {
+          params.set("priorReadiness", prior.readiness);
+        }
+
+        await router.replace(`/studio?${params.toString()}`);
+      });
+    },
+    [
+      effectiveBaselineId,
+      effectiveBaselineVersionId,
+      effectiveJobId,
+      excludedTargetingLabels,
+      runWorkflowActivity,
+      requestedAnalysisId,
+      router,
+    ],
+  );
+
+  const handleUnlockFlowSkip = useCallback(() => {
+    trackEvent("unlock_flow_skipped", {
+      source: "studio",
+      baselineId: effectiveBaselineId ?? requestedBaselineId ?? null,
+      jobId: effectiveJobId ?? requestedJobId ?? null,
+      dimension: unlockContext.dimension,
+      evidence_count: unlockContext.missingEvidence.length,
+    });
+    setUnlockFlowDismissed(true);
+    void router.replace(
+      getStudioHref({
+        jobId: effectiveJobId ?? requestedJobId ?? null,
+        baselineId: effectiveBaselineId ?? requestedBaselineId ?? null,
+        baselineVersionId: effectiveBaselineVersionId ?? requestedBaselineVersionId ?? null,
+        analysisId: requestedAnalysisId || null,
+        assessmentId: requestedAnalysisId || null,
+        fromUnlock: false,
+      }),
+    );
+  }, [
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    requestedAnalysisId,
+    requestedBaselineId,
+    requestedBaselineVersionId,
+    requestedJobId,
+    router,
+    unlockContext.dimension,
+    unlockContext.missingEvidence.length,
+  ]);
+
+  const dismissPostUnlockOutcome = useCallback(() => {
+    setPostUnlockDismissed(true);
+    void router.replace(
+      getStudioHref({
+        jobId: effectiveJobId ?? requestedJobId ?? null,
+        baselineId: effectiveBaselineId ?? requestedBaselineId ?? null,
+        baselineVersionId: effectiveBaselineVersionId ?? requestedBaselineVersionId ?? null,
+        analysisId: requestedAnalysisId || null,
+        assessmentId: requestedAnalysisId || null,
+        fromUnlock: false,
+      }),
+    );
+  }, [
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    requestedAnalysisId,
+    requestedBaselineId,
+    requestedBaselineVersionId,
+    requestedJobId,
+    router,
+  ]);
+
+  const retryPostUnlockReanalysis = useCallback(async () => {
+    if (!postUnlockActive) return;
+    setPostUnlockRetrying(true);
+    setPostUnlockRetryError(null);
+    try {
+      await runAnalysisRefreshAfterUnlock({
+        score: postUnlockParams.priorScore,
+        readiness: postUnlockParams.priorReadiness,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Re-evaluation failed. Please retry.";
+      setPostUnlockRetryError(message);
+      setPostUnlockRetrying(false);
+      trackEvent("unlock_reanalysis_failed", {
+        source: "studio",
+        prior_score: postUnlockParams.priorScore,
+        new_score: typeof analysisScore === "number" ? analysisScore : null,
+        score_delta:
+          typeof postUnlockParams.priorScore === "number" && typeof analysisScore === "number"
+            ? analysisScore - postUnlockParams.priorScore
+            : null,
+        prior_readiness: postUnlockParams.priorReadiness,
+        new_readiness: null,
+        outcome_state: "reanalysis_failed",
+      });
+    }
+  }, [
+    analysisScore,
+    postUnlockActive,
+    postUnlockParams.priorReadiness,
+    postUnlockParams.priorScore,
+    runAnalysisRefreshAfterUnlock,
+  ]);
+
+  const handleUnlockFlowSubmit = useCallback(
+    async (payload: { dimension: string; answers: Array<{ requirement: string; answer: string }> }) => {
+      if (!effectiveBaselineId) {
+        setUnlockSubmitError("Baseline context is missing. Return to Results and reopen Studio.");
+        return;
+      }
+      if (!effectiveJobId) {
+        setUnlockSubmitError("Job context is missing. Return to Results and reopen Studio.");
+        return;
+      }
+
+      setUnlockSubmitting(true);
+      setUnlockSubmitError(null);
+      setUnlockReanalysisFailure(null);
+
+      const uniqueAnswers = payload.answers
+        .map((item) => ({
+          requirement: String(item.requirement ?? "").trim(),
+          answer: String(item.answer ?? "").trim(),
+        }))
+        .filter((item) => item.requirement && item.answer);
+
+      try {
+        for (const item of uniqueAnswers) {
+          const rawText = [
+            `Unlock dimension: ${payload.dimension}`,
+            `Missing evidence: ${item.requirement}`,
+            `Example: ${item.answer}`,
+          ].join("\n");
+          await appendStrengtheningAddition(effectiveBaselineId, {
+            signalType: "experience_expansion",
+            rawText,
+          });
+        }
+      } catch (saveError) {
+        const message =
+          saveError instanceof Error
+            ? saveError.message
+            : "Unable to save evidence. Only include real and defensible experience.";
+        setUnlockSubmitError(message);
+        setUnlockSubmitting(false);
+        return;
+      }
+
+      trackEvent("unlock_flow_completed", {
+        source: "studio",
+        baselineId: effectiveBaselineId,
+        jobId: effectiveJobId,
+        dimension: payload.dimension,
+        evidence_count: uniqueAnswers.length,
+      });
+
+      const priorScore = typeof analysisScore === "number" && Number.isFinite(analysisScore) ? analysisScore : null;
+      const priorReadiness: PostUnlockReadiness | null = activeGenerationReadiness.blocked
+        ? "blocked"
+        : activeGenerationReadiness.status === "ready"
+          ? "ready"
+          : "limited";
+
+      try {
+        await runAnalysisRefreshAfterUnlock({ score: priorScore, readiness: priorReadiness });
+      } catch (reanalysisError) {
+        const message =
+          reanalysisError instanceof Error
+            ? reanalysisError.message
+            : "Re-evaluation failed. Please retry.";
+        setUnlockSubmitting(false);
+        setUnlockReanalysisFailure({ priorScore, priorReadiness, message });
+        trackEvent("unlock_reanalysis_failed", {
+          source: "studio",
+          prior_score: priorScore,
+          new_score: null,
+          score_delta: null,
+          prior_readiness: priorReadiness,
+          new_readiness: null,
+          outcome_state: "reanalysis_failed",
+        });
+      }
+    },
+    [
+      activeGenerationReadiness.blocked,
+      activeGenerationReadiness.status,
+      analysisScore,
+      effectiveBaselineId,
+      effectiveJobId,
+      runAnalysisRefreshAfterUnlock,
+    ],
+  );
   const handleEvidenceExpansionSubmit = useCallback(async (overrideRequirement?: string) => {
     const requirement = (overrideRequirement ?? expandingRequirement)?.trim() ?? "";
     if (!requirement) return;
@@ -4602,7 +5013,9 @@ export default function StudioPage() {
       });
       return false;
     }
+    let activityOutcome: "success" | "failure" = "failure";
     setResumeGenerating(true);
+    startWorkflowActivity("generation_running");
     const shouldShowUnlockConfirmation = isFirstGenerationAfterUnlock;
     trackEvent("resume_generation_attempted", {
       source: "studio",
@@ -4846,6 +5259,7 @@ export default function StudioPage() {
         artifactType: "resume",
         requestId: request.requestId,
       });
+      activityOutcome = "success";
       return true;
     } catch (error) {
       if (
@@ -4880,6 +5294,7 @@ export default function StudioPage() {
       if (activeResumeGenerationRef.current?.requestId === request.requestId) {
         setResumeGenerating(false);
       }
+      await stopWorkflowActivity("generation_running", activityOutcome);
       finishStudioGenerationRequest("resume", request, "completed", requestScope);
     }
   };
@@ -5177,7 +5592,9 @@ export default function StudioPage() {
       });
       return false;
     }
+    let activityOutcome: "success" | "failure" = "failure";
     setCoverGenerating(true);
+    startWorkflowActivity("generation_running");
     const shouldShowUnlockConfirmation = isFirstGenerationAfterUnlock;
     trackEvent("cover_letter_generation_attempted", {
       source: "studio",
@@ -5412,6 +5829,7 @@ export default function StudioPage() {
         artifactType: "cover_letter",
         requestId: request.requestId,
       });
+      activityOutcome = "success";
       return true;
     } catch (error) {
       if (
@@ -5447,6 +5865,7 @@ export default function StudioPage() {
       if (activeCoverGenerationRef.current?.requestId === request.requestId) {
         setCoverGenerating(false);
       }
+      await stopWorkflowActivity("generation_running", activityOutcome);
       finishStudioGenerationRequest("cover_letter", request, "completed", requestScope);
     }
   };
@@ -5642,6 +6061,7 @@ export default function StudioPage() {
     if (!autoGenerationSignature) return;
     if (autoGenerationSignatureRef.current === autoGenerationSignature) return;
     if (studioArtifactPresentationStateRef.current === "hydrated") return;
+    if (suppressAutoGenerationForGenerationReadyShell) return;
     if (suppressAutoGenerationRef.current) return;
     const autoGenerationKey = buildWorkflowRequestKey("auto_generation", generationWorkflowScope);
     if (studioArtifactPairStatus !== "missing") return;
@@ -5725,6 +6145,7 @@ export default function StudioPage() {
     resumeGenerating,
     studioArtifactPairStatus,
     studioArtifactsHydrated,
+    suppressAutoGenerationForGenerationReadyShell,
   ]);
 
   useEffect(() => {
@@ -6502,14 +6923,209 @@ export default function StudioPage() {
           : "application"
     : null;
 
-  const heroHeadline = readyHeaderMode === "resume_only" || readyHeaderMode === "cover_only"
-    ? "Complete your application"
-    : workflowAuthority.headline;
-  const heroBody = readyHeaderMode === "resume_only"
-    ? "Your resume is ready. Generate and review your cover letter to finish your application."
-    : readyHeaderMode === "cover_only"
-      ? "Your cover letter is ready. Generate and review your resume to finish your application."
-      : workflowAuthority.body;
+  const workflowOrchestratorCore = useMemo(() => {
+    const resumeStatus: "missing" | "generating" | "ready" | "failed" = hasUsableResume
+      ? "ready"
+      : resumeGenerating || autoGenerationInFlight || studioArtifactPairStatus === "in_progress"
+        ? "generating"
+        : resumeState.artifactFailure
+          ? "failed"
+          : "missing";
+
+    const coverStatus: "missing" | "generating" | "ready" | "failed" = hasUsableCoverLetter
+      ? "ready"
+      : coverGenerating || autoGenerationInFlight || studioArtifactPairStatus === "in_progress"
+        ? "generating"
+        : coverState.artifactFailure
+          ? "failed"
+          : "missing";
+
+    return resolveWorkflowOrchestrator({
+      surface: "studio",
+      score: typeof analysisScore === "number" ? analysisScore : null,
+      generationReadiness: activeGenerationReadiness,
+      workflowAuthority,
+      artifact: {
+        hasResume: hasUsableResume,
+        hasCoverLetter: hasUsableCoverLetter,
+        pairStatus: studioArtifactPairStatus ?? null,
+        generating:
+          autoGenerationInFlight ||
+          resumeGenerating ||
+          coverGenerating ||
+          studioArtifactPairStatus === "in_progress",
+        failure: topLevelArtifactFailure
+          ? { category: topLevelArtifactFailure.category, retryable: topLevelArtifactFailure.retryable }
+          : null,
+      },
+      resume: {
+        status: resumeStatus,
+        confidence: artifactQuality.confidence ?? null,
+        failure: resumeState.artifactFailure
+          ? { category: resumeState.artifactFailure.category, retryable: resumeState.artifactFailure.retryable }
+          : null,
+      },
+      coverLetter: {
+        status: coverStatus,
+        confidence: artifactQuality.confidence ?? null,
+        failure: coverState.artifactFailure
+          ? { category: coverState.artifactFailure.category, retryable: coverState.artifactFailure.retryable }
+          : null,
+      },
+      artifactQuality: { confidence: artifactQuality.confidence ?? null },
+      allowStaleArtifactPreview: allowStaleArtifactPreview,
+      searchParamsString: searchParamValue,
+      unlockDismissed: unlockFlowDismissed,
+      unlockReanalysisFailure: unlockReanalysisFailure
+        ? { priorScore: unlockReanalysisFailure.priorScore, priorReadiness: unlockReanalysisFailure.priorReadiness, returnToEvidenceHref: "" }
+        : null,
+      postUnlock: {
+        active: false,
+        dismissed: true,
+        priorScore: null,
+        priorReadiness: null,
+        newReadiness: null,
+        reanalysisFailed: false,
+        generationAllowedNow: false,
+        returnToEvidenceHref: "",
+      },
+      generationReady: { dismissed: true, phase: "ready" },
+      resumeFailure: resumeState.artifactFailure,
+      coverFailure: coverState.artifactFailure,
+      activity: workflowActivity,
+    });
+  }, [
+    activeGenerationReadiness,
+    allowStaleArtifactPreview,
+    analysisScore,
+    autoGenerationInFlight,
+    coverGenerating,
+    coverState.artifactFailure,
+    hasUsableCoverLetter,
+    hasUsableResume,
+    resumeGenerating,
+    resumeState.artifactFailure,
+    searchParamValue,
+    studioArtifactPairStatus,
+    topLevelArtifactFailure?.category,
+    topLevelArtifactFailure?.retryable,
+    unlockFlowDismissed,
+    unlockReanalysisFailure?.priorReadiness,
+    unlockReanalysisFailure?.priorScore,
+    workflowActivity,
+    workflowAuthority,
+  ]);
+
+  const workflowSurfaceAuthorityHero = workflowOrchestratorCore.authorityState;
+  const heroHeadline = workflowSurfaceAuthorityHero.headline;
+  const heroBody = workflowSurfaceAuthorityHero.body;
+  const normalizedArtifacts = workflowOrchestratorCore.artifactState;
+
+  const normalizedArtifactsPanelModel = useMemo(() => {
+    const state = normalizedArtifacts.artifactDisplayState;
+    const headline = normalizedArtifacts.primaryArtifactTruth.headline;
+    const body = normalizedArtifacts.primaryArtifactTruth.body;
+
+    if (state === "none") return null;
+
+    if (state === "both_ready_high_confidence") {
+      return { canonicalState: "documents_ready" as const, trustTone: "complete" as const, headline, body };
+    }
+
+    if (state === "both_ready_mixed_confidence") {
+      return { canonicalState: "documents_ready" as const, trustTone: "ready" as const, headline, body };
+    }
+
+    if (state === "stale_output_hidden") {
+      return {
+        canonicalState: workflowSurfaceAuthorityHero.canonicalState,
+        trustTone: workflowSurfaceAuthorityHero.trustTone,
+        headline,
+        body,
+      };
+    }
+
+    if (state === "both_failed_retryable") {
+      return { canonicalState: "generation_failed" as const, trustTone: "failure" as const, headline, body };
+    }
+
+    if (state === "both_failed_non_retryable") {
+      return { canonicalState: "hard_blocked" as const, trustTone: "blocked" as const, headline, body };
+    }
+
+    if (state === "partial_failure_retryable" || state === "partial_failure_non_retryable") {
+      return { canonicalState: "partial_documents" as const, trustTone: "recovery" as const, headline, body };
+    }
+
+    if (state === "resume_only_ready" || state === "cover_only_ready") {
+      return { canonicalState: "partial_documents" as const, trustTone: "recovery" as const, headline, body };
+    }
+
+    return { canonicalState: "partial_documents" as const, trustTone: "recovery" as const, headline, body };
+  }, [
+    normalizedArtifacts.artifactDisplayState,
+    normalizedArtifacts.primaryArtifactTruth.body,
+    normalizedArtifacts.primaryArtifactTruth.headline,
+    workflowSurfaceAuthorityHero.canonicalState,
+    workflowSurfaceAuthorityHero.trustTone,
+  ]);
+
+  const normalizedArtifactsTrackedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const signature = [
+      normalizedArtifacts.artifactDisplayState,
+      artifactQuality.confidence ?? "none",
+      normalizedArtifacts.primaryAction.action,
+    ].join("|");
+
+    if (normalizedArtifactsTrackedRef.current === signature) return;
+    normalizedArtifactsTrackedRef.current = signature;
+
+    trackEvent("artifact_state_normalized_viewed", {
+      surface: "studio",
+      artifact_display_state: normalizedArtifacts.artifactDisplayState,
+      resume_state: hasUsableResume ? "ready" : resumeState.artifactFailure ? "failed" : "missing",
+      cover_state: hasUsableCoverLetter ? "ready" : coverState.artifactFailure ? "failed" : "missing",
+      resume_confidence: artifactQuality.confidence ?? null,
+      cover_confidence: artifactQuality.confidence ?? null,
+      primary_action: normalizedArtifacts.primaryAction.action,
+    });
+
+    if (normalizedArtifacts.shouldSuppressStalePreview) {
+      trackEvent("stale_artifact_suppressed", {
+        surface: "studio",
+        artifact_display_state: normalizedArtifacts.artifactDisplayState,
+        resume_state: hasUsableResume ? "ready" : resumeState.artifactFailure ? "failed" : "missing",
+        cover_state: hasUsableCoverLetter ? "ready" : coverState.artifactFailure ? "failed" : "missing",
+        resume_confidence: artifactQuality.confidence ?? null,
+        cover_confidence: artifactQuality.confidence ?? null,
+        primary_action: normalizedArtifacts.primaryAction.action,
+      });
+    }
+
+    if (normalizedArtifacts.shouldShowLowConfidenceWarning) {
+      trackEvent("low_confidence_artifact_viewed", {
+        surface: "studio",
+        artifact_display_state: normalizedArtifacts.artifactDisplayState,
+        resume_state: hasUsableResume ? "ready" : resumeState.artifactFailure ? "failed" : "missing",
+        cover_state: hasUsableCoverLetter ? "ready" : coverState.artifactFailure ? "failed" : "missing",
+        resume_confidence: artifactQuality.confidence ?? null,
+        cover_confidence: artifactQuality.confidence ?? null,
+        primary_action: normalizedArtifacts.primaryAction.action,
+      });
+    }
+  }, [
+    artifactQuality.confidence,
+    coverState.artifactFailure,
+    hasUsableCoverLetter,
+    hasUsableResume,
+    normalizedArtifacts.artifactDisplayState,
+    normalizedArtifacts.primaryAction.action,
+    normalizedArtifacts.shouldShowLowConfidenceWarning,
+    normalizedArtifacts.shouldSuppressStalePreview,
+    resumeState.artifactFailure,
+    trackEvent,
+  ]);
 
   const shouldPrimaryCompleteCover =
     readyHeaderMode === "resume_only" && !autoGenerationInFlight && studioArtifactPairStatus !== "in_progress";
@@ -6517,82 +7133,78 @@ export default function StudioPage() {
     readyHeaderMode === "cover_only" && !autoGenerationInFlight && studioArtifactPairStatus !== "in_progress";
 
   const instantDraftHero = appliedMomentumHero ?? (isInstantDraftExperience ? (
-    <section
-      className="space-y-5 rounded-[28px] border border-emerald-300/20 bg-[linear-gradient(180deg,rgba(16,185,129,0.16),rgba(15,23,42,0.82))] p-6 md:p-8 shadow-[0_24px_60px_rgba(15,23,42,0.35)]"
-      data-testid="studio-instant-draft-hero"
-    >
-      <div className="space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-200">
-          {isReadySuccessState
-            ? isApplicationApplied
-              ? "Application complete"
-              : hasUsableResume && hasUsableCoverLetter
-                ? "Application ready"
-                : hasUsableResume
-                  ? "Resume ready"
-                  : "Cover letter ready"
-            : autoGenerationInFlight || studioArtifactPairStatus === "in_progress"
-              ? "Building your draft"
-              : studioArtifactPairStatus === "failed"
-                ? "Draft needs another pass"
-                : "Instant draft"}
-        </p>
-        <h1 className="text-3xl font-semibold tracking-tight text-slate-50 md:text-[36px]">
-          {heroHeadline}
-        </h1>
-        <p className="max-w-3xl text-base leading-7 text-slate-200">{heroBody}</p>
-        {isReadySuccessState && !isApplicationApplied && hasUsableResume && !hasUsableCoverLetter ? (
-          <p className="text-sm font-medium text-slate-100">
-            Resume ready. Complete your cover letter.
-          </p>
-        ) : null}
-        {isReadySuccessState && !isApplicationApplied && !hasUsableResume && hasUsableCoverLetter ? (
-          <p className="text-sm font-medium text-slate-100">
-            Cover letter ready. Complete your resume.
-          </p>
-        ) : null}
-        {isReadySuccessState ? (
-          <p className="text-xs font-medium text-slate-200" data-testid="studio-confidence-label">
-            Confidence: {artifactQuality.confidence.toLowerCase()} (non-blocking)
-          </p>
-        ) : null}
-      </div>
-      <div className="flex flex-wrap gap-3">
-        {isApplicationFullyReady && !isApplicationApplied ? (
-          <FormButton
-            onClick={handleApplyToThisRole}
-            data-testid="studio-primary-cta-apply"
-          >
-            Apply to this role
-          </FormButton>
-        ) : null}
-        {shouldPrimaryCompleteCover ? (
-          <FormButton
-            onClick={handlePrimaryCoverAction}
-            disabled={
-              coverGenerating ||
-              autoGenerationInFlight ||
-              (generateNowEligible && !isReadySuccessState && !hasCoverLetterArtifact && !coverState.artifactFailure)
-            }
-          >
-            Complete cover letter
-          </FormButton>
-        ) : shouldPrimaryCompleteResume ? (
-          <FormButton
-            onClick={handlePrimaryResumeAction}
-            disabled={
-              resumeGenerating ||
-              autoGenerationInFlight ||
-              (generateNowEligible && !isReadySuccessState && !hasResumeArtifact && !resumeState.artifactFailure)
-            }
-          >
-            Complete resume
-          </FormButton>
-        ) : null}
-        {!shouldPrimaryCompleteResume ? (
-          <FormButton
-            variant={isApplicationFullyReady || isReadySuccessState || shouldPrimaryCompleteCover ? "secondary" : undefined}
-            onClick={handlePrimaryResumeAction}
+	    <section
+	      className="space-y-6"
+	      data-testid="studio-instant-draft-hero"
+	    >
+	      <WorkflowAuthorityPanel
+	        testId="studio-workflow-authority"
+	        model={{
+	          canonicalState: workflowSurfaceAuthorityHero.canonicalState,
+	          headline: heroHeadline,
+	          body: heroBody,
+	          trustTone: workflowSurfaceAuthorityHero.trustTone,
+	        }}
+	        primaryAction={
+	          isApplicationFullyReady && !isApplicationApplied
+	            ? {
+	                label: "Apply to this role",
+	                onClick: handleApplyToThisRole,
+	                testId: "studio-primary-cta-apply",
+	              }
+	            : shouldPrimaryCompleteCover
+	              ? {
+	                  label: "Complete cover letter",
+	                  onClick: handlePrimaryCoverAction,
+	                  disabled:
+	                    coverGenerating ||
+	                    autoGenerationInFlight ||
+	                    (generateNowEligible && !isReadySuccessState && !hasCoverLetterArtifact && !coverState.artifactFailure),
+	                  testId: "studio-primary-cta-complete-cover",
+	                }
+	              : shouldPrimaryCompleteResume
+	                ? {
+	                    label: "Complete resume",
+	                    onClick: handlePrimaryResumeAction,
+	                    disabled:
+	                      resumeGenerating ||
+	                      autoGenerationInFlight ||
+	                      (generateNowEligible && !isReadySuccessState && !hasResumeArtifact && !resumeState.artifactFailure),
+	                    testId: "studio-primary-cta-complete-resume",
+	                  }
+	                : null
+	        }
+	        supporting={
+	          <div className="space-y-2">
+	            {isReadySuccessState && !isApplicationApplied && hasUsableResume && !hasUsableCoverLetter ? (
+	              <p className="text-sm font-medium text-slate-100">Resume ready. Complete your cover letter.</p>
+	            ) : null}
+	            {isReadySuccessState && !isApplicationApplied && !hasUsableResume && hasUsableCoverLetter ? (
+	              <p className="text-sm font-medium text-slate-100">Cover letter ready. Complete your resume.</p>
+	            ) : null}
+	            {isReadySuccessState ? (
+	              <p className="text-xs font-medium text-slate-200" data-testid="studio-confidence-label">
+	                Confidence: {artifactQuality.confidence.toLowerCase()} (non-blocking)
+	              </p>
+	            ) : null}
+	          </div>
+	        }
+	        afterActions={
+	          <div className="space-y-5">
+	            {isReadySuccessState ? (
+	              <VerifiedGenerationTrustSummary testId="studio-ready-trust-summary" />
+	            ) : null}
+	            {studioFocusPrimary ? (
+	              <StudioFocusPanel primary={studioFocusPrimary} secondary={studioFocusSecondary} />
+	            ) : null}
+	          </div>
+	        }
+	      />
+	      <div className="flex flex-wrap gap-3">
+	        {!shouldPrimaryCompleteResume ? (
+	          <FormButton
+	            variant={isApplicationFullyReady || isReadySuccessState || shouldPrimaryCompleteCover ? "secondary" : undefined}
+	            onClick={handlePrimaryResumeAction}
             disabled={
               resumeGenerating ||
               autoGenerationInFlight ||
@@ -6618,20 +7230,14 @@ export default function StudioPage() {
         <Link
           href={fitReviewHref}
           className="inline-flex items-center justify-center px-1 py-2 text-sm font-semibold text-slate-100 underline decoration-slate-400/70 underline-offset-4 transition hover:decoration-slate-200"
-        >
-          Refine
-        </Link>
-      </div>
-      {isReadySuccessState ? (
-        <VerifiedGenerationTrustSummary testId="studio-ready-trust-summary" />
-      ) : null}
-      {studioFocusPrimary ? (
-        <StudioFocusPanel primary={studioFocusPrimary} secondary={studioFocusSecondary} />
-      ) : null}
-      {topLevelArtifactFailure && canRetryGeneration ? (
-        <ArtifactFailureState
-          failure={topLevelArtifactFailure}
-          onRetry={
+	        >
+	          Refine
+	        </Link>
+	      </div>
+	      {topLevelArtifactFailure && canRetryGeneration ? (
+	        <ArtifactFailureState
+	          failure={topLevelArtifactFailure}
+	          onRetry={
             topLevelArtifactFailure.artifactType === "cover_letter"
               ? handleRetryCoverGeneration
               : handleRetryResumeGeneration
@@ -6652,9 +7258,130 @@ export default function StudioPage() {
         />
       ) : null}
       {/* Deprecated: duplicate READY/export lane. READY UX is owned by the hero + materials sections. */}
-      {false ? (
+      {isReadySuccessState ? (
         <div className="space-y-5">
-          <div className="space-y-3">
+          <p className="text-sm font-medium text-slate-200" data-testid="studio-ready-materials-copy">
+            {normalizedArtifacts.artifactDisplayState === "both_ready_high_confidence" ||
+            normalizedArtifacts.artifactDisplayState === "both_ready_mixed_confidence"
+              ? "Your documents are ready. Download or refine below."
+              : normalizedArtifacts.artifactDisplayState === "resume_only_ready"
+                ? "Your resume is ready. Your cover letter still needs attention."
+                : normalizedArtifacts.artifactDisplayState === "cover_only_ready"
+                  ? "Your cover letter is ready. Your resume still needs attention."
+                  : normalizedArtifacts.primaryArtifactTruth.headline}
+          </p>
+          {normalizedArtifacts.shouldShowLowConfidenceWarning && !showLowQualityRecoveryLane ? (
+            <p className="text-xs font-medium text-amber-200" data-testid="studio-low-confidence-documents-warning">
+              One draft is low confidence. Review closely before exporting.
+            </p>
+          ) : null}
+          {normalizedArtifactsPanelModel &&
+          (normalizedArtifacts.artifactDisplayState === "stale_output_hidden" ||
+            normalizedArtifacts.artifactDisplayState === "partial_failure_retryable" ||
+            normalizedArtifacts.artifactDisplayState === "partial_failure_non_retryable" ||
+            normalizedArtifacts.artifactDisplayState === "both_failed_retryable" ||
+            normalizedArtifacts.artifactDisplayState === "both_failed_non_retryable") ? (
+            <WorkflowAuthorityPanel
+              testId="studio-artifact-truth"
+              eyebrow="Documents"
+              model={normalizedArtifactsPanelModel}
+              primaryAction={{
+                label: normalizedArtifacts.primaryAction.label,
+                testId: "studio-artifact-primary-cta",
+                onClick: () => {
+                  const action = normalizedArtifacts.primaryAction.action;
+                  if (action === "return_to_evidence") return router.push(fitReviewHref);
+                  if (action === "open_workspace" || action === "open_documents") {
+                    const anchor = document.querySelector("[data-testid='studio-workflow-authority']") as HTMLElement | null;
+                    if (anchor) {
+                      anchor.scrollIntoView({ behavior: "smooth", block: "start" });
+                      anchor.focus?.();
+                    }
+                    return;
+                  }
+                  if (action === "retry_both") {
+                    trackEvent("artifact_retry_started", {
+                      surface: "studio",
+                      artifact_display_state: normalizedArtifacts.artifactDisplayState,
+                      resume_state: hasUsableResume ? "ready" : resumeState.artifactFailure ? "failed" : "missing",
+                      cover_state: hasUsableCoverLetter ? "ready" : coverState.artifactFailure ? "failed" : "missing",
+                      resume_confidence: artifactQuality.confidence ?? null,
+                      cover_confidence: artifactQuality.confidence ?? null,
+                      primary_action: action,
+                    });
+
+                    return void (async () => {
+                      try {
+                        await startGenerationFromReadyShell("shell");
+                      } catch (error) {
+                        trackEvent("artifact_retry_failed", {
+                          surface: "studio",
+                          artifact_display_state: normalizedArtifacts.artifactDisplayState,
+                          resume_state: hasUsableResume ? "ready" : resumeState.artifactFailure ? "failed" : "missing",
+                          cover_state: hasUsableCoverLetter ? "ready" : coverState.artifactFailure ? "failed" : "missing",
+                          resume_confidence: artifactQuality.confidence ?? null,
+                          cover_confidence: artifactQuality.confidence ?? null,
+                          primary_action: action,
+                          failure_category: null,
+                          message: error instanceof Error ? error.message : "Retry failed",
+                        });
+                      }
+                    })();
+                  }
+                  if (action === "retry_failed_artifact") {
+                    const coverFailed = Boolean(coverState.artifactFailure) && !hasUsableCoverLetter;
+
+                    trackEvent("artifact_retry_started", {
+                      surface: "studio",
+                      artifact_display_state: normalizedArtifacts.artifactDisplayState,
+                      resume_state: hasUsableResume ? "ready" : resumeState.artifactFailure ? "failed" : "missing",
+                      cover_state: hasUsableCoverLetter ? "ready" : coverState.artifactFailure ? "failed" : "missing",
+                      resume_confidence: artifactQuality.confidence ?? null,
+                      cover_confidence: artifactQuality.confidence ?? null,
+                      primary_action: action,
+                    });
+
+                    return void (async () => {
+                      try {
+                        if (coverFailed) {
+                          await handleRetryCoverGeneration();
+                        } else {
+                          await handleRetryResumeGeneration();
+                        }
+                      } catch (error) {
+                        trackEvent("artifact_retry_failed", {
+                          surface: "studio",
+                          artifact_display_state: normalizedArtifacts.artifactDisplayState,
+                          resume_state: hasUsableResume ? "ready" : resumeState.artifactFailure ? "failed" : "missing",
+                          cover_state: hasUsableCoverLetter ? "ready" : coverState.artifactFailure ? "failed" : "missing",
+                          resume_confidence: artifactQuality.confidence ?? null,
+                          cover_confidence: artifactQuality.confidence ?? null,
+                          primary_action: action,
+                          failure_category: null,
+                          message: error instanceof Error ? error.message : "Retry failed",
+                        });
+                      }
+                    })();
+                  }
+                },
+              }}
+              secondaryAction={
+                normalizedArtifacts.secondaryAction
+                  ? {
+                      label: normalizedArtifacts.secondaryAction.label,
+                      testId: "studio-artifact-secondary-cta",
+                      variant: "secondary",
+                      onClick: () => {
+                        const action = normalizedArtifacts.secondaryAction?.action;
+                        if (action === "return_to_evidence") return router.push(fitReviewHref);
+                        if (action === "open_documents") return setAllowStaleArtifactPreview(true);
+                      },
+                    }
+                  : null
+              }
+            />
+          ) : null}
+          {false && (<div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full border border-emerald-300/30 bg-emerald-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-emerald-100">
                 {isApplicationApplied ? "Application complete" : "Application ready"}
@@ -6681,7 +7408,7 @@ export default function StudioPage() {
             {applicationActionMessage ? (
               <p className="text-sm font-medium text-emerald-100">{applicationActionMessage}</p>
             ) : null}
-          </div>
+          </div>)}
           {applicationProgress ? (
             <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -6701,7 +7428,8 @@ export default function StudioPage() {
               </div>
             </section>
           ) : null}
-          <div className="flex flex-wrap gap-3">
+          {!normalizedArtifacts.shouldSuppressStalePreview ? (
+            <div className="flex flex-wrap gap-3">
             <FormButton
               variant="secondary"
               onClick={() => void exportResume("docx")}
@@ -6744,15 +7472,21 @@ export default function StudioPage() {
                 View fit reasoning
               </a>
             ) : null}
-          </div>
-          <div className="grid gap-4 lg:grid-cols-2">
+            </div>
+          ) : null}
+          {!normalizedArtifacts.shouldSuppressStalePreview ? (
+            <div className="grid gap-4 lg:grid-cols-2">
             {resumePresenter.status === "success" && resumeState.response ? (
               <section className="rounded-2xl border border-white/10 bg-slate-950/45 p-4" data-testid="studio-instant-resume-panel">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Resume</p> 
                     <p className="text-sm text-slate-300"> 
-                      {showLowQualityRecoveryLane ? "Draft (low quality)" : "Application ready"} 
+                      {showLowQualityRecoveryLane
+                        ? "Draft (low quality)"
+                        : hasUsableResume && hasUsableCoverLetter
+                          ? "Application ready"
+                          : "Resume ready"} 
                     </p> 
                   </div> 
                 </div> 
@@ -6809,7 +7543,11 @@ export default function StudioPage() {
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Cover Letter</p> 
                     <p className="text-sm text-slate-300"> 
-                      {showLowQualityRecoveryLane ? "Draft (low quality)" : "Application ready"} 
+                      {showLowQualityRecoveryLane
+                        ? "Draft (low quality)"
+                        : hasUsableResume && hasUsableCoverLetter
+                          ? "Application ready"
+                          : "Cover letter ready"} 
                     </p> 
                   </div> 
                 </div> 
@@ -6855,7 +7593,8 @@ export default function StudioPage() {
                 ) : null}
               </section>
             ) : null}
-          </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
       {!hasCompletedGeneration && studioArtifactPairStatus === "failed" && !generateNowEligible ? (
@@ -7165,8 +7904,601 @@ export default function StudioPage() {
       resumeGating.primaryBlocker === "tier_gate" ||
       coverGating.primaryBlocker === "tier_gate");
 
+  const postUnlockNewReadiness: PostUnlockReadiness | null =
+    hasLoadedAnalysis
+      ? activeGenerationReadiness.blocked
+        ? "blocked"
+        : activeGenerationReadiness.status === "ready"
+          ? "ready"
+          : "limited"
+      : null;
+  const postUnlockModel = useMemo(() => {
+    if (!postUnlockActive) return null;
+
+    const resumeStatus: "missing" | "generating" | "ready" | "failed" = hasUsableResume
+      ? "ready"
+      : resumeGenerating || autoGenerationInFlight || studioArtifactPairStatus === "in_progress"
+        ? "generating"
+        : resumeState.artifactFailure
+          ? "failed"
+          : "missing";
+
+    const coverStatus: "missing" | "generating" | "ready" | "failed" = hasUsableCoverLetter
+      ? "ready"
+      : coverGenerating || autoGenerationInFlight || studioArtifactPairStatus === "in_progress"
+        ? "generating"
+        : coverState.artifactFailure
+          ? "failed"
+          : "missing";
+
+    const orchestrator = resolveWorkflowOrchestrator({
+      surface: "studio",
+      score: typeof analysisScore === "number" ? analysisScore : null,
+      generationReadiness: activeGenerationReadiness,
+      workflowAuthority,
+      artifact: {
+        hasResume: hasUsableResume,
+        hasCoverLetter: hasUsableCoverLetter,
+        pairStatus: studioArtifactPairStatus ?? null,
+        generating:
+          autoGenerationInFlight ||
+          resumeGenerating ||
+          coverGenerating ||
+          studioArtifactPairStatus === "in_progress",
+        failure: topLevelArtifactFailure
+          ? { category: topLevelArtifactFailure.category, retryable: topLevelArtifactFailure.retryable }
+          : null,
+      },
+      resume: {
+        status: resumeStatus,
+        confidence: artifactQuality.confidence ?? null,
+        failure: resumeState.artifactFailure
+          ? { category: resumeState.artifactFailure.category, retryable: resumeState.artifactFailure.retryable }
+          : null,
+      },
+      coverLetter: {
+        status: coverStatus,
+        confidence: artifactQuality.confidence ?? null,
+        failure: coverState.artifactFailure
+          ? { category: coverState.artifactFailure.category, retryable: coverState.artifactFailure.retryable }
+          : null,
+      },
+      artifactQuality: { confidence: artifactQuality.confidence ?? null },
+      allowStaleArtifactPreview: allowStaleArtifactPreview,
+      searchParamsString: searchParamValue,
+      unlockDismissed: unlockFlowDismissed,
+      unlockReanalysisFailure: unlockReanalysisFailure
+        ? { priorScore: unlockReanalysisFailure.priorScore, priorReadiness: unlockReanalysisFailure.priorReadiness, returnToEvidenceHref: strengthenPrimaryHref }
+        : null,
+      postUnlock: {
+        active: true,
+        dismissed: postUnlockDismissed,
+        priorScore: postUnlockParams.priorScore,
+        priorReadiness: postUnlockParams.priorReadiness,
+        newReadiness: postUnlockNewReadiness,
+        reanalysisFailed: Boolean((analysisError && !analysisLoading) || !hasLoadedAnalysis),
+        generationAllowedNow: Boolean(generateNowEligible || activeGenerationReadiness.status === "ready"),
+        returnToEvidenceHref: strengthenPrimaryHref,
+      },
+      generationReady: { dismissed: generationReadyDismissed, phase: generationReadyPhase },
+      resumeFailure: resumeState.artifactFailure,
+      coverFailure: coverState.artifactFailure,
+      activity: workflowActivity,
+    });
+
+    return orchestrator.postUnlockState.model;
+  }, [
+    activeGenerationReadiness,
+    allowStaleArtifactPreview,
+    analysisError,
+    analysisLoading,
+    analysisScore,
+    autoGenerationInFlight,
+    coverGenerating,
+    coverState.artifactFailure,
+    generateNowEligible,
+    generationReadyDismissed,
+    generationReadyPhase,
+    hasLoadedAnalysis,
+    hasUsableCoverLetter,
+    hasUsableResume,
+    postUnlockActive,
+    postUnlockDismissed,
+    postUnlockNewReadiness,
+    postUnlockParams.priorReadiness,
+    postUnlockParams.priorScore,
+    resumeGenerating,
+    resumeState.artifactFailure,
+    searchParamValue,
+    strengthenPrimaryHref,
+    studioArtifactPairStatus,
+    topLevelArtifactFailure?.category,
+    topLevelArtifactFailure?.retryable,
+    unlockFlowDismissed,
+    unlockReanalysisFailure?.priorReadiness,
+    unlockReanalysisFailure?.priorScore,
+    workflowActivity,
+    workflowAuthority,
+    artifactQuality.confidence,
+  ]);
+
+  useEffect(() => {
+    if (!postUnlockActive) return;
+    if (!postUnlockModel) return;
+    if (postUnlockTrackedRef.current) return;
+    if (analysisLoading) return;
+
+    postUnlockTrackedRef.current = true;
+
+    const priorScore = postUnlockParams.priorScore;
+    const newScore = typeof analysisScore === "number" ? analysisScore : null;
+    const scoreDelta =
+      typeof priorScore === "number" && typeof newScore === "number" ? newScore - priorScore : null;
+
+    trackEvent("unlock_outcome_viewed", {
+      source: "studio",
+      prior_score: priorScore,
+      new_score: newScore,
+      score_delta: scoreDelta,
+      prior_readiness: postUnlockParams.priorReadiness,
+      new_readiness: postUnlockNewReadiness,
+      outcome_state: postUnlockModel.outcomeState,
+    });
+
+    if (postUnlockModel.outcomeState === "reanalysis_failed") {
+      trackEvent("unlock_reanalysis_failed", {
+        source: "studio",
+        prior_score: priorScore,
+        new_score: newScore,
+        score_delta: scoreDelta,
+        prior_readiness: postUnlockParams.priorReadiness,
+        new_readiness: postUnlockNewReadiness,
+        outcome_state: postUnlockModel.outcomeState,
+      });
+      return;
+    }
+
+    trackEvent("unlock_reanalysis_succeeded", {
+      source: "studio",
+      prior_score: priorScore,
+      new_score: newScore,
+      score_delta: scoreDelta,
+      prior_readiness: postUnlockParams.priorReadiness,
+      new_readiness: postUnlockNewReadiness,
+      outcome_state: postUnlockModel.outcomeState,
+    });
+  }, [
+    analysisError,
+    analysisLoading,
+    analysisScore,
+    hasLoadedAnalysis,
+    postUnlockActive,
+    postUnlockModel,
+    postUnlockNewReadiness,
+    postUnlockParams.priorReadiness,
+    postUnlockParams.priorScore,
+  ]);
+
+  const generationReadyModel = workflowOrchestratorCore.generationReadyState.model;
+
+  const generationReadyShellActive =
+    !generationReadyDismissed &&
+    !isApplicationApplied &&
+    (generationReadyModel.isGenerationReadyPriority || generationReadyPhase !== "ready");
+
+  useWorkflowGuardrails({
+    surface: "studio",
+    orchestrator: workflowOrchestratorCore,
+    rendered: {
+      workflowAuthorityPanel:
+        !unlockFlowActive && !(postUnlockActive && Boolean(postUnlockModel)) && !generationReadyShellActive,
+      unlockFlow: unlockFlowActive,
+      postUnlockOutcome: postUnlockActive && Boolean(postUnlockModel),
+      generationReadyShell: generationReadyShellActive,
+      artifactTruthPanel: Boolean(normalizedArtifactsPanelModel),
+      staleArtifactPreview: false,
+      activityBanner: true,
+    },
+    context: {
+      failureActive: Boolean(pageTruth.state === "failed"),
+      resumeState: hasUsableResume ? "ready" : resumeState.artifactFailure ? "failed" : "missing",
+      coverState: hasUsableCoverLetter ? "ready" : coverState.artifactFailure ? "failed" : "missing",
+    },
+    orchestratorViolations: workflowOrchestratorCore.diagnostics?.violations ?? null,
+    trackEvent,
+  });
+
+  useEffect(() => {
+    if (!generationReadyShellActive) return;
+    // Generation-ready shell is the explicit authority for starting generation;
+    // suppress background auto-generation so the shell remains singular/trustworthy.
+    suppressAutoGenerationRef.current = true;
+  }, [generationReadyShellActive]);
+
+  const generationReadyAnalyticsContext = useMemo(() => {
+    const trust = generationReadyModel.trustSummary;
+    return {
+      fit_score: typeof trust?.fitScore === "number" ? Math.round(trust.fitScore) : null,
+      readiness_state: trust?.readinessState ?? null,
+      outcome_state: postUnlockModel?.outcomeState ?? null,
+    };
+  }, [generationReadyModel.trustSummary, postUnlockModel?.outcomeState]);
+
+  useEffect(() => {
+    if (!generationReadyShellActive) return;
+    if (unlockFlowActive || postUnlockActive) return;
+    if (generationReadyTrackedRef.current) return;
+    generationReadyTrackedRef.current = true;
+
+    trackEvent("generation_ready_shell_viewed", {
+      source: "studio",
+      ...generationReadyAnalyticsContext,
+    });
+  }, [
+    generationReadyAnalyticsContext,
+    generationReadyShellActive,
+    postUnlockActive,
+    trackEvent,
+    unlockFlowActive,
+  ]);
+
+  const deriveGenerationReadyShellFailure = useCallback((): GenerationReadyShellFailure => {
+    const resumeFailure = resumeStateSnapshotRef.current.artifactFailure;
+    const coverFailure = coverStateSnapshotRef.current.artifactFailure;
+
+    const resumeError = resumeStateSnapshotRef.current.error;
+    const coverError = coverStateSnapshotRef.current.error;
+
+    const failures = [resumeFailure, coverFailure].filter(
+      (failure): failure is StudioArtifactFailurePresentation => Boolean(failure),
+    );
+    const nonRetryableCategories: StudioArtifactFailurePresentation["category"][] = [
+      "generation_blocked",
+      "insufficient_verified_evidence",
+      "unsupported_input",
+      "trace_failure",
+    ];
+    const retryableCategories: StudioArtifactFailurePresentation["category"][] = [
+      "generation_failed",
+      "generation_timeout",
+      "invalid_pair_state",
+    ];
+
+    const readinessBlocked = activeGenerationReadiness.blocked;
+    const blockedByReadinessGate =
+      resumeGating.primaryBlocker === "readiness_block" || coverGating.primaryBlocker === "readiness_block";
+
+    if (readinessBlocked || blockedByReadinessGate) {
+      return {
+        category: "generation_blocked",
+        retryable: false,
+        message: "Generation is blocked. Add more verified evidence to unlock document generation.",
+      };
+    }
+
+    const hasNonRetryableFailure =
+      failures.some((failure) => nonRetryableCategories.includes(failure.category)) ||
+      failures.some((failure) => !failure.retryable);
+
+    if (hasNonRetryableFailure) {
+      const failure = failures.find((candidate) => nonRetryableCategories.includes(candidate.category)) ?? failures[0];
+      return {
+        category: failure?.category ?? null,
+        retryable: false,
+        message: failure?.explanation ?? "Generation can't continue from the current state.",
+      };
+    }
+
+    const hasRetryableFailure = failures.some(
+      (failure) => failure.retryable && retryableCategories.includes(failure.category),
+    );
+
+    if (hasRetryableFailure) {
+      const failure = failures.find((candidate) => retryableCategories.includes(candidate.category)) ?? failures[0];
+      return {
+        category: failure?.category ?? null,
+        retryable: true,
+        message: failure?.explanation ?? "Generation failed. Retry generation now.",
+      };
+    }
+
+    const errorMessage = String(resumeError || coverError || "").trim();
+    return {
+      category: failures[0]?.category ?? null,
+      retryable: true,
+      message: failures[0]?.explanation ?? (errorMessage || "Generation failed. Retry generation now."),
+    };
+  }, [
+    activeGenerationReadiness.blocked,
+    coverGating.primaryBlocker,
+    resumeGating.primaryBlocker,
+    coverStateSnapshotRef,
+    resumeStateSnapshotRef,
+  ]);
+
+  const dismissGenerationReadyShell = useCallback(
+    (reason: "open_workspace" | "dismiss") => {
+      setGenerationReadyDismissed(true);
+      setGenerationReadyFailure(null);
+      setGenerationReadyPhase("ready");
+      suppressAutoGenerationRef.current = true;
+      trackEvent("generation_ready_shell_dismissed", {
+        source: "studio",
+        ...generationReadyAnalyticsContext,
+        reason,
+      });
+    },
+    [generationReadyAnalyticsContext, trackEvent],
+  );
+
+  const startGenerationFromReadyShell = useCallback(
+    async (source: "shell" | "post_unlock") => {
+      if (generationReadyPhase === "generating") return;
+
+      setGenerationReadyFailure(null);
+      setGenerationReadyPhase("generating");
+      trackEvent("generation_ready_shell_started", {
+        source: "studio",
+        ...generationReadyAnalyticsContext,
+        entrypoint: source,
+      });
+
+      const sessionKey = `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:ready_shell:${Date.now()}`;
+      const [resumeSucceeded, coverSucceeded] = await Promise.all([
+        handleResumeDraft({ sessionKey }),
+        handleCoverDraft({ sessionKey }),
+      ]);
+
+      if (resumeSucceeded && coverSucceeded) {
+        // Keep the shell as the sole authority while generation transitions, even if the requests resolve fast.
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        setGenerationReadyDismissed(true);
+        setGenerationReadyFailure(null);
+        setGenerationReadyPhase("ready");
+        return;
+      }
+
+      // Allow state updates from the generation helpers to flush before reading the failure surfaces.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const failure = deriveGenerationReadyShellFailure();
+      setGenerationReadyFailure(failure);
+      setGenerationReadyPhase("failed");
+
+      trackEvent("generation_ready_shell_failed", {
+        source: "studio",
+        ...generationReadyAnalyticsContext,
+        failure_category: failure.category,
+        retryable: failure.retryable,
+      });
+    },
+    [
+      deriveGenerationReadyShellFailure,
+      effectiveBaselineId,
+      effectiveJobId,
+      generationReadyAnalyticsContext,
+      generationReadyPhase,
+      handleCoverDraft,
+      handleResumeDraft,
+      trackEvent,
+    ],
+  );
+
+  useEffect(() => {
+    if (!hasGenerateIntent) return;
+    if (generationIntentHandledRef.current) return;
+    if (!generationReadyShellActive) return;
+    if (generationReadyPhase !== "ready") return;
+    generationIntentHandledRef.current = true;
+
+    void (async () => {
+      try {
+        await startGenerationFromReadyShell("shell");
+      } finally {
+        // Prevent loops on refresh: strip intent after first handling.
+        try {
+          if (typeof window === "undefined") return;
+          const url = new URL(window.location.href);
+          url.searchParams.delete("intent");
+          router.replace(`${url.pathname}${url.search}`);
+        } catch {
+          // ignore
+        }
+      }
+    })();
+  }, [
+    generationReadyPhase,
+    generationReadyShellActive,
+    hasGenerateIntent,
+    router,
+    startGenerationFromReadyShell,
+  ]);
+
+  const workflowSurfaceAuthorityStudio = workflowSurfaceAuthorityHero;
+
+  const workflowSurfaceAuthorityStudioTrackedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const signature = [
+      workflowSurfaceAuthorityStudio.canonicalState,
+      workflowSurfaceAuthorityStudio.trustTone,
+      workflowSurfaceAuthorityStudio.primaryAction.destination,
+    ].join("|");
+    if (workflowSurfaceAuthorityStudioTrackedRef.current === signature) return;
+    workflowSurfaceAuthorityStudioTrackedRef.current = signature;
+
+    trackEvent("workflow_surface_authority_viewed", {
+      surface: "studio",
+      canonical_state: workflowSurfaceAuthorityStudio.canonicalState,
+      trust_tone: workflowSurfaceAuthorityStudio.trustTone,
+      primary_action_destination: workflowSurfaceAuthorityStudio.primaryAction.destination,
+    });
+  }, [
+    trackEvent,
+    workflowSurfaceAuthorityStudio.canonicalState,
+    workflowSurfaceAuthorityStudio.primaryAction.destination,
+    workflowSurfaceAuthorityStudio.trustTone,
+  ]);
+
+  if (unlockFlowActive) {
+    return (
+      <PageShell className="space-y-4 pb-4">
+        <WorkflowActivityBanner tracker={workflowActivity} />
+        <div
+          data-workflow-shell="unlock-flow"
+          data-workflow-state={workflowOrchestratorCore.authorityState.canonicalState}
+          data-workflow-trust-tone={workflowOrchestratorCore.authorityState.trustTone}
+        >
+        {unlockReanalysisFailure ? (
+          <PostUnlockOutcomeShell
+            model={
+              workflowOrchestratorCore.unlockReanalysisFailureState.model ??
+              workflowOrchestratorCore.postUnlockState.model ??
+              {
+                outcomeState: "reanalysis_failed",
+                headline: "Re-evaluation failed.",
+                body: "We couldn’t confirm whether your new evidence changed readiness. Retry the re-evaluation to refresh your score and gating state.",
+                primaryCta: { label: "Try re-evaluating again", action: "retry_reanalysis" },
+                secondaryCta: { label: "Add more evidence", href: "", action: "return_to_evidence" },
+              }
+            }
+            detail={unlockReanalysisFailure.message}
+            primaryDisabled={unlockSubmitting || isWorkflowOperationActive("unlock_reanalysis_running")}
+            onPrimary={() => {
+              setUnlockSubmitting(true);
+              setUnlockSubmitError(null);
+              void (async () => {
+                try {
+                  await runAnalysisRefreshAfterUnlock({
+                    score: unlockReanalysisFailure.priorScore,
+                    readiness: unlockReanalysisFailure.priorReadiness,
+                  });
+                } catch (error) {
+                  const message =
+                    error instanceof Error ? error.message : "Re-evaluation failed. Please retry.";
+                  setUnlockSubmitting(false);
+                  setUnlockReanalysisFailure((current) =>
+                    current
+                      ? {
+                          ...current,
+                          message,
+                        }
+                      : null,
+                  );
+                }
+              })();
+            }}
+            onSecondary={() => {
+              setUnlockReanalysisFailure(null);
+            }}
+            onDismiss={handleUnlockFlowSkip}
+          />
+        ) : (
+          <UnlockPanel
+            dimension={unlockContext.dimension ?? "Evidence gap"}
+            missingEvidence={unlockContext.missingEvidence}
+            submitting={unlockSubmitting || isWorkflowOperationActive("unlock_reanalysis_running")}
+            error={unlockSubmitError}
+            onSkip={handleUnlockFlowSkip}
+            onSubmit={handleUnlockFlowSubmit}
+          />
+        )}
+        </div>
+      </PageShell>
+    );
+  }
+
+  if (postUnlockActive && postUnlockModel) {
+    return (
+      <PageShell className="space-y-4 pb-4">
+        <WorkflowActivityBanner tracker={workflowActivity} />
+        <div
+          data-workflow-shell="post-unlock-outcome"
+          data-workflow-state={workflowOrchestratorCore.authorityState.canonicalState}
+          data-workflow-trust-tone={workflowOrchestratorCore.authorityState.trustTone}
+        >
+        <PostUnlockOutcomeShell
+          model={postUnlockModel}
+          detail={postUnlockRetryError ?? (analysisError && !analysisLoading ? analysisError : null)}
+          primaryDisabled={postUnlockRetrying || isWorkflowOperationActive("unlock_reanalysis_running")}
+          onPrimary={() => {
+            const action = postUnlockModel.primaryCta.action ?? null;
+            if (action === "retry_reanalysis") {
+              void retryPostUnlockReanalysis();
+              return;
+            }
+            if (action === "return_to_evidence") {
+              void router.push(postUnlockModel.primaryCta.href ?? strengthenPrimaryHref);
+              dismissPostUnlockOutcome();
+              return;
+            }
+            if (action === "start_generation") {
+              const priorScore = postUnlockParams.priorScore;
+              const newScore = typeof analysisScore === "number" ? analysisScore : null;
+              const scoreDelta =
+                typeof priorScore === "number" && typeof newScore === "number" ? newScore - priorScore : null;
+              trackEvent("unlock_generation_started", {
+                source: "studio",
+                prior_score: priorScore,
+                new_score: newScore,
+                score_delta: scoreDelta,
+                prior_readiness: postUnlockParams.priorReadiness,
+                new_readiness: postUnlockNewReadiness,
+                outcome_state: postUnlockModel.outcomeState,
+              });
+              void startGenerationFromReadyShell("post_unlock");
+              dismissPostUnlockOutcome();
+              return;
+            }
+            dismissPostUnlockOutcome();
+          }}
+          onSecondary={() => {
+            const action = postUnlockModel.secondaryCta?.action ?? null;
+            if (action === "retry_reanalysis") {
+              void retryPostUnlockReanalysis();
+              return;
+            }
+            dismissPostUnlockOutcome();
+          }}
+          onDismiss={dismissPostUnlockOutcome}
+        />
+        </div>
+      </PageShell>
+    );
+  }
+
+  if (generationReadyShellActive) {
+    const trust = generationReadyModel.trustSummary;
+    return (
+      <PageShell className="space-y-4 pb-4">
+        <WorkflowActivityBanner tracker={workflowActivity} />
+        <div
+          data-workflow-shell="generation-ready-shell"
+          data-workflow-state={workflowOrchestratorCore.authorityState.canonicalState}
+          data-workflow-trust-tone={workflowOrchestratorCore.authorityState.trustTone}
+        >
+        <GenerationReadyShell
+          fitScore={typeof trust?.fitScore === "number" ? trust.fitScore : null}
+          readinessState={trust?.readinessState ?? "Ready"}
+          evidenceStatus={trust?.evidenceStatus ?? "Evidence blocker: Cleared"}
+          phase={generationReadyPhase}
+          failure={generationReadyFailure}
+          disableActions={generationReadyPhase === "generating" || isWorkflowOperationActive("generation_running")}
+          onGenerate={() => void startGenerationFromReadyShell("shell")}
+          onRetry={() => void startGenerationFromReadyShell("shell")}
+          onOpenWorkspace={() => dismissGenerationReadyShell("open_workspace")}
+          onReturnToEvidence={() => {
+            void router.push(strengthenPrimaryHref);
+            dismissGenerationReadyShell("dismiss");
+          }}
+        />
+        </div>
+      </PageShell>
+    );
+  }
+
   return (
     <PageShell className="space-y-4 pb-4">
+      <WorkflowActivityBanner tracker={workflowActivity} />
       {showInstantDraftHero ? instantDraftHero : null}
       {showReadinessRecoveryExperience ? unlockEntryPanel : null}
       {unlockGenerationLoadingMessage && showPrimaryGeneratingNotice ? (
@@ -7721,8 +9053,7 @@ export default function StudioPage() {
       ) : null}
       {requestedAnalysisId && 
       (activeGenerationReadiness.status === "blocked" || activeGenerationReadiness.status === "limited") && 
-      canonicalUnverifiedRequirements.length &&
-      !generateNowEligible ? ( 
+      canonicalUnverifiedRequirements.length ? ( 
         <div 
           id="studio-auto-adjust-panel" 
           className="rounded-2xl border border-amber-300/40 bg-amber-500/10 px-4 py-3" 
@@ -8104,13 +9435,17 @@ export default function StudioPage() {
               </Link>
             ) : null}
           </div>
-        ) : resumePresenter.status === "success" && resumeState.response ? (
+        ) : resumePresenter.status === "success" && resumeState.response && !normalizedArtifacts.shouldSuppressStalePreview ? (
           <div
             className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
             data-testid="studio-resume-ready-panel"
           >
             <p className="text-sm text-slate-200">
-              Your resume is ready. Download or refine below.
+              {normalizedArtifacts.artifactDisplayState === "resume_only_ready" ||
+              normalizedArtifacts.artifactDisplayState === "partial_failure_retryable" ||
+              normalizedArtifacts.artifactDisplayState === "partial_failure_non_retryable"
+                ? "Your resume is ready. Your cover letter still needs attention."
+                : "Your resume is ready. Download or refine below."}
             </p>
             <div className="space-y-4 rounded-xl border border-white/10 bg-slate-950/30 p-3">
               {showLowQualityRecoveryLane && !showFullLowQualityResume ? ( 
@@ -8443,7 +9778,7 @@ export default function StudioPage() {
         ) : null}
 
         {!coverLetterComplianceBlocked ? (
-          coverPresenter.status === "success" && coverState.response ? (
+          coverPresenter.status === "success" && coverState.response && !normalizedArtifacts.shouldSuppressStalePreview ? (
             <div
               className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
               data-testid="studio-cover-ready-panel"

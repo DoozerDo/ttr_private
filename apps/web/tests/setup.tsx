@@ -11,11 +11,13 @@ import { __resetStudioArtifactSingleFlightForTests } from "@/lib/studioArtifactS
 // - overrides that implement `get(key: string): string | null`
 type MockSearchParams = {
   get: (key?: string) => string | null;
+  getAll: (key: string) => string[];
   toString: () => string;
 };
 
 const mockSearchParams = vi.fn<[], MockSearchParams>(() => ({
   get: (_key?: string) => null,
+  getAll: (_key: string) => [],
   toString: () => "",
 }));
 
@@ -125,25 +127,49 @@ const defaultFetch = vi.fn((input: RequestInfo) => {
 function setDefaultFetch() {
   (globalThis.fetch as typeof globalThis.fetch) =
     defaultFetch as unknown as typeof globalThis.fetch;
+  if (typeof window !== "undefined") {
+    (window.fetch as typeof window.fetch) = globalThis.fetch as unknown as typeof window.fetch;
+  }
 }
 
 setDefaultFetch();
 
-export function overrideSearchParams(values: Record<string, string | null>) {
+export function overrideSearchParams(values: Record<string, string | string[] | null>) {
   const params = new URLSearchParams();
   Object.entries(values).forEach(([key, value]) => {
-    if (value !== null) {
-      params.set(key, value);
+    if (value === null) return;
+    if (Array.isArray(value)) {
+      value.forEach((entry) => {
+        if (entry !== null && entry !== undefined) {
+          params.append(key, String(entry));
+        }
+      });
+      return;
     }
+    params.set(key, value);
   });
 
   mockSearchParams.mockReturnValue({
     get: (key?: string) => {
       if (!key) return null;
       if (Object.prototype.hasOwnProperty.call(values, key)) {
-        return values[key];
+        const value = values[key];
+        if (Array.isArray(value)) {
+          const first = value.find((entry) => entry !== null && entry !== undefined);
+          return typeof first === "string" ? first : first !== undefined ? String(first) : null;
+        }
+        return value;
       }
       return null;
+    },
+    getAll: (key: string) => {
+      const value = values[key];
+      if (Array.isArray(value)) {
+        return value.map((entry) => String(entry));
+      }
+      if (typeof value === "string") return [value];
+      const fromParams = params.getAll(key);
+      return fromParams ?? [];
     },
     toString: () => params.toString(),
   });
@@ -152,6 +178,7 @@ export function overrideSearchParams(values: Record<string, string | null>) {
 export function resetSearchParams() {
   mockSearchParams.mockReturnValue({
     get: (_key?: string) => null,
+    getAll: (_key: string) => [],
     toString: () => "",
   });
 }
@@ -159,6 +186,9 @@ export function resetSearchParams() {
 export function setFetchImplementation(custom: typeof defaultFetch) {
   (globalThis.fetch as typeof globalThis.fetch) =
     custom as unknown as typeof globalThis.fetch;
+  if (typeof window !== "undefined") {
+    (window.fetch as typeof window.fetch) = globalThis.fetch as unknown as typeof window.fetch;
+  }
 }
 
 afterEach(() => {

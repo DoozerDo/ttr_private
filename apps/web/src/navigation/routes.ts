@@ -122,6 +122,8 @@ export type StudioHrefInput = {
   assessmentId?: string | null;
   analysisId?: string | null;
   fromUnlock?: boolean;
+  unlockDimension?: string | null;
+  missingEvidence?: string[] | null;
 };
 
 function appendFitReviewParam(
@@ -190,6 +192,15 @@ export function getStudioHref(input: StudioHrefInput = {}) {
 
   if (input.fromUnlock) {
     params.set("fromUnlock", "true");
+  }
+
+  appendRouteParam(params, "unlockDimension", input.unlockDimension ?? null);
+  if (Array.isArray(input.missingEvidence)) {
+    input.missingEvidence
+      .map((value) => (typeof value === "string" ? value.trim() : ""))
+      .filter(Boolean)
+      .slice(0, 6)
+      .forEach((value) => params.append("missingEvidence", value));
   }
 
   const query = params.toString();

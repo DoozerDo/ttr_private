@@ -9,6 +9,8 @@ import { FormButton } from "@/components/FormButton";
 import { ScoreGauge } from "@/components/ScoreGauge";
 import { getVerdictDisplayOrDefault } from "@/lib/fit-verdict";
 import { sanitizeRenderedTextValue } from "@/lib/renderedText";
+import type { ScoreBreakdown } from "@/lib/evidenceLines";
+import { resolveFitReviewGaps, type FitReviewGapAnalysis } from "@/lib/fitReviewResolver";
 import {
   LAST_ANALYSIS_STORAGE_KEY,
   readLastAnalysis,
@@ -23,6 +25,7 @@ import {
   SCORING_DIMENSION_ORDER,
   type FitReviewDimensionKey,
 } from "@/lib/fitReviewQuestions";
+import { getStudioHref } from "@/src/navigation/routes";
 
 type FitDimensionScores = {
   experienceAlignment?: number;
@@ -70,6 +73,8 @@ type ScoringV2Result = {
 const HERO_MESSAGE =
   "Review the blocked analysis, add verified evidence, and continue the recovery path.";
 const ACTIONABLE_DIMENSION_COUNT = 2;
+const GUIDED_UNLOCK_MIN_SCORE = 70;
+const GUIDED_UNLOCK_MAX_SCORE = 84;
 
 function parseTimestamp(value?: string | null) {
   if (!value) return 0;
@@ -160,6 +165,110 @@ function readStringField(
   }
 
   return null;
+}
+
+function extractScoreBreakdown(value: Record<string, unknown> | null): ScoreBreakdown | null {
+  if (!value) return null;
+  const candidates = [value.score_breakdown, value.scoreBreakdown];
+
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const typed = candidate as {
+      total_score?: unknown;
+      dimensions?: Array<{
+        key?: unknown;
+        label?: unknown;
+        score?: unknown;
+        weight?: unknown;
+      }>;
+    };
+    if (typeof typed.total_score !== "number" || !Array.isArray(typed.dimensions)) continue;
+
+    const dimensions = typed.dimensions
+      .map((dimension) => {
+        if (
+          typeof dimension?.key !== "string" ||
+          typeof dimension.label !== "string" ||
+          typeof dimension.score !== "number" ||
+          typeof dimension.weight !== "number"
+        ) {
+          return null;
+        }
+        return {
+          key: dimension.key,
+          label: dimension.label,
+          score: dimension.score,
+          weight: dimension.weight,
+        };
+      })
+      .filter(Boolean) as ScoreBreakdown["dimensions"];
+
+    if (!dimensions.length) continue;
+    return {
+      total_score: typed.total_score,
+      dimensions,
+    } as ScoreBreakdown;
+  }
+
+  return null;
+}
+
+function extractGapAnalysis(value: Record<string, unknown> | null): FitReviewGapAnalysis | null {
+  if (!value) return null;
+
+  const verificationCoverage =
+    (value as { verification_coverage?: unknown }).verification_coverage ??
+    (value as { verificationCoverage?: unknown }).verificationCoverage ??
+    null;
+  const unverifiedRequirementsRaw =
+    verificationCoverage && typeof verificationCoverage === "object"
+      ? (verificationCoverage as { unverifiedRequirements?: unknown; unverified_requirements?: unknown })
+          .unverifiedRequirements ??
+        (verificationCoverage as { unverifiedRequirements?: unknown; unverified_requirements?: unknown })
+          .unverified_requirements ??
+        null
+      : null;
+
+  const directCriticalGaps = (value as { criticalGaps?: unknown }).criticalGaps ?? null;
+  const gapAnalysisContainer = (value as { gapAnalysis?: unknown }).gapAnalysis ?? null;
+  const containerCriticalGaps =
+    gapAnalysisContainer && typeof gapAnalysisContainer === "object"
+      ? (gapAnalysisContainer as { criticalGaps?: unknown }).criticalGaps ?? null
+      : null;
+  const criticalGapsRaw = directCriticalGaps ?? containerCriticalGaps ?? null;
+
+  const unverifiedRequirements = Array.isArray(unverifiedRequirementsRaw)
+    ? unverifiedRequirementsRaw.filter((item): item is string => typeof item === "string")
+    : null;
+
+  const criticalGaps = Array.isArray(criticalGapsRaw)
+    ? (criticalGapsRaw as unknown[])
+        .map((gap) => {
+          if (typeof gap === "string") return gap;
+          if (!gap || typeof gap !== "object") return null;
+          const obj = gap as { title?: unknown; requirementEvidence?: unknown; baselineEvidence?: unknown };
+          return {
+            title: typeof obj.title === "string" ? obj.title : null,
+            requirementEvidence: typeof obj.requirementEvidence === "string" ? obj.requirementEvidence : null,
+            baselineEvidence: typeof obj.baselineEvidence === "string" ? obj.baselineEvidence : null,
+          };
+        })
+        .filter(
+          (
+            gap,
+          ): gap is
+            | string
+            | { title: string | null; requirementEvidence: string | null; baselineEvidence: string | null } =>
+            Boolean(gap),
+        )
+    : null;
+
+  if (!unverifiedRequirements && !criticalGaps) return null;
+
+  return {
+    unverifiedRequirements,
+    criticalGaps,
+  };
 }
 
 export default function FitReviewClient() {
@@ -298,10 +407,22 @@ export default function FitReviewClient() {
   }, [dimensionEntries]);
 
   const heroScoreText = `Score: ${getAssessmentScore(displayAssessment)?.toFixed(1) ?? "Pending"}`;
+  const numericScore = getAssessmentScore(displayAssessment);
+  const isGuidedUnlockScore =
+    typeof numericScore === "number" &&
+    Number.isFinite(numericScore) &&
+    numericScore >= GUIDED_UNLOCK_MIN_SCORE &&
+    numericScore <= GUIDED_UNLOCK_MAX_SCORE;
   const verdictInfo = useMemo(
     () => getVerdictDisplayOrDefault(displayAssessment?.verdict ?? null),
     [displayAssessment?.verdict],
   );
+  const verdictLabelText =
+    isGuidedUnlockScore && verdictInfo.label === "Consider" ? "Almost there" : verdictInfo.label;
+  const verdictDescriptionText =
+    isGuidedUnlockScore && verdictInfo.label === "Consider"
+      ? "One focused update unlocks generation."
+      : verdictInfo.description;
   const verdictLabelStyle = useMemo(() => {
     const baseStyle = {
       display: "inline-flex",
@@ -441,6 +562,34 @@ export default function FitReviewClient() {
   const fitAssessmentId =
     readStringField(displayRecord, ["assessmentId", "fitAssessmentId"]) ??
     readStringField(storedRecord, ["assessmentId", "fitAssessmentId"]);
+
+  const scoreBreakdown = useMemo(
+    () => extractScoreBreakdown(displayRecord ?? storedRecord),
+    [displayRecord, storedRecord],
+  );
+  const gapAnalysis = useMemo(
+    () => extractGapAnalysis(displayRecord ?? storedRecord),
+    [displayRecord, storedRecord],
+  );
+  const resolvedGaps = useMemo(
+    () => resolveFitReviewGaps({ gapAnalysis, scoreBreakdown }),
+    [gapAnalysis, scoreBreakdown],
+  );
+
+  const handleAddExperienceNow = () => {
+    void router.push(
+      getStudioHref({
+        jobId: startJobId,
+        baselineId,
+        baselineVersionId,
+        analysisId: fitAssessmentId ?? null,
+        assessmentId: fitAssessmentId ?? null,
+        fromUnlock: true,
+        unlockDimension: resolvedGaps.primaryGap.dimension,
+        missingEvidence: resolvedGaps.primaryGap.missingEvidence,
+      }),
+    );
+  };
 
   const openDimensionDialog = (dimension: FitReviewDimensionKey) => {
     setDialogError(null);
@@ -661,12 +810,12 @@ export default function FitReviewClient() {
                     loading={loading}
                     label="Fit Score"
                   />
-                  <span style={ttrTypography.caption}>{verdictInfo.label}</span>
+                  <span style={ttrTypography.caption}>{verdictLabelText}</span>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minWidth: 240 }}>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     <span style={ttrTypography.subtleLabel}>Current result</span>
-                    <h2 style={ttrTypography.h2}>Evidence review</h2>
+                    <h2 style={ttrTypography.h2}>{isGuidedUnlockScore ? "Almost there" : "Evidence review"}</h2>
                   </div>
                   <p style={{ margin: 0, color: "rgba(241,245,249,0.92)", fontSize: 15 }}>
                     {displayAssessment?.summary ??
@@ -681,7 +830,7 @@ export default function FitReviewClient() {
                       alignItems: "flex-start",
                     }}
                   >
-                    <span style={verdictLabelStyle}>{verdictInfo.label}</span>
+                    <span style={verdictLabelStyle}>{verdictLabelText}</span>
                     <p
                       style={{
                         margin: 0,
@@ -691,7 +840,7 @@ export default function FitReviewClient() {
                         minWidth: 220,
                       }}
                     >
-                      {verdictInfo.description}
+                      {verdictDescriptionText}
                     </p>
                   </div>
                   {error ? <div style={ttrComponents.dangerBox}>{error}</div> : null}
@@ -712,113 +861,144 @@ export default function FitReviewClient() {
           <section style={{ ...ttrComponents.basePanel }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <span style={ttrTypography.subtleLabel}>Recovery plan</span>
-              <h2 style={ttrTypography.h2}>Top evidence gaps</h2>
+              <h2 style={ttrTypography.h2}>
+                {isGuidedUnlockScore ? "Your fastest path to unlock" : "Top evidence gaps"}
+              </h2>
             </div>
-            <div
-              style={{
-                marginTop: 16,
-                display: "grid",
-                gap: 14,
-                gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-              }}
-            >
-              {dimensionEntries.map((entry) => {
-                const isActionable = actionableDimensionKeys.has(entry.key);
-                const isReviewed = Boolean(approvedAdditions[entry.key]);
-                const additionText = approvedAdditions[entry.key] ?? proposedAdditions[entry.key];
-                const isEditing = editingKey === entry.key;
-                const cardBorder = isActionable && !isReviewed ? "border-emerald-500/40 bg-emerald-900/30" : "border-white/10 bg-white/5";
-                return (
-                  <article
-                    key={entry.key}
-                    className={`rounded-2xl border p-4 text-slate-200 ${cardBorder}`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">{entry.label}</p>
-                      {isReviewed ? (
-                        <span className="text-xs text-emerald-300">Reviewed</span>
-                      ) : isActionable ? (
-                        <span className="text-xs text-sky-300">Actionable</span>
-                      ) : null}
+            {isGuidedUnlockScore ? (
+              <div className="mt-4 space-y-4">
+                <div className="rounded-2xl border border-amber-300/25 bg-amber-500/10 p-4 text-slate-100" data-testid="fit-review-primary-gap">
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-amber-200/90">
+                    You're close. This is the one thing holding you back.
+                  </p>
+                  <h3 className="mt-2 text-lg font-semibold text-white">{resolvedGaps.primaryGap.dimension}</h3>
+                  <p className="mt-2 text-sm text-slate-200">{resolvedGaps.primaryGap.reason}</p>
+                  {resolvedGaps.primaryGap.missingEvidence.length ? (
+                    <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-200" data-testid="fit-review-missing-evidence">
+                      {resolvedGaps.primaryGap.missingEvidence.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <p className="mt-3 text-sm text-slate-200">{resolvedGaps.primaryGap.suggestedAction}</p>
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <FormButton onClick={handleAddExperienceNow} data-testid="fit-review-primary-cta">
+                      Add this experience now
+                    </FormButton>
+                  </div>
+                </div>
+                {resolvedGaps.secondaryGaps.length ? (
+                  <details className="rounded-2xl border border-white/10 bg-slate-900/40 p-4" data-testid="fit-review-secondary-gaps">
+                    <summary className="cursor-pointer text-sm font-semibold text-slate-200">
+                      Other areas to strengthen
+                    </summary>
+                    <div className="mt-3 space-y-3 text-sm text-slate-200">
+                      {resolvedGaps.secondaryGaps.map((gap) => (
+                        <div key={gap.dimension} className="rounded-2xl border border-white/10 bg-slate-950/30 p-3">
+                          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">{gap.dimension}</p>
+                          <p className="mt-2 text-sm text-slate-200">{gap.reason}</p>
+                          {gap.missingEvidence.length ? (
+                            <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-300">
+                              {gap.missingEvidence.map((item) => (
+                                <li key={item}>{item}</li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </div>
+                      ))}
                     </div>
-                    <p className="mt-2 text-lg font-semibold text-white">
-                      {typeof entry.percent === "number"
-                        ? `${entry.percent.toFixed(1)}%`
-                        : entry.normalizedValue !== null
-                          ? `${entry.normalizedValue.toFixed(1)}`
-                          : "Pending"}
-                    </p>
-                    <p className="text-xs text-slate-400">
-                      {entry.points !== null
-                        ? `${entry.points.toFixed(1)} points`
-                        : "Points pending"}
-                    </p>
-                    <p className="mt-2 text-sm text-slate-300">
-                      {isActionable
-                        ? "High-impact evidence gap. Add concrete proof before re-evaluating fit."
-                        : "Informational view of this dimension."}
-                    </p>
-                    {isActionable && !isReviewed ? (
-                      <div className="mt-4">
-                        <FormButton
-                          variant="secondary"
-                          onClick={() => openDimensionDialog(entry.key)}
-                        >
-                          Ask me about this
-                        </FormButton>
+                  </details>
+                ) : null}
+              </div>
+            ) : (
+              <div
+                style={{
+                  marginTop: 16,
+                  display: "grid",
+                  gap: 14,
+                  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+                }}
+              >
+                {dimensionEntries.map((entry) => {
+                  const isActionable = actionableDimensionKeys.has(entry.key);
+                  const isReviewed = Boolean(approvedAdditions[entry.key]);
+                  const additionText = approvedAdditions[entry.key] ?? proposedAdditions[entry.key];
+                  const isEditing = editingKey === entry.key;
+                  const cardBorder =
+                    isActionable && !isReviewed
+                      ? "border-emerald-500/40 bg-emerald-900/30"
+                      : "border-white/10 bg-white/5";
+                  return (
+                    <article key={entry.key} className={`rounded-2xl border p-4 text-slate-200 ${cardBorder}`}>
+                      <div className="flex items-center justify-between">
+                        <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">{entry.label}</p>
+                        {isReviewed ? (
+                          <span className="text-xs text-emerald-300">Reviewed</span>
+                        ) : isActionable ? (
+                          <span className="text-xs text-sky-300">Actionable</span>
+                        ) : null}
                       </div>
-                    ) : null}
-                    {additionText ? (
-                      <div className="mt-4 rounded-2xl border border-white/10 bg-slate-900/70 p-3 text-sm text-slate-100">
-                        <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                          Proposed evidence
-                        </p>
-                        {isEditing ? (
-                          <div className="mt-1 space-y-2">
-                            <textarea
-                              className="w-full rounded-xl border border-white/10 bg-slate-900/50 p-2 text-sm text-slate-100 outline-none"
-                              rows={3}
-                              value={editingText}
-                              onChange={(event) => setEditingText(event.target.value)}
-                            />
-                            <div className="flex gap-2">
-                              <FormButton
-                                variant="secondary"
-                                onClick={handleSaveEdit}
-                              >
-                                Save
-                              </FormButton>
-                              <FormButton variant="ghost" onClick={handleCancelEdit}>
-                                Cancel
-                              </FormButton>
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            <p className="mt-1 text-slate-200">{additionText}</p>
-                            {!isReviewed ? (
-                              <div className="mt-3 flex flex-wrap gap-2">
-                                <FormButton
-                                  variant="secondary"
-                                  onClick={() => handleStartEditing(entry.key)}
-                                >
-                                  Edit
+                      <p className="mt-2 text-lg font-semibold text-white">
+                        {typeof entry.percent === "number"
+                          ? `${entry.percent.toFixed(1)}%`
+                          : entry.normalizedValue !== null
+                            ? `${entry.normalizedValue.toFixed(1)}`
+                            : "Pending"}
+                      </p>
+                      <p className="text-xs text-slate-400">{entry.points !== null ? `${entry.points.toFixed(1)} points` : "Points pending"}</p>
+                      <p className="mt-2 text-sm text-slate-300">
+                        {isActionable ? "High-impact evidence gap. Add concrete proof before re-evaluating fit." : "Informational view of this dimension."}
+                      </p>
+                      {isActionable && !isReviewed ? (
+                        <div className="mt-4">
+                          <FormButton variant="secondary" onClick={() => openDimensionDialog(entry.key)}>
+                            Ask me about this
+                          </FormButton>
+                        </div>
+                      ) : null}
+                      {additionText ? (
+                        <div className="mt-4 rounded-2xl border border-white/10 bg-slate-900/70 p-3 text-sm text-slate-100">
+                          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Proposed evidence</p>
+                          {isEditing ? (
+                            <div className="mt-1 space-y-2">
+                              <textarea
+                                className="w-full rounded-xl border border-white/10 bg-slate-900/50 p-2 text-sm text-slate-100 outline-none"
+                                rows={3}
+                                value={editingText}
+                                onChange={(event) => setEditingText(event.target.value)}
+                              />
+                              <div className="flex gap-2">
+                                <FormButton variant="secondary" onClick={handleSaveEdit}>
+                                  Save
                                 </FormButton>
-                                <FormButton onClick={() => handleApproveAddition(entry.key)}>
-                                  Approve evidence
+                                <FormButton variant="ghost" onClick={handleCancelEdit}>
+                                  Cancel
                                 </FormButton>
                               </div>
-                            ) : null}
-                          </>
-                        )}
-                      </div>
-                    ) : null}
-                  </article>
-                );
-              })}
-            </div>
+                            </div>
+                          ) : (
+                            <>
+                              <p className="mt-1 text-slate-200">{additionText}</p>
+                              {!isReviewed ? (
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  <FormButton variant="secondary" onClick={() => handleStartEditing(entry.key)}>
+                                    Edit
+                                  </FormButton>
+                                  <FormButton onClick={() => handleApproveAddition(entry.key)}>Approve evidence</FormButton>
+                                </div>
+                              ) : null}
+                            </>
+                          )}
+                        </div>
+                      ) : null}
+                    </article>
+                  );
+                })}
+              </div>
+            )}
           </section>
 
+          {isGuidedUnlockScore ? null : (
           <section style={{ ...ttrComponents.basePanel }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <span style={ttrTypography.subtleLabel}>Qualification proof</span>
@@ -855,6 +1035,7 @@ export default function FitReviewClient() {
                 </div>
               </div>
           </section>
+          )}
         </>
       )}
 
