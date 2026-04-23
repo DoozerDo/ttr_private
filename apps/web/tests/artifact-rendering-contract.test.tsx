@@ -2,55 +2,102 @@ import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
 
 import type { ResumeModel } from "@/lib/resumeModel";
-import {
-  RESULTS_RESUME_PREVIEW_LIMITS,
-  ResumePreview,
-  sliceResumeModelForPreview,
-} from "@/app/(app)/studio/ResumePreview";
+import { ResumePreview } from "@/app/(app)/studio/ResumePreview";
 import { truncateForPreview } from "@/lib/previewTruncation";
-import { selectResultsResumePreview } from "@/lib/resultsArtifactPreview";
+import { getResultsCoverLetterTeaser, getResultsResumeTeaser } from "@/lib/resultsArtifactPreview";
+import { ResultsCoverLetterTeaser, ResultsResumeTeaser } from "@/components/results/ResultsArtifactTeasers";
+import { ResultsDocumentsTeaserSection } from "@/components/results/ResultsDocumentsTeaserSection";
 
 describe("Artifact rendering contract", () => {
-  it("bounds resume preview slices (experiences, bullets, and bullet length)", () => {
-    const model: ResumeModel = {
-      heading: {
-        name: "Candidate Name",
-        contactLine: "candidate@example.com | (555) 555-5555 | https://example.com",
+  it("Results documents section remains teaser-only across branch contexts (no Studio-grade rendering)", () => {
+    const resumePayload = {
+      preview: {
+        resume: {
+          heading: { name: "Candidate", contactLine: "c@example.com" },
+          summary: "SUMMARY_SHOULD_BE_SNIPPET " + "s".repeat(5000),
+          experience: [
+            {
+              company: "Company 1",
+              roleTitle: "Role 1",
+              location: "Remote",
+              dateRange: "2022 - 2024",
+              bullets: [
+                "BULLET_1_OK",
+                "BULLET_2_OK",
+                "BULLET_3_OK",
+                "BULLET_4_SHOULD_NOT_RENDER",
+                "BULLET_5_SHOULD_NOT_RENDER",
+              ],
+            },
+            {
+              company: "Company 2 SHOULD_NOT_RENDER",
+              roleTitle: "Role 2 SHOULD_NOT_RENDER",
+              bullets: ["ROLE2_BULLET_SHOULD_NOT_RENDER"],
+            },
+          ],
+        } satisfies ResumeModel,
       },
-      summary: "S".repeat(2000),
-      competencies: Array.from({ length: 40 }, (_, i) => `Competency ${i + 1}`),
-      experience: Array.from({ length: 4 }, (_, i) => ({
-        company: `Company ${i + 1}`,
-        roleTitle: `Role ${i + 1}`,
-        location: "Remote",
-        dateRange: "2020 - 2024",
-        bullets: Array.from({ length: 8 }, (_, j) => `Bullet ${i + 1}.${j + 1} ${"x".repeat(600)}`),
-      })),
-      education: [
-        { degree: "B.S.", institution: "University", location: "CA" },
-        { degree: "M.S.", institution: "University", location: "CA" },
-        { degree: "Ph.D.", institution: "University", location: "CA" },
-      ],
     };
 
-    const sliced = sliceResumeModelForPreview(model, RESULTS_RESUME_PREVIEW_LIMITS);
+    const coverPayload = {
+      preview: {
+        coverLetter: {
+          paragraphs: [
+            "Dear Hiring Team,",
+            "BODY_P1_OK " + "x".repeat(2000),
+            "BODY_P2_SHOULD_NOT_RENDER",
+            "Sincerely,",
+          ],
+        },
+      },
+    };
 
-    expect(sliced.truncated).toBe(true);
-    expect(sliced.model.summary?.length).toBeLessThanOrEqual(RESULTS_RESUME_PREVIEW_LIMITS.maxSummaryChars);
-    expect((sliced.model.competencies ?? []).length).toBeLessThanOrEqual(RESULTS_RESUME_PREVIEW_LIMITS.maxCompetencies);
-    expect((sliced.model.experience ?? []).length).toBeLessThanOrEqual(RESULTS_RESUME_PREVIEW_LIMITS.maxExperiences);
+    const contexts = [
+      { confidence: "HIGH", generationPhase: "generated", pairStatus: "generated" },
+      { confidence: "LOW", generationPhase: "partial", pairStatus: "generated" },
+      { confidence: "LOW", generationPhase: "failed", pairStatus: "generated" },
+      { confidence: "MEDIUM", generationPhase: "generated", pairStatus: "generated" },
+    ];
 
-    for (const entry of sliced.model.experience ?? []) {
-      expect((entry.bullets ?? []).length).toBeLessThanOrEqual(RESULTS_RESUME_PREVIEW_LIMITS.maxBulletsPerExperience);
-      for (const bullet of entry.bullets ?? []) {
-        expect(bullet.length).toBeLessThanOrEqual(RESULTS_RESUME_PREVIEW_LIMITS.maxBulletChars);
-      }
+    for (const ctx of contexts) {
+      const { container, unmount } = render(
+        <ResultsDocumentsTeaserSection
+          resumePayload={resumePayload}
+          coverLetterPayload={coverPayload}
+          studioHref="/studio"
+          confidence={ctx.confidence}
+          generationPhase={ctx.generationPhase}
+          pairStatus={ctx.pairStatus}
+        />,
+      );
+
+      expect(container.querySelector("[data-testid=\"results-documents-teaser-section\"]")).not.toBeNull();
+      expect(container.querySelector("[data-testid=\"results-resume-preview-truncated\"]")).not.toBeNull();
+      expect(container.querySelector("[data-testid=\"results-cover-letter-preview-truncated\"]")).not.toBeNull();
+      expect(container.querySelector("a[href=\"/studio\"]")).not.toBeNull();
+
+      // Resume: 1 role + max 3 bullets.
+      expect(container.textContent).toContain("Company 1");
+      expect(container.textContent).toContain("Role 1");
+      expect(container.textContent).toContain("BULLET_1_OK");
+      expect(container.textContent).toContain("BULLET_2_OK");
+      expect(container.textContent).toContain("BULLET_3_OK");
+      expect(container.textContent).not.toContain("BULLET_4_SHOULD_NOT_RENDER");
+      expect(container.textContent).not.toContain("Company 2 SHOULD_NOT_RENDER");
+      expect(container.textContent).not.toContain("ROLE2_BULLET_SHOULD_NOT_RENDER");
+
+      // Cover letter: first body paragraph only.
+      expect(container.textContent).toContain("BODY_P1_OK");
+      expect(container.textContent).not.toContain("BODY_P2_SHOULD_NOT_RENDER");
+
+      // No scroll-reader container pattern in Results artifact sections.
+      expect(container.querySelector(".overflow-auto")).toBeNull();
+
+      unmount();
     }
-
-    expect((sliced.model.education ?? []).length).toBeLessThanOrEqual(RESULTS_RESUME_PREVIEW_LIMITS.maxEducationEntries);
   });
 
-  it("selects a bounded structured resume preview for Results (no full dumps)", () => {
+  it("Results resume teaser renders exactly 1 role and at most 3 bullets", () => {
     const payload = {
       preview: {
         resume: {
@@ -67,21 +114,46 @@ describe("Artifact rendering contract", () => {
       },
     };
 
-    const selected = selectResultsResumePreview(payload);
-    expect(selected.renderer).toBe("bounded_structured_preview");
-    expect(selected.truncated).toBe(true);
-    expect((selected.previewModel.experience ?? []).length).toBeLessThanOrEqual(RESULTS_RESUME_PREVIEW_LIMITS.maxExperiences);
-    expect(((selected.previewModel.experience ?? [])[0]?.bullets ?? []).length).toBeLessThanOrEqual(
-      RESULTS_RESUME_PREVIEW_LIMITS.maxBulletsPerExperience,
-    );
+    const teaser = getResultsResumeTeaser(payload);
+    expect(teaser.renderer).toBe("role_teaser");
+    if (teaser.renderer !== "role_teaser") {
+      throw new Error("Expected role_teaser renderer");
+    }
+    expect(teaser.role.bullets.length).toBeLessThanOrEqual(3);
+
+    const { container } = render(<ResultsResumeTeaser teaser={teaser} studioHref="/studio" />);
+    expect(container.querySelectorAll("[data-testid=\"results-resume-teaser-role\"]").length).toBe(1);
+    expect(container.querySelectorAll("li").length).toBeLessThanOrEqual(3);
+    expect(container.textContent).toContain("Preview truncated.");
+    expect(container.textContent).toContain("Open Studio");
+    expect(container.querySelector(".overflow-auto")).toBeNull();
   });
 
-  it("selects a bounded text resume preview for Results when model is absent", () => {
-    const payload = { text: "line\n".repeat(500) + "X".repeat(5000) };
-    const selected = selectResultsResumePreview(payload);
-    expect(selected.renderer).toBe("bounded_text_preview");
-    expect(selected.previewText.length).toBeLessThanOrEqual(1200);
-    expect(selected.truncated).toBe(true);
+  it("Results cover letter teaser renders only the first paragraph", () => {
+    const payload = {
+      preview: {
+        coverLetter: {
+          paragraphs: [
+            "First paragraph. " + "x".repeat(2000),
+            "Second paragraph.",
+            "Third paragraph.",
+          ],
+        },
+      },
+    };
+
+    const teaser = getResultsCoverLetterTeaser(payload);
+    expect(teaser.renderer).toBe("paragraph_teaser");
+    if (teaser.renderer === "none") {
+      throw new Error("Expected cover letter teaser");
+    }
+
+    const { container } = render(<ResultsCoverLetterTeaser teaser={teaser} studioHref="/studio" />);
+    expect(container.querySelectorAll("[data-testid=\"results-cover-letter-preview-body\"]").length).toBe(1);
+    expect(container.textContent).toContain("First paragraph.");
+    expect(container.textContent).not.toContain("Second paragraph.");
+    expect(container.textContent).toContain("Preview truncated.");
+    expect(container.querySelector(".overflow-auto")).toBeNull();
   });
 
   it("truncates ResumePreview fallbackText rendering (no full raw body dumps)", () => {

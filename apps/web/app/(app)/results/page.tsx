@@ -69,9 +69,7 @@ import { resolvePairGenerationLifecycle } from "@/lib/pairGenerationLifecycle";
 import { tryAcquirePairGenerationLatch, releasePairGenerationLatch } from "@/lib/pairGenerationLatch";
 import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
 import { isDocumentGenerationUnlocked, isMomentumGenerationAllowed } from "@/lib/documentGenerationGate";
-import { ResumePreview } from "@/app/(app)/studio/ResumePreview";
-import { devLogArtifactRendererSelection } from "@/lib/artifactRendererDebug";
-import { selectResultsResumePreview } from "@/lib/resultsArtifactPreview";
+import { ResultsDocumentsTeaserSection } from "@/components/results/ResultsDocumentsTeaserSection";
 import {
   buildWorkflowRequestKey,
   isWorkflowRequestStale,
@@ -80,7 +78,6 @@ import {
 } from "@/lib/workflowRequestGuard";
 import { deriveEvidenceLedger, type EvidenceLedger } from "@/lib/evidenceLedger";
 import { readRecentIntentState } from "@/src/lib/recentIntent";
-import { buildCoverLetterParagraphs } from "@/src/lib/studio/helpers";
 import { useGuidedMode } from "@/hooks/useGuidedMode";
 import { trackEvent } from "@/src/lib/analytics";
 import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
@@ -89,6 +86,8 @@ import { getStudioHref } from "@/src/navigation/routes";
 
 type ResultsArtifactStatus = "missing" | "in_progress" | "completed" | "failed";
 type ResultsGenerationPhase = "not_started" | "generating" | "generated" | "failed" | "partial";
+
+type AnyObject = Record<string, unknown>;
 
 type ResultsGenerationRecoveryStage =
   | "idle"
@@ -105,6 +104,19 @@ type BackendStudioArtifactsResponse = {
   resume?: BackendStudioArtifactRecord;
   coverLetter?: BackendStudioArtifactRecord;
 };
+
+function stringsOnly(arr: unknown): string[] {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .filter((x): x is string => typeof x === "string")
+    .map((s) =>
+      sanitizeRenderedTextValue(s, {
+        endpoint: "results",
+        field: "stringsOnly[]",
+      }),
+    )
+    .filter((s) => s.length > 0);
+}
 
 function hasAnyArtifactStatus(statuses: { resume: ResultsArtifactStatus; coverLetter: ResultsArtifactStatus }): boolean {
   return statuses.resume !== "missing" || statuses.coverLetter !== "missing";
@@ -1990,129 +2002,6 @@ function normalizeDimensionScores(data?: LatestAnalysis | null): FitDimensionSco
   return {};
 }
 
-
-type AnyObject = Record<string, unknown>;
-
-function stripInternalKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stripInternalKeys);
-
-  if (value && typeof value === "object") {
-    const obj = value as AnyObject;
-    const out: AnyObject = {};
-    for (const [k, v] of Object.entries(obj)) {
-      const key = k.toLowerCase();
-
-      const looksInternal =
-        key.includes("audit") ||
-        key.includes("hash") ||
-        key === "jobid" ||
-        key === "baselineid" ||
-        key === "baselineversionid" ||
-        key.endsWith("_id") ||
-        key === "id";
-
-      if (looksInternal) continue;
-
-      out[k] = stripInternalKeys(v);
-    }
-    return out;
-  }
-
-  return value;
-}
-
-function coercePreviewText(payload: unknown): string | null {
-  const p = payload as AnyObject | null;
-
-  const candidates = ["previewText", "preview_text", "text", "rawText", "raw_text", "content"];
-
-  for (const key of candidates) {
-    const v = p?.[key];
-    if (typeof v === "string" && v.trim().length > 0) return v;
-  }
-
-  return null;
-}
-
-function safeJsonPreview(payload: unknown): string {
-  try {
-    const stripped = stripInternalKeys(payload);
-    return JSON.stringify(stripped, null, 2);
-  } catch (error) {
-    console.error("Failed to build Results JSON preview", error);
-    return "Preview unavailable";
-  }
-}
-
-type ResumeSectionLike = {
-  type?: string | null;
-  title?: string | null;
-  content?: unknown;
-  text?: unknown;
-  lines?: unknown;
-  bullets?: unknown;
-};
-
-function stringsOnly(arr: unknown): string[] {
-  if (!Array.isArray(arr)) return [];
-  return arr
-    .filter((x): x is string => typeof x === "string")
-    .map((s) =>
-      sanitizeRenderedTextValue(s, {
-        endpoint: "results",
-        field: "stringsOnly[]",
-      }),
-    )
-    .filter((s) => s.length > 0);
-}
-
-function extractSectionText(section: ResumeSectionLike): string {
-  const candidates: unknown[] = [section.content, section.text];
-
-  for (const c of candidates) {
-    if (typeof c === "string" && c.trim().length) {
-      return sanitizeRenderedTextValue(c, {
-        endpoint: "results",
-        field: "sectionText",
-      });
-    }
-  }
-
-  const lines = stringsOnly(section.lines);
-  if (lines.length) return lines.join("\n");
-
-  const bullets = stringsOnly(section.bullets);
-  if (bullets.length) return bullets.map((b) => `- ${b}`).join("\n");
-
-  return "";
-}
-
-function extractBestResumeText(payload: unknown): string | null {
-  if (!payload || typeof payload !== "object") return null;
-  const obj = payload as Record<string, unknown>;
-
-  try {
-    const direct = typeof coercePreviewText === "function" ? coercePreviewText(payload) : null;
-    if (typeof direct === "string" && direct.trim().length) return direct.trim();
-  } catch (error) {
-    console.error("Failed to extract best resume text", error);
-  }
-
-  const sectionsRaw = obj["sections"];
-  if (!Array.isArray(sectionsRaw)) return null;
-
-  const sections = sectionsRaw as ResumeSectionLike[];
-
-  const rawSection =
-    sections.find((s) => (s.type ?? "").toString().toUpperCase() === "RAW") ??
-    sections.find((s) => (s.title ?? "").toString().toUpperCase() === "RAW");
-
-  const picked = rawSection ?? sections[0];
-  if (!picked) return null;
-
-  const text = extractSectionText(picked);
-  return text.length ? text : null;
-}
 
 export default function ResultsPage() {
   const [baselineId, setBaselineId] = useState<string>("");
@@ -5133,111 +5022,14 @@ export default function ResultsPage() {
                   Documents come first. Add more evidence after you review and refine these drafts.
                 </p>
               </div>
-              {resumeGenerationPayload ? (
-                <div className="space-y-3" data-testid="results-resume-preview">
-                  {(() => {
-                    const selected = selectResultsResumePreview(resumeGenerationPayload);
-                    devLogArtifactRendererSelection({
-                      page: "results",
-                      artifactType: "resume",
-                      confidence: productReadiness.confidence ?? null,
-                      generationPhase: effectiveResultsGenerationPhase ?? null,
-                      pairStatus: pairWorkflowState.pairStatus ?? null,
-                      renderer: selected.renderer,
-                      previewLength: selected.previewLength,
-                      totalBodyLength: selected.totalBodyLength,
-                      truncated: selected.truncated,
-                      reason: selected.reason,
-                    });
-
-                    if (selected.renderer === "none") return null;
-
-                    const truncationNote = selected.truncated ? (
-                      <p className="text-xs text-slate-400" data-testid="results-resume-preview-truncated">
-                        Preview truncated.{" "}
-                        {studioHref ? (
-                          <a href={studioHref} className="underline underline-offset-2 hover:text-slate-200">
-                            Open Studio
-                          </a>
-                        ) : (
-                          "Open Studio"
-                        )}{" "}
-                        to view and refine the full resume.
-                      </p>
-                    ) : null;
-
-                    if (selected.renderer === "bounded_structured_preview") {
-                      return (
-                        <div className="space-y-2">
-                          <ResumePreview model={selected.previewModel} payload={resumeGenerationPayload} isEditing={false} />
-                          {truncationNote}
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <div
-                        className="max-h-64 overflow-auto space-y-3 rounded-xl border border-white/10 bg-slate-950/40 p-4 text-sm leading-7 text-slate-100"
-                        data-testid="results-resume-preview-body"
-                      >
-                        <pre className="whitespace-pre-wrap">{selected.previewText}</pre>
-                        {truncationNote}
-                      </div>
-                    );
-                  })()}
-                </div>
-              ) : null}
-              {coverLetterGenerationPayload ? (
-                <div className="space-y-3" data-testid="cover-letter-preview">
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-                    Preview of tailored cover letter
-                  </p>
-                  {(() => {
-                    const paragraphs = buildCoverLetterParagraphs(coverLetterGenerationPayload);
-                    const previewParagraphs = paragraphs.slice(0, 4);
-                    const truncated = paragraphs.length > previewParagraphs.length;
-                    const previewTextLength = previewParagraphs.join("\n\n").length;
-                    const bodyTextLength = paragraphs.join("\n\n").length;
-
-                    devLogArtifactRendererSelection({
-                      page: "results",
-                      artifactType: "cover_letter",
-                      confidence: productReadiness.confidence ?? null,
-                      generationPhase: effectiveResultsGenerationPhase ?? null,
-                      pairStatus: pairWorkflowState.pairStatus ?? null,
-                      renderer: "bounded_preview",
-                      previewLength: previewTextLength,
-                      totalBodyLength: bodyTextLength,
-                      truncated,
-                      reason: "completed_generation",
-                    });
-
-                    return (
-                      <div
-                        className="max-h-64 overflow-auto space-y-3 rounded-xl border border-white/10 bg-slate-950/40 p-4 text-sm leading-7 text-slate-100"
-                        data-testid="results-cover-letter-preview-body"
-                      >
-                        {previewParagraphs.map((paragraph, index) => (
-                          <p key={`results-cover-letter-paragraph-${index}`}>{paragraph}</p>
-                        ))}
-                        {truncated ? (
-                          <p className="text-xs text-slate-400">
-                            Preview truncated.{" "}
-                            {studioHref ? (
-                              <a href={studioHref} className="underline underline-offset-2 hover:text-slate-200">
-                                Open Studio
-                              </a>
-                            ) : (
-                              "Open Studio"
-                            )}{" "}
-                            to view and refine the full cover letter.
-                          </p>
-                        ) : null}
-                      </div>
-                    );
-                  })()}
-                </div>
-              ) : null}
+              <ResultsDocumentsTeaserSection
+                resumePayload={resumeGenerationPayload}
+                coverLetterPayload={coverLetterGenerationPayload}
+                studioHref={studioNavigationHref}
+                confidence={productReadiness.confidence ?? null}
+                generationPhase={effectiveResultsGenerationPhase ?? null}
+                pairStatus={pairWorkflowState.pairStatus ?? null}
+              />
             </div>
           ) : null}
           {generationMutationError ? (
