@@ -3316,6 +3316,11 @@ export default function StudioPage() {
   const isHighQualityDraft = hasCompletedGeneration && artifactQuality.confidence === "HIGH"; 
   // Low-confidence is still a signal, but score >= 80 must not block or degrade access to usable artifacts.
   const showLowQualityRecoveryLane = isLowQualityDraft && !generateNowEligible;
+  const isReadySuccessState =
+    workflowAuthority.workflowState === "READY" &&
+    hasCompletedGeneration &&
+    // Low-quality recovery is intentionally a different lane.
+    !showLowQualityRecoveryLane;
   const [showFullLowQualityResume, setShowFullLowQualityResume] = useState(false); 
   const [showFullLowQualityCover, setShowFullLowQualityCover] = useState(false); 
   const [showOptionalEvidenceDetails, setShowOptionalEvidenceDetails] = useState(false);
@@ -4319,7 +4324,12 @@ export default function StudioPage() {
       sessionKey: opts?.sessionKey ?? `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:resume:${Date.now()}`,
     });
     if (!latchAcquired) return false;
-    if (!guardGenerationAction("resume", { allowVerifiedOnlyFallback: Boolean(opts?.verifiedOnly) })) return false;
+    if (
+      !guardGenerationAction("resume", {
+        allowVerifiedOnlyFallback: Boolean(opts?.verifiedOnly) || generateNowEligible,
+      })
+    )
+      return false;
     const requestScope = generationWorkflowScope;
     const request = beginStudioGenerationRequest("resume", requestScope);
     if (!request) return false;
@@ -4837,7 +4847,12 @@ export default function StudioPage() {
       sessionKey: opts?.sessionKey ?? `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:cover:${Date.now()}`,
     });
     if (!latchAcquired) return false;
-    if (!guardGenerationAction("cover_letter", { allowVerifiedOnlyFallback: Boolean(opts?.verifiedOnly) })) return false;
+    if (
+      !guardGenerationAction("cover_letter", {
+        allowVerifiedOnlyFallback: Boolean(opts?.verifiedOnly) || generateNowEligible,
+      })
+    )
+      return false;
     const requestScope = generationWorkflowScope;
     const request = beginStudioGenerationRequest("cover_letter", requestScope);
     if (!request) return false;
@@ -6048,9 +6063,23 @@ export default function StudioPage() {
           {workflowAuthority.headline}
         </h1>
         <p className="max-w-3xl text-base leading-7 text-slate-200">{workflowAuthority.body}</p>
+        {generateNowEligible && isReadySuccessState ? (
+          <p className="text-xs font-medium text-slate-200" data-testid="studio-confidence-label">
+            Confidence: {artifactQuality.confidence === "HIGH" ? "high" : "medium"} (non-blocking)
+          </p>
+        ) : null}
       </div>
       <div className="flex flex-wrap gap-3">
+        {isReadySuccessState && !isApplicationApplied ? (
+          <FormButton
+            onClick={handleApplyToThisRole}
+            data-testid="studio-primary-cta-apply"
+          >
+            Apply to this role
+          </FormButton>
+        ) : null}
         <FormButton
+          variant={isReadySuccessState ? "secondary" : undefined}
           onClick={handlePrimaryResumeAction}
           disabled={
             resumeGenerating ||
@@ -6058,7 +6087,7 @@ export default function StudioPage() {
             (generateNowEligible && !hasResumeArtifact && !resumeState.artifactFailure)
           }
         >
-          Resume
+          {hasResumeArtifact || generateNowEligible ? "Resume" : "Generate Resume"}
         </FormButton>
         <FormButton
           variant="secondary"
@@ -6069,7 +6098,7 @@ export default function StudioPage() {
             (generateNowEligible && !hasCoverLetterArtifact && !coverState.artifactFailure)
           }
         >
-          Cover Letter
+          {hasCoverLetterArtifact || generateNowEligible ? "Cover Letter" : "Generate Cover Letter"}
         </FormButton>
         <Link
           href={fitReviewHref}
@@ -6195,11 +6224,14 @@ export default function StudioPage() {
             <FormButton variant="secondary" onClick={() => void handleCopyCoverLetter()}>
               Copy Cover Letter
             </FormButton>
-            {isApplicationApplied ? (
-              <FormButton onClick={handleAnalyzeAnotherRole}>Analyze another role</FormButton>
-            ) : (
-              <FormButton onClick={handleApplyToThisRole}>Apply to this role</FormButton>
-            )}
+            {/* Keep a single obvious primary action: promote Apply in the hero, avoid duplicating it here. */}
+            {!isReadySuccessState ? (
+              isApplicationApplied ? (
+                <FormButton onClick={handleAnalyzeAnotherRole}>Analyze another role</FormButton>
+              ) : (
+                <FormButton onClick={handleApplyToThisRole}>Apply to this role</FormButton>
+              )
+            ) : null}
             <Link
               href={fitReviewHref}
               className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
@@ -6328,29 +6360,35 @@ export default function StudioPage() {
           </div>
         </div>
       ) : null}
-      {!hasCompletedGeneration && studioArtifactPairStatus === "failed" && !generateNowEligible ? ( 
-        <RouteStateShell 
-          tone="warning" 
-          eyebrow="Needs another pass" 
-          title="Your draft is ready to retry" 
-          body={ 
-            <p className="text-sm text-slate-100"> 
-              We could not finish the last draft attempt. Use retry to generate a fresh version from the current verified inputs. 
-            </p> 
-          } 
-        /> 
-      ) : ( 
-        <RouteStateShell 
-          tone="success" 
-          eyebrow="Drafting" 
-          title="Your draft is taking shape" 
-          body={ 
-            <p className="text-sm text-slate-100"> 
-              We are preparing your resume and cover letter from the baseline evidence already in place. 
-            </p> 
-          } 
-        /> 
-      )} 
+      {!hasCompletedGeneration && studioArtifactPairStatus === "failed" && !generateNowEligible ? (
+        <RouteStateShell
+          tone="warning"
+          eyebrow="Needs another pass"
+          title="Your draft is ready to retry"
+          body={
+            <p className="text-sm text-slate-100">
+              We could not finish the last draft attempt. Use retry to generate a fresh version from the current verified inputs.
+            </p>
+          }
+        />
+      ) : null}
+      {!isReadySuccessState &&
+      (studioGenerationRenderState.isGenerating ||
+        resumeGenerating ||
+        coverGenerating ||
+        autoGenerationInFlight ||
+        studioArtifactPairStatus === "in_progress") ? (
+        <RouteStateShell
+          tone="success"
+          eyebrow="Drafting"
+          title="Your draft is taking shape"
+          body={
+            <p className="text-sm text-slate-100">
+              We are preparing your resume and cover letter from the baseline evidence already in place.
+            </p>
+          }
+        />
+      ) : null}
       <details id="studio-fit-reasoning" className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"> 
         <summary className="cursor-pointer text-sm font-semibold text-slate-100"> 
           Why this is a strong match 
@@ -6362,7 +6400,7 @@ export default function StudioPage() {
               You are above the Studio generation floor and your baseline supports clean drafting. 
             </p> 
           </div> 
-          {!generateNowEligible ? (
+          {hasLoadedAnalysis && !generateNowEligible ? (
             <StudioArtifactQualityPanel
               model={artifactQuality}
               confidence={artifactQuality.confidence}
@@ -6467,7 +6505,9 @@ export default function StudioPage() {
     workflowAuthority.workflowState,
   ]);
 
+  // Avoid flashing blocked/recovery UI before analysis hydration resolves score + readiness.
   const showReadinessRecoveryExperience =
+    hasLoadedAnalysis &&
     !generateNowEligible &&
     ((resumeGating.accessState === "allowed" &&
       (resumeGating.primaryBlocker === "readiness_block" || resumeGating.primaryBlocker === "draft_only")) ||
@@ -6682,7 +6722,7 @@ export default function StudioPage() {
           </>
         ) : (
           <>
-            {!generateNowEligible ? (
+            {!generateNowEligible && !isReadySuccessState ? (
 
               <div className="space-y-2" data-testid="studio-ready-secondary-summary">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
@@ -6693,8 +6733,10 @@ export default function StudioPage() {
                     : "Ready"}
               </p>
               <p className="text-sm text-slate-300">
-                {typeof analysisScore === "number" ? `Fit score ${Math.round(analysisScore)} · ` : "Fit score unavailable · "}
-                {(selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company")} ·{" "}
+                {typeof analysisScore === "number"
+                  ? `Fit score ${Math.round(analysisScore)} - `
+                  : "Fit score unavailable - "}
+                {(selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company")} -{" "}
                 {(selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Unknown role")}
               </p>
               <h1 className="text-3xl font-semibold tracking-tight text-slate-50 md:text-[34px]">
@@ -6723,6 +6765,7 @@ export default function StudioPage() {
               </div>
 
             ) : null}
+            {!isReadySuccessState ? (
             <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-decision-panel"> 
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Decision + Action</p> 
               {generateNowEligible ? (
@@ -6739,8 +6782,8 @@ export default function StudioPage() {
                   : isMediumQualityDraft  
                       ? "Draft output: usable now, stronger with refinement."  
                       : "Strong output: ready to refine in Studio."  
-                  : workflowAuthority.workflowState === "READY"
-                    ? "Draft output: ready to refine in Studio."
+                  : workflowAuthority.canGenerate
+                    ? "Draft output: ready to generate."
                     : "Limited output: not ready yet."}
               </h2>
               <p className="mt-2 text-sm text-slate-200">  
@@ -6752,8 +6795,8 @@ export default function StudioPage() {
                     : isMediumQualityDraft  
                       ? "Usable now, but tightening evidence and refinement will materially improve the result."  
                       : "Built from your verified experience and aligned to the role. Review and refine as needed before applying." 
-                  : workflowAuthority.workflowState === "READY"
-                    ? "Built from your baseline evidence and aligned to the role."
+                  : workflowAuthority.canGenerate
+                    ? "Built from your baseline evidence and ready for generation."
                     : "Built from your baseline evidence, but a few signals still need strengthening."}
               </p>
               {hasCompletedGeneration && (showLowQualityRecoveryLane || isMediumQualityDraft) ? ( 
@@ -6802,6 +6845,7 @@ export default function StudioPage() {
                 </div>
               ) : null}
             </div> 
+            ) : null}
             {!generateNowEligible ? (
               <StudioArtifactQualityPanel
                 model={artifactQuality}
@@ -6814,36 +6858,77 @@ export default function StudioPage() {
           </> 
         )} 
         {hasCompletedGeneration ? (
-          <>
-            {documentCritique ? (
-              <StudioCritiquePanel
-                critique={documentCritique}
+          isReadySuccessState ? (
+            <details
+              className="rounded-2xl border border-white/10 bg-slate-950/35 p-4"
+              data-testid="studio-refinement-details"
+            >
+              <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+                Improve this draft (optional)
+              </summary>
+              <div className="mt-4 space-y-4">
+                {documentCritique ? (
+                  <StudioCritiquePanel
+                    critique={documentCritique}
+                    isApplying={refinementApplying}
+                    onApplyRecommendation={applyCritiqueRecommendation}
+                  />
+                ) : null}
+                <StudioRefinementPanel
+                  plan={documentStrategyPlan}
+                  refinementCount={refinementInstructions.length}
+                  statusMessage={refinementStatusMessage}
+                  isApplying={refinementApplying}
+                  onApplyRefinement={queueRefinement}
+                  onUndo={undoLastRefinement}
+                  onReset={revertToOriginalRefinement}
+                />
+                {hasGeneratedDocumentPair ? (
+                  <StudioRoleMatchPanel
+                    finalPass={roleMatchFinalPass}
+                    isApplying={refinementApplying}
+                    stylePolishNote={
+                      languageStylePass.transformationsApplied.length > 0
+                        ? "Language polished for clarity and readability."
+                        : null
+                    }
+                    onApplyAdjustment={applyFinalRoleAdjustment}
+                  />
+                ) : null}
+              </div>
+            </details>
+          ) : (
+            <>
+              {documentCritique ? (
+                <StudioCritiquePanel
+                  critique={documentCritique}
+                  isApplying={refinementApplying}
+                  onApplyRecommendation={applyCritiqueRecommendation}
+                />
+              ) : null}
+              <StudioRefinementPanel
+                plan={documentStrategyPlan}
+                refinementCount={refinementInstructions.length}
+                statusMessage={refinementStatusMessage}
                 isApplying={refinementApplying}
-                onApplyRecommendation={applyCritiqueRecommendation}
+                onApplyRefinement={queueRefinement}
+                onUndo={undoLastRefinement}
+                onReset={revertToOriginalRefinement}
               />
-            ) : null}
-            <StudioRefinementPanel
-              plan={documentStrategyPlan}
-              refinementCount={refinementInstructions.length}
-              statusMessage={refinementStatusMessage}
-              isApplying={refinementApplying}
-              onApplyRefinement={queueRefinement}
-              onUndo={undoLastRefinement}
-              onReset={revertToOriginalRefinement}
-            />
-            {hasGeneratedDocumentPair ? (
-              <StudioRoleMatchPanel
-                finalPass={roleMatchFinalPass}
-                isApplying={refinementApplying}
-                stylePolishNote={
-                  languageStylePass.transformationsApplied.length > 0
-                    ? "Language polished for clarity and readability."
-                    : null
-                }
-                onApplyAdjustment={applyFinalRoleAdjustment}
-              />
-            ) : null}
-          </>
+              {hasGeneratedDocumentPair ? (
+                <StudioRoleMatchPanel
+                  finalPass={roleMatchFinalPass}
+                  isApplying={refinementApplying}
+                  stylePolishNote={
+                    languageStylePass.transformationsApplied.length > 0
+                      ? "Language polished for clarity and readability."
+                      : null
+                  }
+                  onApplyAdjustment={applyFinalRoleAdjustment}
+                />
+              ) : null}
+            </>
+          )
         ) : null}
         <div className="flex flex-wrap items-center gap-3">
           {generateNowEligible && workflowAuthority.primaryAction === "GENERATE" ? (
@@ -6948,7 +7033,10 @@ export default function StudioPage() {
             </p>
           ) : null}
         </section>
-      ) : !showReadinessRecoveryExperience && workflowAuthority.workflowState === "BLOCKED" && !studioDraftMode ? (
+      ) : hasLoadedAnalysis &&
+        !showReadinessRecoveryExperience &&
+        workflowAuthority.workflowState === "BLOCKED" &&
+        !studioDraftMode ? (
         <RouteStateShell
           testId="studio-evidence-blocked-panel"
           tone="warning"

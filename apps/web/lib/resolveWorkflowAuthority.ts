@@ -35,16 +35,17 @@ export function resolveWorkflowAuthority(input: ResolveWorkflowAuthorityInput): 
 
   // Deterministic authority rules (single lane):
   // - Once any usable output exists, workflow is READY regardless of lifecycle turbulence.
-  // - Otherwise, defer to readiness block, then score bands.
+  // - Otherwise, score >= 80 is READY (generate-now contract), then defer to readiness block.
   const workflowState: WorkflowAuthorityState = hasAnyUsableOutput
     ? "READY"
-    : input.generationReadiness.blocked
-      ? "BLOCKED"
-      : typeof score === "number" && score >= 80
-        ? "READY"
+    : typeof score === "number" && score >= 80
+      ? "READY"
+      : input.generationReadiness.blocked
+        ? "BLOCKED"
         : "REVIEW_REQUIRED";
 
-  const canGenerate = typeof score === "number" && score >= 70 && !input.generationReadiness.blocked;
+  const canGenerate =
+    typeof score === "number" && score >= 70 && (!input.generationReadiness.blocked || score >= 80);
   const suppressFailureMessaging = hasAnyUsableOutput;
 
   const primaryAction: WorkflowAuthorityPrimaryAction =

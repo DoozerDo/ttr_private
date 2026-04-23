@@ -162,14 +162,14 @@ describe("studio low-quality preview gating", () => {
 
     renderStudio();
 
-    await waitFor(() => {
-      expect(screen.getByTestId("studio-decision-panel")).toBeInTheDocument();
-    });
+    await screen.findByTestId("resume-completion-panel");
+    await screen.findByTestId("cover-completion-panel");
 
     expect(screen.queryByText(/needs another pass/i)).toBeNull();
     expect(screen.queryByText(/draft \(low quality\)/i)).toBeNull();
+    expect(screen.getByTestId("studio-primary-cta-apply")).toBeInTheDocument();
     expect(screen.getByTestId("studio-confidence-label")).toHaveTextContent(/Confidence:\s*medium/i);
-    expect(screen.getByTestId("studio-decision-panel")).toHaveTextContent(/Draft output: ready to refine in Studio\./i);
+    expect(screen.queryByTestId("studio-decision-panel")).toBeNull();
     expect(screen.queryByText(/usable output/i)).toBeNull();
     expect(screen.queryByTestId("studio-artifact-quality-panel")).toBeNull();
 

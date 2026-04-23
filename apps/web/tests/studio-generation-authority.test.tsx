@@ -377,20 +377,22 @@ describe("Studio generation authority", () => {
     setupFetch("ready");
     renderStudio();
 
-    await screen.findByTestId("studio-decision-panel");
-    const hero = screen.getByTestId("studio-instant-draft-hero");
-    const readiness = screen.getByTestId("studio-generation-readiness");
-    const decisionPanel = screen.getByTestId("studio-decision-panel");
+    const hero = await screen.findByTestId("studio-instant-draft-hero");
+    const readiness = await screen.findByTestId("studio-generation-readiness");
     // Score >= 80: generate-now lane. The hero is the single authority; the READY summary is suppressed.
     expect(within(hero).getByRole("heading", { level: 1 })).toBeInTheDocument();
     expect(within(readiness).queryByTestId("studio-ready-secondary-summary")).toBeNull();
     expect(within(readiness).queryByRole("heading", { level: 1 })).toBeNull();
-    expect(decisionPanel).toHaveTextContent(/ready to refine in studio/i);
-    expect(decisionPanel).not.toHaveTextContent(/use this now with confidence/i);
 
     // Score >= 80: generation starts automatically on entry.
     await screen.findByTestId("resume-completion-panel");
     await screen.findByTestId("cover-completion-panel");
+    // Success-state polish: one obvious primary action (apply) and reduced mid-page noise.
+    expect(await screen.findByTestId("studio-primary-cta-apply")).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-decision-panel")).toBeNull();
+    const refinementDetails = screen.getByTestId("studio-refinement-details");
+    expect(refinementDetails).toBeInTheDocument();
+    expect(refinementDetails).not.toHaveAttribute("open");
     expect(screen.queryByRole("button", { name: /generate resume/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /generate cover letter/i })).toBeNull();
   });
@@ -560,12 +562,12 @@ describe("Studio generation authority", () => {
     setupFetch("ready", 79);
     renderStudio();
 
-    await screen.findByTestId("studio-decision-panel"); 
-    const decisionPanel = screen.getByTestId("studio-decision-panel"); 
-    expect(screen.getByTestId("studio-generation-readiness")).toHaveTextContent(/Draft|Ready|Usable/i); 
-    expect(decisionPanel).toHaveTextContent(/Draft output/i); 
-    expect(screen.getAllByRole("button", { name: /generate resume/i }).length).toBeGreaterThan(0); 
-    expect(screen.getAllByRole("button", { name: /generate cover letter/i }).length).toBeGreaterThan(0); 
+    await screen.findByTestId("studio-instant-draft-hero");
+
+    // Manual flow: generation remains a user action (vs. score >= 80 auto-generation).
+    expect(screen.queryByTestId("studio-primary-cta-apply")).toBeNull();
+    expect(screen.getAllByRole("button", { name: /generate resume/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: /generate cover letter/i }).length).toBeGreaterThan(0);
   }); 
 
   it("BLOCKED shows blocked status and remediation CTA", async () => { 
@@ -581,11 +583,12 @@ describe("Studio generation authority", () => {
     setupFetch("blocked", 84);
     renderStudio();
 
-    await screen.findByTestId("studio-decision-panel");
-    expect(screen.queryByTestId("studio-blocked-message")).toBeNull();
-    expect(screen.queryByText(/needs another pass/i)).toBeNull();
-    expect(screen.getByTestId("studio-decision-panel")).toHaveTextContent(/ready to refine in studio/i);
-    expect(screen.queryByTestId("studio-artifact-quality-panel")).toBeNull();
+    await screen.findByTestId("studio-instant-draft-hero");
+    await waitFor(() => {
+      expect(screen.queryByTestId("studio-blocked-message")).toBeNull();
+      expect(screen.queryByText(/needs another pass/i)).toBeNull();
+      expect(screen.queryByTestId("studio-artifact-quality-panel")).toBeNull();
+    });
 
     // Score >= 80 auto-generates; no manual "Generate" CTAs on entry.
     expect(screen.queryByRole("button", { name: /generate resume/i })).toBeNull();
@@ -595,22 +598,25 @@ describe("Studio generation authority", () => {
         screen.queryByText(/Generating your resume/i) ?? screen.queryByTestId("resume-completion-panel"),
       ).not.toBeNull();
     });
+    await screen.findByTestId("resume-completion-panel");
+    await screen.findByTestId("cover-completion-panel");
+    expect(screen.getByTestId("studio-primary-cta-apply")).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-decision-panel")).toBeNull();
 
     // Evidence strengthening remains optional/collapsed.
     expect(screen.getByTestId("studio-optional-evidence-details")).toBeInTheDocument();
     expect(screen.queryAllByRole("button", { name: /verify/i }).length).toBe(0);
   });
 
-  it("blocked generation action does not proceed and routes to remediation", async () => {
+  it("blocked readiness renders remediation UI (no auto-redirect)", async () => {
     setupFetch("blocked", 75);
     renderStudio();
 
     await screen.findByTestId("studio-blocked-message");
-    await waitFor(() => {
-      expect(mockRouterPush).toHaveBeenCalled();
-    });
-    const destinations = mockRouterPush.mock.calls.map(([arg]) => String(arg));
-    expect(destinations.some((href) => href.startsWith("/results"))).toBe(true);
+
+    // Blocked states should not silently bounce users around; they should present remediation actions.
+    expect(screen.getByTestId("studio-blocked-primary-action")).toBeInTheDocument();
+    expect(mockRouterPush).not.toHaveBeenCalled();
   });
 
   it.skip("suppresses 0 / 0 coverage and shows honest fallback", async () => {
