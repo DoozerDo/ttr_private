@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   ResumeEducation,
   ResumeExperience,
@@ -14,6 +14,7 @@ import {
   sliceResumeModelForPreview,
   type ResumePreviewLimits,
 } from "@/lib/resumePreviewContract";
+import { StudioFocusPanel } from "./StudioFocusPanel";
 
 export {
   estimateResumeModelBodyLength,
@@ -145,6 +146,11 @@ export function ResumePreview({
 }: Props) {
   const model = useMemo(() => modelOverride ?? readResumeModel(payload), [modelOverride, payload]);
   const [expandedExperienceIndex, setExpandedExperienceIndex] = useState<number | null>(null);
+  const [pendingFocusTarget, setPendingFocusTarget] = useState<
+    | { type: "summary" }
+    | { type: "role"; index: number }
+    | null
+  >(null);
 
   if (!model) {
     if (!fallbackText) return null;
@@ -192,6 +198,77 @@ export function ResumePreview({
           .filter((entry) => entry.degree || entry.institution || entry.location),
       )
     : [];
+
+  const focusRole0 = experiences.length
+    ? {
+        testId: "studio-focus-action-role-0",
+        title: "Improve your most recent role",
+        description: "Recruiters usually scan your most recent experience first.",
+        onClick: () => {
+          setExpandedExperienceIndex(0);
+          setPendingFocusTarget({ type: "role", index: 0 });
+        },
+      }
+    : null;
+
+  const focusSummary = summary
+    ? {
+        testId: "studio-focus-action-summary",
+        title: "Review your summary",
+        description: "Your summary shapes the first impression of your fit.",
+        onClick: () => {
+          setPendingFocusTarget({ type: "summary" });
+        },
+      }
+    : null;
+
+  const focusRole1 = experiences.length > 1
+    ? {
+        testId: "studio-focus-action-role-1",
+        title: "Strengthen another key role",
+        description: "A second strong role reinforces depth and consistency.",
+        onClick: () => {
+          setExpandedExperienceIndex(1);
+          setPendingFocusTarget({ type: "role", index: 1 });
+        },
+      }
+    : null;
+
+  const focusPrimary = focusRole0 ?? focusSummary ?? null;
+  const focusSecondary = focusPrimary === focusRole0
+    ? [focusSummary, focusRole1].filter(Boolean)
+    : focusPrimary === focusSummary
+      ? [focusRole1].filter(Boolean)
+      : [];
+
+  useEffect(() => {
+    if (!pendingFocusTarget) return;
+
+    const focusElement = (element: HTMLElement | null) => {
+      if (!element) return false;
+      element.scrollIntoView?.({ block: "start" });
+      element.focus?.({ preventScroll: true });
+      return true;
+    };
+
+    if (pendingFocusTarget.type === "summary") {
+      const el = document.querySelector<HTMLElement>('[data-testid="studio-resume-summary-section"]');
+      if (focusElement(el)) {
+        setPendingFocusTarget(null);
+      }
+      return;
+    }
+
+    if (pendingFocusTarget.type === "role") {
+      if (expandedExperienceIndex !== pendingFocusTarget.index) return;
+      const el = document.querySelector<HTMLElement>(
+        `[data-testid="studio-resume-experience-role-header-${pendingFocusTarget.index}"]`,
+      );
+      if (focusElement(el)) {
+        setPendingFocusTarget(null);
+      }
+    }
+  }, [expandedExperienceIndex, pendingFocusTarget]);
 
   return (
     <div className="space-y-6" data-testid="studio-resume-workspace-root">
@@ -249,8 +326,10 @@ export function ResumePreview({
         </p>
       ) : null}
 
+      {focusPrimary ? <StudioFocusPanel primary={focusPrimary} secondary={focusSecondary} /> : null}
+
       {summary ? (
-        <section className="space-y-2">
+        <section className="space-y-2" data-testid="studio-resume-summary-section" tabIndex={-1}>
           <h3 className="text-xs font-semibold uppercase tracking-[0.32em] text-slate-400">
             Professional Summary
           </h3>
