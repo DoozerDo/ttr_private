@@ -14,7 +14,7 @@ import {
   sliceResumeModelForPreview,
   type ResumePreviewLimits,
 } from "@/lib/resumePreviewContract";
-import { StudioFocusPanel } from "./StudioFocusPanel";
+import { StudioFocusPanel, type FocusAction } from "./StudioFocusPanel";
 
 export {
   estimateResumeModelBodyLength,
@@ -199,7 +199,7 @@ export function ResumePreview({
       )
     : [];
 
-  const focusRole0 = experiences.length
+  const focusRole0: FocusAction | null = experiences.length
     ? {
         testId: "studio-focus-action-role-0",
         title: "Improve your most recent role",
@@ -211,7 +211,7 @@ export function ResumePreview({
       }
     : null;
 
-  const focusSummary = summary
+  const focusSummary: FocusAction | null = summary
     ? {
         testId: "studio-focus-action-summary",
         title: "Review your summary",
@@ -222,7 +222,7 @@ export function ResumePreview({
       }
     : null;
 
-  const focusRole1 = experiences.length > 1
+  const focusRole1: FocusAction | null = experiences.length > 1
     ? {
         testId: "studio-focus-action-role-1",
         title: "Strengthen another key role",
@@ -234,12 +234,15 @@ export function ResumePreview({
       }
     : null;
 
-  const focusPrimary = focusRole0 ?? focusSummary ?? null;
-  const focusSecondary = focusPrimary === focusRole0
-    ? [focusSummary, focusRole1].filter(Boolean)
-    : focusPrimary === focusSummary
-      ? [focusRole1].filter(Boolean)
-      : [];
+  const focusPrimary: FocusAction | null = focusRole0 ?? focusSummary ?? null;
+  const focusSecondary: FocusAction[] = [];
+
+  if (focusPrimary === focusRole0) {
+    if (focusSummary) focusSecondary.push(focusSummary);
+    if (focusRole1) focusSecondary.push(focusRole1);
+  } else if (focusPrimary === focusSummary) {
+    if (focusRole1) focusSecondary.push(focusRole1);
+  }
 
   useEffect(() => {
     if (!pendingFocusTarget) return;
