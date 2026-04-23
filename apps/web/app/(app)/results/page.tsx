@@ -70,6 +70,8 @@ import { tryAcquirePairGenerationLatch, releasePairGenerationLatch } from "@/lib
 import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
 import { isDocumentGenerationUnlocked, isMomentumGenerationAllowed } from "@/lib/documentGenerationGate";
 import { ResumePreview } from "@/app/(app)/studio/ResumePreview";
+import { devLogArtifactRendererSelection } from "@/lib/artifactRendererDebug";
+import { selectResultsResumePreview } from "@/lib/resultsArtifactPreview";
 import {
   buildWorkflowRequestKey,
   isWorkflowRequestStale,
@@ -5131,7 +5133,60 @@ export default function ResultsPage() {
                   Documents come first. Add more evidence after you review and refine these drafts.
                 </p>
               </div>
-              {resumeGenerationPayload ? <ResumePreview payload={resumeGenerationPayload} /> : null}
+              {resumeGenerationPayload ? (
+                <div className="space-y-3" data-testid="results-resume-preview">
+                  {(() => {
+                    const selected = selectResultsResumePreview(resumeGenerationPayload);
+                    devLogArtifactRendererSelection({
+                      page: "results",
+                      artifactType: "resume",
+                      confidence: productReadiness.confidence ?? null,
+                      generationPhase: effectiveResultsGenerationPhase ?? null,
+                      pairStatus: pairWorkflowState.pairStatus ?? null,
+                      renderer: selected.renderer,
+                      previewLength: selected.previewLength,
+                      totalBodyLength: selected.totalBodyLength,
+                      truncated: selected.truncated,
+                      reason: selected.reason,
+                    });
+
+                    if (selected.renderer === "none") return null;
+
+                    const truncationNote = selected.truncated ? (
+                      <p className="text-xs text-slate-400" data-testid="results-resume-preview-truncated">
+                        Preview truncated.{" "}
+                        {studioHref ? (
+                          <a href={studioHref} className="underline underline-offset-2 hover:text-slate-200">
+                            Open Studio
+                          </a>
+                        ) : (
+                          "Open Studio"
+                        )}{" "}
+                        to view and refine the full resume.
+                      </p>
+                    ) : null;
+
+                    if (selected.renderer === "bounded_structured_preview") {
+                      return (
+                        <div className="space-y-2">
+                          <ResumePreview model={selected.previewModel} payload={resumeGenerationPayload} isEditing={false} />
+                          {truncationNote}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div
+                        className="max-h-64 overflow-auto space-y-3 rounded-xl border border-white/10 bg-slate-950/40 p-4 text-sm leading-7 text-slate-100"
+                        data-testid="results-resume-preview-body"
+                      >
+                        <pre className="whitespace-pre-wrap">{selected.previewText}</pre>
+                        {truncationNote}
+                      </div>
+                    );
+                  })()}
+                </div>
+              ) : null}
               {coverLetterGenerationPayload ? (
                 <div className="space-y-3" data-testid="cover-letter-preview">
                   <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
@@ -5144,22 +5199,18 @@ export default function ResultsPage() {
                     const previewTextLength = previewParagraphs.join("\n\n").length;
                     const bodyTextLength = paragraphs.join("\n\n").length;
 
-                    if (process.env.NODE_ENV === "development") {
-                      console.debug("[artifactRenderer]", {
-                        page: "results",
-                        artifactType: "cover_letter",
-                        confidence: productReadiness.confidence,
-                        generationPhase: effectiveResultsGenerationPhase,
-                        pairStatus: pairWorkflowState.pairStatus,
-                        renderer: "bounded_preview",
-                        rawRendererUsed: false,
-                        previewParagraphCount: previewParagraphs.length,
-                        bodyParagraphCount: paragraphs.length,
-                        previewTextLength,
-                        bodyTextLength,
-                        reason: "completed_generation",
-                      });
-                    }
+                    devLogArtifactRendererSelection({
+                      page: "results",
+                      artifactType: "cover_letter",
+                      confidence: productReadiness.confidence ?? null,
+                      generationPhase: effectiveResultsGenerationPhase ?? null,
+                      pairStatus: pairWorkflowState.pairStatus ?? null,
+                      renderer: "bounded_preview",
+                      previewLength: previewTextLength,
+                      totalBodyLength: bodyTextLength,
+                      truncated,
+                      reason: "completed_generation",
+                    });
 
                     return (
                       <div

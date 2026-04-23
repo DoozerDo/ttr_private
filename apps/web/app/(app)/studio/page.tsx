@@ -123,7 +123,9 @@ import {
 } from "@/lib/studioTrustGate";
 import { buildStudioPageTruth } from "@/lib/studioPageTruth";
 import { BaselineBlockPolicyPanel } from "./BaselineBlockPolicyPanel";
-import { readResumeModel, ResumePreview } from "./ResumePreview";
+import { estimateResumeModelBodyLength, readResumeModel, ResumePreview } from "./ResumePreview";
+import { devLogArtifactRendererSelection } from "@/lib/artifactRendererDebug";
+import { truncateForPreview } from "@/lib/previewTruncation";
 import type { ResumeModel } from "@/lib/resumeModel";
 import { StudioArtifactQualityPanel } from "./StudioArtifactQualityPanel";
 import { StudioCritiquePanel } from "./StudioCritiquePanel";
@@ -6837,22 +6839,57 @@ export default function StudioPage() {
           ? "unknown_payload"
           : "none";
 
-    console.debug("[artifactRenderer]", {
+    const resumeTotalBodyLength = generatedResumeModel
+      ? estimateResumeModelBodyLength(generatedResumeModel)
+      : resumePreviewText.length;
+
+    const resumePreview =
+      resumeRenderer === "low_quality_excerpt"
+        ? truncateForPreview(resumePreviewText, { maxChars: 1200, maxLines: 60 })
+        : resumeRenderer === "fallback_text"
+          ? truncateForPreview(resumePreviewText, { maxChars: 4000, maxLines: 120 })
+          : { text: "", totalLength: resumeTotalBodyLength, previewLength: resumeTotalBodyLength, truncated: false };
+
+    devLogArtifactRendererSelection({
       page: "studio",
-      confidence: artifactQuality.confidence,
-      generationPhase: generationLifecycle.phase,
-      readyState: workflowAuthority.workflowState,
-      resume: {
-        renderer: resumeRenderer,
-        rawRendererUsed: resumeRenderer === "fallback_text",
-        previewTextLength: resumePreviewText.length,
-      },
-      coverLetter: {
-        renderer: coverRenderer,
-        rawRendererUsed: false,
-        paragraphCount: coverLetterParagraphs.length,
-        bodyTextLength: coverLetterParagraphs.join("\n\n").length,
-      },
+      artifactType: "resume",
+      confidence: artifactQuality.confidence ?? null,
+      generationPhase: generationLifecycle.phase ?? null,
+      pairStatus: workflowAuthority.workflowState ?? null,
+      renderer: resumeRenderer,
+      previewLength: resumeRenderer === "structured_preview" ? resumeTotalBodyLength : resumePreview.previewLength,
+      totalBodyLength: resumeTotalBodyLength,
+      truncated:
+        resumeRenderer === "structured_preview"
+          ? false
+          : resumeRenderer === "none"
+            ? false
+            : resumePreview.truncated,
+      reason: "render",
+    });
+
+    const coverTotalBodyLength = coverLetterParagraphs.join("\n\n").length;
+    const coverPreviewParagraphs =
+      coverRenderer === "low_quality_excerpt"
+        ? coverLetterParagraphs.slice(0, 2)
+        : coverRenderer === "bounded_preview"
+          ? coverLetterParagraphs.slice(0, 4)
+          : [];
+    const coverPreviewLength = coverPreviewParagraphs.join("\n\n").length;
+
+    devLogArtifactRendererSelection({
+      page: "studio",
+      artifactType: "cover_letter",
+      confidence: artifactQuality.confidence ?? null,
+      generationPhase: generationLifecycle.phase ?? null,
+      pairStatus: workflowAuthority.workflowState ?? null,
+      renderer: coverRenderer,
+      previewLength: coverPreviewLength,
+      totalBodyLength: coverTotalBodyLength,
+      truncated:
+        coverRenderer === "bounded_preview" || coverRenderer === "low_quality_excerpt"
+          ? coverLetterParagraphs.length > coverPreviewParagraphs.length
+          : false,
       reason: "render",
     });
   }, [

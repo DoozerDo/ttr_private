@@ -6,6 +6,22 @@ import type {
   ResumeExperience,
   ResumeModel,
 } from "@/lib/resumeModel";
+import { truncateForPreview } from "@/lib/previewTruncation";
+import {
+  estimateResumeModelBodyLength,
+  readResumeModel,
+  RESULTS_RESUME_PREVIEW_LIMITS,
+  sliceResumeModelForPreview,
+  type ResumePreviewLimits,
+} from "@/lib/resumePreviewContract";
+
+export {
+  estimateResumeModelBodyLength,
+  readResumeModel,
+  RESULTS_RESUME_PREVIEW_LIMITS,
+  sliceResumeModelForPreview,
+  type ResumePreviewLimits,
+} from "@/lib/resumePreviewContract";
 
 type Props = {
   payload?: unknown;
@@ -45,16 +61,6 @@ function matchesHighlightedClaim(text: string, highlights: Props["claimHighlight
     const claimText = claim.text.toLowerCase();
     return claimText.length > 0 && (normalized === claimText || normalized.includes(claimText));
   });
-}
-
-export function readResumeModel(payload: unknown): ResumeModel | null {
-  if (!payload || typeof payload !== "object") return null;
-  const record = payload as Record<string, unknown>;
-  const preview = record.preview;
-  if (!preview || typeof preview !== "object") return null;
-  const resume = (preview as Record<string, unknown>).resume;
-  if (!resume || typeof resume !== "object") return null;
-  return resume as ResumeModel;
 }
 
 function readDateRange(entry: ResumeExperience): string {
@@ -141,10 +147,16 @@ export function ResumePreview({
 
   if (!model) {
     if (!fallbackText) return null;
+    const preview = truncateForPreview(fallbackText, { maxChars: 4000, maxLines: 120 });
     return (
-      <pre className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-4 text-sm leading-7 text-slate-200">
-        {fallbackText}
-      </pre>
+      <div className="space-y-2">
+        <pre className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-4 text-sm leading-7 text-slate-200">
+          {preview.text}
+        </pre>
+        {preview.truncated ? (
+          <p className="text-xs text-slate-400">Preview truncated.</p>
+        ) : null}
+      </div>
     );
   }
 
