@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import Link from "next/link";
-import { useSearchParams, useRouter } from "next/navigation";
+import { usePathname, useSearchParams, useRouter } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
 import { ArtifactFailureState } from "@/components/ArtifactFailureState";
@@ -41,6 +41,7 @@ import { normalizeClaimVerifications } from "@/lib/claimVerification";
 import { parseTierGateError, SubscriptionTier, type TierGateError } from "@/lib/tiers";
 import { isDraftAnywayEligible, resolveStudioArtifactGating } from "@/lib/studioArtifactGating";
 import { resolveWorkflowAuthority } from "@/lib/resolveWorkflowAuthority";
+import { resolveResultsStudioRedirect } from "@/lib/resolveResultsStudioRedirect";
 import { resolvePairWorkflowState, type PairWorkflowArtifactStatus } from "@/lib/pairWorkflowState";
 import { resolvePairGenerationLifecycle } from "@/lib/pairGenerationLifecycle";
 import { tryAcquirePairGenerationLatch, releasePairGenerationLatch } from "@/lib/pairGenerationLatch";
@@ -1615,19 +1616,58 @@ export default function StudioPage() {
   const hasLoadedAnalysis = Boolean(
     requestedAnalysisId && !analysisLoading && !analysisError && analysisScore !== null,
   );
+  const pathname = usePathname();
   const lowFitRedirectedRef = useRef(false);
   useEffect(() => {
-    if (analysisScore === null) return;
-    if (shouldGenerateDocuments(analysisScore)) {
+    // Only consider cross-page redirects once we have the exact pair + score hydrated.
+    if (!hasLoadedAnalysis) return;
+
+    const decision = resolveResultsStudioRedirect({
+      from: "studio",
+      pathname,
+      baselineId: effectiveBaselineId ?? null,
+      jobId: effectiveJobId ?? null,
+      analysisId: requestedAnalysisId ?? null,
+      baselineVersionId: effectiveBaselineVersionId ?? null,
+      score: analysisScore,
+      hasAnyUsableOutput: Boolean(resumeState.response || coverState.response),
+      generationReadinessBlocked: Boolean(generationReadiness.blocked),
+    });
+
+    if (!decision.redirectTo) {
       lowFitRedirectedRef.current = false;
       return;
     }
+
+    if (process.env.NODE_ENV === "development") {
+      console.debug("[studioAuthorityRedirect]", {
+        pathname,
+        baselineId: effectiveBaselineId ?? null,
+        jobId: effectiveJobId ?? null,
+        analysisId: requestedAnalysisId ?? null,
+        score: analysisScore,
+        hasAnyUsableOutput: Boolean(resumeState.response || coverState.response),
+        redirectTo: decision.redirectTo,
+        reason: decision.reason,
+      });
+    }
+
     if (lowFitRedirectedRef.current) return;
     lowFitRedirectedRef.current = true;
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("locked", "1");
-    void router.replace(`/results?${params.toString()}`);
-  }, [analysisScore, router, searchParams]);
+    void router.replace(decision.redirectTo);
+  }, [
+    analysisScore,
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    hasLoadedAnalysis,
+    generationReadiness.blocked,
+    pathname,
+    requestedAnalysisId,
+    resumeState.response,
+    coverState.response,
+    router,
+  ]);
   useEffect(() => {
     if (!requestedAnalysisId || !effectiveJobId || !effectiveBaselineId) {
       setGenerationReadiness(READINESS_LOADING_STATE);
@@ -2972,11 +3012,8 @@ export default function StudioPage() {
     studioCanonicalDecision.workflowState,
   ]);
   const studioBlockedByNextAction = primaryNextAction.type === "start_fit_review";
-  useEffect(() => {
-    if (studioBlockedByNextAction && requestedAnalysisId) {
-      void router.replace(remediationHref);
-    }
-  }, [requestedAnalysisId, remediationHref, router, studioBlockedByNextAction]);
+  // Important: do not auto-redirect based on legacy `primaryNextAction` here.
+  // Redirecting to Results/Fit Review while Studio can still render (or auto-generate) creates Results <-> Studio loops.
   const evidenceLedger = useMemo(
     () =>
       deriveEvidenceLedger(analysis, {
@@ -6495,12 +6532,24 @@ export default function StudioPage() {
   useEffect(() => {
     if (process.env.NODE_ENV !== "development") return;
     console.debug("[studioAuthority]", {
+      pathname,
+      baselineId: effectiveBaselineId ?? null,
+      jobId: effectiveJobId ?? null,
+      analysisId: requestedAnalysisId ?? null,
+      score: typeof analysisScore === "number" ? analysisScore : null,
+      generationReadinessBlocked: activeGenerationReadiness.blocked,
       workflowState: workflowAuthority.workflowState,
       pageTruth: pageTruth.state,
       suppressFailureMessaging: workflowAuthority.suppressFailureMessaging,
     });
   }, [
+    activeGenerationReadiness.blocked,
+    analysisScore,
+    effectiveBaselineId,
+    effectiveJobId,
     pageTruth.state,
+    pathname,
+    requestedAnalysisId,
     workflowAuthority.suppressFailureMessaging,
     workflowAuthority.workflowState,
   ]);

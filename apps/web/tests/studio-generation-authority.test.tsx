@@ -9,7 +9,7 @@ import {
   recordArtifactRefineIntent,
   recordOpportunityCommitIntent,
 } from "@/src/lib/recentIntent";
-import { mockRouterPush, overrideSearchParams, setFetchImplementation } from "./setup";
+import { mockRouterPush, mockRouterReplace, overrideSearchParams, setFetchImplementation } from "./setup";
 
 const trackEventMock = vi.fn();
 const resolveStudioNextMoveMock = vi.hoisted(() => vi.fn());
@@ -339,6 +339,8 @@ describe("Studio generation authority", () => {
     }
     trackEventMock.mockClear();
     resolveStudioNextMoveMock.mockClear();
+    mockRouterReplace.mockClear();
+    mockRouterPush.mockClear();
   });
 
   it("READY shows the live decision branch and honest fallback", async () => {
@@ -602,6 +604,7 @@ describe("Studio generation authority", () => {
     await screen.findByTestId("cover-completion-panel");
     expect(screen.getByTestId("studio-primary-cta-apply")).toBeInTheDocument();
     expect(screen.queryByTestId("studio-decision-panel")).toBeNull();
+    expect(mockRouterReplace).not.toHaveBeenCalledWith(expect.stringMatching(/^\/results/));
 
     // Evidence strengthening remains optional/collapsed.
     expect(screen.getByTestId("studio-optional-evidence-details")).toBeInTheDocument();
@@ -617,6 +620,7 @@ describe("Studio generation authority", () => {
     // Blocked states should not silently bounce users around; they should present remediation actions.
     expect(screen.getByTestId("studio-blocked-primary-action")).toBeInTheDocument();
     expect(mockRouterPush).not.toHaveBeenCalled();
+    expect(mockRouterReplace).not.toHaveBeenCalledWith(expect.stringMatching(/^\/results/));
   });
 
   it.skip("suppresses 0 / 0 coverage and shows honest fallback", async () => {

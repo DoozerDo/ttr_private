@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
 import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
@@ -58,6 +58,7 @@ import {
 } from "@/lib/renderedText";
 import { buildProgressSummary } from "@/lib/progressSummary";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
+import { resolveResultsStudioRedirect } from "@/lib/resolveResultsStudioRedirect";
 import { isSystemOwnedFinalizedGeneration, shouldGenerateDocuments } from "@/lib/documentGenerationContract";
 import { buildExportPayload } from "../lib/exportPayload";
 import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
@@ -2158,6 +2159,7 @@ export default function ResultsPage() {
 
   const router = useRouter();
   const searchParams = useSearchParams();
+  const pathname = usePathname();
   const runIdentifier = useMemo(() => {
     const candidate =
       searchParams?.get("assessmentId") ??
@@ -2901,36 +2903,53 @@ export default function ResultsPage() {
   const hasTrackedResultsCompletedRef = useRef(false);
   const autoRoutedToStudioRef = useRef(false);
   const shouldAutoRouteToStudio = useMemo(
-    () => typeof activeScore === "number" && isMomentumGenerationAllowed(activeScore),
-    [activeScore],
+    () => !studioLocked && typeof activeScore === "number" && isMomentumGenerationAllowed(activeScore),
+    [activeScore, studioLocked],
   );
   const autoRouteStudioHref = useMemo(() => {
     if (!shouldAutoRouteToStudio) return null;
 
-    const resolvedBaselineId = (latest?.baselineId ?? baselineId ?? "").trim();
-    const resolvedJobId = (latest?.jobId ?? jobId ?? "").trim();
-    const resolvedAnalysisId = (latest?.assessmentId ?? runIdentifier ?? "").trim();
-    const resolvedBaselineVersionId = (latest?.baselineVersionId ?? currentBaselineVersionId ?? "").trim();
+    // Redirect authority must be pair-bound: never guess a different run/baseline/job than the URL context.
+    // If we can't prove the exact pair, don't auto-route (prevents Results <-> Studio ping pong).
+    const resolvedBaselineId = (baselineId ?? "").trim();
+    const resolvedJobId = (jobId ?? "").trim();
+    const resolvedAnalysisId = (runIdentifier ?? "").trim();
+    const resolvedBaselineVersionId = (currentBaselineVersionId ?? "").trim();
 
     if (!resolvedBaselineId || !resolvedJobId || !resolvedAnalysisId) return null;
 
-    return getStudioHref({
+    const decision = resolveResultsStudioRedirect({
+      from: "results",
+      pathname,
+      locked: studioLocked,
       baselineId: resolvedBaselineId,
       jobId: resolvedJobId,
       analysisId: resolvedAnalysisId,
       baselineVersionId: resolvedBaselineVersionId || null,
-      fromUnlock: justUnlocked,
+      score: typeof activeScore === "number" ? activeScore : null,
+      hasAnyUsableOutput: false,
+      generationReadinessBlocked: Boolean(generationReadiness.blocked),
     });
+
+    if (!decision.redirectTo) return null;
+
+    // Preserve unlock attribution on the redirect href.
+    return justUnlocked && !decision.redirectTo.includes("fromUnlock=true")
+      ? `${decision.redirectTo}${decision.redirectTo.includes("?") ? "&" : "?"}fromUnlock=true`
+      : decision.redirectTo;
   }, [
     baselineId,
     currentBaselineVersionId,
+    generationReadiness.blocked,
     jobId,
     justUnlocked,
     latest?.assessmentId,
     latest?.baselineId,
     latest?.baselineVersionId,
     latest?.jobId,
+    pathname,
     runIdentifier,
+    activeScore,
     shouldAutoRouteToStudio,
   ]);
 
@@ -2938,6 +2957,18 @@ export default function ResultsPage() {
     if (!autoRouteStudioHref) return;
     if (autoRoutedToStudioRef.current) return;
     autoRoutedToStudioRef.current = true;
+
+    if (process.env.NODE_ENV === "development") {
+      console.debug("[resultsAuthorityRedirect]", {
+        pathname,
+        locked: studioLocked,
+        baselineId: baselineId ?? null,
+        jobId: jobId ?? null,
+        assessmentId: runIdentifier ?? null,
+        score: typeof activeScore === "number" ? activeScore : null,
+        redirectTo: autoRouteStudioHref,
+      });
+    }
 
     // Preserve key funnel analytics even though Results UI no longer renders for score >= 80.
     trackEvent("results_completed", {
@@ -2954,7 +2985,18 @@ export default function ResultsPage() {
     });
 
     router.replace(autoRouteStudioHref);
-  }, [activeScore, autoRouteStudioHref, baselineId, jobId, latest?.baselineId, latest?.jobId, router]);
+  }, [
+    activeScore,
+    autoRouteStudioHref,
+    baselineId,
+    jobId,
+    latest?.assessmentId,
+    latest?.baselineId,
+    latest?.jobId,
+    pathname,
+    router,
+    runIdentifier,
+  ]);
 
   useEffect(() => {
     if (hasTrackedResultsCompletedRef.current) return;
