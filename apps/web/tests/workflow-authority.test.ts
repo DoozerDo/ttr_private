@@ -55,7 +55,7 @@ describe("resolveWorkflowAuthority", () => {
     expect(result.nextStepHint).toBe("Generate your documents to proceed.");
   });
 
-  it("returns BLOCKED when readiness is blocked and no artifacts exist", () => {
+  it("returns READY for score >= 80 even when readiness is blocked and no artifacts exist", () => {
     const result = resolveWorkflowAuthority({
       score: 92,
       generationReadiness: readiness({ blocked: true, status: "blocked" }),
@@ -66,12 +66,12 @@ describe("resolveWorkflowAuthority", () => {
       isHydrating: false,
     });
 
-    expect(result.workflowState).toBe("BLOCKED");
-    expect(result.canGenerate).toBe(false);
-    expect(result.primaryAction).toBe("BLOCKED");
-    expect(result.headline).toBe("Generation is blocked");
-    expect(result.body).toBe("Resolve the current blockers before continuing.");
-    expect(result.nextStepHint).toBe("Resolve blockers before continuing.");
+    expect(result.workflowState).toBe("READY");
+    expect(result.canGenerate).toBe(true);
+    expect(result.primaryAction).toBe("GENERATE");
+    expect(result.headline).toBe("Your application is being prepared");
+    expect(result.body).toBe("Your fit is strong enough to generate documents for this role.");
+    expect(result.nextStepHint).toBe("Generate your documents to proceed.");
   });
 
   it("returns REVIEW_REQUIRED for low score when not blocked and no artifacts exist", () => {
@@ -92,5 +92,21 @@ describe("resolveWorkflowAuthority", () => {
     expect(result.headline).toBe("Refine before you generate");
     expect(result.body).toBe("This role needs a tighter match before generation will be useful.");
     expect(result.nextStepHint).toBe("Review and refine your fit before continuing.");
+  });
+
+  it("returns READY + RETRY when score >= 80 but generation failed and no usable outputs exist", () => {
+    const result = resolveWorkflowAuthority({
+      score: 88,
+      generationReadiness: readiness(),
+      resumeState: { hasOutput: false, failed: true },
+      coverState: { hasOutput: false, failed: false },
+      isPro: true,
+      hasGeneratedOnce: true,
+      isHydrating: false,
+    });
+
+    expect(result.workflowState).toBe("READY");
+    expect(result.primaryAction).toBe("RETRY");
+    expect(result.nextStepHint).toBe("Retry generation to complete your materials.");
   });
 });

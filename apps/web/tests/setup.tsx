@@ -3,6 +3,7 @@ import { afterEach, vi } from "vitest";
 
 import "@testing-library/jest-dom";
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
+import { __resetStudioArtifactSingleFlightForTests } from "@/lib/studioArtifactSingleFlight";
 
 // Keep a stable URLSearchParams-like shape.
 // The key fix is: `get` must accept an optional key so it matches both:
@@ -179,4 +180,11 @@ afterEach(() => {
   ) {
     localStorage.clear();
   }
+  if (
+    typeof sessionStorage !== "undefined" &&
+    typeof (sessionStorage as Storage).clear === "function"
+  ) {
+    sessionStorage.clear();
+  }
+  __resetStudioArtifactSingleFlightForTests();
 });

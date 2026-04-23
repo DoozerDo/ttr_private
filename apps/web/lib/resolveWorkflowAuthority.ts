@@ -53,11 +53,11 @@ export function resolveWorkflowAuthority(input: ResolveWorkflowAuthorityInput): 
       ? "BLOCKED"
       : workflowState === "REVIEW_REQUIRED"
         ? "REVIEW"
-        : hasAnyUsableOutput
-          ? hasPartialFailure
-            ? "RETRY"
-            : "REVIEW"
-          : "GENERATE";
+        : hasAnyFailures
+          ? "RETRY"
+          : hasAnyUsableOutput
+            ? "REVIEW"
+            : "GENERATE";
 
   const headline =
     workflowState === "BLOCKED"

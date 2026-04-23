@@ -44,7 +44,12 @@ import { resolveWorkflowAuthority } from "@/lib/resolveWorkflowAuthority";
 import { resolveResultsStudioRedirect } from "@/lib/resolveResultsStudioRedirect";
 import { resolvePairWorkflowState, type PairWorkflowArtifactStatus } from "@/lib/pairWorkflowState";
 import { resolvePairGenerationLifecycle } from "@/lib/pairGenerationLifecycle";
-import { tryAcquirePairGenerationLatch, releasePairGenerationLatch } from "@/lib/pairGenerationLatch";
+import {
+  acquireStudioArtifactSingleFlight,
+  isStudioArtifactSingleFlightInFlight,
+  releaseStudioArtifactSingleFlight,
+  type StudioArtifactType,
+} from "@/lib/studioArtifactSingleFlight";
 import { BaselineDto, BaselineVersionDto, listBaselines } from "@/lib/baselines";
 import { appendStrengtheningAddition } from "@/lib/baselines";
 import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
@@ -1613,6 +1618,109 @@ export default function StudioPage() {
       setAutoGenerationInFlight(false);
     }
   }, [autoGenerationInFlight, coverGenerating, generationWorkflowScope, resumeGenerating]);
+
+  useEffect(() => {
+    // Persist in-flight state across remounts (ex: URL normalization router.replace) so we don't:
+    // - re-launch duplicate generation requests
+    // - show "not generated" while a request is actually running
+    if (!effectiveBaselineId || !effectiveJobId || !requestedAnalysisId) return;
+
+    const resumeInFlight = isStudioArtifactSingleFlightInFlight({
+      baselineId: effectiveBaselineId,
+      jobId: effectiveJobId,
+      analysisId: requestedAnalysisId,
+      artifactType: "resume",
+    });
+    const coverInFlight = isStudioArtifactSingleFlightInFlight({
+      baselineId: effectiveBaselineId,
+      jobId: effectiveJobId,
+      analysisId: requestedAnalysisId,
+      artifactType: "cover_letter",
+    });
+
+    if (
+      resumeInFlight &&
+      !resumeState.response &&
+      !resumeState.error &&
+      !resumeState.tierGateError &&
+      !resumeState.artifactFailure
+    ) {
+      setResumeGenerating((current) => current || true);
+    }
+    if (
+      coverInFlight &&
+      !coverState.response &&
+      !coverState.error &&
+      !coverState.tierGateError &&
+      !coverState.artifactFailure &&
+      !coverLetterComplianceBlocked
+    ) {
+      setCoverGenerating((current) => current || true);
+    }
+  }, [
+    coverLetterComplianceBlocked,
+    coverState.artifactFailure,
+    coverState.response,
+    coverState.error,
+    coverState.tierGateError,
+    effectiveBaselineId,
+    effectiveJobId,
+    requestedAnalysisId,
+    resumeState.artifactFailure,
+    resumeState.response,
+    resumeState.error,
+    resumeState.tierGateError,
+  ]);
+
+  useEffect(() => {
+    // Release single-flight locks only once Studio state reflects a terminal outcome.
+    // This avoids a brief window where async work finished but React state hasn't committed yet
+    // (which previously allowed duplicate POSTs in fast/mock environments).
+    if (!effectiveBaselineId || !effectiveJobId || !requestedAnalysisId) return;
+    if (resumeState.response || resumeState.error || resumeState.tierGateError || resumeState.artifactFailure) {
+      releaseStudioArtifactSingleFlight({
+        baselineId: effectiveBaselineId,
+        jobId: effectiveJobId,
+        analysisId: requestedAnalysisId,
+        artifactType: "resume",
+      });
+    }
+  }, [
+    effectiveBaselineId,
+    effectiveJobId,
+    requestedAnalysisId,
+    resumeState.artifactFailure,
+    resumeState.error,
+    resumeState.response,
+    resumeState.tierGateError,
+  ]);
+
+  useEffect(() => {
+    if (!effectiveBaselineId || !effectiveJobId || !requestedAnalysisId) return;
+    if (
+      coverState.response ||
+      coverState.error ||
+      coverState.tierGateError ||
+      coverState.artifactFailure ||
+      coverLetterComplianceBlocked
+    ) {
+      releaseStudioArtifactSingleFlight({
+        baselineId: effectiveBaselineId,
+        jobId: effectiveJobId,
+        analysisId: requestedAnalysisId,
+        artifactType: "cover_letter",
+      });
+    }
+  }, [
+    coverLetterComplianceBlocked,
+    coverState.artifactFailure,
+    coverState.error,
+    coverState.response,
+    coverState.tierGateError,
+    effectiveBaselineId,
+    effectiveJobId,
+    requestedAnalysisId,
+  ]);
   const hasLoadedAnalysis = Boolean(
     requestedAnalysisId && !analysisLoading && !analysisError && analysisScore !== null,
   );
@@ -2142,12 +2250,8 @@ export default function StudioPage() {
     ],
   );
 
-  useEffect(() => {
-    if (!effectiveBaselineId || !effectiveJobId) return;
-    if (generationLifecycle.phase === "generated" || generationLifecycle.phase === "failed" || generationLifecycle.phase === "partial") {
-      releasePairGenerationLatch(`${effectiveBaselineId}:${effectiveJobId}`);
-    }
-  }, [effectiveBaselineId, effectiveJobId, generationLifecycle.phase]);
+  // Pair-wide latches caused cross-mount duplicate launches (ex: when URL normalization triggers remount).
+  // Studio uses per-artifact single-flight locks keyed by (baselineId, jobId, analysisId, artifactType).
 
   const documentCritique = useMemo(
     () =>
@@ -3086,6 +3190,26 @@ export default function StudioPage() {
   const canProceedWithStudioDrafts =
     qualifiedForGeneration && (!activeGenerationReadiness.blocked || generateNowEligible); 
   const isInstantDraftExperience = canProceedWithStudioDrafts; 
+  const resumeSingleFlightInFlight = useMemo(
+    () =>
+      isStudioArtifactSingleFlightInFlight({
+        baselineId: effectiveBaselineId ?? null,
+        jobId: effectiveJobId ?? null,
+        analysisId: requestedAnalysisId ?? null,
+        artifactType: "resume",
+      }),
+    [effectiveBaselineId, effectiveJobId, requestedAnalysisId],
+  );
+  const coverSingleFlightInFlight = useMemo(
+    () =>
+      isStudioArtifactSingleFlightInFlight({
+        baselineId: effectiveBaselineId ?? null,
+        jobId: effectiveJobId ?? null,
+        analysisId: requestedAnalysisId ?? null,
+        artifactType: "cover_letter",
+      }),
+    [effectiveBaselineId, effectiveJobId, requestedAnalysisId],
+  );
   const needsAutoGeneration =
     generateNowEligible &&
     isInstantDraftExperience &&
@@ -3094,7 +3218,9 @@ export default function StudioPage() {
     !resumeState.response &&
     !coverState.response &&
     !resumeState.artifactFailure &&
-    !coverState.artifactFailure;
+    !coverState.artifactFailure &&
+    !resumeSingleFlightInFlight &&
+    !coverSingleFlightInFlight;
   const autoGenerationSignature = useMemo(() => {
     if (!needsAutoGeneration) return null;
     return buildWorkflowRequestKey("auto_generation", generationWorkflowScope);
@@ -3104,6 +3230,7 @@ export default function StudioPage() {
     !hasResumeArtifact &&
     !resumeState.artifactFailure &&
     (resumeGenerating ||
+      resumeSingleFlightInFlight ||
       autoGenerationInFlight ||
       studioArtifactPairStatus === "in_progress" ||
       needsAutoGeneration);
@@ -3112,6 +3239,7 @@ export default function StudioPage() {
     !hasCoverLetterArtifact &&
     !coverState.artifactFailure &&
     (coverGenerating ||
+      coverSingleFlightInFlight ||
       autoGenerationInFlight ||
       studioArtifactPairStatus === "in_progress" ||
       needsAutoGeneration);
@@ -4356,20 +4484,66 @@ export default function StudioPage() {
     }
     if (generationLifecycle.phase === "generated" && hasResumeArtifact) return false;
     if (!generationLifecycle.canStartGeneration) return false;
-    const latchAcquired = tryAcquirePairGenerationLatch({
-      pairKey: effectiveBaselineId && effectiveJobId ? `${effectiveBaselineId}:${effectiveJobId}` : null,
-      sessionKey: opts?.sessionKey ?? `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:resume:${Date.now()}`,
+
+    const artifactType: StudioArtifactType = "resume";
+    const flightRequestId = createRequestId();
+    const flight = acquireStudioArtifactSingleFlight({
+      baselineId: effectiveBaselineId ?? null,
+      jobId: effectiveJobId ?? null,
+      analysisId: requestedAnalysisId ?? null,
+      artifactType,
+      requestId: flightRequestId,
     });
-    if (!latchAcquired) return false;
+    if (!flight.acquired) {
+      if (process.env.NODE_ENV === "development") {
+        console.debug("[studioSingleFlight]", {
+          artifactType,
+          baselineId: effectiveBaselineId ?? null,
+          jobId: effectiveJobId ?? null,
+          analysisId: requestedAnalysisId ?? null,
+          allowed: false,
+          reason: flight.reason,
+        });
+      }
+      return false;
+    }
+
+    if (process.env.NODE_ENV === "development") {
+      console.debug("[studioSingleFlight]", {
+        artifactType,
+        baselineId: effectiveBaselineId ?? null,
+        jobId: effectiveJobId ?? null,
+        analysisId: requestedAnalysisId ?? null,
+        allowed: true,
+        reason: flight.reason,
+        requestId: flightRequestId,
+      });
+    }
+
     if (
       !guardGenerationAction("resume", {
         allowVerifiedOnlyFallback: Boolean(opts?.verifiedOnly) || generateNowEligible,
       })
-    )
+    ) {
+      releaseStudioArtifactSingleFlight({
+        baselineId: effectiveBaselineId ?? null,
+        jobId: effectiveJobId ?? null,
+        analysisId: requestedAnalysisId ?? null,
+        artifactType,
+      });
       return false;
+    }
     const requestScope = generationWorkflowScope;
     const request = beginStudioGenerationRequest("resume", requestScope);
-    if (!request) return false;
+    if (!request) {
+      releaseStudioArtifactSingleFlight({
+        baselineId: effectiveBaselineId ?? null,
+        jobId: effectiveJobId ?? null,
+        analysisId: requestedAnalysisId ?? null,
+        artifactType,
+      });
+      return false;
+    }
     setUnlockGenerationConfirmation(null);
     if ((hasSavedResumeEdits || hasUnsavedResumeEdits) && resumeState.response) {
       const proceed =
@@ -4378,6 +4552,12 @@ export default function StudioPage() {
           : true;
       if (!proceed) {
         finishStudioGenerationRequest("resume", request, "blocked", requestScope);
+        releaseStudioArtifactSingleFlight({
+          baselineId: effectiveBaselineId ?? null,
+          jobId: effectiveJobId ?? null,
+          analysisId: requestedAnalysisId ?? null,
+          artifactType,
+        });
         return false;
       }
       setSavedEditedResumeModel(null);
@@ -4391,6 +4571,12 @@ export default function StudioPage() {
         ...current,
         error: generationMessage ?? "Review prerequisites before generating a resume.",
       }));
+      releaseStudioArtifactSingleFlight({
+        baselineId: effectiveBaselineId ?? null,
+        jobId: effectiveJobId ?? null,
+        analysisId: requestedAnalysisId ?? null,
+        artifactType,
+      });
       return false;
     }
     setResumeGenerating(true);
@@ -4432,6 +4618,14 @@ export default function StudioPage() {
         isWorkflowRequestStale(requestScope, currentWorkflowScopeRef.current) ||
         activeResumeGenerationRef.current?.requestId !== request.requestId
       ) {
+        // Request finished, but Studio moved to a different workflow scope. Release so we don't deadlock
+        // if the user returns to this same pair.
+        releaseStudioArtifactSingleFlight({
+          baselineId: effectiveBaselineId ?? null,
+          jobId: effectiveJobId ?? null,
+          analysisId: requestedAnalysisId ?? null,
+          artifactType,
+        });
         finishStudioGenerationRequest("resume", request, "blocked", requestScope);
         return false;
       }
@@ -4560,6 +4754,12 @@ export default function StudioPage() {
         isWorkflowRequestStale(requestScope, currentWorkflowScopeRef.current) ||
         activeResumeGenerationRef.current?.requestId !== request.requestId
       ) {
+        releaseStudioArtifactSingleFlight({
+          baselineId: effectiveBaselineId ?? null,
+          jobId: effectiveJobId ?? null,
+          analysisId: requestedAnalysisId ?? null,
+          artifactType,
+        });
         finishStudioGenerationRequest("resume", request, "blocked", requestScope);
         return false;
       }
@@ -4879,20 +5079,66 @@ export default function StudioPage() {
     }
     if (generationLifecycle.phase === "generated" && hasCoverLetterArtifact) return false;
     if (!generationLifecycle.canStartGeneration) return false;
-    const latchAcquired = tryAcquirePairGenerationLatch({
-      pairKey: effectiveBaselineId && effectiveJobId ? `${effectiveBaselineId}:${effectiveJobId}` : null,
-      sessionKey: opts?.sessionKey ?? `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:cover:${Date.now()}`,
+
+    const artifactType: StudioArtifactType = "cover_letter";
+    const flightRequestId = createRequestId();
+    const flight = acquireStudioArtifactSingleFlight({
+      baselineId: effectiveBaselineId ?? null,
+      jobId: effectiveJobId ?? null,
+      analysisId: requestedAnalysisId ?? null,
+      artifactType,
+      requestId: flightRequestId,
     });
-    if (!latchAcquired) return false;
+    if (!flight.acquired) {
+      if (process.env.NODE_ENV === "development") {
+        console.debug("[studioSingleFlight]", {
+          artifactType,
+          baselineId: effectiveBaselineId ?? null,
+          jobId: effectiveJobId ?? null,
+          analysisId: requestedAnalysisId ?? null,
+          allowed: false,
+          reason: flight.reason,
+        });
+      }
+      return false;
+    }
+
+    if (process.env.NODE_ENV === "development") {
+      console.debug("[studioSingleFlight]", {
+        artifactType,
+        baselineId: effectiveBaselineId ?? null,
+        jobId: effectiveJobId ?? null,
+        analysisId: requestedAnalysisId ?? null,
+        allowed: true,
+        reason: flight.reason,
+        requestId: flightRequestId,
+      });
+    }
+
     if (
       !guardGenerationAction("cover_letter", {
         allowVerifiedOnlyFallback: Boolean(opts?.verifiedOnly) || generateNowEligible,
       })
-    )
+    ) {
+      releaseStudioArtifactSingleFlight({
+        baselineId: effectiveBaselineId ?? null,
+        jobId: effectiveJobId ?? null,
+        analysisId: requestedAnalysisId ?? null,
+        artifactType,
+      });
       return false;
+    }
     const requestScope = generationWorkflowScope;
     const request = beginStudioGenerationRequest("cover_letter", requestScope);
-    if (!request) return false;
+    if (!request) {
+      releaseStudioArtifactSingleFlight({
+        baselineId: effectiveBaselineId ?? null,
+        jobId: effectiveJobId ?? null,
+        analysisId: requestedAnalysisId ?? null,
+        artifactType,
+      });
+      return false;
+    }
     setUnlockGenerationConfirmation(null);
     if (!opts?.bypassReadinessGate && !canProceedWithStudioDrafts) {
       finishStudioGenerationRequest("cover_letter", request, "blocked", requestScope);
@@ -4900,6 +5146,12 @@ export default function StudioPage() {
         ...current,
         error: generationMessage ?? "Review prerequisites before generating a cover letter.",
       }));
+      releaseStudioArtifactSingleFlight({
+        baselineId: effectiveBaselineId ?? null,
+        jobId: effectiveJobId ?? null,
+        analysisId: requestedAnalysisId ?? null,
+        artifactType,
+      });
       return false;
     }
     setCoverGenerating(true);
@@ -4942,6 +5194,14 @@ export default function StudioPage() {
         isWorkflowRequestStale(requestScope, currentWorkflowScopeRef.current) ||
         activeCoverGenerationRef.current?.requestId !== request.requestId
       ) {
+        // Request finished, but Studio moved to a different workflow scope. Release so we don't deadlock
+        // if the user returns to this same pair.
+        releaseStudioArtifactSingleFlight({
+          baselineId: effectiveBaselineId ?? null,
+          jobId: effectiveJobId ?? null,
+          analysisId: requestedAnalysisId ?? null,
+          artifactType,
+        });
         finishStudioGenerationRequest("cover_letter", request, "blocked", requestScope);
         return false;
       }
@@ -5063,6 +5323,12 @@ export default function StudioPage() {
         isWorkflowRequestStale(requestScope, currentWorkflowScopeRef.current) ||
         activeCoverGenerationRef.current?.requestId !== request.requestId
       ) {
+        releaseStudioArtifactSingleFlight({
+          baselineId: effectiveBaselineId ?? null,
+          jobId: effectiveJobId ?? null,
+          analysisId: requestedAnalysisId ?? null,
+          artifactType,
+        });
         finishStudioGenerationRequest("cover_letter", request, "blocked", requestScope);
         return false;
       }
@@ -5363,11 +5629,6 @@ export default function StudioPage() {
     if (!autoGenerationKey) return;
 
     if (!generationLifecycle.canStartGeneration) return;
-    const latchAcquired = tryAcquirePairGenerationLatch({
-      pairKey: effectiveBaselineId && effectiveJobId ? `${effectiveBaselineId}:${effectiveJobId}` : null,
-      sessionKey: autoGenerationSignature,
-    });
-    if (!latchAcquired) return;
 
     autoGenerationSignatureRef.current = autoGenerationSignature;
     activeAutoGenerationRef.current = {
@@ -5387,9 +5648,12 @@ export default function StudioPage() {
           generationTarget: "resume_and_cover_letter",
         });
         const sessionKey = autoGenerationSignature;
-        // Generation is guarded by a pair-level latch; run sequentially so both artifacts can be produced.
-        const resumeSucceeded = await handleResumeDraft({ sessionKey });
-        const coverSucceeded = await handleCoverDraft({ sessionKey });
+        // Start both requests immediately so a rerender/remount can't slip in-between and launch a duplicate
+        // cover-letter request after resume completes but before cover starts.
+        const [resumeSucceeded, coverSucceeded] = await Promise.all([
+          handleResumeDraft({ sessionKey }),
+          handleCoverDraft({ sessionKey }),
+        ]);
         const autoSucceeded = resumeSucceeded && coverSucceeded;
         if (autoSucceeded) {
           trackEvent("studio_auto_generation_succeeded", {
@@ -6999,13 +7263,6 @@ export default function StudioPage() {
             >
               Resolve blockers
             </Link>
-          ) : workflowAuthority.primaryAction === "REVIEW" ? (
-            <Link
-              href={fitReviewHref}
-              className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
-            >
-              Review fit gaps
-            </Link>
           ) : workflowAuthority.primaryAction === "RETRY" ? (
             <FormButton
               onClick={() => {
@@ -7025,9 +7282,24 @@ export default function StudioPage() {
               className="bg-indigo-600 text-white hover:bg-indigo-500"
             >
               Retry generation
-            </FormButton>
-          ) : generateNowEligible ? null : (
+              </FormButton>
+          ) : generateNowEligible ? null : !canGenerateDocuments ? (
+            <Link
+              href={fitReviewHref}
+              className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+            >
+              Review fit gaps
+            </Link>
+          ) : (
             <>
+              {workflowAuthority.primaryAction === "REVIEW" ? (
+                <Link
+                  href={fitReviewHref}
+                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-white/10"
+                >
+                  Review fit gaps
+                </Link>
+              ) : null}
               <FormButton
                 onClick={() => void handleResumeDraft()}
                 disabled={resumeGenerating}
