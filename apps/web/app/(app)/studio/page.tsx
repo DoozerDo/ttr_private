@@ -40,6 +40,7 @@ import {
 import { normalizeClaimVerifications } from "@/lib/claimVerification";
 import { parseTierGateError, SubscriptionTier, type TierGateError } from "@/lib/tiers";
 import { isDraftAnywayEligible, resolveStudioArtifactGating } from "@/lib/studioArtifactGating";
+import { resolveWorkflowAuthority } from "@/lib/resolveWorkflowAuthority";
 import { resolvePairWorkflowState, type PairWorkflowArtifactStatus } from "@/lib/pairWorkflowState";
 import { resolvePairGenerationLifecycle } from "@/lib/pairGenerationLifecycle";
 import { tryAcquirePairGenerationLatch, releasePairGenerationLatch } from "@/lib/pairGenerationLatch";
@@ -1999,6 +2000,40 @@ export default function StudioPage() {
   );
   const hasCoverLetterDraft = coverPresenter.status === "success" && Boolean(coverState.response);
 
+  // Canonical workflow authority (additive layer): owns top-level readiness/failure messaging decisions.
+  const resolvedScoreForContract = analysisScore;
+  const workflowAuthority = useMemo(
+    () =>
+      resolveWorkflowAuthority({
+        score: resolvedScoreForContract,
+        generationReadiness: activeGenerationReadiness,
+        resumeState: {
+          hasOutput: hasResumeDraft,
+          failed: Boolean(resumeState.error || resumeState.artifactFailure),
+        },
+        coverState: {
+          hasOutput: hasCoverLetterDraft,
+          failed: Boolean(coverState.error || coverState.artifactFailure),
+        },
+        isPro,
+        hasGeneratedOnce,
+        isHydrating: analysisLoading,
+      }),
+    [
+      activeGenerationReadiness,
+      analysisLoading,
+      coverState.artifactFailure,
+      coverState.error,
+      hasCoverLetterDraft,
+      hasGeneratedOnce,
+      hasResumeDraft,
+      isPro,
+      resumeState.artifactFailure,
+      resumeState.error,
+      resolvedScoreForContract,
+    ],
+  );
+
   const pairWorkflowState = useMemo(() => {
     const resumeStatus: PairWorkflowArtifactStatus = resumeGenerating || autoGenerationInFlight
       ? "generating"
@@ -2937,7 +2972,6 @@ export default function StudioPage() {
     studioCanonicalDecision.workflowState,
   ]);
   const studioBlockedByNextAction = primaryNextAction.type === "start_fit_review";
-  const studioUiState = studioCanonicalDecision.workflowState;
   useEffect(() => {
     if (studioBlockedByNextAction && requestedAnalysisId) {
       void router.replace(remediationHref);
@@ -3012,15 +3046,6 @@ export default function StudioPage() {
   useEffect(() => { 
     setRecentIntent(readRecentIntentState()); 
   }, [requestedAnalysisId, effectiveJobId, effectiveBaselineId]); 
-  const generationSupportState = useMemo(() => { 
-    if (!qualifiedForGeneration) return "blocked"; 
-    // Product contract: score >= 80 is a "generate now" lane. Do not block Studio on evidence gaps.
-    if (activeGenerationReadiness.blocked && !generateNowEligible) return "blocked"; 
-    if (studioCanonicalDecision.readinessState === "LIMITED" || studioCanonicalDecision.readinessState === "DRAFT") { 
-      return "partial"; 
-    } 
-    return "strong"; 
-  }, [activeGenerationReadiness.blocked, generateNowEligible, qualifiedForGeneration, studioCanonicalDecision.readinessState]); 
   const canProceedWithStudioDrafts =
     qualifiedForGeneration && (!activeGenerationReadiness.blocked || generateNowEligible); 
   const isInstantDraftExperience = canProceedWithStudioDrafts; 
@@ -3142,46 +3167,8 @@ export default function StudioPage() {
     isInstantDraftExperience,
     requestedAnalysisId,
   ]);
-  const authorityStateTitle = 
-    generationSupportState === "blocked" 
-      ? "Generation blocked" 
-      : hasCompletedGeneration 
-        ? applicationContext?.status?.toLowerCase() === "applied" 
-          ? "Your application is tracked" 
-          : "Your application is ready" 
-        : autoGenerationInFlight || studioArtifactPairStatus === "in_progress" 
-          ? "We are generating your application draft now" 
-          : studioArtifactPairStatus === "failed" && !generateNowEligible
-            ? "Your draft needs another pass" 
-        : "You are a strong match. We are building your application draft"; 
-  const authorityStateExplanation = 
-    generationSupportState === "blocked" 
-      ? "This role is not ready for clean Studio output yet. Return to Fit Review to strengthen verified evidence." 
-      : hasCompletedGeneration 
-        ? applicationContext?.status?.toLowerCase() === "applied" 
-          ? "Your application is marked applied and your materials are ready whenever you need them." 
-          : "Download your resume and cover letter, then apply to this role." 
-        : autoGenerationInFlight || studioArtifactPairStatus === "in_progress" 
-          ? "We are generating both drafts from your baseline evidence now." 
-          : studioArtifactPairStatus === "failed" && !generateNowEligible
-            ? "The previous attempt could not be completed. Retry to generate a fresh draft from the current inputs." 
-        : "We can start immediately from your baseline evidence and role analysis."; 
-  const authorityReasons = useMemo(() => {
-    const reasons: string[] = [];
-    activeGenerationReadiness.verificationIssues.forEach((issue) => {
-      if (issue.explanation && !reasons.includes(issue.explanation)) {
-        reasons.push(issue.explanation);
-      }
-    });
-    activeGenerationReadiness.reasons.forEach((reason) => {
-      if (reason.message && !reasons.includes(reason.message)) {
-        reasons.push(reason.message);
-      }
-    });
-    return reasons.slice(0, 3);
-  }, [activeGenerationReadiness.reasons, activeGenerationReadiness.verificationIssues]);
   const completionCopy = useMemo(() => {
-    if (generationSupportState === "partial") {
+    if (workflowAuthority.workflowState === "REVIEW_REQUIRED") {
       if (recentIntent === "used_and_committed") {
         return {
           title: "Draft used and tracked",
@@ -3202,7 +3189,7 @@ export default function StudioPage() {
         nextStep: "Use it now or sharpen it later",
       };
     }
-    if (generationSupportState === "blocked") {
+    if (workflowAuthority.workflowState === "BLOCKED") {
       return {
         title: "Generation blocked",
         body: "Return to Fit Review to strengthen verified evidence before trying again.",
@@ -3235,9 +3222,13 @@ export default function StudioPage() {
       body: "Built from verified baseline evidence and aligned to the role as currently supported.",
       nextStep: "Use this for your next application",
     };
-  }, [generationSupportState]);
+  }, [recentIntent, workflowAuthority.workflowState]);
   const prioritizedStrengtheningSuggestions = useMemo(() => {
-    if (generationSupportState === "strong" && recentIntent !== "refine_intent" && recentIntent !== "used_not_committed") {
+    if (
+      workflowAuthority.workflowState === "READY" &&
+      recentIntent !== "refine_intent" &&
+      recentIntent !== "used_not_committed"
+    ) {
       return [];
     }
     const tips = [
@@ -3271,7 +3262,7 @@ export default function StudioPage() {
       },
     ];
     return tips.slice(0, recentIntent === "used_not_committed" ? 2 : 4);
-  }, [generationSupportState, recentIntent]);
+  }, [recentIntent, workflowAuthority.workflowState]);
 
   const generationInputSignature = useMemo(() => {
     return JSON.stringify({
@@ -6054,9 +6045,9 @@ export default function StudioPage() {
                 : "Instant draft"}
         </p>
         <h1 className="text-3xl font-semibold tracking-tight text-slate-50 md:text-[36px]">
-          {authorityStateTitle}
+          {workflowAuthority.headline}
         </h1>
-        <p className="max-w-3xl text-base leading-7 text-slate-200">{authorityStateExplanation}</p>
+        <p className="max-w-3xl text-base leading-7 text-slate-200">{workflowAuthority.body}</p>
       </div>
       <div className="flex flex-wrap gap-3">
         <FormButton
@@ -6448,7 +6439,7 @@ export default function StudioPage() {
   ) : null;
 
   const pageTruth = buildStudioPageTruth({
-    generationSupportState,
+    workflowState: workflowAuthority.workflowState,
     readiness: productReadiness ?? null,
     trustGate: trustGateDecision ?? null,
     hasCompletedGeneration,
@@ -6462,6 +6453,19 @@ export default function StudioPage() {
     resumeState,
     coverState,
   });
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    console.debug("[studioAuthority]", {
+      workflowState: workflowAuthority.workflowState,
+      pageTruth: pageTruth.state,
+      suppressFailureMessaging: workflowAuthority.suppressFailureMessaging,
+    });
+  }, [
+    pageTruth.state,
+    workflowAuthority.suppressFailureMessaging,
+    workflowAuthority.workflowState,
+  ]);
 
   const showReadinessRecoveryExperience =
     !generateNowEligible &&
@@ -6540,7 +6544,7 @@ export default function StudioPage() {
           {autoGenerationLoadingMessage}
         </Alert>
       ) : null}
-      {pageTruth.state === "failed" ? (
+      {pageTruth.state === "failed" && !workflowAuthority.suppressFailureMessaging ? (
         <Alert intent="warning" title="Document generation needs attention">
           {toConstraintMessage(
             resumeState.error ??
@@ -6589,9 +6593,9 @@ export default function StudioPage() {
           >
             {draftAnywayRequested
               ? "This draft is based only on your current verified experience. It may need stronger evidence before it is competitive."
-              : generationSupportState === "partial"
-                ? "Generated from partially verified evidence. Add verified examples to strengthen it."
-                : "Generated from verified evidence."}
+              : workflowAuthority.workflowState === "READY"
+                ? "Generated from verified evidence."
+                : "Generated from partially verified evidence. Add verified examples to strengthen it."}
           </div>
         ) : null}
         {showReadinessRecoveryExperience && !studioDraftMode ? (
@@ -6682,11 +6686,11 @@ export default function StudioPage() {
 
               <div className="space-y-2" data-testid="studio-ready-secondary-summary">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                {generationSupportState === "strong"
-                  ? "Ready"
-                  : generationSupportState === "partial"
+                {workflowAuthority.workflowState === "BLOCKED"
+                  ? "Blocked"
+                  : workflowAuthority.workflowState === "REVIEW_REQUIRED"
                     ? "Draft"
-                    : "Blocked"}
+                    : "Ready"}
               </p>
               <p className="text-sm text-slate-300">
                 {typeof analysisScore === "number" ? `Fit score ${Math.round(analysisScore)} · ` : "Fit score unavailable · "}
@@ -6694,19 +6698,27 @@ export default function StudioPage() {
                 {(selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Unknown role")}
               </p>
               <h1 className="text-3xl font-semibold tracking-tight text-slate-50 md:text-[34px]">
-                {authorityStateTitle}
+                {workflowAuthority.headline}
               </h1>
-              <p className="text-base leading-7 text-slate-200">{authorityStateExplanation}</p>
-              <p className="text-sm font-medium text-slate-200">{primaryNextAction.label}</p>
-              <p className="text-sm text-slate-400"> 
-                {generationSupportState === "strong" 
-                  ? "Generated from verified evidence." 
-                  : generationSupportState === "partial" 
-                    ? generateNowEligible
-                      ? "Generated with conservative truth bounds from your baseline evidence."
-                      : "Generated from partially verified evidence. Verify key claims to strengthen it." 
-                    : "Based on your analyzed role context and verified baseline evidence."} 
-              </p> 
+              <p className="text-base leading-7 text-slate-200">{workflowAuthority.body}</p>
+              <p className="text-sm font-medium text-slate-200">
+                {workflowAuthority.primaryAction === "GENERATE"
+                  ? generateNowEligible
+                    ? "Generating documents..."
+                    : "Generate documents"
+                  : workflowAuthority.primaryAction === "RETRY"
+                    ? "Retry generation"
+                  : workflowAuthority.primaryAction === "REVIEW"
+                      ? "Review fit gaps"
+                      : "Resolve blockers"}
+              </p>
+              <p className="text-sm text-slate-400">
+                {workflowAuthority.workflowState === "READY"
+                  ? "Generated from verified evidence."
+                  : workflowAuthority.workflowState === "REVIEW_REQUIRED"
+                    ? "Generated from partially verified evidence. Verify key claims to strengthen it."
+                    : "Based on your analyzed role context and verified baseline evidence."}
+              </p>
 
               </div>
 
@@ -6724,14 +6736,12 @@ export default function StudioPage() {
                     ? "This draft needs another pass."  
                     : generateNowEligible && isLowQualityDraft
                       ? "Draft output: ready to refine in Studio."
-                    : isMediumQualityDraft  
+                  : isMediumQualityDraft  
                       ? "Draft output: usable now, stronger with refinement."  
                       : "Strong output: ready to refine in Studio."  
-                  : generationSupportState === "strong"  
-                    ? "Draft output: ready to refine in Studio." 
-                    : generationSupportState === "partial"
-                      ? "Draft output: usable now, stronger with refinement."
-                      : "Limited output: not ready yet."}
+                  : workflowAuthority.workflowState === "READY"
+                    ? "Draft output: ready to refine in Studio."
+                    : "Limited output: not ready yet."}
               </h2>
               <p className="mt-2 text-sm text-slate-200">  
                 {hasCompletedGeneration  
@@ -6742,11 +6752,9 @@ export default function StudioPage() {
                     : isMediumQualityDraft  
                       ? "Usable now, but tightening evidence and refinement will materially improve the result."  
                       : "Built from your verified experience and aligned to the role. Review and refine as needed before applying." 
-                  : generationSupportState === "strong"  
-                    ? "Built directly from verified evidence and aligned to the role." 
-                    : generationSupportState === "partial"
-                      ? "Built from partially verified evidence and aligned to key role requirements."
-                      : "Built from your verified experience, but a few signals still need strengthening."}
+                  : workflowAuthority.workflowState === "READY"
+                    ? "Built from your baseline evidence and aligned to the role."
+                    : "Built from your baseline evidence, but a few signals still need strengthening."}
               </p>
               {hasCompletedGeneration && (showLowQualityRecoveryLane || isMediumQualityDraft) ? ( 
                 <div className="mt-4 space-y-2"> 
@@ -6838,102 +6846,79 @@ export default function StudioPage() {
           </>
         ) : null}
         <div className="flex flex-wrap items-center gap-3">
-          {generationSupportState === "partial" ? (
-            generateNowEligible ? (
-              <p className="text-sm font-medium text-slate-200" data-testid="studio-auto-generation-status">
-                {lifecycleArtifactFailure && !hasCompletedGeneration
-                  ? "Generation needs a retry."
-                  : autoGenerationInFlight || resumeGenerating || coverGenerating || studioArtifactPairStatus === "in_progress" || needsAutoGeneration
-                    ? "Generating your resume and cover letter…"
-                    : "Preparing your documents…"}
-              </p>
-            ) : (
-              <>
-                <FormButton
-                  onClick={() => void handleResumeDraft()}
-                  disabled={resumeGenerating}
-                  className="bg-indigo-600 text-white hover:bg-indigo-500"
-                >
-                  {resumeGenerating ? "Generating..." : "Generate Resume Draft"}
-                </FormButton>
-                <FormButton
-                  variant="secondary"
-                  onClick={() => void handleCoverDraft()}
-                  disabled={coverGenerating}
-                >
-                  {coverGenerating ? "Generating..." : "Generate Cover Letter Draft"}
-                </FormButton>
-                <Link
-                  href={fitReviewHref}
-                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
-                >
-                  Improve baseline
-                </Link>
-              </>
-            )
-          ) : primaryNextAction.type === "start_fit_review" ? (
-            <Link
-              href={fitReviewHref}
-              className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
-            >
-              Start Fit Review
-            </Link>
-          ) : primaryNextAction.type === "view_results" ? (
-            <Link
-              href={resultsHref}
-              className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
-            >
-              Review Results
-            </Link>
-          ) : primaryNextAction.type === "generate_documents" ? (
-            <Link
-              href="/job-tracker"
-              className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
-            >
-              Add to Opportunities
-            </Link>
-          ) : generationSupportState === "blocked" ? (
+          {generateNowEligible && workflowAuthority.primaryAction === "GENERATE" ? (
+            <p className="text-sm font-medium text-slate-200" data-testid="studio-auto-generation-status">
+              {lifecycleArtifactFailure && !hasCompletedGeneration
+                ? "Generation needs a retry."
+                : autoGenerationInFlight ||
+                    resumeGenerating ||
+                    coverGenerating ||
+                    studioArtifactPairStatus === "in_progress" ||
+                    needsAutoGeneration
+                  ? "Generating your resume and cover letter..."
+                  : "Preparing your documents..."}
+            </p>
+          ) : workflowAuthority.primaryAction === "BLOCKED" ? (
             <Link
               href={remediationHref}
               className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
             >
-              Resolve gaps before generating
+              Resolve blockers
             </Link>
-          ) : (
-            generateNowEligible ? null : (
-              <>
-                <FormButton
-                  onClick={() => void handleResumeDraft()}
-                  disabled={resumeGenerating}
-                  className="bg-indigo-600 text-white hover:bg-indigo-500"
-                >
-                  {resumeGenerating
-                    ? "Generating..."
-                    : "Generate Resume Draft"}
-                </FormButton>
-                <FormButton
-                  variant="secondary"
-                  onClick={() => void handleCoverDraft()}
-                  disabled={coverGenerating}
-                >
-                  {coverGenerating
-                    ? "Generating..."
-                    : "Generate Cover Letter Draft"}
-                </FormButton>
-              </>
-            )
+          ) : workflowAuthority.primaryAction === "REVIEW" ? (
+            <Link
+              href={fitReviewHref}
+              className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+            >
+              Review fit gaps
+            </Link>
+          ) : workflowAuthority.primaryAction === "RETRY" ? (
+            <FormButton
+              onClick={() => {
+                const resumeFailed = Boolean(resumeState.error || resumeState.artifactFailure);
+                const coverFailed = Boolean(coverState.error || coverState.artifactFailure);
+                if (resumeFailed) {
+                  void handleResumeDraft();
+                }
+                if (coverFailed) {
+                  void handleCoverDraft();
+                }
+                if (!resumeFailed && !coverFailed) {
+                  void handleResumeDraft();
+                }
+              }}
+              disabled={resumeGenerating || coverGenerating}
+              className="bg-indigo-600 text-white hover:bg-indigo-500"
+            >
+              Retry generation
+            </FormButton>
+          ) : generateNowEligible ? null : (
+            <>
+              <FormButton
+                onClick={() => void handleResumeDraft()}
+                disabled={resumeGenerating}
+                className="bg-indigo-600 text-white hover:bg-indigo-500"
+              >
+                {resumeGenerating ? "Generating..." : "Generate Resume Draft"}
+              </FormButton>
+              <FormButton
+                variant="secondary"
+                onClick={() => void handleCoverDraft()}
+                disabled={coverGenerating}
+              >
+                {coverGenerating ? "Generating..." : "Generate Cover Letter Draft"}
+              </FormButton>
+            </>
           )}
         </div>
       </section>
-      {generationSupportState === "partial" || canGenerateDocuments ? (
+      {workflowAuthority.workflowState === "READY" || canGenerateDocuments ? (
         <section className="rounded-2xl border border-white/10 bg-white/5 p-4" data-testid="studio-evidence-allowed-panel">
           <h2 className="text-base font-semibold text-slate-100">
-            {generationSupportState === "strong"
-              ? "Why this output is grounded"
-              : "Why this output is limited"}
+            {workflowAuthority.workflowState === "READY" ? "Why this output is grounded" : "Why this output is limited"}
           </h2>
           <p className="mt-1 text-sm text-slate-200">
-            {generationSupportState === "strong"
+            {workflowAuthority.workflowState === "READY"
               ? "This output is grounded in your verified experience."
               : "This output is grounded in verified experience, but some areas still need stronger support."}
           </p>
@@ -6963,7 +6948,7 @@ export default function StudioPage() {
             </p>
           ) : null}
         </section>
-      ) : !showReadinessRecoveryExperience && generationSupportState === "blocked" && !studioDraftMode ? (
+      ) : !showReadinessRecoveryExperience && workflowAuthority.workflowState === "BLOCKED" && !studioDraftMode ? (
         <RouteStateShell
           testId="studio-evidence-blocked-panel"
           tone="warning"
@@ -6979,7 +6964,7 @@ export default function StudioPage() {
       {!showReadinessRecoveryExperience && 
       prioritizedStrengtheningSuggestions.length > 0 && 
       !generateNowEligible &&
-      (generationSupportState !== "strong" || 
+      (workflowAuthority.workflowState !== "READY" || 
         recentIntent === "refine_intent" || 
         recentIntent === "used_not_committed") ? ( 
         <section 
@@ -7408,7 +7393,7 @@ export default function StudioPage() {
                   trackEvent("artifact_refine_intent", {
                     source: "studio",
                     analysisId: requestedAnalysisId || undefined,
-                    reason: generationSupportState,
+                    reason: workflowAuthority.workflowState,
                   });
                 }}
                 className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
@@ -7451,9 +7436,7 @@ export default function StudioPage() {
             <p className="text-sm font-semibold text-slate-100">{resumePresenter.display.title}</p>
             <p className="text-sm text-slate-300">{resumePresenter.display.description}</p>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Next step</p>
-            <p className="text-sm text-slate-200">
-              {resumePresenter.display.reasons[0] ?? "Review flagged items in Results and adjust baseline evidence."}
-            </p>
+            <p className="text-sm text-slate-200">{workflowAuthority.nextStepHint}</p>
           </div>
         ) : null}
 
@@ -7780,7 +7763,7 @@ export default function StudioPage() {
                   trackEvent("artifact_refine_intent", {
                     source: "studio",
                     analysisId: requestedAnalysisId || undefined,
-                    reason: generationSupportState,
+                    reason: workflowAuthority.workflowState,
                   });
                 }}
                 className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
@@ -7823,9 +7806,7 @@ export default function StudioPage() {
             <p className="text-sm font-semibold text-slate-100">{coverPresenter.display.title}</p>
             <p className="text-sm text-slate-300">{coverPresenter.display.description}</p>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Next step</p>
-            <p className="text-sm text-slate-200">
-              {coverPresenter.display.reasons[0] ?? "Review the generated draft and download DOCX or PDF."}
-            </p>
+            <p className="text-sm text-slate-200">{workflowAuthority.nextStepHint}</p>
           </div>
         ) : null}
 
@@ -7839,10 +7820,7 @@ export default function StudioPage() {
                 "Some generated statements could not be verified against your baseline."}
             </p>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-300">Next step</p>
-            <p className="text-sm text-slate-200">
-              {coverPresenter.display?.reasons?.[0] ??
-                "Review flagged items in Results and adjust baseline evidence."}
-            </p>
+            <p className="text-sm text-slate-200">{workflowAuthority.nextStepHint}</p>
           </div>
         ) : null}
 

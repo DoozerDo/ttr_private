@@ -20,7 +20,10 @@ export type StudioPageTruth = {
 };
 
 type BuildStudioPageTruthInput = {
-  generationSupportState: "strong" | "partial" | "blocked";
+  // Legacy support bucketing is still accepted for callers outside Studio.
+  generationSupportState?: "strong" | "partial" | "blocked";
+  // Studio should prefer workflow authority as the canonical UI truth input.
+  workflowState?: "READY" | "REVIEW_REQUIRED" | "BLOCKED" | "PARTIAL";
   readiness?: GenerationProductReadiness | null;
   trustGate?: TrustGateDecision | null;
   hasCompletedGeneration: boolean;
@@ -31,9 +34,17 @@ type BuildStudioPageTruthInput = {
 };
 
 export function buildStudioPageTruth(input: BuildStudioPageTruthInput): StudioPageTruth {
+  const generationSupportState: "strong" | "partial" | "blocked" =
+    input.generationSupportState ??
+    (input.workflowState === "BLOCKED"
+      ? "blocked"
+      : input.workflowState === "REVIEW_REQUIRED"
+        ? "partial"
+        : "strong");
+
   if (input.hasAnyArtifacts) {
     if (input.isGenerating) {
-      if (input.generationSupportState === "partial") {
+      if (generationSupportState === "partial") {
         return { state: "draftable_limited", isGenerating: true };
       }
       return { state: "ready", isGenerating: true };
@@ -59,11 +70,11 @@ export function buildStudioPageTruth(input: BuildStudioPageTruthInput): StudioPa
   const blockedByTrust = input.trustGate ? !input.trustGate.allowed : false;
   const blockedByReadiness = input.readiness ? input.readiness.state === "BLOCKED" : false;
 
-  if (input.generationSupportState === "blocked" || blockedByTrust || blockedByReadiness) {
+  if (generationSupportState === "blocked" || blockedByTrust || blockedByReadiness) {
     return { state: "blocked_evidence", isGenerating: false };
   }
 
-  if (input.generationSupportState === "partial") {
+  if (generationSupportState === "partial") {
     return { state: "draftable_limited", isGenerating: input.isGenerating };
   }
 
