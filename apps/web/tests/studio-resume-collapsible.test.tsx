@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { ResumePreview } from "@/app/(app)/studio/ResumePreview";
 
 describe("Studio resume experience accordion", () => {
@@ -34,7 +34,14 @@ describe("Studio resume experience accordion", () => {
 
     expect(screen.getByTestId("studio-resume-workspace-root")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit Resume" })).toBeInTheDocument();
-    expect(screen.getByTestId("studio-resume-experience-accordion")).toBeInTheDocument();
+    const accordion = screen.getByTestId("studio-resume-experience-accordion");
+    expect(accordion).toBeInTheDocument();
+    expect(accordion.className).toContain("space-y-6");
+
+    const roleBlocks = screen.getAllByTestId("experience-entry-block");
+    expect(roleBlocks).toHaveLength(2);
+    expect(roleBlocks[0]?.className).toContain("rounded-2xl");
+    expect(roleBlocks[0]?.className).toContain("border");
 
     expect(screen.queryByText("Role1 Bullet 1")).toBeNull();
     expect(screen.queryByText("Role2 Bullet 1")).toBeNull();
@@ -44,7 +51,10 @@ describe("Studio resume experience accordion", () => {
     render(<ResumePreview payload={payload} />);
 
     fireEvent.click(screen.getByTestId("studio-resume-experience-role-header-0"));
-    expect(screen.getByTestId("studio-resume-experience-role-body-0")).toBeInTheDocument();
+    const role0Body = screen.getByTestId("studio-resume-experience-role-body-0");
+    expect(role0Body).toBeInTheDocument();
+    const bulletList = within(role0Body).getByRole("list");
+    expect(bulletList.className).toContain("space-y-2");
     expect(screen.getByText("Role1 Bullet 1")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("studio-resume-experience-role-header-1"));
@@ -56,4 +66,3 @@ describe("Studio resume experience accordion", () => {
     expect(screen.queryByTestId("studio-resume-experience-role-body-1")).toBeNull();
   });
 });
-

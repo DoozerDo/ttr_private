@@ -1,10 +1,95 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { ResumePreview } from "@/app/(app)/studio/ResumePreview";
+import { ResumePreview, readResumeModel } from "@/app/(app)/studio/ResumePreview";
+import { StudioFocusPanel, type FocusAction } from "@/app/(app)/studio/StudioFocusPanel";
+
+function StudioFocusHarness({ payload }: { payload: unknown }) {
+  const model = readResumeModel(payload);
+  const toText = (value: unknown) => (typeof value === "string" ? value.trim() : "");
+
+  const summary = toText(model?.summary);
+  const experiences = Array.isArray(model?.experience)
+    ? model!.experience
+        .map((entry) => {
+          const company = toText(entry.company);
+          const roleTitle = toText(entry.roleTitle);
+          const bullets = Array.isArray(entry.bullets)
+            ? entry.bullets.map((value) => toText(value)).filter(Boolean)
+            : [];
+          return { company, roleTitle, bullets };
+        })
+        .filter((entry) => entry.company && entry.roleTitle && entry.bullets.length > 0)
+    : [];
+
+  const focusResumeTarget = (target: { type: "summary" } | { type: "role"; index: number }) => {
+    const focusElement = (element: HTMLElement | null) => {
+      if (!element) return false;
+      element.focus?.();
+      return true;
+    };
+
+    if (target.type === "summary") {
+      const el = document.querySelector<HTMLElement>('[data-testid="studio-resume-summary-section"]');
+      focusElement(el);
+      return;
+    }
+
+    const header = document.querySelector<HTMLElement>(
+      `[data-testid="studio-resume-experience-role-header-${target.index}"]`,
+    );
+    if (!header) return;
+    const expanded = header.getAttribute("aria-expanded") === "true";
+    if (!expanded) header.click();
+    focusElement(header);
+  };
+
+  const focusRole0: FocusAction | null = experiences.length
+    ? {
+        testId: "studio-focus-action-role-0",
+        title: "Improve your most recent role",
+        description: "Recruiters usually scan your most recent experience first.",
+        onClick: () => focusResumeTarget({ type: "role", index: 0 }),
+      }
+    : null;
+
+  const focusSummary: FocusAction | null = summary
+    ? {
+        testId: "studio-focus-action-summary",
+        title: "Review your summary",
+        description: "Your summary shapes the first impression of your fit.",
+        onClick: () => focusResumeTarget({ type: "summary" }),
+      }
+    : null;
+
+  const focusRole1: FocusAction | null = experiences.length > 1
+    ? {
+        testId: "studio-focus-action-role-1",
+        title: "Strengthen another key role",
+        description: "A second strong role reinforces depth and consistency.",
+        onClick: () => focusResumeTarget({ type: "role", index: 1 }),
+      }
+    : null;
+
+  const primary: FocusAction | null = focusRole0 ?? focusSummary ?? null;
+  const secondary: FocusAction[] = [];
+  if (primary === focusRole0) {
+    if (focusSummary) secondary.push(focusSummary);
+    if (focusRole1) secondary.push(focusRole1);
+  } else if (primary === focusSummary) {
+    if (focusRole1) secondary.push(focusRole1);
+  }
+
+  return (
+    <div>
+      {primary ? <StudioFocusPanel primary={primary} secondary={secondary} /> : null}
+      <ResumePreview payload={payload} />
+    </div>
+  );
+}
 
 describe("Studio Focus Panel", () => {
   it("renders deterministic recommendations based on available resume content", () => {
     render(
-      <ResumePreview
+      <StudioFocusHarness
         payload={{
           preview: {
             resume: {
@@ -46,7 +131,7 @@ describe("Studio Focus Panel", () => {
 
   it("does not render actions when targets are missing", () => {
     render(
-      <ResumePreview
+      <StudioFocusHarness
         payload={{
           preview: {
             resume: {
@@ -74,7 +159,7 @@ describe("Studio Focus Panel", () => {
 
   it("promotes summary as primary when no experience exists", () => {
     render(
-      <ResumePreview
+      <StudioFocusHarness
         payload={{
           preview: {
             resume: {
@@ -97,7 +182,7 @@ describe("Studio Focus Panel", () => {
 
   it("summary action focuses the summary section when present", async () => {
     render(
-      <ResumePreview
+      <StudioFocusHarness
         payload={{
           preview: {
             resume: {
@@ -124,7 +209,7 @@ describe("Studio Focus Panel", () => {
 
   it("role actions expand the target role and keep the rest collapsed", async () => {
     render(
-      <ResumePreview
+      <StudioFocusHarness
         payload={{
           preview: {
             resume: {

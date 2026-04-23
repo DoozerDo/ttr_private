@@ -124,6 +124,7 @@ import {
 import { buildStudioPageTruth } from "@/lib/studioPageTruth";
 import { BaselineBlockPolicyPanel } from "./BaselineBlockPolicyPanel";
 import { estimateResumeModelBodyLength, readResumeModel, ResumePreview } from "./ResumePreview";
+import { StudioFocusPanel, type FocusAction } from "./StudioFocusPanel";
 import { devLogArtifactRendererSelection } from "@/lib/artifactRendererDebug";
 import { truncateForPreview } from "@/lib/previewTruncation";
 import type { ResumeModel } from "@/lib/resumeModel";
@@ -2674,14 +2675,6 @@ export default function StudioPage() {
     pairWorkflowState.pairStatus,
     pairWorkflowState.resumeStatus,
   ]);
-  const resumeTrustSummaryVisible =
-    studioGenerationRenderState.shouldShowTrustSummary &&
-    resumePresenter.status === "success" &&
-    Boolean(resumeState.response);
-  const coverTrustSummaryVisible =
-    studioGenerationRenderState.shouldShowTrustSummary &&
-    coverPresenter.status === "success" &&
-    Boolean(coverState.response);
   const unlockGenerationLoadingMessage = studioGenerationRenderState.shouldShowEnhancedLoadingCopy
     ? "Generating from your verified evidence..."
     : null;
@@ -3483,11 +3476,10 @@ export default function StudioPage() {
   const isHighQualityDraft = hasCompletedGeneration && artifactQuality.confidence === "HIGH"; 
   // Low-confidence is still a signal, but score >= 80 must not block or degrade access to usable artifacts.
   const showLowQualityRecoveryLane = isLowQualityDraft && !generateNowEligible;
-  const isReadySuccessState =
-    workflowAuthority.workflowState === "READY" &&
-    hasCompletedGeneration &&
-    // Low-quality recovery is intentionally a different lane.
-    !showLowQualityRecoveryLane;
+  const hasUsableResume = resumePresenter.status === "success" && Boolean(resumeState.response);
+  const hasUsableCoverLetter = coverPresenter.status === "success" && Boolean(coverState.response);
+  // Canonical READY truth: if we have any usable output, behave as READY. Confidence only modulates tone.
+  const isReadySuccessState = hasUsableResume || hasUsableCoverLetter;
   const [showFullLowQualityResume, setShowFullLowQualityResume] = useState(false); 
   const [showFullLowQualityCover, setShowFullLowQualityCover] = useState(false); 
   const [showOptionalEvidenceDetails, setShowOptionalEvidenceDetails] = useState(false);
@@ -6347,6 +6339,107 @@ export default function StudioPage() {
       </section>
     ) : null;
 
+  const focusResumeTarget = useCallback(
+    (target: { type: "summary" } | { type: "role"; index: number }) => {
+      if (showLowQualityRecoveryLane && !showFullLowQualityResume) {
+        setShowFullLowQualityResume(true);
+      }
+
+      const focusElement = (element: HTMLElement | null) => {
+        if (!element) return false;
+        element.scrollIntoView?.({ block: "start" });
+        element.focus?.({ preventScroll: true });
+        return true;
+      };
+
+      if (target.type === "summary") {
+        const el = document.querySelector<HTMLElement>('[data-testid="studio-resume-summary-section"]');
+        focusElement(el);
+        return;
+      }
+
+      const header = document.querySelector<HTMLElement>(
+        `[data-testid="studio-resume-experience-role-header-${target.index}"]`,
+      );
+      if (!header) return;
+
+      const expanded = header.getAttribute("aria-expanded") === "true";
+      if (!expanded) {
+        header.click();
+      }
+
+      // Defer focus until after the accordion updates.
+      window.setTimeout(() => {
+        const refreshed = document.querySelector<HTMLElement>(
+          `[data-testid="studio-resume-experience-role-header-${target.index}"]`,
+        );
+        focusElement(refreshed);
+      }, 0);
+    },
+    [showFullLowQualityResume, showLowQualityRecoveryLane],
+  );
+
+  const resumeModelForFocus = useMemo(
+    () => effectiveResumeModel ?? readResumeModel(resumeState.response),
+    [effectiveResumeModel, resumeState.response],
+  );
+
+  const studioFocusInputs = useMemo(() => {
+    const toText = (value: unknown) => (typeof value === "string" ? value.trim() : "");
+    const summary = toText(resumeModelForFocus?.summary);
+    const experiences = Array.isArray(resumeModelForFocus?.experience)
+      ? resumeModelForFocus!.experience
+          .map((entry) => {
+            const company = toText(entry.company);
+            const roleTitle = toText(entry.roleTitle);
+            const bullets = Array.isArray(entry.bullets)
+              ? entry.bullets.map((value) => toText(value)).filter(Boolean)
+              : [];
+            return { company, roleTitle, bullets };
+          })
+          .filter((entry) => entry.company && entry.roleTitle && entry.bullets.length > 0)
+      : [];
+
+    return { hasSummary: Boolean(summary), experienceCount: experiences.length };
+  }, [resumeModelForFocus]);
+
+  const studioFocusRole0: FocusAction | null =
+    isReadySuccessState && studioFocusInputs.experienceCount
+      ? {
+          testId: "studio-focus-action-role-0",
+          title: "Improve your most recent role",
+          description: "Recruiters usually scan your most recent experience first.",
+          onClick: () => focusResumeTarget({ type: "role", index: 0 }),
+        }
+      : null;
+  const studioFocusSummary: FocusAction | null =
+    isReadySuccessState && studioFocusInputs.hasSummary
+      ? {
+          testId: "studio-focus-action-summary",
+          title: "Review your summary",
+          description: "Your summary shapes the first impression of your fit.",
+          onClick: () => focusResumeTarget({ type: "summary" }),
+        }
+      : null;
+  const studioFocusRole1: FocusAction | null =
+    isReadySuccessState && studioFocusInputs.experienceCount > 1
+      ? {
+          testId: "studio-focus-action-role-1",
+          title: "Strengthen another key role",
+          description: "A second strong role reinforces depth and consistency.",
+          onClick: () => focusResumeTarget({ type: "role", index: 1 }),
+        }
+      : null;
+
+  const studioFocusPrimary: FocusAction | null = studioFocusRole0 ?? studioFocusSummary ?? null;
+  const studioFocusSecondary: FocusAction[] = [];
+  if (studioFocusPrimary === studioFocusRole0) {
+    if (studioFocusSummary) studioFocusSecondary.push(studioFocusSummary);
+    if (studioFocusRole1) studioFocusSecondary.push(studioFocusRole1);
+  } else if (studioFocusPrimary === studioFocusSummary) {
+    if (studioFocusRole1) studioFocusSecondary.push(studioFocusRole1);
+  }
+
   const instantDraftHero = appliedMomentumHero ?? (isInstantDraftExperience ? (
     <section
       className="space-y-5 rounded-[28px] border border-emerald-300/20 bg-[linear-gradient(180deg,rgba(16,185,129,0.16),rgba(15,23,42,0.82))] p-6 md:p-8 shadow-[0_24px_60px_rgba(15,23,42,0.35)]"
@@ -6354,8 +6447,10 @@ export default function StudioPage() {
     >
       <div className="space-y-3">
         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-200">
-          {hasCompletedGeneration
-            ? "Strong match"
+          {isReadySuccessState
+            ? isApplicationApplied
+              ? "Application complete"
+              : "Application ready"
             : autoGenerationInFlight || studioArtifactPairStatus === "in_progress"
               ? "Building your draft"
               : studioArtifactPairStatus === "failed"
@@ -6366,9 +6461,9 @@ export default function StudioPage() {
           {workflowAuthority.headline}
         </h1>
         <p className="max-w-3xl text-base leading-7 text-slate-200">{workflowAuthority.body}</p>
-        {generateNowEligible && isReadySuccessState ? (
+        {isReadySuccessState ? (
           <p className="text-xs font-medium text-slate-200" data-testid="studio-confidence-label">
-            Confidence: {artifactQuality.confidence === "HIGH" ? "high" : "medium"} (non-blocking)
+            Confidence: {artifactQuality.confidence.toLowerCase()} (non-blocking)
           </p>
         ) : null}
       </div>
@@ -6405,35 +6500,17 @@ export default function StudioPage() {
         </FormButton>
         <Link
           href={fitReviewHref}
-          className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
+          className="inline-flex items-center justify-center px-1 py-2 text-sm font-semibold text-slate-100 underline decoration-slate-400/70 underline-offset-4 transition hover:decoration-slate-200"
         >
           Refine
         </Link>
-        {topLevelArtifactFailure && canRetryGeneration ? (
-          <FormButton
-            variant="secondary"
-            onClick={
-              topLevelArtifactFailure.artifactType === "cover_letter"
-                ? handleRetryCoverGeneration
-                : handleRetryResumeGeneration
-            }
-          >
-            Retry
-          </FormButton>
-        ) : showGenericRetry && canRetryGeneration ? (
-          <FormButton
-            variant="secondary"
-            onClick={() => {
-              const sessionKey = `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:retry_both:${Date.now()}`;
-              void handleResumeDraft({ sessionKey });
-              void handleCoverDraft({ sessionKey });
-            }}
-            disabled={autoGenerationInFlight}
-          >
-            Retry
-          </FormButton>
-        ) : null}
       </div>
+      {isReadySuccessState ? (
+        <VerifiedGenerationTrustSummary testId="studio-ready-trust-summary" />
+      ) : null}
+      {studioFocusPrimary ? (
+        <StudioFocusPanel primary={studioFocusPrimary} secondary={studioFocusSecondary} />
+      ) : null}
       {topLevelArtifactFailure && canRetryGeneration ? (
         <ArtifactFailureState
           failure={topLevelArtifactFailure}
@@ -6457,7 +6534,8 @@ export default function StudioPage() {
           }
         />
       ) : null}
-      {hasCompletedGeneration && !generateNowEligible ? (
+      {/* Deprecated: duplicate READY/export lane. READY UX is owned by the hero + materials sections. */}
+      {false ? (
         <div className="space-y-5">
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -6495,12 +6573,12 @@ export default function StudioPage() {
                     Progress
                   </p>
                   <p className="text-sm text-slate-200">
-                    {applicationProgress.completedApplicationsCount} applications completed
+                    {applicationProgress?.completedApplicationsCount ?? 0} applications completed
                   </p>
                 </div>
                 <p className="text-xs font-medium text-slate-300">
-                  {applicationProgress.recentActivity.length > 0
-                    ? `Latest: ${applicationProgress.recentActivity[0].company}, ${applicationProgress.recentActivity[0].title}`
+                  {(applicationProgress?.recentActivity?.length ?? 0) > 0
+                    ? `Latest: ${applicationProgress?.recentActivity?.[0]?.company ?? ""}, ${applicationProgress?.recentActivity?.[0]?.title ?? ""}`
                     : "No recent activity yet"}
                 </p>
               </div>
@@ -7259,6 +7337,7 @@ export default function StudioPage() {
         )} 
         {hasCompletedGeneration ? (
           isReadySuccessState ? (
+            artifactQuality.confidence === "LOW" ? (
             <details
               className="rounded-2xl border border-white/10 bg-slate-950/35 p-4"
               data-testid="studio-refinement-details"
@@ -7297,6 +7376,7 @@ export default function StudioPage() {
                 ) : null}
               </div>
             </details>
+            ) : null
           ) : (
             <>
               {documentCritique ? (
@@ -7330,82 +7410,84 @@ export default function StudioPage() {
             </>
           )
         ) : null}
-        <div className="flex flex-wrap items-center gap-3">
-          {generateNowEligible && workflowAuthority.primaryAction === "GENERATE" ? (
-            <p className="text-sm font-medium text-slate-200" data-testid="studio-auto-generation-status">
-              {lifecycleArtifactFailure && !hasCompletedGeneration
-                ? "Generation needs a retry."
-                : autoGenerationInFlight ||
-                    resumeGenerating ||
-                    coverGenerating ||
-                    studioArtifactPairStatus === "in_progress" ||
-                    needsAutoGeneration
-                  ? "Generating your resume and cover letter..."
-                  : "Preparing your documents..."}
-            </p>
-          ) : workflowAuthority.primaryAction === "BLOCKED" ? (
-            <Link
-              href={remediationHref}
-              className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
-            >
-              Resolve blockers
-            </Link>
-          ) : workflowAuthority.primaryAction === "RETRY" ? (
-            <FormButton
-              onClick={() => {
-                const resumeFailed = Boolean(resumeState.error || resumeState.artifactFailure);
-                const coverFailed = Boolean(coverState.error || coverState.artifactFailure);
-                if (resumeFailed) {
-                  void handleResumeDraft();
-                }
-                if (coverFailed) {
-                  void handleCoverDraft();
-                }
-                if (!resumeFailed && !coverFailed) {
-                  void handleResumeDraft();
-                }
-              }}
-              disabled={resumeGenerating || coverGenerating}
-              className="bg-indigo-600 text-white hover:bg-indigo-500"
-            >
-              Retry generation
-              </FormButton>
-          ) : generateNowEligible ? null : !canGenerateDocuments ? (
-            <Link
-              href={fitReviewHref}
-              className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
-            >
-              Review fit gaps
-            </Link>
-          ) : (
-            <>
-              {workflowAuthority.primaryAction === "REVIEW" ? (
-                <Link
-                  href={fitReviewHref}
-                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-white/10"
-                >
-                  Review fit gaps
-                </Link>
-              ) : null}
+        {!isReadySuccessState ? (
+          <div className="flex flex-wrap items-center gap-3">
+            {generateNowEligible && workflowAuthority.primaryAction === "GENERATE" ? (
+              <p className="text-sm font-medium text-slate-200" data-testid="studio-auto-generation-status">
+                {lifecycleArtifactFailure && !hasCompletedGeneration
+                  ? "Generation needs a retry."
+                  : autoGenerationInFlight ||
+                      resumeGenerating ||
+                      coverGenerating ||
+                      studioArtifactPairStatus === "in_progress" ||
+                      needsAutoGeneration
+                    ? "Generating your resume and cover letter..."
+                    : "Preparing your documents..."}
+              </p>
+            ) : workflowAuthority.primaryAction === "BLOCKED" ? (
+              <Link
+                href={remediationHref}
+                className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+              >
+                Resolve blockers
+              </Link>
+            ) : workflowAuthority.primaryAction === "RETRY" ? (
               <FormButton
-                onClick={() => void handleResumeDraft()}
-                disabled={resumeGenerating}
+                onClick={() => {
+                  const resumeFailed = Boolean(resumeState.error || resumeState.artifactFailure);
+                  const coverFailed = Boolean(coverState.error || coverState.artifactFailure);
+                  if (resumeFailed) {
+                    void handleResumeDraft();
+                  }
+                  if (coverFailed) {
+                    void handleCoverDraft();
+                  }
+                  if (!resumeFailed && !coverFailed) {
+                    void handleResumeDraft();
+                  }
+                }}
+                disabled={resumeGenerating || coverGenerating}
                 className="bg-indigo-600 text-white hover:bg-indigo-500"
               >
-                {resumeGenerating ? "Generating..." : "Generate Resume Draft"}
+                Retry generation
               </FormButton>
-              <FormButton
-                variant="secondary"
-                onClick={() => void handleCoverDraft()}
-                disabled={coverGenerating}
+            ) : generateNowEligible ? null : !canGenerateDocuments ? (
+              <Link
+                href={fitReviewHref}
+                className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
               >
-                {coverGenerating ? "Generating..." : "Generate Cover Letter Draft"}
-              </FormButton>
-            </>
-          )}
-        </div>
+                Review fit gaps
+              </Link>
+            ) : (
+              <>
+                {workflowAuthority.primaryAction === "REVIEW" ? (
+                  <Link
+                    href={fitReviewHref}
+                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-white/10"
+                  >
+                    Review fit gaps
+                  </Link>
+                ) : null}
+                <FormButton
+                  onClick={() => void handleResumeDraft()}
+                  disabled={resumeGenerating}
+                  className="bg-indigo-600 text-white hover:bg-indigo-500"
+                >
+                  {resumeGenerating ? "Generating..." : "Generate Resume Draft"}
+                </FormButton>
+                <FormButton
+                  variant="secondary"
+                  onClick={() => void handleCoverDraft()}
+                  disabled={coverGenerating}
+                >
+                  {coverGenerating ? "Generating..." : "Generate Cover Letter Draft"}
+                </FormButton>
+              </>
+            )}
+          </div>
+        ) : null}
       </section>
-      {workflowAuthority.workflowState === "READY" || canGenerateDocuments ? (
+      {!isReadySuccessState && (workflowAuthority.workflowState === "READY" || canGenerateDocuments) ? (
         <section className="rounded-2xl border border-white/10 bg-white/5 p-4" data-testid="studio-evidence-allowed-panel">
           <h2 className="text-base font-semibold text-slate-100">
             {workflowAuthority.workflowState === "READY" ? "Why this output is grounded" : "Why this output is limited"}
@@ -7722,8 +7804,8 @@ export default function StudioPage() {
         </Alert>
       ) : null} 
  
-      {!generateNowEligible ? <StudioNextMove move={studioNextMove} /> : null} 
-      {!generateNowEligible ? <DocumentStrategyPlanSummary plan={documentStrategyPlan} /> : null} 
+      {!generateNowEligible && !isReadySuccessState ? <StudioNextMove move={studioNextMove} /> : null} 
+      {!generateNowEligible && !isReadySuccessState ? <DocumentStrategyPlanSummary plan={documentStrategyPlan} /> : null} 
  
       {showArtifactMaterials ? ( 
       <> 
@@ -7823,23 +7905,6 @@ export default function StudioPage() {
           <Alert intent="warning" title="Resume edits are currently unavailable">
             {resumeEditError}
           </Alert>
-        ) : null}
-
-        {resumePresenter.status === "success" && resumeState.response ? (
-          <div
-            className="space-y-3 rounded-2xl border border-emerald-300/30 bg-emerald-500/10 p-4"
-            data-testid="resume-completion-panel"
-          >
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-100">
-              Completed
-            </p>
-            <div className="space-y-1">
-              <p className="text-sm font-semibold text-slate-50">{completionCopy.title}</p>
-              <p className="text-sm text-slate-200">{completionCopy.body}</p>
-              <p className="text-sm font-medium text-slate-100">{completionCopy.nextStep}</p>
-            </div>
-            <p className="text-xs text-slate-300">The export matches the draft reviewed in Studio.</p>
-          </div>
         ) : null}
 
         {resumePresenter.status === "success" && resumeState.response ? (
@@ -7952,7 +8017,7 @@ export default function StudioPage() {
             </div>
           </Alert>
         ) : canExportResume ? (
-          <p className="text-sm text-slate-300">Downloads are available.</p>
+          null
         ) : null}
 
         {resumePresenter.status === "blocked" ? (
@@ -7989,9 +8054,6 @@ export default function StudioPage() {
               >
                 {unlockGenerationConfirmation}
               </p>
-            ) : null}
-            {resumeTrustSummaryVisible ? (
-              <VerifiedGenerationTrustSummary testId="studio-resume-trust-summary" />
             ) : null}
             {resumeWarningFlags.length ? (
               <p className="text-xs text-amber-200">
@@ -8196,23 +8258,6 @@ export default function StudioPage() {
         {coverState.error && !coverLetterComplianceBlocked ? null : null}
 
         {!coverLetterComplianceBlocked && coverPresenter.status === "success" && coverState.response ? (
-          <div
-            className="space-y-3 rounded-2xl border border-emerald-300/30 bg-emerald-500/10 p-4"
-            data-testid="cover-completion-panel"
-          >
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-100">
-              Completed
-            </p>
-            <div className="space-y-1">
-              <p className="text-sm font-semibold text-slate-50">{completionCopy.title}</p>
-              <p className="text-sm text-slate-200">{completionCopy.body}</p>
-              <p className="text-sm font-medium text-slate-100">{completionCopy.nextStep}</p>
-            </div>
-            <p className="text-xs text-slate-300">The export matches the draft reviewed in Studio.</p>
-          </div>
-        ) : null}
-
-        {!coverLetterComplianceBlocked && coverPresenter.status === "success" && coverState.response ? (
           <section
             className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4"
             data-testid="studio-opportunities-handoff"
@@ -8323,7 +8368,7 @@ export default function StudioPage() {
         {!isPro ? (
           <p className="text-sm text-slate-300">Upgrade to Pro to download documents.</p>
         ) : canExportCover ? (
-          <p className="text-sm text-slate-300">Downloads are available.</p>
+          null
         ) : null}
 
         {!coverLetterComplianceBlocked ? (
@@ -8336,9 +8381,6 @@ export default function StudioPage() {
                 >
                   {unlockGenerationConfirmation}
                 </p>
-              ) : null}
-              {coverTrustSummaryVisible ? (
-                <VerifiedGenerationTrustSummary testId="studio-cover-trust-summary" />
               ) : null}
               <div className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-3"> 
                 {showLowQualityRecoveryLane && !showFullLowQualityCover ? ( 
@@ -8459,6 +8501,35 @@ export default function StudioPage() {
           )
         ) : null}
       </section> 
+      {isReadySuccessState && artifactQuality.confidence === "LOW" ? (
+        <section
+          className="rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4"
+          data-testid="studio-low-confidence-improvement-tools"
+        >
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-200">
+            Low-confidence improvements
+          </p>
+          <p className="mt-1 text-sm text-slate-200">
+            Your materials are usable, but they will be stronger after another generation pass backed by verified
+            evidence.
+          </p>
+          {canRetryGeneration ? (
+            <div className="mt-3 flex justify-end">
+              <FormButton
+                variant="secondary"
+                onClick={() => {
+                  const sessionKey = `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:retry_both:${Date.now()}`;
+                  void handleResumeDraft({ sessionKey });
+                  void handleCoverDraft({ sessionKey });
+                }}
+                disabled={autoGenerationInFlight || resumeGenerating || coverGenerating}
+              >
+                Retry generation
+              </FormButton>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
       </> 
       ) : null} 
 

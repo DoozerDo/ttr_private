@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type {
   ResumeEducation,
   ResumeExperience,
@@ -14,7 +14,7 @@ import {
   sliceResumeModelForPreview,
   type ResumePreviewLimits,
 } from "@/lib/resumePreviewContract";
-import { StudioFocusPanel, type FocusAction } from "./StudioFocusPanel";
+ 
 
 export {
   estimateResumeModelBodyLength,
@@ -146,11 +146,6 @@ export function ResumePreview({
 }: Props) {
   const model = useMemo(() => modelOverride ?? readResumeModel(payload), [modelOverride, payload]);
   const [expandedExperienceIndex, setExpandedExperienceIndex] = useState<number | null>(null);
-  const [pendingFocusTarget, setPendingFocusTarget] = useState<
-    | { type: "summary" }
-    | { type: "role"; index: number }
-    | null
-  >(null);
 
   if (!model) {
     if (!fallbackText) return null;
@@ -199,83 +194,9 @@ export function ResumePreview({
       )
     : [];
 
-  const focusRole0: FocusAction | null = experiences.length
-    ? {
-        testId: "studio-focus-action-role-0",
-        title: "Improve your most recent role",
-        description: "Recruiters usually scan your most recent experience first.",
-        onClick: () => {
-          setExpandedExperienceIndex(0);
-          setPendingFocusTarget({ type: "role", index: 0 });
-        },
-      }
-    : null;
-
-  const focusSummary: FocusAction | null = summary
-    ? {
-        testId: "studio-focus-action-summary",
-        title: "Review your summary",
-        description: "Your summary shapes the first impression of your fit.",
-        onClick: () => {
-          setPendingFocusTarget({ type: "summary" });
-        },
-      }
-    : null;
-
-  const focusRole1: FocusAction | null = experiences.length > 1
-    ? {
-        testId: "studio-focus-action-role-1",
-        title: "Strengthen another key role",
-        description: "A second strong role reinforces depth and consistency.",
-        onClick: () => {
-          setExpandedExperienceIndex(1);
-          setPendingFocusTarget({ type: "role", index: 1 });
-        },
-      }
-    : null;
-
-  const focusPrimary: FocusAction | null = focusRole0 ?? focusSummary ?? null;
-  const focusSecondary: FocusAction[] = [];
-
-  if (focusPrimary === focusRole0) {
-    if (focusSummary) focusSecondary.push(focusSummary);
-    if (focusRole1) focusSecondary.push(focusRole1);
-  } else if (focusPrimary === focusSummary) {
-    if (focusRole1) focusSecondary.push(focusRole1);
-  }
-
-  useEffect(() => {
-    if (!pendingFocusTarget) return;
-
-    const focusElement = (element: HTMLElement | null) => {
-      if (!element) return false;
-      element.scrollIntoView?.({ block: "start" });
-      element.focus?.({ preventScroll: true });
-      return true;
-    };
-
-    if (pendingFocusTarget.type === "summary") {
-      const el = document.querySelector<HTMLElement>('[data-testid="studio-resume-summary-section"]');
-      if (focusElement(el)) {
-        setPendingFocusTarget(null);
-      }
-      return;
-    }
-
-    if (pendingFocusTarget.type === "role") {
-      if (expandedExperienceIndex !== pendingFocusTarget.index) return;
-      const el = document.querySelector<HTMLElement>(
-        `[data-testid="studio-resume-experience-role-header-${pendingFocusTarget.index}"]`,
-      );
-      if (focusElement(el)) {
-        setPendingFocusTarget(null);
-      }
-    }
-  }, [expandedExperienceIndex, pendingFocusTarget]);
-
   return (
-    <div className="space-y-6" data-testid="studio-resume-workspace-root">
-      <div className="space-y-6" data-testid="resume-preview">
+    <div className="space-y-8" data-testid="studio-resume-workspace-root">
+      <div className="space-y-8" data-testid="resume-preview">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 pb-4">
         <div className="space-y-1">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
@@ -329,10 +250,12 @@ export function ResumePreview({
         </p>
       ) : null}
 
-      {focusPrimary ? <StudioFocusPanel primary={focusPrimary} secondary={focusSecondary} /> : null}
-
       {summary ? (
-        <section className="space-y-2" data-testid="studio-resume-summary-section" tabIndex={-1}>
+        <section
+          className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/30 p-5"
+          data-testid="studio-resume-summary-section"
+          tabIndex={-1}
+        >
           <h3 className="text-xs font-semibold uppercase tracking-[0.32em] text-slate-400">
             Professional Summary
           </h3>
@@ -344,7 +267,7 @@ export function ResumePreview({
               className="min-h-[110px] w-full rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3 text-sm leading-7 text-slate-100 outline-none transition focus:border-sky-300/40"
             />
           ) : (
-            <p className="max-w-3xl text-sm leading-7 text-slate-200">{summary}</p>
+            <p className="max-w-3xl text-sm leading-7 text-slate-200/90">{summary}</p>
           )}
         </section>
       ) : null}
@@ -372,7 +295,7 @@ export function ResumePreview({
           <h3 className="text-xs font-semibold uppercase tracking-[0.32em] text-slate-400">
             Professional Experience
           </h3>
-          <div className="space-y-3" data-testid="studio-resume-experience-accordion">
+          <div className="space-y-6" data-testid="studio-resume-experience-accordion">
             {experiences.map((entry, experienceIndex) => {
               const expanded = expandedExperienceIndex === experienceIndex;
               const headerId = `studio-resume-experience-role-header-${experienceIndex}`;
@@ -381,7 +304,7 @@ export function ResumePreview({
               return (
                 <article
                   key={`${entry.company}-${entry.roleTitle}-${experienceIndex}`}
-                  className="rounded-2xl border border-white/10 bg-slate-950/35"
+                  className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/30"
                   data-testid="experience-entry-block"
                 >
                   <button
@@ -393,12 +316,14 @@ export function ResumePreview({
                         current === experienceIndex ? null : experienceIndex,
                       )
                     }
-                    className="flex w-full items-start justify-between gap-3 rounded-2xl px-5 py-4 text-left transition hover:bg-white/[0.03]"
+                    className={`flex w-full items-start justify-between gap-3 px-6 py-5 text-left transition hover:bg-white/[0.03] ${
+                      expanded ? "border-b border-white/10" : ""
+                    }`}
                     data-testid={headerId}
                   >
                     <div className="space-y-1">
-                      <p className="text-base font-semibold text-slate-50">{entry.company}</p>
-                      <p className="text-sm font-medium text-slate-200">
+                      <p className="text-lg font-semibold text-slate-50">{entry.company}</p>
+                      <p className="text-base font-medium text-slate-200">
                         {[entry.roleTitle, entry.location].filter(Boolean).join(" | ")}
                       </p>
                       <p className="text-xs text-slate-400">
@@ -407,7 +332,7 @@ export function ResumePreview({
                     </div>
                     <div className="flex items-start gap-3 text-right">
                       {entry.dateRange ? (
-                        <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+                        <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500/80">
                           {entry.dateRange}
                         </p>
                       ) : null}
@@ -418,9 +343,9 @@ export function ResumePreview({
                   </button>
 
                   {expanded ? (
-                    <div id={bodyId} className="px-5 pb-5" data-testid={bodyId}>
-                      <div className="rounded-xl border border-white/10 bg-slate-950/40 p-4">
-                        <ul className="space-y-3 pl-5 text-sm leading-7 text-slate-200">
+                    <div id={bodyId} className="px-6 pb-6 pt-4" data-testid={bodyId}>
+                      <div className="rounded-xl border border-white/10 bg-slate-950/35 p-5">
+                        <ul className="space-y-2 pl-5 text-sm leading-7 text-slate-200/90">
                           {entry.bullets.map((bullet, bulletIndex) => (
                             <li
                               key={`${entry.company}-${entry.roleTitle}-bullet-${bulletIndex}`}
