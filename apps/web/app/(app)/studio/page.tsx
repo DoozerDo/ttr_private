@@ -6216,7 +6216,12 @@ export default function StudioPage() {
     if (!autoGenerationSignature) return;
     if (!effectiveBaselineVersionId) return;
     if (autoGenerationSignatureRef.current === autoGenerationSignature) return;
-    if (studioArtifactPresentationStateRef.current === "hydrated") return;
+    if (
+    studioArtifactPresentationStateRef.current === "hydrated" &&
+    !needsAutoGeneration
+   ) {
+    return;
+    }
     if (suppressAutoGenerationForGenerationReadyShell) return;
     if (suppressAutoGenerationRef.current) return;
     const autoGenerationKey = buildWorkflowRequestKey("auto_generation", generationWorkflowScope);
