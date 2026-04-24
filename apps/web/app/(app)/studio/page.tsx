@@ -6211,11 +6211,28 @@ export default function StudioPage() {
     }
   }, [coverState.response, handleCoverDraft, hasCompletedGeneration, resumeState.response, verifiedClaimParams]);
 
-  useEffect(() => {
-    if (!studioArtifactsHydrated) return;
-    if (!autoGenerationSignature) return;
-    if (!effectiveBaselineVersionId) return;
-    if (autoGenerationSignatureRef.current === autoGenerationSignature) return;
+    useEffect(() => {
+    console.log("[AUTO_GEN] start");
+
+    if (!studioArtifactsHydrated) {
+      console.log("[AUTO_GEN] blocked: !studioArtifactsHydrated");
+      return;
+    }
+
+    if (!autoGenerationSignature) {
+      console.log("[AUTO_GEN] blocked: !autoGenerationSignature");
+      return;
+    }
+
+    if (!effectiveBaselineVersionId) {
+      console.log("[AUTO_GEN] blocked: !effectiveBaselineVersionId");
+      return;
+    }
+
+    if (autoGenerationSignatureRef.current === autoGenerationSignature) {
+      console.log("[AUTO_GEN] blocked: already used signature");
+      return;
+    }
     if (
     studioArtifactPresentationStateRef.current === "hydrated" &&
     !needsAutoGeneration
