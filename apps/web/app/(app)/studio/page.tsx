@@ -3462,19 +3462,24 @@ export default function StudioPage() {
     studioArtifactPairStatus === "in_progress");
   // Pending state reflects an explicit generation start, not auto-generation eligibility alone.
   const resumeGenerateNowPending =
-    generateNowEligible &&
-    !activeGenerationReadiness.blocked &&
-    Boolean(effectiveBaselineVersionId) &&
-    !resumeState.response &&
-    !resumeState.error &&
-    !resumeState.artifactFailure;
+  generateNowEligible &&
+  !activeGenerationReadiness.blocked &&
+  Boolean(effectiveBaselineVersionId) &&
+  !hasResumeArtifact &&
+  !resumeState.response &&
+  !resumeState.error &&
+  !resumeState.artifactFailure &&
+  (resumeGenerating || resumeSingleFlightInFlight || autoGenerationInFlight);
+
   const coverGenerateNowPending =
-    generateNowEligible &&
-    !activeGenerationReadiness.blocked &&
-    Boolean(effectiveBaselineVersionId) &&
-    !coverState.response &&
-    !coverState.error &&
-    !coverState.artifactFailure;
+  generateNowEligible &&
+  !activeGenerationReadiness.blocked &&
+  Boolean(effectiveBaselineVersionId) &&
+  !hasCoverLetterArtifact &&
+  !coverState.response &&
+  !coverState.error &&
+  !coverState.artifactFailure &&
+  (coverGenerating || coverSingleFlightInFlight || autoGenerationInFlight);
   useEffect(() => {
     if (!hasCompletedGeneration || !isInstantDraftExperience || !applicationContext) return;
     const signature = `${applicationPairSignature ?? "application_pair"}:${applicationContext.status}`;
