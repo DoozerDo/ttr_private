@@ -6222,7 +6222,12 @@ export default function StudioPage() {
    ) {
     return;
     }
-    if (suppressAutoGenerationForGenerationReadyShell) return;
+    if (
+  suppressAutoGenerationForGenerationReadyShell &&
+  !needsAutoGeneration
+  ) {
+  return;
+  }
     if (suppressAutoGenerationRef.current) return;
     const autoGenerationKey = buildWorkflowRequestKey("auto_generation", generationWorkflowScope);
     if (studioArtifactPairStatus !== "missing") return;
