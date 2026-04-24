@@ -4952,10 +4952,8 @@ export default function StudioPage() {
     versions,
   ]);
 
-  useEffect(() => {
-    if (!hydratedFromResultsContext || !generationSectionRef.current) return;
-    generationSectionRef.current.scrollIntoView?.({ block: "start" });
-  }, [hydratedFromResultsContext]);
+  // Intentionally avoid scrolling the viewport to the artifact/materials section on route entry.
+  // The primary authority panel at the top of Studio is the first-lane UI and must remain visible on load.
 
   useEffect(() => {
     if (!analysis?.baselineId) return;

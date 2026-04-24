@@ -458,4 +458,67 @@ describe("Studio generation authority transition", () => {
 
     scrollSpy.mockRestore();
   });
+
+  it("F. Studio hydration does not scroll into the materials section (authority wins on route entry)", async () => {
+    overrideSearchParams({
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      analysisId: "analysis-8",
+    });
+
+    const scrollSpy = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    const scrollIntoViewSpy = vi.fn();
+    // JSDOM doesn't implement layout/scrolling; we only care about whether Studio *tries* to scroll the section.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (HTMLElement.prototype as any).scrollIntoView = scrollIntoViewSpy;
+
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+
+      if (url.includes("/api/analysis/fit-assessments/analysis-8")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-8",
+            scoring_v2: { score: 82 },
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            verification_coverage: { unverifiedRequirements: [] },
+          }),
+        );
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    // Ensure the materials section is present so any accidental scrollIntoView would have a target.
+    await screen.findByText("Your application materials");
+
+    await waitFor(() => {
+      const calls = scrollSpy.mock.calls;
+      const didAutoTop = calls.some((call) => {
+        const arg0 = call[0] as unknown;
+        if (!arg0 || typeof arg0 !== "object") return false;
+        const record = arg0 as { top?: unknown; behavior?: unknown };
+        return record.top === 0 && record.behavior === "auto";
+      });
+      expect(didAutoTop).toBe(true);
+    });
+
+    expect(scrollIntoViewSpy).not.toHaveBeenCalled();
+
+    scrollSpy.mockRestore();
+    HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+  });
 });
