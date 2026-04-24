@@ -39,6 +39,23 @@ type ServerReadinessPayload = {
   compliance_flags?: unknown;
 };
 
+export type ReadinessTransportResult = {
+  ok: boolean;
+  status: number;
+  payload: Record<string, unknown> | null;
+};
+
+export type ArtifactReadinessContractState =
+  | "ready"
+  | "limited"
+  | "blocked"
+  | "unsupported_input"
+  | "generation_blocked"
+  | "insufficient_verified_evidence"
+  | "http_4xx_blocking"
+  | "http_5xx"
+  | "unknown";
+
 export type VerificationIssue = {
   code:
     | "missing_baseline_evidence"
@@ -972,6 +989,195 @@ export function combineGenerationReadinessFromServer(
           ? "Your baseline needs more verified evidence before generation is fully ready."
           : "Generation is ready for this scored analysis context.",
     verificationIssues,
+  };
+}
+
+type ReadinessFailureEnvelope = {
+  code: string | null;
+  category: string | null;
+  message: string | null;
+  missingRequirements: string[];
+};
+
+function readStringFromPath(payload: Record<string, unknown>, path: string[]): string | null {
+  let current: unknown = payload;
+  for (const segment of path) {
+    if (!current || typeof current !== "object") return null;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  if (typeof current !== "string") return null;
+  const trimmed = current.trim();
+  return trimmed.length ? trimmed : null;
+}
+
+function readStringArrayFromPath(payload: Record<string, unknown>, path: string[]): string[] {
+  let current: unknown = payload;
+  for (const segment of path) {
+    if (!current || typeof current !== "object") return [];
+    current = (current as Record<string, unknown>)[segment];
+  }
+  if (!Array.isArray(current)) return [];
+  return current
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .filter((value) => value.length > 0);
+}
+
+function normalizeFailureCategory(category: string | null, code: string | null): string | null {
+  const raw = (category ?? code ?? "").trim().toLowerCase();
+  return raw.length ? raw : null;
+}
+
+function extractReadinessFailureEnvelope(payload: Record<string, unknown> | null): ReadinessFailureEnvelope | null {
+  if (!payload) return null;
+  const rootCategory = readStringFromPath(payload, ["category"]);
+  const rootCode = readStringFromPath(payload, ["code"]);
+  const rootMessage = readStringFromPath(payload, ["message"]);
+
+  const nestedCategory = readStringFromPath(payload, ["error", "category"]);
+  const nestedCode = readStringFromPath(payload, ["error", "code"]);
+  const nestedMessage = readStringFromPath(payload, ["error", "message"]);
+
+  const category = rootCategory ?? nestedCategory ?? null;
+  const code = rootCode ?? nestedCode ?? null;
+  const message = rootMessage ?? nestedMessage ?? null;
+
+  const missingRequirements = [
+    ...readStringArrayFromPath(payload, ["diagnostics", "missingRequirements"]),
+    ...readStringArrayFromPath(payload, ["error", "diagnostics", "missingRequirements"]),
+  ];
+
+  if (!category && !code && !message && missingRequirements.length === 0) return null;
+
+  return {
+    category,
+    code,
+    message,
+    missingRequirements,
+  };
+}
+
+function buildBlockedServerReadinessPayload(input: {
+  category: string | null;
+  message: string | null;
+  missingRequirements: string[];
+  status: number;
+}): ServerReadinessPayload {
+  const normalizedCategory = normalizeFailureCategory(input.category, null);
+  const missing = Array.from(new Set(input.missingRequirements));
+  const hasMissing = missing.length > 0;
+  const headline =
+    input.message ??
+    (hasMissing
+      ? `Generation is blocked until missing requirements are verified (${missing.join(", ")}).`
+      : normalizedCategory
+        ? `Generation readiness blocked (${normalizedCategory}).`
+        : `Generation readiness blocked (HTTP ${input.status}).`);
+
+  const reasons: Array<{ code?: string; message?: string }> = [];
+  if (normalizedCategory === "unsupported_input" || hasMissing) {
+    reasons.push({
+      code: "unsupported_technology_claim",
+      message: headline,
+    });
+  } else if (normalizedCategory === "insufficient_verified_evidence") {
+    reasons.push({
+      code: "baseline_verification_gap",
+      message: headline,
+    });
+  } else {
+    reasons.push({
+      code: "full_block",
+      message: headline,
+    });
+  }
+
+  const compliance_flags = hasMissing
+    ? missing.map((requirement) => ({
+        code: "unsupported_technology",
+        severity: "block",
+        message: `Missing verified requirement: ${requirement}`,
+        evidence: [
+          {
+            generatedClaim: { text: requirement, type: "technology" },
+          },
+        ],
+      }))
+    : [
+        {
+          code:
+            normalizedCategory === "insufficient_verified_evidence"
+              ? "missing_baseline_support"
+              : normalizedCategory ?? "readiness_http_4xx",
+          severity: "block",
+          message: headline,
+          evidence: [],
+        },
+      ];
+
+  return {
+    status: "blocked",
+    reasons,
+    compliance_flags,
+  };
+}
+
+function normalizeReadinessTransportResult(
+  input: ReadinessTransportResult,
+): { payload: ServerReadinessPayload | null; state: ArtifactReadinessContractState } {
+  if (input.ok) {
+    const status = typeof input.payload?.status === "string" ? input.payload.status.trim().toLowerCase() : "";
+    const state: ArtifactReadinessContractState =
+      status === "ready" || status === "limited" || status === "blocked"
+        ? (status as ArtifactReadinessContractState)
+        : "unknown";
+    return { payload: input.payload as ServerReadinessPayload | null, state };
+  }
+
+  const is4xx = input.status >= 400 && input.status < 500;
+  const is5xx = input.status >= 500 && input.status < 600;
+  const blocking4xx = is4xx && input.status !== 408 && input.status !== 429;
+
+  if (!blocking4xx) {
+    return {
+      payload: null,
+      state: is5xx ? "http_5xx" : "unknown",
+    };
+  }
+
+  const envelope = extractReadinessFailureEnvelope(input.payload);
+  const normalizedCategory = normalizeFailureCategory(envelope?.category ?? null, envelope?.code ?? null);
+  const mapped: ArtifactReadinessContractState =
+    normalizedCategory === "unsupported_input" ||
+    normalizedCategory === "generation_blocked" ||
+    normalizedCategory === "insufficient_verified_evidence"
+      ? (normalizedCategory as ArtifactReadinessContractState)
+      : "http_4xx_blocking";
+
+  return {
+    payload: buildBlockedServerReadinessPayload({
+      category: envelope?.category ?? envelope?.code ?? null,
+      message: envelope?.message ?? null,
+      missingRequirements: envelope?.missingRequirements ?? [],
+      status: input.status,
+    }),
+    state: mapped,
+  };
+}
+
+export function combinePairGenerationReadinessFromTransport(
+  resume: ReadinessTransportResult,
+  coverLetter: ReadinessTransportResult,
+): {
+  readiness: GenerationReadiness;
+  resumeReadinessState: ArtifactReadinessContractState;
+  coverReadinessState: ArtifactReadinessContractState;
+} {
+  const normalizedResume = normalizeReadinessTransportResult(resume);
+  const normalizedCover = normalizeReadinessTransportResult(coverLetter);
+  return {
+    readiness: combineGenerationReadinessFromServer(normalizedResume.payload, normalizedCover.payload),
+    resumeReadinessState: normalizedResume.state,
+    coverReadinessState: normalizedCover.state,
   };
 }
 

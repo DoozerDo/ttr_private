@@ -139,7 +139,7 @@ export function resolveWorkflowSurfaceAuthority(input: {
     };
   }
 
-  if (eligibleForGenerationReady || (generationReadyActive && generationPhase === "ready")) {
+  if (!blocked && (eligibleForGenerationReady || (generationReadyActive && generationPhase === "ready"))) {
     return {
       canonicalState: "generation_ready",
       headline: "Your documents are ready to generate.",
@@ -153,7 +153,7 @@ export function resolveWorkflowSurfaceAuthority(input: {
     };
   }
 
-  if (pairGenerating) {
+  if (pairGenerating && !blocked) {
     return {
       canonicalState: "generation_in_progress",
       headline: "Generating your documents...",

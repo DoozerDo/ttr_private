@@ -3,6 +3,7 @@ export type WorkflowContractViolation = {
     | "multiple_primary_authorities"
     | "generation_ready_conflicts_with_unlock"
     | "generation_ready_conflicts_with_post_unlock"
+    | "pair_blocked_conflicts_with_generation"
     | "stale_preview_rendered_while_suppressed"
     | "unknown_workflow_fallthrough";
   surface: "results" | "studio" | "unknown";
@@ -39,4 +40,3 @@ export function workflowContractViolationKey(violation: WorkflowContractViolatio
   };
   return JSON.stringify(relevant);
 }
-

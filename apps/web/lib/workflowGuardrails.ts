@@ -30,11 +30,15 @@ function detectWorkflowContractViolations(input: {
     failureActive?: boolean;
     resumeState?: string | null;
     coverState?: string | null;
+    resumeReadinessState?: string | null;
+    coverReadinessState?: string | null;
+    blockedRecoveryActive?: boolean | null;
   };
 }): WorkflowContractViolation[] {
   const authority = input.orchestrator.authorityState;
   const failuresActive = Boolean(input.context?.failureActive);
   const violations: WorkflowContractViolation[] = [];
+  const blockedRecoveryActive = Boolean(input.context?.blockedRecoveryActive);
 
   const primaryAuthorities = [
     input.rendered.unlockFlow,
@@ -130,6 +134,42 @@ function detectWorkflowContractViolations(input: {
     });
   }
 
+  if (blockedRecoveryActive) {
+    const canonical = String(authority.canonicalState ?? "");
+    const generationAuthorityRendered =
+      input.rendered.workflowAuthorityPanel &&
+      (canonical === "generation_ready" || canonical === "generation_in_progress");
+    const generationShellRendered = input.rendered.generationReadyShell;
+
+    if (generationAuthorityRendered || generationShellRendered) {
+      violations.push({
+        violationType: "pair_blocked_conflicts_with_generation",
+        surface: input.surface,
+        canonicalState: authority.canonicalState,
+        trustTone: authority.trustTone,
+        authorityFlags: {
+          unlockActive: input.orchestrator.unlockState.isUnlockFlowActive,
+          postUnlockActive: input.orchestrator.postUnlockState.active,
+          generationReadyActive: Boolean(input.rendered.generationReadyShell),
+          failureActive: failuresActive,
+        },
+        artifactFlags: {
+          stalePreviewSuppressed: input.orchestrator.artifactState.shouldSuppressStalePreview,
+          stalePreviewRendered: input.rendered.staleArtifactPreview,
+          resumeState: input.context?.resumeState ?? null,
+          coverState: input.context?.coverState ?? null,
+        },
+        context: {
+          resume_readiness_state: input.context?.resumeReadinessState ?? null,
+          cover_readiness_state: input.context?.coverReadinessState ?? null,
+          blocked_recovery_active: true,
+          generation_shell_rendered: generationShellRendered,
+          generation_authority_rendered: generationAuthorityRendered,
+        },
+      });
+    }
+  }
+
   return violations;
 }
 
@@ -144,6 +184,9 @@ export function useWorkflowGuardrails(input: {
     failureActive?: boolean;
     resumeState?: string | null;
     coverState?: string | null;
+    resumeReadinessState?: string | null;
+    coverReadinessState?: string | null;
+    blockedRecoveryActive?: boolean | null;
   };
   orchestratorViolations?: WorkflowContractViolation[] | null;
   trackEvent?: (<TEvent extends AnalyticsEventName>(

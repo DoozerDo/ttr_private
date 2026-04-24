@@ -30,9 +30,10 @@ import {
   applyTargetingExclusionsToReadiness,
   aggregateVerificationIssues,
   buildVerificationIssuesFromCanonicalClaims,
-  combineGenerationReadinessFromServer,
+  combinePairGenerationReadinessFromTransport,
   filterClaimVerificationsByExcludedLabels,
   reconcileReadinessWithClaimVerifications,
+  type ArtifactReadinessContractState,
   type GenerationReadiness,
   deriveVerificationCoverage,
   normalizeUserFacingRequirementLabel,
@@ -957,6 +958,10 @@ export default function StudioPage() {
   const [contextHydrationMessage, setContextHydrationMessage] = useState<string | null>(null);
   const [generationReadiness, setGenerationReadiness] =
     useState<GenerationReadiness>(READINESS_LOADING_STATE);
+  const [pairReadinessContractState, setPairReadinessContractState] = useState<{
+    resume: ArtifactReadinessContractState;
+    cover: ArtifactReadinessContractState;
+  }>({ resume: "unknown", cover: "unknown" });
   const [excludedTargetingLabels, setExcludedTargetingLabels] = useState<Set<string>>(new Set());
   const [targetingAdjustmentFeedback, setTargetingAdjustmentFeedback] = useState<string | null>(null);
   const [targetingAdjustmentStatus, setTargetingAdjustmentStatus] = useState<"success" | "warning" | null>(null);
@@ -1930,6 +1935,7 @@ export default function StudioPage() {
   useEffect(() => {
     if (!requestedAnalysisId || !effectiveJobId || !effectiveBaselineId) {
       setGenerationReadiness(READINESS_LOADING_STATE);
+      setPairReadinessContractState({ resume: "unknown", cover: "unknown" });
       return;
     }
     const readinessKey = [
@@ -1974,15 +1980,33 @@ export default function StudioPage() {
         const coverPayload = (await readResponsePayload(coverResponse)) as
           | Record<string, unknown>
           | null;
+        const resolved = combinePairGenerationReadinessFromTransport(
+          {
+            ok: resumeResponse.ok,
+            status: resumeResponse.status,
+            payload:
+              resumePayload && typeof resumePayload === "object"
+                ? (resumePayload as Record<string, unknown>)
+                : null,
+          },
+          {
+            ok: coverResponse.ok,
+            status: coverResponse.status,
+            payload:
+              coverPayload && typeof coverPayload === "object"
+                ? (coverPayload as Record<string, unknown>)
+                : null,
+          },
+        );
+        setGenerationReadiness(resolved.readiness);
+        setPairReadinessContractState({
+          resume: resolved.resumeReadinessState,
+          cover: resolved.coverReadinessState,
+        });
         if (!resumeResponse.ok || !coverResponse.ok) {
           failedReadinessKeysRef.current.add(readinessKey);
           return;
         }
-        const resolved = combineGenerationReadinessFromServer(
-          resumePayload as any,
-          coverPayload as any,
-        );
-        setGenerationReadiness(resolved);
       } catch {
         failedReadinessKeysRef.current.add(readinessKey);
       }
@@ -6924,9 +6948,11 @@ export default function StudioPage() {
     : null;
 
   const workflowOrchestratorCore = useMemo(() => {
+    const suppressPairGeneratingPresentation = activeGenerationReadiness.blocked;
     const resumeStatus: "missing" | "generating" | "ready" | "failed" = hasUsableResume
       ? "ready"
-      : resumeGenerating || autoGenerationInFlight || studioArtifactPairStatus === "in_progress"
+      : !suppressPairGeneratingPresentation &&
+          (resumeGenerating || autoGenerationInFlight || studioArtifactPairStatus === "in_progress")
         ? "generating"
         : resumeState.artifactFailure
           ? "failed"
@@ -6934,7 +6960,8 @@ export default function StudioPage() {
 
     const coverStatus: "missing" | "generating" | "ready" | "failed" = hasUsableCoverLetter
       ? "ready"
-      : coverGenerating || autoGenerationInFlight || studioArtifactPairStatus === "in_progress"
+      : !suppressPairGeneratingPresentation &&
+          (coverGenerating || autoGenerationInFlight || studioArtifactPairStatus === "in_progress")
         ? "generating"
         : coverState.artifactFailure
           ? "failed"
@@ -6950,10 +6977,11 @@ export default function StudioPage() {
         hasCoverLetter: hasUsableCoverLetter,
         pairStatus: studioArtifactPairStatus ?? null,
         generating:
-          autoGenerationInFlight ||
-          resumeGenerating ||
-          coverGenerating ||
-          studioArtifactPairStatus === "in_progress",
+          !suppressPairGeneratingPresentation &&
+          (autoGenerationInFlight ||
+            resumeGenerating ||
+            coverGenerating ||
+            studioArtifactPairStatus === "in_progress"),
         failure: topLevelArtifactFailure
           ? { category: topLevelArtifactFailure.category, retryable: topLevelArtifactFailure.retryable }
           : null,
@@ -7718,12 +7746,14 @@ export default function StudioPage() {
     readiness: productReadiness ?? null,
     trustGate: trustGateDecision ?? null,
     hasCompletedGeneration,
-    isGenerating: Boolean(
-      studioGenerationRenderState.isGenerating ||
-        resumeGenerating ||
-        coverGenerating ||
-        autoGenerationInFlight,
-    ),
+    isGenerating: activeGenerationReadiness.blocked
+      ? false
+      : Boolean(
+          studioGenerationRenderState.isGenerating ||
+            resumeGenerating ||
+            coverGenerating ||
+            autoGenerationInFlight,
+        ),
     hasAnyArtifacts: Boolean(hasCompletedGeneration || resumeState.response || coverState.response),
     resumeState,
     coverState,
@@ -7851,7 +7881,8 @@ export default function StudioPage() {
         (!shouldGenerateDocuments(analysisScore) || productReadiness?.state === "BLOCKED")));
 
   const draftAnywayEligible =
-    isDraftAnywayEligible(analysisScore, resumeGating) || isDraftAnywayEligible(analysisScore, coverGating);
+    !activeGenerationReadiness.blocked &&
+    (isDraftAnywayEligible(analysisScore, resumeGating) || isDraftAnywayEligible(analysisScore, coverGating));
 
   const readinessImpactedArtifacts = useMemo(() => {
     const impacted: string[] = [];
@@ -7883,6 +7914,8 @@ export default function StudioPage() {
     pageTruth.state === "draftable_limited" ||
     pageTruth.state === "generated_reviewable" ||
     (pageTruth.state === "failed" && (hasCompletedGeneration || Boolean(resumeState.response) || Boolean(coverState.response)));
+  const showInstantDraftHeroSafe =
+    showInstantDraftHero && !showReadinessRecoveryExperience && !activeGenerationReadiness.blocked;
 
   const highestImpactEvidenceActions = useMemo(() => {
     const candidates = canonicalUnverifiedRequirements.length
@@ -8084,14 +8117,24 @@ export default function StudioPage() {
   const generationReadyShellActive =
     !generationReadyDismissed &&
     !isApplicationApplied &&
+    !showReadinessRecoveryExperience &&
+    !activeGenerationReadiness.blocked &&
     (generationReadyModel.isGenerationReadyPriority || generationReadyPhase !== "ready");
+
+  const suppressGeneratingMessaging = showReadinessRecoveryExperience || activeGenerationReadiness.blocked;
+  const workflowActivityBannerTracker = suppressGeneratingMessaging
+    ? { ...workflowActivity, isActive: false, activeOperations: [] }
+    : workflowActivity;
 
   useWorkflowGuardrails({
     surface: "studio",
     orchestrator: workflowOrchestratorCore,
     rendered: {
       workflowAuthorityPanel:
-        !unlockFlowActive && !(postUnlockActive && Boolean(postUnlockModel)) && !generationReadyShellActive,
+        showInstantDraftHeroSafe &&
+        !unlockFlowActive &&
+        !(postUnlockActive && Boolean(postUnlockModel)) &&
+        !generationReadyShellActive,
       unlockFlow: unlockFlowActive,
       postUnlockOutcome: postUnlockActive && Boolean(postUnlockModel),
       generationReadyShell: generationReadyShellActive,
@@ -8103,6 +8146,9 @@ export default function StudioPage() {
       failureActive: Boolean(pageTruth.state === "failed"),
       resumeState: hasUsableResume ? "ready" : resumeState.artifactFailure ? "failed" : "missing",
       coverState: hasUsableCoverLetter ? "ready" : coverState.artifactFailure ? "failed" : "missing",
+      resumeReadinessState: pairReadinessContractState.resume,
+      coverReadinessState: pairReadinessContractState.cover,
+      blockedRecoveryActive: showReadinessRecoveryExperience,
     },
     orchestratorViolations: workflowOrchestratorCore.diagnostics?.violations ?? null,
     trackEvent,
@@ -8342,7 +8388,7 @@ export default function StudioPage() {
   if (unlockFlowActive) {
     return (
       <PageShell className="space-y-4 pb-4">
-        <WorkflowActivityBanner tracker={workflowActivity} />
+        <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
         <div
           data-workflow-shell="unlock-flow"
           data-workflow-state={workflowOrchestratorCore.authorityState.canonicalState}
@@ -8410,7 +8456,7 @@ export default function StudioPage() {
   if (postUnlockActive && postUnlockModel) {
     return (
       <PageShell className="space-y-4 pb-4">
-        <WorkflowActivityBanner tracker={workflowActivity} />
+        <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
         <div
           data-workflow-shell="post-unlock-outcome"
           data-workflow-state={workflowOrchestratorCore.authorityState.canonicalState}
@@ -8470,7 +8516,7 @@ export default function StudioPage() {
     const trust = generationReadyModel.trustSummary;
     return (
       <PageShell className="space-y-4 pb-4">
-        <WorkflowActivityBanner tracker={workflowActivity} />
+        <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
         <div
           data-workflow-shell="generation-ready-shell"
           data-workflow-state={workflowOrchestratorCore.authorityState.canonicalState}
@@ -8498,9 +8544,9 @@ export default function StudioPage() {
 
   return (
     <PageShell className="space-y-4 pb-4">
-      <WorkflowActivityBanner tracker={workflowActivity} />
-      {showInstantDraftHero ? instantDraftHero : null}
-      {showReadinessRecoveryExperience ? unlockEntryPanel : null}
+      <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
+      {showInstantDraftHeroSafe ? instantDraftHero : null}
+      {showReadinessRecoveryExperience && !activeGenerationReadiness.blocked ? unlockEntryPanel : null}
       {unlockGenerationLoadingMessage && showPrimaryGeneratingNotice ? (
         <Alert intent="info" title="Verified evidence in use">
           {unlockGenerationLoadingMessage}

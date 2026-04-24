@@ -26,7 +26,8 @@ import {
 import {
   applyTargetingExclusionsToReadiness,
   buildVerificationIssuesFromCanonicalClaims,
-  combineGenerationReadinessFromServer,
+  combinePairGenerationReadinessFromTransport,
+  type ArtifactReadinessContractState,
   type GenerationReadiness,
   deriveVerificationCoverage,
   normalizeUserFacingRequirementLabel,
@@ -2024,6 +2025,10 @@ export default function ResultsPage() {
   const [debugCopyStatus, setDebugCopyStatus] = useState<string | null>(null);
   const [generationReadiness, setGenerationReadiness] =
     useState<GenerationReadiness>(READINESS_LOADING_STATE);
+  const [pairReadinessContractState, setPairReadinessContractState] = useState<{
+    resume: ArtifactReadinessContractState;
+    cover: ArtifactReadinessContractState;
+  }>({ resume: "unknown", cover: "unknown" });
   const [recentIntent, setRecentIntent] = useState(() => readRecentIntentState());
   const lastAssessmentHydrationAttempted = useRef(false);
   const autoLoadPairRef = useRef<string | null>(null);
@@ -2309,6 +2314,7 @@ export default function ResultsPage() {
 
     if (!analysisId || !jobIdValue || !baselineIdValue || !baselineVersionIdValue) {
       setGenerationReadiness(READINESS_LOADING_STATE);
+      setPairReadinessContractState({ resume: "unknown", cover: "unknown" });
       return;
     }
 
@@ -2348,15 +2354,33 @@ export default function ResultsPage() {
         const coverPayload = (await readResponsePayload(coverResponse)) as
           | Record<string, unknown>
           | null;
+        const resolved = combinePairGenerationReadinessFromTransport(
+          {
+            ok: resumeResponse.ok,
+            status: resumeResponse.status,
+            payload:
+              resumePayload && typeof resumePayload === "object"
+                ? (resumePayload as Record<string, unknown>)
+                : null,
+          },
+          {
+            ok: coverResponse.ok,
+            status: coverResponse.status,
+            payload:
+              coverPayload && typeof coverPayload === "object"
+                ? (coverPayload as Record<string, unknown>)
+                : null,
+          },
+        );
+        setGenerationReadiness(resolved.readiness);
+        setPairReadinessContractState({
+          resume: resolved.resumeReadinessState,
+          cover: resolved.coverReadinessState,
+        });
         if (!resumeResponse.ok || !coverResponse.ok) {
           failedReadinessKeysRef.current.add(readinessKey);
           return;
         }
-        const resolved = combineGenerationReadinessFromServer(
-          resumePayload as any,
-          coverPayload as any,
-        );
-        setGenerationReadiness(resolved);
       } catch (error) {
         console.error("Failed to resolve generation readiness", error);
         failedReadinessKeysRef.current.add(readinessKey);
@@ -2904,6 +2928,9 @@ export default function ResultsPage() {
       failureActive: workflowSurfaceAuthority.canonicalState === "generation_failed",
       resumeState: pairWorkflowState.resumeStatus,
       coverState: pairWorkflowState.coverLetterStatus,
+      resumeReadinessState: pairReadinessContractState.resume,
+      coverReadinessState: pairReadinessContractState.cover,
+      blockedRecoveryActive: generationReadiness.blocked,
     },
     orchestratorViolations: workflowOrchestrator.diagnostics?.violations ?? null,
     trackEvent,

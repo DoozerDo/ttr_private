@@ -9,11 +9,15 @@ import { useWorkflowGuardrails } from "@/lib/workflowGuardrails";
 import type { AnalyticsEventMap, AnalyticsEventName } from "@/src/lib/analytics";
 
 function readiness(status: GenerationReadiness["status"], blocked: boolean): GenerationReadiness {
+  const badgeLabel: GenerationReadiness["badgeLabel"] =
+    status === "blocked" ? "BLOCKED" : status === "limited" ? "LIMITED" : "READY";
   return {
     status,
     blocked,
-    badgeLabel: status === "ready" ? "Ready" : status === "blocked" ? "Blocked" : "Limited",
+    reasonCodes: [],
     reasons: [],
+    badgeLabel,
+    summary: "test",
     verificationIssues: [],
   };
 }
@@ -73,6 +77,25 @@ function baseInput(overrides: Partial<WorkflowOrchestratorInput> = {}): Workflow
 }
 
 describe("workflow orchestrator contract", () => {
+  it("pair blocked readiness overrides generation-ready and in-progress authorities", () => {
+    const blockedOrchestrator = resolveWorkflowOrchestrator(
+      baseInput({
+        generationReadiness: readiness("blocked", true),
+        artifact: {
+          hasResume: false,
+          hasCoverLetter: false,
+          pairStatus: "generating",
+          generating: true,
+          failure: null,
+        },
+        generationReady: { dismissed: false, phase: "ready" },
+      }),
+    );
+
+    expect(blockedOrchestrator.authorityState.canonicalState).toBe("hard_blocked");
+    expect(blockedOrchestrator.authorityState.trustTone).toBe("blocked");
+  });
+
   it("enforces precedence: unlock flow suppresses post-unlock outcome", () => {
     const orchestrator = resolveWorkflowOrchestrator(
       baseInput({
