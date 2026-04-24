@@ -7094,6 +7094,27 @@ export default function StudioPage() {
   const heroHeadline = workflowSurfaceAuthorityHero.headline;
   const heroBody = workflowSurfaceAuthorityHero.body;
   const normalizedArtifacts = workflowOrchestratorCore.artifactState;
+  const resumeVisibleGeneratingDebug =
+    resumeAutoGenerating || resumeGenerating || resumeSingleFlightInFlight;
+  const coverVisibleGeneratingDebug =
+    coverAutoGenerating || coverGenerating || coverSingleFlightInFlight;
+  const artifactGeneratingDebug =
+    !activeGenerationReadiness.blocked &&
+    (autoGenerationInFlight ||
+      resumeVisibleGeneratingDebug ||
+      coverVisibleGeneratingDebug ||
+      studioArtifactPairStatus === "in_progress");
+  const authorityDebugAttrs: Record<string, string> =
+    process.env.NODE_ENV !== "production"
+      ? {
+          "data-debug-canonical-state": workflowSurfaceAuthorityHero.canonicalState,
+          "data-debug-resume-auto-generating": String(resumeAutoGenerating),
+          "data-debug-cover-auto-generating": String(coverAutoGenerating),
+          "data-debug-resume-visible-generating": String(resumeVisibleGeneratingDebug),
+          "data-debug-cover-visible-generating": String(coverVisibleGeneratingDebug),
+          "data-debug-artifact-generating": String(artifactGeneratingDebug),
+        }
+      : {};
 
   const normalizedArtifactsPanelModel = useMemo(() => {
     const state = normalizedArtifacts.artifactDisplayState;
@@ -7207,14 +7228,15 @@ export default function StudioPage() {
     readyHeaderMode === "cover_only" && !autoGenerationInFlight && studioArtifactPairStatus !== "in_progress";
 
   const instantDraftHero = appliedMomentumHero ?? (isInstantDraftExperience ? (
-	    <section
-	      className="space-y-6"
-	      data-testid="studio-instant-draft-hero"
-	    >
-	      <WorkflowAuthorityPanel
-	        testId="studio-workflow-authority"
-	        model={{
-	          canonicalState: workflowSurfaceAuthorityHero.canonicalState,
+ 	    <section
+ 	      className="space-y-6"
+ 	      data-testid="studio-instant-draft-hero"
+          {...authorityDebugAttrs}
+ 	    >
+ 	      <WorkflowAuthorityPanel
+ 	        testId="studio-workflow-authority"
+ 	        model={{
+ 	          canonicalState: workflowSurfaceAuthorityHero.canonicalState,
 	          headline: heroHeadline,
 	          body: heroBody,
 	          trustTone: workflowSurfaceAuthorityHero.trustTone,
@@ -9405,6 +9427,9 @@ export default function StudioPage() {
         ref={(node) => {
           generationSectionRef.current = node;
         }}
+        {...(process.env.NODE_ENV !== "production"
+          ? { "data-debug-card-generating": String(resumeGenerating || resumeAutoGenerating || resumeGenerateNowPending) }
+          : {})}
         className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow"
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -9697,7 +9722,12 @@ export default function StudioPage() {
         )}
       </section>
 
-      <section className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
+      <section
+        className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow"
+        {...(process.env.NODE_ENV !== "production"
+          ? { "data-debug-card-generating": String(coverGenerating || coverAutoGenerating || coverGenerateNowPending) }
+          : {})}
+      >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Cover letter</h2>
