@@ -6986,8 +6986,9 @@ export default function StudioPage() {
 
   const workflowOrchestratorCore = useMemo(() => {
     const suppressPairGeneratingPresentation = activeGenerationReadiness.blocked;
-    const resumeVisibleGenerating = resumeGenerating || resumeSingleFlightInFlight;
-    const coverVisibleGenerating = coverGenerating || coverSingleFlightInFlight;
+    // Keep pair authority consistent with the exact local booleans that can make the artifact cards render "Generating...".
+    const resumeVisibleGenerating = resumeAutoGenerating || resumeGenerating || resumeSingleFlightInFlight;
+    const coverVisibleGenerating = coverAutoGenerating || coverGenerating || coverSingleFlightInFlight;
     const resumeStatus: "missing" | "generating" | "ready" | "failed" = hasUsableResume
       ? "ready"
       : !suppressPairGeneratingPresentation &&
@@ -7066,11 +7067,13 @@ export default function StudioPage() {
     allowStaleArtifactPreview,
     analysisScore,
     autoGenerationInFlight,
+    coverAutoGenerating,
     coverGenerating,
     coverSingleFlightInFlight,
     coverState.artifactFailure,
     hasUsableCoverLetter,
     hasUsableResume,
+    resumeAutoGenerating,
     resumeGenerating,
     resumeSingleFlightInFlight,
     resumeState.artifactFailure,
@@ -7995,8 +7998,8 @@ export default function StudioPage() {
   const postUnlockModel = useMemo(() => {
     if (!postUnlockActive) return null;
 
-    const resumeVisibleGenerating = resumeGenerating || resumeSingleFlightInFlight;
-    const coverVisibleGenerating = coverGenerating || coverSingleFlightInFlight;
+    const resumeVisibleGenerating = resumeAutoGenerating || resumeGenerating || resumeSingleFlightInFlight;
+    const coverVisibleGenerating = coverAutoGenerating || coverGenerating || coverSingleFlightInFlight;
 
     const resumeStatus: "missing" | "generating" | "ready" | "failed" = hasUsableResume
       ? "ready"
@@ -8077,6 +8080,7 @@ export default function StudioPage() {
     analysisLoading,
     analysisScore,
     autoGenerationInFlight,
+    coverAutoGenerating,
     coverGenerating,
     coverSingleFlightInFlight,
     coverState.artifactFailure,
@@ -8091,6 +8095,7 @@ export default function StudioPage() {
     postUnlockNewReadiness,
     postUnlockParams.priorReadiness,
     postUnlockParams.priorScore,
+    resumeAutoGenerating,
     resumeGenerating,
     resumeSingleFlightInFlight,
     resumeState.artifactFailure,

@@ -327,18 +327,35 @@ describe("Studio generation authority transition", () => {
     const shell = screen.queryByTestId("studio-generation-ready-shell");
     if (shell) {
       fireEvent.click(screen.getByTestId("studio-generation-ready-primary"));
-    }
 
-    await waitFor(() => {
-      const calls = scrollSpy.mock.calls;
-      const didSmoothTop = calls.some((call) => {
-        const arg0 = call[0] as unknown;
-        if (!arg0 || typeof arg0 !== "object") return false;
-        const record = arg0 as { top?: unknown; behavior?: unknown };
-        return record.top === 0 && record.behavior === "smooth";
+      await waitFor(() => {
+        const calls = scrollSpy.mock.calls;
+        const didSmoothTop = calls.some((call) => {
+          const arg0 = call[0] as unknown;
+          if (!arg0 || typeof arg0 !== "object") return false;
+          const record = arg0 as { top?: unknown; behavior?: unknown };
+          return record.top === 0 && record.behavior === "smooth";
+        });
+        expect(didSmoothTop).toBe(true);
       });
-      expect(didSmoothTop).toBe(true);
-    });
+    } else {
+      // Some Studio entry modes auto-start (or immediately show) generation without a shell click.
+      await screen.findByTestId("studio-workflow-authority");
+      expect(
+        within(screen.getByTestId("studio-workflow-authority")).getByTestId("workflow-authority-headline"),
+      ).toHaveTextContent("Generating your documents...");
+
+      await waitFor(() => {
+        const calls = scrollSpy.mock.calls;
+        const didAutoTop = calls.some((call) => {
+          const arg0 = call[0] as unknown;
+          if (!arg0 || typeof arg0 !== "object") return false;
+          const record = arg0 as { top?: unknown; behavior?: unknown };
+          return record.top === 0 && record.behavior === "auto";
+        });
+        expect(didAutoTop).toBe(true);
+      });
+    }
 
     scrollSpy.mockRestore();
   });
