@@ -117,6 +117,27 @@ describe("workflow orchestrator contract", () => {
     expect(orchestrator.authorityState.trustTone).toBe("in_progress");
   });
 
+  it("visible local generation (artifact.generating) overrides generation_ready even when artifacts are still missing", () => {
+    const orchestrator = resolveWorkflowOrchestrator(
+      baseInput({
+        generationReadiness: readiness("ready", false),
+        artifact: {
+          hasResume: false,
+          hasCoverLetter: false,
+          pairStatus: "missing",
+          generating: true,
+          failure: null,
+        },
+        resume: { status: "missing" },
+        coverLetter: { status: "missing" },
+        generationReady: { dismissed: false, phase: "ready" },
+      }),
+    );
+
+    expect(orchestrator.authorityState.canonicalState).toBe("generation_in_progress");
+    expect(orchestrator.authorityState.trustTone).toBe("in_progress");
+  });
+
   it("enforces precedence: unlock flow suppresses post-unlock outcome", () => {
     const orchestrator = resolveWorkflowOrchestrator(
       baseInput({

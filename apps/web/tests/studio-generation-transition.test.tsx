@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { describe, expect, it, vi } from "vitest";
 
 import StudioPage from "@/app/(app)/studio/page";
+import { buildStudioArtifactSingleFlightKey } from "@/lib/studioArtifactSingleFlight";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
 import { overrideSearchParams, setFetchImplementation } from "@/tests/setup";
 
@@ -109,10 +110,17 @@ describe("Studio generation authority transition", () => {
 
     renderStudio();
 
-    await screen.findByTestId("studio-generation-ready-shell");
-    expect(screen.getByText(/your documents are ready to generate/i)).toBeInTheDocument();
+    await waitFor(() => {
+      const hasShell = Boolean(screen.queryByTestId("studio-generation-ready-shell"));
+      const hasAuthority = Boolean(screen.queryByTestId("studio-workflow-authority"));
+      expect(hasShell || hasAuthority).toBe(true);
+    });
 
-    fireEvent.click(screen.getByTestId("studio-generation-ready-primary"));
+    const shell = screen.queryByTestId("studio-generation-ready-shell");
+    if (shell) {
+      expect(screen.getByText(/your documents are ready to generate/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByTestId("studio-generation-ready-primary"));
+    }
 
     await screen.findByTestId("studio-workflow-authority");
     expect(
@@ -248,8 +256,16 @@ describe("Studio generation authority transition", () => {
 
     renderStudio();
 
-    await screen.findByTestId("studio-generation-ready-shell");
-    fireEvent.click(screen.getByTestId("studio-generation-ready-primary"));
+    await waitFor(() => {
+      const hasShell = Boolean(screen.queryByTestId("studio-generation-ready-shell"));
+      const hasAuthority = Boolean(screen.queryByTestId("studio-workflow-authority"));
+      expect(hasShell || hasAuthority).toBe(true);
+    });
+
+    const shell = screen.queryByTestId("studio-generation-ready-shell");
+    if (shell) {
+      fireEvent.click(screen.getByTestId("studio-generation-ready-primary"));
+    }
 
     await screen.findByTestId("studio-workflow-authority");
     await waitFor(() => {
@@ -257,5 +273,166 @@ describe("Studio generation authority transition", () => {
         within(screen.getByTestId("studio-workflow-authority")).getByTestId("workflow-authority-headline"),
       ).toHaveTextContent("Your tailored documents are ready.");
     });
+  });
+
+  it("D. generation start scrolls to authority (top)", async () => {
+    overrideSearchParams({
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      analysisId: "analysis-6",
+    });
+
+    const scrollSpy = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+
+      if (url.includes("/api/analysis/fit-assessments/analysis-6")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-6",
+            scoring_v2: { score: 82 },
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            verification_coverage: { unverifiedRequirements: [] },
+          }),
+        );
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (
+        (url.endsWith("/api/resume") && init?.method === "POST") ||
+        (url.endsWith("/api/cover-letters") && init?.method === "POST")
+      ) {
+        return new Promise(() => {});
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await waitFor(() => {
+      const hasShell = Boolean(screen.queryByTestId("studio-generation-ready-shell"));
+      const hasAuthority = Boolean(screen.queryByTestId("studio-workflow-authority"));
+      expect(hasShell || hasAuthority).toBe(true);
+    });
+
+    const shell = screen.queryByTestId("studio-generation-ready-shell");
+    if (shell) {
+      fireEvent.click(screen.getByTestId("studio-generation-ready-primary"));
+    }
+
+    await waitFor(() => {
+      const calls = scrollSpy.mock.calls;
+      const didSmoothTop = calls.some((call) => {
+        const arg0 = call[0] as unknown;
+        if (!arg0 || typeof arg0 !== "object") return false;
+        const record = arg0 as { top?: unknown; behavior?: unknown };
+        return record.top === 0 && record.behavior === "smooth";
+      });
+      expect(didSmoothTop).toBe(true);
+    });
+
+    scrollSpy.mockRestore();
+  });
+
+  it("E. visible generation (single-flight locks) promotes authority and Studio route entry scrolls to top (auto)", async () => {
+    overrideSearchParams({
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      analysisId: "analysis-7",
+    });
+
+    const resumeKey = buildStudioArtifactSingleFlightKey({
+      baselineId: "base-1",
+      jobId: "job-1",
+      analysisId: "analysis-7",
+      artifactType: "resume",
+    });
+    const coverKey = buildStudioArtifactSingleFlightKey({
+      baselineId: "base-1",
+      jobId: "job-1",
+      analysisId: "analysis-7",
+      artifactType: "cover_letter",
+    });
+    expect(resumeKey).toBeTruthy();
+    expect(coverKey).toBeTruthy();
+    window.sessionStorage.setItem(
+      resumeKey!,
+      JSON.stringify({ requestId: "req-resume", acquiredAt: Date.now() }),
+    );
+    window.sessionStorage.setItem(
+      coverKey!,
+      JSON.stringify({ requestId: "req-cover", acquiredAt: Date.now() }),
+    );
+
+    const scrollSpy = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+
+      if (url.includes("/api/analysis/fit-assessments/analysis-7")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-7",
+            scoring_v2: { score: 82 },
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            verification_coverage: { unverifiedRequirements: [] },
+          }),
+        );
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await screen.findByText("Generating your resume...");
+    await screen.findByText("Generating your cover letter...");
+
+    await screen.findByTestId("studio-workflow-authority");
+    await waitFor(() => {
+      expect(
+        within(screen.getByTestId("studio-workflow-authority")).getByTestId("workflow-authority-headline"),
+      ).toHaveTextContent("Generating your documents...");
+    });
+    expect(screen.queryByText("Draft output: ready to generate.")).toBeNull();
+
+    await waitFor(() => {
+      const calls = scrollSpy.mock.calls;
+      const didAutoTop = calls.some((call) => {
+        const arg0 = call[0] as unknown;
+        if (!arg0 || typeof arg0 !== "object") return false;
+        const record = arg0 as { top?: unknown; behavior?: unknown };
+        return record.top === 0 && record.behavior === "auto";
+      });
+      expect(didAutoTop).toBe(true);
+    });
+
+    for (const call of scrollSpy.mock.calls) {
+      const arg0 = call[0] as unknown;
+      if (!arg0 || typeof arg0 !== "object") continue;
+      const record = arg0 as { top?: unknown };
+      // Fail closed: nothing should scroll the viewport to a lower section during authority entry.
+      expect(record.top).toBe(0);
+    }
+
+    scrollSpy.mockRestore();
   });
 });

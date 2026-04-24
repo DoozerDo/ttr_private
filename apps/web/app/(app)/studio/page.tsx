@@ -1078,6 +1078,43 @@ export default function StudioPage() {
   const critiquePanelTrackedRef = useRef<string | null>(null);
   const previousCritiqueSignatureRef = useRef<string | null>(null);
   const previousCritiqueIssuesRef = useRef<DocumentCritiqueIssue[]>([]);
+
+  const scrollToStudioTop = useCallback((behavior: ScrollBehavior) => {
+    if (typeof window === "undefined") return;
+    if (typeof window.scrollTo !== "function") return;
+    const isJsdom = typeof navigator !== "undefined" && /jsdom/i.test(navigator.userAgent ?? "");
+    const scrollToAny = window.scrollTo as unknown as { mock?: unknown; getMockName?: unknown };
+    const scrollToIsMocked = Boolean(scrollToAny?.mock) || typeof scrollToAny?.getMockName === "function";
+    if (isJsdom && !scrollToIsMocked) return;
+    try {
+      window.scrollTo({ top: 0, behavior });
+    } catch {
+      // Some environments (e.g. JSDOM) stub scrollTo without implementing it.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    let previous: ScrollRestoration | null = null;
+    try {
+      previous = window.history?.scrollRestoration ?? null;
+      window.history.scrollRestoration = "manual";
+    } catch {
+      // ignore
+    }
+
+    scrollToStudioTop("auto");
+
+    return () => {
+      if (!previous) return;
+      try {
+        window.history.scrollRestoration = previous;
+      } catch {
+        // ignore
+      }
+    };
+  }, [scrollToStudioTop]);
   const finalRoleCheckTrackedRef = useRef<string | null>(null);
   const finalRoleAdjustmentClickedRef = useRef<string | null>(null);
   const resumeArtifactViewedSignatureRef = useRef<string | null>(null);
@@ -6949,10 +6986,12 @@ export default function StudioPage() {
 
   const workflowOrchestratorCore = useMemo(() => {
     const suppressPairGeneratingPresentation = activeGenerationReadiness.blocked;
+    const resumeVisibleGenerating = resumeGenerating || resumeSingleFlightInFlight;
+    const coverVisibleGenerating = coverGenerating || coverSingleFlightInFlight;
     const resumeStatus: "missing" | "generating" | "ready" | "failed" = hasUsableResume
       ? "ready"
       : !suppressPairGeneratingPresentation &&
-          (resumeGenerating || autoGenerationInFlight || studioArtifactPairStatus === "in_progress")
+          (resumeVisibleGenerating || autoGenerationInFlight || studioArtifactPairStatus === "in_progress")
         ? "generating"
         : resumeState.artifactFailure
           ? "failed"
@@ -6961,7 +7000,7 @@ export default function StudioPage() {
     const coverStatus: "missing" | "generating" | "ready" | "failed" = hasUsableCoverLetter
       ? "ready"
       : !suppressPairGeneratingPresentation &&
-          (coverGenerating || autoGenerationInFlight || studioArtifactPairStatus === "in_progress")
+          (coverVisibleGenerating || autoGenerationInFlight || studioArtifactPairStatus === "in_progress")
         ? "generating"
         : coverState.artifactFailure
           ? "failed"
@@ -6979,8 +7018,8 @@ export default function StudioPage() {
         generating:
           !suppressPairGeneratingPresentation &&
           (autoGenerationInFlight ||
-            resumeGenerating ||
-            coverGenerating ||
+            resumeVisibleGenerating ||
+            coverVisibleGenerating ||
             studioArtifactPairStatus === "in_progress"),
         failure: topLevelArtifactFailure
           ? { category: topLevelArtifactFailure.category, retryable: topLevelArtifactFailure.retryable }
@@ -7028,10 +7067,12 @@ export default function StudioPage() {
     analysisScore,
     autoGenerationInFlight,
     coverGenerating,
+    coverSingleFlightInFlight,
     coverState.artifactFailure,
     hasUsableCoverLetter,
     hasUsableResume,
     resumeGenerating,
+    resumeSingleFlightInFlight,
     resumeState.artifactFailure,
     searchParamValue,
     studioArtifactPairStatus,
@@ -7710,7 +7751,10 @@ export default function StudioPage() {
       cta={
         <div className="flex flex-wrap gap-3">
           <FormButton
-            onClick={() => void handleResumeDraft()}
+            onClick={() => {
+              scrollToStudioTop("smooth");
+              void handleResumeDraft();
+            }}
             disabled={resumeGenerating}
           >
             {resumeGenerating
@@ -7721,7 +7765,10 @@ export default function StudioPage() {
           </FormButton>
           <FormButton
             variant="secondary"
-            onClick={() => void handleCoverDraft()}
+            onClick={() => {
+              scrollToStudioTop("smooth");
+              void handleCoverDraft();
+            }}
             disabled={coverGenerating}
           >
             {coverGenerating
@@ -7948,9 +7995,12 @@ export default function StudioPage() {
   const postUnlockModel = useMemo(() => {
     if (!postUnlockActive) return null;
 
+    const resumeVisibleGenerating = resumeGenerating || resumeSingleFlightInFlight;
+    const coverVisibleGenerating = coverGenerating || coverSingleFlightInFlight;
+
     const resumeStatus: "missing" | "generating" | "ready" | "failed" = hasUsableResume
       ? "ready"
-      : resumeGenerating || autoGenerationInFlight || studioArtifactPairStatus === "in_progress"
+      : resumeVisibleGenerating || autoGenerationInFlight || studioArtifactPairStatus === "in_progress"
         ? "generating"
         : resumeState.artifactFailure
           ? "failed"
@@ -7958,7 +8008,7 @@ export default function StudioPage() {
 
     const coverStatus: "missing" | "generating" | "ready" | "failed" = hasUsableCoverLetter
       ? "ready"
-      : coverGenerating || autoGenerationInFlight || studioArtifactPairStatus === "in_progress"
+      : coverVisibleGenerating || autoGenerationInFlight || studioArtifactPairStatus === "in_progress"
         ? "generating"
         : coverState.artifactFailure
           ? "failed"
@@ -7975,8 +8025,8 @@ export default function StudioPage() {
         pairStatus: studioArtifactPairStatus ?? null,
         generating:
           autoGenerationInFlight ||
-          resumeGenerating ||
-          coverGenerating ||
+          resumeVisibleGenerating ||
+          coverVisibleGenerating ||
           studioArtifactPairStatus === "in_progress",
         failure: topLevelArtifactFailure
           ? { category: topLevelArtifactFailure.category, retryable: topLevelArtifactFailure.retryable }
@@ -8028,6 +8078,7 @@ export default function StudioPage() {
     analysisScore,
     autoGenerationInFlight,
     coverGenerating,
+    coverSingleFlightInFlight,
     coverState.artifactFailure,
     generateNowEligible,
     generationReadyDismissed,
@@ -8041,6 +8092,7 @@ export default function StudioPage() {
     postUnlockParams.priorReadiness,
     postUnlockParams.priorScore,
     resumeGenerating,
+    resumeSingleFlightInFlight,
     resumeState.artifactFailure,
     searchParamValue,
     strengthenPrimaryHref,
@@ -8119,6 +8171,7 @@ export default function StudioPage() {
     !isApplicationApplied &&
     !showReadinessRecoveryExperience &&
     !activeGenerationReadiness.blocked &&
+    workflowOrchestratorCore.authorityState.canonicalState !== "generation_in_progress" &&
     generationReadyPhase !== "generating" &&
     (generationReadyModel.isGenerationReadyPriority || generationReadyPhase === "failed");
 
@@ -8282,6 +8335,7 @@ export default function StudioPage() {
     async (source: "shell" | "post_unlock") => {
       if (generationReadyPhase === "generating") return;
 
+      scrollToStudioTop("smooth");
       setGenerationReadyFailure(null);
       setGenerationReadyPhase("generating");
       trackEvent("generation_ready_shell_started", {
@@ -8327,6 +8381,7 @@ export default function StudioPage() {
       generationReadyPhase,
       handleCoverDraft,
       handleResumeDraft,
+      scrollToStudioTop,
       trackEvent,
     ],
   );
@@ -8979,7 +9034,10 @@ export default function StudioPage() {
                   </Link>
                 ) : null}
                 <FormButton
-                  onClick={() => void handleResumeDraft()}
+                  onClick={() => {
+                    scrollToStudioTop("smooth");
+                    void handleResumeDraft();
+                  }}
                   disabled={resumeGenerating}
                   className="bg-indigo-600 text-white hover:bg-indigo-500"
                 >
@@ -8987,7 +9045,10 @@ export default function StudioPage() {
                 </FormButton>
                 <FormButton
                   variant="secondary"
-                  onClick={() => void handleCoverDraft()}
+                  onClick={() => {
+                    scrollToStudioTop("smooth");
+                    void handleCoverDraft();
+                  }}
                   disabled={coverGenerating}
                 >
                   {coverGenerating ? "Generating..." : "Generate Cover Letter Draft"}
@@ -9438,7 +9499,13 @@ export default function StudioPage() {
                 <p className="text-xs text-slate-400">{resumeState.artifactFailure.explanation}</p>
               </div>
               <div className="flex justify-end">
-                <FormButton variant="secondary" onClick={() => void handleResumeDraft()}>
+                <FormButton
+                  variant="secondary"
+                  onClick={() => {
+                    scrollToStudioTop("smooth");
+                    void handleResumeDraft();
+                  }}
+                >
                   Retry resume generation
                 </FormButton>
               </div>
@@ -9446,7 +9513,10 @@ export default function StudioPage() {
           ) : (
             <ArtifactFailureState
               failure={resumeState.artifactFailure}
-              onRetry={() => void handleResumeDraft()}
+              onRetry={() => {
+                scrollToStudioTop("smooth");
+                void handleResumeDraft();
+              }}
               retryLabel="Retry resume generation"
             />
           )
@@ -9632,7 +9702,10 @@ export default function StudioPage() {
             {!generateNowEligible ? (
               <FormButton
                 variant="secondary"
-                onClick={() => void handleCoverDraft()}
+                onClick={() => {
+                  scrollToStudioTop("smooth");
+                  void handleCoverDraft();
+                }}
                 disabled={coverGenerating}
                 data-testid="studio-cover-generate-button"
               >
@@ -9775,7 +9848,10 @@ export default function StudioPage() {
             ) : (
               <ArtifactFailureState
                 failure={coverState.artifactFailure}
-                onRetry={() => void handleCoverDraft()}
+                onRetry={() => {
+                  scrollToStudioTop("smooth");
+                  void handleCoverDraft();
+                }}
                 retryLabel="Retry cover letter generation"
               />
             )
@@ -9783,7 +9859,10 @@ export default function StudioPage() {
             isCoverFailureRetryEligible ? (
               <ArtifactFailureState
                 failure={coverState.artifactFailure}
-                onRetry={() => void handleCoverDraft()}
+                onRetry={() => {
+                  scrollToStudioTop("smooth");
+                  void handleCoverDraft();
+                }}
                 retryLabel="Retry cover letter generation"
               />
             ) : (
