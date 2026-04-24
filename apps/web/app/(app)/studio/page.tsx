@@ -3443,6 +3443,7 @@ export default function StudioPage() {
   }, [generationWorkflowScope, needsAutoGeneration]);
   const resumeAutoGenerating =
     generateNowEligible &&
+    !activeGenerationReadiness.blocked &&
     !hasResumeArtifact &&
     !resumeState.artifactFailure &&
     (resumeGenerating ||
@@ -3452,6 +3453,7 @@ export default function StudioPage() {
       needsAutoGeneration);
   const coverAutoGenerating =
     generateNowEligible &&
+    !activeGenerationReadiness.blocked &&
     !hasCoverLetterArtifact &&
     !coverState.artifactFailure &&
     (coverGenerating ||
@@ -3462,11 +3464,13 @@ export default function StudioPage() {
   // In the generate-now lane, avoid a "not generated yet" flash before the auto-generation effect fires.
   const resumeGenerateNowPending =
     generateNowEligible &&
+    !activeGenerationReadiness.blocked &&
     !resumeState.response &&
     !resumeState.error &&
     !resumeState.artifactFailure;
   const coverGenerateNowPending =
     generateNowEligible &&
+    !activeGenerationReadiness.blocked &&
     !coverState.response &&
     !coverState.error &&
     !coverState.artifactFailure;

@@ -265,6 +265,12 @@ describe("Studio generation authority transition", () => {
     const shell = screen.queryByTestId("studio-generation-ready-shell");
     if (shell) {
       fireEvent.click(screen.getByTestId("studio-generation-ready-primary"));
+    } else {
+      // Fall back to triggering generation via artifact CTAs when the shell isn't present.
+      const resumeButton = screen.queryByRole("button", { name: /generate resume/i });
+      if (resumeButton) fireEvent.click(resumeButton);
+      const coverButton = screen.queryByRole("button", { name: /generate cover/i });
+      if (coverButton) fireEvent.click(coverButton);
     }
 
     await screen.findByTestId("studio-workflow-authority");
