@@ -3429,6 +3429,7 @@ export default function StudioPage() {
   const needsAutoGeneration =
     generateNowEligible &&
     isInstantDraftExperience &&
+    Boolean(effectiveBaselineVersionId) &&
     !hasCompletedGeneration &&
     studioArtifactPairStatus === "missing" &&
     !resumeState.response &&
@@ -3442,35 +3443,35 @@ export default function StudioPage() {
     return buildWorkflowRequestKey("auto_generation", generationWorkflowScope);
   }, [generationWorkflowScope, needsAutoGeneration]);
   const resumeAutoGenerating =
-    generateNowEligible &&
-    !activeGenerationReadiness.blocked &&
-    !hasResumeArtifact &&
-    !resumeState.artifactFailure &&
-    (resumeGenerating ||
-      resumeSingleFlightInFlight ||
-      autoGenerationInFlight ||
-      studioArtifactPairStatus === "in_progress" ||
-      needsAutoGeneration);
+  generateNowEligible &&
+  !activeGenerationReadiness.blocked &&
+  !hasResumeArtifact &&
+  !resumeState.artifactFailure &&
+  (resumeGenerating ||
+    resumeSingleFlightInFlight ||
+    autoGenerationInFlight ||
+    studioArtifactPairStatus === "in_progress");
   const coverAutoGenerating =
-    generateNowEligible &&
-    !activeGenerationReadiness.blocked &&
-    !hasCoverLetterArtifact &&
-    !coverState.artifactFailure &&
-    (coverGenerating ||
-      coverSingleFlightInFlight ||
-      autoGenerationInFlight ||
-      studioArtifactPairStatus === "in_progress" ||
-      needsAutoGeneration);
-  // In the generate-now lane, avoid a "not generated yet" flash before the auto-generation effect fires.
+  generateNowEligible &&
+  !activeGenerationReadiness.blocked &&
+  !hasCoverLetterArtifact &&
+  !coverState.artifactFailure &&
+  (coverGenerating ||
+    coverSingleFlightInFlight ||
+    autoGenerationInFlight ||
+    studioArtifactPairStatus === "in_progress");
+  // Pending state reflects an explicit generation start, not auto-generation eligibility alone.
   const resumeGenerateNowPending =
     generateNowEligible &&
     !activeGenerationReadiness.blocked &&
+    Boolean(effectiveBaselineVersionId) &&
     !resumeState.response &&
     !resumeState.error &&
     !resumeState.artifactFailure;
   const coverGenerateNowPending =
     generateNowEligible &&
     !activeGenerationReadiness.blocked &&
+    Boolean(effectiveBaselineVersionId) &&
     !coverState.response &&
     !coverState.error &&
     !coverState.artifactFailure;
@@ -5076,7 +5077,32 @@ export default function StudioPage() {
       });
       return false;
     }
+    if (!effectiveBaselineVersionId) {
+      finishStudioGenerationRequest("resume", request, "blocked", requestScope);
+      const message = "Your resume snapshot is still loading. Please wait a moment and try again.";
+      setResumeState((current) => ({
+        ...current,
+        error: message,
+        artifactFailure: {
+          artifactType: "resume",
+          headline: "Generation cannot start yet",
+          explanation: message,
+          nextStep: "Wait for your resume snapshot to load, then retry generation.",
+          retryable: true,
+          category: "invalid_pair_state",
+          code: "missing_baseline_version",
+        },
+      }));
+      releaseStudioArtifactSingleFlight({
+        baselineId: effectiveBaselineId ?? null,
+        jobId: effectiveJobId ?? null,
+        analysisId: requestedAnalysisId ?? null,
+        artifactType,
+      });
+      return false;
+    }
     let activityOutcome: "success" | "failure" = "failure";
+    let requestFinalStatus: "completed" | "timeout" = "completed";
     setResumeGenerating(true);
     startWorkflowActivity("generation_running");
     const shouldShowUnlockConfirmation = isFirstGenerationAfterUnlock;
@@ -5106,12 +5132,20 @@ export default function StudioPage() {
     setResumeAuditId(undefined);
     const verifiedOnly = Boolean(opts?.verifiedOnly) || generateNowEligible;
     const payload = normalizeGenerationPayload(buildResumePayload(verifiedOnly), "resume"); 
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timeoutMs = 2 * 60_000;
+    const timeoutId =
+      typeof window !== "undefined" && controller
+        ? window.setTimeout(() => controller.abort(), timeoutMs)
+        : null;
     try {
       const response = await fetch("/api/resume", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        ...(controller ? { signal: controller.signal } : {}),
       });
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
       const responsePayload = await readResponsePayload(response);
       if (
         isWorkflowRequestStale(requestScope, currentWorkflowScopeRef.current) ||
@@ -5325,6 +5359,10 @@ export default function StudioPage() {
       activityOutcome = "success";
       return true;
     } catch (error) {
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      if (error instanceof DOMException && error.name === "AbortError") {
+        requestFinalStatus = "timeout";
+      }
       if (
         isWorkflowRequestStale(requestScope, currentWorkflowScopeRef.current) ||
         activeResumeGenerationRef.current?.requestId !== request.requestId
@@ -5335,9 +5373,14 @@ export default function StudioPage() {
       trackEvent("resume_generation_limited", {
         source: "studio",
         analysisId: requestedAnalysisId || undefined,
-        reasonCode: "exception",
+        reasonCode: requestFinalStatus === "timeout" ? "timeout" : "exception",
       });
-      const message = error instanceof Error ? error.message : "Resume generation failed.";
+      const message =
+        requestFinalStatus === "timeout"
+          ? "Resume generation timed out. Please try again."
+          : error instanceof Error
+            ? error.message
+            : "Resume generation failed.";
       setResumeState((current) => ({
         ...current,
         error: message,
@@ -5347,18 +5390,19 @@ export default function StudioPage() {
           explanation: message,
           nextStep: "Review the input and try again with stronger baseline evidence.",
           retryable: true,
-          category: "generation_failed",
-          code: "generation_failed",
+          category: requestFinalStatus === "timeout" ? "generation_timeout" : "generation_failed",
+          code: requestFinalStatus === "timeout" ? "generation_timeout" : "generation_failed",
         },
       }));
       setStudioArtifactPairStatus("failed");
       return false;
     } finally {
-      if (activeResumeGenerationRef.current?.requestId === request.requestId) {
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      if (!activeResumeGenerationRef.current || activeResumeGenerationRef.current?.requestId === request.requestId) {
         setResumeGenerating(false);
       }
       await stopWorkflowActivity("generation_running", activityOutcome);
-      finishStudioGenerationRequest("resume", request, "completed", requestScope);
+      finishStudioGenerationRequest("resume", request, requestFinalStatus, requestScope);
     }
   };
 
@@ -5655,7 +5699,32 @@ export default function StudioPage() {
       });
       return false;
     }
+    if (!effectiveBaselineVersionId) {
+      finishStudioGenerationRequest("cover_letter", request, "blocked", requestScope);
+      const message = "Your resume snapshot is still loading. Please wait a moment and try again.";
+      setCoverState((current) => ({
+        ...current,
+        error: message,
+        artifactFailure: {
+          artifactType: "cover_letter",
+          headline: "Generation cannot start yet",
+          explanation: message,
+          nextStep: "Wait for your resume snapshot to load, then retry generation.",
+          retryable: true,
+          category: "invalid_pair_state",
+          code: "missing_baseline_version",
+        },
+      }));
+      releaseStudioArtifactSingleFlight({
+        baselineId: effectiveBaselineId ?? null,
+        jobId: effectiveJobId ?? null,
+        analysisId: requestedAnalysisId ?? null,
+        artifactType,
+      });
+      return false;
+    }
     let activityOutcome: "success" | "failure" = "failure";
+    let requestFinalStatus: "completed" | "timeout" = "completed";
     setCoverGenerating(true);
     startWorkflowActivity("generation_running");
     const shouldShowUnlockConfirmation = isFirstGenerationAfterUnlock;
@@ -5686,12 +5755,20 @@ export default function StudioPage() {
     setCoverLetterComplianceBlocked(null);
     const verifiedOnly = Boolean(opts?.verifiedOnly) || generateNowEligible;
     const payload = normalizeGenerationPayload(buildCoverLetterPayload(verifiedOnly), "cover_letter"); 
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timeoutMs = 2 * 60_000;
+    const timeoutId =
+      typeof window !== "undefined" && controller
+        ? window.setTimeout(() => controller.abort(), timeoutMs)
+        : null;
     try {
       const response = await fetch("/api/cover-letters", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        ...(controller ? { signal: controller.signal } : {}),
       });
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
       const responsePayload = await readResponsePayload(response);
       if (
         isWorkflowRequestStale(requestScope, currentWorkflowScopeRef.current) ||
@@ -5895,6 +5972,10 @@ export default function StudioPage() {
       activityOutcome = "success";
       return true;
     } catch (error) {
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      if (error instanceof DOMException && error.name === "AbortError") {
+        requestFinalStatus = "timeout";
+      }
       if (
         isWorkflowRequestStale(requestScope, currentWorkflowScopeRef.current) ||
         activeCoverGenerationRef.current?.requestId !== request.requestId
@@ -5905,10 +5986,15 @@ export default function StudioPage() {
       trackEvent("cover_letter_generation_limited", {
         source: "studio",
         analysisId: requestedAnalysisId || undefined,
-        reasonCode: "exception",
+        reasonCode: requestFinalStatus === "timeout" ? "timeout" : "exception",
       });
       console.error("Cover letter generation failed", error);
-      const message = error instanceof Error ? error.message : "Cover letter generation failed.";
+      const message =
+        requestFinalStatus === "timeout"
+          ? "Cover letter generation timed out. Please try again."
+          : error instanceof Error
+            ? error.message
+            : "Cover letter generation failed.";
       setCoverState((current) => ({
         ...current,
         error: message,
@@ -5918,18 +6004,19 @@ export default function StudioPage() {
           explanation: message,
           nextStep: "Review the input and try again with stronger baseline evidence.",
           retryable: true,
-          category: "generation_failed",
-          code: "generation_failed",
+          category: requestFinalStatus === "timeout" ? "generation_timeout" : "generation_failed",
+          code: requestFinalStatus === "timeout" ? "generation_timeout" : "generation_failed",
         },
       }));
       setStudioArtifactPairStatus("failed");
       return false;
     } finally {
-      if (activeCoverGenerationRef.current?.requestId === request.requestId) {
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      if (!activeCoverGenerationRef.current || activeCoverGenerationRef.current?.requestId === request.requestId) {
         setCoverGenerating(false);
       }
       await stopWorkflowActivity("generation_running", activityOutcome);
-      finishStudioGenerationRequest("cover_letter", request, "completed", requestScope);
+      finishStudioGenerationRequest("cover_letter", request, requestFinalStatus, requestScope);
     }
   };
 
@@ -6122,6 +6209,7 @@ export default function StudioPage() {
   useEffect(() => {
     if (!studioArtifactsHydrated) return;
     if (!autoGenerationSignature) return;
+    if (!effectiveBaselineVersionId) return;
     if (autoGenerationSignatureRef.current === autoGenerationSignature) return;
     if (studioArtifactPresentationStateRef.current === "hydrated") return;
     if (suppressAutoGenerationForGenerationReadyShell) return;
@@ -6209,6 +6297,7 @@ export default function StudioPage() {
     studioArtifactPairStatus,
     studioArtifactsHydrated,
     suppressAutoGenerationForGenerationReadyShell,
+    effectiveBaselineVersionId,
   ]);
 
   useEffect(() => {
@@ -8428,6 +8517,7 @@ export default function StudioPage() {
     if (generationIntentHandledRef.current) return;
     if (!generationReadyShellActive) return;
     if (generationReadyPhase !== "ready") return;
+    if (!effectiveBaselineVersionId) return;
     generationIntentHandledRef.current = true;
 
     void (async () => {
@@ -8446,6 +8536,7 @@ export default function StudioPage() {
       }
     })();
   }, [
+    effectiveBaselineVersionId,
     generationReadyPhase,
     generationReadyShellActive,
     hasGenerateIntent,
