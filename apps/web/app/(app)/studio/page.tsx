@@ -6989,8 +6989,10 @@ export default function StudioPage() {
   const workflowOrchestratorCore = useMemo(() => {
     const suppressPairGeneratingPresentation = activeGenerationReadiness.blocked;
     // Keep pair authority consistent with the exact local booleans that can make the artifact cards render "Generating...".
-    const resumeVisibleGenerating = resumeAutoGenerating || resumeGenerating || resumeSingleFlightInFlight;
-    const coverVisibleGenerating = coverAutoGenerating || coverGenerating || coverSingleFlightInFlight;
+    const resumeVisibleGenerating =
+      resumeAutoGenerating || resumeGenerateNowPending || resumeGenerating || resumeSingleFlightInFlight;
+    const coverVisibleGenerating =
+      coverAutoGenerating || coverGenerateNowPending || coverGenerating || coverSingleFlightInFlight;
     const resumeStatus: "missing" | "generating" | "ready" | "failed" = hasUsableResume
       ? "ready"
       : !suppressPairGeneratingPresentation &&
@@ -7071,12 +7073,14 @@ export default function StudioPage() {
     autoGenerationInFlight,
     coverAutoGenerating,
     coverGenerating,
+    coverGenerateNowPending,
     coverSingleFlightInFlight,
     coverState.artifactFailure,
     hasUsableCoverLetter,
     hasUsableResume,
     resumeAutoGenerating,
     resumeGenerating,
+    resumeGenerateNowPending,
     resumeSingleFlightInFlight,
     resumeState.artifactFailure,
     searchParamValue,
@@ -7095,9 +7099,9 @@ export default function StudioPage() {
   const heroBody = workflowSurfaceAuthorityHero.body;
   const normalizedArtifacts = workflowOrchestratorCore.artifactState;
   const resumeVisibleGeneratingDebug =
-    resumeAutoGenerating || resumeGenerating || resumeSingleFlightInFlight;
+    resumeAutoGenerating || resumeGenerateNowPending || resumeGenerating || resumeSingleFlightInFlight;
   const coverVisibleGeneratingDebug =
-    coverAutoGenerating || coverGenerating || coverSingleFlightInFlight;
+    coverAutoGenerating || coverGenerateNowPending || coverGenerating || coverSingleFlightInFlight;
   const artifactGeneratingDebug =
     !activeGenerationReadiness.blocked &&
     (autoGenerationInFlight ||
@@ -8022,8 +8026,10 @@ export default function StudioPage() {
   const postUnlockModel = useMemo(() => {
     if (!postUnlockActive) return null;
 
-    const resumeVisibleGenerating = resumeAutoGenerating || resumeGenerating || resumeSingleFlightInFlight;
-    const coverVisibleGenerating = coverAutoGenerating || coverGenerating || coverSingleFlightInFlight;
+    const resumeVisibleGenerating =
+      resumeAutoGenerating || resumeGenerateNowPending || resumeGenerating || resumeSingleFlightInFlight;
+    const coverVisibleGenerating =
+      coverAutoGenerating || coverGenerateNowPending || coverGenerating || coverSingleFlightInFlight;
 
     const resumeStatus: "missing" | "generating" | "ready" | "failed" = hasUsableResume
       ? "ready"
@@ -8106,6 +8112,7 @@ export default function StudioPage() {
     autoGenerationInFlight,
     coverAutoGenerating,
     coverGenerating,
+    coverGenerateNowPending,
     coverSingleFlightInFlight,
     coverState.artifactFailure,
     generateNowEligible,
@@ -8121,6 +8128,7 @@ export default function StudioPage() {
     postUnlockParams.priorScore,
     resumeAutoGenerating,
     resumeGenerating,
+    resumeGenerateNowPending,
     resumeSingleFlightInFlight,
     resumeState.artifactFailure,
     searchParamValue,
