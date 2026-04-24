@@ -96,6 +96,27 @@ describe("workflow orchestrator contract", () => {
     expect(blockedOrchestrator.authorityState.trustTone).toBe("blocked");
   });
 
+  it("generation_in_progress always overrides generation_ready", () => {
+    const orchestrator = resolveWorkflowOrchestrator(
+      baseInput({
+        generationReadiness: readiness("ready", false),
+        artifact: {
+          hasResume: false,
+          hasCoverLetter: false,
+          pairStatus: "missing",
+          generating: true,
+          failure: null,
+        },
+        resume: { status: "generating" },
+        coverLetter: { status: "missing" },
+        generationReady: { dismissed: false, phase: "ready" },
+      }),
+    );
+
+    expect(orchestrator.authorityState.canonicalState).toBe("generation_in_progress");
+    expect(orchestrator.authorityState.trustTone).toBe("in_progress");
+  });
+
   it("enforces precedence: unlock flow suppresses post-unlock outcome", () => {
     const orchestrator = resolveWorkflowOrchestrator(
       baseInput({

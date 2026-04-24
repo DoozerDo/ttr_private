@@ -288,6 +288,32 @@ export function resolveWorkflowOrchestrator(input: WorkflowOrchestratorInput): W
     authorityState = safeAuthorityFallback("post_unlock_mismatch");
   }
 
+  const generationRunning =
+    Boolean(input.activity?.isActive) &&
+    Array.isArray(input.activity?.activeOperations) &&
+    input.activity.activeOperations.includes("generation_running");
+  const artifactGenerating =
+    Boolean(input.artifact.generating) ||
+    input.resume.status === "generating" ||
+    input.coverLetter.status === "generating" ||
+    String(input.artifact.pairStatus ?? "").toLowerCase() === "generating" ||
+    String(input.artifact.pairStatus ?? "").toLowerCase() === "in_progress";
+  const shouldPromoteGenerationInProgress =
+    !safeReadiness.blocked &&
+    input.workflowAuthority.workflowState !== "BLOCKED" &&
+    !unlockFlowActive &&
+    !postUnlockActive &&
+    (generationRunning || artifactGenerating);
+  if (shouldPromoteGenerationInProgress) {
+    authorityState = {
+      canonicalState: "generation_in_progress",
+      headline: "Generating your documents...",
+      body: "We're building your tailored resume and cover letter now.",
+      primaryAction: { label: "Open workspace", destination: "studio_workspace" },
+      trustTone: "in_progress",
+    };
+  }
+
   const normalizedArtifacts = normalizeWorkflowArtifactState({
     resume: {
       status: input.resume.status,
@@ -300,9 +326,9 @@ export function resolveWorkflowOrchestrator(input: WorkflowOrchestratorInput): W
       failure: input.coverLetter.failure ?? null,
     },
     artifactQuality: input.artifactQuality ?? null,
-    workflowCanonicalState: authority.canonicalState,
-    workflowTrustTone: authority.trustTone,
-    workflowIsBlocked: authority.trustTone === "blocked",
+    workflowCanonicalState: authorityState.canonicalState,
+    workflowTrustTone: authorityState.trustTone,
+    workflowIsBlocked: authorityState.trustTone === "blocked",
     allowStalePreview: Boolean(input.allowStaleArtifactPreview),
   });
 

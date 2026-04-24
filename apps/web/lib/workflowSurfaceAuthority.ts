@@ -139,6 +139,16 @@ export function resolveWorkflowSurfaceAuthority(input: {
     };
   }
 
+  if (pairGenerating && !blocked) {
+    return {
+      canonicalState: "generation_in_progress",
+      headline: "Generating your documents...",
+      body: "We're building your tailored resume and cover letter now.",
+      primaryAction: { label: "Open workspace", destination: "studio_workspace" },
+      trustTone: "in_progress",
+    };
+  }
+
   if (!blocked && (eligibleForGenerationReady || (generationReadyActive && generationPhase === "ready"))) {
     return {
       canonicalState: "generation_ready",
@@ -150,16 +160,6 @@ export function resolveWorkflowSurfaceAuthority(input: {
       },
       secondaryAction: { label: "Open workspace", destination: "studio_workspace" },
       trustTone: "ready",
-    };
-  }
-
-  if (pairGenerating && !blocked) {
-    return {
-      canonicalState: "generation_in_progress",
-      headline: "Generating your documents...",
-      body: "We're drafting your resume and cover letter now.",
-      primaryAction: { label: "Open workspace", destination: "studio_workspace" },
-      trustTone: "in_progress",
     };
   }
 

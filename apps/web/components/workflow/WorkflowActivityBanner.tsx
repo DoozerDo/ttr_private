@@ -17,7 +17,7 @@ function resolveCopy(operation: WorkflowActivityOperation) {
   }
   return {
     headline: "Generating your documents...",
-    body: "Building your tailored resume and cover letter.",
+    body: "We're building your tailored resume and cover letter now.",
   };
 }
 
@@ -55,4 +55,3 @@ export function WorkflowActivityBanner(props: {
     </div>
   );
 }
-

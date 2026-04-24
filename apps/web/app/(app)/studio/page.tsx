@@ -8119,7 +8119,8 @@ export default function StudioPage() {
     !isApplicationApplied &&
     !showReadinessRecoveryExperience &&
     !activeGenerationReadiness.blocked &&
-    (generationReadyModel.isGenerationReadyPriority || generationReadyPhase !== "ready");
+    generationReadyPhase !== "generating" &&
+    (generationReadyModel.isGenerationReadyPriority || generationReadyPhase === "failed");
 
   const suppressGeneratingMessaging = showReadinessRecoveryExperience || activeGenerationReadiness.blocked;
   const workflowActivityBannerTracker = suppressGeneratingMessaging
@@ -8528,7 +8529,7 @@ export default function StudioPage() {
           evidenceStatus={trust?.evidenceStatus ?? "Evidence blocker: Cleared"}
           phase={generationReadyPhase}
           failure={generationReadyFailure}
-          disableActions={generationReadyPhase === "generating" || isWorkflowOperationActive("generation_running")}
+          disableActions={isWorkflowOperationActive("generation_running")}
           onGenerate={() => void startGenerationFromReadyShell("shell")}
           onRetry={() => void startGenerationFromReadyShell("shell")}
           onOpenWorkspace={() => dismissGenerationReadyShell("open_workspace")}
@@ -8719,7 +8720,9 @@ export default function StudioPage() {
               <p className="text-sm font-medium text-slate-200">
                 {workflowAuthority.primaryAction === "GENERATE"
                   ? generateNowEligible
-                    ? "Generating documents..."
+                    ? workflowSurfaceAuthorityHero.canonicalState === "generation_in_progress"
+                      ? "Generating documents..."
+                      : "Generate documents"
                     : "Generate documents"
                   : workflowAuthority.primaryAction === "RETRY"
                     ? "Retry generation"
@@ -8737,7 +8740,7 @@ export default function StudioPage() {
 
               </div>
 
-            ) : null}
+              ) : null}
             {!isReadySuccessState ? (
             <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-decision-panel"> 
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Decision + Action</p> 
@@ -8747,7 +8750,9 @@ export default function StudioPage() {
                 </p>
               ) : null}
               <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-50">  
-                {hasCompletedGeneration  
+                {workflowSurfaceAuthorityHero.canonicalState === "generation_in_progress"
+                  ? "Generating your documents..."
+                  : hasCompletedGeneration  
                   ? showLowQualityRecoveryLane  
                     ? "This draft needs another pass."  
                     : generateNowEligible && isLowQualityDraft
@@ -8760,7 +8765,9 @@ export default function StudioPage() {
                     : "Limited output: not ready yet."}
               </h2>
               <p className="mt-2 text-sm text-slate-200">  
-                {hasCompletedGeneration  
+                {workflowSurfaceAuthorityHero.canonicalState === "generation_in_progress"
+                  ? "We're building your tailored resume and cover letter now."
+                  : hasCompletedGeneration  
                   ? showLowQualityRecoveryLane  
                     ? "The current output is usable only as a rough starting point. Review the issues below, then regenerate or refine from verified evidence."  
                     : generateNowEligible && isLowQualityDraft
@@ -8908,17 +8915,18 @@ export default function StudioPage() {
         {!isReadySuccessState ? (
           <div className="flex flex-wrap items-center gap-3">
             {generateNowEligible && workflowAuthority.primaryAction === "GENERATE" ? (
-              <p className="text-sm font-medium text-slate-200" data-testid="studio-auto-generation-status">
-                {lifecycleArtifactFailure && !hasCompletedGeneration
-                  ? "Generation needs a retry."
-                  : autoGenerationInFlight ||
-                      resumeGenerating ||
-                      coverGenerating ||
-                      studioArtifactPairStatus === "in_progress" ||
-                      needsAutoGeneration
-                    ? "Generating your resume and cover letter..."
-                    : "Preparing your documents..."}
-              </p>
+              (autoGenerationInFlight ||
+                resumeGenerating ||
+                coverGenerating ||
+                studioArtifactPairStatus === "in_progress" ||
+                needsAutoGeneration) &&
+              workflowSurfaceAuthorityHero.canonicalState === "generation_in_progress" ? (
+                <p className="text-sm font-medium text-slate-200" data-testid="studio-auto-generation-status">
+                  {lifecycleArtifactFailure && !hasCompletedGeneration
+                    ? "Generation needs a retry."
+                    : "Generating your resume and cover letter..."}
+                </p>
+              ) : null
             ) : workflowAuthority.primaryAction === "BLOCKED" ? (
               <Link
                 href={remediationHref}

@@ -146,26 +146,10 @@ describe("Studio generation-ready shell", () => {
         return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
       }
       if (url.endsWith("/api/resume") && init?.method === "POST") {
-        return Promise.resolve(
-          createResponse({
-            status: "success",
-            generationStatus: "success",
-            exportReady: true,
-            exports: { docx: true, pdf: true },
-            preview: { resume: { heading: { name: "Alex Candidate", contactLine: "alex@example.com" }, experience: [] } },
-          }),
-        );
+        return new Promise(() => {});
       }
       if (url.endsWith("/api/cover-letters") && init?.method === "POST") {
-        return Promise.resolve(
-          createResponse({
-            status: "success",
-            generationStatus: "success",
-            exportReady: true,
-            exports: { docx: true, pdf: true },
-            preview: { coverLetter: { paragraphs: ["Dear Hiring Team,"] } },
-          }),
-        );
+        return new Promise(() => {});
       }
 
       return Promise.resolve(createResponse({}));
@@ -177,7 +161,10 @@ describe("Studio generation-ready shell", () => {
     await screen.findByTestId("studio-generation-ready-shell");
     fireEvent.click(screen.getByTestId("studio-generation-ready-primary"));
 
-    expect(await screen.findByText("Generating your documents...")).toBeInTheDocument();
+    // Shell is suppressed while generation is running; authority should immediately flip to in-progress.
+    await screen.findByTestId("studio-workflow-authority");
+    expect(screen.getByTestId("workflow-authority-headline")).toHaveTextContent("Generating your documents...");
+    expect(screen.queryByText("Your documents are ready to generate.")).toBeNull();
 
     await waitFor(() => {
       expect(
