@@ -107,6 +107,13 @@ export function WorkflowAuthorityPanel(props: {
   const eyebrow = props.eyebrow ?? defaultEyebrow(props.model.canonicalState);
   const classes = toneClasses(props.model.trustTone);
 
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[WORKFLOW][AUTHORITY_RENDER]", {
+      canonicalState: props.model.canonicalState,
+      headline: props.model.headline,
+    });
+  }
+
   return (
     <section
       className={`rounded-[28px] border p-6 md:p-8 ${classes.container}`}

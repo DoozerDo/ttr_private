@@ -159,6 +159,18 @@ function safeAuthorityFallback(reason: string): WorkflowSurfaceAuthorityModel {
 }
 
 export function resolveWorkflowOrchestrator(input: WorkflowOrchestratorInput): WorkflowOrchestratorOutput {
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[WORKFLOW][ORCHESTRATOR_INPUT]", {
+      activityState: input.activity,
+      artifactState: {
+        artifact: input.artifact,
+        resume: input.resume,
+        coverLetter: input.coverLetter,
+      },
+      authorityState: input.workflowAuthority,
+    });
+  }
+
   const diagnosticsViolations: WorkflowContractViolation[] = [];
   const readinessMalformed = !isGenerationReadiness(input.generationReadiness);
   const safeReadiness = readinessMalformed ? fallbackReadiness() : input.generationReadiness;
@@ -351,6 +363,12 @@ export function resolveWorkflowOrchestrator(input: WorkflowOrchestratorInput): W
     Boolean(generationReadyModel.isGenerationReadyPriority) &&
     !unlockFlowActive &&
     !postUnlockActive;
+
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[WORKFLOW][ORCHESTRATOR_OUTPUT]", {
+      canonicalState: authorityState.canonicalState,
+    });
+  }
 
   return {
     authorityState: authorityState,

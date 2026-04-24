@@ -8543,6 +8543,13 @@ export default function StudioPage() {
     );
   }
 
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[WORKFLOW][ARTIFACT_STATE]", {
+      resume: resumeState,
+      cover: coverState,
+    });
+  }
+
   return (
     <PageShell className="space-y-4 pb-4">
       <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />

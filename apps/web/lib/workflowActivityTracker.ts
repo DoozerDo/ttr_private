@@ -93,6 +93,16 @@ export function useWorkflowActivityTracker(options: WorkflowActivityTrackerOptio
         return;
       }
 
+      if (process.env.NODE_ENV !== "production" && operation === "generation_running") {
+        const activeOperations = (Object.keys(stateRef.current) as WorkflowActivityOperation[]).filter(
+          (op) => (stateRef.current[op]?.count ?? 0) > 0,
+        );
+        console.log("[WORKFLOW][ACTIVITY_START]", {
+          operation: "generation_running",
+          activeOperations,
+        });
+      }
+
       trackEvent?.("workflow_activity_started", {
         surface,
         operation_type: operation,
@@ -129,6 +139,16 @@ export function useWorkflowActivityTracker(options: WorkflowActivityTrackerOptio
       const stillActive = (Object.keys(stateRef.current) as WorkflowActivityOperation[]).some(
         (op) => (stateRef.current[op]?.count ?? 0) > 0,
       );
+
+      if (process.env.NODE_ENV !== "production" && operation === "generation_running") {
+        const activeOperations = (Object.keys(stateRef.current) as WorkflowActivityOperation[]).filter(
+          (op) => (stateRef.current[op]?.count ?? 0) > 0,
+        );
+        console.log("[WORKFLOW][ACTIVITY_END]", {
+          activeOperations,
+        });
+      }
+
       if (stillActive || transitionMs <= 0) return;
 
       cooldownOperationRef.current = operation;
