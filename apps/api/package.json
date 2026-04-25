@@ -12,6 +12,7 @@
     "synthetic:loop": "ts-node -r tsconfig-paths/register src/scripts/run-synthetic-loop-suite.ts",
     "synthetic:generation": "ts-node -r tsconfig-paths/register src/scripts/run-synthetic-generation-suite.ts",
     "seed:local-score": "ts-node -r tsconfig-paths/register src/scripts/seed-local-score.ts",
+    "seed:synthetic-admin": "ts-node -r tsconfig-paths/register src/scripts/seed-local-synthetic-admin.ts",
     "workflow-reset:dry": "ts-node -r tsconfig-paths/register src/scripts/workflow-reset/reset-workflow-state.ts dry-run",
     "workflow-reset:exec": "ts-node -r tsconfig-paths/register src/scripts/workflow-reset/reset-workflow-state.ts execute",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",

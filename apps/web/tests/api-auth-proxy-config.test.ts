@@ -25,9 +25,10 @@ describe("auth proxy server upstream config", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns controlled 503 when upstream API env is missing", async () => {
+  it("returns controlled 503 when upstream API env is missing in production", async () => {
     delete process.env.API_BASE_URL;
     delete process.env.NEXT_PUBLIC_API_BASE_URL;
+    process.env.NODE_ENV = "production";
 
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const response = await loginPost(buildLoginRequest());
@@ -41,9 +42,34 @@ describe("auth proxy server upstream config", () => {
     expect(errorSpy).toHaveBeenCalled();
   });
 
+  it("defaults to localhost API in development when env is missing", async () => {
+    delete process.env.API_BASE_URL;
+    delete process.env.NEXT_PUBLIC_API_BASE_URL;
+    process.env.NODE_ENV = "development";
+
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await loginPost(buildLoginRequest());
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:3001/auth/login",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("returns controlled 503 when upstream API env is malformed", async () => {
     process.env.API_BASE_URL = "not-a-url";
     delete process.env.NEXT_PUBLIC_API_BASE_URL;
+    process.env.NODE_ENV = "production";
 
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const response = await loginPost(buildLoginRequest());
@@ -60,6 +86,7 @@ describe("auth proxy server upstream config", () => {
   it("login proxy uses centralized server-side API base URL", async () => {
     process.env.API_BASE_URL = "http://api:3001";
     delete process.env.NEXT_PUBLIC_API_BASE_URL;
+    process.env.NODE_ENV = "development";
 
     const fetchMock = vi.fn(() =>
       Promise.resolve(
@@ -76,6 +103,30 @@ describe("auth proxy server upstream config", () => {
     expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledWith(
       "http://api:3001/auth/login",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("normalizes localhost to 127.0.0.1 in development", async () => {
+    process.env.API_BASE_URL = "http://localhost:3001";
+    delete process.env.NEXT_PUBLIC_API_BASE_URL;
+    process.env.NODE_ENV = "development";
+
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await loginPost(buildLoginRequest());
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:3001/auth/login",
       expect.objectContaining({ method: "POST" }),
     );
   });

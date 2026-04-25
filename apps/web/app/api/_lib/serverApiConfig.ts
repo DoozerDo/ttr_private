@@ -1,4 +1,5 @@
 const UPSTREAM_ENV_KEYS = ["API_BASE_URL", "NEXT_PUBLIC_API_BASE_URL"] as const;
+const DEV_DEFAULT_API_BASE_URL = "http://127.0.0.1:3001";
 
 function normalizeBaseUrl(value?: string | null): string | null {
   if (!value) return null;
@@ -35,7 +36,13 @@ function pickRawUpstreamApiBaseUrl(): { key: string; value: string } | null {
 
 export function getRequiredServerApiBaseUrl(): string {
   const selected = pickRawUpstreamApiBaseUrl();
+  const nodeEnv = process.env.NODE_ENV ?? "development";
+  const isProd = nodeEnv === "production";
+
   if (!selected) {
+    if (!isProd) {
+      return DEV_DEFAULT_API_BASE_URL;
+    }
     throw new UpstreamApiConfigError(
       "UPSTREAM_API_URL_MISSING",
       "Missing upstream API base URL. Set API_BASE_URL for Next.js server-side route handlers.",
@@ -60,6 +67,11 @@ export function getRequiredServerApiBaseUrl(): string {
       `Unsupported protocol in ${selected.key}.`,
       { key: selected.key, value: selected.value, protocol: parsed.protocol },
     );
+  }
+
+  if (!isProd && parsed.hostname === "localhost") {
+    parsed.hostname = "127.0.0.1";
+    return parsed.toString().replace(/\/+$/, "");
   }
 
   return selected.value;
