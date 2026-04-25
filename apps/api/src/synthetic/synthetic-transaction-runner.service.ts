@@ -104,12 +104,11 @@ export class SyntheticTransactionRunnerService {
     if (user) return user;
 
     const passwordHash = await bcrypt.hash("SyntheticUserPass!123", 10);
-    const createFn: any = this.deps?.usersService?.create;
-    if (!createFn) {
+    if (!this.deps?.usersService?.create) {
       throw new Error("SyntheticTransactionRunnerService usersService.create is not configured");
     }
 
-    return createFn(
+    return this.deps.usersService.create(
       {
         email,
         passwordHash,
