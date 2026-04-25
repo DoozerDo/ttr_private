@@ -37,7 +37,10 @@ export type SyntheticTransactionResult = {
 };
 
 type Deps = {
-  usersService: { findByEmail: (email: string) => Promise<any>; create: (data: any) => Promise<any> };
+  usersService: {
+    findByEmail: (email: string) => Promise<any>;
+    create: (data: any, syntheticMetadata?: any) => Promise<any>;
+  };
   jobsService: { createJob: (userId: string, data: any) => Promise<any> };
   analysisService: { runFitAssessment: (userId: string, input: any) => Promise<any> };
   resumeService: { generateResume: (userId: string, input: any) => Promise<any> };
