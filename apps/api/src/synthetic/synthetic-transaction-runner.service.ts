@@ -141,13 +141,41 @@ export class SyntheticTransactionRunnerService {
     _userId: string,
     input: { scenarioKey: string; runId: string; syntheticCreatedAt: Date },
   ): Promise<any> {
-    const existing = await this.deps?.baselineRepository?.findOne?.({
-      where: { isSynthetic: true, preserveFromCleanup: true },
+    const deps = this.deps;
+    const baselineRepository = deps?.baselineRepository;
+    const baselineVersionRepository = deps?.baselineVersionRepository;
+    const baselineSectionRepository = deps?.baselineSectionRepository;
+    if (!baselineRepository || !baselineVersionRepository || !baselineSectionRepository) {
+      throw new Error("SyntheticTransactionRunnerService baseline repositories are not configured");
+    }
+
+    const existing = await baselineRepository.findOne({
+      where: {
+        userId: _userId,
+        isSynthetic: true,
+        preserveFromCleanup: true,
+        syntheticScenarioKey: input.scenarioKey,
+      },
       relations: ["versions"],
     });
     if (existing) return existing;
 
-    const created = this.deps?.baselineRepository?.create?.({
+    const created = baselineRepository.create({
+      userId: _userId,
+      version: 1,
+      versionNumber: 1,
+      originalFilename: "synthetic-core-loop-resume.pdf",
+      mimeType: "application/pdf",
+      storagePath: `synthetic/${input.scenarioKey}/${input.runId}/resume.pdf`,
+      hash: null,
+      status: "ACTIVE",
+      isActive: true,
+      archivedAt: null,
+      originalBaselineScore: null,
+      latestBaselineScore: null,
+      latestAssessmentId: null,
+      firstAnalyzedAt: null,
+      lastAnalyzedAt: null,
       isSynthetic: true,
       preserveFromCleanup: true,
       syntheticScenarioKey: input.scenarioKey,
@@ -155,22 +183,58 @@ export class SyntheticTransactionRunnerService {
       syntheticCreatedAt: input.syntheticCreatedAt,
       versions: [],
     });
-    const baseline = created ? await this.deps?.baselineRepository?.save?.(created) : null;
-    const version = this.deps?.baselineVersionRepository?.create?.({
-      baselineId: baseline?.id ?? "synthetic-baseline",
+    const baseline = await baselineRepository.save(created);
+    if (!baseline?.id) {
+      throw new Error("SyntheticTransactionRunnerService failed to create baseline fixture");
+    }
+    const version = baselineVersionRepository.create({
+      baselineId: baseline.id,
+      versionNumber: 1,
+      fileHash: null,
+      allowedCompanies: [],
+      allowedRoles: [],
+      allowedTechnologies: [],
+      allowedMetricTokens: [],
+      verifiedAdditions: [],
+      additionDiff: null,
+      promotedFromInterviewId: null,
+      storagePath: baseline.storagePath,
       isSynthetic: true,
       preserveFromCleanup: true,
       syntheticScenarioKey: input.scenarioKey,
       syntheticRunId: input.runId,
       syntheticCreatedAt: input.syntheticCreatedAt,
     });
-    if (version) {
-      const savedVersion = await this.deps?.baselineVersionRepository?.save?.(version);
-      if (baseline) {
-        baseline.versions = [savedVersion];
-      }
-    }
-    return baseline ?? { id: "synthetic-baseline", versions: [] };
+    const savedVersion = await baselineVersionRepository.save(version);
+    baseline.versions = [savedVersion];
+
+    const baselineSections = [
+      {
+        sectionType: "SUMMARY",
+        title: "Professional summary",
+        content:
+          "Synthetic baseline for core loop validation. Demonstrates verified leadership, cross-functional ownership, and measurable outcomes across support, operations, and product launches.",
+      },
+      {
+        sectionType: "EXPERIENCE",
+        title: "Experience highlights",
+        content:
+          "Led operational programs across teams, owned OKRs, improved key metrics, documented workflows, and partnered with stakeholders to deliver repeatable systems and outcomes.",
+      },
+    ];
+
+    const sections = baselineSections.map((section, index) =>
+      baselineSectionRepository.create({
+        baselineId: baseline.id,
+        sectionType: section.sectionType,
+        title: section.title,
+        content: section.content,
+        includePolicy: "always",
+        order: index,
+      }),
+    );
+    await baselineSectionRepository.save(sections);
+    return baseline;
   }
 
   async assertSyntheticPropagation(_syntheticRunId: string): Promise<void> {

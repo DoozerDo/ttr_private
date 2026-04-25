@@ -65,6 +65,7 @@ describe('SyntheticTransactionRunnerService', () => {
       userRepository,
       baselineRepository,
       baselineSectionRepository,
+      baselineVersionRepository,
       fitAssessmentRepository,
       coverLetterRepository,
       opportunityRepository,
@@ -270,8 +271,10 @@ describe('SyntheticTransactionRunnerService', () => {
 
     baselineRepository.findOne.mockResolvedValue({
       id: 'b1',
+      userId: 'u1',
       isSynthetic: true,
       preserveFromCleanup: true,
+      syntheticScenarioKey: 'core_loop_smoke',
       versions: [{ id: 'bv1' }],
     });
 
@@ -283,5 +286,28 @@ describe('SyntheticTransactionRunnerService', () => {
 
     expect(baseline.id).toBe('b1');
     expect(baselineSectionRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('creates a baseline fixture with a non-null userId when missing', async () => {
+    const { service, baselineRepository, baselineVersionRepository, baselineSectionRepository } = buildService() as any;
+
+    baselineRepository.findOne.mockResolvedValue(null);
+    baselineRepository.create.mockImplementation((value: any) => value);
+    baselineRepository.save.mockResolvedValue({ id: 'b-new', userId: 'u1', storagePath: 'synthetic/path.pdf', versions: [] });
+
+    baselineVersionRepository.create.mockImplementation((value: any) => value);
+    baselineVersionRepository.save.mockResolvedValue({ id: 'bv-new' });
+
+    baselineSectionRepository.create.mockImplementation((value: any) => value);
+    baselineSectionRepository.save.mockResolvedValue([]);
+
+    const baseline = await service.resolveOrCreateBaselineFixture('u1', {
+      scenarioKey: 'core_loop_smoke',
+      runId: 'run-1',
+      syntheticCreatedAt: new Date(),
+    });
+
+    expect(baselineRepository.create).toHaveBeenCalledWith(expect.objectContaining({ userId: 'u1' }));
+    expect(baseline.userId).toBe('u1');
   });
 });
