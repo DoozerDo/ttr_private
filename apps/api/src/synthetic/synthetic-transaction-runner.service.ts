@@ -1,4 +1,5 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
+import bcrypt from "bcryptjs";
 import { buildDocumentStrategyPlan } from "../shared/documentStrategyPlan";
 import { evaluateSyntheticGenerationScenario } from "./generation/synthetic-generation.evaluator";
 import { listSyntheticGenerationScenarioBundles } from "./generation/synthetic-generation.fixtures";
@@ -98,9 +99,26 @@ export class SyntheticTransactionRunnerService {
   // These helpers are intentionally instance methods so tests can spy on them.
   // The harness spec overrides them to isolate suite behavior.
   async resolveOrCreateSyntheticUser(): Promise<any> {
-    const user = await this.deps?.usersService?.findByEmail?.("synthetic@example.com");
+    const email = "synthetic@example.com";
+    const user = await this.deps?.usersService?.findByEmail?.(email);
     if (user) return user;
-    return this.deps?.usersService?.create?.({ email: "synthetic@example.com", isSynthetic: true });
+
+    const passwordHash = await bcrypt.hash("SyntheticUserPass!123", 10);
+    const createFn: any = this.deps?.usersService?.create;
+    if (!createFn) {
+      throw new Error("SyntheticTransactionRunnerService usersService.create is not configured");
+    }
+
+    return createFn(
+      {
+        email,
+        passwordHash,
+        firstName: "Synthetic",
+        lastName: "Runner",
+        emailConfirmed: true,
+      },
+      { isSynthetic: true, preserveFromCleanup: true },
+    );
   }
 
   async resolveOrCreateSyntheticBaselineFixture(_userId: string, fixture: SyntheticGenerationBaselineFixture): Promise<any> {

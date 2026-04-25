@@ -74,6 +74,30 @@ describe('SyntheticTransactionRunnerService', () => {
     };
   };
 
+  it('creates a synthetic user with a passwordHash when missing', async () => {
+    const { service, usersService } = buildService();
+
+    usersService.findByEmail.mockResolvedValue(null);
+    usersService.create.mockResolvedValue({ id: 'u-synth', email: 'synthetic@example.com', isSynthetic: true });
+
+    const user = await (service as any).resolveOrCreateSyntheticUser();
+
+    expect(user).toMatchObject({ id: 'u-synth' });
+    expect(usersService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: 'synthetic@example.com',
+        passwordHash: expect.any(String),
+        firstName: expect.any(String),
+        lastName: expect.any(String),
+        emailConfirmed: true,
+      }),
+      expect.objectContaining({ isSynthetic: true }),
+    );
+    const passwordHash = usersService.create.mock.calls[0][0].passwordHash;
+    expect(typeof passwordHash).toBe('string');
+    expect(passwordHash.length).toBeGreaterThan(0);
+  });
+
   it('executes happy path and records success with propagated metadata', async () => {
     const {
       service,

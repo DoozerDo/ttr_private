@@ -47,26 +47,34 @@ function deriveNextAction(input) {
 }
 
 async function login() {
-  const response = await fetch(`${ROOT_URL}/api/auth/login`, {
+  const response = await fetch(`${API_URL}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email: SYNTHETIC_EMAIL, password: SYNTHETIC_PASSWORD }),
   });
   const body = await readJson(response);
   assert(response.ok, `login failed: ${body?.message ?? body?.error ?? response.status}`);
+
+  const accessToken = body?.accessToken ?? body?.token ?? null;
+  assert(accessToken, "login succeeded but no accessToken was returned by the API");
+
   const setCookie = response.headers.get("set-cookie") || "";
-  const cookie = setCookie.split(";")[0];
-  assert(cookie, "login did not return an auth cookie");
-  return { cookie, userId: body?.user?.id ?? body?.id ?? null };
+  const cookie = setCookie ? setCookie.split(";")[0] : "";
+
+  return {
+    accessToken,
+    cookie: cookie || null,
+    userId: body?.user?.id ?? body?.id ?? null,
+  };
 }
 
-async function seedSyntheticFixture(cookie) {
-  assert(cookie, "seedSyntheticFixture requires an auth cookie");
+async function seedSyntheticFixture(accessToken) {
+  assert(accessToken, "seedSyntheticFixture requires an accessToken");
   const response = await fetch(`${API_URL}/admin/synthetic-transactions/core-loop-smoke/run`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Cookie: cookie,
+      Authorization: `Bearer ${accessToken}`,
     },
   });
   const body = await readJson(response);
@@ -75,10 +83,10 @@ async function seedSyntheticFixture(cookie) {
   return body;
 }
 
-async function fetchLatestAnalysis(cookie, jobId) {
-  const response = await fetch(`${ROOT_URL}/api/analysis/latest?jobId=${encodeURIComponent(jobId)}`, {
+async function fetchLatestAnalysis(accessToken, jobId) {
+  const response = await fetch(`${API_URL}/analysis/latest?jobId=${encodeURIComponent(jobId)}`, {
     method: "GET",
-    headers: { Cookie: cookie },
+    headers: { Authorization: `Bearer ${accessToken}` },
   });
   const body = await readJson(response);
   assert(response.ok, `analysis latest failed: ${body?.message ?? body?.error ?? response.status}`);
@@ -86,10 +94,16 @@ async function fetchLatestAnalysis(cookie, jobId) {
   return body;
 }
 
-async function fetchResultsPage(cookie, baselineId, jobId) {
+async function fetchResultsPage({ cookie, accessToken }, baselineId, jobId) {
   const response = await fetch(
     `${ROOT_URL}/results?baselineId=${encodeURIComponent(baselineId)}&jobId=${encodeURIComponent(jobId)}`,
-    { method: "GET", headers: { Cookie: cookie } },
+    {
+      method: "GET",
+      headers: {
+        ...(cookie ? { Cookie: cookie } : {}),
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+    },
   );
   const html = await response.text();
   assert(response.ok, `results page failed: ${response.status}`);
@@ -101,8 +115,8 @@ async function main() {
   const startedAt = new Date().toISOString();
   log("synthetic-core-loop-start", { baseUrl: ROOT_URL, apiUrl: API_URL, startedAt });
 
-  const { cookie } = await login();
-  const seed = await seedSyntheticFixture(cookie);
+  const auth = await login();
+  const seed = await seedSyntheticFixture(auth.accessToken);
 
   const baselineId = String(seed?.summary?.baselineId ?? "");
   const jobId = String(seed?.summary?.jobId ?? "");
@@ -112,7 +126,7 @@ async function main() {
   assert(jobId, "seed response missing jobId");
   assert(assessmentId, "seed response missing assessmentId");
 
-  const analysis = await fetchLatestAnalysis(cookie, jobId);
+  const analysis = await fetchLatestAnalysis(auth.accessToken, jobId);
   const fitScore =
     typeof analysis?.score === "number"
       ? analysis.score
@@ -120,6 +134,7 @@ async function main() {
         ? analysis.fitScore
         : null;
   assert(typeof fitScore === "number", "analysis latest did not include a numeric score");
+  assert(fitScore >= 70, `fit score ${fitScore} is below the core loop threshold (>= 70)`);
 
   const nextAction = deriveNextAction({
     analysisPresent: true,
@@ -130,7 +145,7 @@ async function main() {
 
   assert(nextAction, "derived nextAction was empty");
 
-  await fetchResultsPage(cookie, baselineId, jobId);
+  await fetchResultsPage(auth, baselineId, jobId);
 
   log("synthetic-core-loop-success", {
     syntheticRunId: seed?.syntheticRunId ?? null,

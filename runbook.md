@@ -5,6 +5,17 @@
 docker compose -f infra/docker/docker-compose.local.yml up -d --build
 ```
 
+### Canonical synthetic validation (Docker)
+```
+docker compose -f infra/docker/docker-compose.dev.yml up -d --build
+docker compose -f infra/docker/docker-compose.dev.yml exec api npm run seed:synthetic-admin
+$env:BASE_URL="http://localhost:3000"
+$env:API_BASE_URL="http://localhost:3001"
+$env:SYNTHETIC_USER_EMAIL="michaeltalbert@hotmail.com"
+$env:SYNTHETIC_USER_PASSWORD="FounderTTR2026!"
+npm run synthetic:core-loop-smoke
+```
+
 ### Status
 ```
 docker compose -f infra/docker/docker-compose.local.yml ps

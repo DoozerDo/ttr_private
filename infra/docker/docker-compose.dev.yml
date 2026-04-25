@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
+      POSTGRES_DB: targetthisrole
     ports:
       - "5432:5432"
     volumes:
@@ -24,14 +24,20 @@ services:
     environment:
       NODE_ENV: development
       PORT: "3001"
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/postgres
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/targetthisrole
       JWT_SECRET: ${JWT_SECRET:-dev-local-super-long-random-string}
       APP_PUBLIC_WEB_URL: ${APP_PUBLIC_WEB_URL:-http://localhost:3000}
       REQUIRE_ACCESS_CODE: ${REQUIRE_ACCESS_CODE:-false}
       TYPEORM_SYNCHRONIZE: "false"
     ports:
       - "3001:3001"
-    command: sh -c "npm install && rm -rf dist tsconfig.build.tsbuildinfo && npm run build && npm run migration:run && npm run start:prod"
+    command: >-
+      sh -c "npm install
+      && node -e \"const {Client}=require('pg');const url=process.env.DATABASE_URL;const deadline=Date.now()+60000;(async()=>{for(;;){try{const c=new Client({connectionString:url,ssl:url&&url.includes('sslmode=require')?{rejectUnauthorized:false}:undefined});await c.connect();await c.query('select 1');await c.end();process.stdout.write('db_ready\\n');process.exit(0);}catch(e){if(Date.now()>deadline){console.error('db_not_ready',e?.message||e);process.exit(1);}await new Promise(r=>setTimeout(r,1000));}}})();\"
+      && rm -rf dist tsconfig.build.tsbuildinfo
+      && npm run build
+      && npm run migration:run
+      && npm run start:prod"
     volumes:
       - ../../apps/api:/usr/src/app
       - ../../packages:/usr/src/packages
@@ -47,7 +53,8 @@ services:
       - api
     environment:
       NODE_ENV: development
-      NEXT_PUBLIC_API_BASE_URL: http://api:3001
+      API_BASE_URL: http://api:3001
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:3001
       BROWSERSLIST_IGNORE_OLD_DATA: "1"
       BASELINE_BROWSER_MAPPING_IGNORE_OLD_DATA: "1"
       TTR_SILENCE_BASELINE_BROWSER_MAPPING_WARNING: "1"
