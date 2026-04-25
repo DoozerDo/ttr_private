@@ -89,8 +89,8 @@ async function fetchForeignKeys(client: Client): Promise<ForeignKeyEdge[]> {
   // Normalize to bare table names in public schema when possible.
   return rows
     .map((r) => ({
-      referencing: r.referencing.replace(/^public\./, '').replace(/\"/g, ''),
-      referenced: r.referenced.replace(/^public\./, '').replace(/\"/g, ''),
+      referencing: r.referencing.replace(/^public\./, '').replace(/"/g, ''),
+      referenced: r.referenced.replace(/^public\./, '').replace(/"/g, ''),
     }))
     .filter((r) => r.referencing.length > 0 && r.referenced.length > 0);
 }
@@ -221,4 +221,3 @@ main().catch((err) => {
   console.error(`[workflow-reset] ERROR: ${err instanceof Error ? err.message : String(err)}`);
   process.exitCode = 1;
 });
-

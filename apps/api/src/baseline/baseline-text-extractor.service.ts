@@ -159,7 +159,8 @@ function extractTextFromDocxXml(xml: string): string {
     .join('')
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001F]/g, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }

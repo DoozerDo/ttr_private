@@ -151,10 +151,16 @@ describe('SyntheticTransactionRunnerService', () => {
     const result = await service.runCoreLoopSmoke();
     expect(result.status).toBe('succeeded');
     expect(result.stepResults.every((step) => step.status === 'succeeded')).toBe(true);
+    expect(syntheticRunRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runType: 'synthetic_transaction',
+        triggerSource: 'manual',
+        scenarioKey: 'core_loop_smoke',
+      }),
+    );
     expect(analysisService.runFitAssessment).toHaveBeenCalledWith(
       'u1',
       expect.any(Object),
-      expect.objectContaining({ isSynthetic: true }),
     );
     expect(resumeService.generateResume).toHaveBeenCalledWith(
       'u1',

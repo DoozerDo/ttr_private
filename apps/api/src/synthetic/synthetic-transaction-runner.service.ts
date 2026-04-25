@@ -189,6 +189,9 @@ export class SyntheticTransactionRunnerService {
 
     const runLog = await syntheticRunRepository.save(
       syntheticRunRepository.create({
+        runType: "synthetic_transaction",
+        triggerSource: _triggerSource,
+        scenarioKey: "core_loop_smoke",
         syntheticRunId: `core_loop_smoke_${Date.now()}`,
         startedAt,
         status: "running",

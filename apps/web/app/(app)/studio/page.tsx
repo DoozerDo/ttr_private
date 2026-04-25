@@ -8136,6 +8136,11 @@ export default function StudioPage() {
       resumeGating.primaryBlocker === "tier_gate" ||
       coverGating.primaryBlocker === "tier_gate");
 
+  const canonicalStudioReadinessMessage =
+    activeGenerationReadiness.status === "ready" && !activeGenerationReadiness.blocked
+      ? "You're ready to generate"
+      : "Add more verified experience";
+
   const postUnlockNewReadiness: PostUnlockReadiness | null =
     hasLoadedAnalysis
       ? activeGenerationReadiness.blocked
@@ -8673,6 +8678,9 @@ export default function StudioPage() {
     return (
       <PageShell className="space-y-4 pb-4">
         <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
+        <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
+          {canonicalStudioReadinessMessage}
+        </p>
         <div
           data-workflow-shell="post-unlock-outcome"
           data-workflow-state={workflowOrchestratorCore.authorityState.canonicalState}
@@ -8733,6 +8741,9 @@ export default function StudioPage() {
     return (
       <PageShell className="space-y-4 pb-4">
         <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
+        <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
+          {canonicalStudioReadinessMessage}
+        </p>
         <div
           data-workflow-shell="generation-ready-shell"
           data-workflow-state={workflowOrchestratorCore.authorityState.canonicalState}
@@ -8768,6 +8779,9 @@ export default function StudioPage() {
   return (
     <PageShell className="space-y-4 pb-4">
       <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
+      <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
+        {canonicalStudioReadinessMessage}
+      </p>
       {showInstantDraftHeroSafe ? instantDraftHero : null}
       {showReadinessRecoveryExperience && !activeGenerationReadiness.blocked ? unlockEntryPanel : null}
       {unlockGenerationLoadingMessage && showPrimaryGeneratingNotice ? (
@@ -10536,9 +10550,6 @@ export default function StudioPage() {
     </PageShell> 
   ); 
 } 
-
-
-
 
 
 

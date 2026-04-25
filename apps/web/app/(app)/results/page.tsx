@@ -5253,26 +5253,35 @@ export default function ResultsPage() {
             }}
             primaryAction={(() => {
               const action = workflowSurfaceAuthority.primaryAction;
+              const shouldShowOpenStudioCta = typeof activeScore === "number" && activeScore >= 70;
               if (action.destination === "studio_unlock") {
-                return { label: action.label, onClick: () => router.push(studioUnlockHref), testId: "results-hero-primary-cta" };
+                return { label: action.label, href: studioUnlockHref, testId: "results-hero-primary-cta" };
               }
               if (action.destination === "studio_generate") {
-                return { label: action.label, onClick: () => router.push(studioGenerateHref), testId: "results-hero-primary-cta" };
-              }
-              if (action.destination === "fit_review") {
-                return { label: action.label, onClick: () => router.push(fitReviewPath), testId: "results-hero-primary-cta" };
-              }
-              if (action.destination === "studio_workspace") {
                 return {
-                  label: action.label,
-                  onClick: () => {
-                    oneClickResultsCta?.onClick?.();
-                    router.push(studioNavigationHref);
-                  },
+                  label: shouldShowOpenStudioCta ? "Open Studio" : action.label,
+                  href: studioGenerateHref,
+                  onClick: oneClickResultsCta?.onClick,
                   testId: "results-hero-primary-cta",
                 };
               }
-              return { label: action.label, onClick: () => router.push(studioNavigationHref), testId: "results-hero-primary-cta" };
+              if (action.destination === "fit_review") {
+                return { label: action.label, href: fitReviewPath, testId: "results-hero-primary-cta" };
+              }
+              if (action.destination === "studio_workspace") {
+                return {
+                  label: shouldShowOpenStudioCta ? "Open Studio" : action.label,
+                  href: studioNavigationHref,
+                  onClick: oneClickResultsCta?.onClick,
+                  testId: "results-hero-primary-cta",
+                };
+              }
+              return {
+                label: shouldShowOpenStudioCta ? "Open Studio" : action.label,
+                href: studioNavigationHref,
+                onClick: oneClickResultsCta?.onClick,
+                testId: "results-hero-primary-cta",
+              };
             })()}
             secondaryAction={workflowSurfaceAuthority.secondaryAction ? {
               label: workflowSurfaceAuthority.secondaryAction.label,

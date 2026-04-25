@@ -1025,7 +1025,7 @@ export function WorkspaceRunner({
     () => buildTargetCtaClickedAnalyticsPayload(targetCta),
     [targetCta],
   );
-  const targetCtaLabel = targetCta.isStudioDestination ? "Generate documents" : targetCta.label;
+  const targetCtaLabel = targetCta.isStudioDestination ? "Open Studio" : targetCta.label;
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
     assertTargetCtaAnalyticsMatchesRenderedCta(targetCta, targetCtaAnalyticsPayload);

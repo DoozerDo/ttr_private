@@ -92,7 +92,7 @@ export function GenerationReadyShell(props: {
       eyebrow="Ready"
       model={{
         canonicalState: "generation_ready",
-        headline: "Your documents are ready to generate.",
+        headline: "You're ready to generate",
         body: "Your latest evidence cleared the blocker. Generate your tailored resume and cover letter now.",
         trustTone: "ready",
       }}

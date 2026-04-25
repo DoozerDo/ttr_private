@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import Link from "next/link";
 
 import { FormButton } from "@/components/FormButton";
 import type {
@@ -10,11 +11,57 @@ import type {
 
 type WorkflowAuthorityPanelAction = {
   label: string;
-  onClick: () => void;
+  href?: string;
+  onClick?: () => void;
   disabled?: boolean;
   testId?: string;
   variant?: "primary" | "secondary";
 };
+
+const VARIANT_CLASSES: Record<NonNullable<WorkflowAuthorityPanelAction["variant"]>, string> = {
+  primary:
+    "border-0 bg-[var(--accent-primary)] text-[var(--verdict-apply-text)] hover:bg-[var(--accent-primary-hover)]",
+  secondary:
+    "border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:border-[var(--border-strong)]",
+};
+
+const BASE_CLASSES =
+  "inline-flex items-center justify-center rounded-[var(--button-radius)] px-4 py-2 text-sm font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]";
+
+function WorkflowAuthorityAction({ action, fallbackTestId }: { action: WorkflowAuthorityPanelAction; fallbackTestId: string }) {
+  const variant = action.variant ?? "primary";
+  const intentClass = VARIANT_CLASSES[variant] ?? VARIANT_CLASSES.primary;
+  const disabledClass = action.disabled ? "cursor-not-allowed opacity-60" : "";
+  const className = `${BASE_CLASSES} ${intentClass} ${disabledClass} w-full sm:w-auto`;
+  const testId = action.testId ?? fallbackTestId;
+
+  if (action.href) {
+    if (action.disabled) {
+      return (
+        <span className={className} data-testid={testId}>
+          {action.label}
+        </span>
+      );
+    }
+    return (
+      <Link href={action.href} onClick={action.onClick} className={className} data-testid={testId}>
+        {action.label}
+      </Link>
+    );
+  }
+
+  return (
+    <FormButton
+      variant={variant}
+      onClick={action.onClick}
+      disabled={Boolean(action.disabled)}
+      className="w-full sm:w-auto"
+      data-testid={testId}
+    >
+      {action.label}
+    </FormButton>
+  );
+}
 
 function defaultEyebrow(state: WorkflowSurfaceAuthorityModel["canonicalState"]): string {
   switch (state) {
@@ -151,25 +198,13 @@ export function WorkflowAuthorityPanel(props: {
       {props.primaryAction || props.secondaryAction ? (
         <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
           {props.primaryAction ? (
-            <FormButton
-              onClick={props.primaryAction.onClick}
-              disabled={Boolean(props.primaryAction.disabled)}
-              className="w-full sm:w-auto"
-              data-testid={props.primaryAction.testId ?? "workflow-authority-primary"}
-            >
-              {props.primaryAction.label}
-            </FormButton>
+            <WorkflowAuthorityAction action={props.primaryAction} fallbackTestId="workflow-authority-primary" />
           ) : null}
           {props.secondaryAction ? (
-            <FormButton
-              variant={props.secondaryAction.variant ?? "secondary"}
-              onClick={props.secondaryAction.onClick}
-              disabled={Boolean(props.secondaryAction.disabled)}
-              className="w-full sm:w-auto"
-              data-testid={props.secondaryAction.testId ?? "workflow-authority-secondary"}
-            >
-              {props.secondaryAction.label}
-            </FormButton>
+            <WorkflowAuthorityAction
+              action={{ ...props.secondaryAction, variant: props.secondaryAction.variant ?? "secondary" }}
+              fallbackTestId="workflow-authority-secondary"
+            />
           ) : null}
         </div>
       ) : null}

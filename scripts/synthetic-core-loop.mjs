@@ -4,7 +4,6 @@ const ROOT_URL = (process.env.BASE_URL || "http://localhost:3000").replace(/\/+$
 const API_URL = (process.env.API_BASE_URL || "http://localhost:3001").replace(/\/+$/, "");
 const SYNTHETIC_EMAIL = process.env.SYNTHETIC_USER_EMAIL || "synthetic-core-loop@targetthisrole.local";
 const SYNTHETIC_PASSWORD = process.env.SYNTHETIC_USER_PASSWORD || "SyntheticUserPass!123";
-const ADMIN_USER_ID = (process.env.SYNTHETIC_ADMIN_USER_ID || "").trim();
 
 function log(message, extra) {
   const payload = {
@@ -61,13 +60,13 @@ async function login() {
   return { cookie, userId: body?.user?.id ?? body?.id ?? null };
 }
 
-async function seedSyntheticFixture() {
-  assert(ADMIN_USER_ID, "SYNTHETIC_ADMIN_USER_ID is required to seed the synthetic fixture");
+async function seedSyntheticFixture(cookie) {
+  assert(cookie, "seedSyntheticFixture requires an auth cookie");
   const response = await fetch(`${API_URL}/admin/synthetic-transactions/core-loop-smoke/run`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-dev-user-id": ADMIN_USER_ID,
+      Cookie: cookie,
     },
   });
   const body = await readJson(response);
@@ -102,8 +101,8 @@ async function main() {
   const startedAt = new Date().toISOString();
   log("synthetic-core-loop-start", { baseUrl: ROOT_URL, apiUrl: API_URL, startedAt });
 
-  const seed = await seedSyntheticFixture();
   const { cookie } = await login();
+  const seed = await seedSyntheticFixture(cookie);
 
   const baselineId = String(seed?.summary?.baselineId ?? "");
   const jobId = String(seed?.summary?.jobId ?? "");
