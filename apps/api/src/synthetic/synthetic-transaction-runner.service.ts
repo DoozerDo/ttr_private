@@ -2,6 +2,7 @@ import { Inject, Injectable, Optional } from "@nestjs/common";
 import bcrypt from "bcryptjs";
 import { createHash } from "crypto";
 import { buildDocumentStrategyPlan } from "../shared/documentStrategyPlan";
+import { buildBaselineAllowlistSnapshot } from "../compliance/baseline-allowlist";
 import { evaluateSyntheticGenerationScenario } from "./generation/synthetic-generation.evaluator";
 import { listSyntheticGenerationScenarioBundles } from "./generation/synthetic-generation.fixtures";
 import type {
@@ -115,6 +116,29 @@ function computeCoreLoopBaselineVersionFileHash(): string {
     })),
   };
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+function computeCoreLoopBaselineVersionAllowlists(): {
+  allowedCompanies: string[];
+  allowedRoles: string[];
+  allowedTechnologies: string[];
+  allowedMetricTokens: string[];
+} {
+  const sections = buildCoreLoopBaselineSections();
+  const snapshot = buildBaselineAllowlistSnapshot(
+    sections.map((section) => ({
+      title: section.title,
+      content: section.content,
+      sectionType: section.sectionType,
+    })),
+  );
+
+  return {
+    allowedCompanies: snapshot.allowedCompanies,
+    allowedRoles: snapshot.allowedRoles,
+    allowedTechnologies: snapshot.allowedTechnologies,
+    allowedMetricTokens: snapshot.allowedMetricTokens,
+  };
 }
 
 function isQueryUniqueViolation(error: unknown): boolean {
@@ -314,15 +338,16 @@ export class SyntheticTransactionRunnerService {
       const versions: any[] = Array.isArray((existing as any).versions) ? (existing as any).versions : [];
       const targetVersion = versions[0] ?? null;
       const desiredFileHash = computeCoreLoopBaselineVersionFileHash();
+      const desiredAllowlists = computeCoreLoopBaselineVersionAllowlists();
       if (!targetVersion) {
         const createdVersion = baselineVersionRepository.create({
           baselineId: existing.id,
           versionNumber: 1,
           fileHash: desiredFileHash,
-          allowedCompanies: [],
-          allowedRoles: [],
-          allowedTechnologies: [],
-          allowedMetricTokens: [],
+          allowedCompanies: desiredAllowlists.allowedCompanies,
+          allowedRoles: desiredAllowlists.allowedRoles,
+          allowedTechnologies: desiredAllowlists.allowedTechnologies,
+          allowedMetricTokens: desiredAllowlists.allowedMetricTokens,
           verifiedAdditions: [],
           additionDiff: null,
           promotedFromInterviewId: null,
@@ -337,7 +362,36 @@ export class SyntheticTransactionRunnerService {
         (existing as any).versions = [saved];
       } else if (!targetVersion.fileHash) {
         targetVersion.fileHash = desiredFileHash;
+        if (!Array.isArray(targetVersion.allowedCompanies) || targetVersion.allowedCompanies.length === 0) {
+          targetVersion.allowedCompanies = desiredAllowlists.allowedCompanies;
+        }
+        if (!Array.isArray(targetVersion.allowedRoles) || targetVersion.allowedRoles.length === 0) {
+          targetVersion.allowedRoles = desiredAllowlists.allowedRoles;
+        }
+        if (!Array.isArray(targetVersion.allowedTechnologies) || targetVersion.allowedTechnologies.length === 0) {
+          targetVersion.allowedTechnologies = desiredAllowlists.allowedTechnologies;
+        }
+        if (!Array.isArray(targetVersion.allowedMetricTokens) || targetVersion.allowedMetricTokens.length === 0) {
+          targetVersion.allowedMetricTokens = desiredAllowlists.allowedMetricTokens;
+        }
         await baselineVersionRepository.save(targetVersion);
+      } else {
+        const needsAllowlists =
+          !Array.isArray(targetVersion.allowedCompanies) ||
+          targetVersion.allowedCompanies.length === 0 ||
+          !Array.isArray(targetVersion.allowedRoles) ||
+          targetVersion.allowedRoles.length === 0 ||
+          !Array.isArray(targetVersion.allowedTechnologies) ||
+          targetVersion.allowedTechnologies.length === 0 ||
+          !Array.isArray(targetVersion.allowedMetricTokens) ||
+          targetVersion.allowedMetricTokens.length === 0;
+        if (needsAllowlists) {
+          targetVersion.allowedCompanies = desiredAllowlists.allowedCompanies;
+          targetVersion.allowedRoles = desiredAllowlists.allowedRoles;
+          targetVersion.allowedTechnologies = desiredAllowlists.allowedTechnologies;
+          targetVersion.allowedMetricTokens = desiredAllowlists.allowedMetricTokens;
+          await baselineVersionRepository.save(targetVersion);
+        }
       }
       return existing;
     }
@@ -373,10 +427,7 @@ export class SyntheticTransactionRunnerService {
       baselineId: baseline.id,
       versionNumber: 1,
       fileHash: computeCoreLoopBaselineVersionFileHash(),
-      allowedCompanies: [],
-      allowedRoles: [],
-      allowedTechnologies: [],
-      allowedMetricTokens: [],
+      ...computeCoreLoopBaselineVersionAllowlists(),
       verifiedAdditions: [],
       additionDiff: null,
       promotedFromInterviewId: null,

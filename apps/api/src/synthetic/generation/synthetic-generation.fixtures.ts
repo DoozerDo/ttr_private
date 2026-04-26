@@ -47,7 +47,7 @@ const SUPPORT_OPS_BASELINE: SyntheticGenerationBaselineFixture = {
       title: "Technical Skills",
       sectionType: "SKILLS",
       content:
-        "Zendesk | Jira | Salesforce Service Cloud | SQL | Looker | queue health | capacity planning | staffing tradeoffs | weekly operating reviews | voice of the customer | customer advocacy | CSAT | self service",
+        "Zendesk | Jira | Salesforce Service Cloud | SQL | Looker | Linux | monitoring | VPN | DNS | DHCP | remote access | queue health | capacity planning | staffing tradeoffs | weekly operating reviews | voice of the customer | customer advocacy | CSAT | self service",
     },
     {
       id: "support-ops-section-1",
@@ -100,7 +100,19 @@ const SUPPORT_OPS_BASELINE: SyntheticGenerationBaselineFixture = {
   ],
   allowedCompanies: ["Example SaaS", "Acme", "Northwind Support"],
   allowedRoles: ["Support Operations Director", "Director of Support Operations", "Customer Operations Director"],
-  allowedTechnologies: ["Zendesk", "SQL", "Looker", "Jira", "Salesforce Service Cloud"],
+  allowedTechnologies: [
+    "Zendesk",
+    "SQL",
+    "Looker",
+    "Jira",
+    "Salesforce Service Cloud",
+    "Linux",
+    "monitoring",
+    "VPN",
+    "DNS",
+    "DHCP",
+    "remote access",
+  ],
   allowedMetricTokens: ["SLA", "CSAT", "backlog", "response time", "capacity planning", "staffing"],
 };
 
