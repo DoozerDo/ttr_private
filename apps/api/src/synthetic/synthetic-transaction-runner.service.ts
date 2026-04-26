@@ -316,8 +316,13 @@ export class SyntheticTransactionRunnerService {
       const enrichReplaceCrash = (step: string, error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
         if (!/replace/.test(message)) return null;
-        const stack = error instanceof Error && typeof error.stack === "string" ? error.stack : null;
-        return `Synthetic core loop seed crashed at step=${step} with an unsafe .replace() call on an undefined value. ${stack ? `Stack:\n${stack}` : `Message: ${message}`}`;
+        const nodeEnv = process.env.NODE_ENV ?? "development";
+        const includeStack = nodeEnv !== "production";
+        const stack =
+          includeStack && error instanceof Error && typeof error.stack === "string"
+            ? error.stack
+            : null;
+        return `Synthetic core loop seed crashed at step=${step} with an unsafe .replace() call on an undefined value.${stack ? ` Stack:\n${stack}` : ` Message: ${message}`}`;
       };
 
       const runStep = async <T>(

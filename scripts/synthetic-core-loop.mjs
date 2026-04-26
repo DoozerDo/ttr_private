@@ -112,10 +112,10 @@ async function seedSyntheticFixture(accessToken) {
   const body = await readJson(response);
   assert(response.ok, `synthetic seed failed: ${body?.message ?? body?.error ?? response.status}`);
   if (body?.status !== "succeeded") {
-    const rawError = body?.errorMessage ?? body?.message ?? body?.error ?? "unknown reason";
-    if (typeof rawError === "string" && rawError.includes("reading 'replace'")) {
+    const rawError = body?.errorMessage ?? body?.message ?? body?.error ?? null;
+    if (!rawError) {
       throw new Error(
-        "synthetic seed did not succeed: API crashed calling `.replace(...)` on an undefined value. Check API logs/env for a missing required string config or fixture field.",
+        `synthetic seed did not succeed: missing errorMessage in response body (status=${String(body?.status ?? "unknown")})`,
       );
     }
     throw new Error(`synthetic seed did not succeed: ${rawError}`);
