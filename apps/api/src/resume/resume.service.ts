@@ -1600,8 +1600,8 @@ export class ResumeService {
       if (!analysisId) {
         throw new BadRequestException({
           error: {
-            code: 'analysis_context_mismatch',
-            message: 'Generation request does not match the analyzed context.',
+            code: 'analysis_not_found',
+            message: 'analysisId is required for generation requests.',
             details: {
               expected: {
                 jobId,

@@ -611,12 +611,17 @@ export class SyntheticTransactionRunnerService {
         return await finalize("failed", null);
       }
       push({ step: "run_fit_assessment", status: "succeeded" });
+      const analysisId = (assessment as any)?.assessmentId ?? (assessment as any)?.id ?? null;
+      if (!analysisId) {
+        push({ step: "run_fit_assessment", status: "failed", errorMessage: "analysisId missing from assessment response" });
+        return await finalize("failed", "analysisId missing from assessment response");
+      }
 
       const resume: any = await runStep("generate_resume_preview", () =>
         retryGenerationInFlight("generate_resume_preview", () =>
           (resumeService as any).generateResume(
             user.id,
-            { baselineId: baseline.id, jobId },
+            { baselineId: baseline.id, jobId, analysisId },
             undefined,
             { isSynthetic: true },
           ),
@@ -632,7 +637,7 @@ export class SyntheticTransactionRunnerService {
         retryGenerationInFlight("generate_cover_letter", () =>
           (coverLettersService as any).generateCoverLetter(
             user.id,
-            { baselineId: baseline.id, jobId },
+            { baselineId: baseline.id, jobId, analysisId },
             { isSynthetic: true },
           ),
         ),
