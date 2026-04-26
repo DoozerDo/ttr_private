@@ -309,41 +309,79 @@ export class SyntheticTransactionRunnerService {
     };
 
     try {
-      const user = await this.resolveOrCreateSyntheticUser();
+      const deps = this.deps;
+      if (!deps) {
+        throw new Error("SyntheticTransactionRunnerService deps missing");
+      }
+      const enrichReplaceCrash = (step: string, error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/replace/.test(message)) return null;
+        const stack = error instanceof Error && typeof error.stack === "string" ? error.stack : null;
+        return `Synthetic core loop seed crashed at step=${step} with an unsafe .replace() call on an undefined value. ${stack ? `Stack:\n${stack}` : `Message: ${message}`}`;
+      };
+
+      const runStep = async <T>(
+        step: SyntheticTransactionResult["stepResults"][number]["step"],
+        fn: () => Promise<T>,
+      ): Promise<T> => {
+        try {
+          const result = await fn();
+          return result;
+        } catch (error) {
+          push({
+            step,
+            status: "failed",
+            errorMessage: error instanceof Error ? error.message : String(error),
+          });
+          const enriched = enrichReplaceCrash(step, error);
+          throw new Error(enriched ?? (error instanceof Error ? error.message : String(error)));
+        }
+      };
+
+      const user = await runStep("resolve_synthetic_user", () => this.resolveOrCreateSyntheticUser());
       push({ step: "resolve_synthetic_user", status: "succeeded" });
       await userRepository.findOneOrFail({ where: { id: user.id } });
 
-      const baseline = await this.resolveOrCreateBaselineFixture(user.id, {
-        scenarioKey: "core_loop_smoke",
-        runId: syntheticRunId,
-        syntheticCreatedAt: new Date(),
-      });
+      const baseline = await runStep("resolve_baseline_fixture", () =>
+        this.resolveOrCreateBaselineFixture(user.id, {
+          scenarioKey: "core_loop_smoke",
+          runId: syntheticRunId,
+          syntheticCreatedAt: new Date(),
+        }),
+      );
       push({ step: "resolve_baseline_fixture", status: "succeeded" });
 
-      const createdJob = await jobsService.createJob(user.id, {
-        title: "Core loop synthetic role",
-        company: "TargetThisRole Synthetic",
-        rawDescription: buildCoreLoopJobDescription(),
-        jdIngestionMethod: "PASTE",
-      });
-      const jobId = createdJob?.job?.id ?? createdJob?.id ?? "job-1";
+      const createdJob = await runStep("create_job", () =>
+        jobsService.createJob(user.id, {
+          title: "Core loop synthetic role",
+          company: "TargetThisRole Synthetic",
+          rawDescription: buildCoreLoopJobDescription(),
+          jdIngestionMethod: "PASTE",
+        }),
+      );
       push({ step: "create_job", status: "succeeded" });
+      const jobId = createdJob?.job?.id ?? createdJob?.id ?? "job-1";
 
-      const assessment = await analysisService.runFitAssessment(
-        user.id,
-        { jobId, baselineId: baseline.id },
+      const assessment = await runStep("run_fit_assessment", () =>
+        analysisService.runFitAssessment(user.id, { jobId, baselineId: baseline.id }),
       );
       if (!assessment || assessment.status !== "ok") {
-        push({ step: "run_fit_assessment", status: "failed", errorMessage: String(assessment?.status ?? "unknown") });
+        push({
+          step: "run_fit_assessment",
+          status: "failed",
+          errorMessage: String(assessment?.status ?? "unknown"),
+        });
         return await finalize("failed", null);
       }
       push({ step: "run_fit_assessment", status: "succeeded" });
 
-      const resume = await (resumeService as any).generateResume(
-        user.id,
-        { baselineId: baseline.id, jobId },
-        undefined,
-        { isSynthetic: true },
+      const resume: any = await runStep("generate_resume_preview", () =>
+        (resumeService as any).generateResume(
+          user.id,
+          { baselineId: baseline.id, jobId },
+          undefined,
+          { isSynthetic: true },
+        ),
       );
       if (!resume?.preview?.resume) {
         push({ step: "generate_resume_preview", status: "failed", errorMessage: "resume preview missing" });
@@ -351,34 +389,33 @@ export class SyntheticTransactionRunnerService {
       }
       push({ step: "generate_resume_preview", status: "succeeded" });
 
-      const coverLetter = await (coverLettersService as any).generateCoverLetter(
-        user.id,
-        { baselineId: baseline.id, jobId },
-        { isSynthetic: true },
-      );
-      push({ step: "generate_cover_letter", status: coverLetter?.status === "success" ? "succeeded" : "failed" });
-
-      if (this.deps.opportunitiesService) {
-        await (this.deps.opportunitiesService as any).upsertOpportunity(
+      const coverLetter: any = await runStep("generate_cover_letter", () =>
+        (coverLettersService as any).generateCoverLetter(
           user.id,
           { baselineId: baseline.id, jobId },
           { isSynthetic: true },
+        ),
+      );
+      push({ step: "generate_cover_letter", status: coverLetter?.status === "success" ? "succeeded" : "failed" });
+
+      if (deps.opportunitiesService) {
+        await runStep("upsert_opportunity", () =>
+          (deps.opportunitiesService as any).upsertOpportunity(
+            user.id,
+            { baselineId: baseline.id, jobId },
+            { isSynthetic: true },
+          ),
         );
         push({ step: "upsert_opportunity", status: "succeeded" });
       } else {
         push({ step: "upsert_opportunity", status: "skipped" });
       }
 
-      await this.assertSyntheticPropagation(syntheticRunId);
+      await runStep("assert_synthetic_propagation", () => this.assertSyntheticPropagation(syntheticRunId));
       push({ step: "assert_synthetic_propagation", status: "succeeded" });
 
       return await finalize("succeeded", null);
     } catch (error) {
-      push({
-        step: "assert_synthetic_propagation",
-        status: "failed",
-        errorMessage: error instanceof Error ? error.message : String(error),
-      });
       return await finalize("failed", error instanceof Error ? error.message : String(error));
     }
   }
