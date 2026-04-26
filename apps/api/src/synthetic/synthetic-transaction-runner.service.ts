@@ -102,6 +102,76 @@ function buildCoreLoopJobDescription(): string {
   return `Core loop synthetic job description (local deterministic fixture).\n\n${body}`;
 }
 
+function getExceptionResponse(error: unknown): any | null {
+  const anyErr = error as any;
+  if (!anyErr) return null;
+  if (typeof anyErr.getResponse === "function") {
+    try {
+      return anyErr.getResponse();
+    } catch {
+      return null;
+    }
+  }
+  if (typeof anyErr.response !== "undefined") {
+    return anyErr.response;
+  }
+  return null;
+}
+
+function enrichConflict(step: string, error: unknown): string | null {
+  const response = getExceptionResponse(error);
+  const errorPayload = response?.error ?? response?.message?.error ?? null;
+  const code = errorPayload?.code ?? null;
+  const existingJobId = errorPayload?.existingJobId ?? null;
+  const runId = errorPayload?.runId ?? null;
+  const dedupeKey = errorPayload?.dedupeKey ?? null;
+
+  if (code === "JOB_DUPLICATE") {
+    return `Synthetic core loop seed failed at step=${step} due to a conflict creating a Job (unique field: dedupeHash). existingJobId=${existingJobId ?? "unknown"}`;
+  }
+
+  if (code === "generation_in_flight") {
+    return `Synthetic core loop seed failed at step=${step} because a generation operation is already in flight (service: workflow-idempotency, unique field: dedupeKey). runId=${runId ?? "unknown"} dedupeKey=${dedupeKey ?? "unknown"}`;
+  }
+
+  if ((error as any)?.name === "ConflictException" || (error as any)?.status === 409 || response?.statusCode === 409) {
+    return `Synthetic core loop seed failed at step=${step} due to a conflict. Details: ${JSON.stringify(response)}`;
+  }
+
+  return null;
+}
+
+function buildCoreLoopBaselineSections(): Array<{ sectionType: string; title: string; content: string }> {
+  const paragraph =
+    "Support and operations leader with cross-functional ownership and measurable delivery. I define OKRs, build repeatable workflows, and partner with product, engineering, and stakeholders to drive outcomes with clear accountability. I document systems, run postmortems, and improve reliability using data-backed prioritization and crisp written communication.";
+
+  const longBody = Array.from({ length: 4 })
+    .map(() => paragraph)
+    .join("\n\n");
+
+  return [
+    {
+      sectionType: "SUMMARY",
+      title: "Professional summary",
+      content: longBody,
+    },
+    {
+      sectionType: "EXPERIENCE",
+      title: "Experience highlights",
+      content: [
+        "Director, Support Operations | Acme Co | 2022 - Present",
+        "- Led enterprise escalations and incident response, improving resolution time and customer sentiment.",
+        "- Built operational dashboards and governance rhythms to improve team throughput and quality.",
+        "",
+        "Support Manager | Beta Co | 2019 - 2022",
+        "- Managed queue performance, coached team leads, and improved SLA attainment via process improvements.",
+        "",
+        longBody,
+      ].join("\n"),
+    },
+  ];
+}
+
 @Injectable()
 export class SyntheticTransactionRunnerService {
   constructor(
@@ -169,7 +239,50 @@ export class SyntheticTransactionRunnerService {
       },
       relations: ["versions"],
     });
-    if (existing) return existing;
+    const ensureSections = async (baselineId: string) => {
+      const repoAny: any = baselineSectionRepository as any;
+      const qb = typeof repoAny?.createQueryBuilder === "function" ? repoAny.createQueryBuilder("section") : null;
+      const stats = qb
+        ? ((await qb
+            .select("COUNT(section.id)", "sectionCount")
+            .addSelect("SUM(LENGTH(COALESCE(section.content, '')))", "totalChars")
+            .where('section."baselineId" = :baselineId', { baselineId })
+            .getRawOne()) as { sectionCount?: string; totalChars?: string | null })
+        : null;
+
+      const sectionCount = Number(stats?.sectionCount ?? NaN);
+      const totalChars = Number(stats?.totalChars ?? NaN);
+      const hasEnoughContent =
+        Number.isFinite(sectionCount) &&
+        Number.isFinite(totalChars) &&
+        sectionCount > 0 &&
+        totalChars >= 500;
+
+      if (hasEnoughContent) {
+        return;
+      }
+
+      if (typeof repoAny?.delete === "function") {
+        await repoAny.delete({ baselineId });
+      }
+
+      const sections = buildCoreLoopBaselineSections().map((section, index) =>
+        baselineSectionRepository.create({
+          baselineId,
+          sectionType: section.sectionType,
+          title: section.title,
+          content: section.content,
+          includePolicy: "always",
+          order: index,
+        }),
+      );
+      await baselineSectionRepository.save(sections);
+    };
+
+    if (existing) {
+      await ensureSections(existing.id);
+      return existing;
+    }
 
     const created = baselineRepository.create({
       userId: _userId,
@@ -219,32 +332,7 @@ export class SyntheticTransactionRunnerService {
     const savedVersion = await baselineVersionRepository.save(version);
     baseline.versions = [savedVersion];
 
-    const baselineSections = [
-      {
-        sectionType: "SUMMARY",
-        title: "Professional summary",
-        content:
-          "Synthetic baseline for core loop validation. Demonstrates verified leadership, cross-functional ownership, and measurable outcomes across support, operations, and product launches.",
-      },
-      {
-        sectionType: "EXPERIENCE",
-        title: "Experience highlights",
-        content:
-          "Led operational programs across teams, owned OKRs, improved key metrics, documented workflows, and partnered with stakeholders to deliver repeatable systems and outcomes.",
-      },
-    ];
-
-    const sections = baselineSections.map((section, index) =>
-      baselineSectionRepository.create({
-        baselineId: baseline.id,
-        sectionType: section.sectionType,
-        title: section.title,
-        content: section.content,
-        includePolicy: "always",
-        order: index,
-      }),
-    );
-    await baselineSectionRepository.save(sections);
+    await ensureSections(baseline.id);
     return baseline;
   }
 
@@ -333,19 +421,58 @@ export class SyntheticTransactionRunnerService {
           const result = await fn();
           return result;
         } catch (error) {
+          const enrichedConflict = enrichConflict(step, error);
+          const response = getExceptionResponse(error);
+          const responseDetails =
+            !enrichedConflict && response != null
+              ? `Synthetic core loop seed failed at step=${step} with an error response: ${JSON.stringify(response)}`
+              : null;
+          const errorText =
+            enrichedConflict ??
+            responseDetails ??
+            (error instanceof Error ? error.message : String(error));
           push({
             step,
             status: "failed",
-            errorMessage: error instanceof Error ? error.message : String(error),
+            errorMessage: errorText,
           });
           const enriched = enrichReplaceCrash(step, error);
-          throw new Error(enriched ?? (error instanceof Error ? error.message : String(error)));
+          throw new Error(
+            enriched ??
+              errorText,
+          );
         }
       };
 
       const user = await runStep("resolve_synthetic_user", () => this.resolveOrCreateSyntheticUser());
       push({ step: "resolve_synthetic_user", status: "succeeded" });
       await userRepository.findOneOrFail({ where: { id: user.id } });
+
+      const retryGenerationInFlight = async <T>(
+        step: SyntheticTransactionResult["stepResults"][number]["step"],
+        fn: () => Promise<T>,
+      ): Promise<T> => {
+        const maxAttempts = 6;
+        const nodeEnv = process.env.NODE_ENV ?? "development";
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          try {
+            return await fn();
+          } catch (error) {
+            const response = getExceptionResponse(error);
+            const errorPayload = response?.error ?? null;
+            if (errorPayload?.code !== "generation_in_flight") {
+              throw error;
+            }
+            if (attempt === maxAttempts) {
+              const enriched = enrichConflict(step, error);
+              throw new Error(enriched ?? "Synthetic core loop seed failed due to generation_in_flight");
+            }
+            const delayMs = nodeEnv === "test" ? 0 : 400 * attempt;
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+          }
+        }
+        throw new Error("Synthetic core loop seed retry loop unexpectedly exhausted");
+      };
 
       const baseline = await runStep("resolve_baseline_fixture", () =>
         this.resolveOrCreateBaselineFixture(user.id, {
@@ -356,19 +483,39 @@ export class SyntheticTransactionRunnerService {
       );
       push({ step: "resolve_baseline_fixture", status: "succeeded" });
 
-      const createdJob = await runStep("create_job", () =>
-        jobsService.createJob(user.id, {
-          title: "Core loop synthetic role",
-          company: "TargetThisRole Synthetic",
-          rawDescription: buildCoreLoopJobDescription(),
-          jdIngestionMethod: "PASTE",
-        }),
-      );
+      const createdJob = await runStep("create_job", async () => {
+        try {
+          return await jobsService.createJob(user.id, {
+            title: "Core loop synthetic role",
+            company: "TargetThisRole Synthetic",
+            rawDescription: buildCoreLoopJobDescription(),
+            jdIngestionMethod: "PASTE",
+          });
+        } catch (error) {
+          const response = getExceptionResponse(error);
+          const errorPayload = response?.error ?? null;
+          const existingJobId = errorPayload?.existingJobId ?? null;
+          if (errorPayload?.code === "JOB_DUPLICATE" && typeof existingJobId === "string" && existingJobId.length > 0) {
+            if (!deps.jobRepository) {
+              throw error;
+            }
+            const existing = await deps.jobRepository.findOne({
+              where: { id: existingJobId, userId: user.id },
+            });
+            if (existing) {
+              return { job: existing };
+            }
+          }
+          throw error;
+        }
+      });
       push({ step: "create_job", status: "succeeded" });
       const jobId = createdJob?.job?.id ?? createdJob?.id ?? "job-1";
 
       const assessment = await runStep("run_fit_assessment", () =>
-        analysisService.runFitAssessment(user.id, { jobId, baselineId: baseline.id }),
+        retryGenerationInFlight("run_fit_assessment", () =>
+          analysisService.runFitAssessment(user.id, { jobId, baselineId: baseline.id }),
+        ),
       );
       if (!assessment || assessment.status !== "ok") {
         push({
@@ -381,11 +528,13 @@ export class SyntheticTransactionRunnerService {
       push({ step: "run_fit_assessment", status: "succeeded" });
 
       const resume: any = await runStep("generate_resume_preview", () =>
-        (resumeService as any).generateResume(
-          user.id,
-          { baselineId: baseline.id, jobId },
-          undefined,
-          { isSynthetic: true },
+        retryGenerationInFlight("generate_resume_preview", () =>
+          (resumeService as any).generateResume(
+            user.id,
+            { baselineId: baseline.id, jobId },
+            undefined,
+            { isSynthetic: true },
+          ),
         ),
       );
       if (!resume?.preview?.resume) {
@@ -395,10 +544,12 @@ export class SyntheticTransactionRunnerService {
       push({ step: "generate_resume_preview", status: "succeeded" });
 
       const coverLetter: any = await runStep("generate_cover_letter", () =>
-        (coverLettersService as any).generateCoverLetter(
-          user.id,
-          { baselineId: baseline.id, jobId },
-          { isSynthetic: true },
+        retryGenerationInFlight("generate_cover_letter", () =>
+          (coverLettersService as any).generateCoverLetter(
+            user.id,
+            { baselineId: baseline.id, jobId },
+            { isSynthetic: true },
+          ),
         ),
       );
       push({ step: "generate_cover_letter", status: coverLetter?.status === "success" ? "succeeded" : "failed" });

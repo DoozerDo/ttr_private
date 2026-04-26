@@ -15,7 +15,12 @@ describe('SyntheticTransactionRunnerService', () => {
 
     const userRepository = { findOneOrFail: jest.fn(), findOne: jest.fn(), save: jest.fn() } as any;
     const baselineRepository = { findOne: jest.fn(), save: jest.fn(), create: jest.fn() } as any;
-    const baselineSectionRepository = { create: jest.fn(), save: jest.fn() } as any;
+    const baselineSectionRepository = {
+      create: jest.fn(),
+      save: jest.fn(),
+      delete: jest.fn(),
+      createQueryBuilder: jest.fn(),
+    } as any;
     const baselineVersionRepository = { create: jest.fn(), save: jest.fn() } as any;
     const baselineBlockPolicyRepository = { create: jest.fn(), save: jest.fn() } as any;
     const jobRepository = { findOne: jest.fn() } as any;
@@ -66,6 +71,7 @@ describe('SyntheticTransactionRunnerService', () => {
       baselineRepository,
       baselineSectionRepository,
       baselineVersionRepository,
+      jobRepository,
       fitAssessmentRepository,
       coverLetterRepository,
       opportunityRepository,
@@ -248,6 +254,142 @@ describe('SyntheticTransactionRunnerService', () => {
     );
   });
 
+  it('is idempotent when job creation hits JOB_DUPLICATE conflict', async () => {
+    const {
+      service,
+      usersService,
+      jobsService,
+      analysisService,
+      resumeService,
+      coverLettersService,
+      opportunitiesService,
+      userRepository,
+      baselineRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      coverLetterRepository,
+      opportunityRepository,
+      applicationRepository,
+    } = buildService();
+    jest.spyOn(service as any, 'assertSyntheticPropagation').mockResolvedValue(undefined);
+
+    usersService.findByEmail.mockResolvedValue({ id: 'u1', isSynthetic: true, preserveFromCleanup: true });
+    userRepository.findOneOrFail.mockResolvedValue({ id: 'u1' });
+    baselineRepository.findOne.mockResolvedValue({ id: 'b1', isSynthetic: true, preserveFromCleanup: true, versions: [{ id: 'bv1' }] });
+
+    jobsService.createJob
+      .mockResolvedValueOnce({ job: { id: 'j1' } })
+      .mockRejectedValueOnce(
+        Object.assign(new Error('Conflict Exception'), {
+          name: 'ConflictException',
+          getResponse: () => ({ error: { code: 'JOB_DUPLICATE', existingJobId: 'j1' } }),
+        }),
+      );
+    jobRepository.findOne.mockResolvedValue({ id: 'j1', userId: 'u1' });
+
+    analysisService.runFitAssessment.mockResolvedValue({ status: 'ok', assessmentId: 'a1', score: 82, verdict: 'APPLY' });
+    resumeService.generateResume.mockResolvedValue({ status: 'success', preview: { resume: { experience: [{ company: 'X' }] } } });
+    coverLettersService.generateCoverLetter.mockResolvedValue({ status: 'success', preview: { coverLetter: { content: 'ok' } } });
+    opportunitiesService.upsertOpportunity.mockResolvedValue({ id: 'o1', currentScore: 82 });
+
+    fitAssessmentRepository.findOneOrFail.mockResolvedValue({ id: 'a1', overallScore: 82 });
+    fitAssessmentRepository.findOne.mockResolvedValue({ isSynthetic: true });
+    coverLetterRepository.findOne.mockResolvedValue({ isSynthetic: true });
+    opportunityRepository.findOne.mockResolvedValue({ isSynthetic: true });
+    applicationRepository.findOne.mockResolvedValue({ isSynthetic: true });
+
+    const first = await service.runCoreLoopSmoke();
+    const second = await service.runCoreLoopSmoke();
+
+    expect(first.status).toBe('succeeded');
+    expect(second.status).toBe('succeeded');
+    expect(jobRepository.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'j1', userId: 'u1' },
+      }),
+    );
+  });
+
+  it('retries when cover letter generation is in flight', async () => {
+    const {
+      service,
+      usersService,
+      jobsService,
+      analysisService,
+      resumeService,
+      coverLettersService,
+      opportunitiesService,
+      userRepository,
+      baselineRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      coverLetterRepository,
+      opportunityRepository,
+      applicationRepository,
+    } = buildService();
+    jest.spyOn(service as any, 'assertSyntheticPropagation').mockResolvedValue(undefined);
+
+    usersService.findByEmail.mockResolvedValue({ id: 'u1', isSynthetic: true, preserveFromCleanup: true });
+    userRepository.findOneOrFail.mockResolvedValue({ id: 'u1' });
+    baselineRepository.findOne.mockResolvedValue({ id: 'b1', isSynthetic: true, preserveFromCleanup: true, versions: [{ id: 'bv1' }] });
+
+    jobsService.createJob.mockResolvedValue({ job: { id: 'j1' } });
+    jobRepository.findOne.mockResolvedValue({ id: 'j1', userId: 'u1' });
+
+    analysisService.runFitAssessment.mockResolvedValue({ status: 'ok', assessmentId: 'a1', score: 82, verdict: 'APPLY' });
+    resumeService.generateResume.mockResolvedValue({ status: 'success', preview: { resume: { experience: [{ company: 'X' }] } } });
+
+    coverLettersService.generateCoverLetter
+      .mockRejectedValueOnce(
+        Object.assign(new Error('Conflict Exception'), {
+          name: 'ConflictException',
+          getResponse: () => ({ error: { code: 'generation_in_flight', runId: 'r1', dedupeKey: 'k1' } }),
+        }),
+      )
+      .mockResolvedValueOnce({ status: 'success', preview: { coverLetter: { content: 'ok' } } });
+
+    opportunitiesService.upsertOpportunity.mockResolvedValue({ id: 'o1', currentScore: 82 });
+
+    fitAssessmentRepository.findOneOrFail.mockResolvedValue({ id: 'a1', overallScore: 82 });
+    fitAssessmentRepository.findOne.mockResolvedValue({ isSynthetic: true });
+    coverLetterRepository.findOne.mockResolvedValue({ isSynthetic: true });
+    opportunityRepository.findOne.mockResolvedValue({ isSynthetic: true });
+    applicationRepository.findOne.mockResolvedValue({ isSynthetic: true });
+
+    const result = await service.runCoreLoopSmoke();
+    expect(result.status).toBe('succeeded');
+    expect(coverLettersService.generateCoverLetter).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns enriched conflict diagnostics instead of generic Conflict Exception', async () => {
+    const {
+      service,
+      usersService,
+      jobsService,
+      analysisService,
+      userRepository,
+      baselineRepository,
+    } = buildService();
+    jest.spyOn(service as any, 'assertSyntheticPropagation').mockResolvedValue(undefined);
+
+    usersService.findByEmail.mockResolvedValue({ id: 'u1', isSynthetic: true, preserveFromCleanup: true });
+    userRepository.findOneOrFail.mockResolvedValue({ id: 'u1' });
+    baselineRepository.findOne.mockResolvedValue({ id: 'b1', isSynthetic: true, preserveFromCleanup: true, versions: [{ id: 'bv1' }] });
+
+    jobsService.createJob.mockResolvedValue({ job: { id: 'j1' } });
+    analysisService.runFitAssessment.mockRejectedValue(
+      Object.assign(new Error('Conflict Exception'), {
+        name: 'ConflictException',
+        getResponse: () => ({ error: { code: 'generation_in_flight', runId: 'r1', dedupeKey: 'k1' } }),
+      }),
+    );
+
+    const result = await service.runCoreLoopSmoke();
+    expect(result.status).toBe('failed');
+    expect(result.errorMessage).toContain('step=run_fit_assessment');
+    expect(result.errorMessage).toContain('already in flight');
+  });
+
   it('fails business assertion when resume preview is missing structured content', async () => {
     const {
       service,
@@ -286,6 +428,15 @@ describe('SyntheticTransactionRunnerService', () => {
       syntheticScenarioKey: 'core_loop_smoke',
       versions: [{ id: 'bv1' }],
     });
+    baselineSectionRepository.createQueryBuilder.mockReturnValue({
+      select: () => ({
+        addSelect: () => ({
+          where: () => ({
+            getRawOne: async () => ({ sectionCount: '2', totalChars: '700' }),
+          }),
+        }),
+      }),
+    });
 
     const baseline = await service.resolveOrCreateBaselineFixture('u1', {
       scenarioKey: 'core_loop_smoke',
@@ -295,6 +446,40 @@ describe('SyntheticTransactionRunnerService', () => {
 
     expect(baseline.id).toBe('b1');
     expect(baselineSectionRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('repairs a synthetic baseline fixture when sections are missing or too small', async () => {
+    const { service, baselineRepository, baselineSectionRepository } = buildService() as any;
+
+    baselineRepository.findOne.mockResolvedValue({
+      id: 'b1',
+      userId: 'u1',
+      isSynthetic: true,
+      preserveFromCleanup: true,
+      syntheticScenarioKey: 'core_loop_smoke',
+      versions: [{ id: 'bv1' }],
+    });
+    baselineSectionRepository.createQueryBuilder.mockReturnValue({
+      select: () => ({
+        addSelect: () => ({
+          where: () => ({
+            getRawOne: async () => ({ sectionCount: '0', totalChars: '0' }),
+          }),
+        }),
+      }),
+    });
+    baselineSectionRepository.create.mockImplementation((value: any) => value);
+    baselineSectionRepository.save.mockResolvedValue([]);
+
+    const baseline = await service.resolveOrCreateBaselineFixture('u1', {
+      scenarioKey: 'core_loop_smoke',
+      runId: 'run-1',
+      syntheticCreatedAt: new Date(),
+    });
+
+    expect(baseline.id).toBe('b1');
+    expect(baselineSectionRepository.delete).toHaveBeenCalled();
+    expect(baselineSectionRepository.save).toHaveBeenCalled();
   });
 
   it('enriches raw replace crashes so the API returns diagnostics', async () => {

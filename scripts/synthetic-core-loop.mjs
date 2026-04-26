@@ -110,15 +110,29 @@ async function seedSyntheticFixture(accessToken) {
     },
   });
   const body = await readJson(response);
-  assert(response.ok, `synthetic seed failed: ${body?.message ?? body?.error ?? response.status}`);
+  if (!response.ok) {
+    const details = body ? JSON.stringify(body) : String(response.status);
+    throw new Error(`synthetic seed failed: HTTP ${response.status} ${details}`);
+  }
   if (body?.status !== "succeeded") {
     const rawError = body?.errorMessage ?? body?.message ?? body?.error ?? null;
+    const stepSummary = Array.isArray(body?.stepResults)
+      ? body.stepResults
+          .map((step) => `${step.step}:${step.status}${step.errorMessage ? ` (${step.errorMessage})` : ""}`)
+          .join(", ")
+      : null;
     if (!rawError) {
       throw new Error(
-        `synthetic seed did not succeed: missing errorMessage in response body (status=${String(body?.status ?? "unknown")})`,
+        `synthetic seed did not succeed: missing errorMessage in response body (status=${String(body?.status ?? "unknown")})${stepSummary ? ` steps=${stepSummary}` : ""}`,
       );
     }
-    throw new Error(`synthetic seed did not succeed: ${rawError}`);
+    const extra =
+      rawError === "Conflict Exception" || rawError === "Bad Request Exception"
+        ? ` body=${JSON.stringify(body)}${stepSummary ? ` steps=${stepSummary}` : ""}`
+        : stepSummary
+          ? ` steps=${stepSummary}`
+          : "";
+    throw new Error(`synthetic seed did not succeed: ${rawError}${extra}`);
   }
   return body;
 }
