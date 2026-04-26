@@ -421,7 +421,20 @@ export class SyntheticTransactionRunnerService {
 
       return await finalize("succeeded", null);
     } catch (error) {
-      return await finalize("failed", error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      const enriched =
+        /replace/.test(message)
+          ? (() => {
+              const nodeEnv = process.env.NODE_ENV ?? "development";
+              const includeStack = nodeEnv !== "production";
+              const stack =
+                includeStack && error instanceof Error && typeof error.stack === "string"
+                  ? error.stack
+                  : null;
+              return `Synthetic core loop seed crashed outside step wrapper with an unsafe .replace() call on an undefined value.${stack ? ` Stack:\n${stack}` : ` Message: ${message}`}`;
+            })()
+          : null;
+      return await finalize("failed", enriched ?? message);
     }
   }
 

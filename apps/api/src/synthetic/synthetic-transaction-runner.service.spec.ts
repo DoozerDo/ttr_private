@@ -297,6 +297,36 @@ describe('SyntheticTransactionRunnerService', () => {
     expect(baselineSectionRepository.save).not.toHaveBeenCalled();
   });
 
+  it('enriches raw replace crashes so the API returns diagnostics', async () => {
+    const {
+      service,
+      usersService,
+      userRepository,
+      baselineRepository,
+      jobsService,
+      analysisService,
+      resumeService,
+      coverLettersService,
+    } = buildService();
+    jest
+      .spyOn(service as any, 'assertSyntheticPropagation')
+      .mockResolvedValue(undefined);
+
+    usersService.findByEmail.mockResolvedValue({ id: 'u1', isSynthetic: true, preserveFromCleanup: true });
+    userRepository.findOneOrFail.mockResolvedValue({ id: 'u1' });
+    baselineRepository.findOne.mockResolvedValue({ id: 'b1', userId: 'u1', isSynthetic: true, preserveFromCleanup: true, versions: [{ id: 'bv1' }] });
+
+    jobsService.createJob.mockRejectedValue(new TypeError("Cannot read properties of undefined (reading 'replace')"));
+    analysisService.runFitAssessment.mockResolvedValue({ status: 'ok', assessmentId: 'a1', score: 80, verdict: 'APPLY' });
+    resumeService.generateResume.mockResolvedValue({ status: 'success', preview: { resume: { experience: [{ company: 'X' }] } } });
+    coverLettersService.generateCoverLetter.mockResolvedValue({ status: 'success' });
+
+    const result = await service.runCoreLoopSmoke();
+
+    expect(result.status).toBe('failed');
+    expect(String(result.errorMessage ?? '')).toContain('Synthetic core loop seed crashed');
+  });
+
   it('creates a baseline fixture with a non-null userId when missing', async () => {
     const { service, baselineRepository, baselineVersionRepository, baselineSectionRepository } = buildService() as any;
 
