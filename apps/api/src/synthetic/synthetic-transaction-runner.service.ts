@@ -1,5 +1,6 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import bcrypt from "bcryptjs";
+import { createHash } from "crypto";
 import { buildDocumentStrategyPlan } from "../shared/documentStrategyPlan";
 import { evaluateSyntheticGenerationScenario } from "./generation/synthetic-generation.evaluator";
 import { listSyntheticGenerationScenarioBundles } from "./generation/synthetic-generation.fixtures";
@@ -100,6 +101,20 @@ function buildCoreLoopJobDescription(): string {
     .join("\n\n");
 
   return `Core loop synthetic job description (local deterministic fixture).\n\n${body}`;
+}
+
+function computeCoreLoopBaselineVersionFileHash(): string {
+  const sections = buildCoreLoopBaselineSections();
+  const payload = {
+    fixture: "core_loop_smoke",
+    version: 1,
+    sections: sections.map((section) => ({
+      sectionType: section.sectionType,
+      title: section.title,
+      content: section.content,
+    })),
+  };
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
 function isQueryUniqueViolation(error: unknown): boolean {
@@ -296,6 +311,34 @@ export class SyntheticTransactionRunnerService {
 
     if (existing) {
       await ensureSections(existing.id);
+      const versions: any[] = Array.isArray((existing as any).versions) ? (existing as any).versions : [];
+      const targetVersion = versions[0] ?? null;
+      const desiredFileHash = computeCoreLoopBaselineVersionFileHash();
+      if (!targetVersion) {
+        const createdVersion = baselineVersionRepository.create({
+          baselineId: existing.id,
+          versionNumber: 1,
+          fileHash: desiredFileHash,
+          allowedCompanies: [],
+          allowedRoles: [],
+          allowedTechnologies: [],
+          allowedMetricTokens: [],
+          verifiedAdditions: [],
+          additionDiff: null,
+          promotedFromInterviewId: null,
+          storagePath: (existing as any).storagePath,
+          isSynthetic: true,
+          preserveFromCleanup: true,
+          syntheticScenarioKey: input.scenarioKey,
+          syntheticRunId: input.runId,
+          syntheticCreatedAt: input.syntheticCreatedAt,
+        });
+        const saved = await baselineVersionRepository.save(createdVersion);
+        (existing as any).versions = [saved];
+      } else if (!targetVersion.fileHash) {
+        targetVersion.fileHash = desiredFileHash;
+        await baselineVersionRepository.save(targetVersion);
+      }
       return existing;
     }
 
@@ -329,7 +372,7 @@ export class SyntheticTransactionRunnerService {
     const version = baselineVersionRepository.create({
       baselineId: baseline.id,
       versionNumber: 1,
-      fileHash: null,
+      fileHash: computeCoreLoopBaselineVersionFileHash(),
       allowedCompanies: [],
       allowedRoles: [],
       allowedTechnologies: [],

@@ -397,6 +397,45 @@ describe('SyntheticTransactionRunnerService', () => {
     expect(createJobStep?.errorMessage ?? '').toContain('Exception=');
   });
 
+  it('repairs missing synthetic baseline version fileHash', async () => {
+    const {
+      service,
+      baselineRepository,
+      baselineSectionRepository,
+      baselineVersionRepository,
+    } = buildService();
+
+    baselineSectionRepository.createQueryBuilder.mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      getRawOne: jest.fn().mockResolvedValue({ sectionCount: '2', totalChars: '900' }),
+    });
+
+    baselineRepository.findOne.mockResolvedValue({
+      id: 'b1',
+      userId: 'u1',
+      storagePath: 'synthetic/core_loop_smoke/run/resume.pdf',
+      versions: [{ id: 'bv1', baselineId: 'b1', versionNumber: 1, fileHash: null, storagePath: 'x' }],
+    });
+
+    baselineVersionRepository.save.mockResolvedValue({ id: 'bv1' });
+
+    const baseline = await service.resolveOrCreateBaselineFixture('u1', {
+      scenarioKey: 'core_loop_smoke',
+      runId: 'run-1',
+      syntheticCreatedAt: new Date(),
+    });
+
+    expect(baseline.id).toBe('b1');
+    expect(baselineVersionRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'bv1', fileHash: expect.any(String) }),
+    );
+    const saved = baselineVersionRepository.save.mock.calls[0][0];
+    expect(typeof saved.fileHash).toBe('string');
+    expect(saved.fileHash.length).toBeGreaterThan(10);
+  });
+
   it('retries when cover letter generation is in flight', async () => {
     const {
       service,
