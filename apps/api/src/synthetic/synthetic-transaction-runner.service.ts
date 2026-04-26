@@ -102,6 +102,21 @@ function buildCoreLoopJobDescription(): string {
   return `Core loop synthetic job description (local deterministic fixture).\n\n${body}`;
 }
 
+function isQueryUniqueViolation(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const record = error as Record<string, unknown>;
+  const code = String(record["code"] ?? "").trim();
+  return code === "23505";
+}
+
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "\"[unserializable]\"";
+  }
+}
+
 function getExceptionResponse(error: unknown): any | null {
   const anyErr = error as any;
   if (!anyErr) return null;
@@ -484,11 +499,63 @@ export class SyntheticTransactionRunnerService {
       push({ step: "resolve_baseline_fixture", status: "succeeded" });
 
       const createdJob = await runStep("create_job", async () => {
+        const title = "Core loop synthetic role";
+        const company = "TargetThisRole Synthetic";
+        const rawDescription = buildCoreLoopJobDescription();
+        const rawDescriptionMarker = "Core loop synthetic job description (local deterministic fixture).";
+
+        const findExistingJob = async (): Promise<{ job: any | null; matchCount: number; markerMatchCount: number }> => {
+          if (!deps.jobRepository) return { job: null, matchCount: 0, markerMatchCount: 0 };
+          const repoAny: any = deps.jobRepository as any;
+
+          const where = { userId: user.id, title, company };
+          let matches: any[] = [];
+          if (typeof repoAny.find === "function") {
+            matches = await repoAny.find({
+              where,
+              order: { createdAt: "DESC" },
+              take: 5,
+            });
+          } else {
+            const one = await repoAny.findOne({
+              where,
+              order: { createdAt: "DESC" },
+            });
+            matches = one ? [one] : [];
+          }
+
+          const markerMatches = matches.filter((job) =>
+            String((job as any)?.rawDescription ?? "").startsWith(rawDescriptionMarker),
+          );
+          return {
+            job: markerMatches[0] ?? null,
+            matchCount: matches.length,
+            markerMatchCount: markerMatches.length,
+          };
+        };
+
+        const describeCreateJobError = (error: unknown) => {
+          const anyErr: any = error as any;
+          const response = getExceptionResponse(error);
+          const nodeEnv = process.env.NODE_ENV ?? "development";
+          const includeStack = nodeEnv !== "production";
+          return {
+            name: anyErr?.name ?? null,
+            constructor: anyErr?.constructor?.name ?? null,
+            message: anyErr?.message ?? String(error),
+            status: anyErr?.status ?? anyErr?.statusCode ?? response?.statusCode ?? null,
+            code: anyErr?.code ?? response?.error?.code ?? null,
+            response: anyErr?.response ?? null,
+            getResponse: response ?? null,
+            stack: includeStack ? (typeof anyErr?.stack === "string" ? anyErr.stack : null) : null,
+          };
+        };
+
         try {
           return await jobsService.createJob(user.id, {
-            title: "Core loop synthetic role",
-            company: "TargetThisRole Synthetic",
-            rawDescription: buildCoreLoopJobDescription(),
+            title,
+            company,
+            rawDescription,
             jdIngestionMethod: "PASTE",
           });
         } catch (error) {
@@ -506,6 +573,24 @@ export class SyntheticTransactionRunnerService {
               return { job: existing };
             }
           }
+
+          const isConflict =
+            (error as any)?.name === "ConflictException" ||
+            (error as any)?.status === 409 ||
+            response?.statusCode === 409 ||
+            isQueryUniqueViolation(error);
+
+          if (isConflict) {
+            const existingLookup = await findExistingJob();
+            if (existingLookup.job) {
+              return { job: existingLookup.job };
+            }
+            const diagnostics = describeCreateJobError(error);
+            throw new Error(
+              `Synthetic core loop seed failed at step=create_job due to a conflict creating a Job, but no reusable synthetic job was found. Attempted identifiers: userId=${user.id} title=${safeJson(title)} company=${safeJson(company)} rawDescriptionMarker=${safeJson(rawDescriptionMarker)} matchCount=${existingLookup.matchCount} markerMatchCount=${existingLookup.markerMatchCount}. Exception=${safeJson(diagnostics)}`,
+            );
+          }
+
           throw error;
         }
       });

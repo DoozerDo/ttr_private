@@ -310,6 +310,93 @@ describe('SyntheticTransactionRunnerService', () => {
     );
   });
 
+  it('reuses existing job when JobsService.createJob throws a plain ConflictException', async () => {
+    const {
+      service,
+      usersService,
+      jobsService,
+      analysisService,
+      resumeService,
+      coverLettersService,
+      opportunitiesService,
+      userRepository,
+      baselineRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      coverLetterRepository,
+      opportunityRepository,
+      applicationRepository,
+    } = buildService();
+    jest.spyOn(service as any, 'assertSyntheticPropagation').mockResolvedValue(undefined);
+
+    usersService.findByEmail.mockResolvedValue({ id: 'u1', isSynthetic: true, preserveFromCleanup: true });
+    userRepository.findOneOrFail.mockResolvedValue({ id: 'u1' });
+    baselineRepository.findOne.mockResolvedValue({ id: 'b1', isSynthetic: true, preserveFromCleanup: true, versions: [{ id: 'bv1' }] });
+
+    jobsService.createJob.mockRejectedValue(
+      Object.assign(new Error('Conflict Exception'), {
+        name: 'ConflictException',
+        getResponse: () => ({ statusCode: 409, message: 'Conflict' }),
+      }),
+    );
+    jobRepository.findOne.mockResolvedValue({
+      id: 'j-existing',
+      userId: 'u1',
+      title: 'Core loop synthetic role',
+      company: 'TargetThisRole Synthetic',
+      rawDescription: 'Core loop synthetic job description (local deterministic fixture).\n\nBody',
+      createdAt: new Date(),
+    });
+
+    analysisService.runFitAssessment.mockResolvedValue({ status: 'ok', assessmentId: 'a1', score: 82, verdict: 'APPLY' });
+    resumeService.generateResume.mockResolvedValue({ status: 'success', preview: { resume: { experience: [{ company: 'X' }] } } });
+    coverLettersService.generateCoverLetter.mockResolvedValue({ status: 'success', preview: { coverLetter: { content: 'ok' } } });
+    opportunitiesService.upsertOpportunity.mockResolvedValue({ id: 'o1', currentScore: 82 });
+
+    fitAssessmentRepository.findOneOrFail.mockResolvedValue({ id: 'a1', overallScore: 82 });
+    fitAssessmentRepository.findOne.mockResolvedValue({ isSynthetic: true });
+    coverLetterRepository.findOne.mockResolvedValue({ isSynthetic: true });
+    opportunityRepository.findOne.mockResolvedValue({ isSynthetic: true });
+    applicationRepository.findOne.mockResolvedValue({ isSynthetic: true });
+
+    const result = await service.runCoreLoopSmoke();
+    expect(result.status).toBe('succeeded');
+    expect(analysisService.runFitAssessment).toHaveBeenCalledWith('u1', expect.objectContaining({ jobId: 'j-existing' }));
+  });
+
+  it('enriches create_job conflicts with exception shape details when reuse fails', async () => {
+    const {
+      service,
+      usersService,
+      jobsService,
+      analysisService,
+      userRepository,
+      baselineRepository,
+      jobRepository,
+    } = buildService();
+    jest.spyOn(service as any, 'assertSyntheticPropagation').mockResolvedValue(undefined);
+
+    usersService.findByEmail.mockResolvedValue({ id: 'u1', isSynthetic: true, preserveFromCleanup: true });
+    userRepository.findOneOrFail.mockResolvedValue({ id: 'u1' });
+    baselineRepository.findOne.mockResolvedValue({ id: 'b1', isSynthetic: true, preserveFromCleanup: true, versions: [{ id: 'bv1' }] });
+
+    jobsService.createJob.mockRejectedValue(
+      Object.assign(new Error('Conflict Exception'), {
+        response: { statusCode: 409, message: 'Conflict' },
+        status: 409,
+      }),
+    );
+    jobRepository.findOne.mockResolvedValue(null);
+    analysisService.runFitAssessment.mockResolvedValue({ status: 'ok' });
+
+    const result = await service.runCoreLoopSmoke();
+    expect(result.status).toBe('failed');
+    const createJobStep = result.stepResults.find((s) => s.step === 'create_job');
+    expect(createJobStep?.status).toBe('failed');
+    expect(createJobStep?.errorMessage ?? '').toContain('step=create_job');
+    expect(createJobStep?.errorMessage ?? '').toContain('Exception=');
+  });
+
   it('retries when cover letter generation is in flight', async () => {
     const {
       service,
