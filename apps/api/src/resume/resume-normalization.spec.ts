@@ -43,6 +43,18 @@ describe('resume-normalization', () => {
     expect(document.experience[0]?.dateRange).toBe('2021 - Present');
   });
 
+  it('does not crash on incomplete pipe headers', () => {
+    expect(() =>
+      buildNormalizedResumeDocument([
+        {
+          type: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: ['Northstar Cloud |', '- Led enterprise escalations.'].join('\n'),
+        },
+      ] as any),
+    ).not.toThrow();
+  });
+
   it('keeps bullets attached to the correct experience role', () => {
     const document = buildNormalizedResumeDocument([
       {

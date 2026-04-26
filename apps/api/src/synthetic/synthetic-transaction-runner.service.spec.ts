@@ -203,6 +203,15 @@ describe('SyntheticTransactionRunnerService', () => {
       expect.any(Object),
       expect.objectContaining({ isSynthetic: true }),
     );
+    expect(jobsService.createJob).toHaveBeenCalledWith(
+      'u1',
+      expect.objectContaining({
+        rawDescription: expect.any(String),
+      }),
+    );
+    const jobPayload = jobsService.createJob.mock.calls[0][1];
+    expect(typeof jobPayload.rawDescription).toBe('string');
+    expect(jobPayload.rawDescription.length).toBeGreaterThanOrEqual(1000);
     expect(syntheticRunRepository.update).toHaveBeenCalledWith(
       'run-log-1',
       expect.objectContaining({ status: 'succeeded' }),

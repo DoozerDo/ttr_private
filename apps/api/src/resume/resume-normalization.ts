@@ -493,8 +493,8 @@ function parseExperienceHeader(line: string): Omit<NormalizedResumeExperienceEnt
     const dateCandidate = remainder[remainder.length - 1] ?? '';
     const dateInfo = parseDateRange(dateCandidate);
     const hasDateAtEnd = Boolean(dateInfo.dateRange);
-    const companyPart = remainder[0]
-      ?.replace(/\s*[|,]+$/g, '')
+    const companyPart = (remainder[0] ?? '')
+      .replace(/\s*[|,]+$/g, '')
       .replace(/\s{2,}/g, ' ')
       .trim();
     const locationParts = hasDateAtEnd

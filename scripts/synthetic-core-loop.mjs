@@ -1,7 +1,39 @@
 #!/usr/bin/env node
 
-const ROOT_URL = (process.env.BASE_URL || "http://localhost:3000").replace(/\/+$/, "");
-const API_URL = (process.env.API_BASE_URL || "http://localhost:3001").replace(/\/+$/, "");
+function normalizeBaseUrl({ key, rawValue, fallback }) {
+  const candidate =
+    rawValue == null || String(rawValue).trim() === "" ? fallback : String(rawValue).trim();
+
+  if (typeof candidate !== "string" || !candidate.trim()) {
+    throw new Error(`${key} must be a non-empty URL (got empty value)`);
+  }
+
+  const normalized = candidate.replace(/\/+$/, "");
+
+  let parsed;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new Error(`${key} must be a valid http(s) URL (got "${candidate}")`);
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`${key} must use http or https (got "${parsed.protocol}")`);
+  }
+
+  return normalized;
+}
+
+const ROOT_URL = normalizeBaseUrl({
+  key: "BASE_URL",
+  rawValue: process.env.BASE_URL,
+  fallback: "http://localhost:3000",
+});
+const API_URL = normalizeBaseUrl({
+  key: "API_BASE_URL",
+  rawValue: process.env.API_BASE_URL,
+  fallback: "http://localhost:3001",
+});
 const SYNTHETIC_EMAIL = process.env.SYNTHETIC_USER_EMAIL || "synthetic-core-loop@targetthisrole.local";
 const SYNTHETIC_PASSWORD = process.env.SYNTHETIC_USER_PASSWORD || "SyntheticUserPass!123";
 
@@ -79,7 +111,15 @@ async function seedSyntheticFixture(accessToken) {
   });
   const body = await readJson(response);
   assert(response.ok, `synthetic seed failed: ${body?.message ?? body?.error ?? response.status}`);
-  assert(body?.status === "succeeded", `synthetic seed did not succeed: ${body?.errorMessage ?? "unknown reason"}`);
+  if (body?.status !== "succeeded") {
+    const rawError = body?.errorMessage ?? body?.message ?? body?.error ?? "unknown reason";
+    if (typeof rawError === "string" && rawError.includes("reading 'replace'")) {
+      throw new Error(
+        "synthetic seed did not succeed: API crashed calling `.replace(...)` on an undefined value. Check API logs/env for a missing required string config or fixture field.",
+      );
+    }
+    throw new Error(`synthetic seed did not succeed: ${rawError}`);
+  }
   return body;
 }
 

@@ -91,6 +91,17 @@ function emptyTransactionResult(): SyntheticTransactionResult {
   };
 }
 
+function buildCoreLoopJobDescription(): string {
+  const paragraph =
+    "We are hiring a leader to own cross-functional execution, define success metrics, and ship repeatable operating systems. You will partner with product, analytics, and stakeholders to translate ambiguous goals into measurable outcomes, document workflows, and drive reliable delivery across teams. Demonstrated ownership, clear written communication, and comfort with operational rigor are required.";
+
+  const body = Array.from({ length: 8 })
+    .map(() => paragraph)
+    .join("\n\n");
+
+  return `Core loop synthetic job description (local deterministic fixture).\n\n${body}`;
+}
+
 @Injectable()
 export class SyntheticTransactionRunnerService {
   constructor(
@@ -309,7 +320,12 @@ export class SyntheticTransactionRunnerService {
       });
       push({ step: "resolve_baseline_fixture", status: "succeeded" });
 
-      const createdJob = await jobsService.createJob(user.id, { isSynthetic: true });
+      const createdJob = await jobsService.createJob(user.id, {
+        title: "Core loop synthetic role",
+        company: "TargetThisRole Synthetic",
+        rawDescription: buildCoreLoopJobDescription(),
+        jdIngestionMethod: "PASTE",
+      });
       const jobId = createdJob?.job?.id ?? createdJob?.id ?? "job-1";
       push({ step: "create_job", status: "succeeded" });
 
