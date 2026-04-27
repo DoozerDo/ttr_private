@@ -1,0 +1,52 @@
+name: Production synthetic core loop
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Every 15 minutes.
+    - cron: "*/15 * * * *"
+
+jobs:
+  production-synthetic-core-loop:
+    name: Production synthetic core loop
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20.x"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Preflight production health gate
+        id: gate
+        env:
+          BASE_URL: ${{ secrets.PROD_BASE_URL }}
+          API_BASE_URL: ${{ secrets.PROD_API_BASE_URL }}
+        run: |
+          set -euo pipefail
+          node scripts/ci/health-gate.mjs >> "$GITHUB_OUTPUT"
+
+      - name: Skip (production not healthy yet)
+        if: steps.gate.outputs.healthy != 'true'
+        run: |
+          echo "Skipping synthetics: production did not become healthy before start."
+          echo "Reason: ${{ steps.gate.outputs.reason }}"
+
+      - name: Run production core loop smoke
+        if: steps.gate.outputs.healthy == 'true'
+        env:
+          BASE_URL: ${{ secrets.PROD_BASE_URL }}
+          API_BASE_URL: ${{ secrets.PROD_API_BASE_URL }}
+          SMOKE_LOGIN_EMAIL: ${{ secrets.PROD_SMOKE_LOGIN_EMAIL }}
+          SYNTHETIC_USER_PASSWORD: ${{ secrets.PROD_SMOKE_LOGIN_PASSWORD }}
+        run: npm run synthetic:core-loop-smoke
+
