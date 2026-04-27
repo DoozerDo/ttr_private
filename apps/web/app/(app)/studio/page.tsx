@@ -825,6 +825,11 @@ export default function StudioPage() {
     () => trimId(searchParams.get("analysisId") ?? searchParams.get("assessmentId")),
     [searchParamValue],
   );
+  const stableAnalysisIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (requestedAnalysisId) stableAnalysisIdRef.current = requestedAnalysisId;
+  }, [requestedAnalysisId]);
+  const effectiveRequestedAnalysisId = requestedAnalysisId ?? stableAnalysisIdRef.current;
   const isFromUnlock = useMemo(() => searchParams.get("fromUnlock") === "true", [searchParamValue]);
   const studioIntent = useMemo(() => trimString(searchParams.get("intent")).toLowerCase(), [searchParamValue]);
   const hasGenerateIntent = studioIntent === "generate";
@@ -7012,8 +7017,8 @@ export default function StudioPage() {
         baselineId: effectiveBaselineId || null,
         baselineVersionId: effectiveBaselineVersionId || null,
         jobId: effectiveJobId || null,
-        analysisId: requestedAnalysisId || null,
-        assessmentId: requestedAnalysisId || null,
+        analysisId: effectiveRequestedAnalysisId || null,
+        assessmentId: effectiveRequestedAnalysisId || null,
       },
       score: typeof analysisScore === "number" ? analysisScore : null,
       generationReadiness: activeGenerationReadiness,
@@ -8060,8 +8065,8 @@ export default function StudioPage() {
         baselineId: effectiveBaselineId || null,
         baselineVersionId: effectiveBaselineVersionId || null,
         jobId: effectiveJobId || null,
-        analysisId: requestedAnalysisId || null,
-        assessmentId: requestedAnalysisId || null,
+        analysisId: effectiveRequestedAnalysisId || null,
+        assessmentId: effectiveRequestedAnalysisId || null,
       },
       score: typeof analysisScore === "number" ? analysisScore : null,
       generationReadiness: activeGenerationReadiness,
@@ -8383,9 +8388,11 @@ export default function StudioPage() {
   );
 
   const startGenerationFromReadyShell = useCallback(
-    async (source: "shell" | "shell_auto" | "post_unlock"): Promise<boolean> => {
+    async (
+      source: "shell" | "shell_auto" | "post_unlock",
+    ): Promise<{ ok: boolean; resumeResult: boolean | null; coverResult: boolean | null }> => {
       console.log("[STUDIO][AUTO_GEN][START_CALLED_INNER]", { source });
-      if (generationReadyPhase === "generating") return false;
+      if (generationReadyPhase === "generating") return { ok: false, resumeResult: null, coverResult: null };
 
       scrollToStudioTop("smooth");
       setGenerationReadyFailure(null);
@@ -8408,7 +8415,7 @@ export default function StudioPage() {
           setGenerationReadyDismissed(true);
           setGenerationReadyFailure(null);
           setGenerationReadyPhase("ready");
-          return true;
+          return { ok: true, resumeResult: resumeSucceeded, coverResult: coverSucceeded };
         }
 
         const failure = deriveGenerationReadyShellFailure();
@@ -8421,7 +8428,7 @@ export default function StudioPage() {
           failure_category: failure.category,
           retryable: failure.retryable,
         });
-        return false;
+        return { ok: false, resumeResult: resumeSucceeded, coverResult: coverSucceeded };
       } finally {
         setAutoGenerationInFlight(false);
       }
@@ -8496,7 +8503,7 @@ export default function StudioPage() {
         urlAnalysisId: requestedAnalysisId ?? null,
         urlBaselineId: selectedBaselineId ?? null,
         resolvedJobId: effectiveJobId ?? null,
-        resolvedAnalysisId: requestedAnalysisId ?? null,
+        resolvedAnalysisId: effectiveRequestedAnalysisId ?? null,
         resolvedBaselineVersionId: effectiveBaselineVersionId ?? null,
       });
       console.log("[STUDIO][AUTO_GEN][CONTRACT]", contract.generation);
@@ -8568,11 +8575,23 @@ export default function StudioPage() {
     void (async () => {
       try {
         if (shouldLog) console.log("[STUDIO][AUTO_GEN][START_CALLED]");
-        const ok = await startGenerationFromReadyShell("shell_auto");
+        const { ok, resumeResult, coverResult } = await startGenerationFromReadyShell("shell_auto");
         try {
           if (storage && typeof storage.setItem === "function") storage.setItem(storageKey, ok ? "succeeded" : "failed");
         } catch {
           // ignore
+        }
+        if (shouldLog) {
+          console.log("[STUDIO][AUTO_GEN][RESULT_JSON]", JSON.stringify({
+            ok,
+            error: null,
+            resumeResult,
+            coverResult,
+            baselineVersionId: effectiveBaselineVersionId ?? null,
+            jobId: effectiveJobId ?? null,
+            analysisId: effectiveRequestedAnalysisId ?? null,
+            contractSignature: signature,
+          }));
         }
         if (debugAutoGenerationEnabled) {
           console.log("[STUDIO][AUTO_GEN][RESULT]", { ...decision, ok });
@@ -8582,6 +8601,18 @@ export default function StudioPage() {
           if (storage && typeof storage.setItem === "function") storage.setItem(storageKey, "failed");
         } catch {
           // ignore
+        }
+        if (shouldLog) {
+          console.log("[STUDIO][AUTO_GEN][RESULT_JSON]", JSON.stringify({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+            resumeResult: null,
+            coverResult: null,
+            baselineVersionId: effectiveBaselineVersionId ?? null,
+            jobId: effectiveJobId ?? null,
+            analysisId: effectiveRequestedAnalysisId ?? null,
+            contractSignature: signature,
+          }));
         }
         if (debugAutoGenerationEnabled) {
           console.log("[STUDIO][AUTO_GEN][RESULT]", { ...decision, ok: false, error: error instanceof Error ? error.message : String(error) });
@@ -8601,6 +8632,9 @@ export default function StudioPage() {
     workflowOrchestratorCore.contract?.generation.state,
     workflowOrchestratorCore.contract?.generation.auto.shouldStart,
     workflowOrchestratorCore.contract?.generation.auto.signature,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    effectiveRequestedAnalysisId,
   ]);
 
   useEffect(() => {
