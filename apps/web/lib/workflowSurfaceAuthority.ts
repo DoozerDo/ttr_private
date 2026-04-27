@@ -28,7 +28,11 @@ export function resolveWorkflowSurfaceAuthority(input: {
   generationReady?: { active: boolean; phase: "ready" | "generating" | "failed" } | null;
 }): WorkflowSurfaceAuthorityModel {
   const score = typeof input.score === "number" && Number.isFinite(input.score) ? input.score : null;
-  const readinessIsReady = input.generationReadiness.status === "ready" && !input.generationReadiness.blocked;
+  // "limited" with `blocked=false` is a warning lane, not a hard blocker.
+  // If workflow authority says READY+GENERATE, we allow generation in this lane.
+  const readinessStatus = input.generationReadiness.status;
+  const readinessIsReady =
+    (readinessStatus === "ready" || readinessStatus === "limited") && !input.generationReadiness.blocked;
 
   const hasResume = Boolean(input.artifact.hasResume);
   const hasCoverLetter = Boolean(input.artifact.hasCoverLetter);

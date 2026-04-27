@@ -8438,12 +8438,17 @@ export default function StudioPage() {
     ],
   );
 
-  const debugAutoGenerationEnabled = useMemo(() => {
-    if (process.env.NODE_ENV !== "production") return true;
+  const [debugAutoGenerationEnabled, setDebugAutoGenerationEnabled] = useState(
+    process.env.NODE_ENV !== "production",
+  );
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production") return;
     try {
-      return typeof window !== "undefined" && window.localStorage?.getItem("ttr:debug:autoGen") === "true";
+      setDebugAutoGenerationEnabled(
+        typeof window !== "undefined" && window.localStorage?.getItem("ttr:debug:autoGen") === "true",
+      );
     } catch {
-      return false;
+      setDebugAutoGenerationEnabled(false);
     }
   }, []);
 

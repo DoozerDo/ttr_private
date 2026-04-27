@@ -38,6 +38,22 @@ describe("workflow surface authority resolver", () => {
     expect(model.trustTone).toBe("ready");
   });
 
+  it("returns generation_ready when readiness is limited but not blocked and workflow supports generation", () => {
+    const model = resolveWorkflowSurfaceAuthority({
+      score: 82,
+      generationReadiness: readiness("limited", false),
+      workflowAuthority: workflowAuthority("READY", "GENERATE"),
+      artifact: { hasResume: false, hasCoverLetter: false, pairStatus: "missing" },
+      unlockContext: { active: false, hasMissingEvidence: false },
+      postUnlockOutcomeState: null,
+      generationReady: null,
+    });
+
+    expect(model.canonicalState).toBe("generation_ready");
+    expect(model.primaryAction.destination).toBe("studio_generate");
+    expect(model.trustTone).toBe("ready");
+  });
+
   it("returns unlock_required with studio_unlock primary intent in the 70-84 band when no outputs exist", () => {
     const model = resolveWorkflowSurfaceAuthority({
       score: 78,
