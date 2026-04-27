@@ -8550,127 +8550,123 @@ export default function StudioPage() {
     }
   }, []);
 
+  const generationReadyAutoStartRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!debugAutoGenerationEnabled) return;
-    if (!effectiveBaselineId || !effectiveJobId) return;
+    const contract = workflowOrchestratorCore.contract;
+    if (!contract) return;
 
-    const contractSignature = workflowOrchestratorCore.contract?.generation.auto.signature ?? null;
-    if (!contractSignature) return;
-    const storageKey = `ttr:studio:auto-generate:${contractSignature}`;
-    let latch = null as string | null;
+    const signature = contract.generation.auto.signature;
+    if (generationReadyAutoStartRef.current === signature) return;
+
+    const ready = contract.generation.state === "ready";
+    const shouldStart = contract.generation.auto.shouldStart === true;
+    const artifactsExist = contract.artifacts.hasAnyOutput || hasUsableResume || hasUsableCoverLetter;
+    const generatingNow =
+      autoGenerationInFlight ||
+      resumeGenerating ||
+      coverGenerating ||
+      studioArtifactPairStatus === "in_progress" ||
+      generationReadyPhase === "generating";
+
+    const storageKey = `ttr:studio:auto-generate:${signature}`;
+    const storage = typeof window !== "undefined" ? window.localStorage : null;
+    let latch: string | null = null;
     try {
-      latch = typeof window !== "undefined" ? window.localStorage?.getItem(storageKey) ?? null : null;
+      latch = storage && typeof storage.getItem === "function" ? storage.getItem(storageKey) : null;
     } catch {
       latch = null;
     }
 
-    const ready = workflowOrchestratorCore.contract?.generation.state === "ready";
-    const artifactsMissing = !workflowOrchestratorCore.contract?.artifacts.hasAnyOutput;
-    const generatingNow =
-      resumeGenerating ||
-      coverGenerating ||
-      autoGenerationInFlight ||
-      studioArtifactPairStatus === "in_progress" ||
-      generationReadyPhase === "generating" ||
-      workflowOrchestratorCore.contract?.generation.state === "generating";
+    const shouldBlockFromLatch = latch === "succeeded";
+    const skipReason =
+      contract.generation.auto.shouldStart === true
+        ? null
+        : "skipReason" in contract.generation.auto
+          ? contract.generation.auto.skipReason
+          : "unknown";
+    const decision = {
+      contractGenerationState: contract.generation.state,
+      contractShouldStart: shouldStart,
+      contractSignature: signature,
+      latch,
+      skipReason,
+    };
 
-    if (!ready || !artifactsMissing) return;
-
-    const skipReasons: string[] = [];
-    if (!requestedAnalysisId) skipReasons.push("missing_analysisId");
-    if (!effectiveBaselineVersionId) skipReasons.push("missing_baselineVersionId");
-    if (latch === "succeeded") skipReasons.push("latch_succeeded");
-    if (generatingNow) skipReasons.push("already_generating");
-    if (studioArtifactPairStatus && studioArtifactPairStatus !== "missing" && studioArtifactPairStatus !== "in_progress") {
-      skipReasons.push(`pair_status_${studioArtifactPairStatus}`);
-    }
-    if (workflowOrchestratorCore.contract && !workflowOrchestratorCore.contract.generation.auto.shouldStart) {
-      skipReasons.push(`contract_skip_${workflowOrchestratorCore.contract.generation.auto.skipReason}`);
+    if (debugAutoGenerationEnabled) {
+      console.log("[STUDIO][AUTO_GEN][DECISION]", decision);
     }
 
-    // Only log when we appear to be stuck: ready + missing + not generating.
-    if (skipReasons.length > 0 && !generatingNow) {
-      console.log("[STUDIO][AUTO_GEN][SKIP]", {
-        route: "/studio",
-        baselineId: effectiveBaselineId,
-        jobId: effectiveJobId,
-        requestedAnalysisId: requestedAnalysisId ?? null,
-        readinessStatus: activeGenerationReadiness.status,
-        readinessBlocked: activeGenerationReadiness.blocked,
-        blockers: (activeGenerationReadiness as any)?.reasons ?? (activeGenerationReadiness as any)?.blockers ?? null,
-        studioArtifactPairStatus: studioArtifactPairStatus ?? null,
-        contractGenerationState: workflowOrchestratorCore.contract?.generation.state ?? null,
-        contractAuthorityState: workflowOrchestratorCore.contract?.authority.surface.canonicalState ?? null,
-        hasCompletedGeneration,
-        isGenerating: generatingNow,
-        hasResume: hasUsableResume,
-        hasCoverLetter: hasUsableCoverLetter,
-        latch,
-        skipReasons,
-      });
-    }
-  }, [
-    activeGenerationReadiness,
-    autoGenerationInFlight,
-    coverGenerating,
-    debugAutoGenerationEnabled,
-    effectiveBaselineId,
-    effectiveBaselineVersionId,
-    effectiveJobId,
-    generationReadyPhase,
-    hasCompletedGeneration,
-    hasUsableCoverLetter,
-    hasUsableResume,
-    requestedAnalysisId,
-    resumeGenerating,
-    studioArtifactPairStatus,
-    workflowOrchestratorCore.contract,
-  ]);
-
-  const generationReadyAutoStartRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (generationReadyPhase !== "ready") return;
-    if (!effectiveBaselineId || !effectiveJobId || !requestedAnalysisId) return;
-    if (!workflowOrchestratorCore.contract) return;
-    if (workflowOrchestratorCore.contract.generation.state !== "ready") return;
-    if (workflowOrchestratorCore.contract.artifacts.hasAnyOutput) return;
-    if (resumeGenerating || coverGenerating || autoGenerationInFlight || studioArtifactPairStatus === "in_progress") return;
-    if (!workflowOrchestratorCore.contract.generation.auto.shouldStart) return;
-
-    const signature = workflowOrchestratorCore.contract.generation.auto.signature;
-    if (generationReadyAutoStartRef.current === signature) return;
-
-    const storageKey = `ttr:studio:auto-generate:${signature}`;
-    const storage = typeof window !== "undefined" ? window.localStorage : null;
-    const storedStatus =
-      storage && typeof storage.getItem === "function" ? storage.getItem(storageKey) : null;
-    if (storedStatus === "succeeded") {
-      generationReadyAutoStartRef.current = signature;
+    if (!ready || !shouldStart) {
+      if (debugAutoGenerationEnabled) {
+        console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "contract_not_ready_or_shouldStart_false" });
+      }
       return;
     }
 
+    if (artifactsExist) {
+      if (debugAutoGenerationEnabled) {
+        console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "artifacts_exist" });
+      }
+      return;
+    }
+
+    if (generatingNow) {
+      if (debugAutoGenerationEnabled) {
+        console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "already_generating" });
+      }
+      return;
+    }
+
+    if (shouldBlockFromLatch) {
+      if (debugAutoGenerationEnabled) {
+        console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "latch_succeeded" });
+      }
+      return;
+    }
+
+    // Guardrail: this state must not be silent.
+    if (ready && !artifactsExist && !generatingNow) {
+      console.error("INVALID STATE: ready without generation or artifacts", decision);
+    }
+
     generationReadyAutoStartRef.current = signature;
-    if (storage && typeof storage.setItem === "function") storage.setItem(storageKey, "started");
+    try {
+      if (storage && typeof storage.setItem === "function") storage.setItem(storageKey, "started");
+    } catch {
+      // ignore
+    }
 
     void (async () => {
       try {
         const ok = await startGenerationFromReadyShell("shell_auto");
-        if (storage && typeof storage.setItem === "function") {
-          storage.setItem(storageKey, ok ? "succeeded" : "failed");
+        try {
+          if (storage && typeof storage.setItem === "function") storage.setItem(storageKey, ok ? "succeeded" : "failed");
+        } catch {
+          // ignore
         }
-      } catch {
-        if (storage && typeof storage.setItem === "function") storage.setItem(storageKey, "failed");
+        if (debugAutoGenerationEnabled) {
+          console.log("[STUDIO][AUTO_GEN][RESULT]", { ...decision, ok });
+        }
+      } catch (error) {
+        try {
+          if (storage && typeof storage.setItem === "function") storage.setItem(storageKey, "failed");
+        } catch {
+          // ignore
+        }
+        if (debugAutoGenerationEnabled) {
+          console.log("[STUDIO][AUTO_GEN][RESULT]", { ...decision, ok: false, error: error instanceof Error ? error.message : String(error) });
+        }
       }
     })();
   }, [
-    effectiveBaselineId,
-    effectiveJobId,
-    coverGenerating,
-    resumeGenerating,
     autoGenerationInFlight,
-    studioArtifactPairStatus,
+    coverGenerating,
+    debugAutoGenerationEnabled,
     generationReadyPhase,
-    requestedAnalysisId,
+    hasUsableCoverLetter,
+    hasUsableResume,
+    resumeGenerating,
+    studioArtifactPairStatus,
     startGenerationFromReadyShell,
     workflowOrchestratorCore.contract,
   ]);

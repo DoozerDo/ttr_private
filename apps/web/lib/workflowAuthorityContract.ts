@@ -176,8 +176,15 @@ function resolvePrimaryCtaFromSurface(surface: WorkflowSurfaceAuthorityModel): W
 function buildAutoGenerationSignature(ids: WorkflowAuthorityContract["ids"]): string {
   const baselineVersion = ids.baselineVersionId ?? "unknown_baseline_version";
   const job = ids.jobId ?? "unknown_job";
-  const assessment = ids.assessmentId ?? "unknown_assessment";
+  const assessment = ids.assessmentId ?? ids.analysisId ?? "unknown_assessment";
   return `autoGen:v1:${baselineVersion}:${job}:${assessment}`;
+}
+
+function hasRequiredAutoGenerationIds(ids: WorkflowAuthorityContract["ids"]): boolean {
+  const baselineVersionOk = Boolean((ids.baselineVersionId ?? "").trim());
+  const jobOk = Boolean((ids.jobId ?? "").trim());
+  const analysisOk = Boolean(((ids.assessmentId ?? ids.analysisId) ?? "").trim());
+  return baselineVersionOk && jobOk && analysisOk;
 }
 
 export function resolveWorkflowAuthorityContract(input: {
@@ -297,13 +304,19 @@ export function resolveWorkflowAuthorityContract(input: {
   });
 
   const autoGenSignature = buildAutoGenerationSignature(ids);
+  const hasRequiredIds = hasRequiredAutoGenerationIds(ids);
   const autoDecision: WorkflowAutoGenerationDecision =
-    generationState === "ready" && pairState !== "generating" && pairState !== "generated"
+    generationState === "ready" && hasRequiredIds && pairState !== "generating" && pairState !== "generated"
       ? { shouldStart: true, signature: autoGenSignature }
       : {
           shouldStart: false,
           signature: autoGenSignature,
           skipReason:
+            !hasRequiredIds
+              ? "missing_required_ids"
+              : generationState === "ready"
+                ? "ready_but_ineligible"
+                :
             generationState === "generated"
               ? "artifacts_already_generated"
               : generationState === "generating"
