@@ -3712,18 +3712,7 @@ export default function StudioPage() {
   // Canonical READY truth: if we have any usable output, behave as READY. Confidence only modulates tone.
   const isReadySuccessState = hasUsableResume || hasUsableCoverLetter;
   const isApplicationFullyReady = hasUsableResume && hasUsableCoverLetter;
-  const suppressAutoGenerationForGenerationReadyShell =
-    !generationReadyDismissed &&
-    generationReadyPhase === "ready" &&
-    workflowAuthority.workflowState === "READY" &&
-    workflowAuthority.primaryAction === "GENERATE" &&
-    activeGenerationReadiness.status === "ready" &&
-    !activeGenerationReadiness.blocked &&
-    studioArtifactPairStatus === "missing" &&
-    !resumeState.response &&
-    !coverState.response &&
-    !resumeState.artifactFailure &&
-    !coverState.artifactFailure;
+  const suppressAutoGenerationForGenerationReadyShell = false;
   const [showFullLowQualityResume, setShowFullLowQualityResume] = useState(false); 
   const [showFullLowQualityCover, setShowFullLowQualityCover] = useState(false); 
   const [showOptionalEvidenceDetails, setShowOptionalEvidenceDetails] = useState(false);
@@ -8495,7 +8484,7 @@ export default function StudioPage() {
   );
 
   const startGenerationFromReadyShell = useCallback(
-    async (source: "shell" | "post_unlock") => {
+    async (source: "shell" | "shell_auto" | "post_unlock") => {
       if (generationReadyPhase === "generating") return;
 
       scrollToStudioTop("smooth");
@@ -8504,26 +8493,21 @@ export default function StudioPage() {
       trackEvent("generation_ready_shell_started", {
         source: "studio",
         ...generationReadyAnalyticsContext,
-        entrypoint: source,
+        entrypoint: source === "shell_auto" ? "shell" : source,
       });
 
-      const sessionKey = `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:ready_shell:${Date.now()}`;
+      const stableSessionKey = `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:${requestedAnalysisId ?? "analysis"}:ready_shell`;
       const [resumeSucceeded, coverSucceeded] = await Promise.all([
-        handleResumeDraft({ sessionKey }),
-        handleCoverDraft({ sessionKey }),
+        handleResumeDraft({ sessionKey: stableSessionKey }),
+        handleCoverDraft({ sessionKey: stableSessionKey }),
       ]);
 
       if (resumeSucceeded && coverSucceeded) {
-        // Keep the shell as the sole authority while generation transitions, even if the requests resolve fast.
-        await new Promise((resolve) => setTimeout(resolve, 250));
         setGenerationReadyDismissed(true);
         setGenerationReadyFailure(null);
         setGenerationReadyPhase("ready");
         return;
       }
-
-      // Allow state updates from the generation helpers to flush before reading the failure surfaces.
-      await new Promise((resolve) => setTimeout(resolve, 0));
 
       const failure = deriveGenerationReadyShellFailure();
       setGenerationReadyFailure(failure);
@@ -8540,6 +8524,7 @@ export default function StudioPage() {
       deriveGenerationReadyShellFailure,
       effectiveBaselineId,
       effectiveJobId,
+      requestedAnalysisId,
       generationReadyAnalyticsContext,
       generationReadyPhase,
       handleCoverDraft,
@@ -8548,6 +8533,40 @@ export default function StudioPage() {
       trackEvent,
     ],
   );
+
+  const generationReadyAutoStartRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!generationReadyShellActive) return;
+    if (generationReadyPhase !== "ready") return;
+    if (!effectiveBaselineId || !effectiveJobId || !requestedAnalysisId) return;
+    if (activeGenerationReadiness.status !== "ready" || activeGenerationReadiness.blocked) return;
+
+    const signature = `${effectiveBaselineId}:${effectiveJobId}:${requestedAnalysisId}`;
+    if (generationReadyAutoStartRef.current === signature) return;
+
+    const storageKey = `ttr:studio:auto-generate:${signature}`;
+    const storage = typeof window !== "undefined" ? window.localStorage : null;
+    if (storage && typeof storage.getItem === "function" && storage.getItem(storageKey) === "true") {
+      generationReadyAutoStartRef.current = signature;
+      return;
+    }
+
+    generationReadyAutoStartRef.current = signature;
+    if (storage && typeof storage.setItem === "function") {
+      storage.setItem(storageKey, "true");
+    }
+
+    void startGenerationFromReadyShell("shell_auto");
+  }, [
+    activeGenerationReadiness.blocked,
+    activeGenerationReadiness.status,
+    effectiveBaselineId,
+    effectiveJobId,
+    generationReadyPhase,
+    generationReadyShellActive,
+    requestedAnalysisId,
+    startGenerationFromReadyShell,
+  ]);
 
   useEffect(() => {
     if (!hasGenerateIntent) return;
@@ -10550,8 +10569,6 @@ export default function StudioPage() {
     </PageShell> 
   ); 
 } 
-
-
 
 
 

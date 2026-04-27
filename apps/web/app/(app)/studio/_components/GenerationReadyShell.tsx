@@ -23,12 +23,13 @@ export function GenerationReadyShell(props: {
   const disable = Boolean(props.disableActions);
   const trustLine = `Fit score: ${typeof props.fitScore === "number" ? Math.round(props.fitScore) : "unknown"} • Readiness: ${props.readinessState} • ${props.evidenceStatus}`;
   const supporting = (
-    <div
+    <details
       className="rounded-2xl border border-white/10 bg-slate-950/20 p-4 text-sm text-slate-100"
       data-testid="studio-generation-ready-trust"
     >
-      {trustLine}
-    </div>
+      <summary className="cursor-pointer font-semibold text-slate-100">Why this output is grounded</summary>
+      <p className="mt-2">{trustLine}</p>
+    </details>
   );
 
   if (props.phase === "generating") {
@@ -93,16 +94,10 @@ export function GenerationReadyShell(props: {
       model={{
         canonicalState: "generation_ready",
         headline: "You're ready to generate",
-        body: "Your latest evidence cleared the blocker. Generate your tailored resume and cover letter now.",
+        body: "Your latest evidence cleared the blocker. Starting generation automatically...",
         trustTone: "ready",
       }}
       supporting={supporting}
-      primaryAction={{
-        label: "Generate resume and cover letter",
-        onClick: props.onGenerate,
-        disabled: disable,
-        testId: "studio-generation-ready-primary",
-      }}
       secondaryAction={{
         label: "Open workspace",
         onClick: props.onOpenWorkspace,
