@@ -173,32 +173,89 @@ async function fetchFitAssessment(accessToken, { assessmentId, jobId } = {}) {
 }
 
 async function fetchResultsPage({ cookie, accessToken }, baselineId, jobId) {
-  const response = await fetch(
-    `${ROOT_URL}/results?baselineId=${encodeURIComponent(baselineId)}&jobId=${encodeURIComponent(jobId)}`,
-    {
-      method: "GET",
-      headers: {
-        ...(cookie ? { Cookie: cookie } : {}),
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      },
-    },
-  );
-  const html = await response.text();
-  assert(response.ok, `results page failed: ${response.status}`);
   const ctaTestId = "results-hero-primary-cta";
-  const marker = `data-testid="${ctaTestId}"`;
-  assert(html.includes(marker), `results page missing canonical next action marker (${ctaTestId})`);
+  const url = `${ROOT_URL}/results?baselineId=${encodeURIComponent(baselineId)}&jobId=${encodeURIComponent(jobId)}`;
 
-  const hrefMatch = html.match(
-    new RegExp(`data-testid=\\"${ctaTestId}\\"[^>]*href=\\"([^\\"]+)\\"`, "i"),
-  );
-  assert(hrefMatch && hrefMatch[1], `results page canonical next action missing href (${ctaTestId})`);
+  // Results is a client component; the canonical CTA may only appear after hydration.
+  // Use Playwright to assert against the rendered DOM (no brittle HTML text matching).
+  let playwright;
+  try {
+    playwright = await import("playwright");
+  } catch (error) {
+    throw new Error(
+      `results page assertion requires Playwright. Failed to import playwright: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 
-  const href = String(hrefMatch[1]);
-  const looksValidDestination =
-    href.startsWith("/") || href.startsWith("http://") || href.startsWith("https://");
-  assert(looksValidDestination, `results page canonical next action href looked invalid: ${href}`);
-  return html;
+  const { chromium } = playwright;
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({
+    extraHTTPHeaders: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+  });
+
+  if (cookie) {
+    const [nameRaw, ...rest] = String(cookie).split("=");
+    const name = String(nameRaw ?? "").trim();
+    const value = rest.join("=");
+    if (name && value) {
+      await context.addCookies([
+        {
+          name,
+          value,
+          domain: "localhost",
+          path: "/",
+        },
+      ]);
+    }
+  }
+
+  const page = await context.newPage();
+  try {
+    const response = await page.goto(url, { waitUntil: "domcontentloaded" });
+    assert(response, "results page navigation returned no response");
+    assert(response.ok(), `results page failed: ${response.status()}`);
+
+    const locator = page.locator(`[data-testid="${ctaTestId}"]`);
+    await locator.waitFor({ state: "attached", timeout: 30000 });
+
+    const href = await locator.getAttribute("href");
+    if (!href) {
+      const tagName = await locator.evaluate((el) => el.tagName);
+      const snippet = await page.content();
+      throw new Error(
+        JSON.stringify({
+          message: `results page canonical next action missing href (${ctaTestId})`,
+          url: page.url(),
+          markerExists: true,
+          markerTag: tagName,
+          htmlExcerpt: snippet.slice(0, 800),
+        }),
+      );
+    }
+    const looksValidDestination =
+      href.startsWith("/") || href.startsWith("http://") || href.startsWith("https://");
+    assert(looksValidDestination, `results page canonical next action href looked invalid: ${href}`);
+
+    return await page.content();
+  } catch (error) {
+    const markerExists = await page.locator(`[data-testid="${ctaTestId}"]`).count().then((n) => n > 0).catch(() => false);
+    const htmlExcerpt = await page.content().then((c) => c.slice(0, 800)).catch(() => null);
+    const textExcerpt = await page.textContent("body").then((t) => String(t ?? "").slice(0, 500)).catch(() => null);
+    throw new Error(
+      JSON.stringify({
+        message: error instanceof Error ? error.message : String(error),
+        url: page.url?.() ?? url,
+        loaded: true,
+        markerExists,
+        htmlExcerpt,
+        textExcerpt,
+      }),
+    );
+  } finally {
+    await page.close().catch(() => {});
+    await context.close().catch(() => {});
+    await browser.close().catch(() => {});
+  }
 }
 
 async function main() {
