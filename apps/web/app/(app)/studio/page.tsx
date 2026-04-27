@@ -5962,7 +5962,11 @@ export default function StudioPage() {
         analysisId: requestedAnalysisId ?? null,
         artifactType,
       });
-      return false;
+      return fail({
+        errorCode: "readiness_blocked",
+        errorMessage: generationMessage ?? "Review prerequisites before generating a cover letter.",
+        requestId: request.requestId,
+      });
     }
     if (!effectiveBaselineVersionId) {
       finishStudioGenerationRequest("cover_letter", request, "blocked", requestScope);
@@ -5986,7 +5990,12 @@ export default function StudioPage() {
         analysisId: requestedAnalysisId ?? null,
         artifactType,
       });
-      return false;
+      return fail({
+        errorCode: "missing_baseline_version",
+        errorMessage: message,
+        missingPrereqs: ["baselineVersionId"],
+        requestId: request.requestId,
+      });
     }
     let activityOutcome: "success" | "failure" = "failure";
     let requestFinalStatus: "completed" | "timeout" = "completed";
@@ -6210,7 +6219,11 @@ export default function StudioPage() {
           artifactType,
         });
         finishStudioGenerationRequest("cover_letter", request, "blocked", requestScope);
-        return false;
+        return fail({
+          errorCode: "stale_request_scope",
+          errorMessage: "Cover letter generation finished after the workflow scope changed.",
+          requestId: request.requestId,
+        });
       }
 
       if (!validatedResult.success) {
@@ -6240,7 +6253,11 @@ export default function StudioPage() {
           error: GENERATION_TRUST_FALLBACK_ERROR,
         }));
         lastFailureSignatureRef.current = generationInputSignature;
-        return false;
+        return fail({
+          errorCode: "trust_validation_failed",
+          errorMessage: GENERATION_TRUST_FALLBACK_ERROR,
+          requestId: request.requestId,
+        });
       }
 
       setCoverState((current) => ({
@@ -6281,7 +6298,11 @@ export default function StudioPage() {
         activeCoverGenerationRef.current?.requestId !== request.requestId
       ) {
         finishStudioGenerationRequest("cover_letter", request, "blocked", requestScope);
-        return false;
+        return fail({
+          errorCode: "stale_request_scope",
+          errorMessage: "Cover letter generation aborted because the workflow scope changed.",
+          requestId: request.requestId,
+        });
       }
       trackEvent("cover_letter_generation_limited", {
         source: "studio",
@@ -6309,7 +6330,11 @@ export default function StudioPage() {
         },
       }));
       setStudioArtifactPairStatus("failed");
-      return false;
+      return fail({
+        errorCode: requestFinalStatus === "timeout" ? "generation_timeout" : "generation_failed",
+        errorMessage: message,
+        requestId: request.requestId,
+      });
     } finally {
       if (timeoutId !== null) window.clearTimeout(timeoutId);
       if (!activeCoverGenerationRef.current || activeCoverGenerationRef.current?.requestId === request.requestId) {
@@ -8809,6 +8834,20 @@ export default function StudioPage() {
     }
   }, []);
 
+  const studioBuildMarker =
+    process.env.NEXT_PUBLIC_APP_VERSION ??
+    process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ??
+    process.env.NEXT_PUBLIC_GIT_SHA ??
+    process.env.NEXT_PUBLIC_COMMIT_SHA ??
+    null;
+  const studioBuildLoggedRef = useRef(false);
+  useEffect(() => {
+    if (studioBuildLoggedRef.current) return;
+    studioBuildLoggedRef.current = true;
+    // Single-line so production logs can be grep'd reliably.
+    console.log("[STUDIO][BUILD]", JSON.stringify({ build: studioBuildMarker, nodeEnv: process.env.NODE_ENV ?? null }));
+  }, [studioBuildMarker]);
+
   const generationReadyAutoStartRef = useRef<string | null>(null);
   useEffect(() => {
     const contract = workflowOrchestratorCore.contract;
@@ -8938,6 +8977,7 @@ export default function StudioPage() {
             jobId: effectiveJobId ?? null,
             analysisId: effectiveRequestedAnalysisId ?? null,
             contractSignature: signature,
+            build: studioBuildMarker,
           }));
         }
         if (debugAutoGenerationEnabled) {
@@ -8959,6 +8999,7 @@ export default function StudioPage() {
             jobId: effectiveJobId ?? null,
             analysisId: effectiveRequestedAnalysisId ?? null,
             contractSignature: signature,
+            build: studioBuildMarker,
           }));
         }
         if (debugAutoGenerationEnabled) {
