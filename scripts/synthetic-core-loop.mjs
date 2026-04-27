@@ -185,7 +185,19 @@ async function fetchResultsPage({ cookie, accessToken }, baselineId, jobId) {
   );
   const html = await response.text();
   assert(response.ok, `results page failed: ${response.status}`);
-  assert(html.includes("Run Career Compatibility Analysis") || html.includes("Review Results"), "results page did not contain a canonical next action");
+  const ctaTestId = "results-hero-primary-cta";
+  const marker = `data-testid="${ctaTestId}"`;
+  assert(html.includes(marker), `results page missing canonical next action marker (${ctaTestId})`);
+
+  const hrefMatch = html.match(
+    new RegExp(`data-testid=\\"${ctaTestId}\\"[^>]*href=\\"([^\\"]+)\\"`, "i"),
+  );
+  assert(hrefMatch && hrefMatch[1], `results page canonical next action missing href (${ctaTestId})`);
+
+  const href = String(hrefMatch[1]);
+  const looksValidDestination =
+    href.startsWith("/") || href.startsWith("http://") || href.startsWith("https://");
+  assert(looksValidDestination, `results page canonical next action href looked invalid: ${href}`);
   return html;
 }
 
