@@ -5788,6 +5788,40 @@ export default function StudioPage() {
       emitAttempt(attempt);
       return attempt.ok;
     };
+    const fail = (args: {
+      errorCode: string;
+      errorMessage: string;
+      missingPrereqs?: string[];
+      http?: { status: number | null; responsePayload?: unknown };
+      requestId?: string | null;
+    }) =>
+      finish(
+        makeStudioAttempt("cover", {
+          ok: false,
+          status: "failed",
+          errorCode: args.errorCode,
+          errorMessage: args.errorMessage,
+          missingPrereqs: args.missingPrereqs ?? [],
+          request: {
+            sessionKey: opts?.sessionKey ?? null,
+            requestId: args.requestId ?? null,
+          },
+          http: args.http
+            ? {
+                status: args.http.status ?? null,
+                responseSummary: summarizeStudioGenerationResponse(args.http.responsePayload),
+              }
+            : undefined,
+        }),
+      );
+    const succeed = (requestId?: string | null) =>
+      finish(
+        makeStudioAttempt("cover", {
+          ok: true,
+          status: "success",
+          request: { sessionKey: opts?.sessionKey ?? null, requestId: requestId ?? null },
+        }),
+      );
     if (
       studioArtifactPresentationStateRef.current === "hydrated" &&
       hasCoverLetterArtifact &&
@@ -6005,7 +6039,12 @@ export default function StudioPage() {
           artifactType,
         });
         finishStudioGenerationRequest("cover_letter", request, "blocked", requestScope);
-        return false;
+        return fail({
+          errorCode: "stale_request_scope",
+          errorMessage: "Cover letter generation finished after the workflow scope changed.",
+          requestId: request.requestId,
+          http: { status: response.status, responsePayload },
+        });
       }
       if (!response.ok) {
         console.warn("[studio] generation_failed", {
@@ -6025,13 +6064,18 @@ export default function StudioPage() {
         ) {
           const tierGate = parseTierGateError({ status: response.status, payload: responsePayload });
           setCoverState((current) => ({ ...current, tierGateError: tierGate }));
-          return false;
+          return fail({
+            errorCode: "tier_gated",
+            errorMessage: "Cover letter generation was tier gated.",
+            requestId: request.requestId,
+            http: { status: response.status, responsePayload },
+          });
         }
         if (response.status === 409) {
           const existingId = readDuplicateCoverLetterId(responsePayload);
           if (existingId) {
             await loadCoverLetterById(existingId);
-            return true;
+            return succeed(request.requestId);
           }
         }
         if (response.status === 422) {
@@ -6042,7 +6086,12 @@ export default function StudioPage() {
               artifactFailure: failure,
               error: null,
             }));
-            return false;
+            return fail({
+              errorCode: failure.code ?? "validation_failed",
+              errorMessage: failure.explanation ?? "Cover letter generation returned a validation error.",
+              requestId: request.requestId,
+              http: { status: response.status, responsePayload },
+            });
           }
           const blockedState = parseComplianceBlockedFromPayload(responsePayload);
           if (blockedState) {
@@ -6053,21 +6102,31 @@ export default function StudioPage() {
             });
             applyCoverLetterComplianceBlocked(blockedState);
             lastFailureSignatureRef.current = generationInputSignature;
-            return false;
+            return fail({
+              errorCode: "compliance_blocked",
+              errorMessage: blockedState.body ?? "Cover letter generation was blocked by compliance requirements.",
+              requestId: request.requestId,
+              http: { status: response.status, responsePayload },
+            });
           }
         }
         lastFailureSignatureRef.current = generationInputSignature;
         const tierGate = parseTierGateError({ status: response.status, payload: responsePayload });
         if (tierGate) {
           setCoverState((current) => ({ ...current, tierGateError: tierGate }));
-          return false;
+          return fail({
+            errorCode: "tier_gated",
+            errorMessage: "Cover letter generation was tier gated.",
+            requestId: request.requestId,
+            http: { status: response.status, responsePayload },
+          });
         }
         throw new Error(formatErrorMessage(responsePayload, "Cover letter generation failed."));
       }
       const existingDuplicateId = readDuplicateCoverLetterId(responsePayload);
       if (existingDuplicateId) {
         await loadCoverLetterById(existingDuplicateId);
-        return true;
+        return succeed(request.requestId);
       }
       const initialPresenter = presentCoverLetterGeneration(responsePayload);
       const failure = initialPresenter.failure;
@@ -6077,7 +6136,12 @@ export default function StudioPage() {
           artifactFailure: failure,
           error: null,
         }));
-        return false;
+        return fail({
+          errorCode: failure.code ?? "generation_failed",
+          errorMessage: failure.explanation ?? "Cover letter generation failed.",
+          requestId: request.requestId,
+          http: { status: response.status, responsePayload },
+        });
       }
       if (initialPresenter.status === "blocked" && initialPresenter.display) {
         trackEvent("cover_letter_generation_blocked_compliance", {
@@ -6092,7 +6156,12 @@ export default function StudioPage() {
           cta: initialPresenter.display.cta,
         });
         lastFailureSignatureRef.current = generationInputSignature;
-        return false;
+        return fail({
+          errorCode: "compliance_blocked",
+          errorMessage: initialPresenter.display.description ?? "Cover letter generation was blocked.",
+          requestId: request.requestId,
+          http: { status: response.status, responsePayload },
+        });
       }
       if (initialPresenter.status !== "success") {
         throw new Error("Cover letter generation did not return a usable document.");
@@ -8644,12 +8713,14 @@ export default function StudioPage() {
             artifact === "resume"
               ? await handleResumeDraft({
                   sessionKey: stableSessionKey,
+                  bypassReadinessGate: true,
                   onAttempt: (next) => {
                     attempt = next;
                   },
                 })
               : await handleCoverDraft({
                   sessionKey: stableSessionKey,
+                  bypassReadinessGate: true,
                   onAttempt: (next) => {
                     attempt = next;
                   },
