@@ -4972,18 +4972,125 @@ export default function StudioPage() {
     setSelectedBaselineVersionId(analysis.baselineVersionId);
   }, [analysis?.baselineVersionId, versions]);
 
+  type StudioArtifactGenerationAttemptResult = {
+    artifact: "resume" | "cover";
+    ok: boolean;
+    status: "success" | "skipped" | "failed";
+    errorCode: string | null;
+    errorMessage: string | null;
+    skippedReason: string | null;
+    missingPrereqs: string[];
+    ids: {
+      baselineId: string | null;
+      baselineVersionId: string | null;
+      jobId: string | null;
+      analysisId: string | null;
+    };
+    request: {
+      sessionKey: string | null;
+      requestId: string | null;
+    };
+    http: {
+      status: number | null;
+      responseSummary: unknown | null;
+    };
+  };
+
+  const summarizeStudioGenerationResponse = (payload: unknown): unknown => {
+    if (payload === null || payload === undefined) return payload;
+    if (typeof payload === "string") {
+      const trimmed = payload.trim();
+      return trimmed.length > 600 ? `${trimmed.slice(0, 600)}…` : trimmed;
+    }
+    if (Array.isArray(payload)) return { type: "array", length: payload.length };
+    if (typeof payload === "object") {
+      return { type: "object", keys: Object.keys(payload as Record<string, unknown>).slice(0, 30) };
+    }
+    return { type: typeof payload, value: payload };
+  };
+
+  const makeStudioAttempt = (
+    artifact: StudioArtifactGenerationAttemptResult["artifact"],
+    attempt: Partial<StudioArtifactGenerationAttemptResult> &
+      Pick<StudioArtifactGenerationAttemptResult, "ok" | "status">,
+  ): StudioArtifactGenerationAttemptResult => ({
+    artifact,
+    ok: attempt.ok,
+    status: attempt.status,
+    errorCode: attempt.errorCode ?? null,
+    errorMessage: attempt.errorMessage ?? null,
+    skippedReason: attempt.skippedReason ?? null,
+    missingPrereqs: attempt.missingPrereqs ?? [],
+    ids: {
+      baselineId: attempt.ids?.baselineId ?? effectiveBaselineId ?? null,
+      baselineVersionId: attempt.ids?.baselineVersionId ?? effectiveBaselineVersionId ?? null,
+      jobId: attempt.ids?.jobId ?? effectiveJobId ?? null,
+      analysisId: attempt.ids?.analysisId ?? requestedAnalysisId ?? null,
+    },
+    request: {
+      sessionKey: attempt.request?.sessionKey ?? null,
+      requestId: attempt.request?.requestId ?? null,
+    },
+    http: {
+      status: attempt.http?.status ?? null,
+      responseSummary: attempt.http?.responseSummary ?? null,
+    },
+  });
+
   const handleResumeDraft = async (
-    opts?: { verifiedOnly?: boolean; bypassReadinessGate?: boolean; sessionKey?: string },
+    opts?: {
+      verifiedOnly?: boolean;
+      bypassReadinessGate?: boolean;
+      sessionKey?: string;
+      onAttempt?: (attempt: StudioArtifactGenerationAttemptResult) => void;
+    },
   ): Promise<boolean> => {
+    const emitAttempt = (attempt: StudioArtifactGenerationAttemptResult) => {
+      try {
+        opts?.onAttempt?.(attempt);
+      } catch {
+        // ignore diagnostics failures
+      }
+    };
+    const finish = (attempt: StudioArtifactGenerationAttemptResult) => {
+      emitAttempt(attempt);
+      return attempt.ok;
+    };
     if (
       studioArtifactPresentationStateRef.current === "hydrated" &&
       hasResumeArtifact &&
       Boolean(resumeState.response)
     ) {
-      return true;
+      return finish(
+        makeStudioAttempt("resume", {
+          ok: true,
+          status: "skipped",
+          skippedReason: "already_hydrated",
+          request: { sessionKey: opts?.sessionKey ?? null, requestId: null },
+        }),
+      );
     }
-    if (generationLifecycle.phase === "generated" && hasResumeArtifact) return false;
-    if (!generationLifecycle.canStartGeneration) return false;
+    if (generationLifecycle.phase === "generated" && hasResumeArtifact) {
+      return finish(
+        makeStudioAttempt("resume", {
+          ok: true,
+          status: "skipped",
+          skippedReason: "already_generated",
+          request: { sessionKey: opts?.sessionKey ?? null, requestId: null },
+        }),
+      );
+    }
+    if (!generationLifecycle.canStartGeneration) {
+      return finish(
+        makeStudioAttempt("resume", {
+          ok: false,
+          status: "failed",
+          errorCode: "generation_not_allowed",
+          errorMessage: "Generation cannot start in the current lifecycle phase.",
+          request: { sessionKey: opts?.sessionKey ?? null, requestId: null },
+        }),
+      );
+    }
 
     const artifactType: StudioArtifactType = "resume";
     const flightRequestId = createRequestId();
@@ -5005,7 +5112,14 @@ export default function StudioPage() {
           reason: flight.reason,
         });
       }
-      return false;
+      return finish(
+        makeStudioAttempt("resume", {
+          ok: true,
+          status: "skipped",
+          skippedReason: `single_flight_not_acquired:${flight.reason ?? "unknown"}`,
+          request: { sessionKey: opts?.sessionKey ?? null, requestId: flightRequestId },
+        }),
+      );
     }
 
     if (process.env.NODE_ENV === "development") {
@@ -5031,7 +5145,15 @@ export default function StudioPage() {
         analysisId: requestedAnalysisId ?? null,
         artifactType,
       });
-      return false;
+      return finish(
+        makeStudioAttempt("resume", {
+          ok: false,
+          status: "failed",
+          errorCode: "guard_blocked",
+          errorMessage: "Resume generation was blocked by a readiness guard.",
+          request: { sessionKey: opts?.sessionKey ?? null, requestId: flightRequestId },
+        }),
+      );
     }
     const requestScope = generationWorkflowScope;
     const request = beginStudioGenerationRequest("resume", requestScope);
@@ -5042,7 +5164,15 @@ export default function StudioPage() {
         analysisId: requestedAnalysisId ?? null,
         artifactType,
       });
-      return false;
+      return finish(
+        makeStudioAttempt("resume", {
+          ok: false,
+          status: "failed",
+          errorCode: "missing_generation_request",
+          errorMessage: "Resume generation could not acquire a request slot.",
+          request: { sessionKey: opts?.sessionKey ?? null, requestId: flightRequestId },
+        }),
+      );
     }
     setUnlockGenerationConfirmation(null);
     if ((hasSavedResumeEdits || hasUnsavedResumeEdits) && resumeState.response) {
@@ -5058,7 +5188,15 @@ export default function StudioPage() {
           analysisId: requestedAnalysisId ?? null,
           artifactType,
         });
-        return false;
+        return finish(
+          makeStudioAttempt("resume", {
+            ok: false,
+            status: "failed",
+            errorCode: "user_cancelled",
+            errorMessage: "User cancelled regeneration because edits would be overwritten.",
+            request: { sessionKey: opts?.sessionKey ?? null, requestId: request.requestId },
+          }),
+        );
       }
       setSavedEditedResumeModel(null);
       setDraftResumeModel(generatedResumeModel);
@@ -5077,7 +5215,15 @@ export default function StudioPage() {
         analysisId: requestedAnalysisId ?? null,
         artifactType,
       });
-      return false;
+      return finish(
+        makeStudioAttempt("resume", {
+          ok: false,
+          status: "failed",
+          errorCode: "readiness_blocked",
+          errorMessage: generationMessage ?? "Review prerequisites before generating a resume.",
+          request: { sessionKey: opts?.sessionKey ?? null, requestId: request.requestId },
+        }),
+      );
     }
     if (!effectiveBaselineVersionId) {
       finishStudioGenerationRequest("resume", request, "blocked", requestScope);
@@ -5101,7 +5247,16 @@ export default function StudioPage() {
         analysisId: requestedAnalysisId ?? null,
         artifactType,
       });
-      return false;
+      return finish(
+        makeStudioAttempt("resume", {
+          ok: false,
+          status: "failed",
+          errorCode: "missing_baseline_version",
+          errorMessage: message,
+          missingPrereqs: ["baselineVersionId"],
+          request: { sessionKey: opts?.sessionKey ?? null, requestId: request.requestId },
+        }),
+      );
     }
     let activityOutcome: "success" | "failure" = "failure";
     let requestFinalStatus: "completed" | "timeout" = "completed";
@@ -5615,17 +5770,59 @@ export default function StudioPage() {
   }
 
   const handleCoverDraft = async (
-    opts?: { verifiedOnly?: boolean; bypassReadinessGate?: boolean; sessionKey?: string },
+    opts?: {
+      verifiedOnly?: boolean;
+      bypassReadinessGate?: boolean;
+      sessionKey?: string;
+      onAttempt?: (attempt: StudioArtifactGenerationAttemptResult) => void;
+    },
   ): Promise<boolean> => {
+    const emitAttempt = (attempt: StudioArtifactGenerationAttemptResult) => {
+      try {
+        opts?.onAttempt?.(attempt);
+      } catch {
+        // ignore diagnostics failures
+      }
+    };
+    const finish = (attempt: StudioArtifactGenerationAttemptResult) => {
+      emitAttempt(attempt);
+      return attempt.ok;
+    };
     if (
       studioArtifactPresentationStateRef.current === "hydrated" &&
       hasCoverLetterArtifact &&
       Boolean(coverState.response)
     ) {
-      return true;
+      return finish(
+        makeStudioAttempt("cover", {
+          ok: true,
+          status: "skipped",
+          skippedReason: "already_hydrated",
+          request: { sessionKey: opts?.sessionKey ?? null, requestId: null },
+        }),
+      );
     }
-    if (generationLifecycle.phase === "generated" && hasCoverLetterArtifact) return false;
-    if (!generationLifecycle.canStartGeneration) return false;
+    if (generationLifecycle.phase === "generated" && hasCoverLetterArtifact) {
+      return finish(
+        makeStudioAttempt("cover", {
+          ok: true,
+          status: "skipped",
+          skippedReason: "already_generated",
+          request: { sessionKey: opts?.sessionKey ?? null, requestId: null },
+        }),
+      );
+    }
+    if (!generationLifecycle.canStartGeneration) {
+      return finish(
+        makeStudioAttempt("cover", {
+          ok: false,
+          status: "failed",
+          errorCode: "generation_not_allowed",
+          errorMessage: "Generation cannot start in the current lifecycle phase.",
+          request: { sessionKey: opts?.sessionKey ?? null, requestId: null },
+        }),
+      );
+    }
 
     const artifactType: StudioArtifactType = "cover_letter";
     const flightRequestId = createRequestId();
@@ -5647,7 +5844,14 @@ export default function StudioPage() {
           reason: flight.reason,
         });
       }
-      return false;
+      return finish(
+        makeStudioAttempt("cover", {
+          ok: true,
+          status: "skipped",
+          skippedReason: `single_flight_not_acquired:${flight.reason ?? "unknown"}`,
+          request: { sessionKey: opts?.sessionKey ?? null, requestId: flightRequestId },
+        }),
+      );
     }
 
     if (process.env.NODE_ENV === "development") {
@@ -5673,7 +5877,15 @@ export default function StudioPage() {
         analysisId: requestedAnalysisId ?? null,
         artifactType,
       });
-      return false;
+      return finish(
+        makeStudioAttempt("cover", {
+          ok: false,
+          status: "failed",
+          errorCode: "guard_blocked",
+          errorMessage: "Cover letter generation was blocked by a readiness guard.",
+          request: { sessionKey: opts?.sessionKey ?? null, requestId: flightRequestId },
+        }),
+      );
     }
     const requestScope = generationWorkflowScope;
     const request = beginStudioGenerationRequest("cover_letter", requestScope);
@@ -5684,7 +5896,15 @@ export default function StudioPage() {
         analysisId: requestedAnalysisId ?? null,
         artifactType,
       });
-      return false;
+      return finish(
+        makeStudioAttempt("cover", {
+          ok: false,
+          status: "failed",
+          errorCode: "missing_generation_request",
+          errorMessage: "Cover letter generation could not acquire a request slot.",
+          request: { sessionKey: opts?.sessionKey ?? null, requestId: flightRequestId },
+        }),
+      );
     }
     setUnlockGenerationConfirmation(null);
     if (!opts?.bypassReadinessGate && !canProceedWithStudioDrafts) {
@@ -8390,9 +8610,19 @@ export default function StudioPage() {
   const startGenerationFromReadyShell = useCallback(
     async (
       source: "shell" | "shell_auto" | "post_unlock",
-    ): Promise<{ ok: boolean; resumeResult: boolean | null; coverResult: boolean | null }> => {
+    ): Promise<{
+      ok: boolean;
+      resumeResult: StudioArtifactGenerationAttemptResult | null;
+      coverResult: StudioArtifactGenerationAttemptResult | null;
+    }> => {
       console.log("[STUDIO][AUTO_GEN][START_CALLED_INNER]", { source });
-      if (generationReadyPhase === "generating") return { ok: false, resumeResult: null, coverResult: null };
+      if (generationReadyPhase === "generating") {
+        return {
+          ok: false,
+          resumeResult: null,
+          coverResult: null,
+        };
+      }
 
       scrollToStudioTop("smooth");
       setGenerationReadyFailure(null);
@@ -8406,16 +8636,52 @@ export default function StudioPage() {
 
       try {
         const stableSessionKey = `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:${requestedAnalysisId ?? "analysis"}:ready_shell`;
-        const [resumeSucceeded, coverSucceeded] = await Promise.all([
-          handleResumeDraft({ sessionKey: stableSessionKey }),
-          handleCoverDraft({ sessionKey: stableSessionKey }),
+        const runAttempt = async (
+          artifact: "resume" | "cover",
+        ): Promise<StudioArtifactGenerationAttemptResult> => {
+          let attempt: StudioArtifactGenerationAttemptResult | null = null;
+          const ok =
+            artifact === "resume"
+              ? await handleResumeDraft({
+                  sessionKey: stableSessionKey,
+                  onAttempt: (next) => {
+                    attempt = next;
+                  },
+                })
+              : await handleCoverDraft({
+                  sessionKey: stableSessionKey,
+                  onAttempt: (next) => {
+                    attempt = next;
+                  },
+                });
+
+          if (attempt) return attempt;
+
+          // Guardrail: never allow a silent boolean to leak into the ready-shell path.
+          return makeStudioAttempt(artifact, {
+            ok,
+            status: ok ? "success" : "failed",
+            errorCode: ok ? null : "silent_false",
+            errorMessage: ok
+              ? null
+              : `${artifact === "resume" ? "Resume" : "Cover letter"} generation returned false with no diagnostic.`,
+            skippedReason: null,
+            request: { sessionKey: stableSessionKey, requestId: null },
+          });
+        };
+
+        const [resumeResult, coverResult] = await Promise.all([
+          runAttempt("resume"),
+          runAttempt("cover"),
         ]);
 
-        if (resumeSucceeded && coverSucceeded) {
+        const ok = resumeResult.ok && coverResult.ok;
+
+        if (ok) {
           setGenerationReadyDismissed(true);
           setGenerationReadyFailure(null);
           setGenerationReadyPhase("ready");
-          return { ok: true, resumeResult: resumeSucceeded, coverResult: coverSucceeded };
+          return { ok: true, resumeResult, coverResult };
         }
 
         const failure = deriveGenerationReadyShellFailure();
@@ -8428,7 +8694,7 @@ export default function StudioPage() {
           failure_category: failure.category,
           retryable: failure.retryable,
         });
-        return { ok: false, resumeResult: resumeSucceeded, coverResult: coverSucceeded };
+        return { ok: false, resumeResult, coverResult };
       } finally {
         setAutoGenerationInFlight(false);
       }
@@ -8442,6 +8708,7 @@ export default function StudioPage() {
       generationReadyPhase,
       handleCoverDraft,
       handleResumeDraft,
+      makeStudioAttempt,
       scrollToStudioTop,
       setAutoGenerationInFlight,
       trackEvent,
