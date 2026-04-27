@@ -831,13 +831,35 @@ export class SyntheticTransactionRunnerService {
       push({ step: "generate_cover_letter", status: coverLetter?.status === "success" ? "succeeded" : "failed" });
 
       if (deps.opportunitiesService) {
-        await runStep("upsert_opportunity", () =>
-          (deps.opportunitiesService as any).upsertOpportunity(
+        await runStep("upsert_opportunity", async () => {
+          const company = (createdJob as any)?.job?.company ?? (createdJob as any)?.company ?? null;
+          const roleTitle = (createdJob as any)?.job?.title ?? (createdJob as any)?.title ?? null;
+          const score = Number((assessment as any)?.score ?? (assessment as any)?.overallScore ?? NaN);
+          const missing: string[] = [];
+          if (!baseline?.id) missing.push("baselineId");
+          if (!jobId) missing.push("jobId");
+          if (!analysisId) missing.push("analysisId");
+          if (!company || !String(company).trim()) missing.push("company");
+          if (!roleTitle || !String(roleTitle).trim()) missing.push("roleTitle");
+          if (!Number.isFinite(score)) missing.push("score");
+          if (missing.length) {
+            throw new Error(`Synthetic core loop upsert_opportunity missing required field(s): ${missing.join(", ")}`);
+          }
+          return await (deps.opportunitiesService as any).upsertOpportunity(
             resolvedOwnerId,
-            { baselineId: baseline.id, jobId },
+            {
+              baselineId: baseline.id,
+              jobId,
+              analysisId,
+              company: String(company).trim(),
+              roleTitle: String(roleTitle).trim(),
+              score,
+              generationCompleted: true,
+              notes: "Synthetic core loop smoke opportunity.",
+            },
             { isSynthetic: true },
-          ),
-        );
+          );
+        });
         push({ step: "upsert_opportunity", status: "succeeded" });
       } else {
         push({ step: "upsert_opportunity", status: "skipped" });

@@ -166,7 +166,9 @@ describe('SyntheticTransactionRunnerService', () => {
       versions: [{ id: 'bv1' }],
     });
 
-    jobsService.createJob.mockResolvedValue({ job: { id: 'j1' } });
+    jobsService.createJob.mockResolvedValue({
+      job: { id: 'j1', title: 'Core loop synthetic role', company: 'TargetThisRole Synthetic' },
+    });
     analysisService.runFitAssessment.mockResolvedValue({
       status: 'ok',
       assessmentId: 'a1',
@@ -231,7 +233,14 @@ describe('SyntheticTransactionRunnerService', () => {
     );
     expect(opportunitiesService.upsertOpportunity).toHaveBeenCalledWith(
       'u1',
-      expect.any(Object),
+      expect.objectContaining({
+        baselineId: 'b1',
+        jobId: 'j1',
+        analysisId: 'a1',
+        company: expect.any(String),
+        roleTitle: expect.any(String),
+        score: expect.any(Number),
+      }),
       expect.objectContaining({ isSynthetic: true }),
     );
     expect(jobsService.createJob).toHaveBeenCalledWith(
@@ -312,7 +321,9 @@ describe('SyntheticTransactionRunnerService', () => {
     usersService.findByEmail.mockResolvedValue({ id: 'u1', isSynthetic: true, preserveFromCleanup: true });
     userRepository.findOneOrFail.mockResolvedValue({ id: 'u1' });
     baselineRepository.findOne.mockResolvedValue({ id: 'b1', isSynthetic: true, preserveFromCleanup: true, versions: [{ id: 'bv1' }] });
-    jobsService.createJob.mockResolvedValue({ job: { id: 'j1' } });
+    jobsService.createJob.mockResolvedValue({
+      job: { id: 'j1', title: 'Core loop synthetic role', company: 'TargetThisRole Synthetic' },
+    });
     analysisService.runFitAssessment.mockResolvedValue({ status: 'compliance_blocked' });
 
     const result = await service.runCoreLoopSmoke('manual', 'u1');
@@ -349,14 +360,14 @@ describe('SyntheticTransactionRunnerService', () => {
     baselineRepository.findOne.mockResolvedValue({ id: 'b1', isSynthetic: true, preserveFromCleanup: true, versions: [{ id: 'bv1' }] });
 
     jobsService.createJob
-      .mockResolvedValueOnce({ job: { id: 'j1' } })
+      .mockResolvedValueOnce({ job: { id: 'j1', title: 'Core loop synthetic role', company: 'TargetThisRole Synthetic' } })
       .mockRejectedValueOnce(
         Object.assign(new Error('Conflict Exception'), {
           name: 'ConflictException',
           getResponse: () => ({ error: { code: 'JOB_DUPLICATE', existingJobId: 'j1' } }),
         }),
       );
-    jobRepository.findOne.mockResolvedValue({ id: 'j1', userId: 'u1' });
+    jobRepository.findOne.mockResolvedValue({ id: 'j1', userId: 'u1', title: 'Core loop synthetic role', company: 'TargetThisRole Synthetic' });
 
     analysisService.runFitAssessment.mockResolvedValue({ status: 'ok', assessmentId: 'a1', score: 82, verdict: 'APPLY' });
     resumeService.generateResume.mockResolvedValue({ status: 'success', preview: { resume: { experience: [{ company: 'X' }] } } });
@@ -588,7 +599,9 @@ describe('SyntheticTransactionRunnerService', () => {
     userRepository.findOneOrFail.mockResolvedValue({ id: 'u1' });
     baselineRepository.findOne.mockResolvedValue({ id: 'b1', isSynthetic: true, preserveFromCleanup: true, versions: [{ id: 'bv1' }] });
 
-    jobsService.createJob.mockResolvedValue({ job: { id: 'j1' } });
+    jobsService.createJob.mockResolvedValue({
+      job: { id: 'j1', title: 'Core loop synthetic role', company: 'TargetThisRole Synthetic' },
+    });
     jobRepository.findOne.mockResolvedValue({ id: 'j1', userId: 'u1' });
 
     analysisService.runFitAssessment.mockResolvedValue({ status: 'ok', assessmentId: 'a1', score: 82, verdict: 'APPLY' });
@@ -631,7 +644,9 @@ describe('SyntheticTransactionRunnerService', () => {
     userRepository.findOneOrFail.mockResolvedValue({ id: 'u1' });
     baselineRepository.findOne.mockResolvedValue({ id: 'b1', isSynthetic: true, preserveFromCleanup: true, versions: [{ id: 'bv1' }] });
 
-    jobsService.createJob.mockResolvedValue({ job: { id: 'j1' } });
+    jobsService.createJob.mockResolvedValue({
+      job: { id: 'j1', title: 'Core loop synthetic role', company: 'TargetThisRole Synthetic' },
+    });
     analysisService.runFitAssessment.mockRejectedValue(
       Object.assign(new Error('Conflict Exception'), {
         name: 'ConflictException',
@@ -662,7 +677,9 @@ describe('SyntheticTransactionRunnerService', () => {
     usersService.findByEmail.mockResolvedValue({ id: 'u1', isSynthetic: true, preserveFromCleanup: true });
     userRepository.findOneOrFail.mockResolvedValue({ id: 'u1' });
     baselineRepository.findOne.mockResolvedValue({ id: 'b1', isSynthetic: true, preserveFromCleanup: true, versions: [{ id: 'bv1' }] });
-    jobsService.createJob.mockResolvedValue({ job: { id: 'j1' } });
+    jobsService.createJob.mockResolvedValue({
+      job: { id: 'j1', title: 'Core loop synthetic role', company: 'TargetThisRole Synthetic' },
+    });
     analysisService.runFitAssessment.mockResolvedValue({ status: 'ok', assessmentId: 'a1', score: 80, verdict: 'APPLY' });
     resumeService.generateResume.mockResolvedValue({ status: 'success', preview: { resume: null } });
 
