@@ -97,12 +97,14 @@ import type { ArtifactTraceAudit } from '../generation/artifact-trace-audit';
 import { buildArtifactFailurePayload } from '../generation/artifact-failure';
 import { polishCoverLetterGeneration } from '../language-style-pass';
 import type { DocumentStrategyPlanLike } from '../document-strategy-plan.types';
+import { resolveSyntheticCandidateName } from './candidate-name.util';
 
 type CoverLetterDraft = {
   baseline: Baseline;
   baselineVersion: BaselineVersion;
   job: Job;
   allowedBlocks: AllowedBaselineBlock[];
+  candidateName: string;
   jobContext: {
     id: string;
     title: string | null;
@@ -408,6 +410,31 @@ export class CoverLettersService {
     });
 
     if (reservation.status === 'existing_completed' && reservation.responseBody) {
+      if (
+        (process.env.NODE_ENV ?? 'development') !== 'production' &&
+        syntheticMetadata?.isSynthetic
+      ) {
+        const payload = {
+          isSynthetic: true,
+          reusedCompleted: true,
+          candidateName: draft.candidateName ?? null,
+          candidateNamePresent: Boolean(draft.candidateName),
+          generatorName: this.generator?.constructor?.name ?? 'unknown',
+          draftPreview:
+            typeof (draft as any)?.generation?.content === 'string'
+              ? (draft as any).generation.content.slice(0, 300)
+              : null,
+          postProcessingFlags: null as string[] | null,
+          coverLetterId: (reservation.responseBody as any)?.id ?? null,
+          analysisId: (input as any)?.analysisId ?? null,
+          jobId: draft.job.id,
+          baselineId: draft.baseline.id,
+          dedupeKey,
+        };
+        this.logger.debug(
+          `[synthetic][cover_letter] reused_completed ${JSON.stringify(payload)}`,
+        );
+      }
       return {
         ...(reservation.responseBody as CoverLetterGenerationResponse),
         idempotency: {
@@ -446,6 +473,31 @@ export class CoverLettersService {
     };
 
     try {
+      if (
+        (process.env.NODE_ENV ?? 'development') !== 'production' &&
+        syntheticMetadata?.isSynthetic
+      ) {
+        const payload = {
+          isSynthetic: true,
+          reusedCompleted: false,
+          candidateName: draft.candidateName ?? null,
+          candidateNamePresent: Boolean(draft.candidateName),
+          generatorName: this.generator?.constructor?.name ?? 'unknown',
+          draftPreview:
+            typeof (draft as any)?.generation?.content === 'string'
+              ? (draft as any).generation.content.slice(0, 300)
+              : null,
+          postProcessingFlags: null as string[] | null,
+          coverLetterId: null as string | null,
+          analysisId: (input as any)?.analysisId ?? null,
+          jobId: draft.job.id,
+          baselineId: draft.baseline.id,
+          dedupeKey,
+        };
+        this.logger.debug(
+          `[synthetic][cover_letter] generation_start ${JSON.stringify(payload)}`,
+        );
+      }
       await this.studioArtifactsService.recordCoverLetterInProgress({
         userId,
         baselineId: studioArtifactContext.baselineId,
@@ -575,6 +627,34 @@ export class CoverLettersService {
         resumeArtifactType: 'cover',
         resumeArtifactFormat: 'docx',
       });
+
+      if (
+        (process.env.NODE_ENV ?? 'development') !== 'production' &&
+        syntheticMetadata?.isSynthetic
+      ) {
+        const payload = {
+          isSynthetic: true,
+          reusedCompleted: false,
+          candidateName: draft.candidateName ?? null,
+          candidateNamePresent: Boolean(draft.candidateName),
+          generatorName: this.generator?.constructor?.name ?? 'unknown',
+          draftPreview:
+            typeof (draft as any)?.generation?.content === 'string'
+              ? (draft as any).generation.content.slice(0, 300)
+              : null,
+          postProcessingFlags: null as string[] | null,
+          coverLetterId: (response as any)?.id ?? (savedCoverLetter as any)?.id ?? null,
+          analysisId: (input as any)?.analysisId ?? null,
+          jobId: studioArtifactContext.jobId,
+          baselineId: studioArtifactContext.baselineId,
+          dedupeKey,
+          runId: reservation.runId,
+          reusedExistingCoverLetter,
+        };
+        this.logger.debug(
+          `[synthetic][cover_letter] persisted ${JSON.stringify(payload)}`,
+        );
+      }
       await this.workflowIdempotencyService.complete({
         userId,
         operationName: 'generation.cover_letter',
@@ -939,8 +1019,8 @@ export class CoverLettersService {
     };
     const baselineIdentity = resolveBaselineIdentity(baseline);
     let candidateName = this.cleanText(baselineIdentity?.fullName);
-    if (!candidateName && syntheticMetadata?.isSynthetic) {
-      candidateName = 'Core Loop Candidate';
+    if (syntheticMetadata?.isSynthetic) {
+      candidateName = resolveSyntheticCandidateName(candidateName);
     }
 
     const generationInputsHash = this.computeGenerationInputsHash(
@@ -1038,6 +1118,31 @@ export class CoverLettersService {
       candidateName,
     );
     generation = qualityResult.generation;
+
+    if (
+      (process.env.NODE_ENV ?? 'development') !== 'production' &&
+      syntheticMetadata?.isSynthetic
+    ) {
+      const payload = {
+        isSynthetic: true,
+        reusedCompleted: false,
+        candidateName: candidateName || null,
+        candidateNamePresent: Boolean(candidateName),
+        generatorName: this.generator?.constructor?.name ?? 'unknown',
+        draftPreview:
+          typeof generation?.content === 'string'
+            ? generation.content.slice(0, 300)
+            : null,
+        postProcessingFlags: qualityResult.flags,
+        coverLetterId: null as string | null,
+        analysisId: (input as any)?.analysisId ?? null,
+        jobId: job.id,
+        baselineId: baseline.id,
+      };
+      this.logger.debug(
+        `[synthetic][cover_letter] post_processing ${JSON.stringify(payload)}`,
+      );
+    }
 
     if (qualityResult.flags.length > 0) {
       generation = this.generator.generate({
@@ -1211,6 +1316,7 @@ export class CoverLettersService {
       job,
       analysisAssessment,
       allowedBlocks,
+      candidateName,
       jobContext,
       jobContextAllowlist,
       closingTemplateKey,

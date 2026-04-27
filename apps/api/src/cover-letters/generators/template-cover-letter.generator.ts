@@ -102,11 +102,20 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       ? paragraphEvidence.closing.slice(0, 1)
       : body2Evidence;
 
+    const strategySentence = (() => {
+      const frame = this.cleanText(strategyFrame);
+      if (!frame) return this.ensureSentence('I would bring a steady execution lens to the role.');
+      if (/^(a|an|the)\b/i.test(frame)) {
+        return this.ensureSentence(`I would lead as ${frame}.`);
+      }
+      return this.ensureSentence(`I would lead with a ${frame} lens.`);
+    })();
+
     const opening = this.joinSentences([
       this.ensureSentence(`I am applying for ${roleDescriptor}.`),
       // Strategy contract: ensure the explicit positioning frame is visible in the artifact,
       // so downstream UI/tests can verify resume and cover letter share the same frame.
-      this.ensureSentence(`I would lead as a ${strategyFrame}.`),
+      strategySentence,
       ...(strategyPriority ? [this.ensureSentence(`The strongest fit is ${strategyPriority}.`)] : []),
       this.ensureSentence('This background fits the operating context well.'),
       ...openingEvidence.map((entry) => this.ensureSentence(this.compactEvidenceText(entry.normalizedText))),
@@ -124,13 +133,15 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
         this.ensureSentence('It also gave leaders a clearer view of the next fix.'),
       ]),
     ];
-    const closingLead = closingEvidence.length
+    const closingLead = this.ensureSentence(
+      'Thank you for considering how that operating rhythm supports steady execution for your team.',
+    );
+    const closingEvidenceSentence = closingEvidence.length
       ? this.ensureSentence(this.compactEvidenceText(closingEvidence[0].normalizedText))
-      : this.ensureSentence(
-          'Thank you for considering how that operating rhythm supports steady execution for your team.',
-        );
+      : null;
     const closing = this.joinSentences([
       closingLead,
+      ...(closingEvidenceSentence ? [closingEvidenceSentence] : []),
       this.ensureSentence(
         'That keeps incident response, routing, and service quality improvements moving in a steady cadence.',
       ),

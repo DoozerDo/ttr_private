@@ -244,7 +244,7 @@ describe('cover letter post-processing', () => {
           id: 'section-1',
           title: 'Summary',
           content:
-            'Owned support operations across tooling, analytics, and cross-functional delivery. Improved time-to-first-response by 18% and time-to-resolution by 22%.',
+            'I owned support operations across tooling, analytics, and cross-functional delivery. Improved time-to-first-response by 18% and time-to-resolution by 22%.',
           includePolicy: 'ALWAYS' as never,
           order: 0,
           sectionType: 'SUMMARY' as never,
