@@ -7,7 +7,7 @@ export class CoverLetters1790000000000 implements MigrationInterface {
     await queryRunner.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
 
     await queryRunner.query(`
-      CREATE TABLE "cover_letters" (
+      CREATE TABLE IF NOT EXISTS "cover_letters" (
         "id" uuid NOT NULL DEFAULT gen_random_uuid(),
         "userId" uuid NOT NULL,
         "jobId" uuid NOT NULL,
@@ -23,16 +23,16 @@ export class CoverLetters1790000000000 implements MigrationInterface {
     `);
 
     await queryRunner.query(
-      `CREATE INDEX "IDX_cover_letters_userId" ON "cover_letters" ("userId")`,
+      `CREATE INDEX IF NOT EXISTS "IDX_cover_letters_userId" ON "cover_letters" ("userId")`,
     );
     await queryRunner.query(
-      `CREATE INDEX "IDX_cover_letters_jobId" ON "cover_letters" ("jobId")`,
+      `CREATE INDEX IF NOT EXISTS "IDX_cover_letters_jobId" ON "cover_letters" ("jobId")`,
     );
     await queryRunner.query(
-      `CREATE INDEX "IDX_cover_letters_baselineId" ON "cover_letters" ("baselineId")`,
+      `CREATE INDEX IF NOT EXISTS "IDX_cover_letters_baselineId" ON "cover_letters" ("baselineId")`,
     );
     await queryRunner.query(
-      `CREATE INDEX "IDX_cover_letters_createdAt" ON "cover_letters" ("createdAt")`,
+      `CREATE INDEX IF NOT EXISTS "IDX_cover_letters_createdAt" ON "cover_letters" ("createdAt")`,
     );
   }
 
@@ -45,6 +45,6 @@ export class CoverLetters1790000000000 implements MigrationInterface {
     );
     await queryRunner.query(`DROP INDEX IF EXISTS "IDX_cover_letters_jobId"`);
     await queryRunner.query(`DROP INDEX IF EXISTS "IDX_cover_letters_userId"`);
-    await queryRunner.query(`DROP TABLE "cover_letters"`);
+    await queryRunner.query(`DROP TABLE IF EXISTS "cover_letters"`);
   }
 }

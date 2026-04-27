@@ -436,6 +436,64 @@ describe('SyntheticTransactionRunnerService', () => {
     expect(saved.fileHash.length).toBeGreaterThan(10);
   });
 
+  it('repairs missing synthetic baseline version allowlists', async () => {
+    const {
+      service,
+      baselineRepository,
+      baselineSectionRepository,
+      baselineVersionRepository,
+    } = buildService();
+
+    baselineSectionRepository.createQueryBuilder.mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      getRawOne: jest.fn().mockResolvedValue({ sectionCount: '2', totalChars: '900' }),
+    });
+
+    baselineRepository.findOne.mockResolvedValue({
+      id: 'b1',
+      userId: 'u1',
+      storagePath: 'synthetic/core_loop_smoke/run/resume.pdf',
+      versions: [
+        {
+          id: 'bv1',
+          baselineId: 'b1',
+          versionNumber: 1,
+          fileHash: 'hash',
+          allowedCompanies: [],
+          allowedRoles: [],
+          allowedTechnologies: [],
+          allowedMetricTokens: [],
+          storagePath: 'x',
+        },
+      ],
+    });
+
+    baselineVersionRepository.save.mockResolvedValue({ id: 'bv1' });
+
+    await service.resolveOrCreateBaselineFixture('u1', {
+      scenarioKey: 'core_loop_smoke',
+      runId: 'run-1',
+      syntheticCreatedAt: new Date(),
+    });
+
+    expect(baselineVersionRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'bv1',
+        allowedCompanies: expect.any(Array),
+        allowedRoles: expect.any(Array),
+        allowedTechnologies: expect.any(Array),
+        allowedMetricTokens: expect.any(Array),
+      }),
+    );
+    const saved = baselineVersionRepository.save.mock.calls[0][0];
+    expect(saved.allowedCompanies.length).toBeGreaterThan(0);
+    expect(saved.allowedRoles.length).toBeGreaterThan(0);
+    expect(saved.allowedTechnologies.length).toBeGreaterThan(0);
+    expect(saved.allowedMetricTokens.length).toBeGreaterThan(0);
+  });
+
   it('retries when cover letter generation is in flight', async () => {
     const {
       service,

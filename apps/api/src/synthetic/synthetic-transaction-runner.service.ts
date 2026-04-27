@@ -2,6 +2,7 @@ import { Inject, Injectable, Optional } from "@nestjs/common";
 import bcrypt from "bcryptjs";
 import { createHash } from "crypto";
 import { buildDocumentStrategyPlan } from "../shared/documentStrategyPlan";
+import { buildBaselineAllowlistSnapshot } from "../compliance/baseline-allowlist";
 import { evaluateSyntheticGenerationScenario } from "./generation/synthetic-generation.evaluator";
 import { listSyntheticGenerationScenarioBundles } from "./generation/synthetic-generation.fixtures";
 import type {
@@ -94,13 +95,20 @@ function emptyTransactionResult(): SyntheticTransactionResult {
 
 function buildCoreLoopJobDescription(): string {
   const paragraph =
-    "We are hiring a leader to own cross-functional execution, define success metrics, and ship repeatable operating systems. You will partner with product, analytics, and stakeholders to translate ambiguous goals into measurable outcomes, document workflows, and drive reliable delivery across teams. Demonstrated ownership, clear written communication, and comfort with operational rigor are required.";
+    "We are hiring a Support Operations leader to own cross-functional execution, define success metrics, and ship repeatable operating systems for customer support. You will partner with product, analytics, and stakeholders to translate ambiguous goals into measurable outcomes, document workflows, and drive reliable delivery across teams. Demonstrated ownership, clear written communication, and comfort with operational rigor are required.";
 
   const body = Array.from({ length: 8 })
     .map(() => paragraph)
     .join("\n\n");
 
-  return `Core loop synthetic job description (local deterministic fixture).\n\n${body}`;
+  return [
+    "Core loop synthetic job description (local deterministic fixture).",
+    "",
+    "Core systems and tools: Zendesk, Salesforce Service Cloud, Jira, ServiceNow, Postgres, dashboards.",
+    "Success metrics: SLA attainment, time-to-first-response, time-to-resolution, CSAT, and deflection rate.",
+    "",
+    body,
+  ].join("\n");
 }
 
 function computeCoreLoopBaselineVersionFileHash(): string {
@@ -115,6 +123,53 @@ function computeCoreLoopBaselineVersionFileHash(): string {
     })),
   };
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+function computeCoreLoopBaselineAllowlist(): {
+  allowedCompanies: string[];
+  allowedRoles: string[];
+  allowedTechnologies: string[];
+  allowedMetricTokens: string[];
+} {
+  const sections = buildCoreLoopBaselineSections();
+  const snapshot = buildBaselineAllowlistSnapshot(
+    sections.map((section) => ({
+      sectionType: section.sectionType as any,
+      title: section.title,
+      content: section.content,
+    })),
+  );
+
+  const ensure = (items: string[] | undefined, required: string[]) => {
+    const set = new Set((items ?? []).filter((x) => typeof x === "string" && x.trim().length > 0));
+    for (const token of required) set.add(token);
+    return [...set].sort();
+  };
+
+  return {
+    allowedCompanies: snapshot.allowedCompanies,
+    allowedRoles: snapshot.allowedRoles,
+    allowedTechnologies: ensure(snapshot.allowedTechnologies, [
+      "zendesk",
+      "salesforce",
+      "servicenow",
+      "jira",
+      "postgres",
+    ]),
+    allowedMetricTokens: ensure(snapshot.allowedMetricTokens, [
+      "sla",
+      "csat",
+      "time to resolution",
+      "time to first response",
+      "deflection",
+      "18%",
+      "22%",
+      "12%",
+      "91%",
+      "97%",
+      "0.4",
+    ]),
+  };
 }
 
 function isQueryUniqueViolation(error: unknown): boolean {
@@ -183,15 +238,25 @@ function buildCoreLoopBaselineSections(): Array<{ sectionType: string; title: st
     {
       sectionType: "SUMMARY",
       title: "Professional summary",
-      content: longBody,
+      content: [
+        "Support Operations leader focused on measurable delivery and reliable execution.",
+        "Systems: Zendesk, Salesforce Service Cloud, Jira, ServiceNow; analytics in Postgres; dashboards and governance rhythms.",
+        "Outcomes: improved time-to-resolution, SLA attainment, CSAT, and self-service deflection with documented operating systems.",
+        "",
+        longBody,
+      ].join("\n"),
     },
     {
       sectionType: "EXPERIENCE",
       title: "Experience highlights",
       content: [
         "Director, Support Operations | Acme Co | 2022 - Present",
-        "- Led enterprise escalations and incident response, improving resolution time and customer sentiment.",
-        "- Built operational dashboards and governance rhythms to improve team throughput and quality.",
+        "- Owned support operations across tooling, analytics, and cross-functional delivery.",
+        "- Built operational dashboards (Postgres) and governance rhythms to improve throughput and quality.",
+        "- Improved time-to-first-response by 18% and time-to-resolution by 22% through workflow and triage changes.",
+        "- Improved SLA attainment from 91% to 97% and increased CSAT by 0.4 points through QA and coaching programs.",
+        "- Increased self-service deflection by 12% by launching Zendesk Help Center improvements and ticket routing rules.",
+        "- Led incident response and stakeholder comms; documented runbooks and postmortems in Jira and ServiceNow.",
         "",
         "Support Manager | Beta Co | 2019 - 2022",
         "- Managed queue performance, coached team leads, and improved SLA attainment via process improvements.",
@@ -314,15 +379,16 @@ export class SyntheticTransactionRunnerService {
       const versions: any[] = Array.isArray((existing as any).versions) ? (existing as any).versions : [];
       const targetVersion = versions[0] ?? null;
       const desiredFileHash = computeCoreLoopBaselineVersionFileHash();
+      const desiredAllowlist = computeCoreLoopBaselineAllowlist();
       if (!targetVersion) {
         const createdVersion = baselineVersionRepository.create({
           baselineId: existing.id,
           versionNumber: 1,
           fileHash: desiredFileHash,
-          allowedCompanies: [],
-          allowedRoles: [],
-          allowedTechnologies: [],
-          allowedMetricTokens: [],
+          allowedCompanies: desiredAllowlist.allowedCompanies,
+          allowedRoles: desiredAllowlist.allowedRoles,
+          allowedTechnologies: desiredAllowlist.allowedTechnologies,
+          allowedMetricTokens: desiredAllowlist.allowedMetricTokens,
           verifiedAdditions: [],
           additionDiff: null,
           promotedFromInterviewId: null,
@@ -335,9 +401,29 @@ export class SyntheticTransactionRunnerService {
         });
         const saved = await baselineVersionRepository.save(createdVersion);
         (existing as any).versions = [saved];
-      } else if (!targetVersion.fileHash) {
-        targetVersion.fileHash = desiredFileHash;
-        await baselineVersionRepository.save(targetVersion);
+      } else {
+        const shouldRepairFileHash = !targetVersion.fileHash;
+        const shouldRepairAllowlist =
+          !Array.isArray(targetVersion.allowedCompanies) ||
+          !Array.isArray(targetVersion.allowedRoles) ||
+          !Array.isArray(targetVersion.allowedTechnologies) ||
+          !Array.isArray(targetVersion.allowedMetricTokens) ||
+          targetVersion.allowedCompanies.length === 0 ||
+          targetVersion.allowedRoles.length === 0 ||
+          targetVersion.allowedTechnologies.length === 0 ||
+          targetVersion.allowedMetricTokens.length === 0;
+        if (shouldRepairFileHash || shouldRepairAllowlist) {
+          if (shouldRepairFileHash) {
+            targetVersion.fileHash = desiredFileHash;
+          }
+          if (shouldRepairAllowlist) {
+            targetVersion.allowedCompanies = desiredAllowlist.allowedCompanies;
+            targetVersion.allowedRoles = desiredAllowlist.allowedRoles;
+            targetVersion.allowedTechnologies = desiredAllowlist.allowedTechnologies;
+            targetVersion.allowedMetricTokens = desiredAllowlist.allowedMetricTokens;
+          }
+          await baselineVersionRepository.save(targetVersion);
+        }
       }
       return existing;
     }
@@ -373,10 +459,7 @@ export class SyntheticTransactionRunnerService {
       baselineId: baseline.id,
       versionNumber: 1,
       fileHash: computeCoreLoopBaselineVersionFileHash(),
-      allowedCompanies: [],
-      allowedRoles: [],
-      allowedTechnologies: [],
-      allowedMetricTokens: [],
+      ...computeCoreLoopBaselineAllowlist(),
       verifiedAdditions: [],
       additionDiff: null,
       promotedFromInterviewId: null,
