@@ -237,26 +237,97 @@ export function resolveWorkflowOrchestrator(input: WorkflowOrchestratorInput): W
       })
     : null;
 
-  const contract = resolveWorkflowAuthorityContract({
-    surface: input.surface,
-    currentPathname: null,
-    baselineReady: true,
-    analysisExists: true,
-    score: typeof input.score === "number" ? input.score : null,
-    generationReadiness: { status: safeReadiness.status, blocked: safeReadiness.blocked, reasonCodes: safeReadiness.reasonCodes },
-    workflowAuthorityOverride: input.workflowAuthority,
-    artifact: {
-      resume: { hasOutput: false, failed: input.resume.status === "failed", status: String(input.resume.status) },
-      coverLetter: { hasOutput: false, failed: input.coverLetter.status === "failed", status: String(input.coverLetter.status) },
-      pair: { status: input.artifact.pairStatus ?? null, generating: input.artifact.generating, failure: input.artifact.failure },
-    },
-    opportunity: null,
-    contexts: {
-      unlockContext: input.surface === "studio" ? { active: unlockFlowActive, hasMissingEvidence: unlockContext.missingEvidence.length > 0 } : null,
-      postUnlockOutcomeState: postUnlockOutcomeModel?.outcomeState ?? null,
-      generationReady: { active: !input.generationReady.dismissed, phase: input.generationReady.phase },
-    },
-  });
+  const contract = (() => {
+    try {
+      return resolveWorkflowAuthorityContract({
+        surface: input.surface,
+        currentPathname: null,
+        baselineReady: true,
+        analysisExists: true,
+        score: typeof input.score === "number" ? input.score : null,
+        generationReadiness: {
+          status: safeReadiness.status,
+          blocked: safeReadiness.blocked,
+          reasonCodes: safeReadiness.reasonCodes,
+        },
+        workflowAuthorityOverride: input.workflowAuthority,
+        artifact: {
+          resume: { hasOutput: false, failed: input.resume.status === "failed", status: String(input.resume.status) },
+          coverLetter: {
+            hasOutput: false,
+            failed: input.coverLetter.status === "failed",
+            status: String(input.coverLetter.status),
+          },
+          pair: {
+            status: input.artifact.pairStatus ?? null,
+            generating: input.artifact.generating,
+            failure: input.artifact.failure,
+          },
+        },
+        opportunity: null,
+        contexts: {
+          unlockContext:
+            input.surface === "studio"
+              ? { active: unlockFlowActive, hasMissingEvidence: unlockContext.missingEvidence.length > 0 }
+              : null,
+          postUnlockOutcomeState: postUnlockOutcomeModel?.outcomeState ?? null,
+          generationReady: { active: !input.generationReady.dismissed, phase: input.generationReady.phase },
+        },
+      });
+    } catch (error) {
+      diagnosticsViolations.push({
+        violationType: "unknown_workflow_fallthrough",
+        surface: input.surface,
+        canonicalState: null,
+        trustTone: null,
+        authorityFlags: {
+          unlockActive: unlockFlowActive,
+          postUnlockActive: postUnlockActive,
+          generationReadyActive: !input.generationReady.dismissed,
+          failureActive: false,
+        },
+        artifactFlags: {
+          stalePreviewSuppressed: false,
+          stalePreviewRendered: false,
+        },
+        context: {
+          reason: "workflow_authority_contract_failed",
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+
+      const fallback: WorkflowAuthorityContract = {
+        contractVersion: 1,
+        route: { pathname: null, module: null },
+        ids: {},
+        score: typeof input.score === "number" ? input.score : null,
+        readiness: { status: "unknown", blocked: true, blockers: [] },
+        artifacts: { resume: "missing", coverLetter: "missing", pair: "missing", hasAnyOutput: false },
+        generation: {
+          state: "blocked",
+          auto: { shouldStart: false, signature: "autoGen:v1:fallback", skipReason: "contract_failed" },
+        },
+        opportunityTracking: { hasSavedOpportunity: false, materialsGenerated: false },
+        stepper: {
+          baseline: "available",
+          analysis: "available",
+          fitReview: "available",
+          studio: "available",
+          opportunities: "available",
+          results: "available",
+        },
+        authority: {
+          workflowState: input.workflowAuthority.workflowState,
+          primaryAction: input.workflowAuthority.primaryAction,
+          canGenerate: Boolean((input.workflowAuthority as any)?.canGenerate),
+          surface: safeAuthorityFallback("contract_failed"),
+          primaryCta: { label: "Open workspace", destination: "studio_workspace" },
+        },
+        diagnostics: { surface: input.surface, violations: ["workflow_authority_contract_failed"] },
+      };
+      return fallback;
+    }
+  })();
 
   const authority = contract.authority.surface;
 

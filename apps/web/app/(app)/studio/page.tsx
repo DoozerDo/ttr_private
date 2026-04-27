@@ -8554,7 +8554,8 @@ export default function StudioPage() {
     if (!debugAutoGenerationEnabled) return;
     if (!effectiveBaselineId || !effectiveJobId) return;
 
-    const contractSignature = workflowOrchestratorCore.contract.generation.auto.signature;
+    const contractSignature = workflowOrchestratorCore.contract?.generation.auto.signature ?? null;
+    if (!contractSignature) return;
     const storageKey = `ttr:studio:auto-generate:${contractSignature}`;
     let latch = null as string | null;
     try {
@@ -8563,15 +8564,15 @@ export default function StudioPage() {
       latch = null;
     }
 
-    const ready = workflowOrchestratorCore.contract.generation.state === "ready";
-    const artifactsMissing = !workflowOrchestratorCore.contract.artifacts.hasAnyOutput;
+    const ready = workflowOrchestratorCore.contract?.generation.state === "ready";
+    const artifactsMissing = !workflowOrchestratorCore.contract?.artifacts.hasAnyOutput;
     const generatingNow =
       resumeGenerating ||
       coverGenerating ||
       autoGenerationInFlight ||
       studioArtifactPairStatus === "in_progress" ||
       generationReadyPhase === "generating" ||
-      workflowOrchestratorCore.contract.generation.state === "generating";
+      workflowOrchestratorCore.contract?.generation.state === "generating";
 
     if (!ready || !artifactsMissing) return;
 
@@ -8583,7 +8584,7 @@ export default function StudioPage() {
     if (studioArtifactPairStatus && studioArtifactPairStatus !== "missing" && studioArtifactPairStatus !== "in_progress") {
       skipReasons.push(`pair_status_${studioArtifactPairStatus}`);
     }
-    if (!workflowOrchestratorCore.contract.generation.auto.shouldStart) {
+    if (workflowOrchestratorCore.contract && !workflowOrchestratorCore.contract.generation.auto.shouldStart) {
       skipReasons.push(`contract_skip_${workflowOrchestratorCore.contract.generation.auto.skipReason}`);
     }
 
@@ -8598,8 +8599,8 @@ export default function StudioPage() {
         readinessBlocked: activeGenerationReadiness.blocked,
         blockers: (activeGenerationReadiness as any)?.reasons ?? (activeGenerationReadiness as any)?.blockers ?? null,
         studioArtifactPairStatus: studioArtifactPairStatus ?? null,
-        contractGenerationState: workflowOrchestratorCore.contract.generation.state,
-        contractAuthorityState: workflowOrchestratorCore.contract.authority.surface.canonicalState,
+        contractGenerationState: workflowOrchestratorCore.contract?.generation.state ?? null,
+        contractAuthorityState: workflowOrchestratorCore.contract?.authority.surface.canonicalState ?? null,
         hasCompletedGeneration,
         isGenerating: generatingNow,
         hasResume: hasUsableResume,
@@ -8623,16 +8624,14 @@ export default function StudioPage() {
     requestedAnalysisId,
     resumeGenerating,
     studioArtifactPairStatus,
-    workflowOrchestratorCore.contract.artifacts.hasAnyOutput,
-    workflowOrchestratorCore.contract.authority.surface.canonicalState,
-    workflowOrchestratorCore.contract.generation.auto,
-    workflowOrchestratorCore.contract.generation.state,
+    workflowOrchestratorCore.contract,
   ]);
 
   const generationReadyAutoStartRef = useRef<string | null>(null);
   useEffect(() => {
     if (generationReadyPhase !== "ready") return;
     if (!effectiveBaselineId || !effectiveJobId || !requestedAnalysisId) return;
+    if (!workflowOrchestratorCore.contract) return;
     if (workflowOrchestratorCore.contract.generation.state !== "ready") return;
     if (workflowOrchestratorCore.contract.artifacts.hasAnyOutput) return;
     if (resumeGenerating || coverGenerating || autoGenerationInFlight || studioArtifactPairStatus === "in_progress") return;
@@ -8673,10 +8672,7 @@ export default function StudioPage() {
     generationReadyPhase,
     requestedAnalysisId,
     startGenerationFromReadyShell,
-    workflowOrchestratorCore.contract.artifacts.hasAnyOutput,
-    workflowOrchestratorCore.contract.generation.auto.shouldStart,
-    workflowOrchestratorCore.contract.generation.auto.signature,
-    workflowOrchestratorCore.contract.generation.state,
+    workflowOrchestratorCore.contract,
   ]);
 
   useEffect(() => {
