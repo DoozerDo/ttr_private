@@ -335,7 +335,7 @@ describe('CoverLettersService contract', () => {
     buildDraftSpy.mockRestore();
   });
 
-  it('returns readiness limited but blocks generation with generation_blocked', async () => { 
+  it('returns readiness limited and allows generation', async () => { 
     const { service, coverRepo } = buildService({
       complianceFlags: [
         {

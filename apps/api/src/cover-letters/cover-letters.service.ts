@@ -259,7 +259,9 @@ export class CoverLettersService {
         draft.analysisAssessment,
       ),
     );
-    if (readiness.status !== 'ready') {
+    // Canonical contract: "limited" means warnings/constraints, not a hard blocker.
+    // Only BLOCKED readiness should prevent cover letter generation pre-start.
+    if (readiness.status === 'blocked') {
       const score =
         draft.analysisAssessment?.overallScore ??
         (draft.job?.id && draft.baseline?.id

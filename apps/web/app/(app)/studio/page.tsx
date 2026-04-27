@@ -5004,7 +5004,16 @@ export default function StudioPage() {
     }
     if (Array.isArray(payload)) return { type: "array", length: payload.length };
     if (typeof payload === "object") {
-      return { type: "object", keys: Object.keys(payload as Record<string, unknown>).slice(0, 30) };
+      const record = payload as Record<string, unknown>;
+      const picked: Record<string, unknown> = {};
+      for (const key of ["status", "code", "message", "retryable", "nextAction", "artifactType", "runId", "generationStatus", "exportReady"]) {
+        if (key in record) picked[key] = record[key];
+      }
+      return {
+        type: "object",
+        ...(Object.keys(picked).length ? { picked } : {}),
+        keys: Object.keys(record).slice(0, 30),
+      };
     }
     return { type: typeof payload, value: payload };
   };
