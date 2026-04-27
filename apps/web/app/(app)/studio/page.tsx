@@ -776,16 +776,6 @@ export default function StudioPage() {
     unlockContext.isUnlockFlow && unlockContext.missingEvidence.length > 0 && !unlockFlowDismissed;
   const unlockFlowTrackedRef = useRef(false);
 
-  // Hydration stability: Studio renders contract-dependent UI that can differ between SSR and client.
-  // Render a stable skeleton until the component is mounted so initial HTML matches the first client render.
-  if (!mounted) {
-    return (
-      <PageShell>
-        <RouteStateShell eyebrow="Loading" title="Studio" body="Loading Studio..." testId="studio-hydration-skeleton" />
-      </PageShell>
-    );
-  }
-
   const postUnlockParams = useMemo(() => {
     const params = new URLSearchParams(searchParamValue);
     const postUnlock = (params.get("postUnlock") ?? "").trim();
@@ -8840,8 +8830,13 @@ export default function StudioPage() {
     });
   }
 
-  return (
-    <div data-testid="studio-root" suppressHydrationWarning>
+  const stableSkeleton = (
+    <PageShell>
+      <RouteStateShell eyebrow="Loading" title="Studio" body="Loading Studio..." testId="studio-hydration-skeleton" />
+    </PageShell>
+  );
+
+  const studioContent = (
     <PageShell className="space-y-4 pb-4">
       <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
       <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
@@ -10621,6 +10616,11 @@ export default function StudioPage() {
       ) : null}
 
     </PageShell>
+  );
+
+  return (
+    <div data-testid="studio-root" suppressHydrationWarning>
+      {mounted ? studioContent : stableSkeleton}
     </div>
   );
 } 
