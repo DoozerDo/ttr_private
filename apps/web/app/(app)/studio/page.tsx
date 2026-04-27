@@ -746,6 +746,9 @@ function resolveVerificationIssueAction(issue: GenerationReadiness["verification
 }
 
 export default function StudioPage() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   const isNonProduction = process.env.NODE_ENV !== "production";
   const { isGuidedActive, currentStep: guidedStep, advanceStep, completeGuidedMode } = useGuidedMode();
   const searchParams = useSearchParams();
@@ -772,6 +775,16 @@ export default function StudioPage() {
   const unlockFlowActive =
     unlockContext.isUnlockFlow && unlockContext.missingEvidence.length > 0 && !unlockFlowDismissed;
   const unlockFlowTrackedRef = useRef(false);
+
+  // Hydration stability: Studio renders contract-dependent UI that can differ between SSR and client.
+  // Render a stable skeleton until the component is mounted so initial HTML matches the first client render.
+  if (!mounted) {
+    return (
+      <PageShell>
+        <RouteStateShell eyebrow="Loading" title="Studio" body="Loading Studio..." testId="studio-hydration-skeleton" />
+      </PageShell>
+    );
+  }
 
   const postUnlockParams = useMemo(() => {
     const params = new URLSearchParams(searchParamValue);
@@ -8828,6 +8841,7 @@ export default function StudioPage() {
   }
 
   return (
+    <div data-testid="studio-root" suppressHydrationWarning>
     <PageShell className="space-y-4 pb-4">
       <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
       <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
@@ -10606,6 +10620,7 @@ export default function StudioPage() {
       </details>
       ) : null}
 
-    </PageShell> 
-  ); 
+    </PageShell>
+    </div>
+  );
 } 
