@@ -63,10 +63,10 @@ export function resolveUnlockPathState(input: UnlockPathInput): UnlockPathResolv
         : "UNLOCKED";
 
   const studio: UnlockPathModuleState =
-    !studioEligible
-      ? "LOCKED"
-      : isStudioRoute
-        ? "CURRENT"
+    isStudioRoute
+      ? "CURRENT"
+      : !studioEligible
+        ? "LOCKED"
         : input.hasGeneratedDocuments
           ? "COMPLETE"
           : "UNLOCKED";

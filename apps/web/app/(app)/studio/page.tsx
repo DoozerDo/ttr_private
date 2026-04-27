@@ -6236,7 +6236,7 @@ export default function StudioPage() {
   }
     if (suppressAutoGenerationRef.current) return;
     const autoGenerationKey = buildWorkflowRequestKey("auto_generation", generationWorkflowScope);
-    if (studioArtifactPairStatus !== "missing") return;
+    if (studioArtifactPairStatus && studioArtifactPairStatus !== "missing") return;
     if (resumeState.response || coverState.response || resumeState.artifactFailure || coverState.artifactFailure) return;
     if (resumeGenerating || coverGenerating || autoGenerationInFlight) return;
     if (hasCompletedGeneration) return;
@@ -8484,8 +8484,8 @@ export default function StudioPage() {
   );
 
   const startGenerationFromReadyShell = useCallback(
-    async (source: "shell" | "shell_auto" | "post_unlock") => {
-      if (generationReadyPhase === "generating") return;
+    async (source: "shell" | "shell_auto" | "post_unlock"): Promise<boolean> => {
+      if (generationReadyPhase === "generating") return false;
 
       scrollToStudioTop("smooth");
       setGenerationReadyFailure(null);
@@ -8506,7 +8506,7 @@ export default function StudioPage() {
         setGenerationReadyDismissed(true);
         setGenerationReadyFailure(null);
         setGenerationReadyPhase("ready");
-        return;
+        return true;
       }
 
       const failure = deriveGenerationReadyShellFailure();
@@ -8519,6 +8519,7 @@ export default function StudioPage() {
         failure_category: failure.category,
         retryable: failure.retryable,
       });
+      return false;
     },
     [
       deriveGenerationReadyShellFailure,
@@ -8536,34 +8537,49 @@ export default function StudioPage() {
 
   const generationReadyAutoStartRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!generationReadyShellActive) return;
     if (generationReadyPhase !== "ready") return;
     if (!effectiveBaselineId || !effectiveJobId || !requestedAnalysisId) return;
     if (activeGenerationReadiness.status !== "ready" || activeGenerationReadiness.blocked) return;
+    if (hasUsableResume || hasUsableCoverLetter) return;
+    if (resumeGenerating || coverGenerating || autoGenerationInFlight || studioArtifactPairStatus === "in_progress") return;
 
     const signature = `${effectiveBaselineId}:${effectiveJobId}:${requestedAnalysisId}`;
     if (generationReadyAutoStartRef.current === signature) return;
 
     const storageKey = `ttr:studio:auto-generate:${signature}`;
     const storage = typeof window !== "undefined" ? window.localStorage : null;
-    if (storage && typeof storage.getItem === "function" && storage.getItem(storageKey) === "true") {
+    const storedStatus =
+      storage && typeof storage.getItem === "function" ? storage.getItem(storageKey) : null;
+    if (storedStatus === "succeeded") {
       generationReadyAutoStartRef.current = signature;
       return;
     }
 
     generationReadyAutoStartRef.current = signature;
-    if (storage && typeof storage.setItem === "function") {
-      storage.setItem(storageKey, "true");
-    }
+    if (storage && typeof storage.setItem === "function") storage.setItem(storageKey, "started");
 
-    void startGenerationFromReadyShell("shell_auto");
+    void (async () => {
+      try {
+        const ok = await startGenerationFromReadyShell("shell_auto");
+        if (storage && typeof storage.setItem === "function") {
+          storage.setItem(storageKey, ok ? "succeeded" : "failed");
+        }
+      } catch {
+        if (storage && typeof storage.setItem === "function") storage.setItem(storageKey, "failed");
+      }
+    })();
   }, [
     activeGenerationReadiness.blocked,
     activeGenerationReadiness.status,
     effectiveBaselineId,
     effectiveJobId,
+    hasUsableCoverLetter,
+    hasUsableResume,
+    coverGenerating,
+    resumeGenerating,
+    autoGenerationInFlight,
+    studioArtifactPairStatus,
     generationReadyPhase,
-    generationReadyShellActive,
     requestedAnalysisId,
     startGenerationFromReadyShell,
   ]);
@@ -10569,6 +10585,3 @@ export default function StudioPage() {
     </PageShell> 
   ); 
 } 
-
-
-
