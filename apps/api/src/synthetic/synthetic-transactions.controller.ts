@@ -4,6 +4,7 @@ import {
   Get,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
@@ -18,8 +19,9 @@ export class SyntheticTransactionsController {
   ) {}
 
   @Post('core-loop-smoke/run')
-  runCoreLoopSmoke() {
-    return this.syntheticTransactionRunnerService.runCoreLoopSmoke('manual');
+  runCoreLoopSmoke(@Req() request: { user?: { id?: string; userId?: string; sub?: string } }) {
+    const userId = request?.user?.id ?? request?.user?.userId ?? request?.user?.sub ?? '';
+    return this.syntheticTransactionRunnerService.runCoreLoopSmoke('manual', userId);
   }
 
   @Get('core-loop-smoke/runs')

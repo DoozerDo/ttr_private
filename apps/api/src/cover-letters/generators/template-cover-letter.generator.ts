@@ -127,7 +127,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     const closingLead = closingEvidence.length
       ? this.ensureSentence(this.compactEvidenceText(closingEvidence[0].normalizedText))
       : this.ensureSentence(
-          'I would welcome a conversation about how that operating rhythm supports steady execution for your team.',
+          'Thank you for considering how that operating rhythm supports steady execution for your team.',
         );
     const closing = this.joinSentences([
       closingLead,

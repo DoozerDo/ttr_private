@@ -237,7 +237,7 @@ export class CoverLettersService {
     const requestedOneTap = Boolean((input as unknown as { oneTap?: boolean })?.oneTap);
     let draft: CoverLetterDraft;
     try {
-      draft = await this.buildCoverLetterDraft(userId, input);
+      draft = await this.buildCoverLetterDraft(userId, input, syntheticMetadata);
     } catch (error) {
       if (error instanceof Error) {
         try {
@@ -290,7 +290,7 @@ export class CoverLettersService {
         draft = await this.buildCoverLetterDraft(userId, {
           ...(input as any),
           oneTap: true,
-        });
+        }, syntheticMetadata);
         const retryReadiness = this.buildReadinessFromFlags(
           filterComplianceFlagsByCanonicalClaims(
             draft.complianceResult.complianceFlags ?? [],
@@ -352,7 +352,7 @@ export class CoverLettersService {
         const retryDraft = await this.buildCoverLetterDraft(userId, {
           ...(input as any),
           oneTap: true,
-        });
+        }, syntheticMetadata);
         if (retryDraft.complianceResult.blocked) {
           this.logger.error('[GENERATION_FALLBACK_FAILED][cover_letter]', {
             baselineId: retryDraft.baseline.id,
@@ -808,6 +808,7 @@ export class CoverLettersService {
   private async buildCoverLetterDraft(
     userId: string,
     input: GenerateCoverLetterDto,
+    syntheticMetadata?: SyntheticMetadataInput,
   ): Promise<CoverLetterDraft> {
     if (!userId) {
       throw new BadRequestException('Invalid user context');
@@ -937,7 +938,10 @@ export class CoverLettersService {
       requirements: this.sanitizeList(job.normalizedRequirements),
     };
     const baselineIdentity = resolveBaselineIdentity(baseline);
-    const candidateName = this.cleanText(baselineIdentity?.fullName);
+    let candidateName = this.cleanText(baselineIdentity?.fullName);
+    if (!candidateName && syntheticMetadata?.isSynthetic) {
+      candidateName = 'Core Loop Candidate';
+    }
 
     const generationInputsHash = this.computeGenerationInputsHash(
       baseline.id,

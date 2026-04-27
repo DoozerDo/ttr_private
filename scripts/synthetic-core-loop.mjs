@@ -34,8 +34,8 @@ const API_URL = normalizeBaseUrl({
   rawValue: process.env.API_BASE_URL,
   fallback: "http://localhost:3001",
 });
-const SYNTHETIC_EMAIL = process.env.SYNTHETIC_USER_EMAIL || "synthetic-core-loop@targetthisrole.local";
-const SYNTHETIC_PASSWORD = process.env.SYNTHETIC_USER_PASSWORD || "SyntheticUserPass!123";
+const LOGIN_EMAIL = process.env.SMOKE_LOGIN_EMAIL || "michaeltalbert@hotmail.com";
+const LOGIN_PASSWORD = process.env.SYNTHETIC_USER_PASSWORD;
 
 function log(message, extra) {
   const payload = {
@@ -79,10 +79,11 @@ function deriveNextAction(input) {
 }
 
 async function login() {
+  assert(LOGIN_PASSWORD, "Missing SYNTHETIC_USER_PASSWORD env var for smoke login password");
   const response = await fetch(`${API_URL}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: SYNTHETIC_EMAIL, password: SYNTHETIC_PASSWORD }),
+    body: JSON.stringify({ email: LOGIN_EMAIL, password: LOGIN_PASSWORD }),
   });
   const body = await readJson(response);
   assert(response.ok, `login failed: ${body?.message ?? body?.error ?? response.status}`);
@@ -169,23 +170,13 @@ async function main() {
   const startedAt = new Date().toISOString();
   log("synthetic-core-loop-start", { baseUrl: ROOT_URL, apiUrl: API_URL, startedAt });
 
-  log("synthetic-core-loop-login-attempt", { loginEmail: SYNTHETIC_EMAIL });
+  log("synthetic-core-loop-login-attempt", { loginEmail: LOGIN_EMAIL });
   const auth = await login();
   const seed = await seedSyntheticFixture(auth.accessToken);
-  const seededEmail = seed?.summary?.syntheticUserEmail ?? null;
-  const credentialRepaired = Boolean(seed?.summary?.syntheticUserCredentialRepaired);
-  const seededUserId = seed?.summary?.syntheticUserId ?? null;
-  if (seededEmail && String(seededEmail).trim() !== SYNTHETIC_EMAIL) {
-    log("synthetic-core-loop-user-mismatch", {
-      seededEmail: String(seededEmail),
-      loginEmail: SYNTHETIC_EMAIL,
-    });
-  }
+  const seededOwnerUserId = seed?.summary?.ownerUserId ?? null;
   log("synthetic-core-loop-seed-user", {
-    seededEmail: seededEmail ? String(seededEmail) : null,
-    loginEmail: SYNTHETIC_EMAIL,
-    syntheticUserId: seededUserId ? String(seededUserId) : null,
-    credentialRepaired,
+    loginEmail: LOGIN_EMAIL,
+    ownerUserId: seededOwnerUserId ? String(seededOwnerUserId) : null,
   });
 
   const baselineId = String(seed?.summary?.baselineId ?? "");

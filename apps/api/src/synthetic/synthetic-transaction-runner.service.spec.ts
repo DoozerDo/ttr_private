@@ -204,7 +204,7 @@ describe('SyntheticTransactionRunnerService', () => {
       syntheticRunId: getCapturedRunId(),
     }));
 
-    const result = await service.runCoreLoopSmoke();
+    const result = await service.runCoreLoopSmoke('manual', 'u1');
     expect(result.status).toBe('succeeded');
     expect(result.stepResults.every((step) => step.status === 'succeeded')).toBe(true);
     expect(syntheticRunRepository.create).toHaveBeenCalledWith(
@@ -315,7 +315,7 @@ describe('SyntheticTransactionRunnerService', () => {
     jobsService.createJob.mockResolvedValue({ job: { id: 'j1' } });
     analysisService.runFitAssessment.mockResolvedValue({ status: 'compliance_blocked' });
 
-    const result = await service.runCoreLoopSmoke();
+    const result = await service.runCoreLoopSmoke('manual', 'u1');
 
     expect(result.status).toBe('failed');
     expect(result.stepResults.some((step) => step.step === 'run_fit_assessment' && step.status === 'failed')).toBe(true);
@@ -369,8 +369,8 @@ describe('SyntheticTransactionRunnerService', () => {
     opportunityRepository.findOne.mockResolvedValue({ isSynthetic: true });
     applicationRepository.findOne.mockResolvedValue({ isSynthetic: true });
 
-    const first = await service.runCoreLoopSmoke();
-    const second = await service.runCoreLoopSmoke();
+    const first = await service.runCoreLoopSmoke('manual', 'u1');
+    const second = await service.runCoreLoopSmoke('manual', 'u1');
 
     expect(first.status).toBe('succeeded');
     expect(second.status).toBe('succeeded');
@@ -430,7 +430,7 @@ describe('SyntheticTransactionRunnerService', () => {
     opportunityRepository.findOne.mockResolvedValue({ isSynthetic: true });
     applicationRepository.findOne.mockResolvedValue({ isSynthetic: true });
 
-    const result = await service.runCoreLoopSmoke();
+    const result = await service.runCoreLoopSmoke('manual', 'u1');
     expect(result.status).toBe('succeeded');
     expect(analysisService.runFitAssessment).toHaveBeenCalledWith('u1', expect.objectContaining({ jobId: 'j-existing' }));
   });
@@ -460,7 +460,7 @@ describe('SyntheticTransactionRunnerService', () => {
     jobRepository.findOne.mockResolvedValue(null);
     analysisService.runFitAssessment.mockResolvedValue({ status: 'ok' });
 
-    const result = await service.runCoreLoopSmoke();
+    const result = await service.runCoreLoopSmoke('manual', 'u1');
     expect(result.status).toBe('failed');
     const createJobStep = result.stepResults.find((s) => s.step === 'create_job');
     expect(createJobStep?.status).toBe('failed');
@@ -611,7 +611,7 @@ describe('SyntheticTransactionRunnerService', () => {
     opportunityRepository.findOne.mockResolvedValue({ isSynthetic: true });
     applicationRepository.findOne.mockResolvedValue({ isSynthetic: true });
 
-    const result = await service.runCoreLoopSmoke();
+    const result = await service.runCoreLoopSmoke('manual', 'u1');
     expect(result.status).toBe('succeeded');
     expect(coverLettersService.generateCoverLetter).toHaveBeenCalledTimes(2);
   });
@@ -639,7 +639,7 @@ describe('SyntheticTransactionRunnerService', () => {
       }),
     );
 
-    const result = await service.runCoreLoopSmoke();
+    const result = await service.runCoreLoopSmoke('manual', 'u1');
     expect(result.status).toBe('failed');
     expect(result.errorMessage).toContain('step=run_fit_assessment');
     expect(result.errorMessage).toContain('already in flight');
@@ -666,7 +666,7 @@ describe('SyntheticTransactionRunnerService', () => {
     analysisService.runFitAssessment.mockResolvedValue({ status: 'ok', assessmentId: 'a1', score: 80, verdict: 'APPLY' });
     resumeService.generateResume.mockResolvedValue({ status: 'success', preview: { resume: null } });
 
-    const result = await service.runCoreLoopSmoke();
+    const result = await service.runCoreLoopSmoke('manual', 'u1');
 
     expect(result.status).toBe('failed');
     expect(result.stepResults.some((step) => step.step === 'generate_resume_preview' && step.status === 'failed')).toBe(true);
@@ -761,7 +761,7 @@ describe('SyntheticTransactionRunnerService', () => {
     resumeService.generateResume.mockResolvedValue({ status: 'success', preview: { resume: { experience: [{ company: 'X' }] } } });
     coverLettersService.generateCoverLetter.mockResolvedValue({ status: 'success' });
 
-    const result = await service.runCoreLoopSmoke();
+    const result = await service.runCoreLoopSmoke('manual', 'u1');
 
     expect(result.status).toBe('failed');
     expect(String(result.errorMessage ?? '')).toContain('Synthetic core loop seed crashed');

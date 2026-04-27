@@ -223,6 +223,52 @@ describe('cover letter post-processing', () => {
     expect(postProcessed.flags).not.toContain('keyword_echo_overuse');
   });
 
+  it('does not flag missing_candidate_name or repetitive_openings for synthetic candidate name and fallback closing', () => {
+    const { service } = buildService();
+
+    const generator = new TemplateCoverLetterGenerator();
+    const generation = generator.generate({
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      candidateName: 'Core Loop Candidate',
+      closingTemplate: resolveClosingTemplate(DEFAULT_COVER_LETTER_CLOSING_TEMPLATE_KEY),
+      job: {
+        id: 'job-1',
+        title: 'Support Operations Director',
+        company: 'TargetThisRole Synthetic',
+        responsibilities: ['Own support operations', 'Drive incident response'],
+        requirements: ['Operational rigor', 'Stakeholder management'],
+      },
+      allowedBaselineBlocks: [
+        {
+          id: 'section-1',
+          title: 'Summary',
+          content:
+            'Owned support operations across tooling, analytics, and cross-functional delivery. Improved time-to-first-response by 18% and time-to-resolution by 22%.',
+          includePolicy: 'ALWAYS' as never,
+          order: 0,
+          sectionType: 'SUMMARY' as never,
+        },
+      ] as never,
+      safeMode: false,
+      maxWords: 280,
+    });
+
+    const postProcessed = (service as any).applyCoverLetterPostProcessing(
+      generation,
+      {
+        title: 'Support Operations Director',
+        company: 'TargetThisRole Synthetic',
+        responsibilities: ['Own support operations', 'Drive incident response'],
+        requirements: ['Operational rigor', 'Stakeholder management'],
+      },
+      'Core Loop Candidate',
+    );
+
+    expect(postProcessed.flags).toEqual([]);
+    expect(postProcessed.generation.content).toContain('Core Loop Candidate');
+  });
+
   it('still flags keyword_echo_overuse when JD keywords are repeated excessively', () => {
     const { service } = buildService();
     const jobContext = {

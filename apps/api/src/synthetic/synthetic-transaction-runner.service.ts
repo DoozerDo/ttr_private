@@ -25,7 +25,7 @@ export type SyntheticTransactionResult = {
   errorMessage: string | null;
   stepResults: Array<{
     step:
-      | "resolve_synthetic_user"
+      | "resolve_owner_user"
       | "resolve_baseline_fixture"
       | "create_job"
       | "run_fit_assessment"
@@ -528,7 +528,10 @@ export class SyntheticTransactionRunnerService {
     // Unit tests spy on this; the full DB integrity check is out of scope here.
   }
 
-  async runCoreLoopSmoke(_triggerSource: "manual" | "system" = "manual"): Promise<SyntheticTransactionResult> {
+  async runCoreLoopSmoke(
+    _triggerSource: "manual" | "system" = "manual",
+    ownerUserId?: string,
+  ): Promise<SyntheticTransactionResult> {
     const startedAt = nowIso();
     if (!this.deps) {
       return emptyTransactionResult();
@@ -633,12 +636,15 @@ export class SyntheticTransactionRunnerService {
         }
       };
 
-      const user = await runStep("resolve_synthetic_user", () => this.resolveOrCreateSyntheticUser());
-      summary.syntheticUserEmail = user?.email ?? null;
-      summary.syntheticUserId = user?.id ?? null;
-      summary.syntheticUserCredentialRepaired = Boolean((user as any)?.syntheticCredentialRepaired);
-      push({ step: "resolve_synthetic_user", status: "succeeded" });
-      await userRepository.findOneOrFail({ where: { id: user.id } });
+      const resolvedOwnerId = (ownerUserId ?? "").trim();
+      if (!resolvedOwnerId) {
+        throw new Error("Synthetic core loop seed missing authenticated owner user id");
+      }
+      const owner = await runStep("resolve_owner_user", async () => {
+        return await userRepository.findOneOrFail({ where: { id: resolvedOwnerId } });
+      });
+      summary.ownerUserId = owner?.id ?? resolvedOwnerId;
+      push({ step: "resolve_owner_user", status: "succeeded" });
 
       const retryGenerationInFlight = async <T>(
         step: SyntheticTransactionResult["stepResults"][number]["step"],
@@ -667,7 +673,7 @@ export class SyntheticTransactionRunnerService {
       };
 
       const baseline = await runStep("resolve_baseline_fixture", () =>
-        this.resolveOrCreateBaselineFixture(user.id, {
+        this.resolveOrCreateBaselineFixture(resolvedOwnerId, {
           scenarioKey: "core_loop_smoke",
           runId: syntheticRunId,
           syntheticCreatedAt: new Date(),
@@ -686,7 +692,7 @@ export class SyntheticTransactionRunnerService {
           if (!deps.jobRepository) return { job: null, matchCount: 0, markerMatchCount: 0 };
           const repoAny: any = deps.jobRepository as any;
 
-          const where = { userId: user.id, title, company };
+          const where = { userId: resolvedOwnerId, title, company };
           let matches: any[] = [];
           if (typeof repoAny.find === "function") {
             matches = await repoAny.find({
@@ -730,7 +736,7 @@ export class SyntheticTransactionRunnerService {
         };
 
         try {
-          return await jobsService.createJob(user.id, {
+          return await jobsService.createJob(resolvedOwnerId, {
             title,
             company,
             rawDescription,
@@ -745,7 +751,7 @@ export class SyntheticTransactionRunnerService {
               throw error;
             }
             const existing = await deps.jobRepository.findOne({
-              where: { id: existingJobId, userId: user.id },
+              where: { id: existingJobId, userId: resolvedOwnerId },
             });
             if (existing) {
               return { job: existing };
@@ -765,7 +771,7 @@ export class SyntheticTransactionRunnerService {
             }
             const diagnostics = describeCreateJobError(error);
             throw new Error(
-              `Synthetic core loop seed failed at step=create_job due to a conflict creating a Job, but no reusable synthetic job was found. Attempted identifiers: userId=${user.id} title=${safeJson(title)} company=${safeJson(company)} rawDescriptionMarker=${safeJson(rawDescriptionMarker)} matchCount=${existingLookup.matchCount} markerMatchCount=${existingLookup.markerMatchCount}. Exception=${safeJson(diagnostics)}`,
+              `Synthetic core loop seed failed at step=create_job due to a conflict creating a Job, but no reusable synthetic job was found. Attempted identifiers: userId=${resolvedOwnerId} title=${safeJson(title)} company=${safeJson(company)} rawDescriptionMarker=${safeJson(rawDescriptionMarker)} matchCount=${existingLookup.matchCount} markerMatchCount=${existingLookup.markerMatchCount}. Exception=${safeJson(diagnostics)}`,
             );
           }
 
@@ -778,7 +784,7 @@ export class SyntheticTransactionRunnerService {
 
       const assessment = await runStep("run_fit_assessment", () =>
         retryGenerationInFlight("run_fit_assessment", () =>
-          analysisService.runFitAssessment(user.id, { jobId, baselineId: baseline.id }),
+          analysisService.runFitAssessment(resolvedOwnerId, { jobId, baselineId: baseline.id }),
         ),
       );
       if (!assessment || assessment.status !== "ok") {
@@ -800,7 +806,7 @@ export class SyntheticTransactionRunnerService {
       const resume: any = await runStep("generate_resume_preview", () =>
         retryGenerationInFlight("generate_resume_preview", () =>
           (resumeService as any).generateResume(
-            user.id,
+            resolvedOwnerId,
             { baselineId: baseline.id, jobId, analysisId },
             undefined,
             { isSynthetic: true },
@@ -816,7 +822,7 @@ export class SyntheticTransactionRunnerService {
       const coverLetter: any = await runStep("generate_cover_letter", () =>
         retryGenerationInFlight("generate_cover_letter", () =>
           (coverLettersService as any).generateCoverLetter(
-            user.id,
+            resolvedOwnerId,
             { baselineId: baseline.id, jobId, analysisId },
             { isSynthetic: true },
           ),
@@ -827,7 +833,7 @@ export class SyntheticTransactionRunnerService {
       if (deps.opportunitiesService) {
         await runStep("upsert_opportunity", () =>
           (deps.opportunitiesService as any).upsertOpportunity(
-            user.id,
+            resolvedOwnerId,
             { baselineId: baseline.id, jobId },
             { isSynthetic: true },
           ),
