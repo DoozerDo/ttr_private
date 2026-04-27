@@ -169,15 +169,24 @@ async function main() {
   const startedAt = new Date().toISOString();
   log("synthetic-core-loop-start", { baseUrl: ROOT_URL, apiUrl: API_URL, startedAt });
 
+  log("synthetic-core-loop-login-attempt", { loginEmail: SYNTHETIC_EMAIL });
   const auth = await login();
   const seed = await seedSyntheticFixture(auth.accessToken);
   const seededEmail = seed?.summary?.syntheticUserEmail ?? null;
+  const credentialRepaired = Boolean(seed?.summary?.syntheticUserCredentialRepaired);
+  const seededUserId = seed?.summary?.syntheticUserId ?? null;
   if (seededEmail && String(seededEmail).trim() !== SYNTHETIC_EMAIL) {
     log("synthetic-core-loop-user-mismatch", {
       seededEmail: String(seededEmail),
       loginEmail: SYNTHETIC_EMAIL,
     });
   }
+  log("synthetic-core-loop-seed-user", {
+    seededEmail: seededEmail ? String(seededEmail) : null,
+    loginEmail: SYNTHETIC_EMAIL,
+    syntheticUserId: seededUserId ? String(seededUserId) : null,
+    credentialRepaired,
+  });
 
   const baselineId = String(seed?.summary?.baselineId ?? "");
   const jobId = String(seed?.summary?.jobId ?? "");

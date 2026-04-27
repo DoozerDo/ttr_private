@@ -313,7 +313,7 @@ export class SyntheticTransactionRunnerService {
             );
           }
         }
-        return { ...user, passwordHash: repairedHash };
+        return { ...user, passwordHash: repairedHash, syntheticCredentialRepaired: true };
       }
 
       return user;
@@ -324,7 +324,7 @@ export class SyntheticTransactionRunnerService {
       throw new Error("SyntheticTransactionRunnerService usersService.create is not configured");
     }
 
-    return this.deps.usersService.create(
+    const created = await this.deps.usersService.create(
       {
         email,
         passwordHash,
@@ -334,6 +334,7 @@ export class SyntheticTransactionRunnerService {
       },
       { isSynthetic: true, preserveFromCleanup: true },
     );
+    return { ...created, syntheticCredentialRepaired: false };
   }
 
   async resolveOrCreateSyntheticBaselineFixture(_userId: string, fixture: SyntheticGenerationBaselineFixture): Promise<any> {
@@ -634,6 +635,8 @@ export class SyntheticTransactionRunnerService {
 
       const user = await runStep("resolve_synthetic_user", () => this.resolveOrCreateSyntheticUser());
       summary.syntheticUserEmail = user?.email ?? null;
+      summary.syntheticUserId = user?.id ?? null;
+      summary.syntheticUserCredentialRepaired = Boolean((user as any)?.syntheticCredentialRepaired);
       push({ step: "resolve_synthetic_user", status: "succeeded" });
       await userRepository.findOneOrFail({ where: { id: user.id } });
 

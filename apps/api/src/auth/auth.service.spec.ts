@@ -208,6 +208,47 @@ describe('AuthService', () => {
     });
   });
 
+  it('repairs stale passwordHash for deterministic synthetic user on login', async () => {
+    const payload: LoginDto = {
+      email: 'synthetic-core-loop@targetthisrole.local',
+      password: 'SyntheticUserPass!123',
+    };
+    const staleHash = await bcrypt.hash('OldPass!999', 10);
+    const savedUser: User = {
+      id: 'synthetic-user-id',
+      email: payload.email,
+      firstName: 'Synthetic',
+      lastName: 'Runner',
+      emailConfirmed: true,
+      passwordHash: staleHash,
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
+      role: 'user',
+      subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
+      isSynthetic: true,
+      preserveFromCleanup: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as any;
+
+    usersService.findByEmail.mockResolvedValue(savedUser);
+
+    const result = await service.login(payload);
+
+    expect(usersService.updatePasswordHash).toHaveBeenCalledWith(
+      savedUser.id,
+      expect.any(String),
+    );
+    expect(result.accessToken).toEqual('signed-token');
+    expect(result.user).toMatchObject({ id: savedUser.id, email: savedUser.email });
+  });
+
   it('treats betaAccessApproved users as PRO on login', async () => {
     const payload: LoginDto = {
       email: 'beta-user@example.com',
