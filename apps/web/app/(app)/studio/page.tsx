@@ -8490,36 +8490,41 @@ export default function StudioPage() {
       scrollToStudioTop("smooth");
       setGenerationReadyFailure(null);
       setGenerationReadyPhase("generating");
+      setAutoGenerationInFlight(true);
       trackEvent("generation_ready_shell_started", {
         source: "studio",
         ...generationReadyAnalyticsContext,
         entrypoint: source === "shell_auto" ? "shell" : source,
       });
 
-      const stableSessionKey = `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:${requestedAnalysisId ?? "analysis"}:ready_shell`;
-      const [resumeSucceeded, coverSucceeded] = await Promise.all([
-        handleResumeDraft({ sessionKey: stableSessionKey }),
-        handleCoverDraft({ sessionKey: stableSessionKey }),
-      ]);
+      try {
+        const stableSessionKey = `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:${requestedAnalysisId ?? "analysis"}:ready_shell`;
+        const [resumeSucceeded, coverSucceeded] = await Promise.all([
+          handleResumeDraft({ sessionKey: stableSessionKey }),
+          handleCoverDraft({ sessionKey: stableSessionKey }),
+        ]);
 
-      if (resumeSucceeded && coverSucceeded) {
-        setGenerationReadyDismissed(true);
-        setGenerationReadyFailure(null);
-        setGenerationReadyPhase("ready");
-        return true;
+        if (resumeSucceeded && coverSucceeded) {
+          setGenerationReadyDismissed(true);
+          setGenerationReadyFailure(null);
+          setGenerationReadyPhase("ready");
+          return true;
+        }
+
+        const failure = deriveGenerationReadyShellFailure();
+        setGenerationReadyFailure(failure);
+        setGenerationReadyPhase("failed");
+
+        trackEvent("generation_ready_shell_failed", {
+          source: "studio",
+          ...generationReadyAnalyticsContext,
+          failure_category: failure.category,
+          retryable: failure.retryable,
+        });
+        return false;
+      } finally {
+        setAutoGenerationInFlight(false);
       }
-
-      const failure = deriveGenerationReadyShellFailure();
-      setGenerationReadyFailure(failure);
-      setGenerationReadyPhase("failed");
-
-      trackEvent("generation_ready_shell_failed", {
-        source: "studio",
-        ...generationReadyAnalyticsContext,
-        failure_category: failure.category,
-        retryable: failure.retryable,
-      });
-      return false;
     },
     [
       deriveGenerationReadyShellFailure,
@@ -8531,9 +8536,88 @@ export default function StudioPage() {
       handleCoverDraft,
       handleResumeDraft,
       scrollToStudioTop,
+      setAutoGenerationInFlight,
       trackEvent,
     ],
   );
+
+  const debugAutoGenerationEnabled = useMemo(() => {
+    if (process.env.NODE_ENV !== "production") return true;
+    try {
+      return typeof window !== "undefined" && window.localStorage?.getItem("ttr:debug:autoGen") === "true";
+    } catch {
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!debugAutoGenerationEnabled) return;
+    if (!effectiveBaselineId || !effectiveJobId) return;
+
+    const signature = `${effectiveBaselineId}:${effectiveJobId}:${requestedAnalysisId ?? "none"}`;
+    const storageKey = `ttr:studio:auto-generate:${signature}`;
+    let latch = null as string | null;
+    try {
+      latch = typeof window !== "undefined" ? window.localStorage?.getItem(storageKey) ?? null : null;
+    } catch {
+      latch = null;
+    }
+
+    const ready = activeGenerationReadiness.status === "ready" && !activeGenerationReadiness.blocked;
+    const artifactsMissing = !hasUsableResume && !hasUsableCoverLetter;
+    const generatingNow =
+      resumeGenerating ||
+      coverGenerating ||
+      autoGenerationInFlight ||
+      studioArtifactPairStatus === "in_progress" ||
+      generationReadyPhase === "generating";
+
+    if (!ready || !artifactsMissing) return;
+
+    const skipReasons: string[] = [];
+    if (!requestedAnalysisId) skipReasons.push("missing_analysisId");
+    if (!effectiveBaselineVersionId) skipReasons.push("missing_baselineVersionId");
+    if (latch === "succeeded") skipReasons.push("latch_succeeded");
+    if (generatingNow) skipReasons.push("already_generating");
+    if (studioArtifactPairStatus && studioArtifactPairStatus !== "missing" && studioArtifactPairStatus !== "in_progress") {
+      skipReasons.push(`pair_status_${studioArtifactPairStatus}`);
+    }
+
+    // Only log when we appear to be stuck: ready + missing + not generating.
+    if (skipReasons.length > 0 && !generatingNow) {
+      console.log("[STUDIO][AUTO_GEN][SKIP]", {
+        route: "/studio",
+        baselineId: effectiveBaselineId,
+        jobId: effectiveJobId,
+        requestedAnalysisId: requestedAnalysisId ?? null,
+        readinessStatus: activeGenerationReadiness.status,
+        readinessBlocked: activeGenerationReadiness.blocked,
+        blockers: (activeGenerationReadiness as any)?.reasons ?? (activeGenerationReadiness as any)?.blockers ?? null,
+        studioArtifactPairStatus: studioArtifactPairStatus ?? null,
+        hasCompletedGeneration,
+        isGenerating: generatingNow,
+        hasResume: hasUsableResume,
+        hasCoverLetter: hasUsableCoverLetter,
+        latch,
+        skipReasons,
+      });
+    }
+  }, [
+    activeGenerationReadiness,
+    autoGenerationInFlight,
+    coverGenerating,
+    debugAutoGenerationEnabled,
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    generationReadyPhase,
+    hasCompletedGeneration,
+    hasUsableCoverLetter,
+    hasUsableResume,
+    requestedAnalysisId,
+    resumeGenerating,
+    studioArtifactPairStatus,
+  ]);
 
   const generationReadyAutoStartRef = useRef<string | null>(null);
   useEffect(() => {
