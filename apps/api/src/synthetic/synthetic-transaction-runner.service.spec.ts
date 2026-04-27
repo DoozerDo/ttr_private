@@ -224,6 +224,52 @@ describe('SyntheticTransactionRunnerService', () => {
     );
   });
 
+  it('seeds deterministic core-loop baseline allowlists from baseline sections', async () => {
+    const {
+      service,
+      baselineRepository,
+      baselineVersionRepository,
+      baselineSectionRepository,
+    } = buildService();
+
+    baselineRepository.findOne.mockResolvedValue(null);
+    baselineRepository.create.mockImplementation((value) => value);
+    baselineRepository.save.mockImplementation(async (value) => ({
+      ...value,
+      id: 'b-core-1',
+      versions: [],
+      storagePath: value.storagePath ?? 'synthetic/core',
+    }));
+
+    baselineSectionRepository.create.mockImplementation((value) => value);
+    baselineSectionRepository.save.mockResolvedValue([]);
+
+    let createdBaselineVersion: any = null;
+    baselineVersionRepository.create.mockImplementation((value) => {
+      createdBaselineVersion = value;
+      return value;
+    });
+    baselineVersionRepository.save.mockImplementation(async (value) => ({
+      ...value,
+      id: 'bv-core-1',
+    }));
+
+    const baseline = await (service as any).resolveOrCreateBaselineFixture('u1', {
+      scenarioKey: 'core_loop_smoke',
+      runId: 'run-1',
+      syntheticCreatedAt: new Date('2026-04-26T00:00:00.000Z'),
+    });
+
+    expect(baseline?.id).toBe('b-core-1');
+    expect(createdBaselineVersion?.fileHash).toEqual(expect.any(String));
+    expect(createdBaselineVersion.fileHash.length).toBeGreaterThan(0);
+    expect(Array.isArray(createdBaselineVersion.allowedCompanies)).toBe(true);
+    expect(createdBaselineVersion.allowedCompanies.length).toBeGreaterThan(0);
+    expect(Array.isArray(createdBaselineVersion.allowedRoles)).toBe(true);
+    expect(createdBaselineVersion.allowedRoles.length).toBeGreaterThan(0);
+    expect(Array.isArray(createdBaselineVersion.allowedMetricTokens)).toBe(true);
+  });
+
   it('records failed status and step details on intermediate failure', async () => {
     const {
       service,

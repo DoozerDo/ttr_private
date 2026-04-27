@@ -80,7 +80,10 @@ import {
   summarizeClaimRisk,
 } from './claim-risk';
 import { validateAnalysisContext } from '../common/analysis-context-binding';
-import { filterComplianceFlagsByCanonicalClaims } from '../common/readiness-claim-truth';
+import {
+  filterComplianceFlagsByCanonicalClaims,
+  getCanonicalVerifiedClaimLabels,
+} from '../common/readiness-claim-truth';
 import { validateGenerationTrace } from '../generation/generation-validation';
 import type { ArtifactTraceAudit } from '../generation/artifact-trace-audit';
 import { buildArtifactFailurePayload } from '../generation/artifact-failure';
@@ -3032,6 +3035,69 @@ export class ResumeService {
         ],
       };
     }
+
+    const includeDiagnostics =
+      (process.env.NODE_ENV ?? 'development') !== 'production' ||
+      process.env.READINESS_DIAGNOSTICS === 'true';
+    const readinessDiagnostics =
+      includeDiagnostics && warningFlags.length > 0
+        ? (() => {
+            const verifiedLabels = getCanonicalVerifiedClaimLabels(analysisAssessment);
+            const warningFlagDiagnostics = warningFlags.slice(0, 6).map((flag) => {
+              const evidence = Array.isArray(flag.evidence) ? flag.evidence : [];
+              const generatedClaims = evidence
+                .map((entry) => entry.generatedClaim)
+                .filter((claim): claim is NonNullable<typeof claim> => Boolean(claim));
+              const generatedTokens = generatedClaims
+                .map((claim) => String(claim.text ?? '').trim())
+                .filter(Boolean)
+                .slice(0, 6);
+              const claimTypes = Array.from(
+                new Set(generatedClaims.map((claim) => String(claim.type ?? 'unknown'))),
+              ).slice(0, 6);
+
+              const expectedEvidenceType =
+                flag.code === 'fictional_technology'
+                  ? 'baselineAllowlist.allowedTechnologies'
+                  : flag.code === 'scope_inflation'
+                    ? 'baselineSections.BASELINE_EVIDENCE leadership scope support'
+                    : flag.code === 'stylized_punctuation'
+                      ? 'normalized punctuation (no stylized dashes)'
+                      : 'baseline evidence / allowlist match';
+
+              return {
+                flagCode: flag.code ?? 'unknown',
+                flagSeverity: flag.severity ?? 'unknown',
+                expectedEvidenceType,
+                actualEvidenceCount: evidence.length,
+                generatedClaimTypes: claimTypes,
+                generatedClaimTokens: generatedTokens,
+              };
+            });
+
+            const aggregatedMissingTokens = Array.from(
+              new Set(
+                warningFlags
+                  .flatMap((flag) => flag.evidence ?? [])
+                  .map((entry) => entry.generatedClaim?.text ?? entry.generated ?? '')
+                  .map((value) => String(value ?? '').trim())
+                  .filter(Boolean),
+              ),
+            ).slice(0, 30);
+
+            return {
+              failedReadinessPredicate: 'compliance_warning_flags_present',
+              baselineVersionId: request.baselineVersionId ?? null,
+              analysisId: request.analysisId ?? null,
+              jobId: request.jobId ?? null,
+              verifiedCanonicalClaimCount: verifiedLabels.size,
+              warningFlagCount: warningFlags.length,
+              warningFlagDiagnostics,
+              missingClaimTokens: aggregatedMissingTokens,
+            };
+          })()
+        : null;
+
     return { 
       status: blocked ? 'blocked' : warningFlags.length > 0 ? 'limited' : 'ready', 
       blocked, 
@@ -3046,7 +3112,17 @@ export class ResumeService {
               }, 
             ] 
           : warningFlags.length > 0 
-            ? [ 
+            ? [
+                ...(readinessDiagnostics
+                  ? [
+                      {
+                        code: 'readiness_predicate_failed',
+                        message:
+                          'Readiness limited: compliance warning flags remain after canonical-claim filtering.',
+                        details: readinessDiagnostics,
+                      } as any,
+                    ]
+                  : []),
                 { 
                   code: 'personalization_limitation', 
                   message: 

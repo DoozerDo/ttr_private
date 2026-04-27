@@ -26,7 +26,7 @@ describe('detectFictionalTechnology', () => {
       ],
       baselineAllowlist: {
         allowedCompanies: [],
-        allowedRoleTitles: [],
+        allowedRoles: [],
         allowedTechnologies: [],
         allowedMetricTokens: [],
       },
@@ -43,5 +43,49 @@ describe('detectFictionalTechnology', () => {
     expect(technologyClaims).not.toContain('000');
     expect(technologyClaims).not.toContain('self-service');
     expect(technologyClaims).not.toContain('multi-system');
+  });
+
+  it('does not flag synthetic support-ops infrastructure tokens when present in baseline allowlist', () => {
+    const flags = detectFictionalTechnology({
+      baselineSections: [
+        {
+          title: 'Baseline',
+          content:
+            'Zendesk | Jira | Salesforce Service Cloud | SQL | Looker | Linux | monitoring | VPN | DNS | DHCP | remote access',
+          sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+        },
+      ],
+      generatedSections: [
+        {
+          title: 'Generated',
+          content:
+            'Improved incident operations on Linux with monitoring, remote access, VPN, DNS, and DHCP troubleshooting.',
+          sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+        },
+      ],
+      baselineAllowlist: {
+        allowedCompanies: [],
+        allowedRoles: [],
+        allowedTechnologies: [
+          'Zendesk',
+          'Jira',
+          'Salesforce Service Cloud',
+          'SQL',
+          'Looker',
+          'Linux',
+          'monitoring',
+          'VPN',
+          'DNS',
+          'DHCP',
+          'remote access',
+        ],
+        allowedMetricTokens: [],
+      },
+    });
+
+    const fictionalTechFlags = flags.filter(
+      (flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+    );
+    expect(fictionalTechFlags).toHaveLength(0);
   });
 });

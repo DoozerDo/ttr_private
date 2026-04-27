@@ -125,7 +125,11 @@ function computeCoreLoopBaselineVersionFileHash(): string {
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
+<<<<<<< HEAD
 function computeCoreLoopBaselineAllowlist(): {
+=======
+function computeCoreLoopBaselineVersionAllowlists(): {
+>>>>>>> f5d30e08db61962de4307ebb2173008e6df608f0
   allowedCompanies: string[];
   allowedRoles: string[];
   allowedTechnologies: string[];
@@ -134,6 +138,7 @@ function computeCoreLoopBaselineAllowlist(): {
   const sections = buildCoreLoopBaselineSections();
   const snapshot = buildBaselineAllowlistSnapshot(
     sections.map((section) => ({
+<<<<<<< HEAD
       sectionType: section.sectionType as any,
       title: section.title,
       content: section.content,
@@ -169,6 +174,19 @@ function computeCoreLoopBaselineAllowlist(): {
       "97%",
       "0.4",
     ]),
+=======
+      title: section.title,
+      content: section.content,
+      sectionType: section.sectionType,
+    })),
+  );
+
+  return {
+    allowedCompanies: snapshot.allowedCompanies,
+    allowedRoles: snapshot.allowedRoles,
+    allowedTechnologies: snapshot.allowedTechnologies,
+    allowedMetricTokens: snapshot.allowedMetricTokens,
+>>>>>>> f5d30e08db61962de4307ebb2173008e6df608f0
   };
 }
 
@@ -379,16 +397,27 @@ export class SyntheticTransactionRunnerService {
       const versions: any[] = Array.isArray((existing as any).versions) ? (existing as any).versions : [];
       const targetVersion = versions[0] ?? null;
       const desiredFileHash = computeCoreLoopBaselineVersionFileHash();
+<<<<<<< HEAD
       const desiredAllowlist = computeCoreLoopBaselineAllowlist();
+=======
+      const desiredAllowlists = computeCoreLoopBaselineVersionAllowlists();
+>>>>>>> f5d30e08db61962de4307ebb2173008e6df608f0
       if (!targetVersion) {
         const createdVersion = baselineVersionRepository.create({
           baselineId: existing.id,
           versionNumber: 1,
           fileHash: desiredFileHash,
+<<<<<<< HEAD
           allowedCompanies: desiredAllowlist.allowedCompanies,
           allowedRoles: desiredAllowlist.allowedRoles,
           allowedTechnologies: desiredAllowlist.allowedTechnologies,
           allowedMetricTokens: desiredAllowlist.allowedMetricTokens,
+=======
+          allowedCompanies: desiredAllowlists.allowedCompanies,
+          allowedRoles: desiredAllowlists.allowedRoles,
+          allowedTechnologies: desiredAllowlists.allowedTechnologies,
+          allowedMetricTokens: desiredAllowlists.allowedMetricTokens,
+>>>>>>> f5d30e08db61962de4307ebb2173008e6df608f0
           verifiedAdditions: [],
           additionDiff: null,
           promotedFromInterviewId: null,
@@ -401,6 +430,7 @@ export class SyntheticTransactionRunnerService {
         });
         const saved = await baselineVersionRepository.save(createdVersion);
         (existing as any).versions = [saved];
+<<<<<<< HEAD
       } else {
         const shouldRepairFileHash = !targetVersion.fileHash;
         const shouldRepairAllowlist =
@@ -422,6 +452,38 @@ export class SyntheticTransactionRunnerService {
             targetVersion.allowedTechnologies = desiredAllowlist.allowedTechnologies;
             targetVersion.allowedMetricTokens = desiredAllowlist.allowedMetricTokens;
           }
+=======
+      } else if (!targetVersion.fileHash) {
+        targetVersion.fileHash = desiredFileHash;
+        if (!Array.isArray(targetVersion.allowedCompanies) || targetVersion.allowedCompanies.length === 0) {
+          targetVersion.allowedCompanies = desiredAllowlists.allowedCompanies;
+        }
+        if (!Array.isArray(targetVersion.allowedRoles) || targetVersion.allowedRoles.length === 0) {
+          targetVersion.allowedRoles = desiredAllowlists.allowedRoles;
+        }
+        if (!Array.isArray(targetVersion.allowedTechnologies) || targetVersion.allowedTechnologies.length === 0) {
+          targetVersion.allowedTechnologies = desiredAllowlists.allowedTechnologies;
+        }
+        if (!Array.isArray(targetVersion.allowedMetricTokens) || targetVersion.allowedMetricTokens.length === 0) {
+          targetVersion.allowedMetricTokens = desiredAllowlists.allowedMetricTokens;
+        }
+        await baselineVersionRepository.save(targetVersion);
+      } else {
+        const needsAllowlists =
+          !Array.isArray(targetVersion.allowedCompanies) ||
+          targetVersion.allowedCompanies.length === 0 ||
+          !Array.isArray(targetVersion.allowedRoles) ||
+          targetVersion.allowedRoles.length === 0 ||
+          !Array.isArray(targetVersion.allowedTechnologies) ||
+          targetVersion.allowedTechnologies.length === 0 ||
+          !Array.isArray(targetVersion.allowedMetricTokens) ||
+          targetVersion.allowedMetricTokens.length === 0;
+        if (needsAllowlists) {
+          targetVersion.allowedCompanies = desiredAllowlists.allowedCompanies;
+          targetVersion.allowedRoles = desiredAllowlists.allowedRoles;
+          targetVersion.allowedTechnologies = desiredAllowlists.allowedTechnologies;
+          targetVersion.allowedMetricTokens = desiredAllowlists.allowedMetricTokens;
+>>>>>>> f5d30e08db61962de4307ebb2173008e6df608f0
           await baselineVersionRepository.save(targetVersion);
         }
       }
@@ -459,7 +521,11 @@ export class SyntheticTransactionRunnerService {
       baselineId: baseline.id,
       versionNumber: 1,
       fileHash: computeCoreLoopBaselineVersionFileHash(),
+<<<<<<< HEAD
       ...computeCoreLoopBaselineAllowlist(),
+=======
+      ...computeCoreLoopBaselineVersionAllowlists(),
+>>>>>>> f5d30e08db61962de4307ebb2173008e6df608f0
       verifiedAdditions: [],
       additionDiff: null,
       promotedFromInterviewId: null,
