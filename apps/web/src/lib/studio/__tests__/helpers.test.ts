@@ -112,4 +112,21 @@ describe("studio artifact failure presentation", () => {
     expect(resume.failure).toBeNull();
     expect(coverLetter.failure).toBeNull();
   });
+
+  it("treats production-shaped top-level cover success as usable", () => {
+    const coverLetter = presentCoverLetterGeneration({
+      id: "cover-1",
+      status: "success",
+      generationStatus: "success",
+      exportReady: true,
+      content: "Dear Hiring Team,\n\nBody paragraph.\n\nSincerely,\nCore Loop Candidate",
+      preview: { coverLetter: { salutation: "Dear Hiring Team,", bodyParagraphs: ["Body paragraph."], closingParagraph: "Sincerely," } },
+      exports: { docx: true, pdf: true },
+      display: { title: "Cover letter generated successfully", description: "Ready", reasons: [] },
+      safeDisplay: { title: "Cover letter generated successfully", description: "Ready", reasons: [] },
+    });
+
+    expect(coverLetter.status).toBe("success");
+    expect(coverLetter.failure).toBeNull();
+  });
 });

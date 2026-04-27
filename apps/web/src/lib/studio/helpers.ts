@@ -697,7 +697,13 @@ export function presentCoverLetterGeneration(payload: unknown): StudioGeneration
   if (!payload || typeof payload !== "object") {
     return { status: "unknown", hasExportableContent: false, display: null };
   }
-  const record = payload as Record<string, unknown>;
+  const rawRecord = payload as Record<string, unknown>;
+  const record =
+    (rawRecord.status || rawRecord.generationStatus) && typeof rawRecord === "object"
+      ? rawRecord
+      : rawRecord.payload && typeof rawRecord.payload === "object"
+        ? (rawRecord.payload as Record<string, unknown>)
+        : rawRecord;
   const artifactFailure = readArtifactFailurePayload(payload);
   if (artifactFailure) {
     return {
@@ -975,12 +981,37 @@ function readCoverLetterParagraphSource(payload: unknown): string[] {
 
   for (const candidate of candidates) {
     if (!candidate || typeof candidate !== "object") continue;
-    const cover = (candidate as Record<string, unknown>).coverLetter;
-    if (!cover || typeof cover !== "object") continue;
-    const paragraphs = (cover as Record<string, unknown>).paragraphs;
-    if (!Array.isArray(paragraphs)) continue;
-    const normalized = paragraphs.map((value) => trimToString(value)).filter(Boolean);
-    if (normalized.length) return normalized;
+    const candidateRecord = candidate as Record<string, unknown>;
+
+    // Shape A: `{ preview: { coverLetter: { paragraphs: [...] }}}`
+    const cover = candidateRecord.coverLetter;
+    if (cover && typeof cover === "object") {
+      const coverRecord = cover as Record<string, unknown>;
+      const paragraphs = coverRecord.paragraphs;
+      if (Array.isArray(paragraphs)) {
+        const normalized = paragraphs.map((value) => trimToString(value)).filter(Boolean);
+        if (normalized.length) return normalized;
+      }
+
+      // Shape B: `{ preview: { coverLetter: { salutation, bodyParagraphs, closingParagraph, signatureLine }}}`
+      const salutation = trimToString(coverRecord.salutation);
+      const opening = trimToString(coverRecord.opening);
+      const bodyParagraphsRaw = coverRecord.bodyParagraphs;
+      const bodyParagraphs = Array.isArray(bodyParagraphsRaw)
+        ? bodyParagraphsRaw.map((value) => trimToString(value)).filter(Boolean)
+        : [];
+      const closingParagraph = trimToString(coverRecord.closingParagraph);
+      const signatureLine = trimToString(coverRecord.signatureLine);
+      const synthesized = [salutation || opening, ...bodyParagraphs, closingParagraph, signatureLine].filter(Boolean);
+      if (synthesized.length) return synthesized;
+    }
+
+    // Shape C: `{ preview: { paragraphs: [...] }}`
+    const previewParagraphs = candidateRecord.paragraphs;
+    if (Array.isArray(previewParagraphs)) {
+      const normalized = previewParagraphs.map((value) => trimToString(value)).filter(Boolean);
+      if (normalized.length) return normalized;
+    }
   }
 
   return [];
@@ -988,8 +1019,34 @@ function readCoverLetterParagraphSource(payload: unknown): string[] {
 
 export function buildCoverLetterParagraphs(payload: unknown): string[] {
   const paragraphs = readCoverLetterParagraphSource(payload);
-  if (!paragraphs.length) return [];
-  return normalizeCoverLetterParagraphs(paragraphs);
+  if (paragraphs.length) return normalizeCoverLetterParagraphs(paragraphs);
+
+  // Fallback: treat `content` as usable if it is non-empty text.
+  // This covers successful top-level generation responses that provide a single `content` string
+  // but omit `preview.coverLetter.paragraphs`.
+  if (payload && typeof payload === "object") {
+    const record = payload as Record<string, unknown>;
+    const content = trimToString(record.content);
+    if (content) {
+      const roughParagraphs = content
+        .split(/\n\s*\n/g)
+        .map((value) => trimToString(value))
+        .filter(Boolean);
+      if (roughParagraphs.length) return normalizeCoverLetterParagraphs(roughParagraphs);
+    }
+    if (record.payload && typeof record.payload === "object") {
+      const wrappedContent = trimToString((record.payload as Record<string, unknown>).content);
+      if (wrappedContent) {
+        const roughParagraphs = wrappedContent
+          .split(/\n\s*\n/g)
+          .map((value) => trimToString(value))
+          .filter(Boolean);
+        if (roughParagraphs.length) return normalizeCoverLetterParagraphs(roughParagraphs);
+      }
+    }
+  }
+
+  return [];
 }
 
 export function getFilenameFromContentDisposition(headerValue: string | null): string | null {
