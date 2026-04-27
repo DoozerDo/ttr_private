@@ -26,6 +26,14 @@ export type WorkflowOrchestratorSurface = "results" | "studio";
 export type WorkflowOrchestratorInput = {
   surface: WorkflowOrchestratorSurface;
 
+  ids?: {
+    baselineId?: string | null;
+    baselineVersionId?: string | null;
+    jobId?: string | null;
+    analysisId?: string | null;
+    assessmentId?: string | null;
+  } | null;
+
   score: number | null;
   generationReadiness: GenerationReadiness;
   workflowAuthority: Pick<WorkflowAuthorityResult, "workflowState" | "primaryAction" | "canGenerate" | "suppressFailureMessaging">;
@@ -242,6 +250,7 @@ export function resolveWorkflowOrchestrator(input: WorkflowOrchestratorInput): W
       return resolveWorkflowAuthorityContract({
         surface: input.surface,
         currentPathname: null,
+        ids: input.ids ?? undefined,
         baselineReady: true,
         analysisExists: true,
         score: typeof input.score === "number" ? input.score : null,

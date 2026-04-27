@@ -6200,126 +6200,8 @@ export default function StudioPage() {
     }
   }, [coverState.response, handleCoverDraft, hasCompletedGeneration, resumeState.response, verifiedClaimParams]);
 
-    useEffect(() => {
-    console.log("[AUTO_GEN] start");
-
-    if (!studioArtifactsHydrated) {
-      console.log("[AUTO_GEN] blocked: !studioArtifactsHydrated");
-      return;
-    }
-
-    if (!autoGenerationSignature) {
-      console.log("[AUTO_GEN] blocked: !autoGenerationSignature");
-      return;
-    }
-
-    if (!effectiveBaselineVersionId) {
-      console.log("[AUTO_GEN] blocked: !effectiveBaselineVersionId");
-      return;
-    }
-
-    if (autoGenerationSignatureRef.current === autoGenerationSignature) {
-      console.log("[AUTO_GEN] blocked: already used signature");
-      return;
-    }
-    if (
-    studioArtifactPresentationStateRef.current === "hydrated" &&
-    !needsAutoGeneration
-   ) {
-    return;
-    }
-    if (
-  suppressAutoGenerationForGenerationReadyShell &&
-  !needsAutoGeneration
-  ) {
-  return;
-  }
-    if (suppressAutoGenerationRef.current) return;
-    const autoGenerationKey = buildWorkflowRequestKey("auto_generation", generationWorkflowScope);
-    if (studioArtifactPairStatus && studioArtifactPairStatus !== "missing") return;
-    if (resumeState.response || coverState.response || resumeState.artifactFailure || coverState.artifactFailure) return;
-    if (resumeGenerating || coverGenerating || autoGenerationInFlight) return;
-    if (hasCompletedGeneration) return;
-    if (!canProceedWithStudioDrafts) return;
-    if (!autoGenerationKey) return;
-
-    if (!generationLifecycle.canStartGeneration) return;
-
-    autoGenerationSignatureRef.current = autoGenerationSignature;
-    activeAutoGenerationRef.current = {
-      requestId: autoGenerationSignature,
-      requestKey: autoGenerationKey,
-    };
-    setAutoGenerationInFlight(true);
-
-    const runAutoGeneration = async () => {
-      try {
-        trackEvent("studio_auto_generation_started", {
-          source: "studio",
-          analysisId: requestedAnalysisId || null,
-          baselineId: effectiveBaselineId || null,
-          jobId: effectiveJobId || null,
-          score: analysisScore,
-          generationTarget: "resume_and_cover_letter",
-        });
-        const sessionKey = autoGenerationSignature;
-        // Start both requests immediately so a rerender/remount can't slip in-between and launch a duplicate
-        // cover-letter request after resume completes but before cover starts.
-        const [resumeSucceeded, coverSucceeded] = await Promise.all([
-          handleResumeDraft({ sessionKey }),
-          handleCoverDraft({ sessionKey }),
-        ]);
-        const autoSucceeded = resumeSucceeded && coverSucceeded;
-        if (autoSucceeded) {
-          trackEvent("studio_auto_generation_succeeded", {
-            source: "studio",
-            analysisId: requestedAnalysisId || null,
-            baselineId: effectiveBaselineId || null,
-            jobId: effectiveJobId || null,
-            score: analysisScore,
-            generationTarget: "resume_and_cover_letter",
-          });
-        } else {
-          trackEvent("studio_auto_generation_failed", {
-            source: "studio",
-            analysisId: requestedAnalysisId || null,
-            baselineId: effectiveBaselineId || null,
-            jobId: effectiveJobId || null,
-            score: analysisScore,
-            generationTarget: "resume_and_cover_letter",
-            reason: resumeSucceeded ? "cover_letter_generation_failed" : "resume_generation_failed",
-          });
-        }
-      } finally {
-        if (activeAutoGenerationRef.current?.requestId === autoGenerationSignature) {
-          setAutoGenerationInFlight(false);
-          activeAutoGenerationRef.current = null;
-        }
-      }
-    };
-
-    void runAutoGeneration();
-  }, [
-    autoGenerationInFlight,
-    autoGenerationSignature,
-    canProceedWithStudioDrafts,
-    coverGenerating,
-    hasCompletedGeneration,
-    generationWorkflowScope,
-    handleCoverDraft,
-    handleResumeDraft,
-    hasCoverLetterArtifact,
-    hasResumeArtifact,
-    analysisScore,
-    effectiveBaselineId,
-    effectiveJobId,
-    requestedAnalysisId,
-    resumeGenerating,
-    studioArtifactPairStatus,
-    studioArtifactsHydrated,
-    suppressAutoGenerationForGenerationReadyShell,
-    effectiveBaselineVersionId,
-  ]);
+  // Legacy auto-generation path removed: canonical contract-driven effect below is authoritative.
+  useEffect(() => {}, []);
 
   useEffect(() => {
     if (!autoOpportunitySignature) return;
@@ -7123,6 +7005,13 @@ export default function StudioPage() {
 
     return resolveWorkflowOrchestrator({
       surface: "studio",
+      ids: {
+        baselineId: effectiveBaselineId || null,
+        baselineVersionId: effectiveBaselineVersionId || null,
+        jobId: effectiveJobId || null,
+        analysisId: requestedAnalysisId || null,
+        assessmentId: requestedAnalysisId || null,
+      },
       score: typeof analysisScore === "number" ? analysisScore : null,
       generationReadiness: activeGenerationReadiness,
       workflowAuthority,
@@ -8164,6 +8053,13 @@ export default function StudioPage() {
 
     const orchestrator = resolveWorkflowOrchestrator({
       surface: "studio",
+      ids: {
+        baselineId: effectiveBaselineId || null,
+        baselineVersionId: effectiveBaselineVersionId || null,
+        jobId: effectiveJobId || null,
+        analysisId: requestedAnalysisId || null,
+        assessmentId: requestedAnalysisId || null,
+      },
       score: typeof analysisScore === "number" ? analysisScore : null,
       generationReadiness: activeGenerationReadiness,
       workflowAuthority,
@@ -8485,6 +8381,7 @@ export default function StudioPage() {
 
   const startGenerationFromReadyShell = useCallback(
     async (source: "shell" | "shell_auto" | "post_unlock"): Promise<boolean> => {
+      console.log("[STUDIO][AUTO_GEN][START_CALLED_INNER]", { source });
       if (generationReadyPhase === "generating") return false;
 
       scrollToStudioTop("smooth");
@@ -8577,6 +8474,29 @@ export default function StudioPage() {
       latch = null;
     }
 
+    // Instrumentation: run on every dependency change for this effect scope.
+    // In production, avoid noisy logs unless explicitly enabled or we're in the ready lane.
+    const shouldLog =
+      debugAutoGenerationEnabled || ready || shouldStart || process.env.NODE_ENV !== "production";
+    if (shouldLog) {
+      console.log("[STUDIO][AUTO_GEN][EFFECT_ENTER]", {
+        contractGenerationState: contract.generation.state,
+        contractShouldStart: contract.generation.auto.shouldStart,
+        signature,
+        latch,
+        urlJobId: selectedJobId ?? null,
+        urlAnalysisId: requestedAnalysisId ?? null,
+        urlBaselineId: selectedBaselineId ?? null,
+        resolvedJobId: effectiveJobId ?? null,
+        resolvedAnalysisId: requestedAnalysisId ?? null,
+        resolvedBaselineVersionId: effectiveBaselineVersionId ?? null,
+      });
+      console.log("[STUDIO][AUTO_GEN][CONTRACT]", contract.generation);
+      if (contract.generation.state === "ready") {
+        console.log("[STUDIO][AUTO_GEN][FORCE_CHECK]");
+      }
+    }
+
     const shouldBlockFromLatch = latch === "succeeded";
     const skipReason =
       contract.generation.auto.shouldStart === true
@@ -8638,6 +8558,7 @@ export default function StudioPage() {
 
     void (async () => {
       try {
+        if (shouldLog) console.log("[STUDIO][AUTO_GEN][START_CALLED]");
         const ok = await startGenerationFromReadyShell("shell_auto");
         try {
           if (storage && typeof storage.setItem === "function") storage.setItem(storageKey, ok ? "succeeded" : "failed");
@@ -8668,7 +8589,9 @@ export default function StudioPage() {
     resumeGenerating,
     studioArtifactPairStatus,
     startGenerationFromReadyShell,
-    workflowOrchestratorCore.contract,
+    workflowOrchestratorCore.contract?.generation.state,
+    workflowOrchestratorCore.contract?.generation.auto.shouldStart,
+    workflowOrchestratorCore.contract?.generation.auto.signature,
   ]);
 
   useEffect(() => {

@@ -2773,6 +2773,13 @@ export default function ResultsPage() {
 
     return resolveWorkflowOrchestrator({
       surface: "results",
+      ids: {
+        baselineId: baselineId || latest?.baselineId || null,
+        baselineVersionId: currentBaselineVersionId || latest?.baselineVersionId || null,
+        jobId: jobId || latest?.jobId || null,
+        analysisId: latest?.assessmentId || null,
+        assessmentId: latest?.assessmentId || null,
+      },
       score: typeof activeScore === "number" ? activeScore : null,
       generationReadiness: resultsReadiness,
       workflowAuthority: sharedWorkflowAuthority,
