@@ -315,6 +315,15 @@ export function resolveWorkflowOrchestrator(input: WorkflowOrchestratorInput): W
         generation: {
           state: "blocked",
           auto: { shouldStart: false, signature: "autoGen:v1:fallback", skipReason: "contract_failed" },
+          debug: {
+            readinessStatus: "unknown",
+            readinessBlocked: true,
+            blockers: [],
+            workflowState: input.workflowAuthority.workflowState,
+            workflowPrimaryAction: input.workflowAuthority.primaryAction,
+            surfaceCanonicalState: "hard_blocked",
+            canGenerate: Boolean((input.workflowAuthority as any)?.canGenerate),
+          },
         },
         opportunityTracking: { hasSavedOpportunity: false, materialsGenerated: false },
         stepper: {

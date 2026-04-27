@@ -8492,6 +8492,7 @@ export default function StudioPage() {
         resolvedBaselineVersionId: effectiveBaselineVersionId ?? null,
       });
       console.log("[STUDIO][AUTO_GEN][CONTRACT]", contract.generation);
+      console.log("[STUDIO][AUTO_GEN][CONTRACT_DEBUG]", contract.generation.debug);
       if (contract.generation.state === "ready") {
         console.log("[STUDIO][AUTO_GEN][FORCE_CHECK]");
       }
@@ -9041,7 +9042,7 @@ export default function StudioPage() {
                   : isMediumQualityDraft  
                       ? "Draft output: usable now, stronger with refinement."  
                       : "Strong output: ready to refine in Studio."  
-                  : workflowAuthority.canGenerate
+                  : workflowOrchestratorCore.contract.generation.state === "ready"
                     ? "Draft output: ready to generate."
                     : "Limited output: not ready yet."}
               </h2>
@@ -9056,7 +9057,7 @@ export default function StudioPage() {
                     : isMediumQualityDraft  
                       ? "Usable now, but tightening evidence and refinement will materially improve the result."  
                       : "Built from your verified experience and aligned to the role. Review and refine as needed before applying." 
-                  : workflowAuthority.canGenerate
+                  : workflowOrchestratorCore.contract.generation.state === "ready"
                     ? "Built from your baseline evidence and ready for generation."
                     : "Built from your baseline evidence, but a few signals still need strengthening."}
               </p>

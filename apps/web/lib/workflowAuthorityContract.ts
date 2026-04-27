@@ -68,6 +68,15 @@ export type WorkflowAuthorityContract = {
   generation: {
     state: WorkflowGenerationState;
     auto: WorkflowAutoGenerationDecision;
+    debug: {
+      readinessStatus: WorkflowReadinessStatus;
+      readinessBlocked: boolean;
+      blockers: string[];
+      workflowState: WorkflowAuthorityState;
+      workflowPrimaryAction: WorkflowAuthorityPrimaryAction;
+      surfaceCanonicalState: WorkflowSurfaceAuthorityModel["canonicalState"];
+      canGenerate: boolean;
+    };
   };
   opportunityTracking: {
     hasSavedOpportunity: boolean;
@@ -397,7 +406,6 @@ export function resolveWorkflowAuthorityContract(input: {
       pair: pairState,
       hasAnyOutput,
     },
-    generation: { state: generationState, auto: autoDecision },
     opportunityTracking: { hasSavedOpportunity, materialsGenerated },
     stepper,
     authority: {
@@ -406,6 +414,19 @@ export function resolveWorkflowAuthorityContract(input: {
       canGenerate: workflowAuthority.canGenerate,
       surface: surfaceAuthority,
       primaryCta: surfaceCta,
+    },
+    generation: {
+      state: generationState,
+      auto: autoDecision,
+      debug: {
+        readinessStatus: readiness.status,
+        readinessBlocked: readiness.blocked,
+        blockers: readiness.blockers,
+        workflowState: workflowAuthority.workflowState,
+        workflowPrimaryAction: workflowAuthority.primaryAction,
+        surfaceCanonicalState: surfaceAuthority.canonicalState,
+        canGenerate: workflowAuthority.canGenerate,
+      },
     },
     diagnostics: {
       surface: input.surface ?? "unknown",
