@@ -5,11 +5,13 @@ type EmptyStateProps = {
   body: string | ReactNode;
   cta?: ReactNode;
   className?: string;
+  testId?: string;
 };
 
-export function EmptyState({ title, body, cta, className }: EmptyStateProps) {
+export function EmptyState({ title, body, cta, className, testId }: EmptyStateProps) {
   return (
     <div
+      data-testid={testId}
       className={`flex flex-col items-center gap-3 rounded-2xl border border-dashed border-white/20 bg-white/5 px-6 py-8 text-center text-sm text-slate-300 ${className ?? ""}`}
     >
       <p className="text-lg font-semibold text-slate-100">{title}</p>

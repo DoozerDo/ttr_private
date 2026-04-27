@@ -258,6 +258,96 @@ async function fetchResultsPage({ cookie, accessToken }, baselineId, jobId) {
   }
 }
 
+async function assertStudioWorkflow({ cookie, accessToken }, { baselineId, jobId, assessmentId }) {
+  const studioUrl = `${ROOT_URL}/studio?baselineId=${encodeURIComponent(baselineId)}&jobId=${encodeURIComponent(jobId)}&analysisId=${encodeURIComponent(assessmentId)}`;
+
+  let playwright;
+  try {
+    playwright = await import("playwright");
+  } catch (error) {
+    throw new Error(
+      `studio assertion requires Playwright. Failed to import playwright: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  const { chromium } = playwright;
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({
+    extraHTTPHeaders: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+  });
+
+  if (cookie) {
+    const [nameRaw, ...rest] = String(cookie).split("=");
+    const name = String(nameRaw ?? "").trim();
+    const value = rest.join("=");
+    if (name && value) {
+      await context.addCookies([{ name, value, domain: "localhost", path: "/" }]);
+    }
+  }
+
+  const page = await context.newPage();
+  try {
+    const response = await page.goto(studioUrl, { waitUntil: "domcontentloaded" });
+    assert(response, "studio page navigation returned no response");
+    assert(response.ok(), `studio page failed: ${response.status()}`);
+
+    const studioStepper = page.locator('[data-testid="unlock-path-studio"]');
+    await studioStepper.waitFor({ state: "attached", timeout: 30000 });
+    const studioState = await studioStepper.getAttribute("data-state");
+    assert(studioState && studioState !== "LOCKED", `studio stepper state should not be LOCKED on /studio (got ${studioState ?? "null"})`);
+
+    // Contract: Ready-to-generate must not sit idle with both artifacts missing.
+    // Allow outcomes:
+    // - generation starts (generating markers appear)
+    // - materials render (missing markers disappear)
+    // - an explicit failure shell appears with a message
+    const resumeMissing = page.locator('[data-testid="studio-resume-missing"]');
+    const coverMissing = page.locator('[data-testid="studio-cover-missing"]');
+    const generatingAny = page.locator('[data-testid="studio-auto-generation-status"],[data-testid="studio-resume-generating"],[data-testid="studio-cover-generating"],[data-testid="studio-generation-ready-shell"]');
+    const failureMessage = page.locator('[data-testid="studio-generation-ready-failure-message"]');
+
+    await page.waitForFunction(
+      () => {
+        const resumeMissingEl = document.querySelector('[data-testid="studio-resume-missing"]');
+        const coverMissingEl = document.querySelector('[data-testid="studio-cover-missing"]');
+        const generatingEl = document.querySelector('[data-testid="studio-auto-generation-status"],[data-testid="studio-resume-generating"],[data-testid="studio-cover-generating"],[data-testid="studio-generation-ready-shell"]');
+        const failureEl = document.querySelector('[data-testid="studio-generation-ready-failure-message"]');
+
+        const bothMissing = Boolean(resumeMissingEl && coverMissingEl);
+        return !bothMissing || Boolean(generatingEl) || Boolean(failureEl);
+      },
+      { timeout: 30000 },
+    ).catch(async () => {
+      const url = page.url();
+      const state = await studioStepper.getAttribute("data-state").catch(() => null);
+      const marker = {
+        resumeMissing: await resumeMissing.count().then((n) => n > 0).catch(() => false),
+        coverMissing: await coverMissing.count().then((n) => n > 0).catch(() => false),
+        generatingAny: await generatingAny.count().then((n) => n > 0).catch(() => false),
+        failureMessage: await failureMessage.count().then((n) => n > 0).catch(() => false),
+      };
+      const htmlExcerpt = await page.content().then((c) => c.slice(0, 900)).catch(() => null);
+      const textExcerpt = await page.textContent("body").then((t) => String(t ?? "").slice(0, 500)).catch(() => null);
+      throw new Error(
+        JSON.stringify({
+          message: "studio ready-to-generate state appeared idle (both artifacts missing, no generating, no failure)",
+          url,
+          studioStepperState: state,
+          markers: marker,
+          htmlExcerpt,
+          textExcerpt,
+        }),
+      );
+    });
+
+    return true;
+  } finally {
+    await page.close().catch(() => {});
+    await context.close().catch(() => {});
+    await browser.close().catch(() => {});
+  }
+}
+
 async function main() {
   const startedAt = new Date().toISOString();
   log("synthetic-core-loop-start", { baseUrl: ROOT_URL, apiUrl: API_URL, startedAt });
@@ -301,6 +391,7 @@ async function main() {
   assert(nextAction, "derived nextAction was empty");
 
   await fetchResultsPage(auth, baselineId, jobId);
+  await assertStudioWorkflow(auth, { baselineId, jobId, assessmentId });
 
   log("synthetic-core-loop-success", {
     syntheticRunId: seed?.syntheticRunId ?? null,

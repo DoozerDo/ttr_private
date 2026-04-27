@@ -8554,8 +8554,8 @@ export default function StudioPage() {
     if (!debugAutoGenerationEnabled) return;
     if (!effectiveBaselineId || !effectiveJobId) return;
 
-    const signature = `${effectiveBaselineId}:${effectiveJobId}:${requestedAnalysisId ?? "none"}`;
-    const storageKey = `ttr:studio:auto-generate:${signature}`;
+    const contractSignature = workflowOrchestratorCore.contract.generation.auto.signature;
+    const storageKey = `ttr:studio:auto-generate:${contractSignature}`;
     let latch = null as string | null;
     try {
       latch = typeof window !== "undefined" ? window.localStorage?.getItem(storageKey) ?? null : null;
@@ -8563,14 +8563,15 @@ export default function StudioPage() {
       latch = null;
     }
 
-    const ready = activeGenerationReadiness.status === "ready" && !activeGenerationReadiness.blocked;
-    const artifactsMissing = !hasUsableResume && !hasUsableCoverLetter;
+    const ready = workflowOrchestratorCore.contract.generation.state === "ready";
+    const artifactsMissing = !workflowOrchestratorCore.contract.artifacts.hasAnyOutput;
     const generatingNow =
       resumeGenerating ||
       coverGenerating ||
       autoGenerationInFlight ||
       studioArtifactPairStatus === "in_progress" ||
-      generationReadyPhase === "generating";
+      generationReadyPhase === "generating" ||
+      workflowOrchestratorCore.contract.generation.state === "generating";
 
     if (!ready || !artifactsMissing) return;
 
@@ -8581,6 +8582,9 @@ export default function StudioPage() {
     if (generatingNow) skipReasons.push("already_generating");
     if (studioArtifactPairStatus && studioArtifactPairStatus !== "missing" && studioArtifactPairStatus !== "in_progress") {
       skipReasons.push(`pair_status_${studioArtifactPairStatus}`);
+    }
+    if (!workflowOrchestratorCore.contract.generation.auto.shouldStart) {
+      skipReasons.push(`contract_skip_${workflowOrchestratorCore.contract.generation.auto.skipReason}`);
     }
 
     // Only log when we appear to be stuck: ready + missing + not generating.
@@ -8594,6 +8598,8 @@ export default function StudioPage() {
         readinessBlocked: activeGenerationReadiness.blocked,
         blockers: (activeGenerationReadiness as any)?.reasons ?? (activeGenerationReadiness as any)?.blockers ?? null,
         studioArtifactPairStatus: studioArtifactPairStatus ?? null,
+        contractGenerationState: workflowOrchestratorCore.contract.generation.state,
+        contractAuthorityState: workflowOrchestratorCore.contract.authority.surface.canonicalState,
         hasCompletedGeneration,
         isGenerating: generatingNow,
         hasResume: hasUsableResume,
@@ -8617,17 +8623,22 @@ export default function StudioPage() {
     requestedAnalysisId,
     resumeGenerating,
     studioArtifactPairStatus,
+    workflowOrchestratorCore.contract.artifacts.hasAnyOutput,
+    workflowOrchestratorCore.contract.authority.surface.canonicalState,
+    workflowOrchestratorCore.contract.generation.auto,
+    workflowOrchestratorCore.contract.generation.state,
   ]);
 
   const generationReadyAutoStartRef = useRef<string | null>(null);
   useEffect(() => {
     if (generationReadyPhase !== "ready") return;
     if (!effectiveBaselineId || !effectiveJobId || !requestedAnalysisId) return;
-    if (activeGenerationReadiness.status !== "ready" || activeGenerationReadiness.blocked) return;
-    if (hasUsableResume || hasUsableCoverLetter) return;
+    if (workflowOrchestratorCore.contract.generation.state !== "ready") return;
+    if (workflowOrchestratorCore.contract.artifacts.hasAnyOutput) return;
     if (resumeGenerating || coverGenerating || autoGenerationInFlight || studioArtifactPairStatus === "in_progress") return;
+    if (!workflowOrchestratorCore.contract.generation.auto.shouldStart) return;
 
-    const signature = `${effectiveBaselineId}:${effectiveJobId}:${requestedAnalysisId}`;
+    const signature = workflowOrchestratorCore.contract.generation.auto.signature;
     if (generationReadyAutoStartRef.current === signature) return;
 
     const storageKey = `ttr:studio:auto-generate:${signature}`;
@@ -8653,12 +8664,8 @@ export default function StudioPage() {
       }
     })();
   }, [
-    activeGenerationReadiness.blocked,
-    activeGenerationReadiness.status,
     effectiveBaselineId,
     effectiveJobId,
-    hasUsableCoverLetter,
-    hasUsableResume,
     coverGenerating,
     resumeGenerating,
     autoGenerationInFlight,
@@ -8666,6 +8673,10 @@ export default function StudioPage() {
     generationReadyPhase,
     requestedAnalysisId,
     startGenerationFromReadyShell,
+    workflowOrchestratorCore.contract.artifacts.hasAnyOutput,
+    workflowOrchestratorCore.contract.generation.auto.shouldStart,
+    workflowOrchestratorCore.contract.generation.auto.signature,
+    workflowOrchestratorCore.contract.generation.state,
   ]);
 
   useEffect(() => {
@@ -9977,9 +9988,14 @@ export default function StudioPage() {
 
           </div>
         ) : resumeState.artifactFailure ? null : resumeAutoGenerating || resumeGenerateNowPending ? (
-          <EmptyState title="Generating your resume..." body="This usually finishes in a moment." />
+          <EmptyState
+            testId="studio-resume-generating"
+            title="Generating your resume..."
+            body="This usually finishes in a moment."
+          />
         ) : (
           <EmptyState
+            testId="studio-resume-missing"
             title="Resume not generated yet"
             body="Generate your resume to preview and refine your application."
           />
@@ -10354,6 +10370,9 @@ export default function StudioPage() {
               )
             ) : coverState.artifactFailure ? null : (
               <EmptyState
+                testId={
+                  coverAutoGenerating || coverGenerateNowPending ? "studio-cover-generating" : "studio-cover-missing"
+                }
                 title={
                   coverAutoGenerating || coverGenerateNowPending
                     ? "Generating your cover letter..."

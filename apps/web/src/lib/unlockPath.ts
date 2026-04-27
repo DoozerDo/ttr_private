@@ -1,4 +1,4 @@
-import { shouldGenerateDocuments } from "@/lib/documentGenerationContract";
+import { resolveWorkflowAuthorityContract } from "@/lib/workflowAuthorityContract";
 
 export type UnlockPathModuleState = "LOCKED" | "CURRENT" | "UNLOCKED" | "COMPLETE";
 
@@ -28,63 +28,37 @@ function matchesPath(pathname: string | undefined, prefix: string): boolean {
 }
 
 export function resolveUnlockPathState(input: UnlockPathInput): UnlockPathResolvedState {
-  const isBaselineRoute = matchesPath(input.currentPathname, "/baseline");
-  const isTargetRoute = matchesPath(input.currentPathname, "/target");
-  const isAnalyzeRoute = matchesPath(input.currentPathname, "/analyze");
-  const isFitReviewRoute = matchesPath(input.currentPathname, "/fit-review");
-  const isStudioRoute = matchesPath(input.currentPathname, "/studio");
-  const isOpportunitiesRoute = matchesPath(input.currentPathname, "/opportunities") ||
-    matchesPath(input.currentPathname, "/job-tracker");
+  const readinessStatus = input.readinessStatus ?? null;
+  const contract = resolveWorkflowAuthorityContract({
+    surface: "app_shell",
+    currentPathname: input.currentPathname ?? null,
+    baselineReady: input.baselineReady,
+    analysisExists: input.analysisExists,
+    score: input.score ?? null,
+    generationReadiness: readinessStatus
+      ? { status: readinessStatus, blocked: readinessStatus === "blocked", reasonCodes: [] }
+      : null,
+    artifact: {
+      // Stepper only needs a coarse document state.
+      resume: { hasOutput: Boolean(input.hasGeneratedDocuments), failed: false, status: input.hasGeneratedDocuments ? "completed" : null },
+      coverLetter: { hasOutput: Boolean(input.hasGeneratedDocuments), failed: false, status: input.hasGeneratedDocuments ? "completed" : null },
+      pair: { status: input.hasGeneratedDocuments ? "completed" : null, generating: false, failure: null },
+    },
+    opportunity: { hasSavedOpportunity: Boolean(input.hasSavedOpportunity), materialsGenerated: Boolean(input.hasGeneratedDocuments) },
+  });
 
-  const score = typeof input.score === "number" ? input.score : null;
-  const studioEligible = shouldGenerateDocuments(score);
-  const hasActiveBaseline = input.baselineReady;
-  const fitReviewRelevant = score !== null;
-  const fitReviewEligible = hasActiveBaseline && fitReviewRelevant;
-
-  const baseline: UnlockPathModuleState =
-    isBaselineRoute ? "CURRENT" : input.baselineReady ? "COMPLETE" : "LOCKED";
-
-  const analysis: UnlockPathModuleState =
-    isAnalyzeRoute || isTargetRoute
-      ? "CURRENT"
-      : !input.baselineReady
-        ? "LOCKED"
-        : input.analysisExists
-          ? "COMPLETE"
-          : "UNLOCKED";
-
-  const fitReview: UnlockPathModuleState = !fitReviewEligible
-    ? "LOCKED"
-    : isFitReviewRoute
-      ? "CURRENT"
-      : input.readinessStatus === "ready"
-        ? "COMPLETE"
-        : "UNLOCKED";
-
-  const studio: UnlockPathModuleState =
-    isStudioRoute
-      ? "CURRENT"
-      : !studioEligible
-        ? "LOCKED"
-        : input.hasGeneratedDocuments
-          ? "COMPLETE"
-          : "UNLOCKED";
-
-  const opportunities: "LOCKED" | "UNLOCKED" | "CURRENT" =
-    !studioEligible
-      ? "LOCKED"
-      : isOpportunitiesRoute
-        ? "CURRENT"
-        : input.hasSavedOpportunity
-          ? "UNLOCKED"
-          : "UNLOCKED";
+  function mapState(value: typeof contract.stepper.baseline): UnlockPathModuleState {
+    if (value === "locked") return "LOCKED";
+    if (value === "current") return "CURRENT";
+    if (value === "complete") return "COMPLETE";
+    return "UNLOCKED";
+  }
 
   return {
-    baseline,
-    analysis,
-    fitReview,
-    studio,
-    opportunities,
+    baseline: mapState(contract.stepper.baseline),
+    analysis: mapState(contract.stepper.analysis),
+    fitReview: mapState(contract.stepper.fitReview),
+    studio: mapState(contract.stepper.studio),
+    opportunities: contract.stepper.opportunities === "locked" ? "LOCKED" : contract.stepper.opportunities === "current" ? "CURRENT" : "UNLOCKED",
   };
 }

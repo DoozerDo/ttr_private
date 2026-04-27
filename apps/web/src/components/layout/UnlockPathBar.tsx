@@ -111,6 +111,8 @@ export function UnlockPathBar(props: UnlockPathBarProps) {
             <button
               key={module.id}
               type="button"
+              data-testid={`unlock-path-${module.id}`}
+              data-state={visibleState}
               className={[
                 "group flex min-h-[92px] min-w-[180px] flex-col justify-between rounded-2xl border px-4 py-3 text-left transition",
                 isCurrent

@@ -19,6 +19,7 @@ import type { PostUnlockOutcomeModel, PostUnlockReadiness } from "@/lib/postUnlo
 import { resolveStudioGenerationReadyModel, type StudioGenerationReadyModel } from "@/lib/studioGenerationReadyResolver";
 import type { WorkflowActivitySnapshot } from "@/lib/workflowActivityTracker";
 import type { WorkflowContractViolation } from "@/lib/workflowContractViolation";
+import { resolveWorkflowAuthorityContract, type WorkflowAuthorityContract } from "@/lib/workflowAuthorityContract";
 
 export type WorkflowOrchestratorSurface = "results" | "studio";
 
@@ -27,7 +28,7 @@ export type WorkflowOrchestratorInput = {
 
   score: number | null;
   generationReadiness: GenerationReadiness;
-  workflowAuthority: Pick<WorkflowAuthorityResult, "workflowState" | "primaryAction" | "suppressFailureMessaging">;
+  workflowAuthority: Pick<WorkflowAuthorityResult, "workflowState" | "primaryAction" | "canGenerate" | "suppressFailureMessaging">;
 
   artifact: {
     hasResume: boolean;
@@ -81,6 +82,7 @@ export type WorkflowOrchestratorInput = {
 
 export type WorkflowOrchestratorOutput = {
   authorityState: WorkflowSurfaceAuthorityModel;
+  contract: WorkflowAuthorityContract;
   artifactState: WorkflowArtifactStateNormalizerOutput;
   activityState: WorkflowActivitySnapshot;
   diagnostics?: {
@@ -235,18 +237,28 @@ export function resolveWorkflowOrchestrator(input: WorkflowOrchestratorInput): W
       })
     : null;
 
-  const authority = resolveWorkflowSurfaceAuthority({
+  const contract = resolveWorkflowAuthorityContract({
+    surface: input.surface,
+    currentPathname: null,
+    baselineReady: true,
+    analysisExists: true,
     score: typeof input.score === "number" ? input.score : null,
-    generationReadiness: safeReadiness,
-    workflowAuthority: input.workflowAuthority,
-    artifact: input.artifact,
-    unlockContext: input.surface === "studio" ? { active: unlockFlowActive, hasMissingEvidence: unlockContext.missingEvidence.length > 0 } : null,
-    postUnlockOutcomeState: postUnlockOutcomeModel?.outcomeState ?? null,
-    generationReady: {
-      active: !input.generationReady.dismissed,
-      phase: input.generationReady.phase,
+    generationReadiness: { status: safeReadiness.status, blocked: safeReadiness.blocked, reasonCodes: safeReadiness.reasonCodes },
+    workflowAuthorityOverride: input.workflowAuthority,
+    artifact: {
+      resume: { hasOutput: false, failed: input.resume.status === "failed", status: String(input.resume.status) },
+      coverLetter: { hasOutput: false, failed: input.coverLetter.status === "failed", status: String(input.coverLetter.status) },
+      pair: { status: input.artifact.pairStatus ?? null, generating: input.artifact.generating, failure: input.artifact.failure },
+    },
+    opportunity: null,
+    contexts: {
+      unlockContext: input.surface === "studio" ? { active: unlockFlowActive, hasMissingEvidence: unlockContext.missingEvidence.length > 0 } : null,
+      postUnlockOutcomeState: postUnlockOutcomeModel?.outcomeState ?? null,
+      generationReady: { active: !input.generationReady.dismissed, phase: input.generationReady.phase },
     },
   });
+
+  const authority = contract.authority.surface;
 
   let authorityState: WorkflowSurfaceAuthorityModel = authority;
   if (readinessMalformed) {
@@ -372,6 +384,7 @@ export function resolveWorkflowOrchestrator(input: WorkflowOrchestratorInput): W
 
   return {
     authorityState: authorityState,
+    contract,
     artifactState: normalizedArtifacts,
     activityState: input.activity,
     diagnostics: diagnosticsViolations.length ? { violations: diagnosticsViolations } : undefined,
