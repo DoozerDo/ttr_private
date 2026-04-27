@@ -1,4 +1,5 @@
 import { SyntheticTransactionRunnerService } from './synthetic-transaction-runner.service';
+import bcrypt from 'bcryptjs';
 
 describe('SyntheticTransactionRunnerService', () => {
   const buildService = () => {
@@ -6,6 +7,7 @@ describe('SyntheticTransactionRunnerService', () => {
     const usersService = {
       findByEmail: jest.fn(),
       create: jest.fn(),
+      updatePasswordHash: jest.fn(),
     } as any;
     const jobsService = { createJob: jest.fn() } as any;
     const analysisService = { runFitAssessment: jest.fn() } as any;
@@ -85,14 +87,18 @@ describe('SyntheticTransactionRunnerService', () => {
     const { service, usersService } = buildService();
 
     usersService.findByEmail.mockResolvedValue(null);
-    usersService.create.mockResolvedValue({ id: 'u-synth', email: 'synthetic@example.com', isSynthetic: true });
+    usersService.create.mockResolvedValue({
+      id: 'u-synth',
+      email: 'synthetic-core-loop@targetthisrole.local',
+      isSynthetic: true,
+    });
 
     const user = await (service as any).resolveOrCreateSyntheticUser();
 
     expect(user).toMatchObject({ id: 'u-synth' });
     expect(usersService.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        email: 'synthetic@example.com',
+        email: 'synthetic-core-loop@targetthisrole.local',
         passwordHash: expect.any(String),
         firstName: expect.any(String),
         lastName: expect.any(String),
@@ -103,6 +109,25 @@ describe('SyntheticTransactionRunnerService', () => {
     const passwordHash = usersService.create.mock.calls[0][0].passwordHash;
     expect(typeof passwordHash).toBe('string');
     expect(passwordHash.length).toBeGreaterThan(0);
+  });
+
+  it('repairs stale passwordHash for existing synthetic user', async () => {
+    const { service, usersService } = buildService();
+
+    usersService.findByEmail.mockResolvedValue({
+      id: 'u-synth',
+      email: 'synthetic-core-loop@targetthisrole.local',
+      isSynthetic: true,
+      passwordHash: await bcrypt.hash('OldPass!999', 10),
+    });
+
+    const user = await (service as any).resolveOrCreateSyntheticUser();
+
+    expect(user).toMatchObject({ id: 'u-synth' });
+    expect(usersService.updatePasswordHash).toHaveBeenCalledWith(
+      'u-synth',
+      expect.any(String),
+    );
   });
 
   it('executes happy path and records success with propagated metadata', async () => {

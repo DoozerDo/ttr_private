@@ -42,6 +42,7 @@ type Deps = {
   usersService: {
     findByEmail: (email: string) => Promise<any>;
     create: (data: any, syntheticMetadata?: any) => Promise<any>;
+    updatePasswordHash?: (userId: string, passwordHash: string) => Promise<any>;
   };
   jobsService: { createJob: (userId: string, data: any) => Promise<any> };
   analysisService: { runFitAssessment: (userId: string, input: any) => Promise<any> };
@@ -140,11 +141,37 @@ function computeCoreLoopBaselineVersionAllowlists(): {
     })),
   );
 
+  const ensure = (items: string[] | undefined, required: string[]) => {
+    const set = new Set(
+      (items ?? []).filter((value) => typeof value === "string" && value.trim().length > 0),
+    );
+    for (const token of required) set.add(token);
+    return [...set].sort();
+  };
+
   return {
-    allowedCompanies: snapshot.allowedCompanies,
-    allowedRoles: snapshot.allowedRoles,
-    allowedTechnologies: snapshot.allowedTechnologies,
-    allowedMetricTokens: snapshot.allowedMetricTokens,
+    allowedCompanies: ensure(snapshot.allowedCompanies, ["TargetThisRole Synthetic"]),
+    allowedRoles: ensure(snapshot.allowedRoles, ["Director, Support Operations"]),
+    allowedTechnologies: ensure(snapshot.allowedTechnologies, [
+      "zendesk",
+      "salesforce",
+      "servicenow",
+      "jira",
+      "postgres",
+    ]),
+    allowedMetricTokens: ensure(snapshot.allowedMetricTokens, [
+      "sla",
+      "csat",
+      "time to resolution",
+      "time to first response",
+      "deflection",
+      "18%",
+      "22%",
+      "12%",
+      "91%",
+      "97%",
+      "0.4",
+    ]),
   };
 }
 
@@ -254,11 +281,45 @@ export class SyntheticTransactionRunnerService {
   // These helpers are intentionally instance methods so tests can spy on them.
   // The harness spec overrides them to isolate suite behavior.
   async resolveOrCreateSyntheticUser(): Promise<any> {
-    const email = "synthetic@example.com";
+    const email =
+      (process.env.SYNTHETIC_USER_EMAIL || "").trim() ||
+      "synthetic-core-loop@targetthisrole.local";
+    const password =
+      (process.env.SYNTHETIC_USER_PASSWORD || "").trim() ||
+      "SyntheticUserPass!123";
     const user = await this.deps?.usersService?.findByEmail?.(email);
-    if (user) return user;
+    if (user) {
+      if (!user.isSynthetic) {
+        throw new Error(
+          `SyntheticTransactionRunnerService refused to seed against non-synthetic user email=${email}. Set SYNTHETIC_USER_EMAIL to a dedicated synthetic account.`,
+        );
+      }
 
-    const passwordHash = await bcrypt.hash("SyntheticUserPass!123", 10);
+      const passwordHash = String(user.passwordHash ?? "").trim();
+      const isValid = passwordHash ? await bcrypt.compare(password, passwordHash) : false;
+      if (!isValid) {
+        const repairedHash = await bcrypt.hash(password, 10);
+        const updater = this.deps?.usersService?.updatePasswordHash;
+        if (typeof updater === "function") {
+          await updater(user.id, repairedHash);
+        } else {
+          // Best-effort fallback for unit tests / harnesses that provide a repo instead.
+          const repoAny: any = this.deps?.userRepository as any;
+          if (repoAny && typeof repoAny.save === "function") {
+            await repoAny.save({ ...user, passwordHash: repairedHash });
+          } else {
+            throw new Error(
+              "SyntheticTransactionRunnerService usersService.updatePasswordHash is not configured",
+            );
+          }
+        }
+        return { ...user, passwordHash: repairedHash };
+      }
+
+      return user;
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
     if (!this.deps?.usersService?.create) {
       throw new Error("SyntheticTransactionRunnerService usersService.create is not configured");
     }
@@ -508,6 +569,7 @@ export class SyntheticTransactionRunnerService {
     );
     const syntheticRunId = runLog.syntheticRunId ?? runLog.id ?? "run-id";
 
+    const summary: Record<string, unknown> = { syntheticRunId };
     const finalize = async (status: SyntheticTransactionResult["status"], errorMessage: string | null) => {
       await syntheticRunRepository.update(runLog.id, { status });
       const finishedAt = nowIso();
@@ -516,7 +578,7 @@ export class SyntheticTransactionRunnerService {
         startedAt,
         finishedAt,
         durationMs: new Date(finishedAt).getTime() - new Date(startedAt).getTime(),
-        summary: {},
+        summary,
         errorMessage,
         stepResults,
       };
@@ -571,6 +633,7 @@ export class SyntheticTransactionRunnerService {
       };
 
       const user = await runStep("resolve_synthetic_user", () => this.resolveOrCreateSyntheticUser());
+      summary.syntheticUserEmail = user?.email ?? null;
       push({ step: "resolve_synthetic_user", status: "succeeded" });
       await userRepository.findOneOrFail({ where: { id: user.id } });
 
@@ -607,6 +670,7 @@ export class SyntheticTransactionRunnerService {
           syntheticCreatedAt: new Date(),
         }),
       );
+      summary.baselineId = baseline?.id ?? null;
       push({ step: "resolve_baseline_fixture", status: "succeeded" });
 
       const createdJob = await runStep("create_job", async () => {
@@ -707,6 +771,7 @@ export class SyntheticTransactionRunnerService {
       });
       push({ step: "create_job", status: "succeeded" });
       const jobId = createdJob?.job?.id ?? createdJob?.id ?? "job-1";
+      summary.jobId = jobId;
 
       const assessment = await runStep("run_fit_assessment", () =>
         retryGenerationInFlight("run_fit_assessment", () =>
@@ -723,6 +788,7 @@ export class SyntheticTransactionRunnerService {
       }
       push({ step: "run_fit_assessment", status: "succeeded" });
       const analysisId = (assessment as any)?.assessmentId ?? (assessment as any)?.id ?? null;
+      summary.assessmentId = analysisId;
       if (!analysisId) {
         push({ step: "run_fit_assessment", status: "failed", errorMessage: "analysisId missing from assessment response" });
         return await finalize("failed", "analysisId missing from assessment response");

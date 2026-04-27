@@ -171,6 +171,13 @@ async function main() {
 
   const auth = await login();
   const seed = await seedSyntheticFixture(auth.accessToken);
+  const seededEmail = seed?.summary?.syntheticUserEmail ?? null;
+  if (seededEmail && String(seededEmail).trim() !== SYNTHETIC_EMAIL) {
+    log("synthetic-core-loop-user-mismatch", {
+      seededEmail: String(seededEmail),
+      loginEmail: SYNTHETIC_EMAIL,
+    });
+  }
 
   const baselineId = String(seed?.summary?.baselineId ?? "");
   const jobId = String(seed?.summary?.jobId ?? "");
