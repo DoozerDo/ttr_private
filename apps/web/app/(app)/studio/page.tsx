@@ -6182,7 +6182,12 @@ export default function StudioPage() {
         });
       }
       if (initialPresenter.status !== "success") {
-        throw new Error("Cover letter generation did not return a usable document.");
+        return fail({
+          errorCode: "presenter_no_document",
+          errorMessage: "Cover letter generation did not return a usable document.",
+          requestId: request.requestId,
+          http: { status: response.status, responsePayload },
+        });
       }
       const validatedResult = await generateWithRetry({
         generate: async (strictMode) => {

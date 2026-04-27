@@ -965,13 +965,25 @@ export function normalizeCoverLetterParagraphs(paragraphs: string[]): string[] {
 function readCoverLetterParagraphSource(payload: unknown): string[] {
   if (!payload || typeof payload !== "object") return [];
   const record = payload as Record<string, unknown>;
-  const preview = record.preview;
-  if (!preview || typeof preview !== "object") return [];
-  const cover = (preview as Record<string, unknown>).coverLetter;
-  if (!cover || typeof cover !== "object") return [];
-  const paragraphs = (cover as Record<string, unknown>).paragraphs;
-  if (!Array.isArray(paragraphs)) return [];
-  return paragraphs.map((value) => trimToString(value)).filter(Boolean);
+
+  // Most endpoints return `{ preview: { coverLetter: { paragraphs: [...] }}}`,
+  // but some generation routes wrap the artifact under `{ payload: { preview: ... }}`.
+  const candidates: unknown[] = [record.preview];
+  if (record.payload && typeof record.payload === "object") {
+    candidates.push((record.payload as Record<string, unknown>).preview);
+  }
+
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const cover = (candidate as Record<string, unknown>).coverLetter;
+    if (!cover || typeof cover !== "object") continue;
+    const paragraphs = (cover as Record<string, unknown>).paragraphs;
+    if (!Array.isArray(paragraphs)) continue;
+    const normalized = paragraphs.map((value) => trimToString(value)).filter(Boolean);
+    if (normalized.length) return normalized;
+  }
+
+  return [];
 }
 
 export function buildCoverLetterParagraphs(payload: unknown): string[] {
