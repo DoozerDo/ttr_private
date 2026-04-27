@@ -146,30 +146,19 @@ export function ResumePreview({
 }: Props) {
   const model = useMemo(() => modelOverride ?? readResumeModel(payload), [modelOverride, payload]);
   const [expandedExperienceIndex, setExpandedExperienceIndex] = useState<number | null>(null);
+  const [showFullResume, setShowFullResume] = useState(false);
+  const [summaryExpanded, setSummaryExpanded] = useState(false);
 
-  if (!model) {
-    if (!fallbackText) return null;
-    const preview = truncateForPreview(fallbackText, { maxChars: 4000, maxLines: 120 });
-    return (
-      <div className="space-y-2">
-        <pre className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-4 text-sm leading-7 text-slate-200">
-          {preview.text}
-        </pre>
-        {preview.truncated ? (
-          <p className="text-xs text-slate-400">Preview truncated.</p>
-        ) : null}
-      </div>
-    );
-  }
-
-  const summary = toText(model.summary);
-  const competenciesSource = Array.isArray(model.competencies)
-    ? model.competencies
-    : model.coreCompetencies;
+  const summary = model ? toText(model.summary) : "";
+  const competenciesSource = model
+    ? Array.isArray(model.competencies)
+      ? model.competencies
+      : model.coreCompetencies
+    : null;
   const competencies = Array.isArray(competenciesSource)
     ? competenciesSource.map((value) => toText(value)).filter(Boolean).filter((value) => !isNoiseCompetency(value))
     : [];
-  const experiences = Array.isArray(model.experience)
+  const experiences = model && Array.isArray(model.experience)
     ? model.experience
         .map((entry) => ({
           company: toText(entry.company),
@@ -182,7 +171,7 @@ export function ResumePreview({
         }))
         .filter((entry) => entry.company && entry.roleTitle && entry.bullets.length > 0)
     : [];
-  const education = Array.isArray(model.education)
+  const education = model && Array.isArray(model.education)
     ? dedupeEducationEntries(
         model.education
           .map((entry) => ({
@@ -193,9 +182,6 @@ export function ResumePreview({
           .filter((entry) => entry.degree || entry.institution || entry.location),
       )
     : [];
-
-  const [showFullResume, setShowFullResume] = useState(false);
-  const [summaryExpanded, setSummaryExpanded] = useState(false);
 
   useEffect(() => {
     if (!isEditing) return;
@@ -213,6 +199,21 @@ export function ResumePreview({
     if (isEditing || showFullResume) return withIndex;
     return withIndex.slice(0, 2);
   }, [experiences, isEditing, showFullResume]);
+
+  if (!model) {
+    if (!fallbackText) return null;
+    const preview = truncateForPreview(fallbackText, { maxChars: 4000, maxLines: 120 });
+    return (
+      <div className="space-y-2">
+        <pre className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-4 text-sm leading-7 text-slate-200">
+          {preview.text}
+        </pre>
+        {preview.truncated ? (
+          <p className="text-xs text-slate-400">Preview truncated.</p>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8" data-testid="studio-resume-workspace-root">
