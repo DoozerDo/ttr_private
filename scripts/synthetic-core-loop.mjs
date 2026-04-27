@@ -138,15 +138,38 @@ async function seedSyntheticFixture(accessToken) {
   return body;
 }
 
-async function fetchLatestAnalysis(accessToken, jobId) {
-  const response = await fetch(`${API_URL}/analysis/latest?jobId=${encodeURIComponent(jobId)}`, {
-    method: "GET",
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  const body = await readJson(response);
-  assert(response.ok, `analysis latest failed: ${body?.message ?? body?.error ?? response.status}`);
-  assert(body, "analysis latest returned no body");
-  return body;
+async function fetchFitAssessment(accessToken, { assessmentId, jobId } = {}) {
+  assert(accessToken, "fetchFitAssessment requires an accessToken");
+
+  if (assessmentId) {
+    const response = await fetch(`${API_URL}/analysis/fit-assessments/${encodeURIComponent(assessmentId)}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const body = await readJson(response);
+    assert(
+      response.ok,
+      `analysis fit-assessment failed (assessmentId=${assessmentId}): ${body?.message ?? body?.error ?? response.status}`,
+    );
+    assert(body, "analysis fit-assessment returned no body");
+    return body;
+  }
+
+  if (jobId) {
+    const response = await fetch(`${API_URL}/analysis/job/${encodeURIComponent(jobId)}/latest`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const body = await readJson(response);
+    assert(
+      response.ok,
+      `analysis latest-by-job failed (jobId=${jobId}): ${body?.message ?? body?.error ?? response.status}`,
+    );
+    assert(body, "analysis latest-by-job returned no body");
+    return body;
+  }
+
+  throw new Error("analysis verification requires assessmentId or jobId from seed summary");
 }
 
 async function fetchResultsPage({ cookie, accessToken }, baselineId, jobId) {
@@ -187,13 +210,15 @@ async function main() {
   assert(jobId, "seed response missing jobId");
   assert(assessmentId, "seed response missing assessmentId");
 
-  const analysis = await fetchLatestAnalysis(auth.accessToken, jobId);
+  const analysis = await fetchFitAssessment(auth.accessToken, { assessmentId, jobId });
   const fitScore =
-    typeof analysis?.score === "number"
-      ? analysis.score
-      : typeof analysis?.fitScore === "number"
-        ? analysis.fitScore
-        : null;
+    typeof analysis?.overallScore === "number"
+      ? analysis.overallScore
+      : typeof analysis?.score === "number"
+        ? analysis.score
+        : typeof analysis?.fitScore === "number"
+          ? analysis.fitScore
+          : null;
   assert(typeof fitScore === "number", "analysis latest did not include a numeric score");
   assert(fitScore >= 70, `fit score ${fitScore} is below the core loop threshold (>= 70)`);
 
