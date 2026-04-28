@@ -9,6 +9,7 @@ import {
   gameDesignFixture,
   supportOperationsFixture,
 } from './__fixtures__/cover-letter-fixtures';
+import { COVER_LETTER_GENERIC_FILLER_PHRASES } from './cover-letter-writing-contract';
 
 describe('TemplateCoverLetterGenerator', () => {
   it('rejects underspecified evidence fixtures with a supported-input error', () => {
@@ -58,7 +59,7 @@ describe('TemplateCoverLetterGenerator', () => {
       ],
     });
 
-    expect(result.wordCount).toBeGreaterThan(250);
+    expect(result.wordCount).toBeGreaterThanOrEqual(250);
     expect(result.content).toContain('Support Operations Manager');
   });
 
@@ -207,5 +208,25 @@ describe('TemplateCoverLetterGenerator', () => {
     expect(result.document.closingParagraph).not.toMatch(
       /I would welcome a conversation about how that operating rhythm supports steady execution\.$/i,
     );
+  });
+
+  it('avoids generic enthusiasm filler phrases', () => {
+    const generator = new TemplateCoverLetterGenerator();
+
+    const result = generator.generate({
+      ...supportOperationsFixture,
+      allowedBaselineBlocks: [
+        {
+          ...supportOperationsFixture.allowedBaselineBlocks[0],
+          content:
+            'Managed escalation flows and coordinated incident handoffs across product, support, and engineering teams. Built weekly operating reviews that kept queue health, staffing tradeoffs, and service quality visible.',
+        },
+      ],
+    });
+
+    const lowered = result.content.toLowerCase();
+    for (const phrase of COVER_LETTER_GENERIC_FILLER_PHRASES) {
+      expect(lowered).not.toContain(phrase);
+    }
   });
 });

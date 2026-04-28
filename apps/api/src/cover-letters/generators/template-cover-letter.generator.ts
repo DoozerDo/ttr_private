@@ -104,37 +104,36 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
 
     const strategySentence = (() => {
       const frame = this.cleanText(strategyFrame);
-      if (!frame) return this.ensureSentence('I would bring a steady execution lens to the role.');
+      if (!frame) return this.ensureSentence('My background maps to the operating context behind the role.');
       if (/^(a|an|the)\b/i.test(frame)) {
-        return this.ensureSentence(`I would lead as ${frame}.`);
+        return this.ensureSentence(`I lead with the operating lens described as ${frame}.`);
       }
-      return this.ensureSentence(`I would lead with a ${frame} lens.`);
+      return this.ensureSentence(`I lead with a ${frame} lens.`);
     })();
 
     const opening = this.joinSentences([
-      this.ensureSentence(`I am applying for ${roleDescriptor}.`),
+      this.ensureSentence(`For ${roleDescriptor}, my background aligns with the operating context behind the work.`),
       // Strategy contract: ensure the explicit positioning frame is visible in the artifact,
       // so downstream UI/tests can verify resume and cover letter share the same frame.
       strategySentence,
-      ...(strategyPriority ? [this.ensureSentence(`The strongest fit is ${strategyPriority}.`)] : []),
-      this.ensureSentence('This background fits the operating context well.'),
+      ...(strategyPriority ? [this.ensureSentence(`The strongest alignment is ${strategyPriority}.`)] : []),
+      this.ensureSentence('The work has centered on ownership of the operating rhythm and the decisions that keep delivery reliable.'),
       ...openingEvidence.map((entry) => this.ensureSentence(this.compactEvidenceText(entry.normalizedText))),
-      this.ensureSentence('This work has taught me how to keep the operating rhythm steady.'),
     ]);
     const bodyParagraphs = [
       this.joinSentences([
-        this.ensureSentence('The strongest fit comes from the operating context I have already handled.'),
+        this.ensureSentence('In practice, that fit shows up in how I have owned execution systems that keep service work moving.'),
         ...body1Evidence.map((entry) => this.ensureSentence(this.compactEvidenceText(entry.normalizedText))),
-        this.ensureSentence('It kept staffing tradeoffs and service quality easier to manage.'),
+        this.ensureSentence('This kind of ownership translates directly to the role because it turns messy inputs into clear priorities and dependable follow through.'),
       ]),
       this.joinSentences([
-        this.ensureSentence('That background gives me a practical way to contribute without rehashing the resume.'),
+        this.ensureSentence('Across cross functional partners, I bring an operating approach that protects quality while work is changing.'),
         ...body2Evidence.map((entry) => this.ensureSentence(this.compactEvidenceText(entry.normalizedText))),
-        this.ensureSentence('It also gave leaders a clearer view of the next fix.'),
+        this.ensureSentence('That is relevant to the role because it keeps leaders aligned on the next decision and keeps teams accountable to the same operating signals.'),
       ]),
     ];
     const closingLead = this.ensureSentence(
-      'Thank you for considering how that operating rhythm supports steady execution for your team.',
+      'If the role needs steady ownership of operating rhythm, decision quality, and delivery follow through, I can bring that to the team.',
     );
     const closingEvidenceSentence = closingEvidence.length
       ? this.ensureSentence(this.compactEvidenceText(closingEvidence[0].normalizedText))
@@ -142,9 +141,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     const closing = this.joinSentences([
       closingLead,
       ...(closingEvidenceSentence ? [closingEvidenceSentence] : []),
-      this.ensureSentence(
-        'That keeps incident response, routing, and service quality improvements moving in a steady cadence.',
-      ),
+      this.ensureSentence('I can contribute quickly by grounding decisions in verified evidence, then translating that signal into clear execution priorities.'),
     ]);
     addTrace('opening', openingEvidence);
     addTrace('body_1', body1Evidence);
