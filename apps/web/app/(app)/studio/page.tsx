@@ -138,6 +138,7 @@ import { StudioFocusPanel, type FocusAction } from "./StudioFocusPanel";
 import { devLogArtifactRendererSelection } from "@/lib/artifactRendererDebug";
 import { truncateForPreview } from "@/lib/previewTruncation";
 import type { ResumeModel } from "@/lib/resumeModel";
+import { buildStudioArtifactContract } from "@/src/lib/studio/artifactContract";
 import { StudioArtifactQualityPanel } from "./StudioArtifactQualityPanel";
 import { StudioCritiquePanel } from "./StudioCritiquePanel";
 import { StudioRoleMatchPanel } from "./StudioRoleMatchPanel";
@@ -2361,13 +2362,21 @@ export default function StudioPage() {
     const query = params.toString();
     return query ? `/baseline?${query}` : "/baseline";
   }, [requestedAnalysisId, effectiveJobId, effectiveBaselineId, effectiveBaselineVersionId]);
-  const resumePresenter = useMemo(
-    () => presentResumeGeneration(resumeState.response),
-    [resumeState.response],
+  const canExportDocuments = productReadiness.generation_readiness.canExport;
+  const artifactContract = useMemo(
+    () =>
+      buildStudioArtifactContract({
+        resumeResponse: resumeState.response,
+        coverLetterResponse: coverState.response,
+        canExportDocuments,
+        isPro,
+      }),
+    [canExportDocuments, coverState.response, isPro, resumeState.response],
   );
+  const resumePresenter = artifactContract.presenters.resume;
   useEffect(() => {
     if (process.env.NODE_ENV !== "development") return;
-    if (!resumeState.response) return;
+    if (!artifactContract.normalized.resumeResponse) return;
     console.info("[studio] resume_presenter_resolved", {
       area: "studio",
       operation: "present_resume",
@@ -2376,11 +2385,8 @@ export default function StudioPage() {
       presenterStatus: resumePresenter.status,
       hasExportableContent: resumePresenter.hasExportableContent,
     });
-  }, [resumePresenter.hasExportableContent, resumePresenter.status, resumeState.response]);
-  const generatedResumeModel = useMemo(
-    () => readResumeModel(resumeState.response),
-    [resumeState.response],
-  );
+  }, [artifactContract.normalized.resumeResponse, resumePresenter.hasExportableContent, resumePresenter.status]);
+  const generatedResumeModel = artifactContract.resumeModel;
   const effectiveResumeModel = isResumeEditMode
     ? draftResumeModel
     : savedEditedResumeModel ?? generatedResumeModel;
@@ -2389,27 +2395,20 @@ export default function StudioPage() {
     isResumeEditMode &&
     JSON.stringify(draftResumeModel ?? null) !==
       JSON.stringify((savedEditedResumeModel ?? generatedResumeModel) ?? null);
-  const hasResumeDraft = Boolean(generatedResumeModel) && Boolean(resumeState.response);
-  const hasResumeArtifact = resumePresenter.hasExportableContent;
-  const canExportDocuments = productReadiness.generation_readiness.canExport;
-  const canExportResume =
-    canExportDocuments &&
-    resumePresenter.status === "success" &&
-    hasResumeArtifact;
+  const hasResumeDraft = Boolean(artifactContract.resumeModel) && Boolean(resumeState.response);
+  const hasResumeArtifact = artifactContract.hasResumeArtifact;
+  const canExportResume = artifactContract.resumeExportAvailable;
   const showResumeDownloadActions =
     resumePresenter.status === "blocked" ||
     (resumePresenter.status === "success" && hasResumeArtifact);
   const isResumeDownloadLocked = !isPro;
-  const resumePreviewText = useMemo(() => formatPreview(resumeState.response), [resumeState.response]);
-  const coverLetterParagraphs = useMemo(
-    () => buildCoverLetterParagraphs(coverState.response),
-    [coverState.response],
+  const resumePreviewText = useMemo(
+    () => formatPreview(artifactContract.normalized.resumeResponse),
+    [artifactContract.normalized.resumeResponse],
   );
-  const coverPresenter = useMemo(
-    () => presentCoverLetterGeneration(coverState.response),
-    [coverState.response],
-  );
-  const hasCoverLetterDraft = coverPresenter.status === "success" && Boolean(coverState.response);
+  const coverLetterParagraphs = artifactContract.coverLetterModel?.paragraphs ?? [];
+  const coverPresenter = artifactContract.presenters.coverLetter;
+  const hasCoverLetterDraft = Boolean(artifactContract.coverLetterModel) && Boolean(coverState.response);
 
   // Canonical workflow authority (additive layer): owns top-level readiness/failure messaging decisions.
   const resolvedScoreForContract = analysisScore;
@@ -2637,7 +2636,7 @@ export default function StudioPage() {
     () => artifactQuality.improvableClaims.filter((claim) => !dismissedClaimTexts.includes(claim.text.toLowerCase())),
     [artifactQuality.improvableClaims, dismissedClaimTexts],
   );
-  const hasCoverLetterArtifact = coverPresenter.hasExportableContent;
+  const hasCoverLetterArtifact = artifactContract.hasCoverLetterArtifact;
   useEffect(() => {
     if (!resumeState.response && !coverState.response) {
       return;
@@ -3773,8 +3772,8 @@ export default function StudioPage() {
   const isHighQualityDraft = hasCompletedGeneration && artifactQuality.confidence === "HIGH"; 
   // Low-confidence is still a signal, but score >= 80 must not block or degrade access to usable artifacts.
   const showLowQualityRecoveryLane = isLowQualityDraft && !generateNowEligible;
-  const hasUsableResume = resumePresenter.status === "success" && Boolean(resumeState.response);
-  const hasUsableCoverLetter = coverPresenter.status === "success" && Boolean(coverState.response);
+  const hasUsableResume = artifactContract.hasResumeArtifact;
+  const hasUsableCoverLetter = artifactContract.hasCoverLetterArtifact;
   // Canonical READY truth: if we have any usable output, behave as READY. Confidence only modulates tone.
   const isReadySuccessState = hasUsableResume || hasUsableCoverLetter;
   const isApplicationFullyReady = hasUsableResume && hasUsableCoverLetter;
@@ -8911,6 +8910,56 @@ export default function StudioPage() {
     console.log("[STUDIO][BUILD]", JSON.stringify({ build: studioBuildMarker, nodeEnv: process.env.NODE_ENV ?? null }));
   }, [studioBuildMarker]);
 
+  const artifactContractInvariantLoggedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const contract = workflowOrchestratorCore.contract;
+    if (!contract) return;
+    if (contract.generation.state !== "generated") return;
+    if (artifactContract.hasResumeArtifact || artifactContract.hasCoverLetterArtifact) return;
+
+    const signature = [
+      requestedAnalysisId ?? "_",
+      effectiveJobId ?? "_",
+      effectiveBaselineId ?? "_",
+      effectiveBaselineVersionId ?? "_",
+    ].join(":");
+    if (artifactContractInvariantLoggedRef.current === signature) return;
+    artifactContractInvariantLoggedRef.current = signature;
+
+    const resumeKeys =
+      artifactContract.normalized.resumeResponse && typeof artifactContract.normalized.resumeResponse === "object"
+        ? Object.keys(artifactContract.normalized.resumeResponse as Record<string, unknown>)
+        : [];
+    const coverKeys =
+      artifactContract.normalized.coverLetterResponse &&
+      typeof artifactContract.normalized.coverLetterResponse === "object"
+        ? Object.keys(artifactContract.normalized.coverLetterResponse as Record<string, unknown>)
+        : [];
+
+    console.warn("[STUDIO][ARTIFACT_CONTRACT][GENERATED_WITH_NO_ARTIFACTS]", {
+      area: "studio",
+      operation: "artifact_contract_invariant",
+      status: "warn",
+      code: "generated_with_no_normalized_artifacts",
+      analysisId: requestedAnalysisId ?? null,
+      jobId: effectiveJobId ?? null,
+      baselineId: effectiveBaselineId ?? null,
+      baselineVersionId: effectiveBaselineVersionId ?? null,
+      resumeResponseKeys: resumeKeys,
+      coverLetterResponseKeys: coverKeys,
+    });
+  }, [
+    artifactContract.hasCoverLetterArtifact,
+    artifactContract.hasResumeArtifact,
+    artifactContract.normalized.coverLetterResponse,
+    artifactContract.normalized.resumeResponse,
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    requestedAnalysisId,
+    workflowOrchestratorCore.contract,
+  ]);
+
   const generationReadyAutoStartRef = useRef<string | null>(null);
   useEffect(() => {
     const contract = workflowOrchestratorCore.contract;
@@ -8921,7 +8970,10 @@ export default function StudioPage() {
 
     const ready = contract.generation.state === "ready";
     const shouldStart = contract.generation.auto.shouldStart === true;
-    const artifactsExist = contract.artifacts.hasAnyOutput || hasUsableResume || hasUsableCoverLetter;
+    const artifactsExist =
+      contract.artifacts.hasAnyOutput ||
+      artifactContract.hasResumeArtifact ||
+      artifactContract.hasCoverLetterArtifact;
     const generatingNow =
       autoGenerationInFlight ||
       resumeGenerating ||
@@ -8985,6 +9037,13 @@ export default function StudioPage() {
     if (!ready || !shouldStart) {
       if (debugAutoGenerationEnabled) {
         console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "contract_not_ready_or_shouldStart_false" });
+      }
+      return;
+    }
+
+    if (suppressAutoGenerationRef.current) {
+      if (debugAutoGenerationEnabled) {
+        console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "suppressed_by_artifact_hydration" });
       }
       return;
     }
