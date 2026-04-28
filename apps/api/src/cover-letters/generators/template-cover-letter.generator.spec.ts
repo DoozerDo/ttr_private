@@ -60,7 +60,7 @@ describe('TemplateCoverLetterGenerator', () => {
     });
 
     expect(result.wordCount).toBeGreaterThanOrEqual(250);
-    expect(result.content).toContain('Support Operations Manager');
+    expect(result.content).toMatch(/This role requires/i);
   });
 
   it('keeps paragraph ordering validation focused on the generated letter rather than rejecting strong evidence', () => {
@@ -78,7 +78,7 @@ describe('TemplateCoverLetterGenerator', () => {
     });
 
     expect(result.paragraphs).toHaveLength(4);
-    expect(result.paragraphs[0]).toContain('Support Operations Manager');
+    expect(result.paragraphs[0]).toMatch(/This role requires/i);
   });
 
   it('surfaces constraints summary behavior while still generating a compliant letter', () => {
@@ -118,7 +118,7 @@ describe('TemplateCoverLetterGenerator', () => {
     });
 
     expect(result.wordCount).toBeGreaterThan(250);
-    expect(result.document.opening).toContain('Support Operations Manager');
+    expect(result.document.opening).toMatch(/This role requires/i);
   });
 
   it('keeps the live Morgan Lee synthetic support-ops closing grounded and varied', () => {
@@ -254,5 +254,64 @@ describe('TemplateCoverLetterGenerator', () => {
     for (const phrase of banned) {
       expect(lowered).not.toContain(phrase);
     }
+  });
+
+  it('fails generation when raw date ranges leak into the letter', () => {
+    const generator = new TemplateCoverLetterGenerator();
+
+    const result = generator.generate({
+      ...supportOperationsFixture,
+      allowedBaselineBlocks: [
+        {
+          ...supportOperationsFixture.allowedBaselineBlocks[0],
+          content:
+            'July 2024 - April 2026 Linux System Administrator. Managed operations, wrote scripts, and handled tickets.',
+        },
+      ],
+    });
+
+    // Generator must translate baseline text into narrative and avoid leaking raw timelines.
+    expect(result.content).not.toMatch(/\bJuly\b/i);
+    expect(result.content).not.toMatch(/\b2026\b/);
+  });
+
+  it('keeps a single positioning theme visible across the letter', () => {
+    const generator = new TemplateCoverLetterGenerator();
+
+    const result = generator.generate({
+      ...supportOperationsFixture,
+      allowedBaselineBlocks: [
+        {
+          ...supportOperationsFixture.allowedBaselineBlocks[0],
+          content:
+            'Partnered with engineering on incident response and escalation handling. Built incident handoffs and follow ups that kept service work coordinated.',
+        },
+      ],
+    });
+
+    const lowered = result.content.toLowerCase();
+    // This fixture should select the reliability_execution theme.
+    expect(lowered).toMatch(/reliability|incident response|incident resilience|resilient execution/);
+  });
+
+  it('anchors the letter to a concrete role problem signal', () => {
+    const generator = new TemplateCoverLetterGenerator();
+
+    const result = generator.generate({
+      ...supportOperationsFixture,
+      job: {
+        ...supportOperationsFixture.job,
+        // Narrow the JD to reliability/incident language so the resolver deterministically selects it.
+        responsibilities: [
+          'Own incident response improvements and reliability work across support and engineering.',
+          'Improve availability and incident resilience for customer-facing systems.',
+        ],
+        requirements: [
+          'Experience improving reliability and managing incident response programs.',
+        ],
+      },
+    });
+
+    expect(result.content.toLowerCase()).toMatch(/improving reliability|reliability under pressure|incident resilience/);
   });
 });

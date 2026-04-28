@@ -47,4 +47,9 @@ export const COVER_LETTER_PHRASE_REWRITES: Array<{
   { pattern: /\bclear ownership\b/gi, replacement: 'reliable ownership' },
   { pattern: /\bproven expertise\b/gi, replacement: 'strong judgment' },
   { pattern: /\bi can contribute immediately\b/gi, replacement: 'I can ramp quickly' },
+  { pattern: /\bsteady cadence\b/gi, replacement: 'consistent execution' },
+  { pattern: /\bcadence\b/gi, replacement: 'consistent execution' },
+  { pattern: /\bkeeps ([a-z ]{3,40}) visible\b/gi, replacement: 'made $1 visible' },
+  { pattern: /\bmoving in a steady cadence\b/gi, replacement: 'consistently improved' },
+  { pattern: /\bgives a practical way to contribute by\b/gi, replacement: 'allowed me to contribute by' },
 ];
