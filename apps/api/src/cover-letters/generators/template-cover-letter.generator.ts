@@ -309,6 +309,8 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       ),
       ...(openingProof ? [this.ensureSentence(openingProof)] : []),
     ]);
+    const DEBUG_MARKER = 'ZZZ_NEW_LOGIC';
+    const openingWithMarker = `${DEBUG_MARKER} ${opening}`;
 
     const bodyParagraphs = [
       buildArgumentParagraph({
@@ -350,7 +352,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
         name: candidateName,
       },
       salutation: COVER_LETTER_REQUIRED_SALUTATION,
-      opening,
+      opening: openingWithMarker,
       bodyParagraphs,
       closingParagraph: closing,
       signoff: COVER_LETTER_SIGNOFF,
