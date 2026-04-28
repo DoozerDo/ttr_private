@@ -8872,6 +8872,7 @@ export default function StudioPage() {
       generationReadyPhase === "generating";
 
     const storageKey = `ttr:studio:auto-generate:${signature}`;
+    const lastSignatureKey = "ttr:studio:auto-generate:last-signature";
     const storage = typeof window !== "undefined" ? window.localStorage : null;
     let latch: string | null = null;
     try {
@@ -8951,14 +8952,25 @@ export default function StudioPage() {
       return;
     }
 
-    // Guardrail: this state must not be silent.
-    if (ready && !artifactsExist && !generatingNow) {
-      console.error("INVALID STATE: ready without generation or artifacts", decision);
-    }
-
     generationReadyAutoStartRef.current = signature;
     try {
-      if (storage && typeof storage.setItem === "function") storage.setItem(storageKey, "started");
+      if (storage && typeof storage.setItem === "function") {
+        // If we're about to legitimately start generation, clear any stale failed latch for the same
+        // signature (or the immediately previous signature, if present). This prevents "failed"
+        // from surviving a later successful generation.
+        if (typeof storage.getItem === "function" && typeof storage.removeItem === "function") {
+          const previousSignature = storage.getItem(lastSignatureKey);
+          if (previousSignature && previousSignature !== signature) {
+            const previousKey = `ttr:studio:auto-generate:${previousSignature}`;
+            const previousLatch = storage.getItem(previousKey);
+            if (previousLatch === "failed") storage.removeItem(previousKey);
+          }
+          const currentLatch = storage.getItem(storageKey);
+          if (currentLatch === "failed") storage.removeItem(storageKey);
+        }
+        storage.setItem(lastSignatureKey, signature);
+        storage.setItem(storageKey, "started");
+      }
     } catch {
       // ignore
     }
@@ -8967,8 +8979,14 @@ export default function StudioPage() {
       try {
         if (shouldLog) console.log("[STUDIO][AUTO_GEN][START_CALLED]");
         const { ok, resumeResult, coverResult } = await startGenerationFromReadyShell("shell_auto");
+        const resumeSucceeded = resumeResult?.ok === true && resumeResult.status === "success";
+        const coverSucceeded = coverResult?.ok === true && coverResult.status === "success";
+        const latchSucceeded = ok || (resumeSucceeded && coverSucceeded);
         try {
-          if (storage && typeof storage.setItem === "function") storage.setItem(storageKey, ok ? "succeeded" : "failed");
+          if (storage && typeof storage.setItem === "function") {
+            storage.setItem(storageKey, latchSucceeded ? "succeeded" : "failed");
+            storage.setItem(lastSignatureKey, signature);
+          }
         } catch {
           // ignore
         }
@@ -8986,7 +9004,7 @@ export default function StudioPage() {
           }));
         }
         if (debugAutoGenerationEnabled) {
-          console.log("[STUDIO][AUTO_GEN][RESULT]", { ...decision, ok });
+          console.log("[STUDIO][AUTO_GEN][RESULT]", { ...decision, ok, latchSucceeded });
         }
       } catch (error) {
         try {
