@@ -349,6 +349,8 @@ describe("Studio auto-generation", () => {
       expect(screen.getByTestId("studio-cover-ready-panel")).toBeInTheDocument();
     }, { timeout: 6000 });
 
+    expect(screen.queryByTestId("studio-resume-missing")).not.toBeInTheDocument();
+
     const resumeBodies = readPostBodies(fetchMock, "/api/resume");
     const coverBodies = readPostBodies(fetchMock, "/api/cover-letters");
 

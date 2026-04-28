@@ -2358,7 +2358,7 @@ export default function StudioPage() {
     isResumeEditMode &&
     JSON.stringify(draftResumeModel ?? null) !==
       JSON.stringify((savedEditedResumeModel ?? generatedResumeModel) ?? null);
-  const hasResumeDraft = resumePresenter.status === "success" && Boolean(resumeState.response);
+  const hasResumeDraft = Boolean(generatedResumeModel) && Boolean(resumeState.response);
   const hasResumeArtifact = resumePresenter.hasExportableContent;
   const canExportDocuments = productReadiness.generation_readiness.canExport;
   const canExportResume =
@@ -2417,7 +2417,7 @@ export default function StudioPage() {
   const pairWorkflowState = useMemo(() => {
     const resumeStatus: PairWorkflowArtifactStatus = resumeGenerating || autoGenerationInFlight
       ? "generating"
-      : resumePresenter.status === "success" && Boolean(resumeState.response)
+      : Boolean(generatedResumeModel) && Boolean(resumeState.response)
         ? "ready"
         : resumePresenter.status === "blocked" || resumePresenter.status === "error"
           ? "failed"
@@ -2452,9 +2452,36 @@ export default function StudioPage() {
     coverState.response,
     effectiveBaselineId,
     effectiveJobId,
+    generatedResumeModel,
     productDecisionState.canonicalDecision,
     requestedAnalysisId,
     resumeGenerating,
+    resumePresenter.status,
+    resumeState.response,
+  ]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    const responseKeys =
+      resumeState.response && typeof resumeState.response === "object"
+        ? Object.keys(resumeState.response as Record<string, unknown>).slice(0, 20)
+        : [];
+    console.log("[studio][resume_panel_decision]", {
+      resumeGenerating,
+      resumeStateResponsePresent: Boolean(resumeState.response),
+      resumeStateResponseKeys: responseKeys,
+      presenterStatus: resumePresenter.status,
+      presenterHasExportableContent: resumePresenter.hasExportableContent,
+      readResumeModelHasModel: Boolean(generatedResumeModel),
+      artifactHasOutput: hasResumeDraft,
+      canExportResume,
+    });
+  }, [
+    canExportResume,
+    generatedResumeModel,
+    hasResumeDraft,
+    resumeGenerating,
+    resumePresenter.hasExportableContent,
     resumePresenter.status,
     resumeState.response,
   ]);
@@ -10248,7 +10275,7 @@ export default function StudioPage() {
               </Link>
             ) : null}
           </div>
-        ) : resumePresenter.status === "success" && resumeState.response && !normalizedArtifacts.shouldSuppressStalePreview ? (
+        ) : Boolean(effectiveResumeModel) && resumeState.response && !normalizedArtifacts.shouldSuppressStalePreview ? (
           <div
             className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
             data-testid="studio-resume-ready-panel"
