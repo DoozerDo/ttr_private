@@ -24,12 +24,36 @@ export const RESULTS_RESUME_PREVIEW_LIMITS: ResumePreviewLimits = {
 
 export function readResumeModel(payload: unknown): ResumeModel | null {
   if (!payload || typeof payload !== "object") return null;
-  const record = payload as Record<string, unknown>;
-  const preview = record.preview;
-  if (!preview || typeof preview !== "object") return null;
-  const resume = (preview as Record<string, unknown>).resume;
-  if (!resume || typeof resume !== "object") return null;
-  return resume as ResumeModel;
+  const rawRecord = payload as Record<string, unknown>;
+
+  const maybePayload =
+    rawRecord.payload && typeof rawRecord.payload === "object"
+      ? (rawRecord.payload as Record<string, unknown>)
+      : null;
+
+  const readFromPreview = (record: Record<string, unknown> | null): ResumeModel | null => {
+    if (!record) return null;
+    const preview = record.preview;
+    if (!preview || typeof preview !== "object") return null;
+    const resume = (preview as Record<string, unknown>).resume;
+    if (!resume || typeof resume !== "object") return null;
+    return resume as ResumeModel;
+  };
+
+  // Supported shapes (in priority order):
+  // - response.preview.resume
+  // - response.payload.preview.resume
+  // - response.payload.resume
+  const fromTopLevelPreview = readFromPreview(rawRecord);
+  if (fromTopLevelPreview) return fromTopLevelPreview;
+
+  const fromWrappedPreview = readFromPreview(maybePayload);
+  if (fromWrappedPreview) return fromWrappedPreview;
+
+  const nestedResume = maybePayload?.resume;
+  if (nestedResume && typeof nestedResume === "object") return nestedResume as ResumeModel;
+
+  return null;
 }
 
 export function estimateResumeModelBodyLength(model: ResumeModel | null): number {

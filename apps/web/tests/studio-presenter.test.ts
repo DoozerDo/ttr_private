@@ -7,6 +7,7 @@ import {
   presentCoverLetterGeneration,
   presentResumeGeneration,
 } from "@/src/lib/studio/helpers";
+import { readResumeModel } from "@/lib/resumePreviewContract";
 
 describe("studio presenter helpers", () => {
   it("maps blocked resume payloads to a safe presenter model", () => {
@@ -94,6 +95,25 @@ describe("studio presenter helpers", () => {
     const presented = presentResumeGeneration(payload);
     expect(presented.status).toBe("success");
     expect(presented.hasExportableContent).toBe(true);
+  });
+
+  it("reads resume model from outcome-wrapped payload shapes", () => {
+    const wrappedPreview = {
+      status: "success",
+      generationStatus: "success",
+      payload: {
+        preview: {
+          resume: {
+            heading: { name: "Wrapped Candidate", contactLine: "wrapped@example.com" },
+            summary: "Summary text",
+            experience: [{ company: "Acme", roleTitle: "Manager", bullets: ["Delivered outcomes."] }],
+          },
+        },
+      },
+    };
+
+    const model = readResumeModel(wrappedPreview);
+    expect(model?.heading?.name).toBe("Wrapped Candidate");
   });
 
   it("does not treat section-only resume payloads as exportable success", () => {
