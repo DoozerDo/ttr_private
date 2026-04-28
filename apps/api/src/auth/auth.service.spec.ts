@@ -19,6 +19,8 @@ import { UserToken } from './user-token.entity';
 import { ResendEmailService } from '../email/resend-email.service';
 import { AccessCodesService } from '../access-codes/access-codes.service';
 import { AdminUsersService } from '../admin-users/admin-users.service';
+import * as fs from 'fs';
+import { join } from 'path';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -216,6 +218,68 @@ describe('AuthService', () => {
     };
 
     await expect(service.register(payload)).rejects.toThrow(/Passwords do not match/i);
+  });
+
+  it('does not fail signup when the confirmation email template file is missing', async () => {
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'NODE_ENV') return 'production';
+      if (key === 'REQUIRE_EMAIL_CONFIRMATION') return 'true';
+      if (key === 'SUPPORT_EMAIL') return 'support@targetthisrole.com';
+      return undefined;
+    });
+
+    const payload: RegisterDto = {
+      firstName: 'Test',
+      lastName: 'User',
+      email: 'template-missing@example.com',
+      password: 'Password123',
+      confirmPassword: 'Password123',
+    };
+
+    usersService.findByEmail.mockResolvedValue(null);
+    usersService.create.mockImplementation(async ({ email, passwordHash }) => ({
+      id: 'user-id',
+      email,
+      firstName: payload.firstName,
+      lastName: payload.lastName,
+      emailConfirmed: false,
+      passwordHash,
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
+      role: 'user',
+      subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }));
+
+    const templatePath = join(
+      process.cwd(),
+      'src',
+      'emailTemplates',
+      'signup-confirmation.html',
+    );
+    const movedPath = `${templatePath}.test-moved`;
+    const hadTemplate = fs.existsSync(templatePath);
+
+    if (hadTemplate) {
+      fs.renameSync(templatePath, movedPath);
+    }
+
+    try {
+      const result = await service.register(payload);
+      expect(result.success).toBe(true);
+      expect(result.emailConfirmationRequired).toBe(true);
+    } finally {
+      if (hadTemplate && fs.existsSync(movedPath)) {
+        fs.renameSync(movedPath, templatePath);
+      }
+    }
   });
 
   it('logs in a user with valid credentials', async () => {
