@@ -74,6 +74,28 @@ describe("studio presenter helpers", () => {
     expect(presented.hasExportableContent).toBe(true);
   });
 
+  it("unwraps outcome-wrapped resume payloads into exportable presenter state", () => {
+    const payload = {
+      status: "success",
+      generationStatus: "success",
+      payload: {
+        status: "success",
+        generationStatus: "success",
+        exports: { docx: true, pdf: true },
+        preview: {
+          resume: {
+            heading: { name: "Wrapped Candidate", contactLine: "wrapped@example.com" },
+            experience: [{ company: "Acme", roleTitle: "Manager", bullets: ["Delivered outcomes."] }],
+          },
+        },
+      },
+    };
+
+    const presented = presentResumeGeneration(payload);
+    expect(presented.status).toBe("success");
+    expect(presented.hasExportableContent).toBe(true);
+  });
+
   it("does not treat section-only resume payloads as exportable success", () => {
     const payload = {
       status: "success",

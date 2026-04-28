@@ -617,7 +617,31 @@ export function presentResumeGeneration(payload: unknown): StudioGenerationPrese
   if (!payload || typeof payload !== "object") {
     return { status: "unknown", hasExportableContent: false, display: null };
   }
-  const record = payload as Record<string, unknown>;
+  const rawRecord = payload as Record<string, unknown>;
+  // Some endpoints wrap successful generation results inside an outcome envelope:
+  // { status, generationStatus, payload: { ...actualDoc } }.
+  // Cover letters already unwrap this; resumes must behave the same so Studio can hydrate reliably.
+  const record = (() => {
+    const maybePayload =
+      rawRecord.payload && typeof rawRecord.payload === "object"
+        ? (rawRecord.payload as Record<string, unknown>)
+        : null;
+    const hasOuterPreviewResume =
+      rawRecord.preview &&
+      typeof rawRecord.preview === "object" &&
+      (rawRecord.preview as Record<string, unknown>).resume &&
+      typeof (rawRecord.preview as Record<string, unknown>).resume === "object";
+    const hasInnerPreviewResume =
+      maybePayload?.preview &&
+      typeof maybePayload.preview === "object" &&
+      (maybePayload.preview as Record<string, unknown>).resume &&
+      typeof (maybePayload.preview as Record<string, unknown>).resume === "object";
+
+    if (hasInnerPreviewResume) return maybePayload;
+    if (hasOuterPreviewResume) return rawRecord;
+    if (maybePayload) return maybePayload;
+    return rawRecord;
+  })();
   const artifactFailure = readArtifactFailurePayload(payload);
   if (artifactFailure) {
     return {
