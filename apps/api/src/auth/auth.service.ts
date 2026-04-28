@@ -87,65 +87,83 @@ export class AuthService {
   }
 
   async register(payload: RegisterDto): Promise<RegisterResponseDto> {
-    if (payload.password !== payload.confirmPassword) {
-      throw new BadRequestException('Passwords do not match');
-    }
+    const normalizedEmail = payload.email?.trim().toLowerCase() ?? '';
+    try {
+      if (payload.password !== payload.confirmPassword) {
+        throw new BadRequestException('Passwords do not match');
+      }
 
-    const existing = await this.usersService.findByEmail(payload.email);
+      const existing = await this.usersService.findByEmail(normalizedEmail);
 
-    if (existing) {
+      if (existing) {
+        return {
+          success: true,
+          message: this.requireEmailConfirmation
+            ? 'Check your email to confirm your account.'
+            : 'Account created.',
+          emailConfirmationRequired: this.requireEmailConfirmation,
+        };
+      }
+
+      const passwordHash = await bcrypt.hash(payload.password, 10);
+      const user = await this.usersService.create({
+        email: normalizedEmail,
+        passwordHash,
+        firstName: payload.firstName.trim(),
+        lastName: payload.lastName.trim(),
+        emailConfirmed: !this.requireEmailConfirmation,
+      });
+      await this.notifyNewRegistration(user);
+
+      if (!this.requireEmailConfirmation) {
+        return {
+          success: true,
+          message: 'Account created.',
+          emailConfirmationRequired: false,
+        };
+      }
+
+      const token = randomBytes(32).toString('hex');
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      await this.userTokensRepository.save(
+        this.userTokensRepository.create({
+          userId: user.id,
+          token,
+          type: 'confirm',
+          expiresAt,
+        }),
+      );
+
+      const confirmUrl = buildConfirmationUrl(this.publicWebBaseUrl, token);
+      const html = this.renderSignupConfirmationTemplate(
+        confirmUrl,
+        this.supportEmail,
+      );
+
+      await this.sendConfirmationEmail(user.email, html, this.supportEmail);
+
       return {
         success: true,
-        message: this.requireEmailConfirmation
-          ? 'Check your email to confirm your account.'
-          : 'Account created.',
-        emailConfirmationRequired: this.requireEmailConfirmation,
+        message: 'Check your email to confirm your account.',
+        emailConfirmationRequired: true,
       };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        this.logger.warn(
+          `[register] controlled error status=${error.getStatus()} email=${normalizedEmail || 'unknown'} message=${error.message}`,
+        );
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `[register] unexpected error email=${normalizedEmail || 'unknown'} message=${message}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw new InternalServerErrorException(
+        'Signup failed due to an unexpected server error. Please try again.',
+      );
     }
-
-    const passwordHash = await bcrypt.hash(payload.password, 10);
-    const user = await this.usersService.create({
-      email: payload.email,
-      passwordHash,
-      firstName: payload.firstName.trim(),
-      lastName: payload.lastName.trim(),
-      emailConfirmed: !this.requireEmailConfirmation,
-    });
-    await this.notifyNewRegistration(user);
-
-    if (!this.requireEmailConfirmation) {
-      return {
-        success: true,
-        message: 'Account created.',
-        emailConfirmationRequired: false,
-      };
-    }
-
-    const token = randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-    await this.userTokensRepository.save(
-      this.userTokensRepository.create({
-        userId: user.id,
-        token,
-        type: 'confirm',
-        expiresAt,
-      }),
-    );
-
-    const confirmUrl = buildConfirmationUrl(this.publicWebBaseUrl, token);
-    const html = this.renderSignupConfirmationTemplate(
-      confirmUrl,
-      this.supportEmail,
-    );
-
-    await this.sendConfirmationEmail(user.email, html, this.supportEmail);
-
-    return {
-      success: true,
-      message: 'Check your email to confirm your account.',
-      emailConfirmationRequired: true,
-    };
   }
 
   async login(payload: LoginDto): Promise<AuthResponseDto> {
@@ -507,10 +525,22 @@ export class AuthService {
     ];
     const templatePath =
       candidatePaths.find((path) => existsSync(path)) ?? candidatePaths[0];
-    const template = readFileSync(templatePath, 'utf-8');
-    return template
-      .replaceAll('{{confirm_url}}', confirmUrl)
-      .replaceAll('{{support_email}}', supportEmail);
+    try {
+      const template = readFileSync(templatePath, 'utf-8');
+      return template
+        .replaceAll('{{confirm_url}}', confirmUrl)
+        .replaceAll('{{support_email}}', supportEmail);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `[confirmation-email][template-fallback] path=${templatePath} reason=${message}`,
+      );
+      return [
+        '<p>Confirm your account by clicking the link below:</p>',
+        `<p><a href="${confirmUrl}">Confirm account</a></p>`,
+        `<p>If you did not request this, you can ignore this email. Need help? ${supportEmail}</p>`,
+      ].join('\n');
+    }
   }
 
   private async sendConfirmationEmail(

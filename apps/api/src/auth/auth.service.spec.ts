@@ -168,6 +168,56 @@ describe('AuthService', () => {
     expect(result.success).toEqual(true);
   });
 
+  it('returns a safe error when user creation fails unexpectedly', async () => {
+    const payload: RegisterDto = {
+      firstName: 'Test',
+      lastName: 'User',
+      email: 'user@example.com',
+      password: 'Password123',
+      confirmPassword: 'Password123',
+    };
+
+    usersService.findByEmail.mockResolvedValue(null);
+    usersService.create.mockRejectedValue(new Error('db unavailable'));
+
+    await expect(service.register(payload)).rejects.toBeInstanceOf(
+      InternalServerErrorException,
+    );
+    await expect(service.register(payload)).rejects.toThrow(
+      /Signup failed due to an unexpected server error/i,
+    );
+  });
+
+  it('returns a success response when registering a duplicate email', async () => {
+    const payload: RegisterDto = {
+      firstName: 'Test',
+      lastName: 'User',
+      email: 'user@example.com',
+      password: 'Password123',
+      confirmPassword: 'Password123',
+    };
+
+    usersService.findByEmail.mockResolvedValue({
+      id: 'existing-user',
+      email: payload.email,
+    } as unknown as User);
+
+    const result = await service.register(payload);
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects invalid signup input when passwords do not match', async () => {
+    const payload: RegisterDto = {
+      firstName: 'Test',
+      lastName: 'User',
+      email: 'user@example.com',
+      password: 'Password123',
+      confirmPassword: 'Different123',
+    };
+
+    await expect(service.register(payload)).rejects.toThrow(/Passwords do not match/i);
+  });
+
   it('logs in a user with valid credentials', async () => {
     const payload: LoginDto = {
       email: 'user@example.com',

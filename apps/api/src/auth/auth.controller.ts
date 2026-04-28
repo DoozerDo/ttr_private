@@ -43,8 +43,25 @@ export class AuthController {
     @Body() payload: RegisterDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const response = await this.authService.register(payload);
-    return response;
+    try {
+      const response = await this.authService.register(payload);
+      return response;
+    } catch (error) {
+      if (error instanceof HttpException) {
+        this.logger.warn(
+          `AuthController.register failed with controlled error status=${error.getStatus()} message=${error.message}`,
+        );
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `AuthController.register failed unexpectedly message=${message}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw new InternalServerErrorException(
+        'Signup failed due to unexpected controller error.',
+      );
+    }
   }
 
   @Get('confirm')
