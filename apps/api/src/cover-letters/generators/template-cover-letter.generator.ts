@@ -104,36 +104,36 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
 
     const strategySentence = (() => {
       const frame = this.cleanText(strategyFrame);
-      if (!frame) return this.ensureSentence('My background maps to the operating context behind the role.');
+      if (!frame) return this.ensureSentence('My background aligns with what this role requires.');
       if (/^(a|an|the)\b/i.test(frame)) {
-        return this.ensureSentence(`I lead with the operating lens described as ${frame}.`);
+        return this.ensureSentence(`I align to the role as ${frame}.`);
       }
-      return this.ensureSentence(`I lead with a ${frame} lens.`);
+      return this.ensureSentence(`I align to the role through ${frame}.`);
     })();
 
     const opening = this.joinSentences([
-      this.ensureSentence(`For ${roleDescriptor}, my background aligns with the operating context behind the work.`),
+      this.ensureSentence(`My background aligns with ${roleDescriptor} because I have owned work where clear execution and service quality mattered.`),
       // Strategy contract: ensure the explicit positioning frame is visible in the artifact,
       // so downstream UI/tests can verify resume and cover letter share the same frame.
       strategySentence,
       ...(strategyPriority ? [this.ensureSentence(`The strongest alignment is ${strategyPriority}.`)] : []),
-      this.ensureSentence('The work has centered on ownership of the operating rhythm and the decisions that keep delivery reliable.'),
+      this.ensureSentence('That experience has focused on practical ownership, steady follow through, and decisions that keep teams aligned.'),
       ...openingEvidence.map((entry) => this.ensureSentence(this.compactEvidenceText(entry.normalizedText))),
     ]);
     const bodyParagraphs = [
       this.joinSentences([
-        this.ensureSentence('In practice, that fit shows up in how I have owned execution systems that keep service work moving.'),
+        this.ensureSentence('That fit shows up in the work I have led to make day to day execution clearer and more consistent.'),
         ...body1Evidence.map((entry) => this.ensureSentence(this.compactEvidenceText(entry.normalizedText))),
-        this.ensureSentence('This kind of ownership translates directly to the role because it turns messy inputs into clear priorities and dependable follow through.'),
+        this.ensureSentence('That experience is relevant in this role because it turns real constraints into clear priorities and repeatable decisions.'),
       ]),
       this.joinSentences([
-        this.ensureSentence('Across cross functional partners, I bring an operating approach that protects quality while work is changing.'),
+        this.ensureSentence('I have also partnered across teams to keep work moving while protecting quality and customer impact.'),
         ...body2Evidence.map((entry) => this.ensureSentence(this.compactEvidenceText(entry.normalizedText))),
-        this.ensureSentence('That is relevant to the role because it keeps leaders aligned on the next decision and keeps teams accountable to the same operating signals.'),
+        this.ensureSentence('That is relevant here because it keeps decisions grounded, reduces confusion, and helps teams execute against the same priorities.'),
       ]),
     ];
     const closingLead = this.ensureSentence(
-      'If the role needs steady ownership of operating rhythm, decision quality, and delivery follow through, I can bring that to the team.',
+      'If you need someone who can translate verified experience into clear, practical execution for this role, I can bring that approach.',
     );
     const closingEvidenceSentence = closingEvidence.length
       ? this.ensureSentence(this.compactEvidenceText(closingEvidence[0].normalizedText))
@@ -141,7 +141,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     const closing = this.joinSentences([
       closingLead,
       ...(closingEvidenceSentence ? [closingEvidenceSentence] : []),
-      this.ensureSentence('I can contribute quickly by grounding decisions in verified evidence, then translating that signal into clear execution priorities.'),
+      this.ensureSentence('I would welcome the chance to discuss how I can contribute in this role with grounded, accountable delivery.'),
     ]);
     addTrace('opening', openingEvidence);
     addTrace('body_1', body1Evidence);

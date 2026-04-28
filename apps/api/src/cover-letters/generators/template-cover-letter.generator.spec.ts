@@ -229,4 +229,30 @@ describe('TemplateCoverLetterGenerator', () => {
       expect(lowered).not.toContain(phrase);
     }
   });
+
+  it('avoids internal-sounding positioning phrases', () => {
+    const generator = new TemplateCoverLetterGenerator();
+
+    const result = generator.generate({
+      ...supportOperationsFixture,
+      allowedBaselineBlocks: [
+        {
+          ...supportOperationsFixture.allowedBaselineBlocks[0],
+          content:
+            'Managed escalation flows and coordinated incident handoffs across product, support, and engineering teams. Built weekly operating reviews that kept queue health, staffing tradeoffs, and service quality visible. Partnered with product and engineering on root cause fixes and recurring issue reduction.',
+        },
+      ],
+    });
+
+    const lowered = result.content.toLowerCase();
+    const banned = [
+      'operating context behind the work',
+      'lead with a lens',
+      'ownership of execution systems',
+      'cross functional operating approach',
+    ];
+    for (const phrase of banned) {
+      expect(lowered).not.toContain(phrase);
+    }
+  });
 });
