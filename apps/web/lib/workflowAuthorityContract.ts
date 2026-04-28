@@ -155,8 +155,10 @@ function resolveGenerationState(input: {
   artifactsPair: WorkflowArtifactState;
   retryableFailure: boolean;
 }): WorkflowGenerationState {
-  if (!input.canGenerate || input.readinessBlocked) return "blocked";
   if (input.artifactsPair === "generated") return "generated";
+  // Readiness is a preflight gate. It must block *new* generation, but it must not invalidate
+  // already-generated artifacts.
+  if (!input.canGenerate || input.readinessBlocked) return "blocked";
   if (input.surfaceCanonicalState === "generation_in_progress" || input.artifactsPair === "generating") return "generating";
   if (input.surfaceCanonicalState === "generation_ready") return "ready";
   if (input.surfaceCanonicalState === "generation_failed" || input.artifactsPair === "failed") {

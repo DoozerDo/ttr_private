@@ -261,9 +261,13 @@ export function resolveWorkflowOrchestrator(input: WorkflowOrchestratorInput): W
         },
         workflowAuthorityOverride: input.workflowAuthority,
         artifact: {
-          resume: { hasOutput: false, failed: input.resume.status === "failed", status: String(input.resume.status) },
+          resume: {
+            hasOutput: Boolean(input.artifact.hasResume),
+            failed: input.resume.status === "failed",
+            status: String(input.resume.status),
+          },
           coverLetter: {
-            hasOutput: false,
+            hasOutput: Boolean(input.artifact.hasCoverLetter),
             failed: input.coverLetter.status === "failed",
             status: String(input.coverLetter.status),
           },

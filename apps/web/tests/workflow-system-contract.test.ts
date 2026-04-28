@@ -96,6 +96,26 @@ describe("workflow orchestrator contract", () => {
     expect(blockedOrchestrator.authorityState.trustTone).toBe("blocked");
   });
 
+  it("does not downgrade generated artifacts to blocked when readiness later reports blocked", () => {
+    const orchestrator = resolveWorkflowOrchestrator(
+      baseInput({
+        generationReadiness: readiness("blocked", true),
+        artifact: {
+          hasResume: true,
+          hasCoverLetter: true,
+          pairStatus: "completed",
+          generating: false,
+          failure: null,
+        },
+        resume: { status: "ready" },
+        coverLetter: { status: "ready" },
+      }),
+    );
+
+    expect(orchestrator.contract.generation.state).toBe("generated");
+    expect(orchestrator.contract.generation.auto.shouldStart).toBe(false);
+  });
+
   it("generation_in_progress always overrides generation_ready", () => {
     const orchestrator = resolveWorkflowOrchestrator(
       baseInput({
