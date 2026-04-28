@@ -256,6 +256,110 @@ describe("Studio auto-generation", () => {
     });
   });
 
+  it("hydrates artifacts after resolving baselineVersionId from versions when initially missing", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "",
+    });
+
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            scoring_v2: { score: 84 },
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: null,
+            verification_coverage: { totalClaims: 1, verifiedClaims: 1, inferredClaims: 0, unverifiedClaims: 0, unverifiedRequirements: [] },
+          }),
+        );
+      }
+
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+
+      if (url.includes("/api/studio/artifacts")) {
+        const parsed = new URL(url, "http://localhost");
+        expect(parsed.searchParams.get("baselineId")).toBe("base-1");
+        expect(parsed.searchParams.get("jobId")).toBe("job-1");
+        expect(parsed.searchParams.get("baselineVersionId")).toBe("base-version-1");
+        expect(parsed.searchParams.get("analysisId")).toBe("analysis-1");
+
+        return Promise.resolve(
+          createResponse({
+            resume: {
+              status: "completed",
+              // Simulate a backend that stores response bodies as JSON strings.
+              responseBody: JSON.stringify({
+                status: "success",
+                generationStatus: "success",
+                payload: {
+                  status: "success",
+                  generationStatus: "success",
+                  exportReady: true,
+                  exports: { docx: true, pdf: true },
+                  preview: {
+                    resume: {
+                      heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                      summary: "Support leader focused on scalable operations.",
+                      experience: [{ company: "Acme", roleTitle: "Manager", bullets: ["Led support operations."] }],
+                    },
+                  },
+                },
+              }),
+            },
+            coverLetter: {
+              status: "completed",
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  coverLetter: {
+                    paragraphs: [
+                      "Dear Hiring Team,",
+                      "I bring verified leadership and operational experience aligned to this role.",
+                      "Sincerely,",
+                      "Alex Candidate",
+                    ],
+                  },
+                },
+              },
+            },
+          }),
+        );
+      }
+
+      if (url.endsWith("/api/resume") && init?.method === "POST") {
+        return resolveAutoGenerationSuccess(input);
+      }
+      if (url.endsWith("/api/cover-letters") && init?.method === "POST") {
+        return resolveAutoGenerationSuccess(input);
+      }
+
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-resume-ready-panel")).toBeInTheDocument();
+      expect(screen.queryByTestId("studio-resume-missing")).not.toBeInTheDocument();
+    }, { timeout: 6000 });
+  }, 15000);
+
   it("clears a stale failed latch after hydration when generation succeeds", async () => {
     overrideSearchParams({});
 

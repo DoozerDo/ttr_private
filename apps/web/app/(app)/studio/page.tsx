@@ -550,6 +550,24 @@ function writeStoredStudioArtifacts(key: string, snapshot: StoredStudioArtifactS
   }
 }
 
+function normalizeHydratedArtifactResponse(value: unknown): unknown | null {
+  if (value == null) return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    // Some backends store response bodies as JSON strings. Studio expects objects.
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        return JSON.parse(trimmed) as unknown;
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  }
+  return value;
+}
+
 function getBackendArtifactStatus(record: BackendStudioArtifactRecord | null | undefined) {
   const status = trimString(record?.status).toLowerCase();
   if (status === "completed") {
@@ -1621,12 +1639,14 @@ export default function StudioPage() {
 
     const applyHydratedPayload = (payload: BackendStudioArtifactsResponse | StoredStudioArtifactSnapshot | null) => {
       if (!payload || cancelled) return;
-      const resumeResponse = isBackendStudioArtifactsResponse(payload)
+      const resumeResponseRaw = isBackendStudioArtifactsResponse(payload)
         ? payload.resume?.responseBody ?? null
         : payload.resumeResponse ?? null;
-      const coverResponse = isBackendStudioArtifactsResponse(payload)
+      const coverResponseRaw = isBackendStudioArtifactsResponse(payload)
         ? payload.coverLetter?.responseBody ?? null
         : payload.coverResponse ?? null;
+      const resumeResponse = normalizeHydratedArtifactResponse(resumeResponseRaw);
+      const coverResponse = normalizeHydratedArtifactResponse(coverResponseRaw);
       const resumeFailure = isBackendStudioArtifactsResponse(payload)
         ? buildFailureFromBackendRecord("resume", payload.resume)
         : null;
@@ -1636,7 +1656,10 @@ export default function StudioPage() {
       if (resumeResponse) {
         setResumeState((current) => ({
           ...current,
-          response: resumeResponse,
+          response:
+            resumeResponse && typeof resumeResponse === "object"
+              ? ({ ...(resumeResponse as Record<string, unknown>) } as unknown)
+              : resumeResponse,
           error: null,
           tierGateError: null,
           artifactFailure: null,
@@ -1649,7 +1672,10 @@ export default function StudioPage() {
       if (coverResponse) {
         setCoverState((current) => ({
           ...current,
-          response: coverResponse,
+          response:
+            coverResponse && typeof coverResponse === "object"
+              ? ({ ...(coverResponse as Record<string, unknown>) } as unknown)
+              : coverResponse,
           error: null,
           tierGateError: null,
           artifactFailure: null,
@@ -1731,6 +1757,11 @@ export default function StudioPage() {
         artifactsParams.set("baselineId", effectiveBaselineId);
         artifactsParams.set("baselineVersionId", resolvedBaselineVersionId);
         artifactsParams.set("jobId", effectiveJobId);
+        // Keep resume + cover hydration aligned to the same artifact identity. Some backends scope
+        // drafts by analysisId, so include it when available.
+        if (requestedAnalysisId) {
+          artifactsParams.set("analysisId", requestedAnalysisId);
+        }
         const artifactsUrl = `/api/studio/artifacts?${artifactsParams.toString()}`;
         if (process.env.NODE_ENV === "development") {
           console.info("[studio] artifact_hydration_fetch", {
