@@ -797,6 +797,26 @@ export class CoverLettersService {
   }
 
   async getGenerationReadiness(userId: string, input: GenerateCoverLetterDto) { 
+    // Readiness is a preflight signal. It should never throw for missing/invalid IDs; instead,
+    // return a controlled blocked response so the UI can render safely.
+    const baselineId = typeof (input as any)?.baselineId === 'string' ? (input as any).baselineId.trim() : '';
+    const jobId = typeof (input as any)?.jobId === 'string' ? (input as any).jobId.trim() : '';
+    const analysisId = typeof (input as any)?.analysisId === 'string' ? (input as any).analysisId.trim() : '';
+    if (!baselineId || !jobId || !analysisId) {
+      return {
+        status: 'blocked',
+        blocked: true,
+        compliance_flags: [],
+        reasons: [
+          {
+            code: 'missing_required_ids',
+            message:
+              'Generation readiness requires baselineId, jobId, and analysisId.',
+          },
+        ],
+      } as const;
+    }
+
     try { 
       const draft = await this.buildCoverLetterDraft(userId, input); 
       const flags = filterComplianceFlagsByCanonicalClaims( 
@@ -854,8 +874,39 @@ export class CoverLettersService {
             ],
           } as const;
         }
+
+        // Missing/invalid input or missing data should not 500 in readiness.
+        const status = error.getStatus?.();
+        if (status === 400 || status === 404) {
+          return {
+            status: 'blocked',
+            blocked: true,
+            compliance_flags: [],
+            reasons: [
+              {
+                code: 'readiness_unavailable',
+                message:
+                  'Readiness could not be determined from the current inputs.',
+              },
+            ],
+          } as const;
+        }
       }
-      throw error;
+
+      // For any unexpected runtime exception (TypeError, ORM edge cases, etc.), do not 500.
+      // Return a safe blocked response so Studio "generated" state remains usable and visible.
+      return {
+        status: 'blocked',
+        blocked: true,
+        compliance_flags: [],
+        reasons: [
+          {
+            code: 'readiness_error',
+            message:
+              'Readiness could not be determined due to an internal error.',
+          },
+        ],
+      } as const;
     }
   }
 

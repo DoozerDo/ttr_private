@@ -202,6 +202,22 @@ describe('CoverLettersService contract', () => {
     expect(readiness.status).toBe('ready');
   });
 
+  it('returns a controlled blocked readiness when required IDs are missing', async () => {
+    const { service } = buildService();
+    const buildDraftSpy = jest.spyOn(service as any, 'buildCoverLetterDraft');
+
+    const readiness = await service.getGenerationReadiness('user-1', {
+      baselineId: '',
+      jobId: '',
+      analysisId: '',
+      baselineVersionId: null,
+    } as any);
+
+    expect(buildDraftSpy).not.toHaveBeenCalled();
+    expect(readiness.status).toBe('blocked');
+    expect(readiness.blocked).toBe(true);
+  });
+
   it('returns readiness ready and allows generation in READY state', async () => {
     const { service } = buildService();
     const buildDraftSpy = jest.spyOn(service as any, 'buildCoverLetterDraft').mockResolvedValue({

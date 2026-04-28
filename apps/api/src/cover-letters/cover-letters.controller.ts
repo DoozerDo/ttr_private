@@ -125,9 +125,29 @@ export class CoverLettersController {
     @Req() request: TieredRequest,
   ) {
     const userId = this.requireUserId(request);
-    return withTimeout('generation', () =>
-      this.coverLettersService.getGenerationReadiness(userId, body),
-    );
+
+    // Defensive logging + shielding: readiness is a preflight signal and must not 500 for
+    // "normal" UX flows (including post-generation refreshes).
+    try {
+      this.logger.log(
+        `[readiness] cover_letters.readiness request userId=${userId} baselineId=${(body as any)?.baselineId ?? 'null'} baselineVersionId=${(body as any)?.baselineVersionId ?? 'null'} jobId=${(body as any)?.jobId ?? 'null'} analysisId=${(body as any)?.analysisId ?? 'null'}`,
+      );
+    } catch {
+      // ignore logging errors
+    }
+
+    try {
+      return await withTimeout('generation', () =>
+        this.coverLettersService.getGenerationReadiness(userId, body),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `[readiness] cover_letters.readiness failed userId=${userId} message=${message}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw error;
+    }
   }
 
   private normalizeFormat(value: string): CoverLetterExportFormat {
