@@ -5198,6 +5198,11 @@ export default function StudioPage() {
       );
     }
     if (!generationLifecycle.canStartGeneration) {
+      // Manual retry must be able to regenerate when the current artifacts are unusable (quality failed).
+      // Do not block on the pair lifecycle "generated" state in that case.
+      if (opts?.forceRegenerate && artifactContract.hasUsableArtifacts === false) {
+        // proceed
+      } else {
       return finish(
         makeStudioAttempt("resume", {
           ok: false,
@@ -5207,6 +5212,7 @@ export default function StudioPage() {
           request: { sessionKey: opts?.sessionKey ?? null, requestId: null },
         }),
       );
+      }
     }
 
     const artifactType: StudioArtifactType = "resume";
@@ -5982,6 +5988,11 @@ export default function StudioPage() {
       );
     }
     if (!generationLifecycle.canStartGeneration) {
+      // Manual retry must be able to regenerate when the current artifacts are unusable (quality failed).
+      // Do not block on the pair lifecycle "generated" state in that case.
+      if (opts?.forceRegenerate && artifactContract.hasUsableArtifacts === false) {
+        // proceed
+      } else {
       return finish(
         makeStudioAttempt("cover", {
           ok: false,
@@ -5991,6 +6002,7 @@ export default function StudioPage() {
           request: { sessionKey: opts?.sessionKey ?? null, requestId: null },
         }),
       );
+      }
     }
 
     const artifactType: StudioArtifactType = "cover_letter";
@@ -9206,8 +9218,63 @@ export default function StudioPage() {
       console.warn("[studio][manual_regenerate_start]", { contractSignature: signature });
     }
 
-    void startGenerationFromReadyShell("manual_retry");
-  }, [startGenerationFromReadyShell, workflowOrchestratorCore.contract?.generation.auto.signature]);
+    // Manual retry must bypass all helper flows and hit the generation endpoints directly.
+    // This avoids any readiness-only routing in helpers and ensures Railway logs show:
+    // - REQ POST /resume
+    // - REQ POST /cover-letters
+    const manualRequestId = createRequestId();
+    const stableSessionKey = `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:${requestedAnalysisId ?? "analysis"}:manual_retry`;
+    const sessionKey = `${stableSessionKey}:${manualRequestId}:${Date.now()}`;
+
+    const baselineId = effectiveBaselineId ?? null;
+    const baselineVersionId = effectiveBaselineVersionId ?? null;
+    const jobId = effectiveJobId ?? null;
+    const analysisId = requestedAnalysisId ?? null;
+
+    console.log("[studio][manual_regenerate_resume_requested]", { requestId: manualRequestId, sessionKey });
+    console.log("[studio][manual_regenerate_cover_requested]", { requestId: manualRequestId, sessionKey });
+
+    const payload = {
+      baselineId,
+      baselineVersionId,
+      jobId,
+      analysisId,
+      requestId: manualRequestId,
+      sessionKey,
+      regenerationSource: "manual_retry" as const,
+    };
+
+    console.log("[studio][manual_regenerate_direct_resume]", payload);
+    console.log("[studio][manual_regenerate_direct_cover]", payload);
+    console.info("[GEN_PATH_CONFIRMED][RESUME]", { requestId: manualRequestId });
+    console.info("[GEN_PATH_CONFIRMED][COVER]", { requestId: manualRequestId });
+
+    const [resumeResponse, coverResponse] = await Promise.all([
+      fetch("/api/resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }),
+      fetch("/api/cover-letters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }),
+    ]);
+
+    console.log("[studio][manual_regenerate_result]", {
+      ok: resumeResponse.ok && coverResponse.ok,
+      requestId: manualRequestId,
+      resumeStatus: resumeResponse.status,
+      coverStatus: coverResponse.status,
+    });
+  }, [
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    requestedAnalysisId,
+    workflowOrchestratorCore.contract?.generation.auto.signature,
+  ]);
   useEffect(() => {
     const contract = workflowOrchestratorCore.contract;
     if (!contract) return;
@@ -9252,9 +9319,9 @@ export default function StudioPage() {
       });
     }
 
-    const artifactsExist =
-      contract.artifacts.hasAnyOutput ||
-      artifactContract.hasUsableArtifacts;
+    // Treat "artifacts exist" as "usable artifacts exist". Unusable outputs should not suppress
+    // regeneration (manual or auto) and should not trip the artifacts_already_generated lane.
+    const artifactsExist = artifactContract.hasUsableArtifacts;
     const generatingNow =
       autoGenerationInFlight ||
       resumeGenerating ||

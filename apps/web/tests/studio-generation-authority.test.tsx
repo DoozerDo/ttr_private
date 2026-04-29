@@ -320,14 +320,118 @@ describe("Studio manual regenerate after retry cap", () => {
     });
 
     await waitFor(() => {
-      expect(infoSpy).toHaveBeenCalledWith("[studio][manual_regenerate_resume_requested]", expect.anything());
-      expect(infoSpy).toHaveBeenCalledWith("[studio][manual_regenerate_cover_requested]", expect.anything());
-      expect(infoSpy).toHaveBeenCalledWith("[studio][manual_regenerate_result]", expect.anything());
+      expect(logSpy).toHaveBeenCalledWith("[studio][manual_regenerate_resume_requested]", expect.anything());
+      expect(logSpy).toHaveBeenCalledWith("[studio][manual_regenerate_cover_requested]", expect.anything());
+      expect(logSpy).toHaveBeenCalledWith("[studio][manual_regenerate_direct_resume]", expect.anything());
+      expect(logSpy).toHaveBeenCalledWith("[studio][manual_regenerate_direct_cover]", expect.anything());
+      expect(logSpy).toHaveBeenCalledWith("[studio][manual_regenerate_result]", expect.anything());
     });
 
     warnSpy.mockRestore();
     infoSpy.mockRestore();
     logSpy.mockRestore();
+  });
+
+  it("manual_retry bypasses artifacts_already_generated when artifacts are unusable", async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    // Reuse the same fetch setup as the other manual retry test.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const setup = (globalThis as any).fetch as unknown;
+    // Ensure the existing helper setup runs by calling the previous test's path:
+    // just render studio with the same harness functions already in this file.
+    // (We rely on the test file's default fetch mock configured by `setFetchImplementation`.)
+
+    // Set up fetch to record calls with the same shape used elsewhere in this file.
+    setFetchImplementation(
+      vi.fn((input: RequestInfo, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        const method = (init?.method ?? "GET").toUpperCase();
+        calls.push({ url, method });
+
+        if (url.includes("/api/baselines/base-1/versions")) {
+          return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+        }
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+          return Promise.resolve(
+            createResponse({
+              assessmentId: "analysis-1",
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: "base-version-1",
+              company: "Acme",
+              title: "Director of Support",
+              scoring_v2: { score: 92 },
+              verification_coverage: {
+                totalClaims: 3,
+                verifiedClaims: 3,
+                inferredClaims: 0,
+                unverifiedClaims: 0,
+                unverifiedRequirements: [],
+              },
+            }),
+          );
+        }
+        if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+          return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        }
+        if (method === "GET" && url.includes("/api/resume")) {
+          return Promise.resolve(
+            createResponse({
+              status: "success",
+              generationStatus: "success",
+              exports: { docx: true, pdf: true },
+              preview: {
+                resume: {
+                  heading: { name: "Test Candidate", contactLine: "test@example.com" },
+                  summary: "Designed and built the",
+                  experience: [{ company: "Acme", roleTitle: "Director of Support", bullets: ["Did work."] }],
+                  education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+                  competencies: ["Customer strategy"],
+                },
+              },
+            }),
+          );
+        }
+        if (method === "GET" && url.includes("/api/cover-letters")) {
+          return Promise.resolve(
+            createResponse({
+              status: "success",
+              generationStatus: "success",
+              exportReady: true,
+              exports: { docx: true, pdf: true },
+              preview: {
+                coverLetter: {
+                  paragraphs: ["The strongest fit comes from the operating context I have already handled.", "Second paragraph."],
+                },
+              },
+            }),
+          );
+        }
+        if (method === "POST" && url.includes("/api/resume")) {
+          return Promise.resolve(createResponse({ status: "success", generationStatus: "success", exports: { docx: true, pdf: true }, preview: { resume: { heading: { name: "X", contactLine: "Y" }, summary: "Designed and built the", experience: [], education: [], competencies: [] } } }));
+        }
+        if (method === "POST" && url.includes("/api/cover-letters")) {
+          return Promise.resolve(createResponse({ status: "success", generationStatus: "success", exportReady: true, exports: { docx: true, pdf: true }, preview: { coverLetter: { paragraphs: ["The strongest fit comes from the operating context I have already handled."] } } }));
+        }
+        return Promise.resolve(createResponse({}));
+      }),
+    );
+
+    renderStudio();
+
+    await screen.findByTestId("studio-resume-regenerate");
+    fireEvent.click(screen.getByTestId("studio-resume-regenerate"));
+
+    await waitFor(() => {
+      expect(calls.some((c) => c.method === "POST" && c.url.includes("/api/resume"))).toBe(true);
+      expect(calls.some((c) => c.method === "POST" && c.url.includes("/api/cover-letters"))).toBe(true);
+    });
+
+    logSpy.mockRestore();
+    // restore unused var lint avoid
+    void setup;
   });
 });
 
