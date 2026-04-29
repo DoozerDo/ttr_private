@@ -164,6 +164,8 @@ const LEADING_FRAGMENT_PATTERN =
   /^(?:and|or|as\s+well\s+as|well\s+as|including|with|for|to|of)\b/i;
 const TRAILING_FRAGMENT_PATTERN =
   /(?:,\s*$|\b(?:and|or|as|with|for|to|of|including)\s*$)/i;
+const DANGLING_TERMINAL_WORD_PATTERN =
+  /\b(?:the|and|or|because|with|without|as|to|for|of|in|on|by|from|including|across|within|between|while|when|where|which|that)\s*$/i;
 const SENTENCE_SPAN_PATTERN = /[^.!?]+[.!?]/g;
 const MIN_NON_BULLET_TOKENS = 5;
 const MIN_SENTENCE_TOKENS = 6;
@@ -296,6 +298,7 @@ function hasFragmentBoundary(text: string, exactBaselineBullet: boolean) {
   if (!exactBaselineBullet && isLowercaseStart(normalized)) return true;
   if (LEADING_FRAGMENT_PATTERN.test(normalized)) return true;
   if (TRAILING_FRAGMENT_PATTERN.test(normalized)) return true;
+  if (DANGLING_TERMINAL_WORD_PATTERN.test(normalized)) return true;
   if (!exactBaselineBullet && countTokens(normalized) < MIN_NON_BULLET_TOKENS) return true;
   if (!exactBaselineBullet && !SENTENCE_END_PATTERN.test(normalized)) return true;
   return false;

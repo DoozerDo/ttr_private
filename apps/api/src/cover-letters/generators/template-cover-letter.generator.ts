@@ -302,15 +302,15 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     };
 
     const openingProof = this.compactEvidenceText(openingEvidence[0]?.normalizedText ?? '', 20);
+    const title = normalizedJob.title ?? roleDescriptor;
+    const companyLine = normalizedJob.company ? ` at ${normalizedJob.company}` : '';
     const opening = this.joinSentences([
-      this.ensureSentence(`This role requires ${roleProblem.label}.`),
+      this.ensureSentence(`I am applying for the ${title}${companyLine}.`),
       this.ensureSentence(
-        `My background aligns because I have worked in environments where ${roleProblem.variants[0]} directly affected outcomes.`,
+        `I have led work where ${roleProblem.variants[0]} and ${roleProblem.variants[1]} determined whether teams could deliver consistent results.`,
       ),
       ...(openingProof ? [this.ensureSentence(openingProof)] : []),
     ]);
-    const DEBUG_MARKER = 'ZZZ_NEW_LOGIC';
-    const openingWithMarker = `${DEBUG_MARKER} ${opening}`;
 
     const bodyParagraphs = [
       buildArgumentParagraph({
@@ -330,7 +330,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     ];
 
     const closingLead = this.ensureSentence(
-      `If you need someone who can turn verified experience into clear priorities and accountable follow through for ${roleDescriptor}, I can bring that approach.`,
+      `If you need someone who can translate proven experience into clear priorities and consistent follow through for ${roleDescriptor}, I can bring that approach.`,
     );
     const closingEvidenceSentence = closingEvidence.length
       ? this.ensureSentence(this.compactEvidenceText(closingEvidence[0].normalizedText))
@@ -352,7 +352,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
         name: candidateName,
       },
       salutation: COVER_LETTER_REQUIRED_SALUTATION,
-      opening: openingWithMarker,
+      opening,
       bodyParagraphs,
       closingParagraph: closing,
       signoff: COVER_LETTER_SIGNOFF,
@@ -1059,6 +1059,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       .replace(/\r/g, '\n')
       .replace(/\t/g, ' ')
       .replace(/\u00a0/g, ' ')
+      .replace(/[\u2013\u2014]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
   }

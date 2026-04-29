@@ -60,7 +60,7 @@ describe('TemplateCoverLetterGenerator', () => {
     });
 
     expect(result.wordCount).toBeGreaterThanOrEqual(250);
-    expect(result.content).toMatch(/This role requires/i);
+    expect(result.content).toMatch(/I am applying for the /i);
   });
 
   it('keeps paragraph ordering validation focused on the generated letter rather than rejecting strong evidence', () => {
@@ -78,7 +78,7 @@ describe('TemplateCoverLetterGenerator', () => {
     });
 
     expect(result.paragraphs).toHaveLength(4);
-    expect(result.paragraphs[0]).toMatch(/This role requires/i);
+    expect(result.paragraphs[0]).toMatch(/I am applying for the /i);
   });
 
   it('surfaces constraints summary behavior while still generating a compliant letter', () => {
@@ -118,7 +118,7 @@ describe('TemplateCoverLetterGenerator', () => {
     });
 
     expect(result.wordCount).toBeGreaterThan(250);
-    expect(result.document.opening).toMatch(/This role requires/i);
+    expect(result.document.opening).toMatch(/I am applying for the /i);
   });
 
   it('keeps the live Morgan Lee synthetic support-ops closing grounded and varied', () => {
@@ -254,6 +254,47 @@ describe('TemplateCoverLetterGenerator', () => {
     for (const phrase of banned) {
       expect(lowered).not.toContain(phrase);
     }
+  });
+
+  it('never emits banned cover letter phrases', () => {
+    const generator = new TemplateCoverLetterGenerator();
+
+    const result = generator.generate({
+      ...supportOperationsFixture,
+      allowedBaselineBlocks: [
+        {
+          ...supportOperationsFixture.allowedBaselineBlocks[0],
+          content:
+            'Led support operations and owned escalation governance, incident handoffs, and weekly reviews. Partnered with engineering on root cause fixes and recurring issue reduction.',
+        },
+      ],
+    });
+
+    const lowered = result.content.toLowerCase();
+    const banned = ['operating context', 'execution systems', 'lens', 'strongest fit'];
+    for (const phrase of banned) {
+      expect(lowered).not.toContain(phrase);
+    }
+  });
+
+  it('starts with a recruiter-ready opening line', () => {
+    const generator = new TemplateCoverLetterGenerator();
+
+    const result = generator.generate({
+      ...supportOperationsFixture,
+      allowedBaselineBlocks: [
+        {
+          ...supportOperationsFixture.allowedBaselineBlocks[0],
+          content:
+            'Managed escalation flows and coordinated incident handoffs across product, support, and engineering teams.',
+        },
+      ],
+      maxWords: 280,
+    });
+
+    const firstParagraph = result.paragraphs[0]?.trim() ?? '';
+    expect(firstParagraph).toMatch(/^I am applying for the /);
+    expect(firstParagraph).not.toMatch(/this role requires/i);
   });
 
   it('fails generation when raw date ranges leak into the letter', () => {

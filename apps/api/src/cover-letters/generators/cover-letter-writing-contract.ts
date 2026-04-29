@@ -18,6 +18,10 @@ export const COVER_LETTER_FORBIDDEN_PHRASES = [
   'clear ownership',
   'proven expertise',
   'i can contribute immediately',
+  'operating context',
+  'execution systems',
+  'lens',
+  'strongest fit',
 ];
 
 export const COVER_LETTER_GENERIC_FILLER_PHRASES = [
@@ -52,4 +56,8 @@ export const COVER_LETTER_PHRASE_REWRITES: Array<{
   { pattern: /\bkeeps ([a-z ]{3,40}) visible\b/gi, replacement: 'made $1 visible' },
   { pattern: /\bmoving in a steady cadence\b/gi, replacement: 'consistently improved' },
   { pattern: /\bgives a practical way to contribute by\b/gi, replacement: 'allowed me to contribute by' },
+  { pattern: /\boperating context\b/gi, replacement: 'day to day work' },
+  { pattern: /\bexecution systems\b/gi, replacement: 'operating routines' },
+  { pattern: /\bstrongest fit\b/gi, replacement: 'match' },
+  { pattern: /\blead with a lens\b/gi, replacement: 'approach the work' },
 ];

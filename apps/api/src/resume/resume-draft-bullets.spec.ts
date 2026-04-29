@@ -677,4 +677,25 @@ describe('resume draft bullets', () => {
     const bulletTexts = draft.flatMap((section) => section.bullets.map((bullet) => bullet.text));
     expect(bulletTexts).toEqual([]);
   });
+
+  it('rejects bullets that end with dangling terminal words (ex: "The")', () => {
+    const draft = buildResumeDraftSections(
+      [
+        {
+          id: 'section-dangling-terminal',
+          sectionType: BaselineSectionType.EXPERIENCE,
+          order: 0,
+          title: 'Experience',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          content: [
+            '- Designed and built a full-stack production platform for Conquest of Fates (cof.gg), a sci-fi trading card game. The',
+          ].join('\n'),
+        } as never,
+      ],
+      { jobText: 'full stack platform' },
+    );
+
+    const bulletTexts = draft.flatMap((section) => section.bullets.map((bullet) => bullet.text));
+    expect(bulletTexts).toEqual([]);
+  });
 });
