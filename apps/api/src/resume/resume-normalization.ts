@@ -931,7 +931,7 @@ function buildExperienceFromSection(section: ResumeExportSection): NormalizedRes
       startDate: entry.startDate,
       endDate: entry.endDate,
       dateRange: entry.dateRange,
-      bullets: entry.bullets.map((bullet) => `[TEST_MARKER_RESUME] ${bullet.text}`),
+      bullets: entry.bullets.map((bullet) => bullet.text),
     }));
 }
 

@@ -5425,9 +5425,6 @@ export default function StudioPage() {
         ? window.setTimeout(() => controller.abort(), timeoutMs)
         : null;
     try {
-      if (opts?.regenerationSource === "manual_retry") {
-        console.info("[GEN_PATH_CONFIRMED][RESUME]", { requestId: request.requestId });
-      }
       const response = await fetch("/api/resume", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -5552,9 +5549,6 @@ export default function StudioPage() {
       const validatedResult = await generateWithRetry({
         generate: async (strictMode) => {
           if (!strictMode) return responsePayload;
-          if (opts?.regenerationSource === "manual_retry") {
-            console.info("[GEN_PATH_CONFIRMED][RESUME]", { requestId: request.requestId, retry: true });
-          }
           const retryResponse = await fetch("/api/resume", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -6180,9 +6174,6 @@ export default function StudioPage() {
         ? window.setTimeout(() => controller.abort(), timeoutMs)
         : null;
     try {
-      if (opts?.regenerationSource === "manual_retry") {
-        console.info("[GEN_PATH_CONFIRMED][COVER]", { requestId: request.requestId });
-      }
       const response = await fetch("/api/cover-letters", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -6339,9 +6330,6 @@ export default function StudioPage() {
       const validatedResult = await generateWithRetry({
         generate: async (strictMode) => {
           if (!strictMode) return responsePayload;
-          if (opts?.regenerationSource === "manual_retry") {
-            console.info("[GEN_PATH_CONFIRMED][COVER]", { requestId: request.requestId, retry: true });
-          }
           const retryResponse = await fetch("/api/cover-letters", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -9035,13 +9023,6 @@ export default function StudioPage() {
     }
   }, []);
 
-  const STUDIO_BUILD_MARKER_MANUAL_REGEN = "MANUAL_REGEN_V2";
-  const showStudioBuildMarker =
-    process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_SHOW_BUILD_MARKER === "true";
-  useEffect(() => {
-    console.log("[STUDIO][BUILD_MARKER]", STUDIO_BUILD_MARKER_MANUAL_REGEN);
-  }, []);
-
   const studioBuildMarker =
     process.env.NEXT_PUBLIC_APP_VERSION ??
     process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ??
@@ -9246,8 +9227,6 @@ export default function StudioPage() {
 
     console.log("[studio][manual_regenerate_direct_resume]", payload);
     console.log("[studio][manual_regenerate_direct_cover]", payload);
-    console.info("[GEN_PATH_CONFIRMED][RESUME]", { requestId: manualRequestId });
-    console.info("[GEN_PATH_CONFIRMED][COVER]", { requestId: manualRequestId });
 
     const [resumeResponse, coverResponse] = await Promise.all([
       fetch("/api/resume", {
@@ -10534,11 +10513,6 @@ export default function StudioPage() {
       <> 
       <section className="space-y-1 px-1"> 
         <h2 className="text-xl font-semibold text-slate-100">Your application materials</h2>
-        {showStudioBuildMarker ? (
-          <p className="text-[11px] text-slate-400" data-testid="studio-build-marker">
-            Studio build marker: {STUDIO_BUILD_MARKER_MANUAL_REGEN}
-          </p>
-        ) : null}
         <p className="text-sm text-slate-300">
           Generate, preview, and export your resume and cover letter.
         </p>
@@ -10574,7 +10548,6 @@ export default function StudioPage() {
               }}
               disabled={pageTruth.isGenerating || resumeGenerating || coverGenerating}
               data-testid="studio-resume-regenerate"
-              data-build-marker={STUDIO_BUILD_MARKER_MANUAL_REGEN}
             >
               Regenerate
             </FormButton>
@@ -10928,7 +10901,6 @@ export default function StudioPage() {
                 }}
                 disabled={pageTruth.isGenerating || resumeGenerating || coverGenerating}
                 data-testid="studio-cover-regenerate"
-                data-build-marker={STUDIO_BUILD_MARKER_MANUAL_REGEN}
               >
                 Regenerate
               </FormButton>

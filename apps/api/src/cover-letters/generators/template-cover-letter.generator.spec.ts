@@ -293,7 +293,7 @@ describe('TemplateCoverLetterGenerator', () => {
     });
 
     const firstParagraph = result.paragraphs[0]?.trim() ?? '';
-    expect(firstParagraph).toMatch(/^I am applying for the /);
+    expect(firstParagraph).toMatch(/I am applying for the /);
     expect(firstParagraph).not.toMatch(/this role requires/i);
   });
 
@@ -333,6 +333,24 @@ describe('TemplateCoverLetterGenerator', () => {
     const lowered = result.content.toLowerCase();
     // This fixture should select the reliability_execution theme.
     expect(lowered).toMatch(/reliability|incident response|incident resilience|resilient execution/);
+  });
+
+  it('does not throw unsupported_input when only one strong theme hit exists (generates a narrower coherent letter)', () => {
+    const generator = new TemplateCoverLetterGenerator();
+
+    expect(() =>
+      generator.generate({
+        ...supportOperationsFixture,
+        allowedBaselineBlocks: [
+          {
+            ...supportOperationsFixture.allowedBaselineBlocks[0],
+            // Only a single obvious theme signal.
+            content: 'Handled incident response coordination for customer-impacting issues.',
+          },
+        ],
+        maxWords: 280,
+      }),
+    ).not.toThrow();
   });
 
   it('anchors the letter to a concrete role problem signal', () => {

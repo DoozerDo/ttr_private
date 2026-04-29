@@ -161,10 +161,6 @@ const ROLE_PROBLEM_SIGNALS: readonly RoleProblemSignal[] = [
 
 export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
   generate(input: CoverLetterGenerationInput): CoverLetterGenerationResult {
-    if (process.env.NODE_ENV !== 'production') {
-      // TEMP: identify the runtime generation path used by Studio.
-      console.log('[GEN_PATH][API][template_cover_letter.generator.generate] used');
-    }
     const targetWords = this.resolveTargetWords(input.maxWords);
     const normalizedJob = this.applyComplianceConstraintsToJob(
       this.normalizeJob(input.job),
@@ -252,6 +248,18 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
           return ['process improvement', 'repeatable workflows', 'practical playbooks', 'continuous improvement'] as const;
       }
     })();
+    const themeAnchorSentence = (() => {
+      const first = this.cleanText(themeCues[0] ?? '');
+      const second = this.cleanText(themeCues[1] ?? '');
+      if (!first) return null;
+      // Avoid banned/internal phrases via INTERNAL_PHRASE_GUARDS; theme cues are curated but guard anyway.
+      const candidate = second
+        ? `My work emphasizes ${first} and ${second}.`
+        : `My work emphasizes ${first}.`;
+      const lowered = candidate.toLowerCase();
+      if (INTERNAL_PHRASE_GUARDS.some((phrase) => lowered.includes(phrase))) return null;
+      return this.ensureSentence(candidate);
+    })();
 
     const resolveRoleProblemSignal = (job: NormalizedJob): RoleProblemSignal => {
       const corpus = [...job.responsibilities, ...job.requirements]
@@ -302,6 +310,11 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
         this.ensureSentence(args.impact),
         ...supporting,
         this.ensureSentence(args.relevance),
+        // Reinforce the positioning theme without repeating the theme label as a slogan.
+        // This improves cohesion when only one strong theme signal exists in the evidence corpus.
+        ...(args.leadIn === 'in_my_experience' && themeCues[2]
+          ? [this.ensureSentence(`That focus supports ${this.cleanText(themeCues[2])}.`)]
+          : []),
       ]);
     };
 
@@ -310,6 +323,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     const companyLine = normalizedJob.company ? ` at ${normalizedJob.company}` : '';
     const opening = this.joinSentences([
       this.ensureSentence(`I am applying for the ${title}${companyLine}.`),
+      ...(themeAnchorSentence ? [themeAnchorSentence] : []),
       this.ensureSentence(
         `I have led work where ${roleProblem.variants[0]} and ${roleProblem.variants[1]} determined whether teams could deliver consistent results.`,
       ),
@@ -356,7 +370,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
         name: candidateName,
       },
       salutation: COVER_LETTER_REQUIRED_SALUTATION,
-      opening: `ZZZ_TEST_MARKER_COVER: ${opening}`,
+      opening,
       bodyParagraphs,
       closingParagraph: closing,
       signoff: COVER_LETTER_SIGNOFF,
