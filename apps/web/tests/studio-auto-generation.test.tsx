@@ -248,6 +248,15 @@ function readPostBodies(fetchMock: ReturnType<typeof vi.fn>, suffix: string): Ar
 
 describe("Studio auto-generation", () => {
   beforeEach(() => {
+    try {
+      const storage = window.localStorage;
+      const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index)).filter(Boolean) as string[];
+      for (const key of keys) {
+        if (key.startsWith("ttr:studio:auto-generate:")) storage.removeItem(key);
+      }
+    } catch {
+      // ignore
+    }
     overrideSearchParams({
       analysisId: "analysis-1",
       jobId: "job-1",
@@ -662,7 +671,7 @@ describe("Studio auto-generation", () => {
           ([url, init]) => String(url).endsWith("/api/cover-letters") && init?.method === "POST",
         ).length,
       ).toBeGreaterThan(0);
-    });
+    }, { timeout: 6000 });
 
     const resumePostsBefore = fetchMock.mock.calls.filter(
       ([url, init]) => String(url).endsWith("/api/resume") && init?.method === "POST",

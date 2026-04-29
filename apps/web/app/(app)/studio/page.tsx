@@ -1528,10 +1528,12 @@ export default function StudioPage() {
     return getScoreBand(analysisScore);
   }, [analysisScore]);
   const isTopBand = scoreBand === ScoreBand.TOP;
-  const effectiveJobId = selectedJobId || trimId(analysis?.jobId);
-  const effectiveBaselineId = selectedBaselineId || trimId(analysis?.baselineId);
+  // Effective IDs must be derived consistently from the URL and/or hydrated analysis.
+  // In particular, auto-generation eligibility depends on these being available as soon as the URL provides them.
+  const effectiveJobId = selectedJobId || requestedJobId || trimId(analysis?.jobId);
+  const effectiveBaselineId = selectedBaselineId || requestedBaselineId || trimId(analysis?.baselineId);
   const effectiveBaselineVersionId =
-    selectedBaselineVersionId || trimId(analysis?.baselineVersionId);
+    selectedBaselineVersionId || requestedBaselineVersionId || trimId(analysis?.baselineVersionId);
   const currentWorkflowScope = useMemo<WorkflowRequestScope>(
     () => ({
       baselineId: effectiveBaselineId || null,
@@ -8651,10 +8653,13 @@ export default function StudioPage() {
 
   useEffect(() => {
     if (!generationReadyShellActive) return;
-    // Generation-ready shell is the explicit authority for starting generation;
-    // suppress background auto-generation so the shell remains singular/trustworthy.
-    suppressAutoGenerationRef.current = true;
-  }, [generationReadyShellActive]);
+    // Generation-ready shell is the explicit authority for starting generation.
+    // Only suppress auto-generation when the contract is not instructing an auto-start.
+    // When `shouldStart` is true, the auto-generation effect will start through the
+    // ready shell entrypoint (`shell_auto`), so suppression would incorrectly block
+    // legitimate auto-starts (including in tests).
+    suppressAutoGenerationRef.current = workflowOrchestratorCore.contract.generation.auto.shouldStart !== true;
+  }, [generationReadyShellActive, workflowOrchestratorCore.contract.generation.auto.shouldStart]);
 
   const generationReadyAnalyticsContext = useMemo(() => {
     const trust = generationReadyModel.trustSummary;
