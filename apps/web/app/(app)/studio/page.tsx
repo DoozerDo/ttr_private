@@ -8816,7 +8816,7 @@ export default function StudioPage() {
 
   const startGenerationFromReadyShell = useCallback(
     async (
-      source: "shell" | "shell_auto" | "post_unlock",
+      source: "shell" | "shell_auto" | "post_unlock" | "manual_retry",
     ): Promise<{
       ok: boolean;
       resumeResult: StudioArtifactGenerationAttemptResult | null;
@@ -8845,7 +8845,7 @@ export default function StudioPage() {
       trackEvent("generation_ready_shell_started", {
         source: "studio",
         ...generationReadyAnalyticsContext,
-        entrypoint: source === "shell_auto" ? "shell" : source,
+        entrypoint: source === "shell_auto" ? "shell" : source === "manual_retry" ? "shell" : source,
       });
 
       try {
@@ -9024,6 +9024,19 @@ export default function StudioPage() {
       ? "generated_unusable"
       : workflowOrchestratorCore.contract?.generation.state ?? null;
   const studioAutoRetryCount = studioContractSignature ? (retryCountRef.current[studioContractSignature] ?? 0) : 0;
+  const studioHasRetriesRemaining = studioAutoRetryCount < MAX_AUTO_RETRIES;
+  const studioRetryInProgress =
+    studioEffectiveGenerationState === "generated_unusable" &&
+    studioHasRetriesRemaining &&
+    (autoGenerationInFlight ||
+      generationReadyPhase === "generating" ||
+      resumeGenerating ||
+      coverGenerating ||
+      resumeAutoGenerating ||
+      coverAutoGenerating ||
+      resumeGenerateNowPending ||
+      coverGenerateNowPending ||
+      studioArtifactPairStatus === "in_progress");
   const studioAutoRetryCapReached =
     studioEffectiveGenerationState === "generated_unusable" && studioAutoRetryCount >= MAX_AUTO_RETRIES;
   const generationReadyAutoStartRef = useRef<string | null>(null);
@@ -10304,12 +10317,24 @@ export default function StudioPage() {
             <h2 className="text-lg font-semibold text-slate-100">Resume</h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
               {resumeNeedsRefinement
-                ? studioAutoRetryCapReached
-                  ? "Generation failed quality checks. Please edit or regenerate manually."
-                  : "Resume failed quality checks. Regenerating..."
+                ? studioEffectiveGenerationState === "generated_unusable"
+                  ? studioRetryInProgress
+                    ? "Resume failed quality checks. Regenerating..."
+                    : "Generation failed quality checks. Please edit or regenerate manually."
+                  : "Resume needs refinement before export."
                 : renderCardStatus(resumeCardStatus, "Resume")}
             </p>
           </div>
+          {studioAutoRetryCapReached && studioEffectiveGenerationState === "generated_unusable" ? (
+            <FormButton
+              variant="secondary"
+              onClick={() => void startGenerationFromReadyShell("manual_retry")}
+              disabled={pageTruth.isGenerating || resumeGenerating || coverGenerating}
+              data-testid="studio-regenerate-after-retry-cap"
+            >
+              Regenerate
+            </FormButton>
+          ) : null}
         </div>
         {showResumeDownloadActions && !resumeNeedsRefinement ? (
           <div className="flex flex-wrap gap-2">
@@ -10628,9 +10653,11 @@ export default function StudioPage() {
             <h2 className="text-lg font-semibold text-slate-100">Cover letter</h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
               {coverNeedsRefinement
-                ? studioAutoRetryCapReached
-                  ? "Generation failed quality checks. Please edit or regenerate manually."
-                  : "Cover letter failed quality checks. Regenerating..."
+                ? studioEffectiveGenerationState === "generated_unusable"
+                  ? studioRetryInProgress
+                    ? "Cover letter failed quality checks. Regenerating..."
+                    : "Generation failed quality checks. Please edit or regenerate manually."
+                  : "Cover letter needs refinement before export."
                 : renderCardStatus(coverCardStatus, "Cover letter")}
             </p>
           </div>
@@ -10646,6 +10673,16 @@ export default function StudioPage() {
                 data-testid="studio-cover-generate-button"
               >
                 {coverGenerating ? "Generating..." : "Generate Cover Letter"}
+              </FormButton>
+            ) : null}
+            {studioAutoRetryCapReached && studioEffectiveGenerationState === "generated_unusable" ? (
+              <FormButton
+                variant="secondary"
+                onClick={() => void startGenerationFromReadyShell("manual_retry")}
+                disabled={pageTruth.isGenerating || resumeGenerating || coverGenerating}
+                data-testid="studio-regenerate-after-retry-cap-cover"
+              >
+                Regenerate
               </FormButton>
             ) : null}
             {showCoverDownloadActions && !coverNeedsRefinement ? (
