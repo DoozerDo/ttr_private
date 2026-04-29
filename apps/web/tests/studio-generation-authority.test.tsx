@@ -148,9 +148,10 @@ describe("Studio manual regenerate after retry cap", () => {
     mockRouterReplace.mockReset();
   });
 
-  it("renders Regenerate in generated_unusable + needs_refinement and clicking emits manual retry logs", async () => {
+  it("clicking Regenerate requests both artifact generation paths (resume + cover)", async () => {
     const calls: Array<{ url: string; method: string }> = [];
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
 
     // Ensure a Storage-like localStorage is available for retry-count persistence.
     if (typeof (globalThis as unknown as { localStorage?: unknown }).localStorage !== "object" ||
@@ -310,7 +311,19 @@ describe("Studio manual regenerate after retry cap", () => {
       );
     });
 
+    await waitFor(() => {
+      expect(calls.some((c) => c.method === "POST" && c.url.includes("/api/resume"))).toBe(true);
+      expect(calls.some((c) => c.method === "POST" && c.url.includes("/api/cover-letters"))).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(infoSpy).toHaveBeenCalledWith("[studio][manual_regenerate_resume_requested]", expect.anything());
+      expect(infoSpy).toHaveBeenCalledWith("[studio][manual_regenerate_cover_requested]", expect.anything());
+      expect(infoSpy).toHaveBeenCalledWith("[studio][manual_regenerate_result]", expect.anything());
+    });
+
     warnSpy.mockRestore();
+    infoSpy.mockRestore();
   });
 });
 

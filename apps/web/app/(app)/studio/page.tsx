@@ -5156,6 +5156,8 @@ export default function StudioPage() {
       verifiedOnly?: boolean;
       bypassReadinessGate?: boolean;
       sessionKey?: string;
+      forceRegenerate?: boolean;
+      regenerationSource?: "manual_retry" | "shell" | "shell_auto" | "post_unlock";
       onAttempt?: (attempt: StudioArtifactGenerationAttemptResult) => void;
     },
   ): Promise<boolean> => {
@@ -5171,6 +5173,7 @@ export default function StudioPage() {
       return attempt.ok;
     };
     if (
+      !opts?.forceRegenerate &&
       studioArtifactPresentationStateRef.current === "hydrated" &&
       hasResumeArtifact &&
       Boolean(resumeState.response)
@@ -5184,7 +5187,7 @@ export default function StudioPage() {
         }),
       );
     }
-    if (generationLifecycle.phase === "generated" && hasResumeArtifact) {
+    if (!opts?.forceRegenerate && generationLifecycle.phase === "generated" && hasResumeArtifact) {
       return finish(
         makeStudioAttempt("resume", {
           ok: true,
@@ -5403,6 +5406,12 @@ export default function StudioPage() {
     setResumeAuditId(undefined);
     const verifiedOnly = Boolean(opts?.verifiedOnly) || generateNowEligible;
     const payload = normalizeGenerationPayload(buildResumePayload(verifiedOnly), "resume"); 
+    const payloadWithRequestId = {
+      ...payload,
+      ...(request.requestId ? { requestId: request.requestId } : {}),
+      ...(opts?.sessionKey ? { sessionKey: opts.sessionKey } : {}),
+      ...(opts?.regenerationSource ? { regenerationSource: opts.regenerationSource } : {}),
+    };
     const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
     const timeoutMs = 2 * 60_000;
     const timeoutId =
@@ -5410,10 +5419,13 @@ export default function StudioPage() {
         ? window.setTimeout(() => controller.abort(), timeoutMs)
         : null;
     try {
+      if (opts?.regenerationSource === "manual_retry") {
+        console.info("[GEN_PATH_CONFIRMED][RESUME]", { requestId: request.requestId });
+      }
       const response = await fetch("/api/resume", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(payloadWithRequestId),
         ...(controller ? { signal: controller.signal } : {}),
       });
       if (timeoutId !== null) window.clearTimeout(timeoutId);
@@ -5534,12 +5546,18 @@ export default function StudioPage() {
       const validatedResult = await generateWithRetry({
         generate: async (strictMode) => {
           if (!strictMode) return responsePayload;
+          if (opts?.regenerationSource === "manual_retry") {
+            console.info("[GEN_PATH_CONFIRMED][RESUME]", { requestId: request.requestId, retry: true });
+          }
           const retryResponse = await fetch("/api/resume", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ 
               ...normalizeGenerationPayload(buildResumePayload(generateNowEligible), "resume"), 
               trustGateMode: "strict", 
+              ...(request.requestId ? { requestId: request.requestId } : {}),
+              ...(opts?.sessionKey ? { sessionKey: opts.sessionKey } : {}),
+              ...(opts?.regenerationSource ? { regenerationSource: opts.regenerationSource } : {}),
             }), 
           }); 
           const retryPayload = await readResponsePayload(retryResponse);
@@ -5888,6 +5906,8 @@ export default function StudioPage() {
       verifiedOnly?: boolean;
       bypassReadinessGate?: boolean;
       sessionKey?: string;
+      forceRegenerate?: boolean;
+      regenerationSource?: "manual_retry" | "shell" | "shell_auto" | "post_unlock";
       onAttempt?: (attempt: StudioArtifactGenerationAttemptResult) => void;
     },
   ): Promise<boolean> => {
@@ -5937,6 +5957,7 @@ export default function StudioPage() {
         }),
       );
     if (
+      !opts?.forceRegenerate &&
       studioArtifactPresentationStateRef.current === "hydrated" &&
       hasCoverLetterArtifact &&
       Boolean(coverState.response)
@@ -5950,7 +5971,7 @@ export default function StudioPage() {
         }),
       );
     }
-    if (generationLifecycle.phase === "generated" && hasCoverLetterArtifact) {
+    if (!opts?.forceRegenerate && generationLifecycle.phase === "generated" && hasCoverLetterArtifact) {
       return finish(
         makeStudioAttempt("cover", {
           ok: true,
@@ -6134,6 +6155,12 @@ export default function StudioPage() {
     setCoverLetterComplianceBlocked(null);
     const verifiedOnly = Boolean(opts?.verifiedOnly) || generateNowEligible;
     const payload = normalizeGenerationPayload(buildCoverLetterPayload(verifiedOnly), "cover_letter"); 
+    const payloadWithRequestId = {
+      ...payload,
+      ...(request.requestId ? { requestId: request.requestId } : {}),
+      ...(opts?.sessionKey ? { sessionKey: opts.sessionKey } : {}),
+      ...(opts?.regenerationSource ? { regenerationSource: opts.regenerationSource } : {}),
+    };
     const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
     const timeoutMs = 2 * 60_000;
     const timeoutId =
@@ -6141,10 +6168,13 @@ export default function StudioPage() {
         ? window.setTimeout(() => controller.abort(), timeoutMs)
         : null;
     try {
+      if (opts?.regenerationSource === "manual_retry") {
+        console.info("[GEN_PATH_CONFIRMED][COVER]", { requestId: request.requestId });
+      }
       const response = await fetch("/api/cover-letters", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(payloadWithRequestId),
         ...(controller ? { signal: controller.signal } : {}),
       });
       if (timeoutId !== null) window.clearTimeout(timeoutId);
@@ -6297,12 +6327,18 @@ export default function StudioPage() {
       const validatedResult = await generateWithRetry({
         generate: async (strictMode) => {
           if (!strictMode) return responsePayload;
+          if (opts?.regenerationSource === "manual_retry") {
+            console.info("[GEN_PATH_CONFIRMED][COVER]", { requestId: request.requestId, retry: true });
+          }
           const retryResponse = await fetch("/api/cover-letters", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ 
               ...normalizeGenerationPayload(buildCoverLetterPayload(generateNowEligible), "cover_letter"), 
               trustGateMode: "strict", 
+              ...(request.requestId ? { requestId: request.requestId } : {}),
+              ...(opts?.sessionKey ? { sessionKey: opts.sessionKey } : {}),
+              ...(opts?.regenerationSource ? { regenerationSource: opts.regenerationSource } : {}),
             }), 
           }); 
           const retryPayload = await readResponsePayload(retryResponse);
@@ -8866,23 +8902,40 @@ export default function StudioPage() {
       });
 
       try {
+        const manualRequestId = source === "manual_retry" ? createRequestId() : null;
         const stableSessionKey = `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:${requestedAnalysisId ?? "analysis"}:ready_shell`;
+        const sessionKey =
+          source === "manual_retry"
+            ? `${stableSessionKey}:manual_retry:${manualRequestId ?? "unknown"}:${Date.now()}`
+            : stableSessionKey;
         const runAttempt = async (
           artifact: "resume" | "cover",
         ): Promise<StudioArtifactGenerationAttemptResult> => {
           let attempt: StudioArtifactGenerationAttemptResult | null = null;
+          if (source === "manual_retry") {
+            console.info(
+              artifact === "resume"
+                ? "[studio][manual_regenerate_resume_requested]"
+                : "[studio][manual_regenerate_cover_requested]",
+              { requestId: manualRequestId, sessionKey },
+            );
+          }
           const ok =
             artifact === "resume"
               ? await handleResumeDraft({
-                  sessionKey: stableSessionKey,
+                  sessionKey,
                   bypassReadinessGate: true,
+                  forceRegenerate: source === "manual_retry",
+                  regenerationSource: source,
                   onAttempt: (next) => {
                     attempt = next;
                   },
                 })
               : await handleCoverDraft({
-                  sessionKey: stableSessionKey,
+                  sessionKey,
                   bypassReadinessGate: true,
+                  forceRegenerate: source === "manual_retry",
+                  regenerationSource: source,
                   onAttempt: (next) => {
                     attempt = next;
                   },
@@ -8899,7 +8952,7 @@ export default function StudioPage() {
               ? null
               : `${artifact === "resume" ? "Resume" : "Cover letter"} generation returned false with no diagnostic.`,
             skippedReason: null,
-            request: { sessionKey: stableSessionKey, requestId: null },
+            request: { sessionKey, requestId: manualRequestId },
           });
         };
 
@@ -8909,6 +8962,14 @@ export default function StudioPage() {
         ]);
 
         const ok = resumeResult.ok && coverResult.ok;
+        if (source === "manual_retry") {
+          console.info("[studio][manual_regenerate_result]", {
+            ok,
+            requestId: manualRequestId,
+            resumeResult,
+            coverResult,
+          });
+        }
 
         if (ok) {
           setGenerationReadyDismissed(true);
