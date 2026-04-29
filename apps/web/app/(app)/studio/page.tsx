@@ -2400,9 +2400,10 @@ export default function StudioPage() {
       JSON.stringify((savedEditedResumeModel ?? generatedResumeModel) ?? null);
   const hasResumeDraft = Boolean(artifactContract.resumeModel) && Boolean(resumeState.response);
   const hasResumeArtifact = artifactContract.hasResumeArtifact;
-  const canExportResume = artifactContract.resumeExportAvailable;
-  const resumeQuality = useMemo(() => validateResumeQuality(effectiveResumeModel), [effectiveResumeModel]);
-  const resumeNeedsRefinement = Boolean(effectiveResumeModel) && resumeQuality.status === "needs_refinement";
+  // Quality validation must run on the same normalized resume model used for rendering (readResumeModel output).
+  // Do not inspect raw payloads or presenter state for quality gating.
+  const resumeQuality = useMemo(() => validateResumeQuality(generatedResumeModel), [generatedResumeModel]);
+  const resumeNeedsRefinement = Boolean(generatedResumeModel) && resumeQuality.status === "needs_refinement";
   const resumeQualityIssueSummary = useMemo(() => {
     const blocking = resumeQuality.issues.filter((issue) => issue.severity === "blocking");
     const issues = blocking.length ? blocking : resumeQuality.issues;
@@ -2416,7 +2417,7 @@ export default function StudioPage() {
     resumePresenter.status === "blocked" ||
     (resumePresenter.status === "success" && hasResumeArtifact);
   const isResumeDownloadLocked = !isPro;
-  const canExportResumeWithQuality = canExportResume && resumeQuality.exportable;
+  const canExportResume = artifactContract.resumeExportAvailable && resumeQuality.exportable;
   const resumePreviewText = useMemo(
     () => formatPreview(artifactContract.normalized.resumeResponse),
     [artifactContract.normalized.resumeResponse],
@@ -2438,6 +2439,16 @@ export default function StudioPage() {
       remaining: Math.max(0, issues.length - visible.length),
     };
   }, [coverLetterQuality.issues]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    console.info("[studio][quality_check]", {
+      hasResumeModel: Boolean(generatedResumeModel),
+      qualityStatus: resumeQuality.status,
+      exportable: resumeQuality.exportable,
+      canExportResume,
+    });
+  }, [canExportResume, generatedResumeModel, resumeQuality.exportable, resumeQuality.status]);
 
   // Canonical workflow authority (additive layer): owns top-level readiness/failure messaging decisions.
   const resolvedScoreForContract = analysisScore;
@@ -7239,7 +7250,7 @@ export default function StudioPage() {
           <FormButton
             variant="secondary"
             onClick={() => void exportResume("docx")}
-            disabled={!canExportResumeWithQuality || resumeExportFormat === "docx"}
+            disabled={!canExportResume || resumeExportFormat === "docx"}
           >
             {resumeExportFormat === "docx" ? "Downloading..." : "Download Resume"}
           </FormButton>
@@ -7955,7 +7966,7 @@ export default function StudioPage() {
             <FormButton
               variant="secondary"
               onClick={() => void exportResume("docx")}
-              disabled={!canExportResumeWithQuality || resumeExportFormat === "docx"}
+              disabled={!canExportResume || resumeExportFormat === "docx"}
             >
               {resumeExportFormat === "docx" ? "Downloading..." : "Download Resume"}
             </FormButton>
@@ -10245,14 +10256,14 @@ export default function StudioPage() {
             <FormButton
               variant="secondary"
               onClick={() => void exportResume("docx")}
-              disabled={isResumeDownloadLocked || !canExportResumeWithQuality || resumeExportFormat === "docx"}
+              disabled={isResumeDownloadLocked || !canExportResume || resumeExportFormat === "docx"}
             >
               {resumeExportFormat === "docx" ? "Downloading..." : "Download DOCX"}
             </FormButton>
             <FormButton
               variant="secondary"
               onClick={() => void exportResume("pdf")}
-              disabled={isResumeDownloadLocked || !canExportResumeWithQuality || resumeExportFormat === "pdf"}
+              disabled={isResumeDownloadLocked || !canExportResume || resumeExportFormat === "pdf"}
             >
               {resumeExportFormat === "pdf" ? "Downloading..." : "Download PDF"}
             </FormButton>

@@ -114,6 +114,7 @@ describe("Studio artifact quality gating (soft)", () => {
 
     const resumeSection = screen.getByRole("heading", { name: "Resume" }).closest("section");
     expect(resumeSection).toBeTruthy();
+    expect(within(resumeSection as HTMLElement).getAllByText(/resume needs refinement/i).length).toBeGreaterThan(0);
     const resumeButtons = within(resumeSection as HTMLElement).getAllByRole("button");
     const downloadDocx = resumeButtons.find((button) => button.textContent?.includes("Download DOCX"));
     const downloadPdf = resumeButtons.find((button) => button.textContent?.includes("Download PDF"));
