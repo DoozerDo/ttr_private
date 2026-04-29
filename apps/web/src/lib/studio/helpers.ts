@@ -12,6 +12,7 @@ export type StudioCardStatus =
   | "ready_to_generate"
   | "generating"
   | "generated_successfully"
+  | "needs_correction"
   | "blocked_by_compliance"
   | "needs_more_baseline_detail"
   | "failed_due_to_system_error";

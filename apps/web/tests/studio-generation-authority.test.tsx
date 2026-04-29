@@ -118,6 +118,8 @@ describe("Studio artifact quality gating (soft)", () => {
     expect(
       within(resumeSection as HTMLElement).getAllByText(/failed quality checks/i).length,
     ).toBeGreaterThan(0);
+    expect(within(resumeSection as HTMLElement).queryByText(/Your resume is ready/i)).toBeNull();
+    expect(within(resumeSection as HTMLElement).getAllByText("Resume needs correction before export.").length).toBeGreaterThan(0);
     expect(within(resumeSection as HTMLElement).queryByText("Download DOCX")).toBeNull();
     expect(within(resumeSection as HTMLElement).queryByText("Download PDF")).toBeNull();
   });
@@ -129,12 +131,18 @@ describe("Studio artifact quality gating (soft)", () => {
     await waitFor(() => {
       expect(screen.getByTestId("studio-cover-quality-warning")).toBeInTheDocument();
     });
+    await waitFor(() => {
+      expect(screen.queryByText("Cover letter generated successfully")).toBeNull();
+    });
 
     const coverSection = screen.getByRole("heading", { name: "Cover letter" }).closest("section");
     expect(coverSection).toBeTruthy();
     expect(
       within(coverSection as HTMLElement).getAllByText(/failed quality checks/i).length,
     ).toBeGreaterThan(0);
+    expect(within(coverSection as HTMLElement).queryByText("Cover letter generated successfully")).toBeNull();
+    expect(within(coverSection as HTMLElement).queryByText(/generated successfully/i)).toBeNull();
+    expect(within(coverSection as HTMLElement).getAllByText("Cover letter needs correction before export.").length).toBeGreaterThan(0);
     expect(within(coverSection as HTMLElement).queryByText("Download DOCX")).toBeNull();
     expect(within(coverSection as HTMLElement).queryByText("Download PDF")).toBeNull();
   });

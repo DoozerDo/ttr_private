@@ -2413,7 +2413,10 @@ export default function StudioPage() {
   // Quality validation must run on the same normalized resume model used for rendering (readResumeModel output).
   // Do not inspect raw payloads or presenter state for quality gating.
   const resumeQuality = artifactContract.quality.resume;
+  const resumeHasValidationFindings = resumeQuality.issues.length > 0;
+  const resumeQualityPass = resumeQuality.status === "pass" && !resumeHasValidationFindings;
   const resumeNeedsRefinement = Boolean(generatedResumeModel) && resumeQuality.status === "needs_refinement";
+  const resumeRequiresCorrectionCopy = hasResumeDraft && !resumeQualityPass;
   const resumeQualityIssueSummary = useMemo(() => {
     const blocking = resumeQuality.issues.filter((issue) => issue.severity === "blocking");
     const issues = blocking.length ? blocking : resumeQuality.issues;
@@ -2425,7 +2428,7 @@ export default function StudioPage() {
   }, [resumeQuality.issues]);
   const showResumeDownloadActions =
     resumePresenter.status === "blocked" ||
-    (resumePresenter.status === "success" && hasResumeArtifact);
+    (resumePresenter.status === "success" && hasResumeArtifact && resumeQualityPass);
   const isResumeDownloadLocked = !isPro;
   const canExportResume = artifactContract.resumeExportAvailable && resumeQuality.exportable;
   const resumePreviewText = useMemo(
@@ -2436,7 +2439,10 @@ export default function StudioPage() {
   const coverPresenter = artifactContract.presenters.coverLetter;
   const hasCoverLetterDraft = Boolean(artifactContract.coverLetterModel) && Boolean(coverState.response);
   const coverLetterQuality = artifactContract.quality.coverLetter;
+  const coverHasValidationFindings = coverLetterQuality.issues.length > 0;
+  const coverQualityPass = coverLetterQuality.status === "pass" && !coverHasValidationFindings;
   const coverNeedsRefinement = coverLetterParagraphs.length > 0 && coverLetterQuality.status === "needs_refinement";
+  const coverRequiresCorrectionCopy = hasCoverLetterDraft && !coverQualityPass;
   const coverQualityIssueSummary = useMemo(() => {
     const blocking = coverLetterQuality.issues.filter((issue) => issue.severity === "blocking");
     const issues = blocking.length ? blocking : coverLetterQuality.issues;
@@ -4076,7 +4082,9 @@ export default function StudioPage() {
     if (needsMoreBaselineDetail) return "needs_more_baseline_detail";
     if (resumeState.error) return "failed_due_to_system_error";
     if (resumePresenter.status === "success" && hasResumeArtifact) {
-      return "generated_successfully";
+      // Never claim success if we cannot render/export a usable preview (e.g. missing normalized model).
+      if (!hasResumeDraft) return "needs_correction";
+      return resumeQualityPass ? "generated_successfully" : "needs_correction";
     }
     return canGenerateDocuments ? "ready_to_generate" : "not_generated_yet";
   }, [
@@ -4086,6 +4094,7 @@ export default function StudioPage() {
     resumeGenerating,
     resumePresenter.status,
     resumeState.error,
+    resumeQualityPass,
   ]);
   const resumeNeedsBaselineDetail = isInsufficientBaselineEvidenceMessage(resumeState.error);
 
@@ -4097,7 +4106,9 @@ export default function StudioPage() {
     }
     if (coverState.error) return "failed_due_to_system_error";
     if (coverPresenter.status === "success" && hasCoverLetterArtifact) {
-      return "generated_successfully";
+      // Never claim success if we cannot render/export a usable preview (e.g. sanitized/blocked output).
+      if (!hasCoverLetterDraft) return "needs_correction";
+      return coverQualityPass ? "generated_successfully" : "needs_correction";
     }
     return canGenerateDocuments ? "ready_to_generate" : "not_generated_yet";
   }, [
@@ -4108,6 +4119,7 @@ export default function StudioPage() {
     coverPresenter.status,
     coverState.error,
     hasCoverLetterArtifact,
+    coverQualityPass,
   ]);
 
   function buildCoverLetterPayload(oneTap: boolean): CoverLetterPayload {
@@ -7239,6 +7251,8 @@ export default function StudioPage() {
         return `Generating ${documentName.toLowerCase()}`;
       case "generated_successfully":
         return `${documentName} generated successfully`;
+      case "needs_correction":
+        return `${documentName} needs correction`;
       case "blocked_by_compliance":
         return `${documentName} blocked by compliance`;
       case "needs_more_baseline_detail":
@@ -10530,7 +10544,7 @@ export default function StudioPage() {
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Resume</h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-              {resumeNeedsRefinement
+              {resumeNeedsRefinement || resumeRequiresCorrectionCopy
                 ? studioEffectiveGenerationState === "generated_unusable"
                   ? studioRetryInProgress
                     ? "Resume failed quality checks. Regenerating..."
@@ -10578,7 +10592,7 @@ export default function StudioPage() {
             className="space-y-2 rounded-2xl border border-amber-300/25 bg-amber-500/5 p-4"
             data-testid="studio-resume-quality-warning"
           >
-            <p className="text-sm font-semibold text-amber-100">Resume needs refinement before export.</p>
+            <p className="text-sm font-semibold text-amber-100">Resume needs correction before export.</p>
             {resumeQualityIssueSummary.visible.length ? (
               <ul className="list-disc space-y-1 pl-5 text-sm text-slate-200">
                 {resumeQualityIssueSummary.visible.map((issue, index) => (
@@ -10733,15 +10747,24 @@ export default function StudioPage() {
         ) : Boolean(effectiveResumeModel) && resumeState.response && !normalizedArtifacts.shouldSuppressStalePreview ? (
           <div
             className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
-            data-testid="studio-resume-ready-panel"
+            data-testid={resumeQualityPass ? "studio-resume-ready-panel" : "studio-resume-correction-panel"}
           >
-            <p className="text-sm text-slate-200">
-              {normalizedArtifacts.artifactDisplayState === "resume_only_ready" ||
-              normalizedArtifacts.artifactDisplayState === "partial_failure_retryable" ||
-              normalizedArtifacts.artifactDisplayState === "partial_failure_non_retryable"
-                ? "Your resume is ready. Your cover letter still needs attention."
-                : "Your resume is ready. Download or refine below."}
-            </p>
+            {resumeQualityPass ? (
+              <p className="text-sm text-slate-200">
+                {normalizedArtifacts.artifactDisplayState === "resume_only_ready" ||
+                normalizedArtifacts.artifactDisplayState === "partial_failure_retryable" ||
+                normalizedArtifacts.artifactDisplayState === "partial_failure_non_retryable"
+                  ? "Your resume is ready. Your cover letter still needs attention."
+                  : "Your resume is ready. Download or refine below."}
+              </p>
+            ) : (
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-amber-100">Resume needs correction before export.</p>
+                <p className="text-sm text-slate-200">
+                  Review the flagged issue, edit the resume, or regenerate.
+                </p>
+              </div>
+            )}
             <div className="space-y-4 rounded-xl border border-white/10 bg-slate-950/30 p-3">
               {showLowQualityRecoveryLane && !showFullLowQualityResume ? ( 
                 <div className="space-y-3" data-testid="studio-low-quality-resume-preview-main"> 
@@ -10869,7 +10892,7 @@ export default function StudioPage() {
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Cover letter</h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-              {coverNeedsRefinement
+              {coverNeedsRefinement || coverRequiresCorrectionCopy
                 ? studioEffectiveGenerationState === "generated_unusable"
                   ? studioRetryInProgress
                     ? "Cover letter failed quality checks. Regenerating..."
@@ -10934,7 +10957,7 @@ export default function StudioPage() {
             className="space-y-2 rounded-2xl border border-amber-300/25 bg-amber-500/5 p-4"
             data-testid="studio-cover-quality-warning"
           >
-            <p className="text-sm font-semibold text-amber-100">Cover letter needs refinement before export.</p>
+            <p className="text-sm font-semibold text-amber-100">Cover letter needs correction before export.</p>
             {coverQualityIssueSummary.visible.length ? (
               <ul className="list-disc space-y-1 pl-5 text-sm text-slate-200">
                 {coverQualityIssueSummary.visible.map((issue, index) => (
@@ -11100,7 +11123,10 @@ export default function StudioPage() {
               </div>
             )
           )
-        ) : coverPresenter.display && !coverLetterComplianceBlocked && coverPresenter.status !== "blocked" ? (
+        ) : coverPresenter.display &&
+        coverQualityPass &&
+        !coverLetterComplianceBlocked &&
+        coverPresenter.status !== "blocked" ? (
           <div className="space-y-2 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
             <p className="text-sm font-semibold text-slate-100">{coverPresenter.display.title}</p>
             <p className="text-sm text-slate-300">{coverPresenter.display.description}</p>
@@ -11133,7 +11159,7 @@ export default function StudioPage() {
           coverPresenter.status === "success" && coverState.response && !normalizedArtifacts.shouldSuppressStalePreview ? (
             <div
               className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
-              data-testid="studio-cover-ready-panel"
+              data-testid={coverQualityPass ? "studio-cover-ready-panel" : "studio-cover-correction-panel"}
             >
               {unlockGenerationConfirmation ? (
                 <p
@@ -11142,6 +11168,14 @@ export default function StudioPage() {
                 >
                   {unlockGenerationConfirmation}
                 </p>
+              ) : null}
+              {!coverQualityPass ? (
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-amber-100">Cover letter needs correction before export.</p>
+                  <p className="text-sm text-slate-200">
+                    Regenerate or edit the draft to remove blocked language.
+                  </p>
+                </div>
               ) : null}
               <div className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-3"> 
                 {showLowQualityRecoveryLane && !showFullLowQualityCover ? ( 
