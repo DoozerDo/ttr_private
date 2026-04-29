@@ -9168,7 +9168,8 @@ export default function StudioPage() {
     shouldShowCoverRegenerate,
   ]);
 
-  const handleManualRegenerate = useCallback(async () => {
+  const handleManualRegenerate = useCallback(async (source: "resume" | "cover") => {
+    console.log("[studio][manual_regenerate_handler_entered]", { source });
     const signature = workflowOrchestratorCore.contract?.generation.auto.signature ?? null;
     if (process.env.NODE_ENV !== "production") {
       console.warn("[studio][manual_regenerate_clicked]", {
@@ -10488,7 +10489,10 @@ export default function StudioPage() {
           {shouldShowResumeRegenerate ? (
             <FormButton
               variant="secondary"
-              onClick={() => void handleManualRegenerate()}
+              onClick={() => {
+                console.log("[studio][resume_regenerate_button_clicked]");
+                void handleManualRegenerate("resume");
+              }}
               disabled={pageTruth.isGenerating || resumeGenerating || coverGenerating}
               data-testid="studio-regenerate-after-retry-cap"
             >
@@ -10838,7 +10842,10 @@ export default function StudioPage() {
             {shouldShowCoverRegenerate ? (
               <FormButton
                 variant="secondary"
-                onClick={() => void handleManualRegenerate()}
+                onClick={() => {
+                  console.log("[studio][cover_regenerate_button_clicked]");
+                  void handleManualRegenerate("cover");
+                }}
                 disabled={pageTruth.isGenerating || resumeGenerating || coverGenerating}
                 data-testid="studio-regenerate-after-retry-cap-cover"
               >

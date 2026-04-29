@@ -148,10 +148,11 @@ describe("Studio manual regenerate after retry cap", () => {
     mockRouterReplace.mockReset();
   });
 
-  it("clicking Regenerate requests both artifact generation paths (resume + cover)", async () => {
+  it("clicking Regenerate logs button click + handler entry and triggers both POST endpoints", async () => {
     const calls: Array<{ url: string; method: string }> = [];
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
     // Ensure a Storage-like localStorage is available for retry-count persistence.
     if (typeof (globalThis as unknown as { localStorage?: unknown }).localStorage !== "object" ||
@@ -301,6 +302,8 @@ describe("Studio manual regenerate after retry cap", () => {
 
     fireEvent.click(screen.getByTestId("studio-regenerate-after-retry-cap"));
     await waitFor(() => {
+      expect(logSpy).toHaveBeenCalledWith("[studio][resume_regenerate_button_clicked]");
+      expect(logSpy).toHaveBeenCalledWith("[studio][manual_regenerate_handler_entered]", { source: "resume" });
       expect(warnSpy).toHaveBeenCalledWith(
         "[studio][manual_regenerate_clicked]",
         expect.anything(),
@@ -324,6 +327,7 @@ describe("Studio manual regenerate after retry cap", () => {
 
     warnSpy.mockRestore();
     infoSpy.mockRestore();
+    logSpy.mockRestore();
   });
 });
 
