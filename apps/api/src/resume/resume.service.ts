@@ -93,6 +93,11 @@ import type {
   UserSafeDisplayPayload,
 } from '../documents/normalized-document.models';
 import { SyntheticMetadataInput } from '../synthetic/synthetic-metadata.types';
+import {
+  repairResumeForQuality,
+  validateResumeArtifactQuality,
+  type ArtifactQualityGate,
+} from '../artifacts/artifactQualityValidator';
 
 export type GenerateResumeRequest = {
   baselineId: string;
@@ -217,6 +222,7 @@ export type ResumeGenerationResponse = {
   display: UserSafeDisplayPayload;
   safeDisplay: UserSafeDisplayPayload;
   internal: Record<string, unknown>;
+  qualityGate?: ArtifactQualityGate;
   idempotency?: {
     status:
       | 'accepted_new'
@@ -1953,11 +1959,22 @@ export class ResumeService {
             .map((bullet) => bullet.claimRisk),
         );
     const identity = resolveBaselineIdentity(baseline);
-    const normalizedDocument = buildNormalizedResumeDocument(
+    let normalizedDocument = buildNormalizedResumeDocument(
       sections as ResumeExportSection[],
       identity,
       { documentStrategyPlan: request.documentStrategyPlan ?? undefined },
     );
+
+    // Soft quality enforcement (server-side self-heal): validate the normalized resume model using
+    // the same rules enforced in the Studio UI safety net. If the first pass fails, attempt a single
+    // deterministic repair and re-check. Never loop indefinitely.
+    let qualityGate = validateResumeArtifactQuality(normalizedDocument);
+    if (qualityGate.status === 'needs_refinement') {
+      const repaired = repairResumeForQuality(normalizedDocument, qualityGate);
+      const repairedGate = validateResumeArtifactQuality(repaired);
+      normalizedDocument = repaired;
+      qualityGate = repairedGate.status === 'pass' ? repairedGate : qualityGate;
+    }
     let experienceDiagnostics = this.buildExperiencePipelineDiagnostics({
       sectionsWithPolicies,
       allowedSections,
@@ -2265,6 +2282,9 @@ export class ResumeService {
           resumeGenerationDiagnostics: experienceDiagnostics,
           normalizationDiagnostics: experienceDiagnostics,
         },
+        ...(qualityGate.status === 'pass'
+          ? { qualityGate: { status: 'pass', reasons: [] } }
+          : { qualityGate }),
       };
     }
 
@@ -2401,6 +2421,9 @@ export class ResumeService {
         resumeGenerationDiagnostics: experienceDiagnostics,
         normalizationDiagnostics: experienceDiagnostics,
       },
+      ...(qualityGate.status === 'pass'
+        ? { qualityGate: { status: 'pass', reasons: [] } }
+        : { qualityGate }),
       idempotency: {
         status: reservation.status,
         runId: reservation.runId,
@@ -2461,6 +2484,7 @@ export class ResumeService {
         } catch {
           normalizedDocument = null;
         }
+        const qualityGate = validateResumeArtifactQuality(normalizedDocument);
 
         const minimalAuditId = `minimal:${Date.now()}`;
         const response: ResumeGenerationResponse = {
@@ -2505,6 +2529,9 @@ export class ResumeService {
             minimalFallback: true,
             failureReason: error instanceof Error ? error.message : String(error),
           },
+          ...(qualityGate.status === 'pass'
+            ? { qualityGate: { status: 'pass', reasons: [] } }
+            : { qualityGate }),
         };
 
         try {

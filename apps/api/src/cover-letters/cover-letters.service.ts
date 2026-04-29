@@ -97,6 +97,11 @@ import type { ArtifactTraceAudit } from '../generation/artifact-trace-audit';
 import { buildArtifactFailurePayload } from '../generation/artifact-failure';
 import { polishCoverLetterGeneration } from '../language-style-pass';
 import type { DocumentStrategyPlanLike } from '../document-strategy-plan.types';
+import {
+  repairCoverLetterForQuality,
+  validateCoverLetterArtifactQuality,
+  type ArtifactQualityGate,
+} from '../artifacts/artifactQualityValidator';
 import { resolveSyntheticCandidateName } from './candidate-name.util';
 
 type CoverLetterDraft = {
@@ -105,6 +110,7 @@ type CoverLetterDraft = {
   job: Job;
   allowedBlocks: AllowedBaselineBlock[];
   candidateName: string;
+  qualityGate: ArtifactQualityGate;
   jobContext: {
     id: string;
     title: string | null;
@@ -144,6 +150,7 @@ export type CoverLetterGenerationResponse = {
   status: 'success';
   generationStatus: 'success';
   exportReady: boolean;
+  quality?: ArtifactQualityGate;
   baselineId: string;
   baselineVersionId: string;
   jobId: string;
@@ -568,6 +575,14 @@ export class CoverLettersService {
         status: 'success',
         generationStatus: 'success',
         exportReady: true,
+        ...(draft.qualityGate
+          ? {
+              quality:
+                draft.qualityGate.status === 'pass'
+                  ? { status: 'pass', reasons: [] }
+                  : draft.qualityGate,
+            }
+          : {}),
         ...savedCoverLetter,
         baselineVersionId: draft.baselineVersion.id,
         exports,
@@ -1172,6 +1187,46 @@ export class CoverLettersService {
     );
     generation = qualityResult.generation;
 
+    // Soft quality enforcement (server-side self-heal): run shared artifact quality validation.
+    // If the first pass fails, attempt one deterministic repair pass. If it still fails, return
+    // the artifact but include quality metadata so Studio can surface the safety net.
+    let artifactQuality = validateCoverLetterArtifactQuality(generation.paragraphs ?? generation.document?.bodyParagraphs ?? []);
+    if (artifactQuality.status === 'needs_refinement') {
+      const repairSource = Array.isArray(generation.paragraphs) && generation.paragraphs.length
+        ? generation.paragraphs
+        : generation.document
+          ? [
+              generation.document.opening,
+              ...(generation.document.bodyParagraphs ?? []),
+              generation.document.closingParagraph,
+            ].filter(Boolean)
+          : [];
+      const repairedParagraphs = repairCoverLetterForQuality(repairSource, artifactQuality);
+      artifactQuality = validateCoverLetterArtifactQuality(repairedParagraphs);
+      if (generation.document) {
+        const opening = repairedParagraphs[0] ?? generation.document.opening;
+        const closingParagraph = repairedParagraphs.length >= 2 ? repairedParagraphs[repairedParagraphs.length - 1] : generation.document.closingParagraph;
+        const bodyParagraphs = repairedParagraphs.slice(1, Math.max(1, repairedParagraphs.length - 1));
+        generation = {
+          ...generation,
+          document: {
+            ...generation.document,
+            opening,
+            bodyParagraphs,
+            closingParagraph,
+          },
+          paragraphs: repairedParagraphs,
+          content: repairedParagraphs.join('\n\n'),
+        };
+      } else {
+        generation = {
+          ...generation,
+          paragraphs: repairedParagraphs,
+          content: repairedParagraphs.join('\n\n'),
+        };
+      }
+    }
+
     if (
       (process.env.NODE_ENV ?? 'development') !== 'production' &&
       syntheticMetadata?.isSynthetic
@@ -1370,6 +1425,7 @@ export class CoverLettersService {
       analysisAssessment,
       allowedBlocks,
       candidateName,
+      qualityGate: artifactQuality,
       jobContext,
       jobContextAllowlist,
       closingTemplateKey,
