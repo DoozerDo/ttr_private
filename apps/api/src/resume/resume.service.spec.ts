@@ -246,6 +246,40 @@ const buildService = (options?: {
 };
 
 describe('ResumeService contract', () => {
+  it('repairs malformed role titles and removes dangling fragments in final preview resume output', async () => {
+    const { service } = buildService();
+
+    const original = baseline.sections?.[0]?.content ?? '';
+    baseline.sections = [
+      {
+        ...baseSection,
+        content: [
+          // Explicit header with a truncated title fragment.
+          'Example Co | Technical Architect & Full | 2020 - 2024',
+          // Bullet-like lines.
+          '- Built a production platform for a game. The',
+          '- Led incident response and reliability work across teams.',
+        ].join('\n'),
+      },
+    ];
+
+    const result = await service.generateResume('user-1', baseRequest);
+    const resume = result.preview?.resume ?? null;
+    expect(resume).toBeTruthy();
+    expect(resume?.experience?.length ?? 0).toBeGreaterThan(0);
+
+    const roleTitle = String(resume?.experience?.[0]?.roleTitle ?? '');
+    expect(roleTitle).not.toMatch(/\b&\s*Full\b/i);
+    expect(roleTitle).not.toMatch(/\s&\s*$/);
+
+    const summary = String(resume?.summary ?? '');
+    expect(summary).not.toMatch(/\bThe\s*$/);
+
+    const bullets = (resume?.experience?.[0]?.bullets ?? []).map((b) => String(b));
+    expect(bullets.some((b) => /\bThe\s*$/.test(b))).toBe(false);
+
+    baseline.sections = [{ ...baseSection, content: original }];
+  });
   it('does not require baselineVersionId (service resolves latest version)', async () => {
     const { service } = buildService();
     await expect(

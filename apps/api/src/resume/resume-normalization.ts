@@ -216,6 +216,20 @@ function normalizeRoleTitleText(value?: string | null): string {
     .trim();
 }
 
+function repairRoleTitleFragment(value: string): string {
+  const normalized = normalizeRoleTitleText(value);
+  if (!normalized) return '';
+
+  // Avoid truncated titles that end in conjunction fragments (often caused by wrapped PDF lines).
+  // Example: "Technical Architect & Full" (intended: "Technical Architect & Full-stack ...").
+  let next = normalized.replace(/\s+/g, ' ').trim();
+  next = next.replace(/\s*&\s*$/g, '').trim();
+  next = next.replace(/\s*(?:&|and)\s+full$/i, '').trim();
+  next = next.replace(/\s*(?:&|and)\s+part$/i, '').trim();
+  next = next.replace(/\s*(?:&|and)\s+contract$/i, '').trim();
+  return next;
+}
+
 function stripRoleSuffixFromBulletText(bullet: string, roleTitle: string): string {
   const normalizedBullet = normalizeLine(bullet);
   if (!normalizedBullet) return '';
@@ -602,6 +616,7 @@ function buildExperienceFromSection(section: ResumeExportSection): NormalizedRes
   let current: ExperienceCandidate | null = null;
   let pendingLocation: string | undefined;
   let pendingRole: string | undefined;
+  let lastLineWasExperienceHeader = false;
 
   const inferFallbackRoleTitle = (entry: ExperienceCandidate): string => {
     const explicit = normalizeDisplayLine(entry.roleTitle ?? '');
@@ -704,6 +719,7 @@ function buildExperienceFromSection(section: ResumeExportSection): NormalizedRes
     if (BULLET_PATTERN.test(line)) {
       const bulletText = normalizeDisplayLine(line.replace(BULLET_PATTERN, ''));
       if (!bulletText || isLowQualityFragment(bulletText)) continue;
+      lastLineWasExperienceHeader = false;
       const active = ensureCurrent();
       active.roleEvidenceLines.push(line);
       addBulletToCandidate(active, bulletText, {
@@ -767,10 +783,12 @@ function buildExperienceFromSection(section: ResumeExportSection): NormalizedRes
         active.startDate = parsedDate.startDate;
         active.endDate = parsedDate.endDate;
       }
+      lastLineWasExperienceHeader = true;
       continue;
     }
 
     if (isPaginationArtifact(line)) {
+      lastLineWasExperienceHeader = false;
       continue;
     }
 
@@ -782,19 +800,26 @@ function buildExperienceFromSection(section: ResumeExportSection): NormalizedRes
       } else {
         pendingLocation = line;
       }
+      lastLineWasExperienceHeader = false;
       continue;
     }
 
-    if (isLikelyRoleTitle(line)) {
+    // Allow role-title-only lines when they immediately follow an explicit experience header
+    // (company | location | dates). This preserves common resume formatting (separate role line)
+    // while preventing bullets/summary lines from being misclassified as role titles.
+    if (lastLineWasExperienceHeader && isLikelyRoleTitle(line)) {
       const currentEntry = current as ExperienceCandidate | null;
-      if (currentEntry && !currentEntry.roleTitle) {
+      if (currentEntry && currentEntry.company && !currentEntry.roleTitle) {
         currentEntry.roleEvidenceLines.push(line);
         currentEntry.roleTitle = line;
-      } else {
-        pendingRole = line;
+        lastLineWasExperienceHeader = false;
+        continue;
       }
+      pendingRole = line;
+      lastLineWasExperienceHeader = false;
       continue;
     }
+    lastLineWasExperienceHeader = false;
 
     if (isLowQualityFragment(line)) {
       continue;
@@ -1118,7 +1143,7 @@ function sanitizeNormalizedResumeDocument(
   const sanitizedExperience = document.experience
     .map((entry) => {
       const roleTitle =
-        normalizeRoleTitleText(sanitizeText(entry.roleTitle)) || 'Professional Experience';
+        repairRoleTitleFragment(sanitizeText(entry.roleTitle)) || 'Professional Experience';
       const bulletLines = entry.bullets
         .flatMap((bullet) => sanitizeText(bullet).split(/\r?\n/))
         .map((bullet) => bullet.trim())
