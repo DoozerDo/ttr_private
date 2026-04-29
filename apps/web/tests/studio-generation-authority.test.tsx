@@ -114,14 +114,11 @@ describe("Studio artifact quality gating (soft)", () => {
 
     const resumeSection = screen.getByRole("heading", { name: "Resume" }).closest("section");
     expect(resumeSection).toBeTruthy();
-    expect(within(resumeSection as HTMLElement).getAllByText(/resume needs refinement/i).length).toBeGreaterThan(0);
-    const resumeButtons = within(resumeSection as HTMLElement).getAllByRole("button");
-    const downloadDocx = resumeButtons.find((button) => button.textContent?.includes("Download DOCX"));
-    const downloadPdf = resumeButtons.find((button) => button.textContent?.includes("Download PDF"));
-    expect(downloadDocx).toBeTruthy();
-    expect(downloadPdf).toBeTruthy();
-    expect(downloadDocx).toHaveProperty("disabled", true);
-    expect(downloadPdf).toHaveProperty("disabled", true);
+    expect(
+      within(resumeSection as HTMLElement).getAllByText(/failed quality checks/i).length,
+    ).toBeGreaterThan(0);
+    expect(within(resumeSection as HTMLElement).queryByText("Download DOCX")).toBeNull();
+    expect(within(resumeSection as HTMLElement).queryByText("Download PDF")).toBeNull();
   });
 
   it("renders cover letter preview but blocks export when cover letter quality fails", async () => {
@@ -134,13 +131,11 @@ describe("Studio artifact quality gating (soft)", () => {
 
     const coverSection = screen.getByRole("heading", { name: "Cover letter" }).closest("section");
     expect(coverSection).toBeTruthy();
-    const coverButtons = within(coverSection as HTMLElement).getAllByRole("button");
-    const downloadDocx = coverButtons.find((button) => button.textContent?.includes("Download DOCX"));
-    const downloadPdf = coverButtons.find((button) => button.textContent?.includes("Download PDF"));
-    expect(downloadDocx).toBeTruthy();
-    expect(downloadPdf).toBeTruthy();
-    expect(downloadDocx).toHaveProperty("disabled", true);
-    expect(downloadPdf).toHaveProperty("disabled", true);
+    expect(
+      within(coverSection as HTMLElement).getAllByText(/failed quality checks/i).length,
+    ).toBeGreaterThan(0);
+    expect(within(coverSection as HTMLElement).queryByText("Download DOCX")).toBeNull();
+    expect(within(coverSection as HTMLElement).queryByText("Download PDF")).toBeNull();
   });
 });
 

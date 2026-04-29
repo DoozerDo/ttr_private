@@ -5,6 +5,7 @@ import {
   presentCoverLetterGeneration,
   presentResumeGeneration,
 } from "@/src/lib/studio/helpers";
+import { validateCoverLetterQuality, validateResumeQuality } from "@/src/lib/studio/artifactQuality";
 
 export type StudioCoverLetterModel = {
   paragraphs: string[];
@@ -74,6 +75,12 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
     ? { paragraphs: coverParagraphs }
     : null;
 
+  const resumeQuality = validateResumeQuality(resumeModel);
+  const coverLetterQuality = validateCoverLetterQuality(coverParagraphs);
+  const hasUsableArtifacts =
+    (Boolean(resumeModel) && resumeQuality.exportable) ||
+    (Boolean(coverLetterModel) && coverLetterQuality.exportable);
+
   const hasResumeArtifact = resumePresenter.hasExportableContent || Boolean(resumeModel);
   const hasCoverLetterArtifact =
     coverPresenter.hasExportableContent || (coverParagraphs.length > 0 && Boolean(input.coverLetterResponse));
@@ -92,8 +99,13 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
   return {
     hasResumeArtifact,
     hasCoverLetterArtifact,
+    hasUsableArtifacts,
     resumeModel,
     coverLetterModel,
+    quality: {
+      resume: resumeQuality,
+      coverLetter: coverLetterQuality,
+    },
     resumeExportAvailable,
     coverLetterExportAvailable,
     normalized: {
@@ -106,4 +118,3 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
     },
   };
 }
-

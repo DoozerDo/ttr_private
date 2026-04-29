@@ -828,6 +828,7 @@ export default function StudioPage() {
   const failedReadinessKeysRef = useRef<Set<string>>(new Set());
   const generationSectionRef = useRef<HTMLElement | null>(null);
   const draftAnywayRequestedRef = useRef(false);
+  const invalidGeneratedStateLoggedRef = useRef<string | null>(null);
   const [draftAnywayRequested, setDraftAnywayRequested] = useState(false);
   const requestedJobId = useMemo(
     () => trimId(searchParams.get("jobId")),
@@ -2402,7 +2403,7 @@ export default function StudioPage() {
   const hasResumeArtifact = artifactContract.hasResumeArtifact;
   // Quality validation must run on the same normalized resume model used for rendering (readResumeModel output).
   // Do not inspect raw payloads or presenter state for quality gating.
-  const resumeQuality = useMemo(() => validateResumeQuality(generatedResumeModel), [generatedResumeModel]);
+  const resumeQuality = artifactContract.quality.resume;
   const resumeNeedsRefinement = Boolean(generatedResumeModel) && resumeQuality.status === "needs_refinement";
   const resumeQualityIssueSummary = useMemo(() => {
     const blocking = resumeQuality.issues.filter((issue) => issue.severity === "blocking");
@@ -2425,10 +2426,7 @@ export default function StudioPage() {
   const coverLetterParagraphs = artifactContract.coverLetterModel?.paragraphs ?? [];
   const coverPresenter = artifactContract.presenters.coverLetter;
   const hasCoverLetterDraft = Boolean(artifactContract.coverLetterModel) && Boolean(coverState.response);
-  const coverLetterQuality = useMemo(
-    () => validateCoverLetterQuality(coverLetterParagraphs),
-    [coverLetterParagraphs],
-  );
+  const coverLetterQuality = artifactContract.quality.coverLetter;
   const coverNeedsRefinement = coverLetterParagraphs.length > 0 && coverLetterQuality.status === "needs_refinement";
   const coverQualityIssueSummary = useMemo(() => {
     const blocking = coverLetterQuality.issues.filter((issue) => issue.severity === "blocking");
@@ -9012,12 +9010,32 @@ export default function StudioPage() {
     const signature = contract.generation.auto.signature;
     if (generationReadyAutoStartRef.current === signature) return;
 
-    const ready = contract.generation.state === "ready";
-    const shouldStart = contract.generation.auto.shouldStart === true;
+    const effectiveGenerationState =
+      contract.generation.state === "generated" && !artifactContract.hasUsableArtifacts
+        ? "generated_unusable"
+        : contract.generation.state;
+
+    const shouldStart =
+      contract.generation.auto.shouldStart === true || effectiveGenerationState === "generated_unusable";
+    const ready = effectiveGenerationState === "ready" || effectiveGenerationState === "generated_unusable";
+
+    if (
+      effectiveGenerationState === "generated_unusable" &&
+      invalidGeneratedStateLoggedRef.current !== signature &&
+      process.env.NODE_ENV !== "production"
+    ) {
+      invalidGeneratedStateLoggedRef.current = signature;
+      console.warn("[studio][invalid_generated_state]", {
+        hasResume: Boolean(artifactContract.hasResumeArtifact),
+        hasCover: Boolean(artifactContract.hasCoverLetterArtifact),
+        resumeQuality: artifactContract.quality.resume,
+        coverQuality: artifactContract.quality.coverLetter,
+      });
+    }
+
     const artifactsExist =
       contract.artifacts.hasAnyOutput ||
-      artifactContract.hasResumeArtifact ||
-      artifactContract.hasCoverLetterArtifact;
+      artifactContract.hasUsableArtifacts;
     const generatingNow =
       autoGenerationInFlight ||
       resumeGenerating ||
@@ -9041,8 +9059,8 @@ export default function StudioPage() {
       debugAutoGenerationEnabled || ready || shouldStart || process.env.NODE_ENV !== "production";
     if (shouldLog) {
       console.log("[STUDIO][AUTO_GEN][EFFECT_ENTER]", {
-        contractGenerationState: contract.generation.state,
-        contractShouldStart: contract.generation.auto.shouldStart,
+        contractGenerationState: effectiveGenerationState,
+        contractShouldStart: shouldStart,
         signature,
         latch,
         urlJobId: selectedJobId ?? null,
@@ -9059,7 +9077,7 @@ export default function StudioPage() {
       }
     }
 
-    const shouldBlockFromLatch = latch === "succeeded";
+    const shouldBlockFromLatch = latch === "succeeded" && artifactContract.hasUsableArtifacts;
     const skipReason =
       contract.generation.auto.shouldStart === true
         ? null
@@ -9067,7 +9085,7 @@ export default function StudioPage() {
           ? contract.generation.auto.skipReason
           : "unknown";
     const decision = {
-      contractGenerationState: contract.generation.state,
+      contractGenerationState: effectiveGenerationState,
       contractShouldStart: shouldStart,
       contractSignature: signature,
       latch,
@@ -10247,11 +10265,13 @@ export default function StudioPage() {
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Resume</h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-              {resumeNeedsRefinement ? "Resume needs refinement" : renderCardStatus(resumeCardStatus, "Resume")}
+              {resumeNeedsRefinement
+                ? "Resume failed quality checks. Regenerating..."
+                : renderCardStatus(resumeCardStatus, "Resume")}
             </p>
           </div>
         </div>
-        {showResumeDownloadActions ? (
+        {showResumeDownloadActions && !resumeNeedsRefinement ? (
           <div className="flex flex-wrap gap-2">
             <FormButton
               variant="secondary"
@@ -10568,7 +10588,7 @@ export default function StudioPage() {
             <h2 className="text-lg font-semibold text-slate-100">Cover letter</h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
               {coverNeedsRefinement
-                ? "Cover letter needs refinement"
+                ? "Cover letter failed quality checks. Regenerating..."
                 : renderCardStatus(coverCardStatus, "Cover letter")}
             </p>
           </div>
@@ -10586,7 +10606,7 @@ export default function StudioPage() {
                 {coverGenerating ? "Generating..." : "Generate Cover Letter"}
               </FormButton>
             ) : null}
-            {showCoverDownloadActions ? (
+            {showCoverDownloadActions && !coverNeedsRefinement ? (
               <>
                 <FormButton
                   variant="secondary"
@@ -10606,7 +10626,7 @@ export default function StudioPage() {
             ) : null}
           </div>
         </div>
-        {showCoverDownloadActions ? (
+        {showCoverDownloadActions && !coverNeedsRefinement ? (
           <p className="text-xs text-slate-400">Download: DOCX | PDF</p>
         ) : null}
 
