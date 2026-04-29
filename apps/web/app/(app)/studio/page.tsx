@@ -1820,6 +1820,15 @@ export default function StudioPage() {
       const snapshot = readStoredStudioArtifacts(studioArtifactStorageKey);
       if (cancelled) return;
       if (snapshot) {
+        if (process.env.NODE_ENV === "development") {
+          console.info("[studio] artifact_hydration_fallback_local_storage", {
+            area: "studio",
+            operation: "hydrate_artifacts",
+            status: "info",
+            code: "artifact_hydration_fallback_local_storage",
+            storageKey: studioArtifactStorageKey,
+          });
+        }
         applyHydratedPayload(snapshot);
         setStudioArtifactsHydrated(true);
         return;
