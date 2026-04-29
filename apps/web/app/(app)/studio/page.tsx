@@ -8831,6 +8831,13 @@ export default function StudioPage() {
         };
       }
 
+      if (source === "shell_auto") {
+        const contractSignature = workflowOrchestratorCore.contract?.generation.auto.signature;
+        if (contractSignature) {
+          retryCountRef.current[contractSignature] = (retryCountRef.current[contractSignature] ?? 0) + 1;
+        }
+      }
+
       scrollToStudioTop("smooth");
       setGenerationReadyFailure(null);
       setGenerationReadyPhase("generating");
@@ -9002,6 +9009,23 @@ export default function StudioPage() {
     workflowOrchestratorCore.contract,
   ]);
 
+  const MAX_AUTO_RETRIES = 1;
+  const retryCountRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    const signature = workflowOrchestratorCore.contract?.generation.auto.signature;
+    if (!signature) return;
+    if (!artifactContract.hasUsableArtifacts) return;
+    retryCountRef.current[signature] = 0;
+  }, [artifactContract.hasUsableArtifacts, workflowOrchestratorCore.contract?.generation.auto.signature]);
+
+  const studioContractSignature = workflowOrchestratorCore.contract?.generation.auto.signature ?? null;
+  const studioEffectiveGenerationState =
+    workflowOrchestratorCore.contract?.generation.state === "generated" && !artifactContract.hasUsableArtifacts
+      ? "generated_unusable"
+      : workflowOrchestratorCore.contract?.generation.state ?? null;
+  const studioAutoRetryCount = studioContractSignature ? (retryCountRef.current[studioContractSignature] ?? 0) : 0;
+  const studioAutoRetryCapReached =
+    studioEffectiveGenerationState === "generated_unusable" && studioAutoRetryCount >= MAX_AUTO_RETRIES;
   const generationReadyAutoStartRef = useRef<string | null>(null);
   useEffect(() => {
     const contract = workflowOrchestratorCore.contract;
@@ -9015,8 +9039,22 @@ export default function StudioPage() {
         ? "generated_unusable"
         : contract.generation.state;
 
-    const shouldStart =
-      contract.generation.auto.shouldStart === true || effectiveGenerationState === "generated_unusable";
+    let contractShouldStart = contract.generation.auto.shouldStart === true;
+    if (effectiveGenerationState === "generated_unusable") {
+      const retryCount = retryCountRef.current[signature] ?? 0;
+      if (retryCount >= MAX_AUTO_RETRIES) {
+        contractShouldStart = false;
+
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[studio][retry_cap_reached]", {
+            contractSignature: signature,
+            retryCount,
+          });
+        }
+      } else {
+        contractShouldStart = true;
+      }
+    }
     const ready = effectiveGenerationState === "ready" || effectiveGenerationState === "generated_unusable";
 
     if (
@@ -9056,11 +9094,11 @@ export default function StudioPage() {
     // Instrumentation: run on every dependency change for this effect scope.
     // In production, avoid noisy logs unless explicitly enabled or we're in the ready lane.
     const shouldLog =
-      debugAutoGenerationEnabled || ready || shouldStart || process.env.NODE_ENV !== "production";
+      debugAutoGenerationEnabled || ready || contractShouldStart || process.env.NODE_ENV !== "production";
     if (shouldLog) {
       console.log("[STUDIO][AUTO_GEN][EFFECT_ENTER]", {
         contractGenerationState: effectiveGenerationState,
-        contractShouldStart: shouldStart,
+        contractShouldStart,
         signature,
         latch,
         urlJobId: selectedJobId ?? null,
@@ -9086,7 +9124,7 @@ export default function StudioPage() {
           : "unknown";
     const decision = {
       contractGenerationState: effectiveGenerationState,
-      contractShouldStart: shouldStart,
+      contractShouldStart,
       contractSignature: signature,
       latch,
       skipReason,
@@ -9096,7 +9134,7 @@ export default function StudioPage() {
       console.log("[STUDIO][AUTO_GEN][DECISION]", decision);
     }
 
-    if (!ready || !shouldStart) {
+    if (!ready || !contractShouldStart) {
       if (debugAutoGenerationEnabled) {
         console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "contract_not_ready_or_shouldStart_false" });
       }
@@ -10266,7 +10304,9 @@ export default function StudioPage() {
             <h2 className="text-lg font-semibold text-slate-100">Resume</h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
               {resumeNeedsRefinement
-                ? "Resume failed quality checks. Regenerating..."
+                ? studioAutoRetryCapReached
+                  ? "Generation failed quality checks. Please edit or regenerate manually."
+                  : "Resume failed quality checks. Regenerating..."
                 : renderCardStatus(resumeCardStatus, "Resume")}
             </p>
           </div>
@@ -10588,7 +10628,9 @@ export default function StudioPage() {
             <h2 className="text-lg font-semibold text-slate-100">Cover letter</h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
               {coverNeedsRefinement
-                ? "Cover letter failed quality checks. Regenerating..."
+                ? studioAutoRetryCapReached
+                  ? "Generation failed quality checks. Please edit or regenerate manually."
+                  : "Cover letter failed quality checks. Regenerating..."
                 : renderCardStatus(coverCardStatus, "Cover letter")}
             </p>
           </div>
