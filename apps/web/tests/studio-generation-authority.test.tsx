@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import StudioPage from "@/app/(app)/studio/page";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
@@ -93,6 +93,54 @@ vi.mock("@/lib/baselines", async () => {
       },
     ]),
   };
+});
+
+describe("Studio artifact quality gating (soft)", () => {
+  beforeEach(() => {
+    trackEventMock.mockClear();
+    clearRecentIntentSignals();
+    mockRouterPush.mockReset();
+    mockRouterReplace.mockReset();
+  });
+
+  it("renders resume draft but blocks export when resume quality fails", async () => {
+    setupFetchWithQualityFailures();
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("studio-resume-missing")).toBeNull();
+      expect(screen.getByTestId("studio-resume-quality-warning")).toBeInTheDocument();
+    });
+
+    const resumeSection = screen.getByRole("heading", { name: "Resume" }).closest("section");
+    expect(resumeSection).toBeTruthy();
+    const resumeButtons = within(resumeSection as HTMLElement).getAllByRole("button");
+    const downloadDocx = resumeButtons.find((button) => button.textContent?.includes("Download DOCX"));
+    const downloadPdf = resumeButtons.find((button) => button.textContent?.includes("Download PDF"));
+    expect(downloadDocx).toBeTruthy();
+    expect(downloadPdf).toBeTruthy();
+    expect(downloadDocx).toHaveProperty("disabled", true);
+    expect(downloadPdf).toHaveProperty("disabled", true);
+  });
+
+  it("renders cover letter preview but blocks export when cover letter quality fails", async () => {
+    setupFetchWithQualityFailures();
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-cover-quality-warning")).toBeInTheDocument();
+    });
+
+    const coverSection = screen.getByRole("heading", { name: "Cover letter" }).closest("section");
+    expect(coverSection).toBeTruthy();
+    const coverButtons = within(coverSection as HTMLElement).getAllByRole("button");
+    const downloadDocx = coverButtons.find((button) => button.textContent?.includes("Download DOCX"));
+    const downloadPdf = coverButtons.find((button) => button.textContent?.includes("Download PDF"));
+    expect(downloadDocx).toBeTruthy();
+    expect(downloadPdf).toBeTruthy();
+    expect(downloadDocx).toHaveProperty("disabled", true);
+    expect(downloadPdf).toHaveProperty("disabled", true);
+  });
 });
 
 function renderStudio(
@@ -228,6 +276,88 @@ function setupFetch(readinessStatus: "ready" | "limited" | "blocked", score = 94
                   "Dear Hiring Team,",
                   "I am applying for this role.",
                   "I have led support operations programs.",
+                  "Sincerely,",
+                  "Test Candidate",
+                ],
+              },
+            },
+          }),
+        );
+      }
+      return Promise.resolve(createResponse({}));
+    }),
+  );
+}
+
+function setupFetchWithQualityFailures() {
+  setFetchImplementation(
+    vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+            scoring_v2: { score: 94 },
+            verification_coverage: {
+              totalClaims: 3,
+              verifiedClaims: 3,
+              inferredClaims: 0,
+              unverifiedClaims: 0,
+              unverifiedRequirements: [],
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.includes("/api/resume")) {
+        return Promise.resolve(
+          createResponse({
+            status: "success",
+            generationStatus: "success",
+            exports: { docx: true, pdf: true },
+            preview: {
+              resume: {
+                heading: { name: "Test Candidate", contactLine: "test@example.com" },
+                summary:
+                  "Designed and built a full-stack production platform for Conquest of Fates (cof.gg), a sci-fi trading card game. The",
+                experience: [
+                  {
+                    company: "Acme",
+                    roleTitle: "Director of Support",
+                    bullets: ["Led support operations and improved team performance."],
+                  },
+                ],
+                education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+                competencies: ["Customer strategy", "Operational leadership"],
+              },
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/cover-letters")) {
+        return Promise.resolve(
+          createResponse({
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: {
+              coverLetter: {
+                paragraphs: [
+                  "The strongest fit comes from the operating context I have already handled.",
+                  "I am applying for this role.",
                   "Sincerely,",
                   "Test Candidate",
                 ],

@@ -17,6 +17,7 @@ import { PageShell } from "@/components/PageShell";
 import { VerifiedGenerationTrustSummary } from "@/components/VerifiedGenerationTrustSummary";
 import { StudioNextMove } from "@/components/StudioNextMove";
 import { defaultClosingTemplateKey } from "@/lib/coverLetters";
+import { validateCoverLetterQuality, validateResumeQuality } from "@/src/lib/studio/artifactQuality";
 import { buildExportPayload } from "../lib/exportPayload";
 import { formatErrorMessage, readResponsePayload } from "@/lib/compliance/parseComplianceError";
 import { sanitizeRenderedTextValue } from "@/lib/renderedText";
@@ -2400,10 +2401,22 @@ export default function StudioPage() {
   const hasResumeDraft = Boolean(artifactContract.resumeModel) && Boolean(resumeState.response);
   const hasResumeArtifact = artifactContract.hasResumeArtifact;
   const canExportResume = artifactContract.resumeExportAvailable;
+  const resumeQuality = useMemo(() => validateResumeQuality(effectiveResumeModel), [effectiveResumeModel]);
+  const resumeNeedsRefinement = Boolean(effectiveResumeModel) && resumeQuality.status === "needs_refinement";
+  const resumeQualityIssueSummary = useMemo(() => {
+    const blocking = resumeQuality.issues.filter((issue) => issue.severity === "blocking");
+    const issues = blocking.length ? blocking : resumeQuality.issues;
+    const visible = issues.slice(0, 3);
+    return {
+      visible,
+      remaining: Math.max(0, issues.length - visible.length),
+    };
+  }, [resumeQuality.issues]);
   const showResumeDownloadActions =
     resumePresenter.status === "blocked" ||
     (resumePresenter.status === "success" && hasResumeArtifact);
   const isResumeDownloadLocked = !isPro;
+  const canExportResumeWithQuality = canExportResume && resumeQuality.exportable;
   const resumePreviewText = useMemo(
     () => formatPreview(artifactContract.normalized.resumeResponse),
     [artifactContract.normalized.resumeResponse],
@@ -2411,6 +2424,20 @@ export default function StudioPage() {
   const coverLetterParagraphs = artifactContract.coverLetterModel?.paragraphs ?? [];
   const coverPresenter = artifactContract.presenters.coverLetter;
   const hasCoverLetterDraft = Boolean(artifactContract.coverLetterModel) && Boolean(coverState.response);
+  const coverLetterQuality = useMemo(
+    () => validateCoverLetterQuality(coverLetterParagraphs),
+    [coverLetterParagraphs],
+  );
+  const coverNeedsRefinement = coverLetterParagraphs.length > 0 && coverLetterQuality.status === "needs_refinement";
+  const coverQualityIssueSummary = useMemo(() => {
+    const blocking = coverLetterQuality.issues.filter((issue) => issue.severity === "blocking");
+    const issues = blocking.length ? blocking : coverLetterQuality.issues;
+    const visible = issues.slice(0, 3);
+    return {
+      visible,
+      remaining: Math.max(0, issues.length - visible.length),
+    };
+  }, [coverLetterQuality.issues]);
 
   // Canonical workflow authority (additive layer): owns top-level readiness/failure messaging decisions.
   const resolvedScoreForContract = analysisScore;
@@ -3418,7 +3445,8 @@ export default function StudioPage() {
     canExportDocuments &&
     coverPresenter.status === "success" &&
     hasCoverLetterArtifact &&
-    !coverLetterComplianceBlocked;
+    !coverLetterComplianceBlocked &&
+    coverLetterQuality.exportable;
   const showCoverDownloadActions =
     Boolean(coverLetterComplianceBlocked) ||
     coverPresenter.status === "blocked" ||
@@ -7211,7 +7239,7 @@ export default function StudioPage() {
           <FormButton
             variant="secondary"
             onClick={() => void exportResume("docx")}
-            disabled={!canExportResume || resumeExportFormat === "docx"}
+            disabled={!canExportResumeWithQuality || resumeExportFormat === "docx"}
           >
             {resumeExportFormat === "docx" ? "Downloading..." : "Download Resume"}
           </FormButton>
@@ -7927,7 +7955,7 @@ export default function StudioPage() {
             <FormButton
               variant="secondary"
               onClick={() => void exportResume("docx")}
-              disabled={!canExportResume || resumeExportFormat === "docx"}
+              disabled={!canExportResumeWithQuality || resumeExportFormat === "docx"}
             >
               {resumeExportFormat === "docx" ? "Downloading..." : "Download Resume"}
             </FormButton>
@@ -10208,7 +10236,7 @@ export default function StudioPage() {
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Resume</h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-              {renderCardStatus(resumeCardStatus, "Resume")}
+              {resumeNeedsRefinement ? "Resume needs refinement" : renderCardStatus(resumeCardStatus, "Resume")}
             </p>
           </div>
         </div>
@@ -10217,20 +10245,39 @@ export default function StudioPage() {
             <FormButton
               variant="secondary"
               onClick={() => void exportResume("docx")}
-              disabled={isResumeDownloadLocked || !canExportResume || resumeExportFormat === "docx"}
+              disabled={isResumeDownloadLocked || !canExportResumeWithQuality || resumeExportFormat === "docx"}
             >
               {resumeExportFormat === "docx" ? "Downloading..." : "Download DOCX"}
             </FormButton>
             <FormButton
               variant="secondary"
               onClick={() => void exportResume("pdf")}
-              disabled={isResumeDownloadLocked || !canExportResume || resumeExportFormat === "pdf"}
+              disabled={isResumeDownloadLocked || !canExportResumeWithQuality || resumeExportFormat === "pdf"}
             >
               {resumeExportFormat === "pdf" ? "Downloading..." : "Download PDF"}
             </FormButton>
           </div>
         ) : null}
         {/* Resume download actions are rendered as buttons; no extra status line needed here. */}
+
+        {resumeNeedsRefinement ? (
+          <div
+            className="space-y-2 rounded-2xl border border-amber-300/25 bg-amber-500/5 p-4"
+            data-testid="studio-resume-quality-warning"
+          >
+            <p className="text-sm font-semibold text-amber-100">Resume needs refinement before export.</p>
+            {resumeQualityIssueSummary.visible.length ? (
+              <ul className="list-disc space-y-1 pl-5 text-sm text-slate-200">
+                {resumeQualityIssueSummary.visible.map((issue, index) => (
+                  <li key={`resume-quality-issue-${issue.code}-${index}`}>{issue.message}</li>
+                ))}
+              </ul>
+            ) : null}
+            {resumeQualityIssueSummary.remaining ? (
+              <p className="text-xs text-slate-300">and {resumeQualityIssueSummary.remaining} more</p>
+            ) : null}
+          </div>
+        ) : null}
 
         {resumeState.tierGateError ? (
           <Alert intent="warning">
@@ -10509,7 +10556,9 @@ export default function StudioPage() {
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Cover letter</h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-              {renderCardStatus(coverCardStatus, "Cover letter")}
+              {coverNeedsRefinement
+                ? "Cover letter needs refinement"
+                : renderCardStatus(coverCardStatus, "Cover letter")}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -10548,6 +10597,25 @@ export default function StudioPage() {
         </div>
         {showCoverDownloadActions ? (
           <p className="text-xs text-slate-400">Download: DOCX | PDF</p>
+        ) : null}
+
+        {coverNeedsRefinement ? (
+          <div
+            className="space-y-2 rounded-2xl border border-amber-300/25 bg-amber-500/5 p-4"
+            data-testid="studio-cover-quality-warning"
+          >
+            <p className="text-sm font-semibold text-amber-100">Cover letter needs refinement before export.</p>
+            {coverQualityIssueSummary.visible.length ? (
+              <ul className="list-disc space-y-1 pl-5 text-sm text-slate-200">
+                {coverQualityIssueSummary.visible.map((issue, index) => (
+                  <li key={`cover-quality-issue-${issue.code}-${index}`}>{issue.message}</li>
+                ))}
+              </ul>
+            ) : null}
+            {coverQualityIssueSummary.remaining ? (
+              <p className="text-xs text-slate-300">and {coverQualityIssueSummary.remaining} more</p>
+            ) : null}
+          </div>
         ) : null}
 
         {coverLetterComplianceBlocked ? (
