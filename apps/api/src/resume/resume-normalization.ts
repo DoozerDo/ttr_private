@@ -41,6 +41,8 @@ const CONTINUATION_START_PATTERN =
 const BULLET_CONTINUATION_END_PATTERN =
   /(?:,\s*$|\b(?:and|with|including|across)\s*$)/i;
 const WRAPPED_BULLET_END_CONTINUATION_PATTERN = /(?:,\s*$|\b(?:and|or|to|for|with|in|on|of|by|from)$)/i;
+const DANGLING_BULLET_TERMINAL_WORD_PATTERN =
+  /\b(?:the|and|or|because|with|without|as|to|for|of|in|on|by|from|including|across|within|between|while|when|where|which|that)\s*$/i;
 const GENERIC_ROLE_PHRASE_SOURCE =
   '(?:(?:(?:senior|lead|principal|staff|junior|associate|assistant|head|director|manager|engineer|developer|designer|producer|analyst|consultant|architect|coordinator|specialist)\\b(?:\\s+[a-z][a-z/&-]*){0,4})|(?:[a-z][a-z/&-]*\\s+(?:manager|engineer|developer|designer|producer|analyst|consultant|architect|coordinator|specialist)\\b(?:\\s+[a-z][a-z/&-]*){0,3}))';
 const GENERIC_ROLE_TRAILING_PATTERN = new RegExp(
@@ -412,11 +414,14 @@ function normalizeExperienceBullets(rawBullets: string[], roleTitle?: string): s
       .replace(/\s+/g, ' ')
       .trim();
     const tightened = tightenBulletForSeniority(cleaned);
+    const terminalNormalized = normalizeLine(tightened);
     if (
       !tightened ||
       isLowQualityFragment(tightened) ||
       isPaginationArtifact(tightened) ||
-      isClearlyIncompleteBulletFragment(tightened)
+      isClearlyIncompleteBulletFragment(tightened) ||
+      (!SENTENCE_END_PATTERN.test(terminalNormalized) &&
+        DANGLING_BULLET_TERMINAL_WORD_PATTERN.test(terminalNormalized))
     ) {
       continue;
     }
@@ -844,11 +849,14 @@ function buildExperienceFromSection(section: ResumeExportSection): NormalizedRes
           .replace(/\s+/g, ' ')
           .trim();
         const tightened = tightenBulletForSeniority(cleaned);
+        const terminalNormalized = normalizeLine(tightened);
         if (
           !tightened ||
           isLowQualityFragment(tightened) ||
           isPaginationArtifact(tightened) ||
-          isClearlyIncompleteBulletFragment(tightened)
+          isClearlyIncompleteBulletFragment(tightened) ||
+          (!SENTENCE_END_PATTERN.test(terminalNormalized) &&
+            DANGLING_BULLET_TERMINAL_WORD_PATTERN.test(terminalNormalized))
         ) {
           continue;
         }
@@ -923,7 +931,7 @@ function buildExperienceFromSection(section: ResumeExportSection): NormalizedRes
       startDate: entry.startDate,
       endDate: entry.endDate,
       dateRange: entry.dateRange,
-      bullets: entry.bullets.map((bullet) => bullet.text),
+      bullets: entry.bullets.map((bullet) => `[TEST_MARKER_RESUME] ${bullet.text}`),
     }));
 }
 

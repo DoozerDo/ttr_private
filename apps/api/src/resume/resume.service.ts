@@ -1567,6 +1567,11 @@ export class ResumeService {
     options?: GenerateResumeOptions,
     syntheticMetadata?: SyntheticMetadataInput,
   ): Promise<ResumeGenerationResponse> {
+    console.log("[GEN_PATH_CONFIRMED][RESUME] Local generator executed");
+    if (process.env.NODE_ENV !== 'production') {
+      // TEMP: identify the runtime generation path used by Studio.
+      console.log('[GEN_PATH][API][resume.service.generateResume] used');
+    }
     let baselineForFailSafe: Baseline | null = null;
     let baselineVersionForFailSafe: BaselineVersion | null = null;
     let minimalDraftSectionsForFailSafe: ResumeDraftSection[] | null = null;
@@ -1843,6 +1848,15 @@ export class ResumeService {
       cachedResume.responseBody &&
       cachedResume.inputsHash === studioArtifactContext.inputsHash
     ) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[GEN_PATH][API][resume] cached_output_reused', {
+          baselineId: baseline.id,
+          baselineVersionId: baselineVersion.id,
+          jobId: job?.id ?? jobId ?? null,
+          analysisId: analysisId ?? null,
+          inputsHash: studioArtifactContext.inputsHash,
+        });
+      }
       const cachedResponse = cachedResume.responseBody as unknown as ResumeGenerationResponse;
       recordResumeEvent(true);
       return {
@@ -1893,6 +1907,9 @@ export class ResumeService {
     let sections: ResumeDraftSection[] = forcedMinimalSections ?? [];
     if (!forcedMinimalSections) {
       try {
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('[GEN_PATH][API][resume] buildResumeDraftSections used');
+        }
         sections = this.sanitizeDraftSections(buildResumeDraftSections(resumeInputSections, {
           jobText: draftJobText || null,
           gapGuidance: !request.oneTap && gapGuidance

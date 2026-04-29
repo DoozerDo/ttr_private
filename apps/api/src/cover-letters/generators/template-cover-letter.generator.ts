@@ -161,6 +161,10 @@ const ROLE_PROBLEM_SIGNALS: readonly RoleProblemSignal[] = [
 
 export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
   generate(input: CoverLetterGenerationInput): CoverLetterGenerationResult {
+    if (process.env.NODE_ENV !== 'production') {
+      // TEMP: identify the runtime generation path used by Studio.
+      console.log('[GEN_PATH][API][template_cover_letter.generator.generate] used');
+    }
     const targetWords = this.resolveTargetWords(input.maxWords);
     const normalizedJob = this.applyComplianceConstraintsToJob(
       this.normalizeJob(input.job),
@@ -352,7 +356,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
         name: candidateName,
       },
       salutation: COVER_LETTER_REQUIRED_SALUTATION,
-      opening,
+      opening: `ZZZ_TEST_MARKER_COVER: ${opening}`,
       bodyParagraphs,
       closingParagraph: closing,
       signoff: COVER_LETTER_SIGNOFF,

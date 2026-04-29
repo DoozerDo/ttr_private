@@ -211,6 +211,10 @@ export class CoverLettersService {
     private readonly studioArtifactsService: StudioArtifactsService,
     private readonly applicationsService: ApplicationsService,
   ) {
+    if (process.env.NODE_ENV !== 'production') {
+      // TEMP: identify the runtime generation path used by Studio.
+      console.log('[GEN_PATH][API][cover_letters.service] constructed');
+    }
     this.coverLetterRepository = this.dataSource.getRepository(CoverLetter);
     this.baselineRepository = this.dataSource.getRepository(Baseline);
     this.baselineVersionRepository =
@@ -246,6 +250,10 @@ export class CoverLettersService {
     input: GenerateCoverLetterDto,
     syntheticMetadata?: SyntheticMetadataInput,
   ): Promise<CoverLetterGenerationResponse> {
+    console.log("[GEN_PATH_CONFIRMED][COVER] Local generator executed");
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[GEN_PATH][API][cover_letters.service.generateCoverLetter] used');
+    }
     const requestedOneTap = Boolean((input as unknown as { oneTap?: boolean })?.oneTap);
     let draft: CoverLetterDraft;
     try {
@@ -422,6 +430,16 @@ export class CoverLettersService {
     });
 
     if (reservation.status === 'existing_completed' && reservation.responseBody) {
+      if ((process.env.NODE_ENV ?? 'development') !== 'production') {
+        console.log('[GEN_PATH][API][cover_letters] cached_output_reused', {
+          baselineId: draft.baseline.id,
+          baselineVersionId: draft.baselineVersion.id,
+          jobId: draft.job.id,
+          analysisId: (input as any)?.analysisId ?? null,
+          dedupeKey,
+          generatorName: this.generator?.constructor?.name ?? 'unknown',
+        });
+      }
       if (
         (process.env.NODE_ENV ?? 'development') !== 'production' &&
         syntheticMetadata?.isSynthetic

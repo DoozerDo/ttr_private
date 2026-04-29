@@ -323,6 +323,35 @@ describe('resume-normalization', () => {
     expect(plain).not.toContain('\ndeployment timelines\n');
   });
 
+  it('never emits dangling fragment bullets in final plain text (ex: "... The")', () => {
+    const document = buildNormalizedResumeDocument([
+      {
+        type: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        content: [
+          'Cat Daddy | Kirkland, WA | 2021 - Present',
+          'Senior Producer',
+          '- Designed and built a full-stack production platform for Conquest of Fates (cof.gg), a sci-fi trading card game. The',
+          '- Led live operations roadmap delivery across multiple game releases.',
+        ].join('\n'),
+        bullets: [
+          {
+            text: 'Designed and built a full-stack production platform for Conquest of Fates (cof.gg), a sci-fi trading card game. The',
+            source: { experienceEntryIndex: 0 },
+          },
+          {
+            text: 'Led live operations roadmap delivery across multiple game releases.',
+            source: { experienceEntryIndex: 0 },
+          },
+        ] as any,
+      },
+    ] as any);
+
+    const plain = buildResumePlainText(document);
+    expect(plain).not.toContain('game. The');
+    expect(plain).toContain('Led live operations roadmap delivery across multiple game releases.');
+  });
+
   it('keeps Cat Daddy Games and MobilityWare as separate coherent role blocks', () => {
     const document = buildNormalizedResumeDocument([
       {
