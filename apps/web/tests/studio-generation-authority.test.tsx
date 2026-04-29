@@ -293,14 +293,14 @@ describe("Studio manual regenerate after retry cap", () => {
     renderStudio();
 
     // With generated-but-unusable artifacts and quality failures, the manual Regenerate button should appear.
-    await screen.findByTestId("studio-regenerate-after-retry-cap");
-    await screen.findByTestId("studio-regenerate-after-retry-cap-cover");
+    await screen.findByTestId("studio-resume-regenerate");
+    await screen.findByTestId("studio-cover-regenerate");
 
     await waitFor(() => {
-      expect(screen.getByTestId("studio-regenerate-after-retry-cap")).not.toBeDisabled();
+      expect(screen.getByTestId("studio-resume-regenerate")).not.toBeDisabled();
     });
 
-    fireEvent.click(screen.getByTestId("studio-regenerate-after-retry-cap"));
+    fireEvent.click(screen.getByTestId("studio-resume-regenerate"));
     await waitFor(() => {
       expect(logSpy).toHaveBeenCalledWith("[studio][resume_regenerate_button_clicked]");
       expect(logSpy).toHaveBeenCalledWith("[studio][manual_regenerate_handler_entered]", { source: "resume" });

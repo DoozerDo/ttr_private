@@ -9023,6 +9023,13 @@ export default function StudioPage() {
     }
   }, []);
 
+  const STUDIO_BUILD_MARKER_MANUAL_REGEN = "MANUAL_REGEN_V2";
+  const showStudioBuildMarker =
+    process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_SHOW_BUILD_MARKER === "true";
+  useEffect(() => {
+    console.log("[STUDIO][BUILD_MARKER]", STUDIO_BUILD_MARKER_MANUAL_REGEN);
+  }, []);
+
   const studioBuildMarker =
     process.env.NEXT_PUBLIC_APP_VERSION ??
     process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ??
@@ -10460,6 +10467,11 @@ export default function StudioPage() {
       <> 
       <section className="space-y-1 px-1"> 
         <h2 className="text-xl font-semibold text-slate-100">Your application materials</h2>
+        {showStudioBuildMarker ? (
+          <p className="text-[11px] text-slate-400" data-testid="studio-build-marker">
+            Studio build marker: {STUDIO_BUILD_MARKER_MANUAL_REGEN}
+          </p>
+        ) : null}
         <p className="text-sm text-slate-300">
           Generate, preview, and export your resume and cover letter.
         </p>
@@ -10494,7 +10506,8 @@ export default function StudioPage() {
                 void handleManualRegenerate("resume");
               }}
               disabled={pageTruth.isGenerating || resumeGenerating || coverGenerating}
-              data-testid="studio-regenerate-after-retry-cap"
+              data-testid="studio-resume-regenerate"
+              data-build-marker={STUDIO_BUILD_MARKER_MANUAL_REGEN}
             >
               Regenerate
             </FormButton>
@@ -10847,7 +10860,8 @@ export default function StudioPage() {
                   void handleManualRegenerate("cover");
                 }}
                 disabled={pageTruth.isGenerating || resumeGenerating || coverGenerating}
-                data-testid="studio-regenerate-after-retry-cap-cover"
+                data-testid="studio-cover-regenerate"
+                data-build-marker={STUDIO_BUILD_MARKER_MANUAL_REGEN}
               >
                 Regenerate
               </FormButton>
