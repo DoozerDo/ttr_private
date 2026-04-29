@@ -98,6 +98,7 @@ import {
   validateResumeArtifactQuality,
   type ArtifactQualityGate,
 } from '../artifacts/artifactQualityValidator';
+import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
 
 export type GenerateResumeRequest = {
   baselineId: string;
@@ -1968,12 +1969,15 @@ export class ResumeService {
     // Soft quality enforcement (server-side self-heal): validate the normalized resume model using
     // the same rules enforced in the Studio UI safety net. If the first pass fails, attempt a single
     // deterministic repair and re-check. Never loop indefinitely.
-    let qualityGate = validateResumeArtifactQuality(normalizedDocument);
-    if (qualityGate.status === 'needs_refinement') {
-      const repaired = repairResumeForQuality(normalizedDocument, qualityGate);
+    const firstPassQualityGate = validateResumeArtifactQuality(normalizedDocument);
+    let qualityGate = firstPassQualityGate;
+    let repairAttempted = false;
+    if (firstPassQualityGate.status === 'needs_refinement') {
+      repairAttempted = true;
+      const repaired = repairResumeForQuality(normalizedDocument, firstPassQualityGate);
       const repairedGate = validateResumeArtifactQuality(repaired);
       normalizedDocument = repaired;
-      qualityGate = repairedGate.status === 'pass' ? repairedGate : qualityGate;
+      qualityGate = repairedGate;
     }
     let experienceDiagnostics = this.buildExperiencePipelineDiagnostics({
       sectionsWithPolicies,
@@ -2239,6 +2243,18 @@ export class ResumeService {
     }
 
     if (preflightOnly) {
+      emitArtifactQualityTelemetry(this.logger, {
+        artifactType: 'resume',
+        baselineId: baseline.id,
+        baselineVersionId: baselineVersion.id,
+        jobId: jobId ?? '',
+        analysisId: analysisId ?? null,
+        requestId: audit.id ?? null,
+      }, {
+        firstPass: firstPassQualityGate,
+        final: qualityGate,
+        repairAttempted,
+      });
       return {
         ok: true,
         status: 'success',
@@ -2382,6 +2398,18 @@ export class ResumeService {
     const display = this.buildSuccessDisplayPayload();
     const exports: DocumentGenerationExports = { docx: true, pdf: true };
     recordResumeEvent(true);
+    emitArtifactQualityTelemetry(this.logger, {
+      artifactType: 'resume',
+      baselineId: baseline.id,
+      baselineVersionId: baselineVersion.id,
+      jobId: jobId ?? '',
+      analysisId: analysisId ?? null,
+      requestId: audit.id ?? null,
+    }, {
+      firstPass: firstPassQualityGate,
+      final: qualityGate,
+      repairAttempted,
+    });
     const response: ResumeGenerationResponse = {
       ok: true,
       status: 'success',
@@ -2484,9 +2512,24 @@ export class ResumeService {
         } catch {
           normalizedDocument = null;
         }
-        const qualityGate = validateResumeArtifactQuality(normalizedDocument);
-
         const minimalAuditId = `minimal:${Date.now()}`;
+        const qualityGate = validateResumeArtifactQuality(normalizedDocument);
+        emitArtifactQualityTelemetry(
+          this.logger,
+          {
+            artifactType: 'resume',
+            baselineId: baselineForFailSafe.id,
+            baselineVersionId: baselineVersionForFailSafe.id,
+            jobId: jobIdForFailSafe ?? '',
+            analysisId: analysisIdForFailSafe ?? null,
+            requestId: minimalAuditId ?? null,
+          },
+          {
+            firstPass: qualityGate,
+            final: qualityGate,
+            repairAttempted: false,
+          },
+        );
         const response: ResumeGenerationResponse = {
           ok: true,
           status: 'success',

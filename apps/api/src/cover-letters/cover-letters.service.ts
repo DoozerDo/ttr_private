@@ -102,6 +102,7 @@ import {
   validateCoverLetterArtifactQuality,
   type ArtifactQualityGate,
 } from '../artifacts/artifactQualityValidator';
+import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
 import { resolveSyntheticCandidateName } from './candidate-name.util';
 
 type CoverLetterDraft = {
@@ -111,6 +112,8 @@ type CoverLetterDraft = {
   allowedBlocks: AllowedBaselineBlock[];
   candidateName: string;
   qualityGate: ArtifactQualityGate;
+  firstPassQualityGate: ArtifactQualityGate;
+  qualityRepairAttempted: boolean;
   jobContext: {
     id: string;
     title: string | null;
@@ -615,6 +618,25 @@ export class CoverLettersService {
           reused: reusedExistingCoverLetter || reservation.status === 'existing_completed',
         },
       } as unknown as CoverLetterGenerationResponse;
+
+      emitArtifactQualityTelemetry(
+        this.logger,
+        {
+          artifactType: 'cover_letter',
+          baselineId: draft.baseline.id,
+          baselineVersionId: draft.baselineVersion.id,
+          jobId: draft.job.id,
+          analysisId: draft.analysisAssessment?.id ?? (input as any)?.analysisId ?? null,
+          requestId: draft.complianceResult.audit.id ?? null,
+        },
+        {
+          firstPass:
+            draft.firstPassQualityGate ??
+            draft.qualityGate ?? { status: 'pass', reasons: [] },
+          final: draft.qualityGate ?? { status: 'pass', reasons: [] },
+          repairAttempted: draft.qualityRepairAttempted ?? false,
+        },
+      );
       await this.studioArtifactsService.recordCoverLetterSuccess({
         userId,
         baselineId: studioArtifactContext.baselineId,
@@ -1190,8 +1212,13 @@ export class CoverLettersService {
     // Soft quality enforcement (server-side self-heal): run shared artifact quality validation.
     // If the first pass fails, attempt one deterministic repair pass. If it still fails, return
     // the artifact but include quality metadata so Studio can surface the safety net.
-    let artifactQuality = validateCoverLetterArtifactQuality(generation.paragraphs ?? generation.document?.bodyParagraphs ?? []);
+    const firstPassArtifactQuality = validateCoverLetterArtifactQuality(
+      generation.paragraphs ?? generation.document?.bodyParagraphs ?? [],
+    );
+    let artifactQuality = firstPassArtifactQuality;
+    let repairAttempted = false;
     if (artifactQuality.status === 'needs_refinement') {
+      repairAttempted = true;
       const repairSource = Array.isArray(generation.paragraphs) && generation.paragraphs.length
         ? generation.paragraphs
         : generation.document
@@ -1426,6 +1453,8 @@ export class CoverLettersService {
       allowedBlocks,
       candidateName,
       qualityGate: artifactQuality,
+      firstPassQualityGate: firstPassArtifactQuality,
+      qualityRepairAttempted: repairAttempted,
       jobContext,
       jobContextAllowlist,
       closingTemplateKey,
