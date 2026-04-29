@@ -8832,7 +8832,7 @@ export default function StudioPage() {
       coverResult: StudioArtifactGenerationAttemptResult | null;
     }> => {
       console.log("[STUDIO][AUTO_GEN][START_CALLED_INNER]", { source });
-      if (generationReadyPhase === "generating") {
+      if (generationReadyPhase === "generating" && source !== "manual_retry") {
         return {
           ok: false,
           resumeResult: null,
@@ -8843,7 +8843,15 @@ export default function StudioPage() {
       if (source === "shell_auto") {
         const contractSignature = workflowOrchestratorCore.contract?.generation.auto.signature;
         if (contractSignature) {
-          retryCountRef.current[contractSignature] = (retryCountRef.current[contractSignature] ?? 0) + 1;
+          const next = (retryCountRef.current[contractSignature] ?? 0) + 1;
+          retryCountRef.current[contractSignature] = next;
+          try {
+            if (typeof window !== "undefined" && window.localStorage && typeof window.localStorage.setItem === "function") {
+              window.localStorage.setItem(retryCountStorageKey(contractSignature), String(next));
+            }
+          } catch {
+            // ignore
+          }
         }
       }
 
@@ -9020,11 +9028,19 @@ export default function StudioPage() {
 
   const MAX_AUTO_RETRIES = 1;
   const retryCountRef = useRef<Record<string, number>>({});
+  const retryCountStorageKey = (signature: string) => `ttr:studio:auto-generate:retry-count:${signature}`;
   useEffect(() => {
     const signature = workflowOrchestratorCore.contract?.generation.auto.signature;
     if (!signature) return;
     if (!artifactContract.hasUsableArtifacts) return;
     retryCountRef.current[signature] = 0;
+    try {
+      if (typeof window !== "undefined" && window.localStorage && typeof window.localStorage.removeItem === "function") {
+        window.localStorage.removeItem(retryCountStorageKey(signature));
+      }
+    } catch {
+      // ignore
+    }
   }, [artifactContract.hasUsableArtifacts, workflowOrchestratorCore.contract?.generation.auto.signature]);
 
   const studioContractSignature = workflowOrchestratorCore.contract?.generation.auto.signature ?? null;
@@ -9032,7 +9048,21 @@ export default function StudioPage() {
     workflowOrchestratorCore.contract?.generation.state === "generated" && !artifactContract.hasUsableArtifacts
       ? "generated_unusable"
       : workflowOrchestratorCore.contract?.generation.state ?? null;
-  const studioAutoRetryCount = studioContractSignature ? (retryCountRef.current[studioContractSignature] ?? 0) : 0;
+  const studioAutoRetryCount = useMemo(() => {
+    if (!studioContractSignature) return 0;
+    const inMemory = retryCountRef.current[studioContractSignature] ?? 0;
+    if (inMemory > 0) return inMemory;
+    try {
+      if (typeof window !== "undefined" && window.localStorage && typeof window.localStorage.getItem === "function") {
+        const raw = window.localStorage.getItem(retryCountStorageKey(studioContractSignature));
+        const parsed = raw ? Number(raw) : 0;
+        return Number.isFinite(parsed) ? parsed : 0;
+      }
+    } catch {
+      // ignore
+    }
+    return 0;
+  }, [studioContractSignature]);
   const studioHasRetriesRemaining = studioAutoRetryCount < MAX_AUTO_RETRIES;
   const studioRetryInProgress =
     studioEffectiveGenerationState === "generated_unusable" &&
@@ -9048,7 +9078,41 @@ export default function StudioPage() {
       studioArtifactPairStatus === "in_progress");
   const studioAutoRetryCapReached =
     studioEffectiveGenerationState === "generated_unusable" && studioAutoRetryCount >= MAX_AUTO_RETRIES;
+
   const generationReadyAutoStartRef = useRef<string | null>(null);
+
+  const handleManualRegenerate = useCallback(async () => {
+    const signature = workflowOrchestratorCore.contract?.generation.auto.signature ?? null;
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("[studio][manual_regenerate_clicked]", {
+        contractSignature: signature,
+        retryCount: signature ? (retryCountRef.current[signature] ?? 0) : null,
+      });
+    }
+
+    // Bypass the auto-generation succeeded latch for this signature so a user-initiated retry
+    // always triggers POST /api/resume and POST /api/cover-letters without relying on URL noise.
+    try {
+      if (signature && typeof window !== "undefined" && window.localStorage) {
+        const storageKey = `ttr:studio:auto-generate:${signature}`;
+        if (typeof window.localStorage.removeItem === "function") {
+          window.localStorage.removeItem(storageKey);
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // Do not rely on the auto-start effect re-running; call generation directly.
+    // Also prevent the auto-start effect from treating this signature as "already started".
+    generationReadyAutoStartRef.current = null;
+
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("[studio][manual_regenerate_start]", { contractSignature: signature });
+    }
+
+    void startGenerationFromReadyShell("manual_retry");
+  }, [startGenerationFromReadyShell, workflowOrchestratorCore.contract?.generation.auto.signature]);
   useEffect(() => {
     const contract = workflowOrchestratorCore.contract;
     if (!contract) return;
@@ -10334,10 +10398,10 @@ export default function StudioPage() {
                 : renderCardStatus(resumeCardStatus, "Resume")}
             </p>
           </div>
-          {studioAutoRetryCapReached && studioEffectiveGenerationState === "generated_unusable" ? (
+          {resumeNeedsRefinement && studioAutoRetryCapReached && studioEffectiveGenerationState === "generated_unusable" ? (
             <FormButton
               variant="secondary"
-              onClick={() => void startGenerationFromReadyShell("manual_retry")}
+              onClick={() => void handleManualRegenerate()}
               disabled={pageTruth.isGenerating || resumeGenerating || coverGenerating}
               data-testid="studio-regenerate-after-retry-cap"
             >
@@ -10684,10 +10748,10 @@ export default function StudioPage() {
                 {coverGenerating ? "Generating..." : "Generate Cover Letter"}
               </FormButton>
             ) : null}
-            {studioAutoRetryCapReached && studioEffectiveGenerationState === "generated_unusable" ? (
+            {coverNeedsRefinement && studioAutoRetryCapReached && studioEffectiveGenerationState === "generated_unusable" ? (
               <FormButton
                 variant="secondary"
-                onClick={() => void startGenerationFromReadyShell("manual_retry")}
+                onClick={() => void handleManualRegenerate()}
                 disabled={pageTruth.isGenerating || resumeGenerating || coverGenerating}
                 data-testid="studio-regenerate-after-retry-cap-cover"
               >

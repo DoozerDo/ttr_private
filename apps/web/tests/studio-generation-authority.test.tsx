@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import StudioPage from "@/app/(app)/studio/page";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
+import { fireEvent } from "@testing-library/react";
 import {
   clearRecentIntentSignals,
   recordArtifactUsedIntent,
@@ -136,6 +137,187 @@ describe("Studio artifact quality gating (soft)", () => {
     ).toBeGreaterThan(0);
     expect(within(coverSection as HTMLElement).queryByText("Download DOCX")).toBeNull();
     expect(within(coverSection as HTMLElement).queryByText("Download PDF")).toBeNull();
+  });
+});
+
+describe("Studio manual regenerate after retry cap", () => {
+  beforeEach(() => {
+    trackEventMock.mockClear();
+    clearRecentIntentSignals();
+    mockRouterPush.mockReset();
+    mockRouterReplace.mockReset();
+  });
+
+  it("renders Regenerate after generated_unusable reaches retry cap and clicking sends both POSTs without looping", async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Ensure a Storage-like localStorage is available for retry-count persistence.
+    if (typeof (globalThis as unknown as { localStorage?: unknown }).localStorage !== "object" ||
+      typeof (globalThis as unknown as { localStorage?: Storage }).localStorage?.getItem !== "function" ||
+      typeof (globalThis as unknown as { localStorage?: Storage }).localStorage?.setItem !== "function") {
+      const store = new Map<string, string>();
+      (globalThis as unknown as { localStorage: Storage }).localStorage = {
+        getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+        setItem: (key: string, value: string) => {
+          store.set(key, String(value));
+        },
+        removeItem: (key: string) => {
+          store.delete(key);
+        },
+        clear: () => {
+          store.clear();
+        },
+        key: (index: number) => Array.from(store.keys())[index] ?? null,
+        get length() {
+          return store.size;
+        },
+      } as unknown as Storage;
+    }
+
+    // Ensure readiness gates allow manual regeneration to proceed (bypassReadinessGate still expects
+    // the broader Studio contract to be in a generate-capable state for some guard paths).
+    getCanonicalNextActionMock.mockReturnValue({
+      type: "studio",
+      label: "Open Resume & Cover Letter Studio",
+      route: "/studio",
+      reason: "test override",
+    });
+    buildGenerationProductReadinessMock.mockReturnValue({
+      generation_readiness: {
+        canGenerate: true,
+        canExport: true,
+        reasonsBlocked: [],
+      },
+      state: "ALLOWED",
+      confidence: "HIGH",
+      needsVerification: false,
+      tier: "generation_export_allowed",
+      canOpenStudio: true,
+      generationMode: "verified",
+    });
+    evaluateStudioTrustGateMock.mockReturnValue({
+      allowed: true,
+      reason: null,
+      generation_readiness: {
+        canGenerate: true,
+        canExport: true,
+        reasonsBlocked: [],
+      },
+      blocked: false,
+      authority: "READY",
+      reasons: [],
+      verificationIssues: [],
+    });
+
+    const resumeResponseWithQualityFailures = () =>
+      createResponse({
+        status: "success",
+        generationStatus: "success",
+        exports: { docx: true, pdf: true },
+        preview: {
+          resume: {
+            heading: { name: "Test Candidate", contactLine: "test@example.com" },
+            summary: "Designed and built the",
+            experience: [{ company: "Acme", roleTitle: "Director of Support", bullets: ["Did work."] }],
+            education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+            competencies: ["Customer strategy"],
+          },
+        },
+      });
+
+    const coverResponseWithQualityFailures = () =>
+      createResponse({
+        status: "success",
+        generationStatus: "success",
+        exportReady: true,
+        exports: { docx: true, pdf: true },
+        preview: {
+          coverLetter: {
+            paragraphs: ["The strongest fit comes from the operating context I have already handled.", "Second paragraph."],
+          },
+        },
+      });
+
+    setFetchImplementation(
+      vi.fn((input: RequestInfo, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        const method = (init?.method ?? "GET").toUpperCase();
+        calls.push({ url, method });
+
+        if (url.includes("/api/baselines/base-1/versions")) {
+          return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+        }
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+          return Promise.resolve(
+            createResponse({
+              assessmentId: "analysis-1",
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: "base-version-1",
+              company: "Acme",
+              title: "Director of Support",
+              scoring_v2: { score: 92 },
+              verification_coverage: {
+                totalClaims: 3,
+                verifiedClaims: 3,
+                inferredClaims: 0,
+                unverifiedClaims: 0,
+                unverifiedRequirements: [],
+              },
+            }),
+          );
+        }
+        if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+          return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        }
+
+        if (method === "POST" && url.endsWith("/api/resume")) {
+          return Promise.resolve(resumeResponseWithQualityFailures());
+        }
+        if (method === "POST" && url.endsWith("/api/cover-letters")) {
+          return Promise.resolve(coverResponseWithQualityFailures());
+        }
+        if (method === "GET" && url.includes("/api/resume")) {
+          return Promise.resolve(resumeResponseWithQualityFailures());
+        }
+        if (method === "GET" && url.includes("/api/cover-letters")) {
+          return Promise.resolve(coverResponseWithQualityFailures());
+        }
+        return Promise.resolve(createResponse({}));
+      }),
+    );
+
+    // Simulate "retries exhausted" for the stable signature used by Studio's auto-generation contract.
+    // This persists across refresh and is what users actually experience when the UI rehydrates a stale artifact.
+    (globalThis as unknown as { localStorage: Storage }).localStorage.setItem(
+      "ttr:studio:auto-generate:retry-count:autoGen:v1:base-version-1:job-1:analysis-1",
+      "1",
+    );
+
+    renderStudio();
+
+    // With generated-but-unusable artifacts and retry cap reached, the manual Regenerate button should appear.
+    await screen.findByTestId("studio-regenerate-after-retry-cap");
+    await screen.findByTestId("studio-regenerate-after-retry-cap-cover");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-regenerate-after-retry-cap")).not.toBeDisabled();
+    });
+
+    fireEvent.click(screen.getByTestId("studio-regenerate-after-retry-cap"));
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[studio][manual_regenerate_clicked]",
+        expect.anything(),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[studio][manual_regenerate_start]",
+        expect.anything(),
+      );
+    });
+
+    warnSpy.mockRestore();
   });
 });
 
