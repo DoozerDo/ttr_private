@@ -148,7 +148,7 @@ describe("Studio manual regenerate after retry cap", () => {
     mockRouterReplace.mockReset();
   });
 
-  it("renders Regenerate after generated_unusable reaches retry cap and clicking sends both POSTs without looping", async () => {
+  it("renders Regenerate in generated_unusable + needs_refinement and clicking emits manual retry logs", async () => {
     const calls: Array<{ url: string; method: string }> = [];
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -288,16 +288,9 @@ describe("Studio manual regenerate after retry cap", () => {
       }),
     );
 
-    // Simulate "retries exhausted" for the stable signature used by Studio's auto-generation contract.
-    // This persists across refresh and is what users actually experience when the UI rehydrates a stale artifact.
-    (globalThis as unknown as { localStorage: Storage }).localStorage.setItem(
-      "ttr:studio:auto-generate:retry-count:autoGen:v1:base-version-1:job-1:analysis-1",
-      "1",
-    );
-
     renderStudio();
 
-    // With generated-but-unusable artifacts and retry cap reached, the manual Regenerate button should appear.
+    // With generated-but-unusable artifacts and quality failures, the manual Regenerate button should appear.
     await screen.findByTestId("studio-regenerate-after-retry-cap");
     await screen.findByTestId("studio-regenerate-after-retry-cap-cover");
 

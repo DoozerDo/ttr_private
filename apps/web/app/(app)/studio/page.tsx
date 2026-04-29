@@ -9081,6 +9081,32 @@ export default function StudioPage() {
 
   const generationReadyAutoStartRef = useRef<string | null>(null);
 
+  const shouldShowResumeRegenerate =
+    studioEffectiveGenerationState === "generated_unusable" && resumeNeedsRefinement;
+  const shouldShowCoverRegenerate =
+    studioEffectiveGenerationState === "generated_unusable" && coverNeedsRefinement;
+
+  useEffect(() => {
+    // Prod-safe diagnostic: only log when the UX is in the "generated unusable" lane.
+    if (studioEffectiveGenerationState !== "generated_unusable") return;
+    console.info("[studio][manual_regenerate_visibility]", {
+      effectiveGenerationState: studioEffectiveGenerationState,
+      retryCount: studioAutoRetryCount,
+      MAX_AUTO_RETRIES,
+      resumeNeedsRefinement,
+      coverNeedsRefinement,
+      shouldShowResumeRegenerate,
+      shouldShowCoverRegenerate,
+    });
+  }, [
+    studioEffectiveGenerationState,
+    studioAutoRetryCount,
+    resumeNeedsRefinement,
+    coverNeedsRefinement,
+    shouldShowResumeRegenerate,
+    shouldShowCoverRegenerate,
+  ]);
+
   const handleManualRegenerate = useCallback(async () => {
     const signature = workflowOrchestratorCore.contract?.generation.auto.signature ?? null;
     if (process.env.NODE_ENV !== "production") {
@@ -10398,7 +10424,7 @@ export default function StudioPage() {
                 : renderCardStatus(resumeCardStatus, "Resume")}
             </p>
           </div>
-          {resumeNeedsRefinement && studioAutoRetryCapReached && studioEffectiveGenerationState === "generated_unusable" ? (
+          {shouldShowResumeRegenerate ? (
             <FormButton
               variant="secondary"
               onClick={() => void handleManualRegenerate()}
@@ -10748,7 +10774,7 @@ export default function StudioPage() {
                 {coverGenerating ? "Generating..." : "Generate Cover Letter"}
               </FormButton>
             ) : null}
-            {coverNeedsRefinement && studioAutoRetryCapReached && studioEffectiveGenerationState === "generated_unusable" ? (
+            {shouldShowCoverRegenerate ? (
               <FormButton
                 variant="secondary"
                 onClick={() => void handleManualRegenerate()}
