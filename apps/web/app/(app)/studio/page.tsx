@@ -1770,15 +1770,13 @@ export default function StudioPage() {
         artifactsParams.set("jobId", jobId);
         if (requestedAnalysisId) artifactsParams.set("analysisId", requestedAnalysisId);
 
-        if (process.env.NODE_ENV === "development") {
-          console.info("[STUDIO_ARTIFACTS_FETCH]", {
-            attempt,
-            baselineId,
-            baselineVersionId,
-            jobId,
-            analysisId: requestedAnalysisId ?? null,
-          });
-        }
+        console.log("[STUDIO_ARTIFACTS_FETCH]", {
+          attempt,
+          baselineId,
+          baselineVersionId,
+          jobId,
+          analysisId: requestedAnalysisId ?? null,
+        });
 
         const response = await fetch(`/api/studio/artifacts?${artifactsParams.toString()}`, { cache: "no-store" });
         const payload = await readResponsePayload(response);
@@ -1787,23 +1785,21 @@ export default function StudioPage() {
           applyStudioArtifactsPayload(backend);
           setStudioArtifactsHydrated(true);
 
-          if (process.env.NODE_ENV === "development") {
-            console.info("[STUDIO_ARTIFACTS_RESULT]", {
-              attempt,
-              status: response.status,
-              ok: response.ok,
-              hasResume: Boolean(backend.resume?.responseBody) || Boolean(backend.resumeResult),
-              hasCoverLetter: Boolean(backend.coverLetter?.responseBody) || Boolean(backend.coverLetterResult),
-            });
-          }
+          console.log("[STUDIO_ARTIFACTS_RESULT]", {
+            attempt,
+            status: response.status,
+            ok: response.ok,
+            hasResume: Boolean(backend.resume?.responseBody) || Boolean(backend.resumeResult),
+            hasCoverLetter: Boolean(backend.coverLetter?.responseBody) || Boolean(backend.coverLetterResult),
+          });
 
           const resumeOk = options.expectedResume ? Boolean(backend.resume?.responseBody) || Boolean(backend.resumeResult) : true;
           const coverOk = options.expectedCover
             ? Boolean(backend.coverLetter?.responseBody) || Boolean(backend.coverLetterResult)
             : true;
           if (resumeOk && coverOk) return;
-        } else if (process.env.NODE_ENV === "development") {
-          console.info("[STUDIO_ARTIFACTS_RESULT]", {
+        } else {
+          console.log("[STUDIO_ARTIFACTS_RESULT]", {
             attempt,
             status: response.status,
             ok: response.ok,
@@ -9521,51 +9517,67 @@ export default function StudioPage() {
   ]);
 
   const handleGenerateResume = useCallback(async () => {
-    const baselineId = effectiveBaselineId ?? null;
-    const baselineVersionId = effectiveBaselineVersionId ?? null;
-    const jobId = effectiveJobId ?? null;
-    console.log("GENERATE_RESUME_CLICKED");
-    console.log("GENERATE_PAYLOAD", { baselineId, baselineVersionId, jobId });
-    if (!baselineId || !jobId || !baselineVersionId) {
-      console.error("[studio][generate_missing_context]", {
-        baselineId,
-        baselineVersionId,
-        jobId,
-        source: "resume",
-      });
-      return;
-    }
-    setResumeGenerating(true);
+    console.log("[STUDIO_GENERATE_HANDLER_START]");
     try {
-      const response = await fetch("/api/resume/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ baselineId, baselineVersionId, jobId }),
-      });
-      const payload = await readResponsePayload(response.clone());
-      if (process.env.NODE_ENV === "development") {
-        console.info("[STUDIO_GENERATE_RESPONSE]", {
+      const baselineId = effectiveBaselineId ?? null;
+      const baselineVersionId = effectiveBaselineVersionId ?? null;
+      const jobId = effectiveJobId ?? null;
+      console.log("GENERATE_RESUME_CLICKED");
+      console.log("GENERATE_PAYLOAD", { baselineId, baselineVersionId, jobId });
+
+      if (!baselineId || !jobId || !baselineVersionId) {
+        console.error("[studio][generate_missing_context]", {
+          baselineId,
+          baselineVersionId,
+          jobId,
+          source: "resume",
+        });
+        console.error("[STUDIO_GENERATE_ERROR]", new Error("generate_missing_context"));
+        return;
+      }
+
+      setResumeGenerating(true);
+      try {
+        console.log("[STUDIO_GENERATE_FETCH_START]");
+        const response = await fetch("/api/resume/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ baselineId, baselineVersionId, jobId }),
+        });
+
+        console.log("[STUDIO_GENERATE_RESPONSE]", {
+          status: response.status,
+          ok: response.ok,
+        });
+
+        const payload = await readResponsePayload(response.clone());
+        console.log("[STUDIO_GENERATE_RESPONSE]", {
           type: "resume",
           status: response.status,
           ok: response.ok,
           bodySummary: summarizeStudioBody(payload),
         });
-      }
-      if (!response.ok) {
-        setResumeState((current) => ({
-          ...current,
-          response: null,
-          error: `Resume generation failed (${response.status}): ${summarizeStudioBody(payload)}`,
-          tierGateError: null,
-          artifactFailure: null,
-        }));
-        return;
-      }
 
-      await refreshStudioArtifactsAfterGenerate({ expectedResume: true });
-      setStudioArtifactsRefreshNonce((current) => current + 1);
+        if (!response.ok) {
+          setResumeState((current) => ({
+            ...current,
+            response: null,
+            error: `Resume generation failed (${response.status}): ${summarizeStudioBody(payload)}`,
+            tierGateError: null,
+            artifactFailure: null,
+          }));
+          return;
+        }
+
+        await refreshStudioArtifactsAfterGenerate({ expectedResume: true });
+        setStudioArtifactsRefreshNonce((current) => current + 1);
+      } finally {
+        setResumeGenerating(false);
+      }
+    } catch (error) {
+      console.error("[STUDIO_GENERATE_ERROR]", error);
     } finally {
-      setResumeGenerating(false);
+      console.log("[STUDIO_GENERATE_HANDLER_END]");
     }
   }, [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, refreshStudioArtifactsAfterGenerate]);
 
