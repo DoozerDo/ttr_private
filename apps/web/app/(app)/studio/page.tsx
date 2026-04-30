@@ -595,6 +595,20 @@ function normalizeHydratedArtifactResponse(value: unknown): unknown | null {
   return value;
 }
 
+function extractResumeResponseFromStudioArtifacts(payload: BackendStudioArtifactsResponse): unknown | null {
+  const responseBody = payload.resume?.responseBody ?? null;
+  const normalized = normalizeHydratedArtifactResponse(responseBody);
+  if (normalized) return normalized;
+  return payload.resumeResult ? ({ resumeResult: payload.resumeResult } as unknown) : null;
+}
+
+function extractCoverLetterResponseFromStudioArtifacts(payload: BackendStudioArtifactsResponse): unknown | null {
+  const responseBody = payload.coverLetter?.responseBody ?? null;
+  const normalized = normalizeHydratedArtifactResponse(responseBody);
+  if (normalized) return normalized;
+  return payload.coverLetterResult ? ({ coverLetterResult: payload.coverLetterResult } as unknown) : null;
+}
+
 function readArtifactTextFallback(payload: unknown): string {
   try {
     if (!payload || typeof payload !== "object") return "";
@@ -1716,10 +1730,8 @@ export default function StudioPage() {
   }, [currentWorkflowScope]);
 
   const applyStudioArtifactsPayload = useCallback((payload: BackendStudioArtifactsResponse) => {
-    const resumeResponseRaw = payload.resume?.responseBody ?? null;
-    const coverResponseRaw = payload.coverLetter?.responseBody ?? null;
-    const resumeResponse = normalizeHydratedArtifactResponse(resumeResponseRaw);
-    const coverResponse = normalizeHydratedArtifactResponse(coverResponseRaw);
+    const resumeResponse = extractResumeResponseFromStudioArtifacts(payload);
+    const coverResponse = extractCoverLetterResponseFromStudioArtifacts(payload);
 
     // Phase 1: prefer canonical artifact results when present, but keep legacy responseBody alongside it.
     const resumeResult = payload.resumeResult ?? null;
@@ -1809,6 +1821,31 @@ export default function StudioPage() {
           const backend = payload as BackendStudioArtifactsResponse;
           applyStudioArtifactsPayload(backend);
           setStudioArtifactsHydrated(true);
+
+          const resumeData = extractResumeResponseFromStudioArtifacts(backend);
+          const coverData = extractCoverLetterResponseFromStudioArtifacts(backend);
+          if (resumeData) {
+            setResumeState((current) => ({
+              ...current,
+              response: resumeData,
+              error: null,
+              tierGateError: null,
+              artifactFailure: null,
+            }));
+          }
+          if (coverData) {
+            setCoverState((current) => ({
+              ...current,
+              response: coverData,
+              error: null,
+              tierGateError: null,
+              artifactFailure: null,
+            }));
+          }
+          console.log("[STUDIO_STATE_UPDATED]", {
+            hasResume: Boolean(resumeData),
+            hasCover: Boolean(coverData),
+          });
 
           console.log("[STUDIO_ARTIFACTS_RESULT]", {
             attempt,
@@ -2668,6 +2705,14 @@ export default function StudioPage() {
         : readCanonicalResumePreviewPayload(artifactContract.normalized.resumeResponse),
     [artifactContract.normalized.resumeResponse, artifactContract.results.resume],
   );
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    if (!canonicalResumePreviewPayload) return;
+    console.log("[STUDIO_RESUME_PREVIEW_PROPS]", {
+      hasPayload: Boolean(canonicalResumePreviewPayload),
+      payloadType: typeof canonicalResumePreviewPayload,
+    });
+  }, [canonicalResumePreviewPayload]);
   const coverLetterParagraphs = artifactContract.coverLetterModel?.paragraphs ?? [];
   const coverPreviewText = useMemo(
     () => formatPreview(artifactContract.normalized.coverLetterResponse) || readArtifactTextFallback(artifactContract.normalized.coverLetterResponse),
@@ -11169,7 +11214,7 @@ export default function StudioPage() {
               </Link>
             ) : null}
           </div>
-        ) : hasResumeArtifact && resumeState.response && !shouldSuppressStalePreview ? (
+        ) : hasResumeArtifact && !shouldSuppressStalePreview ? (
           <div
             className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
             data-testid={resumeQualityPass ? "studio-resume-ready-panel" : "studio-resume-correction-panel"}
@@ -11613,7 +11658,7 @@ export default function StudioPage() {
         ) : null}
 
         {!coverLetterComplianceBlocked ? (
-          hasCoverLetterArtifact && coverState.response && !shouldSuppressStalePreview ? (
+          hasCoverLetterArtifact && !shouldSuppressStalePreview ? (
             <div
               className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
               data-testid={coverQualityPass ? "studio-cover-ready-panel" : "studio-cover-correction-panel"}
