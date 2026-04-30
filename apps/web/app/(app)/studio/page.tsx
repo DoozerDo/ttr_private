@@ -770,6 +770,14 @@ export default function StudioPage() {
   useEffect(() => setMounted(true), []);
 
   const isNonProduction = process.env.NODE_ENV !== "production";
+  const readCanonicalResumePreviewPayload = (value: unknown): unknown | null => {
+    if (!value || typeof value !== "object") return null;
+    const preview = (value as Record<string, unknown>).preview;
+    if (!preview || typeof preview !== "object") return null;
+    const resume = (preview as Record<string, unknown>).resume;
+    if (!resume || typeof resume !== "object") return null;
+    return resume;
+  };
   const { isGuidedActive, currentStep: guidedStep, advanceStep, completeGuidedMode } = useGuidedMode();
   const searchParams = useSearchParams();
   const searchParamValue = searchParams.toString();
@@ -2402,10 +2410,9 @@ export default function StudioPage() {
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
     if (!artifactContract.normalized.resumeResponse) return;
-    const previewModel = readResumeModel(artifactContract.normalized.resumeResponse);
-    if (!previewModel) return;
-    console.log("STUDIO_PREVIEW_SOURCE", previewModel);
-    console.log("RESUME_PREVIEW_SOURCE", previewModel);
+    const previewPayload = readCanonicalResumePreviewPayload(artifactContract.normalized.resumeResponse);
+    if (!previewPayload) return;
+    console.log("RESUME_PREVIEW_SOURCE", previewPayload);
   }, [artifactContract.normalized.resumeResponse]);
   const generatedResumeModel = artifactContract.resumeModel;
   const effectiveResumeModel = isResumeEditMode
@@ -2443,9 +2450,8 @@ export default function StudioPage() {
     () => formatPreview(artifactContract.normalized.resumeResponse),
     [artifactContract.normalized.resumeResponse],
   );
-  // Canonical Studio resume preview source is the API-provided, sanitized preview model.
-  const resumePreviewModel = useMemo(
-    () => readResumeModel(artifactContract.normalized.resumeResponse),
+  const canonicalResumePreviewPayload = useMemo(
+    () => readCanonicalResumePreviewPayload(artifactContract.normalized.resumeResponse),
     [artifactContract.normalized.resumeResponse],
   );
   const coverLetterParagraphs = artifactContract.coverLetterModel?.paragraphs ?? [];
@@ -8120,7 +8126,7 @@ export default function StudioPage() {
                       </details>
                     </div>
                   ) : (
-                    <ResumePreview payload={artifactContract.normalized.resumeResponse?.preview?.resume} />
+                    <ResumePreview payload={canonicalResumePreviewPayload} />
                   )}
                 </div>
                 {resumeCopyStatus ? (
@@ -10809,7 +10815,7 @@ export default function StudioPage() {
                   </details>
                 </div>
               ) : (
-                <ResumePreview payload={artifactContract.normalized.resumeResponse?.preview?.resume} />
+                <ResumePreview payload={canonicalResumePreviewPayload} />
               )}
             </div>
             {!isApplicationApplied ? (
