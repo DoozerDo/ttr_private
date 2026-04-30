@@ -95,6 +95,8 @@ import {
 } from '../artifacts/artifactQualityValidator';
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
 import { sanitizeResumePreviewForStudio } from './resumePreviewSanitizer';
+import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
+import { assembleResumeFromStructuredBaseline } from './resumeTemplateAssembler';
 
 export type GenerateResumeRequest = {
   baselineId: string;
@@ -1960,11 +1962,45 @@ export class ResumeService {
             .map((bullet) => bullet.claimRisk),
         );
     const identity = resolveBaselineIdentity(baseline);
-    let normalizedDocument = buildNormalizedResumeDocument(
-      sections as ResumeExportSection[],
-      identity,
-      { documentStrategyPlan: request.documentStrategyPlan ?? undefined },
-    );
+
+    const TEMPLATE_ASSEMBLY_THRESHOLD = 80;
+    const scoreForTemplate = effectiveAssessment?.overallScore ?? latestAssessment?.overallScore ?? 0;
+
+    let normalizedDocument = (() => {
+      if (typeof scoreForTemplate === 'number' && scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD) {
+        const structured = extractStructuredBaselineFromSections(resumeInputSections);
+        if ((structured.experience ?? []).length === 0) {
+          throw new UnprocessableEntityException(buildArtifactFailurePayload({
+            code: 'generation_blocked',
+            category: 'generation_blocked',
+            message: 'Resume could not be assembled because required baseline evidence is missing.',
+            detail: 'A fit score >= 80 requires structured baseline experience entries (company + role title).',
+            retryable: false,
+            userAction: {
+              title: 'Add verified experience structure',
+              description: 'Ensure your baseline includes Experience entries with company and role title headers.',
+            },
+            diagnostics: {
+              missingRequirements: structured.missingEvidenceReasons.slice(0, 6),
+            },
+          }));
+        }
+        const identityRecord =
+          identity && typeof identity === 'object'
+            ? (identity as unknown as Record<string, unknown>)
+            : {};
+        return assembleResumeFromStructuredBaseline(structured, {
+          name: identityRecord.name,
+          contactLine: identityRecord.contactLine,
+          links: identityRecord.links,
+        });
+      }
+      return buildNormalizedResumeDocument(
+        sections as ResumeExportSection[],
+        identity,
+        { documentStrategyPlan: request.documentStrategyPlan ?? undefined },
+      );
+    })();
 
     // Deterministic structural repair pass: prevent bullet-like prose from being treated as an
     // experience header field. This is non-fabricating: it clears malformed header fields and
@@ -2514,6 +2550,15 @@ export class ResumeService {
     });
     return response;
     } catch (error) {
+      if (error instanceof UnprocessableEntityException) {
+        const responseBody = error.getResponse() as any;
+        const category = responseBody?.category ?? responseBody?.error?.category ?? null;
+        const code = responseBody?.code ?? responseBody?.error?.code ?? null;
+        const artifactReadiness = responseBody?.diagnostics?.artifactReadiness ?? responseBody?.error?.diagnostics?.artifactReadiness ?? null;
+        if (category === 'generation_blocked' || code === 'generation_blocked' || artifactReadiness === 'blocked') {
+          throw error;
+        }
+      }
       const hasBaselineText =
         Boolean(minimalDraftSectionsForFailSafe) &&
         (minimalDraftSectionsForFailSafe ?? []).some(

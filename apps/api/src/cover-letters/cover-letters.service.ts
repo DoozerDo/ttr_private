@@ -102,6 +102,8 @@ import {
   validateCoverLetterArtifactQuality,
   type ArtifactQualityGate,
 } from '../artifacts/artifactQualityValidator';
+import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
+import { assembleCoverLetterFromStructuredBaseline } from './coverLetterTemplateAssembler';
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
 import { resolveSyntheticCandidateName } from './candidate-name.util';
 
@@ -1149,23 +1151,71 @@ export class CoverLettersService {
     let generation: CoverLetterGenerationResult;
     try {
       const requestSafeMode = oneTap || complianceConstraints?.mode === 'strict';
-      generation = this.generator.generate({
-        baselineId: baseline.id,
-        jobId: job.id,
-        allowedBaselineBlocks: allowedBlocks,
-        job: jobContext,
-        candidateName,
-        closingTemplate,
-        maxWords: input.maxWords,
-        tone: input.tone,
-        safeMode: requestSafeMode,
-        complianceConstraints,
-        documentStrategyPlan: input.documentStrategyPlan ?? undefined,
-        gapAnalysis: {
-          strengths: gapInsights.strengths,
-          criticalGaps: gapInsights.criticalGaps,
-        },
-      });
+
+      const TEMPLATE_ASSEMBLY_THRESHOLD = 80;
+      const scoreForTemplate = latestAssessment?.overallScore ?? 0;
+      if (typeof scoreForTemplate === 'number' && scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD) {
+        const structured = extractStructuredBaselineFromSections(allowedSections as any);
+        if ((structured.experience ?? []).length === 0) {
+          throw new UnprocessableEntityException(buildArtifactFailurePayload({
+            code: 'generation_blocked',
+            category: 'generation_blocked',
+            message: 'Cover letter could not be assembled because required baseline evidence is missing.',
+            detail: 'A fit score >= 80 requires structured baseline experience entries (company + role title).',
+            retryable: false,
+            userAction: {
+              title: 'Add verified experience structure',
+              description: 'Ensure your baseline includes Experience entries with company and role title headers.',
+            },
+            diagnostics: {
+              missingRequirements: structured.missingEvidenceReasons.slice(0, 6),
+            },
+          }));
+        }
+        const document = assembleCoverLetterFromStructuredBaseline({
+          structured,
+          senderName: candidateName || 'Candidate',
+          senderContactLine: null,
+          jobTitle: job?.title ?? null,
+          companyName: job?.company ?? null,
+        });
+        const paragraphs = [
+          document.opening,
+          ...(document.bodyParagraphs ?? []),
+          document.closingParagraph,
+        ].map((p) => String(p ?? '').trim()).filter(Boolean);
+        const content = paragraphs.join('\n\n');
+        const wordCount = content.split(/\s+/).filter(Boolean).length;
+        generation = {
+          document,
+          content,
+          wordCount,
+          greeting: document.salutation,
+          paragraphs,
+          closingParagraphs: [document.closingParagraph].filter(Boolean),
+          salutation: document.salutation,
+          closing: `${document.signoff}\n${document.signatureName}`,
+          traceMap: {},
+        };
+      } else {
+        generation = this.generator.generate({
+          baselineId: baseline.id,
+          jobId: job.id,
+          allowedBaselineBlocks: allowedBlocks,
+          job: jobContext,
+          candidateName,
+          closingTemplate,
+          maxWords: input.maxWords,
+          tone: input.tone,
+          safeMode: requestSafeMode,
+          complianceConstraints,
+          documentStrategyPlan: input.documentStrategyPlan ?? undefined,
+          gapAnalysis: {
+            strengths: gapInsights.strengths,
+            criticalGaps: gapInsights.criticalGaps,
+          },
+        });
+      }
     } catch (error) {
       if (error instanceof Error) {
         try {
