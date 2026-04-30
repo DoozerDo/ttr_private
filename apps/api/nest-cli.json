@@ -7,7 +7,7 @@
     "assets": [
       {
         "include": "scoring-v2/config/**/*.json",
-        "outDir": "dist"
+        "outDir": "dist/apps/api/src"
       },
       {
         "include": "../templates/**/*",
