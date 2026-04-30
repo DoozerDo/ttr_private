@@ -2535,7 +2535,9 @@ export class ResumeService {
     };
 
     // Final safety: ensure the exact preview payload returned to Studio is sanitized.
-    response.preview.resume = sanitizeResumePreviewForStudio(response.preview.resume);
+    if (response.preview.resume) {
+      response.preview.resume = sanitizeResumePreviewForStudio(response.preview.resume);
+    }
     // Temporary debug log for deploy verification; remove once the Studio preview path is confirmed stable.
     // eslint-disable-next-line no-console
     console.log('SANITIZED_PREVIEW_OUT', response.preview.resume);
