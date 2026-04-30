@@ -97,6 +97,7 @@ import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTeleme
 import { sanitizeResumePreviewForStudio } from './resumePreviewSanitizer';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
 import { assembleResumeFromStructuredBaseline } from './resumeTemplateAssembler';
+import { computeTemplateEligibilityFromBaselineSections } from './templateEligibility';
 
 export type GenerateResumeRequest = {
   baselineId: string;
@@ -1965,27 +1966,26 @@ export class ResumeService {
 
     const TEMPLATE_ASSEMBLY_THRESHOLD = 80;
     const STRUCTURED_BASELINE_TEMPLATE_VERSION = 'structured-baseline-v1';
-    const scoreForTemplate = effectiveAssessment?.overallScore ?? latestAssessment?.overallScore ?? 0;
+    const rawScoreForTemplate = effectiveAssessment?.overallScore ?? latestAssessment?.overallScore ?? 0;
+    const eligibility = computeTemplateEligibilityFromBaselineSections({
+      rawScore: rawScoreForTemplate,
+      threshold: TEMPLATE_ASSEMBLY_THRESHOLD,
+      baselineSections: resumeInputSections as any,
+    });
+    let scoreForTemplate = eligibility.scoreForTemplate;
     let usedStructuredBaselineTemplate = false;
+    let structuredBaselineExtractionMissingReasons: string[] | null =
+      eligibility.structuredBaselineMissingReasons;
 
     let normalizedDocument = (() => {
       if (typeof scoreForTemplate === 'number' && scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD) {
         const structured = extractStructuredBaselineFromSections(resumeInputSections);
         if ((structured.experience ?? []).length === 0) {
-          throw new UnprocessableEntityException(buildArtifactFailurePayload({
-            code: 'generation_blocked',
-            category: 'generation_blocked',
-            message: 'Resume could not be assembled because required baseline evidence is missing.',
-            detail: 'A fit score >= 80 requires structured baseline experience entries (company + role title).',
-            retryable: false,
-            userAction: {
-              title: 'Add verified experience structure',
-              description: 'Ensure your baseline includes Experience entries with company and role title headers.',
-            },
-            diagnostics: {
-              missingRequirements: structured.missingEvidenceReasons.slice(0, 6),
-            },
-          }));
+          return buildNormalizedResumeDocument(
+            sections as ResumeExportSection[],
+            identity,
+            { documentStrategyPlan: request.documentStrategyPlan ?? undefined },
+          );
         }
         usedStructuredBaselineTemplate = true;
         // `resolveBaselineIdentity` returns `BaselineIdentity` (`fullName`, etc). Use those fields
@@ -2558,6 +2558,14 @@ export class ResumeService {
         resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
         resumeGenerationDiagnostics: experienceDiagnostics,
         normalizationDiagnostics: experienceDiagnostics,
+        ...(structuredBaselineExtractionMissingReasons
+          ? {
+              artifactReadiness: 'blocked',
+              missingRequirements: structuredBaselineExtractionMissingReasons,
+              scoreCappedFrom: rawScoreForTemplate,
+              scoreCappedTo: TEMPLATE_ASSEMBLY_THRESHOLD - 1,
+            }
+          : {}),
         ...(usedStructuredBaselineTemplate
           ? {
               generationMode: 'structured_baseline_template',

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
 import { Repository } from 'typeorm';
+import { Baseline } from '../baseline/baseline.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
 import { Job } from '../jobs/job.entity';
@@ -9,6 +10,7 @@ import { StudioArtifact, StudioArtifactLifecycleStatus } from './studio-artifact
 import type { NormalizedResumeDocument } from '../documents/normalized-document.models';
 import { sanitizeResumePreviewForStudio } from '../resume/resumePreviewSanitizer';
 import type { ArtifactGenerationResult, ArtifactCorrectionReason } from '@shared/artifactGenerationResult';
+import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
 
 export type StudioArtifactKind = 'resume' | 'cover_letter';
 
@@ -33,6 +35,9 @@ export type StudioArtifactsState = {
   baselineVersionHash: string | null;
   jobFingerprint: string | null;
   generationContractVersion: string;
+  artifactReadiness?: 'ready' | 'blocked';
+  artifactReadinessReasons?: string[];
+  assessmentScore?: number | null;
   resume: StudioArtifactRecord | null;
   coverLetter: StudioArtifactRecord | null;
   resumeResult?: ArtifactGenerationResult<unknown>;
@@ -104,6 +109,8 @@ export class StudioArtifactsService {
   constructor(
     @InjectRepository(StudioArtifact)
     private readonly studioArtifactRepository: Repository<StudioArtifact>,
+    @InjectRepository(Baseline)
+    private readonly baselineRepository: Repository<Baseline>,
     @InjectRepository(BaselineVersion)
     private readonly baselineVersionRepository: Repository<BaselineVersion>,
     @InjectRepository(Job)
@@ -123,7 +130,7 @@ export class StudioArtifactsService {
     baselineVersionId: string;
     analysisId?: string | null;
   }): Promise<StudioArtifactsState> {
-    const [baselineVersion, job, assessment] = await Promise.all([
+    const [baselineVersion, job, assessment, baseline] = await Promise.all([
       this.baselineVersionRepository.findOne({
         where: { id: input.baselineVersionId, baselineId: input.baselineId },
       }),
@@ -135,6 +142,10 @@ export class StudioArtifactsService {
             where: { id: input.analysisId, userId: input.userId, jobId: input.jobId, baselineId: input.baselineId },
           })
         : Promise.resolve(null),
+      this.baselineRepository.findOne({
+        where: { id: input.baselineId, userId: input.userId },
+        relations: { sections: true },
+      }),
     ]);
 
     const record = await this.studioArtifactRepository.findOne({
@@ -157,8 +168,52 @@ export class StudioArtifactsService {
       jobFingerprint,
     });
 
-    const resumeRecord = this.buildArtifactRecord(record, 'resume', resumeInputsHash);
-    const coverRecord = this.buildArtifactRecord(record, 'cover_letter', coverLetterInputsHash);
+    const score = typeof assessment?.overallScore === 'number' ? assessment.overallScore : null;
+    const TEMPLATE_THRESHOLD = 80;
+    const structured = baseline?.sections?.length
+      ? extractStructuredBaselineFromSections(baseline.sections as any)
+      : null;
+    const hasUsableExperience =
+      Boolean(structured) &&
+      (structured?.experience ?? []).some((entry) => {
+        const company = safeText((entry as any)?.company);
+        const roleTitle = safeText((entry as any)?.roleTitle);
+        const bullets = Array.isArray((entry as any)?.bullets) ? (entry as any).bullets : [];
+        const usableBullets = bullets.map((b: unknown) => safeText(b)).filter(Boolean);
+        return company.length > 0 && roleTitle.length > 0 && usableBullets.length > 0;
+      });
+    const artifactReadiness =
+      typeof score === 'number' && score >= TEMPLATE_THRESHOLD && hasUsableExperience
+        ? 'ready'
+        : typeof score === 'number' && score >= TEMPLATE_THRESHOLD
+          ? 'blocked'
+          : undefined;
+    const artifactReadinessReasons =
+      artifactReadiness === 'blocked'
+        ? (structured?.missingEvidenceReasons?.slice(0, 8) ?? ['Missing structured baseline evidence.'])
+        : [];
+
+    const resumeRecordRaw = this.buildArtifactRecord(record, 'resume', resumeInputsHash);
+    const coverRecordRaw = this.buildArtifactRecord(record, 'cover_letter', coverLetterInputsHash);
+
+    const isStructuredTemplateResult = (responseBody: Record<string, unknown> | null): boolean => {
+      if (!responseBody) return false;
+      const internal = normalizeRecord(responseBody.internal);
+      return (
+        safeText(internal?.generationMode) === 'structured_baseline_template' &&
+        safeText(internal?.templateVersion) === 'structured-baseline-v1'
+      );
+    };
+
+    // For score >= 80, never rehydrate legacy artifacts as "current" output.
+    const resumeRecord =
+      artifactReadiness && !isStructuredTemplateResult(resumeRecordRaw?.responseBody ?? null)
+        ? null
+        : resumeRecordRaw;
+    const coverRecord =
+      artifactReadiness && !isStructuredTemplateResult(coverRecordRaw?.responseBody ?? null)
+        ? null
+        : coverRecordRaw;
 
     return {
       status: this.resolvePairStatus(record, resumeInputsHash, coverLetterInputsHash),
@@ -168,6 +223,8 @@ export class StudioArtifactsService {
       baselineVersionHash,
       jobFingerprint,
       generationContractVersion: ARTIFACT_CONTRACT_VERSION,
+      assessmentScore: score,
+      ...(artifactReadiness ? { artifactReadiness, artifactReadinessReasons } : {}),
       resume: resumeRecord,
       coverLetter: coverRecord,
       resumeResult: this.buildCanonicalResultFromRecord('resume', resumeRecord),

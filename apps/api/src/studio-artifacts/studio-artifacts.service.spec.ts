@@ -3,7 +3,18 @@ import { StudioArtifactLifecycleStatus } from './studio-artifact.entity';
 
 const baselineVersion = { id: 'baseline-version-1', baselineId: 'baseline-1', hash: 'baseline-hash-1' };
 const job = { id: 'job-1', userId: 'user-1', title: 'Director of Support', company: 'Acme', rawDescription: 'Lead support teams.' };
-const assessment = { id: 'analysis-1', userId: 'user-1', jobId: 'job-1', baselineId: 'baseline-1', inputsHash: 'assessment-hash-1' };
+const assessment = { id: 'analysis-1', userId: 'user-1', jobId: 'job-1', baselineId: 'baseline-1', inputsHash: 'assessment-hash-1', overallScore: 70 };
+const baseline = {
+  id: 'baseline-1',
+  userId: 'user-1',
+  sections: [
+    {
+      title: 'Experience',
+      content: ['Acme | Director of Support | 2020 - 2024', '- Led support operations.'].join('\n'),
+      sectionType: 'EXPERIENCE',
+    },
+  ],
+};
 
 function createRepository<T extends object>() {
   let stored: Partial<T> | null = null;
@@ -29,9 +40,13 @@ describe('StudioArtifactsService', () => {
     const assessmentRepository = {
       findOne: jest.fn(async () => assessment),
     };
+    const baselineRepository = {
+      findOne: jest.fn(async () => baseline),
+    };
 
     const service = new StudioArtifactsService(
       studioArtifactRepository as any,
+      baselineRepository as any,
       baselineVersionRepository as any,
       jobRepository as any,
       assessmentRepository as any,
@@ -83,9 +98,13 @@ describe('StudioArtifactsService', () => {
     const assessmentRepository = {
       findOne: jest.fn(async () => assessment),
     };
+    const baselineRepository = {
+      findOne: jest.fn(async () => baseline),
+    };
 
     const service = new StudioArtifactsService(
       studioArtifactRepository as any,
+      baselineRepository as any,
       baselineVersionRepository as any,
       jobRepository as any,
       assessmentRepository as any,
@@ -141,6 +160,9 @@ describe('StudioArtifactsService', () => {
 
   it('returns in progress and failed states and invalidates stale inputs deterministically', async () => {
     const studioArtifactRepository = createRepository<any>();
+    const baselineRepository = {
+      findOne: jest.fn(async () => baseline),
+    };
     const baselineVersionRepository = {
       findOne: jest.fn(async () => baselineVersion),
     };
@@ -153,6 +175,7 @@ describe('StudioArtifactsService', () => {
 
     const service = new StudioArtifactsService(
       studioArtifactRepository as any,
+      baselineRepository as any,
       baselineVersionRepository as any,
       jobRepository as any,
       assessmentRepository as any,
@@ -247,6 +270,9 @@ describe('StudioArtifactsService', () => {
 
   it('invalidates stale artifacts when the generation inputs change', async () => {
     const studioArtifactRepository = createRepository<any>();
+    const baselineRepository = {
+      findOne: jest.fn(async () => baseline),
+    };
     const baselineVersionRepository = {
       findOne: jest.fn(async () => baselineVersion),
     };
@@ -259,6 +285,7 @@ describe('StudioArtifactsService', () => {
 
     const service = new StudioArtifactsService(
       studioArtifactRepository as any,
+      baselineRepository as any,
       baselineVersionRepository as any,
       jobRepository as any,
       assessmentRepository as any,
@@ -294,5 +321,62 @@ describe('StudioArtifactsService', () => {
 
     expect(staleState.resume).toBeNull();
     expect(staleState.status).toBe(StudioArtifactLifecycleStatus.MISSING);
+  });
+
+  it('filters out legacy/stale artifacts as current output when score >= 80', async () => {
+    const studioArtifactRepository = createRepository<any>();
+    const baselineRepository = {
+      findOne: jest.fn(async () => baseline),
+    };
+    const baselineVersionRepository = {
+      findOne: jest.fn(async () => baselineVersion),
+    };
+    const jobRepository = {
+      findOne: jest.fn(async () => job),
+    };
+    const assessmentRepository = {
+      findOne: jest.fn(async () => ({ ...assessment, overallScore: 90 })),
+    };
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository as any,
+      baselineRepository as any,
+      baselineVersionRepository as any,
+      jobRepository as any,
+      assessmentRepository as any,
+    );
+
+    const inputsHash = service.computeResumeInputsHash({
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: service.computeJobFingerprint(job as any),
+      assessmentInputsHash: assessment.inputsHash,
+    });
+
+    await service.recordResumeSuccess({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: service.computeJobFingerprint(job as any),
+      inputsHash,
+      responseBody: { status: 'success', preview: { resume: { heading: { name: 'Alex' } } }, internal: {} },
+      content: 'resume-content',
+      metadata: {},
+    });
+
+    const state = await service.readState({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      analysisId: 'analysis-1',
+    });
+
+    expect(state.assessmentScore).toBe(90);
+    expect(state.artifactReadiness).toBe('ready');
+    // Legacy internal metadata is filtered out for score>=80: record should not be treated as current.
+    expect(state.resume).toBeNull();
+    expect(state.resumeResult?.generationState).toBe('not_started');
   });
 });
