@@ -64,6 +64,12 @@ export class ResumeController {
     @Body() body: ResumeRequestBody,
     @Req() request: TieredResumeRequest,
   ): Promise<GenerationOutcome<ResumeGenerationResponse> & ResumeGenerationResponse> {
+    // eslint-disable-next-line no-console
+    console.log('[RESUME_GENERATE_START]', {
+      baselineId: body.baselineId?.trim() ?? null,
+      baselineVersionId: body.baselineVersionId?.trim() ?? null,
+      jobId: body.jobId?.trim() ?? null,
+    });
     return this.executeGenerationOutcome('resume.generate', body, () =>
       this.handleGenerate(body, request),
     );
@@ -152,31 +158,11 @@ export class ResumeController {
         },
       });
     }
-    if (!analysisId)
-      throw new BadRequestException({
-        error: {
-          code: 'invalid_pair_state',
-          message: 'Generation request does not match the analyzed context.',
-          details: {
-            expected: {
-              jobId,
-              baselineId,
-              baselineVersionId,
-            },
-            received: {
-              jobId,
-              baselineId,
-              baselineVersionId,
-            },
-          },
-        },
-      });
-
     return {
       baselineId,
       baselineVersionId,
       jobId,
-      analysisId,
+      ...(analysisId ? { analysisId } : {}),
       oneTap,
       editedResume: body.editedResume,
     };

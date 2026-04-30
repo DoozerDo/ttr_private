@@ -400,8 +400,8 @@ export class StudioArtifactsService {
     jobFingerprint: string | null;
     inputsHash: string;
     metadata?: Record<string, unknown>;
-  }) {
-    await this.upsertArtifactRow(input.userId, input.baselineId, input.jobId, {
+  }): Promise<string> {
+    return this.upsertArtifactRow(input.userId, input.baselineId, input.jobId, {
       baselineVersionId: input.baselineVersionId,
       baselineVersionHash: input.baselineVersionHash,
       jobFingerprint: input.jobFingerprint,
@@ -426,8 +426,8 @@ export class StudioArtifactsService {
     responseBody: Record<string, unknown>;
     content: string | null;
     metadata?: Record<string, unknown>;
-  }) {
-    await this.upsertArtifactRow(input.userId, input.baselineId, input.jobId, {
+  }): Promise<string> {
+    return this.upsertArtifactRow(input.userId, input.baselineId, input.jobId, {
       baselineVersionId: input.baselineVersionId,
       baselineVersionHash: input.baselineVersionHash,
       jobFingerprint: input.jobFingerprint,
@@ -456,8 +456,8 @@ export class StudioArtifactsService {
     failureCode: string;
     failureMessage: string;
     metadata?: Record<string, unknown>;
-  }) {
-    await this.upsertArtifactRow(input.userId, input.baselineId, input.jobId, {
+  }): Promise<string> {
+    return this.upsertArtifactRow(input.userId, input.baselineId, input.jobId, {
       baselineVersionId: input.baselineVersionId,
       baselineVersionHash: input.baselineVersionHash,
       jobFingerprint: input.jobFingerprint,
@@ -481,8 +481,8 @@ export class StudioArtifactsService {
     jobFingerprint: string | null;
     inputsHash: string;
     metadata?: Record<string, unknown>;
-  }) {
-    await this.upsertArtifactRow(input.userId, input.baselineId, input.jobId, {
+  }): Promise<string> {
+    return this.upsertArtifactRow(input.userId, input.baselineId, input.jobId, {
       baselineVersionId: input.baselineVersionId,
       baselineVersionHash: input.baselineVersionHash,
       jobFingerprint: input.jobFingerprint,
@@ -507,8 +507,8 @@ export class StudioArtifactsService {
     responseBody: Record<string, unknown>;
     content: string | null;
     metadata?: Record<string, unknown>;
-  }) {
-    await this.upsertArtifactRow(input.userId, input.baselineId, input.jobId, {
+  }): Promise<string> {
+    return this.upsertArtifactRow(input.userId, input.baselineId, input.jobId, {
       baselineVersionId: input.baselineVersionId,
       baselineVersionHash: input.baselineVersionHash,
       jobFingerprint: input.jobFingerprint,
@@ -537,8 +537,8 @@ export class StudioArtifactsService {
     failureCode: string;
     failureMessage: string;
     metadata?: Record<string, unknown>;
-  }) {
-    await this.upsertArtifactRow(input.userId, input.baselineId, input.jobId, {
+  }): Promise<string> {
+    return this.upsertArtifactRow(input.userId, input.baselineId, input.jobId, {
       baselineVersionId: input.baselineVersionId,
       baselineVersionHash: input.baselineVersionHash,
       jobFingerprint: input.jobFingerprint,
@@ -714,7 +714,7 @@ export class StudioArtifactsService {
     baselineId: string,
     jobId: string,
     patch: ArtifactPatch,
-  ) {
+  ): Promise<string> {
     if (shouldDebugDocgen()) {
       const resumeStatus = patch.resumeStatus ?? null;
       const coverLetterStatus = patch.coverLetterStatus ?? null;
@@ -734,6 +734,7 @@ export class StudioArtifactsService {
     });
     const next = existing ?? this.studioArtifactRepository.create({ userId, baselineId, jobId });
     Object.assign(next, patch);
-    await this.studioArtifactRepository.save(next);
+    const saved = await this.studioArtifactRepository.save(next);
+    return String((saved as any)?.id ?? (next as any)?.id ?? '');
   }
 }

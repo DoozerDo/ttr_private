@@ -30,12 +30,27 @@ export class StudioArtifactsController {
       throw new BadRequestException('baselineId, baselineVersionId, and jobId are required');
     }
 
-    return this.studioArtifactsService.readState({
+    // eslint-disable-next-line no-console
+    console.log('[STUDIO_ARTIFACTS_FETCH]', {
+      baselineId: baselineId.trim(),
+      baselineVersionId: baselineVersionId.trim(),
+      jobId: jobId.trim(),
+    });
+
+    const state = await this.studioArtifactsService.readState({
       userId,
       baselineId: baselineId.trim(),
       baselineVersionId: baselineVersionId.trim(),
       jobId: jobId.trim(),
       analysisId: analysisId?.trim() || null,
     });
+
+    // eslint-disable-next-line no-console
+    console.log('[STUDIO_ARTIFACTS_RESULT]', {
+      hasResume: Boolean(state.resume?.responseBody),
+      hasCoverLetter: Boolean(state.coverLetter?.responseBody),
+    });
+
+    return state;
   }
 }

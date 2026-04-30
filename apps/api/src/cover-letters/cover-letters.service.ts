@@ -693,6 +693,20 @@ export class CoverLettersService {
         },
       } as unknown as CoverLetterGenerationResponse;
 
+      if (!draft.complianceResult.normalizedContent || draft.complianceResult.normalizedContent.trim().length < 1) {
+        throw new UnprocessableEntityException({
+          error: {
+            code: 'generation_empty_output',
+            message: 'Cover letter generation produced empty output.',
+          },
+        });
+      }
+      // eslint-disable-next-line no-console
+      console.log('[COVER_LETTER_GENERATE_OUTPUT]', {
+        hasContent: true,
+        length: draft.complianceResult.normalizedContent.length,
+      });
+
       emitArtifactQualityTelemetry(
         this.logger,
         {
@@ -711,7 +725,7 @@ export class CoverLettersService {
           repairAttempted: draft.qualityRepairAttempted ?? false,
         },
       );
-      await this.studioArtifactsService.recordCoverLetterSuccess({
+      const artifactId = await this.studioArtifactsService.recordCoverLetterSuccess({
         userId,
         baselineId: studioArtifactContext.baselineId,
         jobId: studioArtifactContext.jobId,
@@ -726,6 +740,8 @@ export class CoverLettersService {
           closingTemplateKey: draft.closingTemplateKey,
         },
       });
+      // eslint-disable-next-line no-console
+      console.log('[COVER_LETTER_GENERATE_PERSISTED]', { artifactId });
       await this.applicationsService.upsertApplicationForPair({
         userId,
         baselineId: studioArtifactContext.baselineId,
@@ -1063,26 +1079,7 @@ export class CoverLettersService {
     }
 
     const baselineVersionId = input.baselineVersionId?.trim() || null;
-    if (!input.analysisId?.trim()) {
-      throw new BadRequestException({
-        error: {
-          code: 'analysis_not_found',
-          message: 'analysisId is required for generation requests.',
-          details: {
-            expected: {
-              jobId: input.jobId,
-              baselineId: input.baselineId,
-              baselineVersionId,
-            },
-            received: {
-              jobId: input.jobId,
-              baselineId: input.baselineId,
-              baselineVersionId,
-            },
-          },
-        },
-      });
-    }
+    let analysisId = input.analysisId?.trim() || '';
 
     const baseline = await this.baselineRepository.findOne({
       where: { id: input.baselineId, userId },
@@ -1118,10 +1115,50 @@ export class CoverLettersService {
       throw new BadRequestException('Baseline version hash missing');
     }
 
+    if (!analysisId) {
+      const assessmentForBaselineVersion = await this.fitAssessmentRepository.findOne({
+        where: {
+          userId,
+          jobId: job.id,
+          baselineId: baseline.id,
+          baselineVersion: baselineVersion.versionNumber ?? null,
+        },
+        order: { createdAt: 'DESC' },
+      });
+      const fallbackAssessment =
+        assessmentForBaselineVersion ??
+        (await this.fitAssessmentRepository.findOne({
+          where: { userId, jobId: job.id, baselineId: baseline.id },
+          order: { createdAt: 'DESC' },
+        }));
+      analysisId = fallbackAssessment?.id ?? '';
+    }
+
+    if (!analysisId) {
+      throw new BadRequestException({
+        error: {
+          code: 'analysis_not_found',
+          message: 'analysisId could not be resolved for generation.',
+          details: {
+            expected: {
+              jobId: input.jobId,
+              baselineId: input.baselineId,
+              baselineVersionId,
+            },
+            received: {
+              jobId: input.jobId,
+              baselineId: input.baselineId,
+              baselineVersionId,
+            },
+          },
+        },
+      });
+    }
+
     const analysisAssessment = await validateAnalysisContext({
       analysisRepository: this.fitAssessmentRepository,
       baselineVersionRepository: this.baselineVersionRepository,
-      analysisId: input.analysisId.trim(),
+      analysisId,
       userId,
       jobId: job.id,
       baselineId: baseline.id,

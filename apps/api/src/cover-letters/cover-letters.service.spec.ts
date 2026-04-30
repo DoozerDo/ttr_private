@@ -127,9 +127,9 @@ const buildService = (options?: {
   const studioArtifactsService = {
     computeJobFingerprint: jest.fn().mockReturnValue('job-fingerprint-1'),
     computeCoverLetterInputsHash: jest.fn().mockReturnValue('cover-letter-inputs-hash-1'),
-    recordCoverLetterInProgress: jest.fn().mockResolvedValue(undefined),
-    recordCoverLetterSuccess: jest.fn().mockResolvedValue(undefined),
-    recordCoverLetterFailure: jest.fn().mockResolvedValue(undefined),
+    recordCoverLetterInProgress: jest.fn().mockResolvedValue('studio-artifact-1'),
+    recordCoverLetterSuccess: jest.fn().mockResolvedValue('studio-artifact-1'),
+    recordCoverLetterFailure: jest.fn().mockResolvedValue('studio-artifact-1'),
   } as any;
 
   const applicationsService = {

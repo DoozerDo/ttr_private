@@ -1600,7 +1600,7 @@ export class ResumeService {
       const baselineId = request.baselineId?.trim();
       const baselineVersionId = request.baselineVersionId?.trim() || null;
       const jobId = request.jobId?.trim();
-      const analysisId = request.analysisId?.trim();
+      let analysisId = request.analysisId?.trim();
       jobIdForFailSafe = jobId ?? null;
       analysisIdForFailSafe = analysisId ?? null;
 
@@ -1610,26 +1610,7 @@ export class ResumeService {
       if (!jobId) {
         throw new BadRequestException('jobId is required');
       }
-      if (!analysisId) {
-        throw new BadRequestException({
-          error: {
-            code: 'analysis_not_found',
-            message: 'analysisId is required for generation requests.',
-            details: {
-              expected: {
-                jobId,
-                baselineId,
-                baselineVersionId,
-              },
-              received: {
-                jobId,
-                baselineId,
-                baselineVersionId,
-              },
-            },
-          },
-        });
-      }
+      // analysisId may be omitted by Studio generate buttons; resolve the latest assessment for this pair.
 
       const baseline = await this.baselineRepository.findOne({
       where: { id: baselineId, userId },
@@ -1658,6 +1639,44 @@ export class ResumeService {
     if (!baselineVersion.hash) {
       throw new BadRequestException('Baseline version hash missing');
     }
+
+    if (!analysisId) {
+      const assessmentForBaselineVersion = await this.fitAssessmentRepository.findOne({
+        where: {
+          userId,
+          jobId,
+          baselineId: baseline.id,
+          baselineVersion: baselineVersion.versionNumber ?? null,
+        },
+        order: { createdAt: 'DESC' },
+      });
+      const latestAssessmentFallback = assessmentForBaselineVersion ?? (await this.findLatestAssessment(userId, jobId, baseline.id));
+      analysisId = latestAssessmentFallback?.id ?? undefined;
+      analysisIdForFailSafe = analysisId ?? null;
+    }
+    if (!analysisId) {
+      throw new BadRequestException({
+        error: {
+          code: 'analysis_not_found',
+          message: 'analysisId could not be resolved for generation.',
+          details: {
+            expected: {
+              jobId,
+              baselineId,
+              baselineVersionId,
+            },
+            received: {
+              jobId,
+              baselineId,
+              baselineVersionId,
+            },
+          },
+        },
+      });
+    }
+
+    // eslint-disable-next-line no-console
+    console.log('[RESUME_GENERATE_START]', { baselineId: baseline.id, baselineVersionId: baselineVersion.id, jobId });
 
     const analysisAssessment = await validateAnalysisContext({
       analysisRepository: this.fitAssessmentRepository,
@@ -2585,7 +2604,22 @@ export class ResumeService {
         company: resume.experience?.[0]?.company,
       });
     }
-    await this.studioArtifactsService.recordResumeSuccess({
+    const persistedContent = JSON.stringify(normalizedDocument);
+    if (!persistedContent || persistedContent.trim().length < 10) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'generation_empty_output',
+          message: 'Resume generation produced empty output.',
+        },
+      });
+    }
+    // eslint-disable-next-line no-console
+    console.log('[RESUME_GENERATE_OUTPUT]', {
+      hasContent: true,
+      length: persistedContent.length,
+    });
+
+    const artifactId = await this.studioArtifactsService.recordResumeSuccess({
       userId,
       baselineId: studioArtifactContext.baselineId,
       jobId: studioArtifactContext.jobId,
@@ -2594,13 +2628,15 @@ export class ResumeService {
       jobFingerprint: studioArtifactContext.jobFingerprint,
       inputsHash: studioArtifactContext.inputsHash,
       responseBody: response as unknown as Record<string, unknown>,
-      content: JSON.stringify(normalizedDocument),
+      content: persistedContent,
       metadata: {
         auditId: audit.id,
         baselineVersionHash: audit.baselineVersionHash,
         analysisId: studioArtifactContext.analysisId,
       },
     });
+    // eslint-disable-next-line no-console
+    console.log('[RESUME_GENERATE_PERSISTED]', { artifactId });
     if (!forceTemplateRegen) {
       await this.workflowIdempotencyService.complete({
         userId,

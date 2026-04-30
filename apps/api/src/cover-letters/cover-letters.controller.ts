@@ -60,6 +60,13 @@ export class CoverLettersController {
   ): Promise<GenerationOutcome<CoverLetterGenerationResponse> & CoverLetterGenerationResponse> {
     const userId = this.requireUserId(request);
 
+    // eslint-disable-next-line no-console
+    console.log('[COVER_LETTER_GENERATE_START]', {
+      baselineId: body.baselineId ?? null,
+      baselineVersionId: body.baselineVersionId ?? null,
+      jobId: body.jobId ?? null,
+    });
+
     const entitlements = resolveEntitlementsFromUser(request.user);
     assertFeatureAvailable(entitlements, FeatureKey.COVER_LETTER_EXPORT);
 

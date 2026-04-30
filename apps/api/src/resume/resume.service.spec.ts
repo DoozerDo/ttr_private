@@ -199,9 +199,9 @@ const buildService = (options?: {
       resume: null,
       coverLetter: null,
     }),
-    recordResumeInProgress: jest.fn().mockResolvedValue(undefined),
-    recordResumeFailure: jest.fn().mockResolvedValue(undefined),
-    recordResumeSuccess: jest.fn().mockResolvedValue(undefined),
+    recordResumeInProgress: jest.fn().mockResolvedValue('studio-artifact-1'),
+    recordResumeFailure: jest.fn().mockResolvedValue('studio-artifact-1'),
+    recordResumeSuccess: jest.fn().mockResolvedValue('studio-artifact-1'),
   } as unknown as jest.Mocked<StudioArtifactsService>;
 
   const gapAnalysisService = {
@@ -311,6 +311,19 @@ describe('ResumeService contract', () => {
 
     baseline.sections = [{ ...baseSection, content: original }];
     baseline.parsedRecords = originalParsed;
+  });
+
+  it('resolves analysisId when omitted (Studio generate) and still persists the resume artifact', async () => {
+    const { service, studioArtifactsService } = buildService();
+
+    const result = await service.generateResume('user-1', {
+      ...baseRequest,
+      analysisId: undefined,
+      oneTap: true,
+    } as any);
+
+    expect(result.ok).toBe(true);
+    expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
   });
 
   it('sanitizes preview output by clearing malformed role titles like \"Technical Architect & Full\"', () => {
