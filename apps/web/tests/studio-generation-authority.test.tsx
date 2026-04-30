@@ -115,6 +115,8 @@ describe("Studio artifact quality gating (soft)", () => {
 
     const resumeSection = screen.getByRole("heading", { name: "Resume" }).closest("section");
     expect(resumeSection).toBeTruthy();
+    const resumeSource = within(resumeSection as HTMLElement).getByTestId("studio-resume-generation-source");
+    expect(resumeSource.textContent ?? "").toMatch(/reason:\s*stale_legacy/i);
     expect(within(resumeSection as HTMLElement).queryByText(/Your resume is ready/i)).toBeNull();
     expect(within(resumeSection as HTMLElement).getAllByText("Resume needs correction before export.").length).toBeGreaterThan(0);
     // Placeholder header appears when title/company are sanitized.
@@ -157,6 +159,16 @@ describe("Studio artifact quality gating (soft)", () => {
     expect(within(coverSection as HTMLElement).getAllByText("Cover letter needs correction before export.").length).toBeGreaterThan(0);
     expect(within(coverSection as HTMLElement).queryByText("Download DOCX")).toBeNull();
     expect(within(coverSection as HTMLElement).queryByText("Download PDF")).toBeNull();
+  });
+
+  it("renders generation source diagnostics blocks visibly in the card headers", async () => {
+    setupFetchWithQualityFailures();
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-resume-generation-source")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-cover-generation-source")).toBeInTheDocument();
+    });
   });
 
   it("ResumePreview trusts sanitized API fields and does not render malformed role titles from overrides", () => {

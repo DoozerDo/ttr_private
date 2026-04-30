@@ -1468,6 +1468,49 @@ export default function StudioPage() {
   }, [analysis]); 
   const generateNowEligible = isGenerateNowEligible(analysisScore);
 
+  const readGenerationDebug = useCallback(
+    (payload: unknown): { generationMode: string; templateVersion: string } => {
+      if (!payload || typeof payload !== "object") {
+        return { generationMode: "legacy_generation", templateVersion: "unknown" };
+      }
+      const record = payload as Record<string, unknown>;
+      const internal = (record.internal && typeof record.internal === "object"
+        ? (record.internal as Record<string, unknown>)
+        : null);
+      const generationMode = typeof internal?.generationMode === "string"
+        ? internal.generationMode
+        : typeof record.generationMode === "string"
+          ? (record.generationMode as string)
+          : "legacy_generation";
+      const templateVersion = typeof internal?.templateVersion === "string"
+        ? internal.templateVersion
+        : typeof record.templateVersion === "string"
+          ? (record.templateVersion as string)
+          : "unknown";
+      return { generationMode, templateVersion };
+    },
+    [],
+  );
+
+  const readMissingStructuredBaselineSignal = useCallback((payload: unknown): boolean => {
+    if (!payload || typeof payload !== "object") return false;
+    const record = payload as Record<string, unknown>;
+    const diagnostics = (record.diagnostics && typeof record.diagnostics === "object"
+      ? (record.diagnostics as Record<string, unknown>)
+      : null);
+    const missingRequirements = diagnostics?.missingRequirements;
+    if (Array.isArray(missingRequirements) && missingRequirements.length > 0) return true;
+
+    const error = (record.error && typeof record.error === "object"
+      ? (record.error as Record<string, unknown>)
+      : null);
+    const errorDiagnostics = (error?.diagnostics && typeof error.diagnostics === "object"
+      ? (error.diagnostics as Record<string, unknown>)
+      : null);
+    const errorMissing = errorDiagnostics?.missingRequirements;
+    return Array.isArray(errorMissing) && errorMissing.length > 0;
+  }, []);
+
   const coverLetterJobContext = useMemo(() => {
     const jobWithExtras = selectedJob as Job & {
       companyName?: string | null;
@@ -10609,6 +10652,28 @@ export default function StudioPage() {
                   : "Resume needs refinement before export."
                 : renderCardStatus(resumeCardStatus, "Resume")}
             </p>
+            {(() => {
+              const { generationMode, templateVersion } = readGenerationDebug(artifactContract.normalized.resumeResponse);
+              const score = typeof analysisScore === "number" ? analysisScore : null;
+              const artifactCurrent = score !== null && score >= 80 && generationMode === "structured_baseline_template";
+              const hasMissingStructuredBaseline = readMissingStructuredBaselineSignal(artifactContract.normalized.resumeResponse);
+              const reason = score !== null && score < 80
+                ? "below_80"
+                : score !== null && score >= 80 && hasMissingStructuredBaseline
+                  ? "missing_structured_baseline"
+                  : score !== null && score >= 80 && generationMode !== "structured_baseline_template"
+                    ? "stale_legacy"
+                    : "current";
+              return (
+                <div className="mt-1 text-[10px] leading-4 text-slate-500" data-testid="studio-resume-generation-source">
+                  <div>generationMode: {generationMode}</div>
+                  <div>templateVersion: {templateVersion}</div>
+                  <div>score: {score ?? "unknown"}</div>
+                  <div>artifact current: {String(artifactCurrent)}</div>
+                  <div>reason: {reason}</div>
+                </div>
+              );
+            })()}
           </div>
           {shouldShowResumeRegenerate ? (
             <FormButton
@@ -10952,6 +11017,28 @@ export default function StudioPage() {
                   : "Cover letter needs refinement before export."
                 : renderCardStatus(coverCardStatus, "Cover letter")}
             </p>
+            {(() => {
+              const { generationMode, templateVersion } = readGenerationDebug(artifactContract.normalized.coverLetterResponse);
+              const score = typeof analysisScore === "number" ? analysisScore : null;
+              const artifactCurrent = score !== null && score >= 80 && generationMode === "structured_baseline_template";
+              const hasMissingStructuredBaseline = readMissingStructuredBaselineSignal(artifactContract.normalized.coverLetterResponse);
+              const reason = score !== null && score < 80
+                ? "below_80"
+                : score !== null && score >= 80 && hasMissingStructuredBaseline
+                  ? "missing_structured_baseline"
+                  : score !== null && score >= 80 && generationMode !== "structured_baseline_template"
+                    ? "stale_legacy"
+                    : "current";
+              return (
+                <div className="mt-1 text-[10px] leading-4 text-slate-500" data-testid="studio-cover-generation-source">
+                  <div>generationMode: {generationMode}</div>
+                  <div>templateVersion: {templateVersion}</div>
+                  <div>score: {score ?? "unknown"}</div>
+                  <div>artifact current: {String(artifactCurrent)}</div>
+                  <div>reason: {reason}</div>
+                </div>
+              );
+            })()}
           </div>
           <div className="flex flex-wrap gap-2">
             {!generateNowEligible ? (
