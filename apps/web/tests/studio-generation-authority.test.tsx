@@ -248,6 +248,200 @@ describe("Studio artifact quality gating (soft)", () => {
     });
   });
 
+  it("clicking Generate resume refreshes artifacts and renders a resume preview", async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    let resumeGenerated = false;
+
+    setFetchImplementation(
+      vi.fn((input: RequestInfo, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        const method = (init?.method ?? "GET").toUpperCase();
+        calls.push({ url, method });
+
+        if (url.includes("/api/baselines/base-1/versions")) {
+          return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+        }
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+          return Promise.resolve(
+            createResponse({
+              assessmentId: "analysis-1",
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: "base-version-1",
+              scoring_v2: { score: 72 },
+              verification_coverage: {
+                totalClaims: 3,
+                verifiedClaims: 3,
+                inferredClaims: 0,
+                unverifiedClaims: 0,
+                unverifiedRequirements: [],
+              },
+            }),
+          );
+        }
+        if (url.includes("/api/studio/artifacts")) {
+          if (!resumeGenerated) {
+            return Promise.resolve(
+              createResponse({
+                status: "missing",
+                baselineId: "base-1",
+                jobId: "job-1",
+                baselineVersionId: "base-version-1",
+                baselineVersionHash: "hash-1",
+                jobFingerprint: "fp-1",
+                generationContractVersion: "studio-artifacts-v1",
+                resume: null,
+                coverLetter: null,
+              }),
+            );
+          }
+          return Promise.resolve(
+            createResponse({
+              status: "completed",
+              baselineId: "base-1",
+              jobId: "job-1",
+              baselineVersionId: "base-version-1",
+              baselineVersionHash: "hash-1",
+              jobFingerprint: "fp-1",
+              generationContractVersion: "studio-artifacts-v1",
+              resume: {
+                status: "completed",
+                inputsHash: "ih-1",
+                responseBody: {
+                  status: "success",
+                  generationStatus: "success",
+                  exports: { docx: true, pdf: true },
+                  preview: {
+                    resume: {
+                      heading: { name: "Test Candidate", contactLine: "test@example.com" },
+                      summary: "Verified support leader aligned to the role.",
+                      experience: [{ company: "Acme", roleTitle: "Director of Support", bullets: ["Delivered results."] }],
+                    },
+                  },
+                },
+                content: null,
+                failureCode: null,
+                failureMessage: null,
+              },
+              coverLetter: null,
+            }),
+          );
+        }
+        if (method === "POST" && url.includes("/api/resume/generate")) {
+          resumeGenerated = true;
+          return Promise.resolve(createResponse({ status: "ok" }));
+        }
+        if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+          return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        }
+        return Promise.resolve(createResponse({}));
+      }),
+    );
+
+    renderStudio({ intent: null });
+
+    await screen.findByTestId("studio-resume-missing");
+    const resumeButton = await screen.findByTestId("studio-generate-resume-button");
+    fireEvent.click(resumeButton);
+
+    await screen.findByTestId("studio-resume-ready-panel");
+    expect(calls.filter((c) => c.url.includes("/api/studio/artifacts")).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("clicking Generate cover letter refreshes artifacts and renders a cover letter preview", async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    let coverGenerated = false;
+
+    setFetchImplementation(
+      vi.fn((input: RequestInfo, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        const method = (init?.method ?? "GET").toUpperCase();
+        calls.push({ url, method });
+
+        if (url.includes("/api/baselines/base-1/versions")) {
+          return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+        }
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+          return Promise.resolve(
+            createResponse({
+              assessmentId: "analysis-1",
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: "base-version-1",
+              scoring_v2: { score: 72 },
+              verification_coverage: {
+                totalClaims: 3,
+                verifiedClaims: 3,
+                inferredClaims: 0,
+                unverifiedClaims: 0,
+                unverifiedRequirements: [],
+              },
+            }),
+          );
+        }
+        if (url.includes("/api/studio/artifacts")) {
+          if (!coverGenerated) {
+            return Promise.resolve(
+              createResponse({
+                status: "missing",
+                baselineId: "base-1",
+                jobId: "job-1",
+                baselineVersionId: "base-version-1",
+                baselineVersionHash: "hash-1",
+                jobFingerprint: "fp-1",
+                generationContractVersion: "studio-artifacts-v1",
+                resume: null,
+                coverLetter: null,
+              }),
+            );
+          }
+          return Promise.resolve(
+            createResponse({
+              status: "completed",
+              baselineId: "base-1",
+              jobId: "job-1",
+              baselineVersionId: "base-version-1",
+              baselineVersionHash: "hash-1",
+              jobFingerprint: "fp-1",
+              generationContractVersion: "studio-artifacts-v1",
+              resume: null,
+              coverLetter: {
+                status: "completed",
+                inputsHash: "ih-2",
+                responseBody: {
+                  status: "success",
+                  generationStatus: "success",
+                  exports: { docx: true, pdf: true },
+                  preview: { coverLetter: { paragraphs: ["Dear Hiring Team,", "Sincerely,", "Test Candidate"] } },
+                },
+                content: null,
+                failureCode: null,
+                failureMessage: null,
+              },
+            }),
+          );
+        }
+        if (method === "POST" && url.includes("/api/cover-letters/generate")) {
+          coverGenerated = true;
+          return Promise.resolve(createResponse({ status: "ok" }));
+        }
+        if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+          return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        }
+        return Promise.resolve(createResponse({}));
+      }),
+    );
+
+    renderStudio({ intent: null });
+
+    await screen.findByTestId("studio-cover-missing");
+    const coverButton = await screen.findByTestId("studio-generate-cover-button");
+    fireEvent.click(coverButton);
+
+    await screen.findByTestId("studio-cover-ready-panel");
+    expect(calls.filter((c) => c.url.includes("/api/studio/artifacts")).length).toBeGreaterThanOrEqual(2);
+  });
+
   it("ResumePreview trusts sanitized API fields and does not render malformed role titles from overrides", () => {
     const payload = {
       heading: { name: "Test Candidate", contactLine: "test@example.com" },

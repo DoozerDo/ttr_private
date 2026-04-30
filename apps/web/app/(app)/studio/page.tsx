@@ -1666,6 +1666,108 @@ export default function StudioPage() {
   useEffect(() => {
     currentWorkflowScopeRef.current = currentWorkflowScope;
   }, [currentWorkflowScope]);
+
+  const applyStudioArtifactsPayload = useCallback((payload: BackendStudioArtifactsResponse) => {
+    const resumeResponseRaw = payload.resume?.responseBody ?? null;
+    const coverResponseRaw = payload.coverLetter?.responseBody ?? null;
+    const resumeResponse = normalizeHydratedArtifactResponse(resumeResponseRaw);
+    const coverResponse = normalizeHydratedArtifactResponse(coverResponseRaw);
+
+    // Phase 1: prefer canonical artifact results when present, but keep legacy responseBody alongside it.
+    const resumeResult = payload.resumeResult ?? null;
+    const coverLetterResult = payload.coverLetterResult ?? null;
+    const resumeResponseWithResult =
+      resumeResult
+        ? (resumeResponse && typeof resumeResponse === "object"
+            ? ({ ...(resumeResponse as Record<string, unknown>), resumeResult } as unknown)
+            : ({ resumeResult } as unknown))
+        : resumeResponse;
+    const coverResponseWithResult =
+      coverLetterResult
+        ? (coverResponse && typeof coverResponse === "object"
+            ? ({ ...(coverResponse as Record<string, unknown>), coverLetterResult } as unknown)
+            : ({ coverLetterResult } as unknown))
+        : coverResponse;
+
+    const resumeFailure = buildFailureFromBackendRecord("resume", payload.resume);
+    const coverFailure = buildFailureFromBackendRecord("cover_letter", payload.coverLetter);
+
+    if (resumeResponseWithResult) {
+      setResumeState((current) => ({
+        ...current,
+        response:
+          resumeResponseWithResult && typeof resumeResponseWithResult === "object"
+            ? ({ ...(resumeResponseWithResult as Record<string, unknown>) } as unknown)
+            : resumeResponseWithResult,
+        error: null,
+        tierGateError: null,
+        artifactFailure: null,
+      }));
+      setHasGeneratedOnce(true);
+      studioArtifactPresentationStateRef.current = "hydrated";
+    } else if (resumeFailure) {
+      setResumeState((current) => ({ ...current, artifactFailure: resumeFailure, error: null }));
+    }
+
+    if (coverResponseWithResult) {
+      setCoverState((current) => ({
+        ...current,
+        response:
+          coverResponseWithResult && typeof coverResponseWithResult === "object"
+            ? ({ ...(coverResponseWithResult as Record<string, unknown>) } as unknown)
+            : coverResponseWithResult,
+        error: null,
+        tierGateError: null,
+        artifactFailure: null,
+      }));
+      setHasGeneratedOnce(true);
+      studioArtifactPresentationStateRef.current = "hydrated";
+    } else if (coverFailure) {
+      setCoverState((current) => ({ ...current, artifactFailure: coverFailure, error: null }));
+    }
+
+    const pairStatus = getBackendPairStatus(payload);
+    setStudioArtifactPairStatus(pairStatus);
+    // If hydration confirms artifacts are missing, allow auto-generation to proceed afterwards.
+    suppressAutoGenerationRef.current = pairStatus !== "missing";
+  }, []);
+
+  const refreshStudioArtifactsAfterGenerate = useCallback(
+    async (options: { expectedResume?: boolean; expectedCover?: boolean }) => {
+      const baselineId = effectiveBaselineId ?? null;
+      const baselineVersionId = effectiveBaselineVersionId ?? null;
+      const jobId = effectiveJobId ?? null;
+      if (!baselineId || !baselineVersionId || !jobId) return;
+
+      // Generation persistence can lag the generate endpoint response; poll briefly for the persisted artifact.
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const artifactsParams = new URLSearchParams();
+        artifactsParams.set("baselineId", baselineId);
+        artifactsParams.set("baselineVersionId", baselineVersionId);
+        artifactsParams.set("jobId", jobId);
+        if (requestedAnalysisId) artifactsParams.set("analysisId", requestedAnalysisId);
+
+        const response = await fetch(`/api/studio/artifacts?${artifactsParams.toString()}`, { cache: "no-store" });
+        const payload = await readResponsePayload(response);
+        if (response.ok && payload && typeof payload === "object" && !Array.isArray(payload)) {
+          const backend = payload as BackendStudioArtifactsResponse;
+          applyStudioArtifactsPayload(backend);
+          setStudioArtifactsHydrated(true);
+
+          const resumeOk = options.expectedResume ? Boolean(backend.resume?.responseBody) || Boolean(backend.resumeResult) : true;
+          const coverOk = options.expectedCover
+            ? Boolean(backend.coverLetter?.responseBody) || Boolean(backend.coverLetterResult)
+            : true;
+          if (resumeOk && coverOk) return;
+        }
+
+        if (attempt < 3) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      }
+    },
+    [applyStudioArtifactsPayload, effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, requestedAnalysisId],
+  );
   useEffect(() => {
     studioArtifactStorageKeyRef.current = studioArtifactStorageKey;
     if (!studioArtifactStorageKey) {
@@ -9342,12 +9444,13 @@ export default function StudioPage() {
         body: JSON.stringify({ baselineId, baselineVersionId, jobId }),
       });
       if (response.ok) {
+        await refreshStudioArtifactsAfterGenerate({ expectedResume: true });
         setStudioArtifactsRefreshNonce((current) => current + 1);
       }
     } finally {
       setResumeGenerating(false);
     }
-  }, [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId]);
+  }, [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, refreshStudioArtifactsAfterGenerate]);
 
   const handleGenerateCoverLetter = useCallback(async () => {
     const baselineId = effectiveBaselineId ?? null;
@@ -9372,12 +9475,13 @@ export default function StudioPage() {
         body: JSON.stringify({ baselineId, baselineVersionId, jobId }),
       });
       if (response.ok) {
+        await refreshStudioArtifactsAfterGenerate({ expectedCover: true });
         setStudioArtifactsRefreshNonce((current) => current + 1);
       }
     } finally {
       setCoverGenerating(false);
     }
-  }, [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId]);
+  }, [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, refreshStudioArtifactsAfterGenerate]);
   useEffect(() => {
     const contract = workflowOrchestratorCore.contract;
     if (!contract) return;
