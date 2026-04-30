@@ -8100,7 +8100,7 @@ export default function StudioPage() {
                   </div> 
                 </div> 
                 <div className="space-y-4 rounded-xl border border-white/10 bg-slate-950/40 p-3"> 
-                  {showLowQualityRecoveryLane && !showFullLowQualityResume ? ( 
+                  {showLowQualityRecoveryLane && !showFullLowQualityResume && !studioIsGeneratedUnusable ? ( 
                     <div className="space-y-3" data-testid="studio-low-quality-resume-preview"> 
                       <div className="rounded-xl border border-amber-300/25 bg-amber-500/5 p-3">
                         <p className="text-sm font-semibold text-amber-100">This draft needs another pass.</p>
@@ -8125,8 +8125,15 @@ export default function StudioPage() {
                         </summary>
                       </details>
                     </div>
-                  ) : (
+                  ) : canonicalResumePreviewPayload ? (
                     <ResumePreview payload={canonicalResumePreviewPayload} />
+                  ) : (
+                    <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
+                      <p className="text-sm font-semibold text-slate-100">Resume needs correction before export.</p>
+                      <p className="mt-1 text-sm text-slate-200">
+                        Review the flagged issue, edit the resume, or regenerate.
+                      </p>
+                    </div>
                   )}
                 </div>
                 {resumeCopyStatus ? (
@@ -9160,6 +9167,7 @@ export default function StudioPage() {
       studioArtifactPairStatus === "in_progress");
   const studioAutoRetryCapReached =
     studioEffectiveGenerationState === "generated_unusable" && studioAutoRetryCount >= MAX_AUTO_RETRIES;
+  const studioIsGeneratedUnusable = studioEffectiveGenerationState === "generated_unusable";
 
   const generationReadyAutoStartRef = useRef<string | null>(null);
 
@@ -9180,6 +9188,7 @@ export default function StudioPage() {
       shouldShowResumeRegenerate,
       shouldShowCoverRegenerate,
     });
+    console.log("RENDER_SOURCE", { state: studioEffectiveGenerationState, using: "preview_only" });
   }, [
     studioEffectiveGenerationState,
     studioAutoRetryCount,
@@ -10773,7 +10782,7 @@ export default function StudioPage() {
               </div>
             )}
             <div className="space-y-4 rounded-xl border border-white/10 bg-slate-950/30 p-3">
-              {showLowQualityRecoveryLane && !showFullLowQualityResume ? ( 
+              {showLowQualityRecoveryLane && !showFullLowQualityResume && !studioIsGeneratedUnusable ? ( 
                 <div className="space-y-3" data-testid="studio-low-quality-resume-preview-main"> 
                   <div className="rounded-xl border border-amber-300/25 bg-amber-500/5 p-3">
                     <p className="text-sm font-semibold text-amber-100">This draft needs another pass.</p>
@@ -10814,8 +10823,15 @@ export default function StudioPage() {
                     </summary>
                   </details>
                 </div>
-              ) : (
+              ) : canonicalResumePreviewPayload ? (
                 <ResumePreview payload={canonicalResumePreviewPayload} />
+              ) : (
+                <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
+                  <p className="text-sm font-semibold text-slate-100">Resume needs correction before export.</p>
+                  <p className="mt-1 text-sm text-slate-200">
+                    Review the flagged issue, edit the resume, or regenerate.
+                  </p>
+                </div>
               )}
             </div>
             {!isApplicationApplied ? (

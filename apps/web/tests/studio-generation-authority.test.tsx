@@ -187,6 +187,9 @@ describe("Studio artifact quality gating (soft)", () => {
     expect(screen.queryByText(/Technical Architect & Full/i)).toBeNull();
     expect(screen.getByText("Experience entry needs correction")).toBeInTheDocument();
   });
+
+  // The generated_unusable lane is covered by API+UI contract tests; avoid mocking the orchestrator
+  // here because it affects many unrelated authority tests.
 });
 
 describe("Studio manual regenerate after retry cap", () => {
