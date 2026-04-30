@@ -110,6 +110,84 @@ function parseExperienceHeaderLine(line: string): { company: string; roleTitle: 
   return null;
 }
 
+function looksLikeDatesLine(line: string): boolean {
+  const raw = trimToText(line);
+  if (!raw) return false;
+  return /\b(19|20)\d{2}\b/.test(raw) && raw.split(/\s+/).length <= 8;
+}
+
+function parseCompanyWithDates(line: string): { company: string; dates?: string } | null {
+  const raw = trimToText(line);
+  if (!raw) return null;
+  const match = raw.match(/^(.+?)\s*\(([^()]*\b(19|20)\d{2}[^()]*)\)\s*$/);
+  if (!match) return null;
+  const company = trimToText(match[1]);
+  const dates = trimToText(match[2]);
+  if (!company) return null;
+  return { company, ...(dates ? { dates } : {}) };
+}
+
+function parseRoleAtCompany(line: string): { company: string; roleTitle: string; dates?: string } | null {
+  const raw = trimToText(line);
+  if (!raw) return null;
+  const match = raw.match(/^(.+?)\s+at\s+(.+?)(?:\s*\(([^()]*)\))?\s*$/i);
+  if (!match) return null;
+  const roleTitle = trimToText(match[1]);
+  const company = trimToText(match[2]);
+  const dates = trimToText(match[3]);
+  if (!roleTitle || !company) return null;
+  return { company, roleTitle, ...(dates ? { dates } : {}) };
+}
+
+function isImplicitBulletCandidate(line: string): boolean {
+  const raw = trimToText(line);
+  if (!raw) return false;
+  if (looksLikeSentence(raw)) return false;
+  if (!startsWithActionVerb(raw)) return false;
+  const wordCount = raw.split(/\s+/).filter(Boolean).length;
+  if (wordCount > 18) return false;
+  if (raw.length > 160) return false;
+  return true;
+}
+
+function readExperienceHeaderAt(
+  lines: string[],
+  startIndex: number,
+): { header: { company: string; roleTitle: string; dates?: string }; consumed: number } | null {
+  const line0 = trimToText(lines[startIndex] ?? '');
+  if (!line0 || isBulletLine(line0)) return null;
+
+  const single = parseExperienceHeaderLine(line0) ?? parseRoleAtCompany(line0);
+  if (single) return { header: single, consumed: 1 };
+
+  // Prevent bullet-like prose from being misclassified as a multi-line header's company line.
+  if (startsWithActionVerb(line0) || looksLikeSentence(line0)) {
+    return null;
+  }
+
+  const line1 = trimToText(lines[startIndex + 1] ?? '');
+  if (line1 && !isBulletLine(line1)) {
+    const companyWithDates = parseCompanyWithDates(line0);
+    if (companyWithDates) {
+      return {
+        header: { company: companyWithDates.company, roleTitle: line1, ...(companyWithDates.dates ? { dates: companyWithDates.dates } : {}) },
+        consumed: 2,
+      };
+    }
+
+    const company = line0;
+    const roleTitle = line1;
+    const line2 = trimToText(lines[startIndex + 2] ?? '');
+    const maybeDates = line2 && !isBulletLine(line2) && looksLikeDatesLine(line2) ? line2 : undefined;
+    return {
+      header: { company, roleTitle, ...(maybeDates ? { dates: maybeDates } : {}) },
+      consumed: maybeDates ? 3 : 2,
+    };
+  }
+
+  return null;
+}
+
 function extractSectionByType(sections: BaselineSection[], type: string): BaselineSection[] {
   return sections.filter((section) => String((section as any).sectionType ?? '').toUpperCase() === type);
 }
@@ -173,13 +251,13 @@ export function extractStructuredBaselineFromSections(
 
     let idx = 0;
     while (idx < lines.length) {
-      const line = trimToText(lines[idx]);
-      idx += 1;
-      if (!line) continue;
-      if (isBulletLine(line)) continue;
-
-      const header = parseExperienceHeaderLine(line);
-      if (!header) continue;
+      const headerRead = readExperienceHeaderAt(lines, idx);
+      if (!headerRead) {
+        idx += 1;
+        continue;
+      }
+      const header = headerRead.header;
+      idx += headerRead.consumed;
 
       if (isUnsafeHeaderCandidate(header.company) || isUnsafeHeaderCandidate(header.roleTitle)) {
         missingEvidenceReasons.push('Skipped experience entry with malformed company/role title header.');
@@ -194,10 +272,12 @@ export function extractStructuredBaselineFromSections(
           continue;
         }
         // Stop bullets when we see the next header-looking line.
-        if (!isBulletLine(nextLine) && parseExperienceHeaderLine(nextLine)) break;
+        if (!isBulletLine(nextLine) && readExperienceHeaderAt(lines, idx)) break;
         if (isBulletLine(nextLine)) {
           const bullet = stripBulletPrefix(nextLine);
           if (bullet) bullets.push(bullet);
+        } else if (isImplicitBulletCandidate(nextLine)) {
+          bullets.push(nextLine);
         }
         idx += 1;
       }
@@ -216,11 +296,16 @@ export function extractStructuredBaselineFromSections(
     missingEvidenceReasons.push('No safely structured experience entries found (company + role title required).');
   }
 
-  return {
+  const structured: StructuredBaseline = {
     summary: summary || undefined,
     experience,
     education,
     skills,
     missingEvidenceReasons,
   };
+
+  // eslint-disable-next-line no-console
+  console.log('EXTRACTED_EXPERIENCE', structured.experience);
+
+  return structured;
 }
