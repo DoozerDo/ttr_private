@@ -595,6 +595,31 @@ function normalizeHydratedArtifactResponse(value: unknown): unknown | null {
   return value;
 }
 
+function readArtifactTextFallback(payload: unknown): string {
+  try {
+    if (!payload || typeof payload !== "object") return "";
+    const record = payload as Record<string, unknown>;
+    const content = typeof record.content === "string" ? record.content.trim() : "";
+    if (content) return content;
+    const sections = record.sections;
+    if (Array.isArray(sections)) {
+      const lines = sections
+        .map((section) => {
+          if (!section || typeof section !== "object") return "";
+          const sectionRecord = section as Record<string, unknown>;
+          const text = typeof sectionRecord.text === "string" ? sectionRecord.text.trim() : "";
+          const sectionContent = typeof sectionRecord.content === "string" ? sectionRecord.content.trim() : "";
+          return text || sectionContent || "";
+        })
+        .filter(Boolean);
+      return lines.join("\n").trim();
+    }
+    return "";
+  } catch {
+    return "";
+  }
+}
+
 function getBackendArtifactStatus(record: BackendStudioArtifactRecord | null | undefined) {
   const status = trimString(record?.status).toLowerCase();
   if (status === "completed") {
@@ -2633,7 +2658,7 @@ export default function StudioPage() {
     ? artifactContract.results.resume.actions.canExport
     : artifactContract.resumeExportAvailable && resumeQuality.exportable;
   const resumePreviewText = useMemo(
-    () => formatPreview(artifactContract.normalized.resumeResponse),
+    () => formatPreview(artifactContract.normalized.resumeResponse) || readArtifactTextFallback(artifactContract.normalized.resumeResponse),
     [artifactContract.normalized.resumeResponse],
   );
   const canonicalResumePreviewPayload = useMemo(
@@ -2644,6 +2669,10 @@ export default function StudioPage() {
     [artifactContract.normalized.resumeResponse, artifactContract.results.resume],
   );
   const coverLetterParagraphs = artifactContract.coverLetterModel?.paragraphs ?? [];
+  const coverPreviewText = useMemo(
+    () => formatPreview(artifactContract.normalized.coverLetterResponse) || readArtifactTextFallback(artifactContract.normalized.coverLetterResponse),
+    [artifactContract.normalized.coverLetterResponse],
+  );
   const coverPresenter = artifactContract.presenters.coverLetter;
   const hasCoverLetterDraft =
     (Boolean(artifactContract.coverLetterModel) && Boolean(coverState.response)) ||
@@ -11131,7 +11160,7 @@ export default function StudioPage() {
               </Link>
             ) : null}
           </div>
-        ) : Boolean(effectiveResumeModel) && resumeState.response && !normalizedArtifacts.shouldSuppressStalePreview ? (
+        ) : hasResumeArtifact && resumeState.response && !normalizedArtifacts.shouldSuppressStalePreview ? (
           <div
             className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
             data-testid={resumeQualityPass ? "studio-resume-ready-panel" : "studio-resume-correction-panel"}
@@ -11198,10 +11227,10 @@ export default function StudioPage() {
                 <ResumePreview payload={canonicalResumePreviewPayload} />
               ) : (
                 <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
-                  <p className="text-sm font-semibold text-slate-100">Resume needs correction before export.</p>
-                  <p className="mt-1 text-sm text-slate-200">
-                    Review the flagged issue, edit the resume, or regenerate.
-                  </p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Template unknown</p>
+                  <div className="mt-3">
+                    <ResumePreview fallbackText={resumePreviewText} />
+                  </div>
                 </div>
               )}
             </div>
@@ -11575,7 +11604,7 @@ export default function StudioPage() {
         ) : null}
 
         {!coverLetterComplianceBlocked ? (
-          coverLetterParagraphs.length > 0 && !normalizedArtifacts.shouldSuppressStalePreview ? (
+          hasCoverLetterArtifact && coverState.response && !normalizedArtifacts.shouldSuppressStalePreview ? (
             <div
               className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
               data-testid={coverQualityPass ? "studio-cover-ready-panel" : "studio-cover-correction-panel"}
@@ -11672,7 +11701,9 @@ export default function StudioPage() {
                     })}
                   </div>
                 ) : (
-                  <p className="text-sm text-slate-400">Preview unavailable.</p>
+                  <pre className="whitespace-pre-wrap text-sm leading-7 text-slate-200">
+                    {coverPreviewText || "Cover letter preview unavailable."}
+                  </pre>
                 )}
               </div>
             </div>

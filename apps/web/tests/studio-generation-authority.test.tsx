@@ -348,6 +348,104 @@ describe("Studio artifact quality gating (soft)", () => {
     expect(calls.filter((c) => c.url.includes("/api/studio/artifacts")).length).toBeGreaterThanOrEqual(2);
   });
 
+  it("renders resume preview when artifacts include core content but preview.resume is missing", async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    let resumeGenerated = false;
+
+    setFetchImplementation(
+      vi.fn((input: RequestInfo, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        const method = (init?.method ?? "GET").toUpperCase();
+        calls.push({ url, method });
+
+        if (url.includes("/api/baselines/base-1/versions")) {
+          return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+        }
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+          return Promise.resolve(
+            createResponse({
+              assessmentId: "analysis-1",
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: "base-version-1",
+              scoring_v2: { score: 72 },
+              verification_coverage: {
+                totalClaims: 3,
+                verifiedClaims: 3,
+                inferredClaims: 0,
+                unverifiedClaims: 0,
+                unverifiedRequirements: [],
+              },
+            }),
+          );
+        }
+        if (url.includes("/api/studio/artifacts")) {
+          if (!resumeGenerated) {
+            return Promise.resolve(
+              createResponse({
+                status: "missing",
+                baselineId: "base-1",
+                jobId: "job-1",
+                baselineVersionId: "base-version-1",
+                baselineVersionHash: "hash-1",
+                jobFingerprint: "fp-1",
+                generationContractVersion: "studio-artifacts-v1",
+                resume: null,
+                coverLetter: null,
+              }),
+            );
+          }
+          return Promise.resolve(
+            createResponse({
+              status: "completed",
+              baselineId: "base-1",
+              jobId: "job-1",
+              baselineVersionId: "base-version-1",
+              baselineVersionHash: "hash-1",
+              jobFingerprint: "fp-1",
+              generationContractVersion: "studio-artifacts-v1",
+              resume: {
+                status: "completed",
+                inputsHash: "ih-1",
+                responseBody: {
+                  status: "success",
+                  generationStatus: "success",
+                  exports: { docx: true, pdf: true },
+                  templateVersion: undefined,
+                  content: "Resume Body: Generated content without preview model.",
+                  sections: [{ text: "Resume Body: Generated content without preview model." }],
+                },
+                content: "Resume Body: Generated content without preview model.",
+                failureCode: null,
+                failureMessage: null,
+              },
+              coverLetter: null,
+            }),
+          );
+        }
+        if (method === "POST" && url.includes("/api/resume/generate")) {
+          resumeGenerated = true;
+          return Promise.resolve(createResponse({ status: "ok" }));
+        }
+        if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+          return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        }
+        return Promise.resolve(createResponse({}));
+      }),
+    );
+
+    renderStudio({ intent: null });
+
+    await screen.findByTestId("studio-resume-missing");
+    const resumeButton = await screen.findByTestId("studio-generate-resume-button");
+    fireEvent.click(resumeButton);
+
+    await screen.findByTestId("studio-resume-correction-panel");
+    expect(screen.queryByTestId("studio-resume-missing")).toBeNull();
+    expect(screen.getByText(/Template unknown/i)).toBeInTheDocument();
+    expect(calls.filter((c) => c.url.includes("/api/studio/artifacts")).length).toBeGreaterThanOrEqual(2);
+  });
+
   it("clicking Generate cover letter refreshes artifacts and renders a cover letter preview", async () => {
     const calls: Array<{ url: string; method: string }> = [];
     let coverGenerated = false;
@@ -509,13 +607,17 @@ function renderStudio(
 
 function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   const stringBody = typeof body === "string" ? body : JSON.stringify(body);
-  return {
+  const response = {
     ok,
     status,
     headers: { get: () => "application/json" },
     json: () => Promise.resolve(body),
     text: () => Promise.resolve(stringBody),
     blob: () => Promise.resolve(new Blob([stringBody], { type: "application/json" })),
+  };
+  return {
+    ...response,
+    clone: () => ({ ...response }),
   };
 }
 

@@ -1,5 +1,5 @@
 import type { ResumeModel } from "@/lib/resumeModel";
-import { readResumeModel } from "@/lib/resumePreviewContract";
+import { estimateResumeModelBodyLength, readResumeModel } from "@/lib/resumePreviewContract";
 import {
   buildCoverLetterParagraphs,
   presentCoverLetterGeneration,
@@ -63,6 +63,47 @@ function normalizeCoverLetterResponse(payload: unknown): unknown {
   };
 }
 
+function hasNonEmptyText(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function hasNonEmptySectionText(sections: unknown): boolean {
+  if (!Array.isArray(sections)) return false;
+  return sections.some((section) => {
+    if (!section || typeof section !== "object") return false;
+    const record = section as Record<string, unknown>;
+    return hasNonEmptyText(record.text) || hasNonEmptyText(record.content);
+  });
+}
+
+function hasRenderableResumeContent(payload: unknown, model: ResumeModel | null): boolean {
+  if (model && estimateResumeModelBodyLength(model) > 0) return true;
+  const record = toRecord(payload);
+  if (!record) return false;
+  if (hasNonEmptyText(record.content)) return true;
+  if (hasNonEmptySectionText(record.sections)) return true;
+  const preview = toRecord(record.preview);
+  const resumePreview = preview ? toRecord(preview.resume) : null;
+  if (resumePreview) return true;
+  const nestedResume = toRecord(record.resume);
+  if (nestedResume) return true;
+  return false;
+}
+
+function hasRenderableCoverLetterContent(payload: unknown, paragraphs: string[]): boolean {
+  if (paragraphs.length > 0) return true;
+  const record = toRecord(payload);
+  if (!record) return false;
+  if (hasNonEmptyText(record.content)) return true;
+  if (hasNonEmptySectionText(record.sections)) return true;
+  const preview = toRecord(record.preview);
+  const coverPreview = preview ? toRecord(preview.coverLetter) : null;
+  if (coverPreview) return true;
+  const nestedCover = toRecord(record.coverLetter);
+  if (nestedCover) return true;
+  return false;
+}
+
 export function buildStudioArtifactContract(input: StudioArtifactContractInput) {
   const normalizedResumeResponse = normalizeResumeResponse(input.resumeResponse);
   const normalizedCoverLetterResponse = normalizeCoverLetterResponse(input.coverLetterResponse);
@@ -94,12 +135,8 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
     (Boolean(resumeModel) && resumeQuality.exportable) ||
     (Boolean(coverLetterModel) && coverLetterQuality.exportable);
 
-  const hasResumeArtifact = resumePresenter.hasExportableContent || Boolean(resumeModel);
-  const hasCoverLetterArtifact =
-    coverPresenter.hasExportableContent ||
-    Boolean(coverLetterResult?.preview) ||
-    coverParagraphs.length > 0 ||
-    Boolean(input.coverLetterResponse);
+  const hasResumeArtifact = hasRenderableResumeContent(normalizedResumeResponse, resumeModel);
+  const hasCoverLetterArtifact = hasRenderableCoverLetterContent(normalizedCoverLetterResponse, coverParagraphs);
 
   const resumeExportAvailable =
     input.canExportDocuments &&
