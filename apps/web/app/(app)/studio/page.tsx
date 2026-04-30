@@ -3693,15 +3693,17 @@ export default function StudioPage() {
     entrySource,
     studioCanonicalDecision.workflowState,
   ]);
-  const studioBlockedByNextAction = primaryNextAction.type === "start_fit_review";
+  const studioBlockedByNextAction =
+    primaryNextAction.type === "start_fit_review" && !hasResumeArtifact && !hasCoverLetterArtifact;
   // Important: do not auto-redirect based on legacy `primaryNextAction` here.
   // Redirecting to Results/Fit Review while Studio can still render (or auto-generate) creates Results <-> Studio loops.
   const evidenceLedger = useMemo(
     () =>
       deriveEvidenceLedger(analysis, {
-        generationAllowed: primaryNextAction.type !== "start_fit_review",
+        generationAllowed:
+          primaryNextAction.type !== "start_fit_review" || hasResumeArtifact || hasCoverLetterArtifact,
       }),
-    [analysis, primaryNextAction.type],
+    [analysis, hasCoverLetterArtifact, hasResumeArtifact, primaryNextAction.type],
   );
   useEffect(() => {
     if (!isGuidedActive) return;
@@ -7913,6 +7915,11 @@ export default function StudioPage() {
     workflowSurfaceAuthorityHero.trustTone,
   ]);
 
+  // Stale preview suppression must never hide artifacts that are already loaded and renderable.
+  // Suppression applies only when artifacts are genuinely missing/unrenderable for this pair.
+  const shouldSuppressStalePreview =
+    normalizedArtifacts.shouldSuppressStalePreview && !hasResumeArtifact && !hasCoverLetterArtifact;
+
   const normalizedArtifactsTrackedRef = useRef<string | null>(null);
   useEffect(() => {
     const signature = [
@@ -7934,7 +7941,7 @@ export default function StudioPage() {
       primary_action: normalizedArtifacts.primaryAction.action,
     });
 
-    if (normalizedArtifacts.shouldSuppressStalePreview) {
+    if (shouldSuppressStalePreview) {
       trackEvent("stale_artifact_suppressed", {
         surface: "studio",
         artifact_display_state: normalizedArtifacts.artifactDisplayState,
@@ -7965,7 +7972,7 @@ export default function StudioPage() {
     normalizedArtifacts.artifactDisplayState,
     normalizedArtifacts.primaryAction.action,
     normalizedArtifacts.shouldShowLowConfidenceWarning,
-    normalizedArtifacts.shouldSuppressStalePreview,
+    shouldSuppressStalePreview,
     resumeState.artifactFailure,
     trackEvent,
   ]);
@@ -8272,7 +8279,7 @@ export default function StudioPage() {
               </div>
             </section>
           ) : null}
-          {!normalizedArtifacts.shouldSuppressStalePreview ? (
+          {!shouldSuppressStalePreview ? (
             <div className="flex flex-wrap gap-3">
             <FormButton
               variant="secondary"
@@ -8318,7 +8325,7 @@ export default function StudioPage() {
             ) : null}
             </div>
           ) : null}
-          {!normalizedArtifacts.shouldSuppressStalePreview ? (
+          {!shouldSuppressStalePreview ? (
             <div className="grid gap-4 lg:grid-cols-2">
             {resumePresenter.status === "success" && resumeState.response ? (
               <section className="rounded-2xl border border-white/10 bg-slate-950/45 p-4" data-testid="studio-instant-resume-panel">
@@ -8750,7 +8757,9 @@ export default function StudioPage() {
 
   const showArtifactMaterials =
     !studioBlockedByNextAction &&
-    (!studioGenerationRenderState.isBlocked ||
+    (hasResumeArtifact ||
+      hasCoverLetterArtifact ||
+      !studioGenerationRenderState.isBlocked ||
       resumeGating.primaryBlocker === "tier_gate" ||
       coverGating.primaryBlocker === "tier_gate");
 
@@ -10870,7 +10879,7 @@ export default function StudioPage() {
         </section>
       ) : null}
 
-      {!hydratedFromResultsContext && contextHydrationMessage ? (
+      {!hydratedFromResultsContext && contextHydrationMessage && !hasResumeArtifact && !hasCoverLetterArtifact ? (
         <Alert intent="warning" title="Role context unavailable">
           {contextHydrationMessage}
         </Alert>
@@ -10886,12 +10895,12 @@ export default function StudioPage() {
           {baselinesError}
         </Alert>
       ) : null}
-      {!requestedAnalysisId ? (
+      {!requestedAnalysisId && !hasResumeArtifact && !hasCoverLetterArtifact ? (
         <Alert intent="info" title="Role analysis required">
           Select a role from Results to generate documents.
         </Alert>
       ) : null}
-      {requestedAnalysisId && analysisError ? (
+      {requestedAnalysisId && analysisError && !hasResumeArtifact && !hasCoverLetterArtifact ? (
         <Alert intent="warning" title="Role analysis unavailable">
           {analysisError}
         </Alert>
@@ -11135,7 +11144,7 @@ export default function StudioPage() {
           null
         ) : null}
 
-        {resumePresenter.status === "blocked" ? (
+        {resumePresenter.status === "blocked" && !hasResumeArtifact ? (
           <div className="space-y-3 rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4">
             <p className="text-sm font-semibold text-amber-100">
               {resumePresenter.display?.title ?? "Resume blocked by compliance"}
@@ -11160,7 +11169,7 @@ export default function StudioPage() {
               </Link>
             ) : null}
           </div>
-        ) : hasResumeArtifact && resumeState.response && !normalizedArtifacts.shouldSuppressStalePreview ? (
+        ) : hasResumeArtifact && resumeState.response && !shouldSuppressStalePreview ? (
           <div
             className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
             data-testid={resumeQualityPass ? "studio-resume-ready-panel" : "studio-resume-correction-panel"}
@@ -11583,7 +11592,7 @@ export default function StudioPage() {
           </div>
         ) : null}
 
-        {!coverLetterComplianceBlocked && coverPresenter.status === "blocked" ? (
+        {!coverLetterComplianceBlocked && coverPresenter.status === "blocked" && !hasCoverLetterArtifact ? (
           <div className="space-y-3 rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4">
             <p className="text-sm font-semibold text-amber-100">
               {coverPresenter.display?.title ?? "Cover letter blocked by compliance"}
@@ -11604,7 +11613,7 @@ export default function StudioPage() {
         ) : null}
 
         {!coverLetterComplianceBlocked ? (
-          hasCoverLetterArtifact && coverState.response && !normalizedArtifacts.shouldSuppressStalePreview ? (
+          hasCoverLetterArtifact && coverState.response && !shouldSuppressStalePreview ? (
             <div
               className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
               data-testid={coverQualityPass ? "studio-cover-ready-panel" : "studio-cover-correction-panel"}

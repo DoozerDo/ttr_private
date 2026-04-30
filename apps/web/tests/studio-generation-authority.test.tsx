@@ -446,6 +446,196 @@ describe("Studio artifact quality gating (soft)", () => {
     expect(calls.filter((c) => c.url.includes("/api/studio/artifacts")).length).toBeGreaterThanOrEqual(2);
   });
 
+  it("renders resume + cover previews even when readiness is blocked", async () => {
+    setFetchImplementation(
+      vi.fn((input: RequestInfo, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        const method = (init?.method ?? "GET").toUpperCase();
+
+        if (url.includes("/api/baselines/base-1/versions")) {
+          return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+        }
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+          return Promise.resolve(
+            createResponse({
+              assessmentId: "analysis-1",
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: "base-version-1",
+              scoring_v2: { score: 88 },
+              verification_coverage: {
+                totalClaims: 3,
+                verifiedClaims: 3,
+                inferredClaims: 0,
+                unverifiedClaims: 0,
+                unverifiedRequirements: [],
+              },
+            }),
+          );
+        }
+        if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+          return Promise.resolve(
+            createResponse({
+              status: "limited",
+              blocked: true,
+              reasonCodes: ["personalization_limitation"],
+              reasons: [{ code: "personalization_limitation", message: "Blocked for this test." }],
+              compliance_flags: [],
+            }),
+          );
+        }
+        if (url.includes("/api/studio/artifacts")) {
+          return Promise.resolve(
+            createResponse({
+              status: "completed",
+              baselineId: "base-1",
+              jobId: "job-1",
+              baselineVersionId: "base-version-1",
+              baselineVersionHash: "hash-1",
+              jobFingerprint: "fp-1",
+              generationContractVersion: "studio-artifacts-v1",
+              resume: {
+                status: "completed",
+                inputsHash: "ih-1",
+                responseBody: {
+                  status: "success",
+                  generationStatus: "success",
+                  exports: { docx: false, pdf: false },
+                  preview: {
+                    resume: {
+                      heading: { name: "Test Candidate", contactLine: "test@example.com" },
+                      summary: "Resume exists and must render even when blocked.",
+                      experience: [{ company: "Acme", roleTitle: "Director", bullets: ["Did work."] }],
+                    },
+                  },
+                },
+                content: null,
+                failureCode: null,
+                failureMessage: null,
+              },
+              coverLetter: {
+                status: "completed",
+                inputsHash: "ih-2",
+                responseBody: {
+                  status: "success",
+                  generationStatus: "success",
+                  exports: { docx: false, pdf: false },
+                  preview: { coverLetter: { paragraphs: ["Dear Hiring Team,", "Cover exists even when blocked."] } },
+                },
+                content: null,
+                failureCode: null,
+                failureMessage: null,
+              },
+            }),
+          );
+        }
+
+        if (method === "POST" && (url.includes("/api/resume/generate") || url.includes("/api/cover-letters/generate"))) {
+          return Promise.resolve(createResponse({ status: "ok" }));
+        }
+        return Promise.resolve(createResponse({}));
+      }),
+    );
+
+    renderStudio({ intent: null });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("studio-resume-ready-panel") ?? screen.queryByTestId("studio-resume-correction-panel"),
+      ).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("studio-cover-ready-panel") ?? screen.queryByTestId("studio-cover-correction-panel"),
+      ).toBeTruthy();
+    });
+    expect(screen.queryByText(/generation is blocked/i)).toBeNull();
+    expect(screen.queryByText(/complete your profile/i)).toBeNull();
+  });
+
+  it("keeps previews visible when analysis fetch fails but artifacts exist", async () => {
+    setFetchImplementation(
+      vi.fn((input: RequestInfo, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        const method = (init?.method ?? "GET").toUpperCase();
+
+        if (url.includes("/api/baselines/base-1/versions")) {
+          return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+        }
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+          return Promise.resolve(createResponse({ error: "fetch failed" }, false, 500));
+        }
+        if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+          return Promise.resolve(createResponse({ status: "limited", blocked: false, reasons: [], compliance_flags: [] }));
+        }
+        if (url.includes("/api/studio/artifacts")) {
+          return Promise.resolve(
+            createResponse({
+              status: "completed",
+              baselineId: "base-1",
+              jobId: "job-1",
+              baselineVersionId: "base-version-1",
+              baselineVersionHash: "hash-1",
+              jobFingerprint: "fp-1",
+              generationContractVersion: "studio-artifacts-v1",
+              resume: {
+                status: "completed",
+                inputsHash: "ih-1",
+                responseBody: {
+                  status: "success",
+                  generationStatus: "success",
+                  exports: { docx: false, pdf: false },
+                  preview: {
+                    resume: {
+                      heading: { name: "Test Candidate" },
+                      summary: "Artifact renders even if analysis fails.",
+                      experience: [{ company: "Acme", roleTitle: "Director", bullets: ["Did work."] }],
+                    },
+                  },
+                },
+                content: null,
+                failureCode: null,
+                failureMessage: null,
+              },
+              coverLetter: {
+                status: "completed",
+                inputsHash: "ih-2",
+                responseBody: {
+                  status: "success",
+                  generationStatus: "success",
+                  exports: { docx: false, pdf: false },
+                  preview: { coverLetter: { paragraphs: ["Dear Hiring Team,", "Still visible."] } },
+                },
+                content: null,
+                failureCode: null,
+                failureMessage: null,
+              },
+            }),
+          );
+        }
+
+        if (method === "POST" && (url.includes("/api/resume/generate") || url.includes("/api/cover-letters/generate"))) {
+          return Promise.resolve(createResponse({ status: "ok" }));
+        }
+        return Promise.resolve(createResponse({}));
+      }),
+    );
+
+    renderStudio({ intent: null });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("studio-resume-ready-panel") ?? screen.queryByTestId("studio-resume-correction-panel"),
+      ).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("studio-cover-ready-panel") ?? screen.queryByTestId("studio-cover-correction-panel"),
+      ).toBeTruthy();
+    });
+    expect(screen.queryByText(/Role analysis unavailable/i)).toBeNull();
+  });
+
   it("clicking Generate cover letter refreshes artifacts and renders a cover letter preview", async () => {
     const calls: Array<{ url: string; method: string }> = [];
     let coverGenerated = false;
