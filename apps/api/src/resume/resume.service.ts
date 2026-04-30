@@ -40,7 +40,7 @@ import { OpportunitiesService } from '../opportunities/opportunities.service';
 import { AUTO_GENERATE_THRESHOLD } from '../config/autoGenerateThreshold';
 import { VERIFIED_ONLY_GENERATION_THRESHOLD } from '../config/verifiedOnlyGenerationThreshold';
 import { CriticalFlowEventType, CriticalFlowTrackerService } from '../support/critical-flow-tracker.service';
-import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
+import { WorkflowIdempotencyService, type WorkflowIdempotencyReservation } from '../common/workflow-idempotency.service';
 import { StudioArtifactsService } from '../studio-artifacts/studio-artifacts.service';
 import '../docx-templates/templates';
 import {
@@ -97,7 +97,6 @@ import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTeleme
 import { sanitizeResumePreviewForStudio } from './resumePreviewSanitizer';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
 import { assembleResumeFromStructuredBaseline } from './resumeTemplateAssembler';
-import { computeTemplateEligibilityFromBaselineSections } from './templateEligibility';
 
 export type GenerateResumeRequest = {
   baselineId: string;
@@ -1570,6 +1569,7 @@ export class ResumeService {
     syntheticMetadata?: SyntheticMetadataInput,
   ): Promise<ResumeGenerationResponse> {
     // Avoid noisy runtime logs; diagnostics should be emitted only in synthetic/test harnesses.
+    let forceTemplateRegen = false;
     let baselineForFailSafe: Baseline | null = null;
     let baselineVersionForFailSafe: BaselineVersion | null = null;
     let minimalDraftSectionsForFailSafe: ResumeDraftSection[] | null = null;
@@ -1966,26 +1966,37 @@ export class ResumeService {
 
     const TEMPLATE_ASSEMBLY_THRESHOLD = 80;
     const STRUCTURED_BASELINE_TEMPLATE_VERSION = 'structured-baseline-v1';
-    const rawScoreForTemplate = effectiveAssessment?.overallScore ?? latestAssessment?.overallScore ?? 0;
-    const eligibility = computeTemplateEligibilityFromBaselineSections({
-      rawScore: rawScoreForTemplate,
-      threshold: TEMPLATE_ASSEMBLY_THRESHOLD,
-      baselineSections: resumeInputSections as any,
-    });
-    let scoreForTemplate = eligibility.scoreForTemplate;
+    const scoreForTemplateRaw =
+      effectiveAssessment?.overallScore ?? latestAssessment?.overallScore ?? 0;
+    const scoreForTemplate = Number(scoreForTemplateRaw);
+    forceTemplateRegen =
+      Number.isFinite(scoreForTemplate) && scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD;
     let usedStructuredBaselineTemplate = false;
-    let structuredBaselineExtractionMissingReasons: string[] | null =
-      eligibility.structuredBaselineMissingReasons;
+    let structuredBaselineExtractionMissingReasons: string[] | null = null;
 
     let normalizedDocument = (() => {
-      if (typeof scoreForTemplate === 'number' && scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD) {
+      if (forceTemplateRegen) {
         const structured = extractStructuredBaselineFromSections(resumeInputSections);
+        // eslint-disable-next-line no-console
+        console.log('FORCED_TEMPLATE_RESUME', {
+          score: scoreForTemplate,
+          experienceCount: (structured.experience ?? []).length,
+        });
         if ((structured.experience ?? []).length === 0) {
-          return buildNormalizedResumeDocument(
-            sections as ResumeExportSection[],
-            identity,
-            { documentStrategyPlan: request.documentStrategyPlan ?? undefined },
-          );
+          throw new UnprocessableEntityException(buildArtifactFailurePayload({
+            code: 'generation_blocked',
+            category: 'generation_blocked',
+            message: 'Resume could not be assembled because required baseline evidence is missing.',
+            detail: 'A fit score >= 80 requires structured baseline experience entries (company + role title).',
+            retryable: false,
+            userAction: {
+              title: 'Add verified experience structure',
+              description: 'Ensure your baseline includes Experience entries with company and role title headers.',
+            },
+            diagnostics: {
+              missingRequirements: structured.missingEvidenceReasons.slice(0, 8),
+            },
+          }));
         }
         usedStructuredBaselineTemplate = true;
         // `resolveBaselineIdentity` returns `BaselineIdentity` (`fullName`, etc). Use those fields
@@ -2356,97 +2367,85 @@ export class ResumeService {
       };
     }
 
-    dedupeKey = this.buildResumeDedupeKey({
-      userId,
-      baselineId: baseline.id,
-      baselineVersionId: baselineVersion.id,
-      jobId: job?.id ?? jobId,
-      analysisId,
-      outputHash,
-      oneTap: Boolean(request.oneTap),
-      enforceOneTap: shouldEnforceOneTap,
-    });
-    if (typeof scoreForTemplate === 'number' && scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD) {
-      // Prevent legacy artifact reuse when score >= 80: the dedupe key must only match artifacts
-      // produced by the structured baseline template path and for the specific template version.
-      dedupeKey = `${dedupeKey}:mode:structured_baseline_template:template:${STRUCTURED_BASELINE_TEMPLATE_VERSION}`;
-    }
-    const reservation = await this.workflowIdempotencyService.reserve<ResumeGenerationResponse>({
-      userId,
-      operationName: 'generation.resume',
-      dedupeKey,
-      runId: audit.id,
-    });
-    let effectiveReservation = reservation;
-    reservationRunId = effectiveReservation.runId;
-
-    const isStructuredTemplateResponse = (value: unknown): boolean => {
-      if (!value || typeof value !== 'object') return false;
-      const record = value as Record<string, unknown>;
-      const internal = record.internal && typeof record.internal === 'object'
-        ? (record.internal as Record<string, unknown>)
-        : null;
-      return internal?.generationMode === 'structured_baseline_template' &&
-        internal?.templateVersion === STRUCTURED_BASELINE_TEMPLATE_VERSION;
-    };
-
-    if (
-      typeof scoreForTemplate === 'number' &&
-      scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD &&
-      effectiveReservation.status === 'existing_completed' &&
-      effectiveReservation.responseBody &&
-      !isStructuredTemplateResponse(effectiveReservation.responseBody)
-    ) {
-      // Legacy/stale artifact found under the idempotency key: force a fresh run so we regenerate
-      // using the structured baseline template path and overwrite stored artifacts.
-      const forcedKey = `${dedupeKey}:regen:${audit.id}`;
-      effectiveReservation = await this.workflowIdempotencyService.reserve<ResumeGenerationResponse>({
+    type IdempotencyStatus =
+      | 'accepted_new'
+      | 'existing_in_flight'
+      | 'existing_completed'
+      | 'rejected_stale'
+      | 'persistence_conflict';
+    type ReservationLike =
+      | WorkflowIdempotencyReservation<ResumeGenerationResponse>
+      | { status: 'accepted_new'; runId: string; responseBody: null };
+    let reservation: ReservationLike;
+    if (forceTemplateRegen) {
+      reservation = { status: 'accepted_new', runId: audit.id, responseBody: null };
+      dedupeKey = this.buildResumeDedupeKey({
+        userId,
+        baselineId: baseline.id,
+        baselineVersionId: baselineVersion.id,
+        jobId: job?.id ?? jobId,
+        analysisId,
+        outputHash,
+        oneTap: Boolean(request.oneTap),
+        enforceOneTap: shouldEnforceOneTap,
+      });
+    } else {
+      dedupeKey = this.buildResumeDedupeKey({
+        userId,
+        baselineId: baseline.id,
+        baselineVersionId: baselineVersion.id,
+        jobId: job?.id ?? jobId,
+        analysisId,
+        outputHash,
+        oneTap: Boolean(request.oneTap),
+        enforceOneTap: shouldEnforceOneTap,
+      });
+      reservation = await this.workflowIdempotencyService.reserve<ResumeGenerationResponse>({
         userId,
         operationName: 'generation.resume',
-        dedupeKey: forcedKey,
+        dedupeKey,
         runId: audit.id,
       });
-      dedupeKey = forcedKey;
-      reservationRunId = effectiveReservation.runId;
-    }
 
-    if (effectiveReservation.status === 'existing_completed' && effectiveReservation.responseBody) {
-      const response = {
-        ...(effectiveReservation.responseBody as ResumeGenerationResponse),
-        idempotency: {
-          status: effectiveReservation.status,
-          runId: effectiveReservation.runId,
-          dedupeKey,
-          reused: true,
-        },
-      } as ResumeGenerationResponse;
+      if (reservation.status === 'existing_completed' && reservation.responseBody) {
+        const response = {
+          ...(reservation.responseBody as ResumeGenerationResponse),
+          idempotency: {
+            status: reservation.status,
+            runId: reservation.runId,
+            dedupeKey,
+            reused: true,
+          },
+        } as ResumeGenerationResponse;
 
-      if (response?.preview?.resume) {
-        response.preview.resume = sanitizeResumePreviewForStudio(response.preview.resume);
-        const resume = response.preview.resume;
-        // eslint-disable-next-line no-console
-        console.log('FINAL_SANITIZED_PREVIEW', {
-          roleTitle: resume.experience?.[0]?.roleTitle,
-          company: resume.experience?.[0]?.company,
-        });
+        if (response?.preview?.resume) {
+          response.preview.resume = sanitizeResumePreviewForStudio(response.preview.resume);
+          const resume = response.preview.resume;
+          // eslint-disable-next-line no-console
+          console.log('FINAL_SANITIZED_PREVIEW', {
+            roleTitle: resume.experience?.[0]?.roleTitle,
+            company: resume.experience?.[0]?.company,
+          });
+        }
+
+        return response;
       }
 
-      return response;
+      if (reservation.status === 'existing_in_flight') {
+        throw new UnprocessableEntityException({
+          error: {
+            code: 'generation_in_flight',
+            message:
+              'A resume is already being generated for this role. Please wait and try again.',
+            retryable: true,
+            nextAction: 'retry_later',
+            runId: reservation.runId,
+            dedupeKey,
+          },
+        });
+      }
     }
-
-    if (effectiveReservation.status === 'existing_in_flight') {
-      throw new UnprocessableEntityException({
-        error: {
-          code: 'generation_in_flight',
-          message:
-            'A resume is already being generated for this role. Please wait and try again.',
-          retryable: true,
-          nextAction: 'retry_later',
-          runId: effectiveReservation.runId,
-          dedupeKey,
-        },
-      });
-    }
+    reservationRunId = reservation.runId;
 
     await this.studioArtifactsService.recordResumeInProgress({
       userId,
@@ -2558,14 +2557,6 @@ export class ResumeService {
         resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
         resumeGenerationDiagnostics: experienceDiagnostics,
         normalizationDiagnostics: experienceDiagnostics,
-        ...(structuredBaselineExtractionMissingReasons
-          ? {
-              artifactReadiness: 'blocked',
-              missingRequirements: structuredBaselineExtractionMissingReasons,
-              scoreCappedFrom: rawScoreForTemplate,
-              scoreCappedTo: TEMPLATE_ASSEMBLY_THRESHOLD - 1,
-            }
-          : {}),
         ...(usedStructuredBaselineTemplate
           ? {
               generationMode: 'structured_baseline_template',
@@ -2577,10 +2568,10 @@ export class ResumeService {
         ? { qualityGate: { status: 'pass', reasons: [] } }
         : { qualityGate }),
       idempotency: {
-        status: reservation.status,
+        status: (forceTemplateRegen ? 'accepted_new' : (reservation.status as IdempotencyStatus)),
         runId: reservation.runId,
         dedupeKey,
-        reused: reservation.status === 'existing_completed',
+        reused: !forceTemplateRegen && reservation.status === 'existing_completed',
       },
     };
 
@@ -2610,13 +2601,15 @@ export class ResumeService {
         analysisId: studioArtifactContext.analysisId,
       },
     });
-    await this.workflowIdempotencyService.complete({
-      userId,
-      operationName: 'generation.resume',
-      dedupeKey,
-      runId: reservation.runId,
-      responseBody: response,
-    });
+    if (!forceTemplateRegen) {
+      await this.workflowIdempotencyService.complete({
+        userId,
+        operationName: 'generation.resume',
+        dedupeKey,
+        runId: reservation.runId,
+        responseBody: response,
+      });
+    }
     return response;
     } catch (error) {
       if (error instanceof UnprocessableEntityException) {
@@ -2775,7 +2768,7 @@ export class ResumeService {
           analysisId: studioArtifactContext.analysisId,
         },
       });
-      if (dedupeKey) {
+      if (!forceTemplateRegen && dedupeKey) {
         void this.workflowIdempotencyService.markFailure({
           userId,
           operationName: 'generation.resume',

@@ -19,7 +19,6 @@ import { BaselineSectionType } from '../baseline/baseline-section.entity';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
 import { extractEvidenceUnitsFromLogicalUnits, reconstructLogicalTextUnits } from './resume-draft-bullets';
 import * as ResumeDraftBullets from './resume-draft-bullets';
-import { computeTemplateEligibilityFromBaselineSections } from './templateEligibility';
 
 type MockRepo<T> = Partial<Record<keyof Repository<T>, jest.Mock>> & {
   findOne: jest.Mock;
@@ -509,7 +508,7 @@ describe('ResumeService contract', () => {
     expect(extracted.experience[0].bullets[0]).toMatch(/Led global support operations/i);
   });
 
-  it('caps template eligibility below 80 when structured baseline extraction fails (prevents score>=80 + generation_blocked)', async () => {
+  it('throws generation_blocked when score >= 80 but structured baseline extraction yields no experience entries', async () => {
     const { service } = buildService();
 
     const original = baseline.sections?.[0]?.content ?? '';
@@ -522,33 +521,13 @@ describe('ResumeService contract', () => {
       },
     ];
 
-    const result = await service.generateResume('user-1', baseRequest);
-    expect(result.status).toBe('success');
-    // Regression: this case must not throw generation_blocked even if the assessment score is 80+.
-    expect((result as any)?.internal?.generationMode).not.toBe('structured_baseline_template');
+    await expect(service.generateResume('user-1', baseRequest)).rejects.toBeInstanceOf(UnprocessableEntityException);
 
     baseline.sections = [{ ...baseSection, content: original }];
   });
 
-  it('forces scoreForTemplate below 80 when structured baseline extraction yields no experience entries', () => {
-    const res = computeTemplateEligibilityFromBaselineSections({
-      rawScore: 90,
-      threshold: 80,
-      baselineSections: [
-        {
-          title: 'Experience',
-          sectionType: BaselineSectionType.EXPERIENCE,
-          content: 'Built and shipped critical systems across teams.',
-        } as any,
-      ],
-    });
-    expect(res.scoreForTemplate).toBe(79);
-    expect(res.structuredBaselineMissingReasons?.length ?? 0).toBeGreaterThan(0);
-  });
-
-  it.skip('bypasses idempotency reuse for legacy artifacts when score >= 80 by using a template-scoped dedupe key', async () => {
+  it('bypasses idempotency and always uses structured baseline template when score >= 80', async () => {
     const { service, workflowIdempotencyService } = buildService();
-    let seenDedupeKey = '';
     const originalParsed = baseline.parsedRecords;
     baseline.parsedRecords = [
       {
@@ -557,51 +536,11 @@ describe('ResumeService contract', () => {
       } as any,
     ];
 
-    (workflowIdempotencyService.reserve as jest.Mock).mockImplementation((arg: any) => {
-      seenDedupeKey = String(arg?.dedupeKey ?? '');
-      if (seenDedupeKey.includes('structured-baseline-v1') && seenDedupeKey.includes(':regen:')) {
-        return Promise.resolve({ status: 'accepted_new', runId: 'audit-1' });
-      }
-      return Promise.resolve({
-        status: 'existing_completed',
-        runId: 'legacy-audit',
-        responseBody: {
-          ok: true,
-          status: 'success',
-          generationStatus: 'success',
-          exportReady: true,
-          blocked: false,
-          baselineId: 'baseline-1',
-          baselineVersionId: 'baseline-version-1',
-          jobId: 'job-1',
-          sections: [],
-          compliance_flags: [],
-          compliance_blocked: false,
-          audit_id: 'legacy-audit',
-          auditId: 'legacy-audit',
-          baseline_version_hash: 'hash-1',
-          quality: 'draft',
-          exports: { docx: true, pdf: true },
-          preview: { resume: null },
-          trackerEntryId: null,
-          trackerStatus: null,
-          opportunityId: null,
-          claimRiskSummary: null,
-          gapAnalysis: null,
-          gapGuidance: null,
-          display: { title: 'Legacy', description: '', reasons: [], cta: { label: 'x', href: '/' } },
-          safeDisplay: { title: 'Legacy', description: '', reasons: [], cta: { label: 'x', href: '/' } },
-          internal: {},
-        },
-      });
-    });
-
     const result = await service.generateResume('user-1', baseRequest);
-    expect((workflowIdempotencyService.reserve as jest.Mock).mock.calls.length).toBeGreaterThanOrEqual(2);
-    expect(seenDedupeKey).toContain('structured-baseline-v1');
-    expect(seenDedupeKey).toContain(':regen:');
-    expect((result as any)?.internal?.generationMode).toBe('structured_baseline_template');
-    expect((result as any)?.internal?.templateVersion).toBe('structured-baseline-v1');
+    expect(workflowIdempotencyService.reserve).not.toHaveBeenCalled();
+    expect(result.internal?.generationMode).toBe('structured_baseline_template');
+    expect(result.internal?.templateVersion).toBe('structured-baseline-v1');
+
     baseline.parsedRecords = originalParsed;
   });
   it('does not require baselineVersionId (service resolves latest version)', async () => {

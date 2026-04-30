@@ -410,9 +410,10 @@ export class CoverLettersService {
 
     const TEMPLATE_ASSEMBLY_THRESHOLD = 80;
     const STRUCTURED_BASELINE_TEMPLATE_VERSION = 'structured-baseline-v1';
-    const scoreForTemplate = draft.analysisAssessment?.overallScore ?? 0;
+    const scoreForTemplateRaw = draft.analysisAssessment?.overallScore ?? 0;
+    const scoreForTemplate = Number(scoreForTemplateRaw);
     const forceTemplateRegen =
-      typeof scoreForTemplate === 'number' &&
+      Number.isFinite(scoreForTemplate) &&
       scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD;
     if (forceTemplateRegen) {
       // eslint-disable-next-line no-console

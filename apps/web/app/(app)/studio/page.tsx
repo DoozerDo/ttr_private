@@ -10671,6 +10671,9 @@ export default function StudioPage() {
                   <div>score: {score ?? "unknown"}</div>
                   <div>artifact current: {String(artifactCurrent)}</div>
                   <div>reason: {reason}</div>
+                  <div>structuredBaselineExperienceCount: {String((artifactContract as any)?.structuredBaselineExperienceCount ?? "unknown")}</div>
+                  <div>structuredBaselineMissingEvidenceReasons: {JSON.stringify((artifactContract as any)?.structuredBaselineMissingEvidenceReasons ?? [])}</div>
+                  <div>structuredBaselineExtractedExperiencePreview: {JSON.stringify((artifactContract as any)?.structuredBaselineExtractedExperiencePreview ?? [])}</div>
                 </div>
               );
             })()}

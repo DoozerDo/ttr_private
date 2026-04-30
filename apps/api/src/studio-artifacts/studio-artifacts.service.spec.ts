@@ -375,6 +375,9 @@ describe('StudioArtifactsService', () => {
 
     expect(state.assessmentScore).toBe(90);
     expect(state.artifactReadiness).toBe('ready');
+    expect(state.structuredBaselineExperienceCount).toBeGreaterThan(0);
+    expect(Array.isArray(state.structuredBaselineMissingEvidenceReasons)).toBe(true);
+    expect(Array.isArray(state.structuredBaselineExtractedExperiencePreview)).toBe(true);
     // Legacy internal metadata is filtered out for score>=80: record should not be treated as current.
     expect(state.resume).toBeNull();
     expect(state.resumeResult?.generationState).toBe('not_started');

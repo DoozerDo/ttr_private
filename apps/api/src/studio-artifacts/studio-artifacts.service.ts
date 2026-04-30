@@ -38,6 +38,14 @@ export type StudioArtifactsState = {
   artifactReadiness?: 'ready' | 'blocked';
   artifactReadinessReasons?: string[];
   assessmentScore?: number | null;
+  structuredBaselineExperienceCount?: number;
+  structuredBaselineMissingEvidenceReasons?: string[];
+  structuredBaselineExtractedExperiencePreview?: Array<{
+    company: string;
+    roleTitle: string;
+    dates?: string;
+    bulletCount: number;
+  }>;
   resume: StudioArtifactRecord | null;
   coverLetter: StudioArtifactRecord | null;
   resumeResult?: ArtifactGenerationResult<unknown>;
@@ -173,6 +181,16 @@ export class StudioArtifactsService {
     const structured = baseline?.sections?.length
       ? extractStructuredBaselineFromSections(baseline.sections as any)
       : null;
+    const structuredBaselineExperienceCount = structured?.experience?.length ?? 0;
+    const structuredBaselineMissingEvidenceReasons = structured?.missingEvidenceReasons ?? [];
+    const structuredBaselineExtractedExperiencePreview = (structured?.experience ?? [])
+      .slice(0, 6)
+      .map((entry) => ({
+        company: safeText((entry as any)?.company),
+        roleTitle: safeText((entry as any)?.roleTitle),
+        ...(safeText((entry as any)?.dates) ? { dates: safeText((entry as any)?.dates) } : {}),
+        bulletCount: Array.isArray((entry as any)?.bullets) ? (entry as any).bullets.length : 0,
+      }));
     const hasUsableExperience =
       Boolean(structured) &&
       (structured?.experience ?? []).some((entry) => {
@@ -192,6 +210,15 @@ export class StudioArtifactsService {
       artifactReadiness === 'blocked'
         ? (structured?.missingEvidenceReasons?.slice(0, 8) ?? ['Missing structured baseline evidence.'])
         : [];
+
+    // eslint-disable-next-line no-console
+    console.log('STUDIO_ARTIFACT_READINESS_DEBUG', {
+      score,
+      artifactReadiness,
+      structuredBaselineExperienceCount,
+      structuredBaselineMissingEvidenceReasons,
+      structuredBaselineExtractedExperiencePreview,
+    });
 
     const resumeRecordRaw = this.buildArtifactRecord(record, 'resume', resumeInputsHash);
     const coverRecordRaw = this.buildArtifactRecord(record, 'cover_letter', coverLetterInputsHash);
@@ -224,6 +251,9 @@ export class StudioArtifactsService {
       jobFingerprint,
       generationContractVersion: ARTIFACT_CONTRACT_VERSION,
       assessmentScore: score,
+      structuredBaselineExperienceCount,
+      structuredBaselineMissingEvidenceReasons,
+      structuredBaselineExtractedExperiencePreview,
       ...(artifactReadiness ? { artifactReadiness, artifactReadinessReasons } : {}),
       resume: resumeRecord,
       coverLetter: coverRecord,
