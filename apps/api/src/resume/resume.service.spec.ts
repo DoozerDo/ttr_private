@@ -469,6 +469,57 @@ describe('ResumeService contract', () => {
 
     baseline.sections = [{ ...baseSection, content: original }];
   });
+
+  it('bypasses idempotency reuse for legacy artifacts when score >= 80 by using a template-scoped dedupe key', async () => {
+    const { service, workflowIdempotencyService } = buildService();
+    let seenDedupeKey = '';
+
+    (workflowIdempotencyService.reserve as jest.Mock).mockImplementation((arg: any) => {
+      seenDedupeKey = String(arg?.dedupeKey ?? '');
+      if (seenDedupeKey.includes('structured-baseline-v1') && seenDedupeKey.includes(':regen:')) {
+        return Promise.resolve({ status: 'accepted_new', runId: 'audit-1' });
+      }
+      return Promise.resolve({
+        status: 'existing_completed',
+        runId: 'legacy-audit',
+        responseBody: {
+          ok: true,
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          blocked: false,
+          baselineId: 'baseline-1',
+          baselineVersionId: 'baseline-version-1',
+          jobId: 'job-1',
+          sections: [],
+          compliance_flags: [],
+          compliance_blocked: false,
+          audit_id: 'legacy-audit',
+          auditId: 'legacy-audit',
+          baseline_version_hash: 'hash-1',
+          quality: 'draft',
+          exports: { docx: true, pdf: true },
+          preview: { resume: null },
+          trackerEntryId: null,
+          trackerStatus: null,
+          opportunityId: null,
+          claimRiskSummary: null,
+          gapAnalysis: null,
+          gapGuidance: null,
+          display: { title: 'Legacy', description: '', reasons: [], cta: { label: 'x', href: '/' } },
+          safeDisplay: { title: 'Legacy', description: '', reasons: [], cta: { label: 'x', href: '/' } },
+          internal: {},
+        },
+      });
+    });
+
+    const result = await service.generateResume('user-1', baseRequest);
+    expect((workflowIdempotencyService.reserve as jest.Mock).mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(seenDedupeKey).toContain('structured-baseline-v1');
+    expect(seenDedupeKey).toContain(':regen:');
+    expect((result as any)?.internal?.generationMode).toBe('structured_baseline_template');
+    expect((result as any)?.internal?.templateVersion).toBe('structured-baseline-v1');
+  });
   it('does not require baselineVersionId (service resolves latest version)', async () => {
     const { service } = buildService();
     await expect(

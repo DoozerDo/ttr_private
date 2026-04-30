@@ -1964,7 +1964,9 @@ export class ResumeService {
     const identity = resolveBaselineIdentity(baseline);
 
     const TEMPLATE_ASSEMBLY_THRESHOLD = 80;
+    const STRUCTURED_BASELINE_TEMPLATE_VERSION = 'structured-baseline-v1';
     const scoreForTemplate = effectiveAssessment?.overallScore ?? latestAssessment?.overallScore ?? 0;
+    let usedStructuredBaselineTemplate = false;
 
     let normalizedDocument = (() => {
       if (typeof scoreForTemplate === 'number' && scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD) {
@@ -1985,12 +1987,16 @@ export class ResumeService {
             },
           }));
         }
+        usedStructuredBaselineTemplate = true;
+        // `resolveBaselineIdentity` returns `BaselineIdentity` (`fullName`, etc). Use those fields
+        // explicitly so template assembly always has a stable, verified name and doesn't depend on
+        // any untyped/legacy identity shape.
         const identityRecord =
           identity && typeof identity === 'object'
-            ? (identity as unknown as Record<string, unknown>)
+            ? (identity as unknown as { fullName?: unknown; contactLine?: unknown; links?: unknown })
             : {};
         return assembleResumeFromStructuredBaseline(structured, {
-          name: identityRecord.name,
+          name: identityRecord.fullName,
           contactLine: identityRecord.contactLine,
           links: identityRecord.links,
         });
@@ -2188,7 +2194,11 @@ export class ResumeService {
 
     const complianceBlocked = blocked;
 
-    if (complianceBlocked) {
+    // Verified-only (`oneTap`) generation is intentionally allowed to proceed even when the
+    // compliance gate reports blocked status, because the oneTap lane is baseline-only and does
+    // not depend on unverifiable tailoring claims. The compliance gate should remain a hard stop
+    // only for non-oneTap (tailored) generation.
+    if (complianceBlocked && !request.oneTap) {
       const score = effectiveAssessment?.overallScore ?? null;
       if (
         typeof score === 'number' &&
@@ -2356,20 +2366,56 @@ export class ResumeService {
       oneTap: Boolean(request.oneTap),
       enforceOneTap: shouldEnforceOneTap,
     });
+    if (typeof scoreForTemplate === 'number' && scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD) {
+      // Prevent legacy artifact reuse when score >= 80: the dedupe key must only match artifacts
+      // produced by the structured baseline template path and for the specific template version.
+      dedupeKey = `${dedupeKey}:mode:structured_baseline_template:template:${STRUCTURED_BASELINE_TEMPLATE_VERSION}`;
+    }
     const reservation = await this.workflowIdempotencyService.reserve<ResumeGenerationResponse>({
       userId,
       operationName: 'generation.resume',
       dedupeKey,
       runId: audit.id,
     });
-    reservationRunId = reservation.runId;
+    let effectiveReservation = reservation;
+    reservationRunId = effectiveReservation.runId;
 
-    if (reservation.status === 'existing_completed' && reservation.responseBody) {
+    const isStructuredTemplateResponse = (value: unknown): boolean => {
+      if (!value || typeof value !== 'object') return false;
+      const record = value as Record<string, unknown>;
+      const internal = record.internal && typeof record.internal === 'object'
+        ? (record.internal as Record<string, unknown>)
+        : null;
+      return internal?.generationMode === 'structured_baseline_template' &&
+        internal?.templateVersion === STRUCTURED_BASELINE_TEMPLATE_VERSION;
+    };
+
+    if (
+      typeof scoreForTemplate === 'number' &&
+      scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD &&
+      effectiveReservation.status === 'existing_completed' &&
+      effectiveReservation.responseBody &&
+      !isStructuredTemplateResponse(effectiveReservation.responseBody)
+    ) {
+      // Legacy/stale artifact found under the idempotency key: force a fresh run so we regenerate
+      // using the structured baseline template path and overwrite stored artifacts.
+      const forcedKey = `${dedupeKey}:regen:${audit.id}`;
+      effectiveReservation = await this.workflowIdempotencyService.reserve<ResumeGenerationResponse>({
+        userId,
+        operationName: 'generation.resume',
+        dedupeKey: forcedKey,
+        runId: audit.id,
+      });
+      dedupeKey = forcedKey;
+      reservationRunId = effectiveReservation.runId;
+    }
+
+    if (effectiveReservation.status === 'existing_completed' && effectiveReservation.responseBody) {
       const response = {
-        ...(reservation.responseBody as ResumeGenerationResponse),
+        ...(effectiveReservation.responseBody as ResumeGenerationResponse),
         idempotency: {
-          status: reservation.status,
-          runId: reservation.runId,
+          status: effectiveReservation.status,
+          runId: effectiveReservation.runId,
           dedupeKey,
           reused: true,
         },
@@ -2388,7 +2434,7 @@ export class ResumeService {
       return response;
     }
 
-    if (reservation.status === 'existing_in_flight') {
+    if (effectiveReservation.status === 'existing_in_flight') {
       throw new UnprocessableEntityException({
         error: {
           code: 'generation_in_flight',
@@ -2396,7 +2442,7 @@ export class ResumeService {
             'A resume is already being generated for this role. Please wait and try again.',
           retryable: true,
           nextAction: 'retry_later',
-          runId: reservation.runId,
+          runId: effectiveReservation.runId,
           dedupeKey,
         },
       });
@@ -2416,32 +2462,41 @@ export class ResumeService {
       },
     });
 
-    const trackerEntry =
-      await this.applicationsService.upsertPreparedFromResumeGeneration({
-        userId,
-        jobId: job?.id ?? null,
-        companyName: job?.company ?? null,
-        roleTitle: job?.title ?? null,
-        jobUrl: job?.canonicalUrl ?? job?.sourceUrl ?? null,
-        jobText: job?.rawDescription ?? null,
-        baselineVersionId: baselineVersion.id,
-        cxFitScoreSnapshot,
-        resumeArtifactId: audit.id,
-        resumeArtifactType: 'resume',
-      }, syntheticMetadata);
-    const opportunity = await this.opportunitiesService.createFromResumeStudio(
-      userId,
-      {
-        companyName: job?.company ?? 'Unknown company',
-        jobTitle: job?.title ?? 'Untitled role',
-        fitScore: latestAssessment?.overallScore ?? 0,
-        jobId: job?.id ?? jobId ?? null,
-        baselineVersionUsed: baselineVersion.id,
-        analysisId,
-        baselineId: baseline.id,
-      },
-      syntheticMetadata,
-    );
+    // In verified-only (`oneTap`) generation we intentionally avoid creating/updating downstream
+    // application/opportunity records. Those are tied to tailored generation and can otherwise
+    // create misleading "ready" states during limited recovery.
+    const trackerEntry = request.oneTap
+      ? null
+      : await this.applicationsService.upsertPreparedFromResumeGeneration(
+          {
+            userId,
+            jobId: job?.id ?? null,
+            companyName: job?.company ?? null,
+            roleTitle: job?.title ?? null,
+            jobUrl: job?.canonicalUrl ?? job?.sourceUrl ?? null,
+            jobText: job?.rawDescription ?? null,
+            baselineVersionId: baselineVersion.id,
+            cxFitScoreSnapshot,
+            resumeArtifactId: audit.id,
+            resumeArtifactType: 'resume',
+          },
+          syntheticMetadata,
+        );
+    const opportunity = request.oneTap
+      ? null
+      : await this.opportunitiesService.createFromResumeStudio(
+          userId,
+          {
+            companyName: job?.company ?? 'Unknown company',
+            jobTitle: job?.title ?? 'Untitled role',
+            fitScore: latestAssessment?.overallScore ?? 0,
+            jobId: job?.id ?? jobId ?? null,
+            baselineVersionUsed: baselineVersion.id,
+            analysisId,
+            baselineId: baseline.id,
+          },
+          syntheticMetadata,
+        );
 
     const quality =
         latestAssessment &&
@@ -2487,8 +2542,8 @@ export class ResumeService {
       preview: {
         resume: sanitizedPreviewDocument,
       },
-      trackerEntryId: trackerEntry.id,
-      trackerStatus: trackerEntry.status,
+      trackerEntryId: trackerEntry?.id ?? null,
+      trackerStatus: trackerEntry?.status ?? null,
       opportunityId: opportunity?.id ?? null,
       claimRiskSummary,
       gapAnalysis: gapInsights,
@@ -2503,6 +2558,12 @@ export class ResumeService {
         resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
         resumeGenerationDiagnostics: experienceDiagnostics,
         normalizationDiagnostics: experienceDiagnostics,
+        ...(usedStructuredBaselineTemplate
+          ? {
+              generationMode: 'structured_baseline_template',
+              templateVersion: STRUCTURED_BASELINE_TEMPLATE_VERSION,
+            }
+          : {}),
       },
       ...(qualityGate.status === 'pass'
         ? { qualityGate: { status: 'pass', reasons: [] } }

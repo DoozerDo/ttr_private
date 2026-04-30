@@ -408,7 +408,9 @@ export class CoverLettersService {
       }
     }
 
-    const dedupeKey = this.buildGenerationDedupeKey({
+    const TEMPLATE_ASSEMBLY_THRESHOLD = 80;
+    const STRUCTURED_BASELINE_TEMPLATE_VERSION = 'structured-baseline-v1';
+    let dedupeKey = this.buildGenerationDedupeKey({
       userId,
       baselineId: draft.baseline.id,
       baselineVersionId: draft.baselineVersion.id,
@@ -417,14 +419,51 @@ export class CoverLettersService {
       closingTemplateKey: draft.closingTemplateKey,
       mode: draft.complianceResult.blocked ? 'blocked' : 'ready',
     });
-    const reservation = await this.workflowIdempotencyService.reserve<CoverLetterGenerationResponse>({
+    const scoreForTemplate = draft.analysisAssessment?.overallScore ?? 0;
+    if (typeof scoreForTemplate === 'number' && scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD) {
+      dedupeKey = `${dedupeKey}:mode:structured_baseline_template:template:${STRUCTURED_BASELINE_TEMPLATE_VERSION}`;
+    }
+    let reservation = await this.workflowIdempotencyService.reserve<CoverLetterGenerationResponse>({
       userId,
       operationName: 'generation.cover_letter',
       dedupeKey,
       runId: draft.complianceResult.audit.id,
     });
 
-    if (reservation.status === 'existing_completed' && reservation.responseBody) {
+    let effectiveReservation = reservation;
+
+    const isStructuredTemplateResponse = (value: unknown): boolean => {
+      if (!value || typeof value !== 'object') return false;
+      const record = value as Record<string, unknown>;
+      const internal =
+        record.internal && typeof record.internal === 'object'
+          ? (record.internal as Record<string, unknown>)
+          : null;
+      return (
+        internal?.generationMode === 'structured_baseline_template' &&
+        internal?.templateVersion === STRUCTURED_BASELINE_TEMPLATE_VERSION
+      );
+    };
+
+    if (
+      typeof scoreForTemplate === 'number' &&
+      scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD &&
+      effectiveReservation.status === 'existing_completed' &&
+      effectiveReservation.responseBody &&
+      !isStructuredTemplateResponse(effectiveReservation.responseBody)
+    ) {
+      const forcedKey = `${dedupeKey}:regen:${draft.complianceResult.audit.id}`;
+      effectiveReservation = await this.workflowIdempotencyService.reserve<CoverLetterGenerationResponse>({
+        userId,
+        operationName: 'generation.cover_letter',
+        dedupeKey: forcedKey,
+        runId: draft.complianceResult.audit.id,
+      });
+      dedupeKey = forcedKey;
+      reservation = effectiveReservation;
+    }
+
+    if (effectiveReservation.status === 'existing_completed' && effectiveReservation.responseBody) {
       if (
         (process.env.NODE_ENV ?? 'development') !== 'production' &&
         syntheticMetadata?.isSynthetic
@@ -440,7 +479,7 @@ export class CoverLettersService {
               ? (draft as any).generation.content.slice(0, 300)
               : null,
           postProcessingFlags: null as string[] | null,
-          coverLetterId: (reservation.responseBody as any)?.id ?? null,
+          coverLetterId: (effectiveReservation.responseBody as any)?.id ?? null,
           analysisId: (input as any)?.analysisId ?? null,
           jobId: draft.job.id,
           baselineId: draft.baseline.id,
@@ -451,17 +490,17 @@ export class CoverLettersService {
         );
       }
       return {
-        ...(reservation.responseBody as CoverLetterGenerationResponse),
+        ...(effectiveReservation.responseBody as CoverLetterGenerationResponse),
         idempotency: {
-          status: reservation.status,
-          runId: reservation.runId,
+          status: effectiveReservation.status,
+          runId: effectiveReservation.runId,
           dedupeKey,
           reused: true,
         },
       } as CoverLetterGenerationResponse;
     }
 
-    if (reservation.status === 'existing_in_flight') {
+    if (effectiveReservation.status === 'existing_in_flight') {
       throw new ConflictException({
         error: {
           code: 'generation_in_flight',
@@ -469,7 +508,7 @@ export class CoverLettersService {
             'A cover letter is already being generated for this role. Please wait and try again.',
           retryable: true,
           nextAction: 'retry_later',
-          runId: reservation.runId,
+          runId: effectiveReservation.runId,
           dedupeKey,
         },
       });
@@ -613,6 +652,12 @@ export class CoverLettersService {
           auditId: draft.complianceResult.audit.id,
           baselineVersionHash: draft.complianceResult.audit.baselineVersionHash,
           complianceFlags: draft.complianceResult.complianceFlags,
+          ...(dedupeKey.includes('mode:structured_baseline_template')
+            ? {
+                generationMode: 'structured_baseline_template',
+                templateVersion: 'structured-baseline-v1',
+              }
+            : {}),
         },
         idempotency: {
           status: reusedExistingCoverLetter ? 'existing_completed' : reservation.status,
