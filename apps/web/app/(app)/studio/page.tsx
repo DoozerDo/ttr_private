@@ -10813,6 +10813,7 @@ export default function StudioPage() {
                   model={effectiveResumeModel}
                   fallbackText={resumePreviewText}
                   claimHighlights={visibleImprovableClaims}
+                  trustApiSanitizedModel={!resumeQualityPass}
                   isEditing={isResumeEditMode}
                   hasUnsavedChanges={hasUnsavedResumeEdits}
                   onEnterEditMode={handleEnterResumeEditMode}

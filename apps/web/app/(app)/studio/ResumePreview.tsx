@@ -27,6 +27,7 @@ export {
 type Props = {
   payload?: unknown;
   model?: ResumeModel | null;
+  trustApiSanitizedModel?: boolean;
   fallbackText?: string;
   claimHighlights?: Array<{
     id: string;
@@ -136,6 +137,7 @@ export function ResumePreview({
   model: modelOverride,
   fallbackText,
   claimHighlights,
+  trustApiSanitizedModel = false,
   isEditing = false,
   hasUnsavedChanges = false,
   onEnterEditMode,
@@ -144,7 +146,12 @@ export function ResumePreview({
   onSummaryChange,
   onBulletChange,
 }: Props) {
-  const model = useMemo(() => modelOverride ?? readResumeModel(payload), [modelOverride, payload]);
+  const model = useMemo(() => {
+    if (trustApiSanitizedModel && !isEditing) {
+      return readResumeModel(payload);
+    }
+    return modelOverride ?? readResumeModel(payload);
+  }, [isEditing, modelOverride, payload, trustApiSanitizedModel]);
   const [expandedExperienceIndex, setExpandedExperienceIndex] = useState<number | null>(null);
   const [showFullResume, setShowFullResume] = useState(false);
   const [summaryExpanded, setSummaryExpanded] = useState(false);
@@ -185,79 +192,15 @@ export function ResumePreview({
       )
     : [];
 
-  const headerActionVerbs = useMemo(
-    () =>
-      new Set(
-        [
-          "designed",
-          "built",
-          "led",
-          "managed",
-          "created",
-          "implemented",
-          "developed",
-          "owned",
-          "improved",
-          "reduced",
-          "increased",
-          "delivered",
-          "supported",
-          "maintained",
-          "coordinated",
-          "partnered",
-          "collaborated",
-          "architected",
-          "automated",
-          "migrated",
-          "troubleshot",
-          "resolved",
-        ],
-      ),
-    [],
-  );
+  const deriveHeader = useCallback((entry: { company: string; roleTitle: string }) => {
+    const company = toText(entry.company);
+    const roleTitle = toText(entry.roleTitle);
 
-  const sanitizeHeaderField = useCallback(
-    (value: string): string => {
-      const text = toText(value).replace(/\s+/g, " ").trim();
-      if (!text) return "";
-
-      const words = text.split(/\s+/).filter(Boolean);
-      if (words.length > 10) return "";
-
-      const firstWord = (words[0] ?? "").toLowerCase();
-      if (firstWord && headerActionVerbs.has(firstWord)) return "";
-
-      // Sentence-like punctuation patterns indicate prose, not headers.
-      if (/[.!?]/.test(text)) return "";
-      if (/[,:;]\s/.test(text) && words.length > 6) return "";
-
-      return text;
-    },
-    [headerActionVerbs],
-  );
-
-  const deriveHeader = useCallback(
-    (entry: { company: string; roleTitle: string }) => {
-      const company = sanitizeHeaderField(entry.company);
-      const roleTitle = sanitizeHeaderField(entry.roleTitle);
-
-      if (company && roleTitle) {
-        return { company, roleTitle, placeholder: false };
-      }
-      if (company) {
-        return { company, roleTitle: "", placeholder: false };
-      }
-      if (roleTitle) {
-        return { company: "", roleTitle, placeholder: false };
-      }
-      return {
-        company: "Experience entry needs correction",
-        roleTitle: "",
-        placeholder: true,
-      };
-    },
-    [sanitizeHeaderField],
-  );
+    if (company && roleTitle) return { company, roleTitle };
+    if (company) return { company, roleTitle: "" };
+    if (roleTitle) return { company: "", roleTitle };
+    return { company: "Experience entry needs correction", roleTitle: "" };
+  }, []);
 
   useEffect(() => {
     if (!isEditing) return;

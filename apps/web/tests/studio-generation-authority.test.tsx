@@ -2,8 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import StudioPage from "@/app/(app)/studio/page";
+import { ResumePreview } from "@/app/(app)/studio/ResumePreview";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
-import { fireEvent } from "@testing-library/react";
 import {
   clearRecentIntentSignals,
   recordArtifactUsedIntent,
@@ -162,6 +162,50 @@ describe("Studio artifact quality gating (soft)", () => {
     expect(within(coverSection as HTMLElement).getAllByText("Cover letter needs correction before export.").length).toBeGreaterThan(0);
     expect(within(coverSection as HTMLElement).queryByText("Download DOCX")).toBeNull();
     expect(within(coverSection as HTMLElement).queryByText("Download PDF")).toBeNull();
+  });
+
+  it("ResumePreview trusts sanitized API fields and does not render malformed role titles from overrides", () => {
+    const payload = {
+      preview: {
+        resume: {
+          heading: { name: "Test Candidate", contactLine: "test@example.com" },
+          summary: "Low quality resume preview.",
+          experience: [
+            {
+              company: "Experience entry needs correction",
+              roleTitle: "",
+              bullets: ["Designed and built a full-stack production platform."],
+            },
+          ],
+        },
+      },
+    };
+
+    const overrideModel = {
+      heading: { name: "Test Candidate", contactLine: "test@example.com" },
+      summary: "Override model (should be ignored in correction mode).",
+      experience: [
+        {
+          company: "Acme",
+          roleTitle: "Technical Architect & Full",
+          bullets: ["Did work."],
+        },
+      ],
+      competencies: [],
+      education: [],
+    } as unknown as Parameters<typeof ResumePreview>[0]["model"];
+
+    render(
+      <ResumePreview
+        payload={payload}
+        model={overrideModel}
+        trustApiSanitizedModel={true}
+        isEditing={false}
+      />,
+    );
+
+    expect(screen.queryByText(/Technical Architect & Full/i)).toBeNull();
+    expect(screen.getByText("Experience entry needs correction")).toBeInTheDocument();
   });
 });
 
