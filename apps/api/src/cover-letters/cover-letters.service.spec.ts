@@ -273,6 +273,8 @@ describe('CoverLettersService contract', () => {
 
   it('reuses a completed generation request instead of creating a duplicate artifact', async () => {
     const { service, coverRepo, workflowIdempotencyService } = buildService();
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 70;
     const buildDraftSpy = jest.spyOn(service as any, 'buildCoverLetterDraft').mockResolvedValue({
       baseline,
       baselineVersion,
@@ -355,6 +357,7 @@ describe('CoverLettersService contract', () => {
     expect(result.idempotency?.reused).toBe(true);
     expect(coverRepo.save).not.toHaveBeenCalled();
     buildDraftSpy.mockRestore();
+    assessment.overallScore = originalScore;
   });
 
   it('forces regeneration for score >= 80 when an existing completed artifact is legacy', async () => {
@@ -418,51 +421,13 @@ describe('CoverLettersService contract', () => {
         },
       });
 
-      (workflowIdempotencyService.reserve as jest.Mock)
-        .mockResolvedValueOnce({
-          status: 'existing_completed',
-          runId: 'legacy-run',
-          responseBody: {
-            status: 'success',
-            generationStatus: 'success',
-            exportReady: true,
-            id: 'cover-legacy',
-            userId: 'user-1',
-            baselineId: 'baseline-1',
-            jobId: 'job-1',
-            content: 'cached legacy',
-            generatorType: 'template',
-            generatorVersion: 'v1',
-            closingTemplateKey: 'default',
-            generationInputsHash: 'hash',
-            preview: { coverLetter: { salutation: 'Dear Hiring Team,' } },
-            compliance_flags: [],
-            audit_id: 'audit-legacy',
-            auditId: 'audit-legacy',
-            baseline_version_hash: 'hash-1',
-            exports: { docx: true, pdf: true },
-            display: { title: '', description: '', reasons: [], cta: { label: '', href: '' } },
-            safeDisplay: { title: '', description: '', reasons: [], cta: { label: '', href: '' } },
-            traceMap: {},
-            debugTrace: { passed: true, failures: [], traceCoverage: 100, unusedEvidence: [], selectedEvidence: [] },
-            internal: { auditId: 'audit-legacy', baselineVersionHash: 'hash-1', complianceFlags: [] },
-          },
-        })
-        .mockResolvedValueOnce({
-          status: 'accepted_new',
-          runId: 'run-2',
-          responseBody: null,
-        });
-
       const result = await service.generateCoverLetter('user-1', request as any);
 
       expect(assembleSpy).toHaveBeenCalled();
-      expect((workflowIdempotencyService.reserve as jest.Mock).mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(workflowIdempotencyService.reserve).not.toHaveBeenCalled();
       expect(result.id).toBeTruthy();
-      expect(result.id).not.toBe('cover-legacy');
       expect(result.internal?.generationMode).toBe('structured_baseline_template');
       expect(result.internal?.templateVersion).toBe('structured-baseline-v1');
-      expect(result.idempotency?.reused).toBe(false);
       expect(coverRepo.save).toHaveBeenCalled();
       buildDraftSpy.mockRestore();
     } finally {
@@ -652,6 +617,99 @@ describe('CoverLettersService contract', () => {
     } finally {
       assessment.overallScore = originalScore;
     }
+  });
+
+  it('forces structured template regeneration and overwrites an existing legacy artifact when score >= 80', async () => {
+    const { service, coverRepo, workflowIdempotencyService } = buildService();
+    const assembler = require('./coverLetterTemplateAssembler');
+
+    // Do not allow idempotency reuse at all for score >= 80.
+    (workflowIdempotencyService.reserve as jest.Mock).mockResolvedValue({
+      status: 'existing_completed',
+      runId: 'legacy-run',
+      responseBody: { id: 'cover-legacy', internal: {} },
+    });
+
+    const existing = {
+      id: 'cover-existing',
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      generationInputsHash: 'hash',
+      content: 'legacy content',
+    };
+    (coverRepo.findOne as jest.Mock).mockResolvedValue(existing);
+    (coverRepo.save as jest.Mock)
+      .mockImplementationOnce(() => {
+        const err: any = new Error('duplicate key');
+        err.code = '23505';
+        throw err;
+      })
+      .mockImplementationOnce(async (payload: any) => ({ ...payload, id: existing.id }));
+
+    jest.spyOn(service as any, 'buildCoverLetterDraft').mockResolvedValue({
+      baseline,
+      baselineVersion,
+      job,
+      analysisAssessment: assessment,
+      allowedBlocks: [],
+      jobContext: {
+        id: 'job-1',
+        title: 'Program Manager',
+        company: 'Example Co',
+        responsibilities: [],
+        requirements: [],
+      },
+      jobContextAllowlist: { allowedCompanies: ['Example Co'], allowedRoleTitles: ['Program Manager'] },
+      closingTemplateKey: 'default',
+      generationInputsHash: 'hash',
+      generation: {
+        document: assembler.assembleCoverLetterFromStructuredBaseline({
+          structured: {
+            contact: undefined,
+            summary: undefined,
+            experience: [
+              {
+                company: 'Example Co',
+                roleTitle: 'Program Manager',
+                dates: '2020 - 2024',
+                bullets: ['Led enterprise support modernization across global teams.'],
+                source: 'baseline',
+              },
+            ],
+            education: [],
+            skills: [],
+            missingEvidenceReasons: [],
+          },
+          senderName: 'Jordan Lee',
+          senderContactLine: null,
+          jobTitle: job.title,
+          companyName: job.company,
+        }),
+        content: 'Dear Hiring Team,\\n\\nOpening.\\n\\nClosing.\\n\\nSincerely,\\n\\nJordan Lee',
+        wordCount: 120,
+        greeting: 'Dear Hiring Team,',
+        paragraphs: ['Opening.'],
+        closingParagraphs: ['Closing.'],
+        paragraphEvidence: [],
+        traceMap: {},
+      },
+      complianceResult: {
+        normalizedContent: 'valid',
+        complianceFlags: [],
+        blocked: false,
+        audit: { id: 'audit-1', baselineVersionHash: 'hash-1' },
+      },
+    });
+
+    const result = await service.generateCoverLetter('user-1', request as any);
+
+    expect(workflowIdempotencyService.reserve).not.toHaveBeenCalled();
+    expect(result.id).toBe(existing.id);
+    expect(result.id).not.toBe('cover-legacy');
+    expect(result.internal?.generationMode).toBe('structured_baseline_template');
+    expect(result.internal?.templateVersion).toBe('structured-baseline-v1');
+    expect(coverRepo.save).toHaveBeenCalled();
   });
 
   it('throws generation_failed when output validation is invalid', async () => {
