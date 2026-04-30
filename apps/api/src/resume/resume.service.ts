@@ -89,6 +89,7 @@ import type {
 import { SyntheticMetadataInput } from '../synthetic/synthetic-metadata.types';
 import {
   repairResumeForQuality,
+  repairResumeStructure,
   validateResumeArtifactQuality,
   type ArtifactQualityGate,
 } from '../artifacts/artifactQualityValidator';
@@ -1964,6 +1965,11 @@ export class ResumeService {
       identity,
       { documentStrategyPlan: request.documentStrategyPlan ?? undefined },
     );
+
+    // Deterministic structural repair pass: prevent bullet-like prose from being treated as an
+    // experience header field. This is non-fabricating: it clears malformed header fields and
+    // preserves the original text as bullets when appropriate.
+    normalizedDocument = repairResumeStructure(normalizedDocument);
 
     // Soft quality enforcement (server-side self-heal): validate the normalized resume model using
     // the same rules enforced in the Studio UI safety net. If the first pass fails, attempt a single

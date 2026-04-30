@@ -304,6 +304,72 @@ export function repairResumeForQuality(
   };
 }
 
+function addBulletIfMissing(existing: unknown, bulletText: string): unknown[] {
+  const normalized = trimToText(bulletText);
+  if (!normalized) return Array.isArray(existing) ? existing : [];
+  const bullets = Array.isArray(existing) ? existing.map((b) => trimToText(b)).filter(Boolean) : [];
+  if (bullets.some((b) => b === normalized)) return Array.isArray(existing) ? existing : bullets;
+  return [...bullets, normalized];
+}
+
+function trimDanglingHeaderSuffix(value: string): string {
+  const text = trimToText(value);
+  if (!text) return '';
+  if (!endsWithDanglingHeaderToken(text)) return text;
+  const tokens = text.split(/\s+/);
+  if (tokens.length <= 1) return '';
+  return tokens.slice(0, -1).join(' ').trim();
+}
+
+// Structural repair pass: when an experience header field looks like prose/bullets, move it into bullets
+// and clear the header. This is non-fabricating: it never invents a company or role title.
+export function repairResumeStructure(
+  resume: NormalizedResumeDocument,
+): NormalizedResumeDocument {
+  const experience = (Array.isArray(resume.experience) ? resume.experience : []).map((entry) => {
+    const rawCompany = trimToText((entry as any)?.company);
+    const rawRoleTitle = trimToText((entry as any)?.roleTitle);
+    const rawBullets = Array.isArray((entry as any)?.bullets) ? (entry as any).bullets : [];
+
+    let nextCompany = rawCompany;
+    let nextRoleTitle = rawRoleTitle;
+    let nextBullets: unknown = rawBullets;
+
+    if (nextRoleTitle) {
+      const trimmedRoleTitle = trimDanglingHeaderSuffix(nextRoleTitle);
+      // If the title is malformed, keep the content as a bullet and clear the header field.
+      // Use the *original* value for the bullet so we preserve the exact generated text.
+      if (isMalformedResumeExperienceRoleTitle(trimmedRoleTitle) || isMalformedResumeExperienceRoleTitle(nextRoleTitle)) {
+        nextBullets = addBulletIfMissing(nextBullets, nextRoleTitle);
+        nextRoleTitle = '';
+      } else {
+        nextRoleTitle = trimmedRoleTitle;
+      }
+    }
+
+    if (nextCompany) {
+      // If company is malformed, drop it (company-like prose should not be promoted to the header).
+      if (isMalformedResumeExperienceCompany(nextCompany)) {
+        nextCompany = '';
+      }
+    }
+
+    return {
+      ...(entry as any),
+      company: nextCompany,
+      roleTitle: nextRoleTitle,
+      bullets: Array.isArray(nextBullets)
+        ? nextBullets.map((b) => trimToText(b)).filter(Boolean)
+        : nextBullets,
+    };
+  });
+
+  return {
+    ...(resume as any),
+    experience: experience as any,
+  };
+}
+
 export function repairCoverLetterForQuality(
   paragraphs: string[],
   gate: ArtifactQualityGate,

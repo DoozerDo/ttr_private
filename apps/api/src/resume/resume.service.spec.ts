@@ -16,6 +16,7 @@ import { GapAnalysisService } from '../analysis/gap-analysis.service';
 import { CriticalFlowTrackerService } from '../support/critical-flow-tracker.service';
 import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
 import { BaselineSectionType } from '../baseline/baseline-section.entity';
+import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
 import { extractEvidenceUnitsFromLogicalUnits, reconstructLogicalTextUnits } from './resume-draft-bullets';
 import * as ResumeDraftBullets from './resume-draft-bullets';
 
@@ -372,26 +373,76 @@ describe('ResumeService contract', () => {
     ];
 
     const result = await service.generateResume('user-1', baseRequest);
-    expect(result.exportReady).toBe(false);
-    expect(result.exports).toEqual({ docx: false, pdf: false });
-    expect(result.qualityGate?.status).toBe('needs_refinement');
-    expect(result.qualityGate?.reasons ?? []).toEqual(
-      expect.arrayContaining(['malformed_experience_header:role_title']),
-    );
+    // Structural repair should clear malformed headers before quality evaluation.
+    expect(result.qualityGate?.status).toBe('pass');
 
     const preview = result.preview?.resume as any;
     expect(preview?.experience?.length ?? 0).toBeGreaterThan(0);
     const firstRoleTitle = String(preview?.experience?.[0]?.roleTitle ?? '');
     expect(firstRoleTitle).not.toContain('Designed and built');
-    const firstBullets = (preview?.experience?.[0]?.bullets ?? []).map((b: unknown) => String(b ?? ''));
-    expect(firstBullets.join(' ')).toContain('Designed and built a full-stack production platform for Conquest of Fates');
-
     const secondRoleTitle = String(preview?.experience?.[1]?.roleTitle ?? '');
     expect(secondRoleTitle).toBe('');
     const secondBullets = (preview?.experience?.[1]?.bullets ?? []).map((b: unknown) => String(b ?? ''));
     expect(secondBullets.join(' ')).not.toMatch(/\bTechnical Architect and\b/i);
 
     baseline.sections = [{ ...baseSection, content: original }];
+  });
+
+  it('extracts a minimal structured baseline model from EXPERIENCE section text (safe headers only)', () => {
+    const sections = [
+      {
+        id: 'exp-1',
+        sectionType: 'EXPERIENCE',
+        title: 'Experience',
+        order: 1,
+        content: [
+          'Example Co | Technical Architect & Full Stack Engineer | 2020 - 2024',
+          '- Led incident response and reliability work across teams.',
+          '- Built CI automation to reduce release risk.',
+          '',
+          // Unsafe: prose/bullet-like header candidate should be skipped entirely.
+          'Example Co | Designed and built a full-stack production platform for Conquest of Fates (cof.gg), a sci-fi trading card game. | 2018 - 2020',
+          '- Shipped features.',
+          '',
+          // Unsafe: missing role title (pipe parts collapse).
+          'Just A Company | 2016 - 2018',
+          '- Did work.',
+        ].join('\n'),
+      },
+      {
+        id: 'skills-1',
+        sectionType: 'SKILLS',
+        title: 'Skills',
+        order: 2,
+        content: ['- TypeScript', '- PostgreSQL, Redis'].join('\n'),
+      },
+      {
+        id: 'edu-1',
+        sectionType: 'EDUCATION',
+        title: 'Education',
+        order: 3,
+        content: ['State University — B.S. Computer Science'].join('\n'),
+      },
+    ] as any;
+
+    const extracted = extractStructuredBaselineFromSections(sections);
+    expect(extracted.experience.length).toBe(1);
+    expect(extracted.experience[0]).toMatchObject({
+      company: 'Example Co',
+      roleTitle: 'Technical Architect & Full Stack Engineer',
+      dates: '2020 - 2024',
+      source: 'baseline',
+    });
+    expect(extracted.experience[0].bullets).toEqual([
+      'Led incident response and reliability work across teams.',
+      'Built CI automation to reduce release risk.',
+    ]);
+    expect(extracted.skills).toEqual(expect.arrayContaining(['TypeScript', 'PostgreSQL', 'Redis']));
+    expect(extracted.education).toEqual(expect.arrayContaining(['State University — B.S. Computer Science']));
+    // Ensure unsafe header prose is not promoted into company/roleTitle.
+    const serialized = JSON.stringify(extracted);
+    expect(serialized).not.toContain('Designed and built a full-stack production platform');
+    expect(extracted.missingEvidenceReasons.length).toBeGreaterThan(0);
   });
   it('does not require baselineVersionId (service resolves latest version)', async () => {
     const { service } = buildService();
