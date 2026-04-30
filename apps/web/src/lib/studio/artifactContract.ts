@@ -6,6 +6,7 @@ import {
   presentResumeGeneration,
 } from "@/src/lib/studio/helpers";
 import { validateCoverLetterQuality, validateResumeQuality } from "@/src/lib/studio/artifactQuality";
+import type { ArtifactGenerationResult } from "@shared/artifactGenerationResult";
 
 export type StudioCoverLetterModel = {
   paragraphs: string[];
@@ -66,11 +67,23 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
   const normalizedResumeResponse = normalizeResumeResponse(input.resumeResponse);
   const normalizedCoverLetterResponse = normalizeCoverLetterResponse(input.coverLetterResponse);
 
+  const resumeResult = toRecord(normalizedResumeResponse)?.resumeResult as ArtifactGenerationResult<unknown> | undefined;
+  const coverLetterResult = toRecord(normalizedCoverLetterResponse)?.coverLetterResult as ArtifactGenerationResult<unknown> | undefined;
+
   const resumePresenter = presentResumeGeneration(normalizedResumeResponse);
   const coverPresenter = presentCoverLetterGeneration(normalizedCoverLetterResponse);
 
-  const resumeModel: ResumeModel | null = readResumeModel(normalizedResumeResponse);
-  const coverParagraphs = buildCoverLetterParagraphs(normalizedCoverLetterResponse);
+  const resumeModel: ResumeModel | null =
+    resumeResult?.preview && typeof resumeResult.preview === "object"
+      ? (resumeResult.preview as ResumeModel)
+      : readResumeModel(normalizedResumeResponse);
+  const coverParagraphs = (() => {
+    const previewRecord = coverLetterResult?.preview && typeof coverLetterResult.preview === "object"
+      ? (coverLetterResult.preview as Record<string, unknown>)
+      : null;
+    const paragraphs = previewRecord ? previewRecord.paragraphs : null;
+    return Array.isArray(paragraphs) ? paragraphs.map((p) => String(p ?? "")).filter(Boolean) : buildCoverLetterParagraphs(normalizedCoverLetterResponse);
+  })();
   const coverLetterModel: StudioCoverLetterModel | null = coverParagraphs.length
     ? { paragraphs: coverParagraphs }
     : null;
@@ -83,18 +96,19 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
 
   const hasResumeArtifact = resumePresenter.hasExportableContent || Boolean(resumeModel);
   const hasCoverLetterArtifact =
-    coverPresenter.hasExportableContent || (coverParagraphs.length > 0 && Boolean(input.coverLetterResponse));
+    coverPresenter.hasExportableContent ||
+    Boolean(coverLetterResult?.preview) ||
+    coverParagraphs.length > 0 ||
+    Boolean(input.coverLetterResponse);
 
   const resumeExportAvailable =
     input.canExportDocuments &&
     input.isPro &&
-    resumePresenter.status === "success" &&
-    resumePresenter.hasExportableContent;
+    (resumeResult ? resumeResult.actions.canExport : resumePresenter.status === "success" && resumePresenter.hasExportableContent);
   const coverLetterExportAvailable =
     input.canExportDocuments &&
     input.isPro &&
-    coverPresenter.status === "success" &&
-    coverPresenter.hasExportableContent;
+    (coverLetterResult ? coverLetterResult.actions.canExport : coverPresenter.status === "success" && coverPresenter.hasExportableContent);
 
   return {
     hasResumeArtifact,
@@ -102,6 +116,10 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
     hasUsableArtifacts,
     resumeModel,
     coverLetterModel,
+    results: {
+      resume: resumeResult ?? null,
+      coverLetter: coverLetterResult ?? null,
+    },
     quality: {
       resume: resumeQuality,
       coverLetter: coverLetterQuality,

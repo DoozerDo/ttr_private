@@ -115,9 +115,6 @@ describe("Studio artifact quality gating (soft)", () => {
 
     const resumeSection = screen.getByRole("heading", { name: "Resume" }).closest("section");
     expect(resumeSection).toBeTruthy();
-    expect(
-      within(resumeSection as HTMLElement).getAllByText(/failed quality checks/i).length,
-    ).toBeGreaterThan(0);
     expect(within(resumeSection as HTMLElement).queryByText(/Your resume is ready/i)).toBeNull();
     expect(within(resumeSection as HTMLElement).getAllByText("Resume needs correction before export.").length).toBeGreaterThan(0);
     // Placeholder header appears when title/company are sanitized.
@@ -154,9 +151,7 @@ describe("Studio artifact quality gating (soft)", () => {
 
     const coverSection = screen.getByRole("heading", { name: "Cover letter" }).closest("section");
     expect(coverSection).toBeTruthy();
-    expect(
-      within(coverSection as HTMLElement).getAllByText(/failed quality checks/i).length,
-    ).toBeGreaterThan(0);
+    expect(within(coverSection as HTMLElement).queryByTestId("studio-cover-missing")).toBeNull();
     expect(within(coverSection as HTMLElement).queryByText("Cover letter generated successfully")).toBeNull();
     expect(within(coverSection as HTMLElement).queryByText(/generated successfully/i)).toBeNull();
     expect(within(coverSection as HTMLElement).getAllByText("Cover letter needs correction before export.").length).toBeGreaterThan(0);
@@ -637,6 +632,67 @@ function setupFetchWithQualityFailures() {
   setFetchImplementation(
     vi.fn((input: RequestInfo) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "completed",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "fp-1",
+            generationContractVersion: "studio-artifacts-v1",
+            resumeResult: {
+              artifactType: "resume",
+              generationState: "generated_needs_correction",
+              qualityStatus: "needs_refinement",
+              preview: {
+                heading: { name: "Test Candidate", contactLine: "test@example.com" },
+                summary: "Low quality resume preview.",
+                experience: [
+                  {
+                    company: "Experience entry needs correction",
+                    roleTitle: "",
+                    bullets: [
+                      "Led support operations and improved team performance.",
+                      "Designed and built a full-stack production platform for Conquest of Fates (cof.gg), a sci-fi trading card game.",
+                    ],
+                  },
+                ],
+                education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+                competencies: ["Customer strategy", "Operational leadership"],
+              },
+              correctionReasons: [{ code: "malformed_experience_header:role_title", message: "malformed", severity: "warning" }],
+              exportReady: false,
+              exports: { docx: false, pdf: false },
+              actions: { canEdit: true, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
+            },
+            coverLetterResult: {
+              artifactType: "cover_letter",
+              generationState: "generated_needs_correction",
+              qualityStatus: "needs_refinement",
+              preview: { paragraphs: ["Blocked phrase: operating context."] },
+              correctionReasons: [{ code: "banned_phrase", message: "banned", severity: "warning" }],
+              exportReady: false,
+              exports: { docx: false, pdf: false },
+              actions: { canEdit: false, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
+            },
+            resume: {
+              status: "completed",
+              inputsHash: "ih-1",
+              responseBody: { status: "success", preview: { resume: { heading: { name: "Legacy" } } } },
+              content: null,
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: null,
+              failedAt: null,
+              metadata: {},
+            },
+            coverLetter: null,
+          }),
+        );
+      }
       if (url.includes("/api/baselines/base-1/versions")) {
         return Promise.resolve(
           createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),

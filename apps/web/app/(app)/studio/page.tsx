@@ -278,6 +278,8 @@ type BackendStudioArtifactsResponse = {
   generationContractVersion?: string | null;
   resume?: BackendStudioArtifactRecord | null;
   coverLetter?: BackendStudioArtifactRecord | null;
+  resumeResult?: unknown;
+  coverLetterResult?: unknown;
 };
 
 const ANALYSIS_LOAD_ERROR_MESSAGE =
@@ -1660,19 +1662,35 @@ export default function StudioPage() {
         : payload.coverResponse ?? null;
       const resumeResponse = normalizeHydratedArtifactResponse(resumeResponseRaw);
       const coverResponse = normalizeHydratedArtifactResponse(coverResponseRaw);
+
+      // Phase 1: prefer canonical artifact results when present, but keep legacy responseBody alongside it.
+      const resumeResult = isBackendStudioArtifactsResponse(payload) ? payload.resumeResult ?? null : null;
+      const coverLetterResult = isBackendStudioArtifactsResponse(payload) ? payload.coverLetterResult ?? null : null;
+      const resumeResponseWithResult =
+        resumeResult
+          ? (resumeResponse && typeof resumeResponse === "object"
+              ? ({ ...(resumeResponse as Record<string, unknown>), resumeResult } as unknown)
+              : ({ resumeResult } as unknown))
+          : resumeResponse;
+      const coverResponseWithResult =
+        coverLetterResult
+          ? (coverResponse && typeof coverResponse === "object"
+              ? ({ ...(coverResponse as Record<string, unknown>), coverLetterResult } as unknown)
+              : ({ coverLetterResult } as unknown))
+          : coverResponse;
       const resumeFailure = isBackendStudioArtifactsResponse(payload)
         ? buildFailureFromBackendRecord("resume", payload.resume)
         : null;
       const coverFailure = isBackendStudioArtifactsResponse(payload)
         ? buildFailureFromBackendRecord("cover_letter", payload.coverLetter)
         : null;
-      if (resumeResponse) {
+      if (resumeResponseWithResult) {
         setResumeState((current) => ({
           ...current,
           response:
-            resumeResponse && typeof resumeResponse === "object"
-              ? ({ ...(resumeResponse as Record<string, unknown>) } as unknown)
-              : resumeResponse,
+            resumeResponseWithResult && typeof resumeResponseWithResult === "object"
+              ? ({ ...(resumeResponseWithResult as Record<string, unknown>) } as unknown)
+              : resumeResponseWithResult,
           error: null,
           tierGateError: null,
           artifactFailure: null,
@@ -1682,13 +1700,13 @@ export default function StudioPage() {
       } else if (resumeFailure) {
         setResumeState((current) => ({ ...current, artifactFailure: resumeFailure, error: null }));
       }
-      if (coverResponse) {
+      if (coverResponseWithResult) {
         setCoverState((current) => ({
           ...current,
           response:
-            coverResponse && typeof coverResponse === "object"
-              ? ({ ...(coverResponse as Record<string, unknown>) } as unknown)
-              : coverResponse,
+            coverResponseWithResult && typeof coverResponseWithResult === "object"
+              ? ({ ...(coverResponseWithResult as Record<string, unknown>) } as unknown)
+              : coverResponseWithResult,
           error: null,
           tierGateError: null,
           artifactFailure: null,
@@ -2429,8 +2447,13 @@ export default function StudioPage() {
   // Do not inspect raw payloads or presenter state for quality gating.
   const resumeQuality = artifactContract.quality.resume;
   const resumeHasValidationFindings = resumeQuality.issues.length > 0;
-  const resumeQualityPass = resumeQuality.status === "pass" && !resumeHasValidationFindings;
-  const resumeNeedsRefinement = Boolean(generatedResumeModel) && resumeQuality.status === "needs_refinement";
+  const resumeResult = artifactContract.results.resume;
+  const resumeQualityPass = resumeResult
+    ? resumeResult.qualityStatus === "pass" && resumeResult.generationState === "generated_usable"
+    : resumeQuality.status === "pass" && !resumeHasValidationFindings;
+  const resumeNeedsRefinement = resumeResult
+    ? resumeResult.qualityStatus !== "pass"
+    : Boolean(generatedResumeModel) && resumeQuality.status === "needs_refinement";
   const resumeRequiresCorrectionCopy = hasResumeDraft && !resumeQualityPass;
   const resumeQualityIssueSummary = useMemo(() => {
     const blocking = resumeQuality.issues.filter((issue) => issue.severity === "blocking");
@@ -2443,24 +2466,38 @@ export default function StudioPage() {
   }, [resumeQuality.issues]);
   const showResumeDownloadActions =
     resumePresenter.status === "blocked" ||
-    (resumePresenter.status === "success" && hasResumeArtifact && resumeQualityPass);
+    (artifactContract.results.resume
+      ? artifactContract.results.resume.actions.canExport
+      : resumePresenter.status === "success" && hasResumeArtifact && resumeQualityPass);
   const isResumeDownloadLocked = !isPro;
-  const canExportResume = artifactContract.resumeExportAvailable && resumeQuality.exportable;
+  const canExportResume = artifactContract.results.resume
+    ? artifactContract.results.resume.actions.canExport
+    : artifactContract.resumeExportAvailable && resumeQuality.exportable;
   const resumePreviewText = useMemo(
     () => formatPreview(artifactContract.normalized.resumeResponse),
     [artifactContract.normalized.resumeResponse],
   );
   const canonicalResumePreviewPayload = useMemo(
-    () => readCanonicalResumePreviewPayload(artifactContract.normalized.resumeResponse),
-    [artifactContract.normalized.resumeResponse],
+    () =>
+      artifactContract.results.resume?.preview && typeof artifactContract.results.resume.preview === "object"
+        ? artifactContract.results.resume.preview
+        : readCanonicalResumePreviewPayload(artifactContract.normalized.resumeResponse),
+    [artifactContract.normalized.resumeResponse, artifactContract.results.resume],
   );
   const coverLetterParagraphs = artifactContract.coverLetterModel?.paragraphs ?? [];
   const coverPresenter = artifactContract.presenters.coverLetter;
-  const hasCoverLetterDraft = Boolean(artifactContract.coverLetterModel) && Boolean(coverState.response);
+  const hasCoverLetterDraft =
+    (Boolean(artifactContract.coverLetterModel) && Boolean(coverState.response)) ||
+    Boolean(artifactContract.results.coverLetter?.preview);
   const coverLetterQuality = artifactContract.quality.coverLetter;
   const coverHasValidationFindings = coverLetterQuality.issues.length > 0;
-  const coverQualityPass = coverLetterQuality.status === "pass" && !coverHasValidationFindings;
-  const coverNeedsRefinement = coverLetterParagraphs.length > 0 && coverLetterQuality.status === "needs_refinement";
+  const coverLetterResult = artifactContract.results.coverLetter;
+  const coverQualityPass = coverLetterResult
+    ? coverLetterResult.qualityStatus === "pass" && coverLetterResult.generationState === "generated_usable"
+    : coverLetterQuality.status === "pass" && !coverHasValidationFindings;
+  const coverNeedsRefinement = coverLetterResult
+    ? coverLetterResult.qualityStatus !== "pass"
+    : coverLetterParagraphs.length > 0 && coverLetterQuality.status === "needs_refinement";
   const coverRequiresCorrectionCopy = hasCoverLetterDraft && !coverQualityPass;
   const coverQualityIssueSummary = useMemo(() => {
     const blocking = coverLetterQuality.issues.filter((issue) => issue.severity === "blocking");
@@ -11171,7 +11208,7 @@ export default function StudioPage() {
         ) : null}
 
         {!coverLetterComplianceBlocked ? (
-          coverPresenter.status === "success" && coverState.response && !normalizedArtifacts.shouldSuppressStalePreview ? (
+          coverLetterParagraphs.length > 0 && !normalizedArtifacts.shouldSuppressStalePreview ? (
             <div
               className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
               data-testid={coverQualityPass ? "studio-cover-ready-panel" : "studio-cover-correction-panel"}

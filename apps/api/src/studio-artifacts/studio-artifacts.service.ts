@@ -8,6 +8,7 @@ import { Job } from '../jobs/job.entity';
 import { StudioArtifact, StudioArtifactLifecycleStatus } from './studio-artifact.entity';
 import type { NormalizedResumeDocument } from '../documents/normalized-document.models';
 import { sanitizeResumePreviewForStudio } from '../resume/resumePreviewSanitizer';
+import type { ArtifactGenerationResult, ArtifactCorrectionReason } from '@shared/artifactGenerationResult';
 
 export type StudioArtifactKind = 'resume' | 'cover_letter';
 
@@ -34,6 +35,8 @@ export type StudioArtifactsState = {
   generationContractVersion: string;
   resume: StudioArtifactRecord | null;
   coverLetter: StudioArtifactRecord | null;
+  resumeResult?: ArtifactGenerationResult<unknown>;
+  coverLetterResult?: ArtifactGenerationResult<unknown>;
 };
 
 type ArtifactPatch = Partial<Pick<
@@ -154,6 +157,9 @@ export class StudioArtifactsService {
       jobFingerprint,
     });
 
+    const resumeRecord = this.buildArtifactRecord(record, 'resume', resumeInputsHash);
+    const coverRecord = this.buildArtifactRecord(record, 'cover_letter', coverLetterInputsHash);
+
     return {
       status: this.resolvePairStatus(record, resumeInputsHash, coverLetterInputsHash),
       baselineId: input.baselineId,
@@ -162,8 +168,139 @@ export class StudioArtifactsService {
       baselineVersionHash,
       jobFingerprint,
       generationContractVersion: ARTIFACT_CONTRACT_VERSION,
-      resume: this.buildArtifactRecord(record, 'resume', resumeInputsHash),
-      coverLetter: this.buildArtifactRecord(record, 'cover_letter', coverLetterInputsHash),
+      resume: resumeRecord,
+      coverLetter: coverRecord,
+      resumeResult: this.buildCanonicalResultFromRecord('resume', resumeRecord),
+      coverLetterResult: this.buildCanonicalResultFromRecord('cover_letter', coverRecord),
+    };
+  }
+
+  private buildCanonicalResultFromRecord(
+    artifact: StudioArtifactKind,
+    record: StudioArtifactRecord | null,
+  ): ArtifactGenerationResult<unknown> {
+    const artifactType = artifact === 'resume' ? 'resume' : 'cover_letter';
+    const baseActions = {
+      canEdit: artifact === 'resume',
+      canRegenerate: true,
+      canExport: false,
+      canSaveToOpportunities: false,
+    };
+
+    if (!record) {
+      return {
+        artifactType,
+        generationState: 'not_started',
+        qualityStatus: 'needs_refinement',
+        preview: null,
+        correctionReasons: [],
+        exportReady: false,
+        exports: { docx: false, pdf: false },
+        actions: baseActions,
+      };
+    }
+
+    if (record.status === StudioArtifactLifecycleStatus.IN_PROGRESS) {
+      return {
+        artifactType,
+        generationState: 'generating',
+        qualityStatus: 'needs_refinement',
+        preview: null,
+        correctionReasons: [],
+        exportReady: false,
+        exports: { docx: false, pdf: false },
+        actions: baseActions,
+      };
+    }
+
+    if (record.status === StudioArtifactLifecycleStatus.FAILED) {
+      const correctionReasons: ArtifactCorrectionReason[] = [];
+      if (record.failureCode || record.failureMessage) {
+        correctionReasons.push({
+          code: String(record.failureCode ?? 'generation_failed'),
+          message: String(record.failureMessage ?? 'Generation failed.'),
+          severity: 'error',
+        });
+      }
+      return {
+        artifactType,
+        generationState: 'generation_failed',
+        qualityStatus: 'failed',
+        preview: null,
+        correctionReasons,
+        exportReady: false,
+        exports: { docx: false, pdf: false },
+        actions: baseActions,
+      };
+    }
+
+    const responseBody = record.responseBody;
+    const preview = responseBody && typeof responseBody.preview === 'object'
+      ? (responseBody.preview as Record<string, unknown>)
+      : null;
+    const previewModel =
+      artifact === 'resume'
+        ? preview?.resume ?? null
+        : preview?.coverLetter ?? null;
+
+    const qualityGate =
+      responseBody && typeof responseBody.qualityGate === 'object'
+        ? (responseBody.qualityGate as Record<string, unknown>)
+        : null;
+    const qualityStatusRaw = qualityGate?.status;
+    const qualityStatus =
+      qualityStatusRaw === 'pass'
+        ? 'pass'
+        : qualityStatusRaw === 'needs_refinement'
+          ? 'needs_refinement'
+          : qualityStatusRaw === 'blocked'
+            ? 'blocked'
+            : 'failed';
+
+    const correctionReasons: ArtifactCorrectionReason[] = Array.isArray(qualityGate?.reasons)
+      ? (qualityGate?.reasons as unknown[])
+          .map((reason) => String(reason ?? '').trim())
+          .filter(Boolean)
+          .slice(0, 8)
+          .map((code) => ({
+            code,
+            message: code,
+            severity: 'warning' as const,
+          }))
+      : [];
+
+    const exportReadyRaw =
+      responseBody && typeof responseBody.exportReady === 'boolean' ? responseBody.exportReady : false;
+    const exportReady = Boolean(exportReadyRaw) && qualityStatus === 'pass';
+    const exportsRaw =
+      responseBody && typeof responseBody.exports === 'object' ? (responseBody.exports as Record<string, unknown>) : null;
+    const exports = exportReady
+      ? {
+          docx: Boolean(exportsRaw && exportsRaw.docx),
+          pdf: Boolean(exportsRaw && exportsRaw.pdf),
+        }
+      : { docx: false, pdf: false };
+
+    const generationState =
+      qualityStatus === 'pass' && previewModel
+        ? 'generated_usable'
+        : previewModel
+          ? 'generated_needs_correction'
+          : 'generated_unusable';
+
+    return {
+      artifactType,
+      generationState,
+      qualityStatus,
+      preview: previewModel ?? null,
+      correctionReasons: correctionReasons.length ? correctionReasons : [{ code: 'needs_correction', message: 'Needs correction.', severity: 'warning' }],
+      exportReady,
+      exports,
+      actions: {
+        ...baseActions,
+        canExport: exportReady,
+        canSaveToOpportunities: exportReady,
+      },
     };
   }
 
