@@ -120,6 +120,17 @@ describe("Studio artifact quality gating (soft)", () => {
     ).toBeGreaterThan(0);
     expect(within(resumeSection as HTMLElement).queryByText(/Your resume is ready/i)).toBeNull();
     expect(within(resumeSection as HTMLElement).getAllByText("Resume needs correction before export.").length).toBeGreaterThan(0);
+    // Placeholder header appears when title/company are sanitized.
+    expect(within(resumeSection as HTMLElement).getByText("Experience entry needs correction")).toBeInTheDocument();
+    // Expand the entry so bullets are rendered, then ensure the accomplishment only appears in bullets.
+    fireEvent.click(within(resumeSection as HTMLElement).getByText("Experience entry needs correction"));
+    const accomplishmentNodes = await within(resumeSection as HTMLElement).findAllByText(
+      /Designed and built a full-stack production platform/i,
+    );
+    expect(accomplishmentNodes.length).toBeGreaterThanOrEqual(1);
+    for (const node of accomplishmentNodes) {
+      expect(node.closest("li")).toBeTruthy();
+    }
     expect(within(resumeSection as HTMLElement).queryByText("Download DOCX")).toBeNull();
     expect(within(resumeSection as HTMLElement).queryByText("Download PDF")).toBeNull();
   });
@@ -634,9 +645,12 @@ function setupFetchWithQualityFailures() {
                   "Designed and built a full-stack production platform for Conquest of Fates (cof.gg), a sci-fi trading card game. The",
                 experience: [
                   {
-                    company: "Acme",
-                    roleTitle: "Director of Support",
-                    bullets: ["Led support operations and improved team performance."],
+                    company: "Experience entry needs correction",
+                    roleTitle: "",
+                    bullets: [
+                      "Led support operations and improved team performance.",
+                      "Designed and built a full-stack production platform for Conquest of Fates (cof.gg), a sci-fi trading card game.",
+                    ],
                   },
                 ],
                 education: [{ degree: "BA", institution: "State University", location: "Remote" }],

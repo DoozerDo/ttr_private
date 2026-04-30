@@ -169,7 +169,9 @@ export function ResumePreview({
             ? entry.bullets.map((value) => toText(value)).filter(Boolean)
             : [],
         }))
-        .filter((entry) => entry.company && entry.roleTitle && entry.bullets.length > 0)
+        // Allow missing/cleared role titles in correction mode; never require a role title to render
+        // the entry as long as we have a safe company label + bullets.
+        .filter((entry) => entry.company && entry.bullets.length > 0)
     : [];
   const education = model && Array.isArray(model.education)
     ? dedupeEducationEntries(
