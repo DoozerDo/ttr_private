@@ -1612,14 +1612,16 @@ export default function StudioPage() {
     () => getStudioArtifactStorageKey(effectiveJobId, effectiveBaselineId),
     [effectiveBaselineId, effectiveJobId],
   );
+  const [studioArtifactsRefreshNonce, setStudioArtifactsRefreshNonce] = useState(0);
   const studioArtifactHydrationSignature = useMemo(
     () =>
       [
         studioArtifactStorageKey ?? "none",
         effectiveBaselineVersionId ?? "none",
         requestedAnalysisId ?? "none",
+        String(studioArtifactsRefreshNonce),
       ].join("|"),
-    [effectiveBaselineVersionId, requestedAnalysisId, studioArtifactStorageKey],
+    [effectiveBaselineVersionId, requestedAnalysisId, studioArtifactStorageKey, studioArtifactsRefreshNonce],
   );
   useEffect(() => {
     if (!requestedAnalysisId) {
@@ -9284,6 +9286,7 @@ export default function StudioPage() {
 
   const handleManualRegenerate = useCallback(async (source: "resume" | "cover") => {
     console.log("[studio][manual_regenerate_handler_entered]", { source });
+    console.log("REGENERATE_TRIGGERED");
     const signature = workflowOrchestratorCore.contract?.generation.auto.signature ?? null;
     if (process.env.NODE_ENV !== "production") {
       console.warn("[studio][manual_regenerate_clicked]", {
@@ -9313,42 +9316,23 @@ export default function StudioPage() {
       console.warn("[studio][manual_regenerate_start]", { contractSignature: signature });
     }
 
-    // Manual retry must bypass all helper flows and hit the generation endpoints directly.
-    // This avoids any readiness-only routing in helpers and ensures Railway logs show:
-    // - REQ POST /resume
-    // - REQ POST /cover-letters
-    const manualRequestId = createRequestId();
-    const stableSessionKey = `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:${requestedAnalysisId ?? "analysis"}:manual_retry`;
-    const sessionKey = `${stableSessionKey}:${manualRequestId}:${Date.now()}`;
-
+    // Manual retry must hit explicit generation endpoints (not readiness-only paths) and then
+    // re-hydrate Studio artifacts from the readState endpoint.
     const baselineId = effectiveBaselineId ?? null;
-    const baselineVersionId = effectiveBaselineVersionId ?? null;
     const jobId = effectiveJobId ?? null;
-    const analysisId = requestedAnalysisId ?? null;
+    if (!baselineId || !jobId) {
+      console.warn("[studio][manual_regenerate_missing_context]", { baselineId, jobId });
+      return;
+    }
 
-    console.log("[studio][manual_regenerate_resume_requested]", { requestId: manualRequestId, sessionKey });
-    console.log("[studio][manual_regenerate_cover_requested]", { requestId: manualRequestId, sessionKey });
-
-    const payload = {
-      baselineId,
-      baselineVersionId,
-      jobId,
-      analysisId,
-      requestId: manualRequestId,
-      sessionKey,
-      regenerationSource: "manual_retry" as const,
-    };
-
-    console.log("[studio][manual_regenerate_direct_resume]", payload);
-    console.log("[studio][manual_regenerate_direct_cover]", payload);
-
+    const payload = { baselineId, jobId };
     const [resumeResponse, coverResponse] = await Promise.all([
-      fetch("/api/resume", {
+      fetch("/api/resume/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       }),
-      fetch("/api/cover-letters", {
+      fetch("/api/cover-letters/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -9357,10 +9341,12 @@ export default function StudioPage() {
 
     console.log("[studio][manual_regenerate_result]", {
       ok: resumeResponse.ok && coverResponse.ok,
-      requestId: manualRequestId,
       resumeStatus: resumeResponse.status,
       coverStatus: coverResponse.status,
     });
+
+    // Trigger a fresh artifact hydration pass without relying on URL changes or refresh.
+    setStudioArtifactsRefreshNonce((current) => current + 1);
   }, [
     effectiveBaselineId,
     effectiveBaselineVersionId,
