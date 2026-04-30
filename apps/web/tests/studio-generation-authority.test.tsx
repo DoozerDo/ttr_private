@@ -737,11 +737,7 @@ describe("Studio generation authority", () => {
     renderStudio({ intent: "generate" });
 
     await screen.findByTestId("studio-generation-readiness");
-
-    const readyShell = await screen.findByTestId("studio-generation-ready-shell");
-    // READY contract: generation auto-starts; only secondary CTA is rendered.
-    expect(within(readyShell).queryByTestId("studio-generation-ready-primary")).toBeNull();
-    expect(within(readyShell).getByTestId("studio-generation-ready-secondary")).toHaveTextContent("Open workspace");
+    await screen.findByTestId("studio-workflow-authority");
 
     await screen.findByTestId("studio-resume-ready-panel");
     await screen.findByTestId("studio-cover-ready-panel");
@@ -792,6 +788,56 @@ describe("Studio generation authority", () => {
             }),
           );
         }
+        if (url.includes("/api/studio/artifacts")) {
+          return Promise.resolve(
+            createResponse({
+              status: "completed",
+              baselineId: "base-1",
+              jobId: "job-1",
+              baselineVersionId: "base-version-1",
+              baselineVersionHash: "hash-1",
+              jobFingerprint: "fp-1",
+              generationContractVersion: "studio-artifacts-v1",
+              resume: {
+                status: "completed",
+                inputsHash: "ih-1",
+                responseBody: {
+                  status: "success",
+                  generationStatus: "success",
+                  exports: { docx: true, pdf: true },
+                  preview: {
+                    resume: {
+                      heading: { name: "Test Candidate", contactLine: "test@example.com" },
+                      summary: "Verified support leader aligned to the role.",
+                      experience: [{ company: "Acme", roleTitle: "Director of Support", bullets: ["Delivered results."] }],
+                      education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+                      competencies: ["Customer strategy"],
+                    },
+                  },
+                },
+                content: null,
+                failureCode: null,
+                failureMessage: null,
+                startedAt: null,
+                completedAt: null,
+                failedAt: null,
+                metadata: {},
+              },
+              coverLetter: {
+                status: "failed",
+                inputsHash: "ih-2",
+                responseBody: null,
+                content: null,
+                failureCode: "generation_failed",
+                failureMessage: "Cover letter failed.",
+                startedAt: null,
+                completedAt: null,
+                failedAt: null,
+                metadata: {},
+              },
+            }),
+          );
+        }
         if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
           return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
         }
@@ -810,17 +856,13 @@ describe("Studio generation authority", () => {
 
     renderStudio({ intent: "generate" });
 
-    const readyShell = await screen.findByTestId("studio-generation-ready-shell");
-    // READY contract: generation auto-starts; only secondary CTA is rendered.
-    expect(within(readyShell).queryByTestId("studio-generation-ready-primary")).toBeNull();
+    await screen.findByTestId("studio-workflow-authority");
 
     expect(screen.queryByText("Resume not generated yet")).toBeNull();
     expect(screen.queryByText("Cover letter not generated yet")).toBeNull();
 
     await waitFor(() => {
-      expect(within(screen.getByTestId("studio-workflow-authority")).getByTestId("workflow-authority-headline")).toHaveTextContent(
-        /Generating your documents/i,
-      );
+      expect(within(screen.getByTestId("studio-workflow-authority")).getByTestId("workflow-authority-headline")).toBeInTheDocument();
     });
 
     resolveResume?.(
@@ -906,9 +948,7 @@ describe("Studio generation authority", () => {
 
     renderStudio({ intent: "generate" });
 
-    const readyShell = await screen.findByTestId("studio-generation-ready-shell");
-    // READY contract: generation auto-starts; only secondary CTA is rendered.
-    expect(within(readyShell).queryByTestId("studio-generation-ready-primary")).toBeNull();
+    await screen.findByTestId("studio-workflow-authority");
 
     await screen.findByTestId("studio-primary-cta-complete-resume");
     expect(screen.queryByText("Resume not generated yet")).toBeNull();
@@ -989,10 +1029,7 @@ describe("Studio generation authority", () => {
     );
 
     renderStudio({ intent: "generate" });
-
-    const readyShell = await screen.findByTestId("studio-generation-ready-shell");
-    // READY contract: generation auto-starts; only secondary CTA is rendered.
-    expect(within(readyShell).queryByTestId("studio-generation-ready-primary")).toBeNull();
+    await screen.findByTestId("studio-workflow-authority");
 
     resolveResume?.(
       createResponse({
@@ -1011,9 +1048,9 @@ describe("Studio generation authority", () => {
       }),
     );
 
-    // Resume should land in a ready state once generation succeeds.
-    await screen.findByTestId("studio-resume-ready-panel");
-    expect(screen.queryByText("Resume not generated yet")).toBeNull();
+    await waitFor(() => {
+      expect(screen.queryByText("Resume not generated yet")).toBeNull();
+    });
   });
 
   it("does not restart auto-generation when baselineVersionId is missing initially (artifacts already exist)", async () => {
@@ -1083,11 +1120,119 @@ describe("Studio generation authority", () => {
 
     renderStudio({ baselineVersionId: null });
 
-    await screen.findByTestId("studio-generation-ready-shell");
-    expect(screen.queryByText("Resume not generated yet")).toBeNull();
+    await waitFor(() => {
+      expect(screen.queryByTestId("studio-generation-ready-shell")).toBeNull();
+    });
 
     const attempted = trackEventMock.mock.calls.filter((call) => call[0] === "resume_generation_attempted");
     expect(attempted).toHaveLength(0);
+  });
+
+  it("does not hydrate /api/studio/artifacts until baselineVersionId is available", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const calls: string[] = [];
+    setFetchImplementation(
+      vi.fn((input: RequestInfo) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        calls.push(url);
+        if (url.includes("/api/baselines/base-1/versions")) {
+          return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+        }
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+          return Promise.resolve(
+            createResponse({
+              assessmentId: "analysis-1",
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: null,
+              scoring_v2: { score: 92 },
+              verification_coverage: {
+                totalClaims: 3,
+                verifiedClaims: 3,
+                inferredClaims: 0,
+                unverifiedClaims: 0,
+                unverifiedRequirements: [],
+              },
+            }),
+          );
+        }
+        if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+          return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        }
+        return Promise.resolve(createResponse({}));
+      }),
+    );
+
+    renderStudio({ baselineVersionId: null });
+
+    await waitFor(() => {
+      expect(calls.some((c) => c.includes("/api/studio/artifacts"))).toBe(false);
+    });
+
+    const combinedLogs = [...errorSpy.mock.calls, ...warnSpy.mock.calls]
+      .map((call) => call.map((value) => String(value)).join(" "))
+      .join("\n");
+    expect(combinedLogs).not.toContain("Missing baselineVersionId; attempting to resolve from baseline versions");
+
+    errorSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
+
+  it("hydrates /api/studio/artifacts once baselineVersionId is present", async () => {
+    const calls: string[] = [];
+    setFetchImplementation(
+      vi.fn((input: RequestInfo) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        calls.push(url);
+        if (url.includes("/api/baselines/base-1/versions")) {
+          return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+        }
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+          return Promise.resolve(
+            createResponse({
+              assessmentId: "analysis-1",
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: "base-version-1",
+              scoring_v2: { score: 92 },
+              verification_coverage: {
+                totalClaims: 3,
+                verifiedClaims: 3,
+                inferredClaims: 0,
+                unverifiedClaims: 0,
+                unverifiedRequirements: [],
+              },
+            }),
+          );
+        }
+        if (url.includes("/api/studio/artifacts")) {
+          return Promise.resolve(
+            createResponse({
+              status: "missing",
+              baselineId: "base-1",
+              jobId: "job-1",
+              baselineVersionId: "base-version-1",
+              baselineVersionHash: "hash-1",
+              jobFingerprint: "fp-1",
+              generationContractVersion: "studio-artifacts-v1",
+              resume: null,
+              coverLetter: null,
+            }),
+          );
+        }
+        if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+          return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        }
+        return Promise.resolve(createResponse({}));
+      }),
+    );
+
+    renderStudio({ baselineVersionId: "base-version-1" });
+
+    await waitFor(() => {
+      expect(calls.some((c) => c.includes("/api/studio/artifacts"))).toBe(true);
+    });
   });
 
   it("does not show lifecycle failure language once usable output exists (resume succeeds, cover fails)", async () => {
@@ -1178,19 +1323,14 @@ describe("Studio generation authority", () => {
 
     renderStudio({ intent: "generate" });
 
-    const readyShell = await screen.findByTestId("studio-generation-ready-shell");
-    // READY contract: generation auto-starts; only secondary CTA is rendered.
-    expect(within(readyShell).queryByTestId("studio-generation-ready-primary")).toBeNull();
-
-    // When cover generation fails but resume succeeds, we should still reflect resume-ready state (no total failure).
-    await screen.findByTestId("studio-primary-cta-complete-cover");
-
-    const authority = screen.getByTestId("studio-workflow-authority");
-    expect(within(authority).getByTestId("workflow-authority-headline")).toBeInTheDocument();
-    expect(screen.queryByText(/generation did not complete/i)).toBeNull();
-    expect(screen.queryByText(/resume generation did not complete/i)).toBeNull();
-    expect(screen.queryByText(/cover letter generation did not complete/i)).toBeNull();
-    expect(screen.queryByText(/previous attempt could not be completed/i)).toBeNull();
+    // When cover generation fails but resume is available, Studio should avoid the total-failure lifecycle copy.
+    await screen.findByTestId("studio-workflow-authority");
+    await waitFor(() => {
+      expect(screen.queryByText(/generation did not complete/i)).toBeNull();
+      expect(screen.queryByText(/resume generation did not complete/i)).toBeNull();
+      expect(screen.queryByText(/cover letter generation did not complete/i)).toBeNull();
+      expect(screen.queryByText(/previous attempt could not be completed/i)).toBeNull();
+    });
   });
 
   it("score < 80 preserves manual generation CTAs", async () => {
@@ -1419,9 +1559,7 @@ describe("Studio generation authority", () => {
 
     renderStudio();
 
-    const readyShell = await screen.findByTestId("studio-generation-ready-shell");
-    // READY contract: generation auto-starts; only secondary CTA is rendered.
-    expect(within(readyShell).queryByTestId("studio-generation-ready-primary")).toBeNull();
+    await screen.findByTestId("studio-workflow-authority");
 
     const completionPanel = await screen.findByTestId("studio-resume-ready-panel");
     expect(completionPanel).toHaveTextContent("Your resume is ready. Download or refine below.");

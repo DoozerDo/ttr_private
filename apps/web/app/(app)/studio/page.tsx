@@ -1675,6 +1675,14 @@ export default function StudioPage() {
       setStudioArtifactsHydrated(false);
       return;
     }
+    // Hard guard: never hydrate Studio artifacts until we have a baselineVersionId. The artifacts
+    // endpoint requires baselineId + baselineVersionId + jobId. Attempting to hydrate without a
+    // baselineVersionId creates a degraded cached state and blocks recovery.
+    if (!effectiveBaselineVersionId) {
+      studioArtifactHydrationKeyRef.current = null;
+      suppressAutoGenerationRef.current = false;
+      return;
+    }
     if (studioArtifactHydrationKeyRef.current === studioArtifactHydrationSignature) {
       return;
     }
@@ -1778,55 +1786,11 @@ export default function StudioPage() {
       try {
         const hasBaselineId = Boolean(effectiveBaselineId);
         const hasJobId = Boolean(effectiveJobId);
-        let resolvedBaselineVersionId = effectiveBaselineVersionId;
-        const hasBaselineVersionId = Boolean(resolvedBaselineVersionId);
+        const resolvedBaselineVersionId = effectiveBaselineVersionId;
 
         // The artifacts API requires baselineId + baselineVersionId + jobId. Do not call without them.
         if (!hasBaselineId || !hasJobId) {
           throw new Error("Missing required artifacts context");
-        }
-
-        if (!hasBaselineVersionId) {
-          console.error("[STUDIO][ARTIFACTS] Missing baselineVersionId; attempting to resolve from baseline versions.", {
-            baselineId: effectiveBaselineId,
-            jobId: effectiveJobId,
-            analysisId: requestedAnalysisId ?? null,
-          });
-          try {
-            const versionsResponse = await fetch(
-              `/api/baselines/${encodeURIComponent(effectiveBaselineId)}/versions`,
-              { cache: "no-store" },
-            );
-            const versionsPayload = await readResponsePayload(versionsResponse);
-            if (versionsResponse.ok && Array.isArray(versionsPayload)) {
-              const versions = versionsPayload
-                .map((record) => {
-                  if (!record || typeof record !== "object") return null;
-                  const candidate = record as { id?: unknown; versionNumber?: unknown };
-                  const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
-                  const versionNumber =
-                    typeof candidate.versionNumber === "number" ? candidate.versionNumber : Number(candidate.versionNumber);
-                  if (!id || !Number.isFinite(versionNumber)) return null;
-                  return { id, versionNumber };
-                })
-                .filter((value): value is { id: string; versionNumber: number } => Boolean(value));
-              const resolved = versions.sort((a, b) => b.versionNumber - a.versionNumber)[0]?.id ?? null;
-              if (resolved) {
-                resolvedBaselineVersionId = resolved;
-              }
-            }
-          } catch {
-            // fall through to cache fallback below
-          }
-        }
-
-        if (!resolvedBaselineVersionId) {
-          console.error("[STUDIO][ARTIFACTS] baselineVersionId still missing; blocking artifacts fetch.", {
-            baselineId: effectiveBaselineId,
-            jobId: effectiveJobId,
-            analysisId: requestedAnalysisId ?? null,
-          });
-          throw new Error("Missing baselineVersionId");
         }
 
         const artifactsParams = new URLSearchParams();
@@ -9848,6 +9812,7 @@ export default function StudioPage() {
           {canonicalStudioReadinessMessage}
         </p>
         <div
+          data-testid="studio-generation-ready-shell"
           data-workflow-shell="generation-ready-shell"
           data-workflow-state={workflowOrchestratorCore.authorityState.canonicalState}
           data-workflow-trust-tone={workflowOrchestratorCore.authorityState.trustTone}
