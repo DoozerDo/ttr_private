@@ -281,6 +281,27 @@ describe('ResumeService contract', () => {
     baseline.sections = [{ ...baseSection, content: original }];
   });
 
+  it('sanitizes preview output by clearing malformed role titles like \"Technical Architect & Full\"', () => {
+    const { sanitizeResumePreviewForStudio } = require('./resume.service');
+    const preview = sanitizeResumePreviewForStudio({
+      heading: { name: 'Test Candidate', contactLine: '' },
+      summary: 'Test summary',
+      experience: [
+        {
+          company: 'Example Co',
+          roleTitle: 'Technical Architect & Full',
+          bullets: ['Did work.'],
+          dateRange: '2020 - 2024',
+        },
+      ],
+      education: [],
+      competencies: [],
+    });
+
+    expect(preview.experience[0].roleTitle).toBe('');
+    expect(preview.experience[0].company).toBe('Example Co');
+  });
+
   it('marks resume as not export-ready when experience headers are malformed (sentence-like title/company)', async () => {
     const { service } = buildService();
 

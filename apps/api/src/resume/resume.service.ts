@@ -131,7 +131,7 @@ function shouldAppendHeaderValueAsBullet(value: string): boolean {
   return looksLikeSentence(text) || startsWithActionVerb(text);
 }
 
-function sanitizeResumePreviewForStudio(
+export function sanitizeResumePreviewForStudio(
   resume: NormalizedResumeDocument,
 ): NormalizedResumeDocument {
   const experience = Array.isArray(resume.experience) ? resume.experience : [];
@@ -2533,6 +2533,12 @@ export class ResumeService {
         reused: reservation.status === 'existing_completed',
       },
     };
+
+    // Final safety: ensure the exact preview payload returned to Studio is sanitized.
+    response.preview.resume = sanitizeResumePreviewForStudio(response.preview.resume);
+    // Temporary debug log for deploy verification; remove once the Studio preview path is confirmed stable.
+    // eslint-disable-next-line no-console
+    console.log('SANITIZED_PREVIEW_OUT', response.preview.resume);
     await this.studioArtifactsService.recordResumeSuccess({
       userId,
       baselineId: studioArtifactContext.baselineId,
