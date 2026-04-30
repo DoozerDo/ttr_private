@@ -9354,6 +9354,52 @@ export default function StudioPage() {
     requestedAnalysisId,
     workflowOrchestratorCore.contract?.generation.auto.signature,
   ]);
+
+  const handleGenerateResume = useCallback(async () => {
+    const baselineId = effectiveBaselineId ?? null;
+    const jobId = effectiveJobId ?? null;
+    console.log("GENERATE_RESUME_CLICKED");
+    if (!baselineId || !jobId) {
+      console.warn("[studio][generate_missing_context]", { baselineId, jobId, source: "resume" });
+      return;
+    }
+    setResumeGenerating(true);
+    try {
+      const response = await fetch("/api/resume/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baselineId, jobId }),
+      });
+      if (response.ok) {
+        setStudioArtifactsRefreshNonce((current) => current + 1);
+      }
+    } finally {
+      setResumeGenerating(false);
+    }
+  }, [effectiveBaselineId, effectiveJobId]);
+
+  const handleGenerateCoverLetter = useCallback(async () => {
+    const baselineId = effectiveBaselineId ?? null;
+    const jobId = effectiveJobId ?? null;
+    console.log("GENERATE_COVER_CLICKED");
+    if (!baselineId || !jobId) {
+      console.warn("[studio][generate_missing_context]", { baselineId, jobId, source: "cover_letter" });
+      return;
+    }
+    setCoverGenerating(true);
+    try {
+      const response = await fetch("/api/cover-letters/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baselineId, jobId }),
+      });
+      if (response.ok) {
+        setStudioArtifactsRefreshNonce((current) => current + 1);
+      }
+    } finally {
+      setCoverGenerating(false);
+    }
+  }, [effectiveBaselineId, effectiveJobId]);
   useEffect(() => {
     const contract = workflowOrchestratorCore.contract;
     if (!contract) return;
@@ -10984,6 +11030,16 @@ export default function StudioPage() {
             testId="studio-resume-missing"
             title="Resume not generated yet"
             body="Generate your resume to preview and refine your application."
+            cta={
+              <FormButton
+                type="button"
+                onClick={() => void handleGenerateResume()}
+                disabled={pageTruth.isGenerating || resumeGenerating || coverGenerating}
+                data-testid="studio-generate-resume-button"
+              >
+                Generate resume
+              </FormButton>
+            }
           />
         )}
       </section>
@@ -11439,6 +11495,18 @@ export default function StudioPage() {
                   coverAutoGenerating || coverGenerateNowPending
                     ? "This usually finishes in a moment."
                     : "Generate your cover letter to create a tailored introduction."
+                }
+                cta={
+                  coverAutoGenerating || coverGenerateNowPending ? null : (
+                    <FormButton
+                      type="button"
+                      onClick={() => void handleGenerateCoverLetter()}
+                      disabled={pageTruth.isGenerating || resumeGenerating || coverGenerating}
+                      data-testid="studio-generate-cover-button"
+                    >
+                      Generate cover letter
+                    </FormButton>
+                  )
                 }
               />
             )
