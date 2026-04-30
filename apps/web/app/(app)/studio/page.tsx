@@ -7607,6 +7607,16 @@ export default function StudioPage() {
   const heroHeadline = workflowSurfaceAuthorityHero.headline;
   const heroBody = workflowSurfaceAuthorityHero.body;
   const normalizedArtifacts = workflowOrchestratorCore.artifactState;
+
+  // Studio "generated_unusable" lane: generation completed but output failed quality and is not usable.
+  // Must be declared before any render branches that reference it (e.g. low-quality recovery lanes).
+  const studioContractSignature = workflowOrchestratorCore.contract?.generation.auto.signature ?? null;
+  const studioEffectiveGenerationState =
+    workflowOrchestratorCore.contract?.generation.state === "generated" && !artifactContract.hasUsableArtifacts
+      ? "generated_unusable"
+      : workflowOrchestratorCore.contract?.generation.state ?? null;
+  const studioIsGeneratedUnusable = studioEffectiveGenerationState === "generated_unusable";
+
   const resumeVisibleGeneratingDebug =
     resumeAutoGenerating || resumeGenerateNowPending || resumeGenerating || resumeSingleFlightInFlight;
   const coverVisibleGeneratingDebug =
@@ -9132,11 +9142,6 @@ export default function StudioPage() {
     }
   }, [artifactContract.hasUsableArtifacts, workflowOrchestratorCore.contract?.generation.auto.signature]);
 
-  const studioContractSignature = workflowOrchestratorCore.contract?.generation.auto.signature ?? null;
-  const studioEffectiveGenerationState =
-    workflowOrchestratorCore.contract?.generation.state === "generated" && !artifactContract.hasUsableArtifacts
-      ? "generated_unusable"
-      : workflowOrchestratorCore.contract?.generation.state ?? null;
   const studioAutoRetryCount = useMemo(() => {
     if (!studioContractSignature) return 0;
     const inMemory = retryCountRef.current[studioContractSignature] ?? 0;
@@ -9167,7 +9172,6 @@ export default function StudioPage() {
       studioArtifactPairStatus === "in_progress");
   const studioAutoRetryCapReached =
     studioEffectiveGenerationState === "generated_unusable" && studioAutoRetryCount >= MAX_AUTO_RETRIES;
-  const studioIsGeneratedUnusable = studioEffectiveGenerationState === "generated_unusable";
 
   const generationReadyAutoStartRef = useRef<string | null>(null);
 
