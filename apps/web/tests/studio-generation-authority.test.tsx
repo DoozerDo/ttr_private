@@ -166,19 +166,15 @@ describe("Studio artifact quality gating (soft)", () => {
 
   it("ResumePreview trusts sanitized API fields and does not render malformed role titles from overrides", () => {
     const payload = {
-      preview: {
-        resume: {
-          heading: { name: "Test Candidate", contactLine: "test@example.com" },
-          summary: "Low quality resume preview.",
-          experience: [
-            {
-              company: "Experience entry needs correction",
-              roleTitle: "",
-              bullets: ["Designed and built a full-stack production platform."],
-            },
-          ],
+      heading: { name: "Test Candidate", contactLine: "test@example.com" },
+      summary: "Low quality resume preview.",
+      experience: [
+        {
+          company: "Experience entry needs correction",
+          roleTitle: "",
+          bullets: ["Designed and built a full-stack production platform."],
         },
-      },
+      ],
     };
 
     const overrideModel = {

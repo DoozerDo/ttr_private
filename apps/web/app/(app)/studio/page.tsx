@@ -2399,6 +2399,13 @@ export default function StudioPage() {
       hasExportableContent: resumePresenter.hasExportableContent,
     });
   }, [artifactContract.normalized.resumeResponse, resumePresenter.hasExportableContent, resumePresenter.status]);
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    if (!artifactContract.normalized.resumeResponse) return;
+    const previewModel = readResumeModel(artifactContract.normalized.resumeResponse);
+    if (!previewModel) return;
+    console.log("STUDIO_PREVIEW_SOURCE", previewModel);
+  }, [artifactContract.normalized.resumeResponse]);
   const generatedResumeModel = artifactContract.resumeModel;
   const effectiveResumeModel = isResumeEditMode
     ? draftResumeModel
@@ -2433,6 +2440,11 @@ export default function StudioPage() {
   const canExportResume = artifactContract.resumeExportAvailable && resumeQuality.exportable;
   const resumePreviewText = useMemo(
     () => formatPreview(artifactContract.normalized.resumeResponse),
+    [artifactContract.normalized.resumeResponse],
+  );
+  // Canonical Studio resume preview source is the API-provided, sanitized preview model.
+  const resumePreviewModel = useMemo(
+    () => readResumeModel(artifactContract.normalized.resumeResponse),
     [artifactContract.normalized.resumeResponse],
   );
   const coverLetterParagraphs = artifactContract.coverLetterModel?.paragraphs ?? [];
@@ -8108,8 +8120,8 @@ export default function StudioPage() {
                     </div>
                   ) : (
                     <ResumePreview
-                      payload={resumeState.response}
-                      model={effectiveResumeModel}
+                      payload={resumePreviewModel}
+                      model={null}
                       fallbackText={resumePreviewText}
                       claimHighlights={visibleImprovableClaims}
                       isEditing={false}
@@ -10809,8 +10821,12 @@ export default function StudioPage() {
                 </div>
               ) : (
                 <ResumePreview
-                  payload={resumeState.response}
-                  model={effectiveResumeModel}
+                  payload={
+                    isResumeEditMode
+                      ? resumeState.response
+                      : resumePreviewModel
+                  }
+                  model={isResumeEditMode ? effectiveResumeModel : null}
                   fallbackText={resumePreviewText}
                   claimHighlights={visibleImprovableClaims}
                   trustApiSanitizedModel={!resumeQualityPass}

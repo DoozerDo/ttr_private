@@ -26,6 +26,17 @@ export function readResumeModel(payload: unknown): ResumeModel | null {
   if (!payload || typeof payload !== "object") return null;
   const rawRecord = payload as Record<string, unknown>;
 
+  // Direct preview model shape (API: response.preview.resume) may be passed through without wrapper.
+  // Detect it by the presence of resume-model keys rather than requiring a preview envelope.
+  const looksLikeDirectResumeModel =
+    "heading" in rawRecord ||
+    "summary" in rawRecord ||
+    "experience" in rawRecord ||
+    "education" in rawRecord ||
+    "competencies" in rawRecord ||
+    "coreCompetencies" in rawRecord;
+  if (looksLikeDirectResumeModel) return rawRecord as ResumeModel;
+
   const maybePayload =
     rawRecord.payload && typeof rawRecord.payload === "object"
       ? (rawRecord.payload as Record<string, unknown>)

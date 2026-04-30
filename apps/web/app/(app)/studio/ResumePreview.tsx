@@ -146,6 +146,16 @@ export function ResumePreview({
   onSummaryChange,
   onBulletChange,
 }: Props) {
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    if (isEditing) return;
+    const maybeObject = payload as Record<string, unknown> | null | undefined;
+    if (maybeObject && typeof maybeObject === "object" && "preview" in maybeObject) {
+      console.warn(
+        "[studio][resume_preview_payload_shape_warning] expected payload to be API preview.resume, received a wrapper object with preview.*",
+      );
+    }
+  }, [isEditing, payload]);
   const model = useMemo(() => {
     if (trustApiSanitizedModel && !isEditing) {
       return readResumeModel(payload);
