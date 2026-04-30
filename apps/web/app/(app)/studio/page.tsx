@@ -2405,6 +2405,7 @@ export default function StudioPage() {
     const previewModel = readResumeModel(artifactContract.normalized.resumeResponse);
     if (!previewModel) return;
     console.log("STUDIO_PREVIEW_SOURCE", previewModel);
+    console.log("RESUME_PREVIEW_SOURCE", previewModel);
   }, [artifactContract.normalized.resumeResponse]);
   const generatedResumeModel = artifactContract.resumeModel;
   const effectiveResumeModel = isResumeEditMode
@@ -8119,19 +8120,7 @@ export default function StudioPage() {
                       </details>
                     </div>
                   ) : (
-                    <ResumePreview
-                      payload={resumePreviewModel}
-                      model={null}
-                      fallbackText={resumePreviewText}
-                      claimHighlights={visibleImprovableClaims}
-                      isEditing={false}
-                      hasUnsavedChanges={false}
-                      onEnterEditMode={handleEnterResumeEditMode}
-                      onSaveEdits={handleSaveResumeEdits}
-                      onCancelEdits={handleCancelResumeEdits}
-                      onSummaryChange={handleResumeSummaryChange}
-                      onBulletChange={handleResumeBulletChange}
-                    />
+                    <ResumePreview payload={artifactContract.normalized.resumeResponse?.preview?.resume} />
                   )}
                 </div>
                 {resumeCopyStatus ? (
@@ -10820,24 +10809,7 @@ export default function StudioPage() {
                   </details>
                 </div>
               ) : (
-                <ResumePreview
-                  payload={
-                    isResumeEditMode
-                      ? resumeState.response
-                      : resumePreviewModel
-                  }
-                  model={isResumeEditMode ? effectiveResumeModel : null}
-                  fallbackText={resumePreviewText}
-                  claimHighlights={visibleImprovableClaims}
-                  trustApiSanitizedModel={!resumeQualityPass}
-                  isEditing={isResumeEditMode}
-                  hasUnsavedChanges={hasUnsavedResumeEdits}
-                  onEnterEditMode={handleEnterResumeEditMode}
-                  onSaveEdits={handleSaveResumeEdits}
-                  onCancelEdits={handleCancelResumeEdits}
-                  onSummaryChange={handleResumeSummaryChange}
-                  onBulletChange={handleResumeBulletChange}
-                />
+                <ResumePreview payload={artifactContract.normalized.resumeResponse?.preview?.resume} />
               )}
             </div>
             {!isApplicationApplied ? (

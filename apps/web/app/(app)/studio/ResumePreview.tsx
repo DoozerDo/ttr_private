@@ -26,8 +26,6 @@ export {
 
 type Props = {
   payload?: unknown;
-  model?: ResumeModel | null;
-  trustApiSanitizedModel?: boolean;
   fallbackText?: string;
   claimHighlights?: Array<{
     id: string;
@@ -134,10 +132,8 @@ function dedupeEducationEntries(entries: ResumeEducation[]): ResumeEducation[] {
 
 export function ResumePreview({
   payload,
-  model: modelOverride,
   fallbackText,
   claimHighlights,
-  trustApiSanitizedModel = false,
   isEditing = false,
   hasUnsavedChanges = false,
   onEnterEditMode,
@@ -156,12 +152,10 @@ export function ResumePreview({
       );
     }
   }, [isEditing, payload]);
-  const model = useMemo(() => {
-    if (trustApiSanitizedModel && !isEditing) {
-      return readResumeModel(payload);
-    }
-    return modelOverride ?? readResumeModel(payload);
-  }, [isEditing, modelOverride, payload, trustApiSanitizedModel]);
+
+  // Studio must render resume preview from API-sanitized `response.preview.resume` only.
+  // Do not merge/override with any other data source.
+  const model = useMemo(() => readResumeModel(payload), [payload]);
   const [expandedExperienceIndex, setExpandedExperienceIndex] = useState<number | null>(null);
   const [showFullResume, setShowFullResume] = useState(false);
   const [summaryExpanded, setSummaryExpanded] = useState(false);

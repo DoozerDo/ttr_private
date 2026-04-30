@@ -177,25 +177,9 @@ describe("Studio artifact quality gating (soft)", () => {
       ],
     };
 
-    const overrideModel = {
-      heading: { name: "Test Candidate", contactLine: "test@example.com" },
-      summary: "Override model (should be ignored in correction mode).",
-      experience: [
-        {
-          company: "Acme",
-          roleTitle: "Technical Architect & Full",
-          bullets: ["Did work."],
-        },
-      ],
-      competencies: [],
-      education: [],
-    } as unknown as Parameters<typeof ResumePreview>[0]["model"];
-
     render(
       <ResumePreview
         payload={payload}
-        model={overrideModel}
-        trustApiSanitizedModel={true}
         isEditing={false}
       />,
     );
