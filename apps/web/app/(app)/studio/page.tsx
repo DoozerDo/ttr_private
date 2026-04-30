@@ -9357,10 +9357,17 @@ export default function StudioPage() {
 
   const handleGenerateResume = useCallback(async () => {
     const baselineId = effectiveBaselineId ?? null;
+    const baselineVersionId = effectiveBaselineVersionId ?? null;
     const jobId = effectiveJobId ?? null;
     console.log("GENERATE_RESUME_CLICKED");
-    if (!baselineId || !jobId) {
-      console.warn("[studio][generate_missing_context]", { baselineId, jobId, source: "resume" });
+    console.log("GENERATE_PAYLOAD", { baselineId, baselineVersionId, jobId });
+    if (!baselineId || !jobId || !baselineVersionId) {
+      console.error("[studio][generate_missing_context]", {
+        baselineId,
+        baselineVersionId,
+        jobId,
+        source: "resume",
+      });
       return;
     }
     setResumeGenerating(true);
@@ -9368,7 +9375,7 @@ export default function StudioPage() {
       const response = await fetch("/api/resume/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ baselineId, jobId }),
+        body: JSON.stringify({ baselineId, baselineVersionId, jobId }),
       });
       if (response.ok) {
         setStudioArtifactsRefreshNonce((current) => current + 1);
@@ -9376,14 +9383,21 @@ export default function StudioPage() {
     } finally {
       setResumeGenerating(false);
     }
-  }, [effectiveBaselineId, effectiveJobId]);
+  }, [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId]);
 
   const handleGenerateCoverLetter = useCallback(async () => {
     const baselineId = effectiveBaselineId ?? null;
+    const baselineVersionId = effectiveBaselineVersionId ?? null;
     const jobId = effectiveJobId ?? null;
     console.log("GENERATE_COVER_CLICKED");
-    if (!baselineId || !jobId) {
-      console.warn("[studio][generate_missing_context]", { baselineId, jobId, source: "cover_letter" });
+    console.log("GENERATE_PAYLOAD", { baselineId, baselineVersionId, jobId });
+    if (!baselineId || !jobId || !baselineVersionId) {
+      console.error("[studio][generate_missing_context]", {
+        baselineId,
+        baselineVersionId,
+        jobId,
+        source: "cover_letter",
+      });
       return;
     }
     setCoverGenerating(true);
@@ -9391,7 +9405,7 @@ export default function StudioPage() {
       const response = await fetch("/api/cover-letters/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ baselineId, jobId }),
+        body: JSON.stringify({ baselineId, baselineVersionId, jobId }),
       });
       if (response.ok) {
         setStudioArtifactsRefreshNonce((current) => current + 1);
@@ -9399,7 +9413,7 @@ export default function StudioPage() {
     } finally {
       setCoverGenerating(false);
     }
-  }, [effectiveBaselineId, effectiveJobId]);
+  }, [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId]);
   useEffect(() => {
     const contract = workflowOrchestratorCore.contract;
     if (!contract) return;
@@ -11034,7 +11048,12 @@ export default function StudioPage() {
               <FormButton
                 type="button"
                 onClick={() => void handleGenerateResume()}
-                disabled={pageTruth.isGenerating || resumeGenerating || coverGenerating}
+                disabled={
+                  !effectiveBaselineVersionId ||
+                  pageTruth.isGenerating ||
+                  resumeGenerating ||
+                  coverGenerating
+                }
                 data-testid="studio-generate-resume-button"
               >
                 Generate resume
@@ -11501,7 +11520,12 @@ export default function StudioPage() {
                     <FormButton
                       type="button"
                       onClick={() => void handleGenerateCoverLetter()}
-                      disabled={pageTruth.isGenerating || resumeGenerating || coverGenerating}
+                      disabled={
+                        !effectiveBaselineVersionId ||
+                        pageTruth.isGenerating ||
+                        resumeGenerating ||
+                        coverGenerating
+                      }
                       data-testid="studio-generate-cover-button"
                     >
                       Generate cover letter

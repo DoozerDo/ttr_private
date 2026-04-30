@@ -171,7 +171,82 @@ describe("Studio artifact quality gating (soft)", () => {
     });
   });
 
-  // Missing-artifact Generate CTAs are asserted in the Studio page contract smoke tests for the READY shell.
+  it("includes baselineVersionId in missing-artifact generate payloads", async () => {
+    const calls: Array<{ url: string; method: string; body?: string }> = [];
+    setFetchImplementation(
+      vi.fn((input: RequestInfo, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        const method = (init?.method ?? "GET").toUpperCase();
+        const body = typeof init?.body === "string" ? init.body : undefined;
+        calls.push({ url, method, body });
+
+        if (url.includes("/api/baselines/base-1/versions")) {
+          return Promise.resolve(
+            createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+          );
+        }
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+          return Promise.resolve(
+            createResponse({
+              assessmentId: "analysis-1",
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: "base-version-1",
+              scoring_v2: { score: 72 },
+              verification_coverage: {
+                totalClaims: 3,
+                verifiedClaims: 3,
+                inferredClaims: 0,
+                unverifiedClaims: 0,
+                unverifiedRequirements: [],
+              },
+            }),
+          );
+        }
+        if (url.includes("/api/studio/artifacts")) {
+          return Promise.resolve(
+            createResponse({
+              status: "missing",
+              baselineId: "base-1",
+              jobId: "job-1",
+              baselineVersionId: "base-version-1",
+              baselineVersionHash: "hash-1",
+              jobFingerprint: "fp-1",
+              generationContractVersion: "studio-artifacts-v1",
+              resume: null,
+              coverLetter: null,
+            }),
+          );
+        }
+        if (method === "POST" && url.includes("/api/resume/generate")) {
+          return Promise.resolve(createResponse({ status: "ok" }));
+        }
+        if (method === "POST" && url.includes("/api/cover-letters/generate")) {
+          return Promise.resolve(createResponse({ status: "ok" }));
+        }
+        if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+          return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        }
+        return Promise.resolve(createResponse({}));
+      }),
+    );
+
+    renderStudio({ intent: null });
+
+    const resumeButton = await screen.findByTestId("studio-generate-resume-button");
+    fireEvent.click(resumeButton);
+    await waitFor(() => {
+      const resumeCall = calls.find((c) => c.method === "POST" && c.url.includes("/api/resume/generate"));
+      expect(resumeCall?.body).toContain("\"baselineVersionId\":\"base-version-1\"");
+    });
+
+    const coverButton = await screen.findByTestId("studio-generate-cover-button");
+    fireEvent.click(coverButton);
+    await waitFor(() => {
+      const coverCall = calls.find((c) => c.method === "POST" && c.url.includes("/api/cover-letters/generate"));
+      expect(coverCall?.body).toContain("\"baselineVersionId\":\"base-version-1\"");
+    });
+  });
 
   it("ResumePreview trusts sanitized API fields and does not render malformed role titles from overrides", () => {
     const payload = {
