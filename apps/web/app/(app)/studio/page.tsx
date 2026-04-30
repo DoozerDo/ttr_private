@@ -309,6 +309,29 @@ type DocumentState = {
   artifactFailure: StudioArtifactFailurePresentation | null;
 };
 
+function summarizeStudioBody(payload: unknown): string {
+  try {
+    if (payload == null) return "null";
+    if (typeof payload === "string") return payload.slice(0, 800);
+    if (typeof payload === "number" || typeof payload === "boolean") return String(payload);
+    if (typeof payload !== "object") return String(payload).slice(0, 800);
+
+    const record = payload as Record<string, unknown>;
+    const nestedError = record.error && typeof record.error === "object" ? (record.error as Record<string, unknown>) : null;
+    const messageCandidate =
+      (typeof nestedError?.message === "string" && nestedError.message) ||
+      (typeof record.message === "string" && record.message) ||
+      (typeof nestedError?.code === "string" && nestedError.code) ||
+      (typeof record.code === "string" && record.code) ||
+      null;
+    if (messageCandidate) return String(messageCandidate).slice(0, 800);
+
+    return JSON.stringify(record).slice(0, 800);
+  } catch {
+    return "unavailable";
+  }
+}
+
 type CoverLetterJobContextPayload = {
   allowedCompanies?: string[];
   allowedRoleTitles?: string[];
@@ -1747,6 +1770,16 @@ export default function StudioPage() {
         artifactsParams.set("jobId", jobId);
         if (requestedAnalysisId) artifactsParams.set("analysisId", requestedAnalysisId);
 
+        if (process.env.NODE_ENV === "development") {
+          console.info("[STUDIO_ARTIFACTS_FETCH]", {
+            attempt,
+            baselineId,
+            baselineVersionId,
+            jobId,
+            analysisId: requestedAnalysisId ?? null,
+          });
+        }
+
         const response = await fetch(`/api/studio/artifacts?${artifactsParams.toString()}`, { cache: "no-store" });
         const payload = await readResponsePayload(response);
         if (response.ok && payload && typeof payload === "object" && !Array.isArray(payload)) {
@@ -1754,11 +1787,30 @@ export default function StudioPage() {
           applyStudioArtifactsPayload(backend);
           setStudioArtifactsHydrated(true);
 
+          if (process.env.NODE_ENV === "development") {
+            console.info("[STUDIO_ARTIFACTS_RESULT]", {
+              attempt,
+              status: response.status,
+              ok: response.ok,
+              hasResume: Boolean(backend.resume?.responseBody) || Boolean(backend.resumeResult),
+              hasCoverLetter: Boolean(backend.coverLetter?.responseBody) || Boolean(backend.coverLetterResult),
+            });
+          }
+
           const resumeOk = options.expectedResume ? Boolean(backend.resume?.responseBody) || Boolean(backend.resumeResult) : true;
           const coverOk = options.expectedCover
             ? Boolean(backend.coverLetter?.responseBody) || Boolean(backend.coverLetterResult)
             : true;
           if (resumeOk && coverOk) return;
+        } else if (process.env.NODE_ENV === "development") {
+          console.info("[STUDIO_ARTIFACTS_RESULT]", {
+            attempt,
+            status: response.status,
+            ok: response.ok,
+            hasResume: false,
+            hasCoverLetter: false,
+            bodySummary: summarizeStudioBody(payload),
+          });
         }
 
         if (attempt < 3) {
@@ -9391,7 +9443,13 @@ export default function StudioPage() {
       return;
     }
 
-    const payload = { baselineId, jobId };
+    const baselineVersionId = effectiveBaselineVersionId ?? null;
+    const payload = {
+      baselineId,
+      baselineVersionId: baselineVersionId ?? undefined,
+      jobId,
+      ...(requestedAnalysisId ? { analysisId: requestedAnalysisId } : {}),
+    };
     const [resumeResponse, coverResponse] = await Promise.all([
       fetch("/api/resume/generate", {
         method: "POST",
@@ -9405,14 +9463,55 @@ export default function StudioPage() {
       }),
     ]);
 
+    const [resumePayload, coverPayload] = await Promise.all([
+      readResponsePayload(resumeResponse.clone()),
+      readResponsePayload(coverResponse.clone()),
+    ]);
+
+    if (process.env.NODE_ENV === "development") {
+      console.info("[STUDIO_GENERATE_RESPONSE]", {
+        type: "resume",
+        status: resumeResponse.status,
+        ok: resumeResponse.ok,
+        bodySummary: summarizeStudioBody(resumePayload),
+      });
+      console.info("[STUDIO_GENERATE_RESPONSE]", {
+        type: "cover_letter",
+        status: coverResponse.status,
+        ok: coverResponse.ok,
+        bodySummary: summarizeStudioBody(coverPayload),
+      });
+    }
+
     console.log("[studio][manual_regenerate_result]", {
       ok: resumeResponse.ok && coverResponse.ok,
       resumeStatus: resumeResponse.status,
       coverStatus: coverResponse.status,
     });
 
-    // Trigger a fresh artifact hydration pass without relying on URL changes or refresh.
-    setStudioArtifactsRefreshNonce((current) => current + 1);
+    if (!resumeResponse.ok) {
+      setResumeState((current) => ({
+        ...current,
+        response: null,
+        error: `Resume generation failed (${resumeResponse.status}): ${summarizeStudioBody(resumePayload)}`,
+        tierGateError: null,
+        artifactFailure: null,
+      }));
+    }
+    if (!coverResponse.ok) {
+      setCoverState((current) => ({
+        ...current,
+        response: null,
+        error: `Cover letter generation failed (${coverResponse.status}): ${summarizeStudioBody(coverPayload)}`,
+        tierGateError: null,
+        artifactFailure: null,
+      }));
+    }
+
+    if (resumeResponse.ok && coverResponse.ok) {
+      // Trigger a fresh artifact hydration pass without relying on URL changes or refresh.
+      setStudioArtifactsRefreshNonce((current) => current + 1);
+    }
   }, [
     effectiveBaselineId,
     effectiveBaselineVersionId,
@@ -9443,10 +9542,28 @@ export default function StudioPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ baselineId, baselineVersionId, jobId }),
       });
-      if (response.ok) {
-        await refreshStudioArtifactsAfterGenerate({ expectedResume: true });
-        setStudioArtifactsRefreshNonce((current) => current + 1);
+      const payload = await readResponsePayload(response.clone());
+      if (process.env.NODE_ENV === "development") {
+        console.info("[STUDIO_GENERATE_RESPONSE]", {
+          type: "resume",
+          status: response.status,
+          ok: response.ok,
+          bodySummary: summarizeStudioBody(payload),
+        });
       }
+      if (!response.ok) {
+        setResumeState((current) => ({
+          ...current,
+          response: null,
+          error: `Resume generation failed (${response.status}): ${summarizeStudioBody(payload)}`,
+          tierGateError: null,
+          artifactFailure: null,
+        }));
+        return;
+      }
+
+      await refreshStudioArtifactsAfterGenerate({ expectedResume: true });
+      setStudioArtifactsRefreshNonce((current) => current + 1);
     } finally {
       setResumeGenerating(false);
     }
@@ -9474,10 +9591,28 @@ export default function StudioPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ baselineId, baselineVersionId, jobId }),
       });
-      if (response.ok) {
-        await refreshStudioArtifactsAfterGenerate({ expectedCover: true });
-        setStudioArtifactsRefreshNonce((current) => current + 1);
+      const payload = await readResponsePayload(response.clone());
+      if (process.env.NODE_ENV === "development") {
+        console.info("[STUDIO_GENERATE_RESPONSE]", {
+          type: "cover_letter",
+          status: response.status,
+          ok: response.ok,
+          bodySummary: summarizeStudioBody(payload),
+        });
       }
+      if (!response.ok) {
+        setCoverState((current) => ({
+          ...current,
+          response: null,
+          error: `Cover letter generation failed (${response.status}): ${summarizeStudioBody(payload)}`,
+          tierGateError: null,
+          artifactFailure: null,
+        }));
+        return;
+      }
+
+      await refreshStudioArtifactsAfterGenerate({ expectedCover: true });
+      setStudioArtifactsRefreshNonce((current) => current + 1);
     } finally {
       setCoverGenerating(false);
     }
