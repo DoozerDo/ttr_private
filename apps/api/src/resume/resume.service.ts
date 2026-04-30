@@ -2396,7 +2396,7 @@ export class ResumeService {
     reservationRunId = reservation.runId;
 
     if (reservation.status === 'existing_completed' && reservation.responseBody) {
-      return {
+      const response = {
         ...(reservation.responseBody as ResumeGenerationResponse),
         idempotency: {
           status: reservation.status,
@@ -2405,6 +2405,17 @@ export class ResumeService {
           reused: true,
         },
       } as ResumeGenerationResponse;
+
+      if (response?.preview?.resume) {
+        response.preview.resume = sanitizeResumePreviewForStudio(response.preview.resume);
+        // eslint-disable-next-line no-console
+        console.log('FINAL_SANITIZED_PREVIEW', {
+          roleTitle: response.preview.resume.experience?.[0]?.roleTitle,
+          company: response.preview.resume.experience?.[0]?.company,
+        });
+      }
+
+      return response;
     }
 
     if (reservation.status === 'existing_in_flight') {
@@ -2535,12 +2546,14 @@ export class ResumeService {
     };
 
     // Final safety: ensure the exact preview payload returned to Studio is sanitized.
-    if (response.preview.resume) {
+    if (response?.preview?.resume) {
       response.preview.resume = sanitizeResumePreviewForStudio(response.preview.resume);
+      // eslint-disable-next-line no-console
+      console.log('FINAL_SANITIZED_PREVIEW', {
+        roleTitle: response.preview.resume.experience?.[0]?.roleTitle,
+        company: response.preview.resume.experience?.[0]?.company,
+      });
     }
-    // Temporary debug log for deploy verification; remove once the Studio preview path is confirmed stable.
-    // eslint-disable-next-line no-console
-    console.log('SANITIZED_PREVIEW_OUT', response.preview.resume);
     await this.studioArtifactsService.recordResumeSuccess({
       userId,
       baselineId: studioArtifactContext.baselineId,

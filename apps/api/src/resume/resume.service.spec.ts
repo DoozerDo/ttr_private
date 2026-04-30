@@ -302,6 +302,56 @@ describe('ResumeService contract', () => {
     expect(preview.experience[0].company).toBe('Example Co');
   });
 
+  it('applies preview sanitization on idempotency reuse responses before returning to client', async () => {
+    const { service, workflowIdempotencyService } = buildService();
+
+    (workflowIdempotencyService.reserve as jest.Mock).mockResolvedValueOnce({
+      status: 'existing_completed',
+      runId: 'audit-1',
+      responseBody: {
+        ok: true,
+        status: 'success',
+        generationStatus: 'success',
+        exportReady: false,
+        blocked: false,
+        baselineId: 'baseline-1',
+        baselineVersionId: 'baseline-version-1',
+        jobId: 'job-1',
+        sections: [],
+        compliance_flags: [],
+        compliance_blocked: false,
+        audit_id: 'audit-1',
+        auditId: 'audit-1',
+        baseline_version_hash: 'hash-1',
+        quality: 'draft',
+        exports: { docx: false, pdf: false },
+        preview: {
+          resume: {
+            heading: { name: 'Test Candidate', contactLine: '' },
+            summary: 'Test summary',
+            experience: [
+              {
+                company: 'Example Co',
+                roleTitle: 'Technical Architect & Full',
+                bullets: ['Did work.'],
+                dateRange: '2020 - 2024',
+              },
+            ],
+            education: [],
+            competencies: [],
+          },
+        },
+        trackerEntryId: null,
+        trackerStatus: null,
+        opportunityId: null,
+        idempotency: null,
+      },
+    });
+
+    const result = await service.generateResume('user-1', baseRequest);
+    expect(result.preview?.resume?.experience?.[0]?.roleTitle ?? '').toBe('');
+  });
+
   it('marks resume as not export-ready when experience headers are malformed (sentence-like title/company)', async () => {
     const { service } = buildService();
 
