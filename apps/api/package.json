@@ -19,7 +19,7 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "start:prod": "npm run migration:run && node dist/main",
+    "start:prod": "npm run migration:run && node dist/apps/api/src/main.js",
     "lint": "eslint \"src/**/*.ts\"",
     "test": "jest",
     "test:calibration": "jest --config jest.calibration.config.js --runInBand",
