@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   ResumeEducation,
   ResumeExperience,
@@ -185,6 +185,80 @@ export function ResumePreview({
       )
     : [];
 
+  const headerActionVerbs = useMemo(
+    () =>
+      new Set(
+        [
+          "designed",
+          "built",
+          "led",
+          "managed",
+          "created",
+          "implemented",
+          "developed",
+          "owned",
+          "improved",
+          "reduced",
+          "increased",
+          "delivered",
+          "supported",
+          "maintained",
+          "coordinated",
+          "partnered",
+          "collaborated",
+          "architected",
+          "automated",
+          "migrated",
+          "troubleshot",
+          "resolved",
+        ],
+      ),
+    [],
+  );
+
+  const sanitizeHeaderField = useCallback(
+    (value: string): string => {
+      const text = toText(value).replace(/\s+/g, " ").trim();
+      if (!text) return "";
+
+      const words = text.split(/\s+/).filter(Boolean);
+      if (words.length > 10) return "";
+
+      const firstWord = (words[0] ?? "").toLowerCase();
+      if (firstWord && headerActionVerbs.has(firstWord)) return "";
+
+      // Sentence-like punctuation patterns indicate prose, not headers.
+      if (/[.!?]/.test(text)) return "";
+      if (/[,:;]\s/.test(text) && words.length > 6) return "";
+
+      return text;
+    },
+    [headerActionVerbs],
+  );
+
+  const deriveHeader = useCallback(
+    (entry: { company: string; roleTitle: string }) => {
+      const company = sanitizeHeaderField(entry.company);
+      const roleTitle = sanitizeHeaderField(entry.roleTitle);
+
+      if (company && roleTitle) {
+        return { company, roleTitle, placeholder: false };
+      }
+      if (company) {
+        return { company, roleTitle: "", placeholder: false };
+      }
+      if (roleTitle) {
+        return { company: "", roleTitle, placeholder: false };
+      }
+      return {
+        company: "Experience entry needs correction",
+        roleTitle: "",
+        placeholder: true,
+      };
+    },
+    [sanitizeHeaderField],
+  );
+
   useEffect(() => {
     if (!isEditing) return;
     setShowFullResume(true);
@@ -361,10 +435,11 @@ export function ResumePreview({
               const expanded = expandedExperienceIndex === experienceIndex;
               const headerId = `studio-resume-experience-role-header-${experienceIndex}`;
               const bodyId = `studio-resume-experience-role-body-${experienceIndex}`;
+              const safeHeader = deriveHeader({ company: entry.company, roleTitle: entry.roleTitle });
 
               return (
                 <article
-                  key={`${entry.company}-${entry.roleTitle}-${experienceIndex}`}
+                  key={`${safeHeader.company || "no-company"}-${safeHeader.roleTitle || "no-role"}-${experienceIndex}`}
                   className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/20 data-[studio-focus-highlight=true]:ring-2 data-[studio-focus-highlight=true]:ring-amber-300/60"
                   data-testid="experience-entry-block"
                   data-studio-role-block="true"
@@ -373,10 +448,12 @@ export function ResumePreview({
                   {isEditing ? (
                     <div className="flex items-start justify-between gap-3 border-b border-white/10 px-6 py-5 text-left">
                       <div className="space-y-1">
-                        <p className="text-lg font-semibold text-slate-50">{entry.company}</p>
-                        <p className="text-base font-medium text-slate-200">
-                          {[entry.roleTitle, entry.location].filter(Boolean).join(" | ")}
-                        </p>
+                        {safeHeader.company ? (
+                          <p className="text-lg font-semibold text-slate-50">{safeHeader.company}</p>
+                        ) : null}
+                        {safeHeader.roleTitle ? (
+                          <p className="text-base font-medium text-slate-200">{safeHeader.roleTitle}</p>
+                        ) : null}
                         <p className="text-xs text-slate-400">
                           {entry.bullets.length} {entry.bullets.length === 1 ? "bullet" : "bullets"}
                         </p>
@@ -405,10 +482,12 @@ export function ResumePreview({
                       data-testid={headerId}
                     >
                       <div className="space-y-1">
-                        <p className="text-lg font-semibold text-slate-50">{entry.company}</p>
-                        <p className="text-base font-medium text-slate-200">
-                          {[entry.roleTitle, entry.location].filter(Boolean).join(" | ")}
-                        </p>
+                        {safeHeader.company ? (
+                          <p className="text-lg font-semibold text-slate-50">{safeHeader.company}</p>
+                        ) : null}
+                        {safeHeader.roleTitle ? (
+                          <p className="text-base font-medium text-slate-200">{safeHeader.roleTitle}</p>
+                        ) : null}
                         <p className="text-xs text-slate-400">
                           {entry.bullets.length} {entry.bullets.length === 1 ? "bullet" : "bullets"}
                         </p>

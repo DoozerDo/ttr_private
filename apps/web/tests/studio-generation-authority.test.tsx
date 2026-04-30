@@ -123,7 +123,13 @@ describe("Studio artifact quality gating (soft)", () => {
     // Placeholder header appears when title/company are sanitized.
     expect(within(resumeSection as HTMLElement).getByText("Experience entry needs correction")).toBeInTheDocument();
     // Expand the entry so bullets are rendered, then ensure the accomplishment only appears in bullets.
-    fireEvent.click(within(resumeSection as HTMLElement).getByText("Experience entry needs correction"));
+    const resumeExperienceHeader = within(resumeSection as HTMLElement).getByText("Experience entry needs correction");
+    const resumeExperienceHeaderButton = resumeExperienceHeader.closest("button");
+    expect(resumeExperienceHeaderButton).toBeTruthy();
+    expect(resumeExperienceHeaderButton?.textContent ?? "").not.toMatch(/Designed and built a full-stack production platform/i);
+    expect(resumeExperienceHeaderButton?.textContent ?? "").not.toMatch(/Technical Architect & Full/i);
+
+    fireEvent.click(resumeExperienceHeader);
     const accomplishmentNodes = await within(resumeSection as HTMLElement).findAllByText(
       /Designed and built a full-stack production platform/i,
     );
