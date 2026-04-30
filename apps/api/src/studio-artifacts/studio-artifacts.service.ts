@@ -6,6 +6,8 @@ import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
 import { Job } from '../jobs/job.entity';
 import { StudioArtifact, StudioArtifactLifecycleStatus } from './studio-artifact.entity';
+import type { NormalizedResumeDocument } from '../documents/normalized-document.models';
+import { sanitizeResumePreviewForStudio } from '../resume/resumePreviewSanitizer';
 
 export type StudioArtifactKind = 'resume' | 'cover_letter';
 
@@ -71,6 +73,23 @@ function safeText(value: unknown) {
 function normalizeRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object') return null;
   return value as Record<string, unknown>;
+}
+
+function sanitizeStoredResumeResponseBody(value: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!value) return null;
+  const preview = value.preview;
+  if (!preview || typeof preview !== 'object') return value;
+  const previewRecord = preview as Record<string, unknown>;
+  const resume = previewRecord.resume;
+  if (!resume || typeof resume !== 'object') return value;
+
+  return {
+    ...value,
+    preview: {
+      ...previewRecord,
+      resume: sanitizeResumePreviewForStudio(resume as NormalizedResumeDocument),
+    },
+  };
 }
 
 function shouldDebugDocgen() {
@@ -402,7 +421,7 @@ export class StudioArtifactsService {
     if (inputsHash && inputsHash !== expectedInputsHash) return null;
     const responseBody =
       artifact === 'resume'
-        ? normalizeRecord(record.resumeResponseBody)
+        ? sanitizeStoredResumeResponseBody(normalizeRecord(record.resumeResponseBody))
         : normalizeRecord(record.coverLetterResponseBody);
     const content =
       artifact === 'resume' ? record.resumeContent : record.coverLetterContent;

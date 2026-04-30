@@ -91,13 +91,9 @@ import {
   repairResumeForQuality,
   validateResumeArtifactQuality,
   type ArtifactQualityGate,
-  isMalformedResumeExperienceCompany,
-  isMalformedResumeExperienceRoleTitle,
-  looksLikeSentence,
-  startsWithActionVerb,
-  endsWithDanglingHeaderToken,
 } from '../artifacts/artifactQualityValidator';
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
+import { sanitizeResumePreviewForStudio } from './resumePreviewSanitizer';
 
 export type GenerateResumeRequest = {
   baselineId: string;
@@ -119,77 +115,8 @@ function buildVerifiedOnlyRequest(request: GenerateResumeRequest): GenerateResum
   };
 }
 
-function normalizeForBulletMatch(value: string): string {
-  return String(value ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
-}
-
-function shouldAppendHeaderValueAsBullet(value: string): boolean {
-  const text = String(value ?? '').trim();
-  if (!text) return false;
-  // Only append if it looks like an accomplishment sentence; never append dangling header fragments.
-  if (endsWithDanglingHeaderToken(text)) return false;
-  return looksLikeSentence(text) || startsWithActionVerb(text);
-}
-
-export function sanitizeResumePreviewForStudio(
-  resume: NormalizedResumeDocument,
-): NormalizedResumeDocument {
-  const experience = Array.isArray(resume.experience) ? resume.experience : [];
-  if (!experience.length) return resume;
-
-  const sanitizedExperience = experience.map((entry) => {
-    const company = typeof (entry as any)?.company === 'string' ? (entry as any).company : '';
-    const roleTitle = typeof (entry as any)?.roleTitle === 'string' ? (entry as any).roleTitle : '';
-    const bulletsRaw = Array.isArray((entry as any)?.bullets) ? ((entry as any).bullets as unknown[]) : [];
-    const bullets = bulletsRaw.map((b) => String(b ?? '')).filter(Boolean);
-    const bulletIndex = new Set(bullets.map(normalizeForBulletMatch));
-
-    const next: any = { ...(entry as any) };
-    let removedCompany: string | null = null;
-    let removedRoleTitle: string | null = null;
-
-    if (company && isMalformedResumeExperienceCompany(company)) {
-      removedCompany = company;
-      next.company = '';
-    }
-    if (roleTitle && isMalformedResumeExperienceRoleTitle(roleTitle)) {
-      removedRoleTitle = roleTitle;
-      next.roleTitle = '';
-    }
-
-    const appended: string[] = [];
-    for (const removed of [removedCompany, removedRoleTitle]) {
-      if (!removed) continue;
-      if (!shouldAppendHeaderValueAsBullet(removed)) continue;
-      const key = normalizeForBulletMatch(removed);
-      if (key && !bulletIndex.has(key)) {
-        appended.push(removed.trim());
-        bulletIndex.add(key);
-      }
-    }
-
-    if (appended.length) {
-      next.bullets = [...bullets, ...appended];
-    } else {
-      next.bullets = bullets;
-    }
-
-    const hasCompany = Boolean(String(next.company ?? '').trim());
-    const hasRole = Boolean(String(next.roleTitle ?? '').trim());
-    if (!hasCompany && !hasRole) {
-      // Placeholder is for UI only; export is already blocked upstream when qualityGate fails.
-      next.company = 'Experience entry needs correction';
-      next.roleTitle = '';
-    }
-
-    return next as any;
-  });
-
-  return {
-    ...(resume as any),
-    experience: sanitizedExperience as any,
-  };
-}
+// Resume preview sanitization is implemented in `resumePreviewSanitizer.ts` so it can be reused by
+// both generation and Studio artifact rehydration read paths without circular imports.
 
 const NO_CLAIM_RISK: ClaimRiskResult = { level: 'None', flaggedTerms: [] };
 
@@ -2408,10 +2335,11 @@ export class ResumeService {
 
       if (response?.preview?.resume) {
         response.preview.resume = sanitizeResumePreviewForStudio(response.preview.resume);
+        const resume = response.preview.resume;
         // eslint-disable-next-line no-console
         console.log('FINAL_SANITIZED_PREVIEW', {
-          roleTitle: response.preview.resume.experience?.[0]?.roleTitle,
-          company: response.preview.resume.experience?.[0]?.company,
+          roleTitle: resume.experience?.[0]?.roleTitle,
+          company: resume.experience?.[0]?.company,
         });
       }
 
@@ -2548,10 +2476,11 @@ export class ResumeService {
     // Final safety: ensure the exact preview payload returned to Studio is sanitized.
     if (response?.preview?.resume) {
       response.preview.resume = sanitizeResumePreviewForStudio(response.preview.resume);
+      const resume = response.preview.resume;
       // eslint-disable-next-line no-console
       console.log('FINAL_SANITIZED_PREVIEW', {
-        roleTitle: response.preview.resume.experience?.[0]?.roleTitle,
-        company: response.preview.resume.experience?.[0]?.company,
+        roleTitle: resume.experience?.[0]?.roleTitle,
+        company: resume.experience?.[0]?.company,
       });
     }
     await this.studioArtifactsService.recordResumeSuccess({

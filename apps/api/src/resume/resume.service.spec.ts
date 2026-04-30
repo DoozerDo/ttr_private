@@ -282,7 +282,7 @@ describe('ResumeService contract', () => {
   });
 
   it('sanitizes preview output by clearing malformed role titles like \"Technical Architect & Full\"', () => {
-    const { sanitizeResumePreviewForStudio } = require('./resume.service');
+    const { sanitizeResumePreviewForStudio } = require('./resumePreviewSanitizer');
     const preview = sanitizeResumePreviewForStudio({
       heading: { name: 'Test Candidate', contactLine: '' },
       summary: 'Test summary',

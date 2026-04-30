@@ -72,6 +72,73 @@ describe('StudioArtifactsService', () => {
     expect(state.coverLetter?.status).toBeUndefined();
   });
 
+  it('sanitizes stored resume preview on readState so malformed role titles never rehydrate to Studio', async () => {
+    const studioArtifactRepository = createRepository<any>();
+    const baselineVersionRepository = {
+      findOne: jest.fn(async () => baselineVersion),
+    };
+    const jobRepository = {
+      findOne: jest.fn(async () => job),
+    };
+    const assessmentRepository = {
+      findOne: jest.fn(async () => assessment),
+    };
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository as any,
+      baselineVersionRepository as any,
+      jobRepository as any,
+      assessmentRepository as any,
+    );
+
+    const inputsHash = service.computeResumeInputsHash({
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: service.computeJobFingerprint(job as any),
+      assessmentInputsHash: assessment.inputsHash,
+    });
+
+    await service.recordResumeSuccess({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: service.computeJobFingerprint(job as any),
+      inputsHash,
+      responseBody: {
+        status: 'success',
+        preview: {
+          resume: {
+            heading: { name: 'Alex' },
+            summary: 'Test summary',
+            experience: [
+              {
+                company: 'Example Co',
+                roleTitle: 'Technical Architect & Full',
+                bullets: ['Did work.'],
+              },
+            ],
+          },
+        },
+      },
+      content: 'resume-content',
+      metadata: { auditId: 'audit-1' },
+    });
+
+    const state = await service.readState({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      analysisId: 'analysis-1',
+    });
+
+    const responseBody = state.resume?.responseBody ?? null;
+    expect(responseBody).toBeTruthy();
+    const preview = (responseBody as any)?.preview?.resume;
+    expect(preview?.experience?.[0]?.roleTitle ?? '').toBe('');
+  });
+
   it('returns in progress and failed states and invalidates stale inputs deterministically', async () => {
     const studioArtifactRepository = createRepository<any>();
     const baselineVersionRepository = {
