@@ -56,14 +56,8 @@ import {
 } from '../docx-templates/docx-template.registry';
 import { resolveBaselineIdentity } from '../baseline/baseline-identity.utils';
 import { resolveBaselineSectionsForGeneration } from '../baseline/baseline-section-source';
-import {
-  buildResumeDraftSections,
-  extractEvidenceUnitsFromLogicalUnits,
-  extractJobKeywords,
-  reconstructLogicalTextUnits,
-  type ResumeDraftSection,
-  validateResumeDraftBulletAnchors,
-} from './resume-draft-bullets';
+import * as ResumeDraftBullets from './resume-draft-bullets';
+import type { ResumeDraftSection } from './resume-draft-bullets';
 import {
   buildNormalizedResumeDocument,
   buildResumePlainText,
@@ -97,6 +91,11 @@ import {
   repairResumeForQuality,
   validateResumeArtifactQuality,
   type ArtifactQualityGate,
+  isMalformedResumeExperienceCompany,
+  isMalformedResumeExperienceRoleTitle,
+  looksLikeSentence,
+  startsWithActionVerb,
+  endsWithDanglingHeaderToken,
 } from '../artifacts/artifactQualityValidator';
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
 
@@ -117,6 +116,78 @@ function buildVerifiedOnlyRequest(request: GenerateResumeRequest): GenerateResum
     jobId: request.jobId ?? null,
     analysisId: request.analysisId,
     oneTap: true,
+  };
+}
+
+function normalizeForBulletMatch(value: string): string {
+  return String(value ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function shouldAppendHeaderValueAsBullet(value: string): boolean {
+  const text = String(value ?? '').trim();
+  if (!text) return false;
+  // Only append if it looks like an accomplishment sentence; never append dangling header fragments.
+  if (endsWithDanglingHeaderToken(text)) return false;
+  return looksLikeSentence(text) || startsWithActionVerb(text);
+}
+
+function sanitizeResumePreviewForStudio(
+  resume: NormalizedResumeDocument,
+): NormalizedResumeDocument {
+  const experience = Array.isArray(resume.experience) ? resume.experience : [];
+  if (!experience.length) return resume;
+
+  const sanitizedExperience = experience.map((entry) => {
+    const company = typeof (entry as any)?.company === 'string' ? (entry as any).company : '';
+    const roleTitle = typeof (entry as any)?.roleTitle === 'string' ? (entry as any).roleTitle : '';
+    const bulletsRaw = Array.isArray((entry as any)?.bullets) ? ((entry as any).bullets as unknown[]) : [];
+    const bullets = bulletsRaw.map((b) => String(b ?? '')).filter(Boolean);
+    const bulletIndex = new Set(bullets.map(normalizeForBulletMatch));
+
+    const next: any = { ...(entry as any) };
+    let removedCompany: string | null = null;
+    let removedRoleTitle: string | null = null;
+
+    if (company && isMalformedResumeExperienceCompany(company)) {
+      removedCompany = company;
+      next.company = '';
+    }
+    if (roleTitle && isMalformedResumeExperienceRoleTitle(roleTitle)) {
+      removedRoleTitle = roleTitle;
+      next.roleTitle = '';
+    }
+
+    const appended: string[] = [];
+    for (const removed of [removedCompany, removedRoleTitle]) {
+      if (!removed) continue;
+      if (!shouldAppendHeaderValueAsBullet(removed)) continue;
+      const key = normalizeForBulletMatch(removed);
+      if (key && !bulletIndex.has(key)) {
+        appended.push(removed.trim());
+        bulletIndex.add(key);
+      }
+    }
+
+    if (appended.length) {
+      next.bullets = [...bullets, ...appended];
+    } else {
+      next.bullets = bullets;
+    }
+
+    const hasCompany = Boolean(String(next.company ?? '').trim());
+    const hasRole = Boolean(String(next.roleTitle ?? '').trim());
+    if (!hasCompany && !hasRole) {
+      // Placeholder is for UI only; export is already blocked upstream when qualityGate fails.
+      next.company = 'Experience entry needs correction';
+      next.roleTitle = '';
+    }
+
+    return next as any;
+  });
+
+  return {
+    ...(resume as any),
+    experience: sanitizedExperience as any,
   };
 }
 
@@ -529,8 +600,8 @@ export class ResumeService {
     resumeInputSections: BaselineSection[],
   ): ArtifactTraceAudit {
     const availableEvidenceIds = resumeInputSections.flatMap((section) => {
-      const logicalUnits = reconstructLogicalTextUnits(section.content ?? '');
-      return extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits).map((unit) => unit.id);
+      const logicalUnits = ResumeDraftBullets.reconstructLogicalTextUnits(section.content ?? '');
+      return ResumeDraftBullets.extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits).map((unit) => unit.id);
     });
 
     const traceMap: Record<string, string[]> = {};
@@ -887,7 +958,7 @@ export class ResumeService {
     dimensionScores?: FitAssessment['dimensionScores'] | null;
     jobTitle?: string | null;
   }): ResumeDraftSection[] {
-    const keywordList = extractJobKeywords(payload.jobText, 28);
+    const keywordList = ResumeDraftBullets.extractJobKeywords(payload.jobText, 28);
     const keywordSet = keywordList.length ? new Set(keywordList.map((kw) => kw.toLowerCase())) : new Set<string>();
 
     const strongestDimensions = payload.dimensionScores
@@ -1257,14 +1328,14 @@ export class ResumeService {
     const logicalUnitsReconstructed = payload.resumeInputSections
       .filter((section) => String(section.sectionType ?? section.type ?? '').toUpperCase() === 'EXPERIENCE')
       .reduce(
-        (sum, section) => sum + reconstructLogicalTextUnits(section.content ?? '').length,
+        (sum, section) => sum + ResumeDraftBullets.reconstructLogicalTextUnits(section.content ?? '').length,
         0,
       );
     const extractedEvidenceUnits = payload.resumeInputSections
       .filter((section) => String(section.sectionType ?? section.type ?? '').toUpperCase() === 'EXPERIENCE')
       .reduce((sum, section) => {
-        const logicalUnits = reconstructLogicalTextUnits(section.content ?? '');
-        return sum + extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits).length;
+        const logicalUnits = ResumeDraftBullets.reconstructLogicalTextUnits(section.content ?? '');
+        return sum + ResumeDraftBullets.extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits).length;
       }, 0);
     const draftedBullets = payload.draftedSections.reduce(
       (sum, section) => sum + (Array.isArray(section.bullets) ? section.bullets.length : 0),
@@ -1407,8 +1478,8 @@ export class ResumeService {
       .find(Boolean);
 
     for (const section of sections) {
-      const logicalUnits = reconstructLogicalTextUnits(section.content ?? '');
-      const evidenceUnits = extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits);
+      const logicalUnits = ResumeDraftBullets.reconstructLogicalTextUnits(section.content ?? '');
+      const evidenceUnits = ResumeDraftBullets.extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits);
 
       for (const evidence of evidenceUnits) {
         const text = String(evidence.normalizedText ?? '').trim();
@@ -1894,7 +1965,7 @@ export class ResumeService {
     let sections: ResumeDraftSection[] = forcedMinimalSections ?? [];
     if (!forcedMinimalSections) {
       try {
-        sections = this.sanitizeDraftSections(buildResumeDraftSections(resumeInputSections, {
+        sections = this.sanitizeDraftSections(ResumeDraftBullets.buildResumeDraftSections(resumeInputSections, {
           jobText: draftJobText || null,
           gapGuidance: !request.oneTap && gapGuidance
             ? {
@@ -1980,6 +2051,7 @@ export class ResumeService {
       normalizedDocument = repaired;
       qualityGate = repairedGate;
     }
+    const sanitizedPreviewDocument = sanitizeResumePreviewForStudio(normalizedDocument);
     let experienceDiagnostics = this.buildExperiencePipelineDiagnostics({
       sectionsWithPolicies,
       allowedSections,
@@ -2003,7 +2075,7 @@ export class ResumeService {
     });
     const bulletAnchorValidation = usedMinimalFallback
       ? { valid: true, reasons: [] }
-      : validateResumeDraftBulletAnchors(
+      : ResumeDraftBullets.validateResumeDraftBulletAnchors(
           sections,
           resumeInputSections,
         );
@@ -2411,11 +2483,12 @@ export class ResumeService {
       final: qualityGate,
       repairAttempted,
     });
+    const exportable = qualityGate.status === 'pass';
     const response: ResumeGenerationResponse = {
       ok: true,
       status: 'success',
       generationStatus: 'success',
-      exportReady: true,
+      exportReady: exportable,
       blocked: false,
       baselineId: baseline.id,
       baselineVersionId: baselineVersion.id,
@@ -2429,9 +2502,9 @@ export class ResumeService {
       quality,
       traceMap: resumeTraceAudit.traceMap,
       debugTrace: resumeTraceAudit.debugTrace,
-      exports,
+      exports: exportable ? exports : ({ docx: false, pdf: false } as DocumentGenerationExports),
       preview: {
-        resume: normalizedDocument,
+        resume: sanitizedPreviewDocument,
       },
       trackerEntryId: trackerEntry.id,
       trackerStatus: trackerEntry.status,

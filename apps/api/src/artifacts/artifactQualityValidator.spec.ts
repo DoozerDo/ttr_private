@@ -45,5 +45,26 @@ describe('artifactQualityValidator', () => {
     // The repair can still leave weak/generic opening patterns; ensure we can still flag.
     expect(repairedGate.status === 'pass' || repairedGate.status === 'needs_refinement').toBe(true);
   });
-});
 
+  it('flags sentence-like experience headers as malformed', () => {
+    const resume: any = {
+      heading: { name: 'Test', contactLine: 'test@example.com' },
+      summary: 'Summary.',
+      competencies: [],
+      experience: [
+        {
+          company:
+            'Designed and built a full-stack production platform for Conquest of Fates (cof.gg), a sci-fi trading card game',
+          roleTitle: 'Technical Architect & Full',
+          bullets: ['Did a thing.'],
+        },
+      ],
+      education: [],
+    };
+
+    const gate = validateResumeArtifactQuality(resume);
+    expect(gate.status).toBe('needs_refinement');
+    expect(gate.reasons).toContain('malformed_experience_header:company');
+    expect(gate.reasons).toContain('malformed_experience_header:role_title');
+  });
+});

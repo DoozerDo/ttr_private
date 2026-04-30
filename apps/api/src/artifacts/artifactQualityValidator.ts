@@ -43,6 +43,55 @@ const COVER_BANNED_PHRASES: Array<{ label: string; pattern: RegExp }> = [
   { label: "banned_phrase:'strongest fit'", pattern: /\bstrongest fit\b/i },
 ];
 
+const EXPERIENCE_TITLE_ACTION_VERBS = new Set(
+  [
+    'designed',
+    'built',
+    'led',
+    'managed',
+    'created',
+    'implemented',
+    'developed',
+    'owned',
+    'improved',
+    'reduced',
+    'increased',
+    'delivered',
+    'supported',
+    'maintained',
+    'coordinated',
+    'partnered',
+    'collaborated',
+    'architected',
+    'automated',
+    'migrated',
+    'troubleshot',
+    'resolved',
+  ].map((value) => value.toLowerCase()),
+);
+
+const EXPERIENCE_TITLE_DANGLING_SUFFIXES = new Set(
+  [
+    'and',
+    'or',
+    'with',
+    'for',
+    'to',
+    'of',
+    'full',
+    'senior',
+    'lead',
+    'principal',
+    'technical',
+    'software',
+    'frontend',
+    'backend',
+    'cloud',
+    'platform',
+    'systems',
+  ].map((value) => value.toLowerCase()),
+);
+
 function trimToText(value: unknown): string {
   return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
 }
@@ -73,6 +122,32 @@ function detectTrailingFragmentReason(value: string): string | null {
   const raw = trimToText(value);
   if (!raw) return null;
   return endsWithDanglingFragment(raw) ? 'incomplete_trailing_fragment' : null;
+}
+
+export function looksLikeSentence(value: string): boolean {
+  const text = trimToText(value);
+  if (!text) return false;
+  if (/[.!?]\s*$/.test(text)) return true;
+  if (/[.!?]/.test(text) && text.split(/\s+/).length > 6) return true;
+  // Common prose patterns unlikely in role/company headers.
+  if (/[,:;]\s/.test(text) && text.split(/\s+/).length > 10) return true;
+  return false;
+}
+
+export function startsWithActionVerb(value: string): boolean {
+  const text = trimToText(value);
+  if (!text) return false;
+  const first = text.split(/\s+/)[0]?.toLowerCase() ?? '';
+  if (!first) return false;
+  return EXPERIENCE_TITLE_ACTION_VERBS.has(first);
+}
+
+export function endsWithDanglingHeaderToken(value: string): boolean {
+  const normalized = normalizeForTrailingCheck(trimToText(value));
+  if (!normalized) return false;
+  const lastToken = normalized.split(/\s+/).pop()?.toLowerCase() ?? '';
+  if (!lastToken) return false;
+  return EXPERIENCE_TITLE_DANGLING_SUFFIXES.has(lastToken);
 }
 
 export function validateResumeArtifactQuality(
@@ -110,6 +185,18 @@ export function validateResumeArtifactQuality(
       reasons.push('empty_role');
     }
 
+    // Structural header contract: never allow bullet-like prose to be treated as the experience header.
+    if (roleTitle) {
+      if (looksLikeSentence(roleTitle) || startsWithActionVerb(roleTitle) || endsWithDanglingHeaderToken(roleTitle)) {
+        reasons.push('malformed_experience_header:role_title');
+      }
+    }
+    if (company) {
+      if (looksLikeSentence(company) || startsWithActionVerb(company)) {
+        reasons.push('malformed_experience_header:company');
+      }
+    }
+
     for (const bullet of bullets) {
       reasons.push(...detectPlaceholderReasons(bullet));
       const trailing = detectTrailingFragmentReason(bullet);
@@ -122,6 +209,18 @@ export function validateResumeArtifactQuality(
     status: unique.length > 0 ? 'needs_refinement' : 'pass',
     reasons: unique,
   };
+}
+
+export function isMalformedResumeExperienceRoleTitle(value: string): boolean {
+  const text = trimToText(value);
+  if (!text) return false;
+  return looksLikeSentence(text) || startsWithActionVerb(text) || endsWithDanglingHeaderToken(text);
+}
+
+export function isMalformedResumeExperienceCompany(value: string): boolean {
+  const text = trimToText(value);
+  if (!text) return false;
+  return looksLikeSentence(text) || startsWithActionVerb(text);
 }
 
 export function validateCoverLetterArtifactQuality(
@@ -229,4 +328,3 @@ export function repairCoverLetterForQuality(
     })
     .filter(Boolean);
 }
-
