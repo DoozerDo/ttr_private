@@ -2,6 +2,7 @@ import { BadRequestException, UnprocessableEntityException } from '@nestjs/commo
 import { Repository } from 'typeorm';
 import { ResumeService, GenerateResumeRequest } from './resume.service';
 import { RESUME_GENERATION_V2_FEATURE_FLAG } from './resume-generation-v2';
+import { UnprocessableEntityException } from '@nestjs/common';
 import { Baseline, BaselineStatus } from '../baseline/baseline.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
@@ -339,6 +340,52 @@ describe('ResumeService contract', () => {
       expect((result as any)?.internal?.generationPipeline).toBe('v2');
       expect(JSON.stringify((result as any)?.preview ?? {})).not.toContain('Vue 3), deck builder frontend');
       expect(String((result as any)?.preview?.resume?.summary ?? '').trim().length).toBeGreaterThan(0);
+    } finally {
+      baseline.sections = originalSections;
+      if (typeof originalFlag === 'string') {
+        process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      } else {
+        delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+      }
+    }
+  });
+
+  it('does not use top-level minimal fallback when RESUME_GENERATION_V2=true and V2 fails', async () => {
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
+    const originalSections = baseline.sections;
+    try {
+      const { service, studioArtifactsService } = buildService();
+
+      baseline.sections = [
+        {
+          ...baseSection,
+          id: 'section-name',
+          sectionType: BaselineSectionType.SUMMARY as any,
+          title: 'Summary',
+          order: 0,
+          content: ['Test User'].join('\n'),
+        } as any,
+        {
+          ...baseSection,
+          order: 1,
+          content: [
+            'Vue 3), deck builder frontend | Project',
+            '- Implemented state management.',
+          ].join('\n'),
+        },
+      ];
+
+      await expect(
+        service.generateResume('user-1', { ...baseRequest, forceRegenerate: true } as any),
+      ).rejects.toBeInstanceOf(UnprocessableEntityException);
+
+      expect(studioArtifactsService.recordResumeSuccess).not.toHaveBeenCalled();
+      expect(studioArtifactsService.recordResumeFailure).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({ generationPipeline: 'v2' }),
+        }),
+      );
     } finally {
       baseline.sections = originalSections;
       if (typeof originalFlag === 'string') {

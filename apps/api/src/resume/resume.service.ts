@@ -1604,8 +1604,9 @@ export class ResumeService {
     };
     let dedupeKey: string | undefined;
     let reservationRunId: string | undefined;
+    let isResumeV2 = false;
     try {
-      const isResumeV2 = process.env[RESUME_GENERATION_V2_FEATURE_FLAG] === 'true';
+      isResumeV2 = process.env[RESUME_GENERATION_V2_FEATURE_FLAG] === 'true';
       const shouldEnforceOneTap = options?.enforceOneTap ?? true;
       const preflightOnly = options?.preflightOnly ?? false;
       const baselineId = request.baselineId?.trim();
@@ -2891,6 +2892,50 @@ export class ResumeService {
     }
     return response;
     } catch (error) {
+      if (isResumeV2) {
+        const responseBody =
+          error instanceof UnprocessableEntityException
+            ? (error.getResponse() as any)
+            : null;
+        const errorCode = responseBody?.error?.code ?? responseBody?.code ?? null;
+        const errorMessage =
+          responseBody?.error?.message ?? responseBody?.message ?? (error instanceof Error ? error.message : String(error));
+        this.logger.error('[resume-generation][v2] failed', {
+          userId,
+          baselineId: studioArtifactContext.baselineId || null,
+          baselineVersionId: studioArtifactContext.baselineVersionId || null,
+          jobId: studioArtifactContext.jobId || null,
+          analysisId: studioArtifactContext.analysisId || null,
+          code: errorCode,
+          message: errorMessage,
+          name: error instanceof Error ? error.name : typeof error,
+          stack: error instanceof Error ? error.stack : null,
+        });
+
+        try {
+          await this.studioArtifactsService.recordResumeFailure({
+            userId,
+            baselineId: studioArtifactContext.baselineId,
+            jobId: studioArtifactContext.jobId,
+            baselineVersionId: studioArtifactContext.baselineVersionId,
+            baselineVersionHash: studioArtifactContext.baselineVersionHash,
+            jobFingerprint: studioArtifactContext.jobFingerprint,
+            inputsHash: studioArtifactContext.inputsHash,
+            analysisId: studioArtifactContext.analysisId,
+            failureCode: String(errorCode ?? 'resume_v2_failed'),
+            failureMessage: String(errorMessage ?? 'Resume V2 generation failed.'),
+            metadata: {
+              generationPipeline: 'v2',
+              errorCode: errorCode ?? null,
+            },
+          } as any);
+        } catch {
+          // ignore persistence failures for failure artifacts
+        }
+
+        throw error;
+      }
+
       if (error instanceof UnprocessableEntityException) {
         const responseBody = error.getResponse() as any;
         const category = responseBody?.category ?? responseBody?.error?.category ?? null;
