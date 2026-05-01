@@ -1,4 +1,11 @@
-const UPSTREAM_ENV_KEYS = ["API_BASE_URL", "NEXT_PUBLIC_API_BASE_URL"] as const;
+// Keep this list permissive: production deployments may provide different naming conventions.
+const UPSTREAM_ENV_KEYS = [
+  "API_BASE_URL",
+  "NEXT_PUBLIC_API_BASE_URL",
+  "NEXT_PUBLIC_API_URL",
+  "API_URL",
+  "BACKEND_API_BASE_URL",
+] as const;
 const DEV_DEFAULT_API_BASE_URL = "http://127.0.0.1:3001";
 
 function normalizeBaseUrl(value?: string | null): string | null {

@@ -1,8 +1,24 @@
 import { NextResponse } from "next/server";
-import { getRequiredServerApiBaseUrl } from "../_lib/serverApiConfig";
+import { getRequiredServerApiBaseUrl, UpstreamApiConfigError } from "../_lib/serverApiConfig";
 
 export function getApiBaseUrl(): string {
-  return getRequiredServerApiBaseUrl();
+  try {
+    return getRequiredServerApiBaseUrl();
+  } catch (error) {
+    const configError =
+      error instanceof UpstreamApiConfigError
+        ? error
+        : new UpstreamApiConfigError(
+            "UPSTREAM_API_URL_MALFORMED",
+            "Unexpected server API base URL configuration error.",
+          );
+    console.error("Proxy upstream config error", {
+      code: configError.code,
+      message: configError.message,
+      details: configError.details,
+    });
+    return "";
+  }
 }
 
 function cloneHeaders(response: Response) {
