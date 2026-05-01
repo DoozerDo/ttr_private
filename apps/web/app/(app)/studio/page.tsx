@@ -2870,6 +2870,13 @@ export default function StudioPage() {
     if (coverLetterParagraphs.length > 0) return true;
     return typeof coverPreviewText === "string" && coverPreviewText.trim().length > 0;
   }, [coverLetterParagraphs.length, coverPreviewText]);
+
+  if (process.env.NODE_ENV !== "production") {
+    console.log("RENDER FLAGS", {
+      hasRenderableResumeContent,
+      hasRenderableCoverLetterContent,
+    });
+  }
   const coverPresenter = artifactContract.presenters.coverLetter;
   const hasCoverLetterDraft = hasCoverLetterArtifact;
   const coverLetterQuality = artifactContract.quality.coverLetter;
@@ -11471,13 +11478,13 @@ export default function StudioPage() {
             ) : null}
 
           </div>
-        ) : resumeState.artifactFailure ? null : resumeAutoGenerating || resumeGenerateNowPending ? (
+        ) : resumeState.artifactFailure ? null : !hasRenderableResumeContent && (resumeAutoGenerating || resumeGenerateNowPending) ? (
           <EmptyState
             testId="studio-resume-generating"
             title="Generating your resume..."
             body="This usually finishes in a moment."
           />
-        ) : (
+        ) : !hasRenderableResumeContent ? (
           <EmptyState
             testId="studio-resume-missing"
             title="Resume not generated yet"
@@ -11498,7 +11505,7 @@ export default function StudioPage() {
               </FormButton>
             }
           />
-        )}
+        ) : null}
       </section>
 
       <section
@@ -11940,7 +11947,7 @@ export default function StudioPage() {
                   </div>
                 </div>
               )
-            ) : coverState.artifactFailure ? null : (
+            ) : coverState.artifactFailure ? null : !hasRenderableCoverLetterContent ? (
               <EmptyState
                 testId={
                   coverAutoGenerating || coverGenerateNowPending ? "studio-cover-generating" : "studio-cover-missing"
@@ -11973,7 +11980,7 @@ export default function StudioPage() {
                   )
                 }
               />
-            )
+            ) : null
           )
         ) : null}
       </section> 
