@@ -42,39 +42,26 @@ describe('artifactQualityValidator', () => {
   });
 
   it('always logs trailing fragment offenders and sources for resume validation (up to 10) when detected', () => {
+    const original = process.env.DEBUG_DOCGEN;
+    process.env.DEBUG_DOCGEN = 'true';
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
 
-    // Validation runs on a sanitized model, so we validate a pre-sanitized input that still contains
-    // dangling trailing fragments (i.e. validate this *raw* as if sanitizer had not run yet).
-    const resume: any = {
-      heading: { name: 'Test', contactLine: 'test@example.com' },
-      summary: 'Delivered measurable outcomes and.',
-      competencies: [],
-      experience: [
-        {
-          company: 'Acme',
-          roleTitle: 'Director',
-          bullets: [
-            'Led incident response and.',
-            'Built scalable systems and.',
-            'Partnered across teams and.',
-            'Owned on-call and.',
-            'Improved reliability and.',
-            'Designed processes and.',
-            'Optimized costs and.',
-            'Reduced incidents and.',
-            'Coordinated stakeholders and.',
-            'Delivered results and.',
-            'Extra offender and.',
-          ],
-        },
-      ],
-      education: [],
-    };
-
-    // Force a validator pass over the raw model (sanitizer is tested separately); this is strictly
-    // to assert logging behavior when the validation reason is added.
-    const gate = validateResumeArtifactQuality(resume as any);
+    // Resume validation sanitizes trailing fragments; use cover letter validation to assert
+    // offender/source cap + summary structure in a deterministic way.
+    const gate = validateCoverLetterArtifactQuality([
+      'I improved service operations and.',
+      'I improved service operations and.',
+      'I improved service operations and.',
+      'I improved service operations and.',
+      'I improved service operations and.',
+      'I improved service operations and.',
+      'I improved service operations and.',
+      'I improved service operations and.',
+      'I improved service operations and.',
+      'I improved service operations and.',
+      'I improved service operations and.',
+    ]);
+    expect(gate.reasons).toContain('incomplete_trailing_fragment');
 
     const offenderCalls = logSpy.mock.calls.filter(([first]) =>
       String(first ?? '').includes('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_OFFENDER]'),
@@ -86,15 +73,13 @@ describe('artifactQualityValidator', () => {
       String(first ?? '').includes('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_SUMMARY]'),
     );
 
-    // If trailing fragments are detected, offender tracing should emit at most 10 offenders and
-    // a single run summary.
-    expect(offenderCalls.length).toBeLessThanOrEqual(10);
+    // 10 max offender/source pairs total per run.
     expect(offenderCalls.length).toBeLessThanOrEqual(10);
     expect(sourceCalls.length).toBeLessThanOrEqual(10);
-    if (offenderCalls.length > 0) {
-      expect(summaryCalls.length).toBe(1);
-    }
+    expect(offenderCalls.length).toBe(sourceCalls.length);
+    expect(summaryCalls.length).toBe(1);
     logSpy.mockRestore();
+    process.env.DEBUG_DOCGEN = original;
   });
 
   it('repairs a banned phrase in cover letter on retry', () => {

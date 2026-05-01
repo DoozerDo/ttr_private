@@ -278,42 +278,56 @@ function detectTrailingFragmentReason(value: string): string | null {
   const raw = trimToText(value);
   if (!raw) return null;
   const isDangling = endsWithDanglingFragment(raw);
-
-  if (isDangling && activeTrailingFragmentTraceBudget) {
-    activeTrailingFragmentTraceBudget.detected += 1;
-  }
-
-  if (
-    isDangling &&
-    activeTrailingFragmentTraceBudget &&
-    activeTrailingFragmentTraceBudget.remaining > 0
-  ) {
-    try {
-      const normalized = normalizeForTrailingCheck(raw);
-      const tokens = normalized.split(/\s+/).filter(Boolean);
-      const endingToken = (tokens[tokens.length - 1] ?? '').toLowerCase();
-      const incompleteReason = DANGLING_TRAILING_WORDS.has(endingToken)
-        ? 'dangling_trailing_word'
-        : INCOMPLETE_TRAILING_PREPOSITIONS.has(endingToken)
-          ? 'trailing_preposition'
-          : WEAK_TERMINAL_VERBS.has(endingToken)
-            ? 'weak_terminal_verb'
-            : 'unknown';
-      // eslint-disable-next-line no-console
-      console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_OFFENDER]', {
-        endingToken: endingToken || null,
-        reason: incompleteReason,
-        hasTerminalPunctuation: /[.!?]\s*$/.test(raw),
-        isCompleteClause: isCompleteClause(raw),
-        text: raw,
-      });
-      activeTrailingFragmentTraceBudget.logged += 1;
-      activeTrailingFragmentTraceBudget.remaining -= 1;
-    } catch {
-      // ignore debug logging failures
-    }
-  }
   return isDangling ? 'incomplete_trailing_fragment' : null;
+}
+
+function logTrailingFragmentOffender(text: string) {
+  if (!activeTrailingFragmentTraceBudget) return;
+  if (activeTrailingFragmentTraceBudget.remaining <= 0) return;
+
+  try {
+    const raw = trimToText(text);
+    const normalized = normalizeForTrailingCheck(raw);
+    const tokens = normalized.split(/\s+/).filter(Boolean);
+    const endingToken = (tokens[tokens.length - 1] ?? '').toLowerCase();
+    const offenderReason = DANGLING_TRAILING_WORDS.has(endingToken)
+      ? 'dangling_trailing_word'
+      : INCOMPLETE_TRAILING_PREPOSITIONS.has(endingToken)
+        ? 'trailing_preposition'
+        : WEAK_TERMINAL_VERBS.has(endingToken)
+          ? 'weak_terminal_verb'
+          : 'unknown';
+
+    // eslint-disable-next-line no-console
+    console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_OFFENDER]', {
+      text: raw,
+      endingToken: endingToken || null,
+      reason: offenderReason,
+      hasTerminalPunctuation: /[.!?]\s*$/.test(raw),
+      isCompleteClause: isCompleteClause(raw),
+    });
+  } catch {
+    // ignore debug logging failures
+  }
+}
+
+function logTrailingFragmentSource(payload: {
+  source: string;
+  company?: string | null;
+  roleTitle?: string | null;
+}) {
+  if (!activeTrailingFragmentTraceBudget) return;
+  if (activeTrailingFragmentTraceBudget.remaining <= 0) return;
+
+  // eslint-disable-next-line no-console
+  console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_SOURCE]', {
+    source: payload.source,
+    company: payload.company ?? null,
+    roleTitle: payload.roleTitle ?? null,
+  });
+
+  activeTrailingFragmentTraceBudget.logged += 1;
+  activeTrailingFragmentTraceBudget.remaining -= 1;
 }
 
 export function looksLikeSentence(value: string): boolean {
@@ -388,17 +402,12 @@ export function validateResumeArtifactQuality(
     reasons.push(...detectPlaceholderReasons(sanitizedResume.summary));
     const trailing = detectTrailingFragmentReason(sanitizedResume.summary);
     if (trailing) {
-      reasons.push(trailing);
-      if (activeTrailingFragmentTraceBudget && activeTrailingFragmentTraceBudget.remaining > 0) {
-        // eslint-disable-next-line no-console
-        console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_SOURCE]', {
-          source: 'summary',
-          company: null,
-          roleTitle: null,
-        });
-        activeTrailingFragmentTraceBudget.logged += 1;
-        activeTrailingFragmentTraceBudget.remaining -= 1;
+      if (activeTrailingFragmentTraceBudget) {
+        activeTrailingFragmentTraceBudget.detected += 1;
       }
+      reasons.push(trailing);
+      logTrailingFragmentOffender(sanitizedResume.summary);
+      logTrailingFragmentSource({ source: 'summary', company: null, roleTitle: null });
     }
     if (!trimToText(sanitizedResume.summary)) {
       reasons.push('empty_summary');
@@ -435,17 +444,16 @@ export function validateResumeArtifactQuality(
       reasons.push(...detectPlaceholderReasons(bullet));
       const trailing = detectTrailingFragmentReason(bullet);
       if (trailing) {
-        reasons.push(trailing);
-        if (activeTrailingFragmentTraceBudget && activeTrailingFragmentTraceBudget.remaining > 0) {
-          // eslint-disable-next-line no-console
-          console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_SOURCE]', {
-            source: 'experience.bullet',
-            company: company || null,
-            roleTitle: roleTitle || null,
-          });
-          activeTrailingFragmentTraceBudget.logged += 1;
-          activeTrailingFragmentTraceBudget.remaining -= 1;
+        if (activeTrailingFragmentTraceBudget) {
+          activeTrailingFragmentTraceBudget.detected += 1;
         }
+        reasons.push(trailing);
+        logTrailingFragmentOffender(bullet);
+        logTrailingFragmentSource({
+          source: 'experience.bullet',
+          company: company || null,
+          roleTitle: roleTitle || null,
+        });
       }
     }
   }
@@ -455,7 +463,8 @@ export function validateResumeArtifactQuality(
   if (activeTrailingFragmentTraceBudget && activeTrailingFragmentTraceBudget.detected > 0) {
     // eslint-disable-next-line no-console
     console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_SUMMARY]', {
-      count: activeTrailingFragmentTraceBudget.detected,
+      totalDetected: activeTrailingFragmentTraceBudget.detected,
+      totalLogged: activeTrailingFragmentTraceBudget.logged,
     });
   }
   activeTrailingFragmentTraceBudget = null;
@@ -518,7 +527,18 @@ export function validateCoverLetterArtifactQuality(
   for (const paragraph of normalizedParagraphs) {
     reasons.push(...detectPlaceholderReasons(paragraph));
     const trailing = detectTrailingFragmentReason(paragraph);
-    if (trailing) reasons.push(trailing);
+    if (trailing) {
+      if (activeTrailingFragmentTraceBudget) {
+        activeTrailingFragmentTraceBudget.detected += 1;
+      }
+      reasons.push(trailing);
+      logTrailingFragmentOffender(paragraph);
+      logTrailingFragmentSource({
+        source: 'cover_letter.paragraph',
+        company: null,
+        roleTitle: null,
+      });
+    }
   }
 
   const unique = Array.from(new Set(reasons));
