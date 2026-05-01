@@ -2849,6 +2849,10 @@ export default function StudioPage() {
         : readCanonicalResumePreviewPayload(artifactContract.normalized.resumeResponse),
     [artifactContract.normalized.resumeResponse, artifactContract.results.resume],
   );
+  const hasRenderableResumeContent = useMemo(() => {
+    if (canonicalResumePreviewPayload) return true;
+    return typeof resumePreviewText === "string" && resumePreviewText.trim().length > 0;
+  }, [canonicalResumePreviewPayload, resumePreviewText]);
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
     if (!canonicalResumePreviewPayload) return;
@@ -2862,6 +2866,10 @@ export default function StudioPage() {
     () => formatPreview(artifactContract.normalized.coverLetterResponse) || readArtifactTextFallback(artifactContract.normalized.coverLetterResponse),
     [artifactContract.normalized.coverLetterResponse],
   );
+  const hasRenderableCoverLetterContent = useMemo(() => {
+    if (coverLetterParagraphs.length > 0) return true;
+    return typeof coverPreviewText === "string" && coverPreviewText.trim().length > 0;
+  }, [coverLetterParagraphs.length, coverPreviewText]);
   const coverPresenter = artifactContract.presenters.coverLetter;
   const hasCoverLetterDraft = hasCoverLetterArtifact;
   const coverLetterQuality = artifactContract.quality.coverLetter;
@@ -11345,7 +11353,7 @@ export default function StudioPage() {
               </Link>
             ) : null}
           </div>
-        ) : hasResumeArtifact && !shouldSuppressStalePreview ? (
+        ) : hasRenderableResumeContent ? (
           <div
             className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
             data-testid={resumeQualityPass ? "studio-resume-ready-panel" : "studio-resume-correction-panel"}
@@ -11789,7 +11797,7 @@ export default function StudioPage() {
         ) : null}
 
         {!coverLetterComplianceBlocked ? (
-          hasCoverLetterArtifact && !shouldSuppressStalePreview ? (
+          hasRenderableCoverLetterContent ? (
             <div
               className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
               data-testid={coverQualityPass ? "studio-cover-ready-panel" : "studio-cover-correction-panel"}
