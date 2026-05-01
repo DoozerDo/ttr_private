@@ -156,14 +156,6 @@ export class StudioArtifactsService {
       }),
     ]);
 
-    const record = await this.studioArtifactRepository.findOne({
-      where: {
-        userId: input.userId,
-        baselineId: input.baselineId,
-        jobId: input.jobId,
-      },
-    });
-
     const baselineVersionHash = baselineVersion?.hash ?? baselineVersion?.id ?? null;
     const jobFingerprint = this.computeJobFingerprint(job);
     const resumeInputsHash = this.computeResumeInputsHash({
@@ -174,6 +166,26 @@ export class StudioArtifactsService {
     const coverLetterInputsHash = this.computeCoverLetterInputsHash({
       baselineVersionHash,
       jobFingerprint,
+    });
+
+    // eslint-disable-next-line no-console
+    console.log('[ARTIFACT_READ]', {
+      baselineId: input.baselineId,
+      jobId: input.jobId,
+      baselineVersionId: input.baselineVersionId,
+      inputsHash: {
+        resume: resumeInputsHash,
+        coverLetter: coverLetterInputsHash,
+      },
+      analysisId: input.analysisId ?? null,
+    });
+
+    const record = await this.studioArtifactRepository.findOne({
+      where: {
+        userId: input.userId,
+        baselineId: input.baselineId,
+        jobId: input.jobId,
+      },
     });
 
     const score = typeof assessment?.overallScore === 'number' ? assessment.overallScore : null;
@@ -426,7 +438,17 @@ export class StudioArtifactsService {
     responseBody: Record<string, unknown>;
     content: string | null;
     metadata?: Record<string, unknown>;
+    analysisId?: string | null;
   }): Promise<string> {
+    // eslint-disable-next-line no-console
+    console.log('[ARTIFACT_WRITE]', {
+      type: 'resume',
+      baselineId: input.baselineId,
+      jobId: input.jobId,
+      baselineVersionId: input.baselineVersionId,
+      inputsHash: input.inputsHash,
+      analysisId: input.analysisId ?? null,
+    });
     return this.upsertArtifactRow(input.userId, input.baselineId, input.jobId, {
       baselineVersionId: input.baselineVersionId,
       baselineVersionHash: input.baselineVersionHash,
@@ -507,7 +529,17 @@ export class StudioArtifactsService {
     responseBody: Record<string, unknown>;
     content: string | null;
     metadata?: Record<string, unknown>;
+    analysisId?: string | null;
   }): Promise<string> {
+    // eslint-disable-next-line no-console
+    console.log('[ARTIFACT_WRITE]', {
+      type: 'coverLetter',
+      baselineId: input.baselineId,
+      jobId: input.jobId,
+      baselineVersionId: input.baselineVersionId,
+      inputsHash: input.inputsHash,
+      analysisId: input.analysisId ?? null,
+    });
     return this.upsertArtifactRow(input.userId, input.baselineId, input.jobId, {
       baselineVersionId: input.baselineVersionId,
       baselineVersionHash: input.baselineVersionHash,
