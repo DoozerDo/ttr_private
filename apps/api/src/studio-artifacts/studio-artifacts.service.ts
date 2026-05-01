@@ -670,12 +670,20 @@ export class StudioArtifactsService {
       artifact === 'resume' ? record.resumeInputsHash : record.coverLetterInputsHash;
     if (status === StudioArtifactLifecycleStatus.MISSING) return null;
     if (inputsHash && inputsHash !== expectedInputsHash) return null;
-    const responseBody =
+    const rawResponseBody =
       artifact === 'resume'
         ? sanitizeStoredResumeResponseBody(normalizeRecord(record.resumeResponseBody))
         : normalizeRecord(record.coverLetterResponseBody);
     const content =
       artifact === 'resume' ? record.resumeContent : record.coverLetterContent;
+
+    const responseBody = (() => {
+      if (!rawResponseBody) return null;
+      if (!content) return rawResponseBody;
+      const existing = typeof rawResponseBody.content === 'string' ? rawResponseBody.content.trim() : '';
+      if (existing) return rawResponseBody;
+      return { ...rawResponseBody, content };
+    })();
     const failureCode =
       artifact === 'resume' ? record.resumeFailureCode : record.coverLetterFailureCode;
     const failureMessage =

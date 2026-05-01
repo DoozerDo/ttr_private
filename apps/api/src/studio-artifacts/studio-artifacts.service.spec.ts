@@ -84,6 +84,8 @@ describe('StudioArtifactsService', () => {
     expect(state.resume?.responseBody).toEqual(
       expect.objectContaining({ status: 'success' }),
     );
+    expect(state.resume?.content).toBe('resume-content');
+    expect((state.resume?.responseBody as any)?.content).toBe('resume-content');
     expect(state.coverLetter?.status).toBeUndefined();
   });
 
@@ -263,6 +265,8 @@ describe('StudioArtifactsService', () => {
     });
     expect(completedState.status).toBe(StudioArtifactLifecycleStatus.COMPLETED);
     expect(completedState.coverLetter?.status).toBe(StudioArtifactLifecycleStatus.COMPLETED);
+    expect(completedState.coverLetter?.content).toBe('cover-letter-content');
+    expect((completedState.coverLetter?.responseBody as any)?.content).toBe('cover-letter-content');
     expect(completedState.coverLetter?.responseBody).toEqual(
       expect.objectContaining({ status: 'success' }),
     );

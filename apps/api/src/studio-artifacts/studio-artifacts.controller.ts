@@ -49,6 +49,10 @@ export class StudioArtifactsController {
     console.log('[STUDIO_ARTIFACTS_RESULT]', {
       hasResume: Boolean(state.resume?.responseBody),
       hasCoverLetter: Boolean(state.coverLetter?.responseBody),
+      hasResumeContent: Boolean(state.resume?.content),
+      hasCoverLetterContent: Boolean(state.coverLetter?.content),
+      resumeContentLength: state.resume?.content?.length ?? 0,
+      coverLetterContentLength: state.coverLetter?.content?.length ?? 0,
     });
 
     return state;
