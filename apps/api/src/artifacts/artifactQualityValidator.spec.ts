@@ -75,6 +75,22 @@ describe('artifactQualityValidator', () => {
     }
   });
 
+  it('drops or trims incomplete clauses even when no dangling token is present', () => {
+    const cleaned = trimIncompleteTrailingFragments(
+      [
+        'Improved system performance by 35% through query tuning', // no terminal punctuation; should be treated complete enough
+        'Built scalable architecture for', // incomplete
+        'Led', // incomplete
+        'Delivered measurable outcomes.', // complete
+      ].join('\n'),
+    );
+    const lines = cleaned.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    expect(lines).toContain('Improved system performance by 35% through query tuning');
+    expect(lines).toContain('Delivered measurable outcomes.');
+    expect(lines.some((line) => line === 'Built scalable architecture for')).toBe(false);
+    expect(lines.some((line) => line === 'Led')).toBe(false);
+  });
+
   it('sanitizes resume bullets before validation so trailing fragments are removed', () => {
     const resume: any = {
       heading: { name: 'Test', contactLine: 'test@example.com' },

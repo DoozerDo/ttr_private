@@ -92,6 +92,58 @@ const EXPERIENCE_TITLE_DANGLING_SUFFIXES = new Set(
   ].map((value) => value.toLowerCase()),
 );
 
+const INCOMPLETE_TRAILING_PREPOSITIONS = new Set(
+  [
+    'with',
+    'for',
+    'to',
+    'of',
+    'in',
+    'on',
+    'at',
+    'by',
+    'from',
+    'into',
+    'over',
+    'under',
+    'within',
+    'across',
+    'through',
+    'during',
+    'before',
+    'after',
+  ].map((value) => value.toLowerCase()),
+);
+
+const WEAK_TERMINAL_VERBS = new Set(
+  [
+    'improved',
+    'led',
+    'built',
+    'created',
+    'designed',
+    'developed',
+    'implemented',
+    'managed',
+    'owned',
+    'delivered',
+    'reduced',
+    'increased',
+    'supported',
+    'maintained',
+    'coordinated',
+    'partnered',
+    'collaborated',
+    'architected',
+    'automated',
+    'migrated',
+    'troubleshot',
+    'resolved',
+    'optimized',
+    'streamlined',
+  ].map((value) => value.toLowerCase()),
+);
+
 function trimToText(value: unknown): string {
   return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
 }
@@ -119,6 +171,25 @@ function trimToLastTerminalPunctuation(value: string): string {
   return lastMatch ? trimToText(lastMatch[0]) : '';
 }
 
+function isCompleteClause(value: string): boolean {
+  const text = trimToText(value);
+  if (!text) return false;
+  if (/[.!?]\s*$/.test(text)) return true;
+
+  const normalized = normalizeForTrailingCheck(text);
+  if (!normalized) return false;
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  if (tokens.length < 6) return false;
+
+  const lastToken = tokens[tokens.length - 1]?.toLowerCase() ?? '';
+  if (!lastToken) return false;
+  if (INCOMPLETE_TRAILING_PREPOSITIONS.has(lastToken)) return false;
+  if (DANGLING_TRAILING_WORDS.has(lastToken)) return false;
+  if (WEAK_TERMINAL_VERBS.has(lastToken)) return false;
+
+  return true;
+}
+
 /**
  * Remove trailing fragment-like lines (e.g. ending with "the", "and", "with") from generated text.
  * This is a post-processing safety net and should run before persisting artifacts.
@@ -135,13 +206,14 @@ export function trimIncompleteTrailingFragments(text: string): string {
       continue;
     }
 
-    if (!endsWithDanglingFragment(trimmed)) {
+    // If it already looks like a complete clause or sentence, keep it.
+    if (isCompleteClause(trimmed) && !endsWithDanglingFragment(trimmed)) {
       cleaned.push(trimmed);
       continue;
     }
 
     const trimmedToSentence = trimToLastTerminalPunctuation(trimmed);
-    if (trimmedToSentence.length >= 10 && !endsWithDanglingFragment(trimmedToSentence)) {
+    if (trimmedToSentence.length >= 10 && isCompleteClause(trimmedToSentence) && !endsWithDanglingFragment(trimmedToSentence)) {
       cleaned.push(trimmedToSentence);
       continue;
     }
