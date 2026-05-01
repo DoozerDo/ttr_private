@@ -3,6 +3,7 @@ import {
   repairResumeForQuality,
   validateCoverLetterArtifactQuality,
   validateResumeArtifactQuality,
+  trimIncompleteTrailingFragments,
 } from './artifactQualityValidator';
 
 describe('artifactQualityValidator', () => {
@@ -66,5 +67,16 @@ describe('artifactQualityValidator', () => {
     expect(gate.status).toBe('needs_refinement');
     expect(gate.reasons).toContain('malformed_experience_header:company');
     expect(gate.reasons).toContain('malformed_experience_header:role_title');
+  });
+
+  it('trims dangling fragments on every line', () => {
+    const cleaned = trimIncompleteTrailingFragments(
+      ['First line ends with and', 'Second line is fine.', 'Third line ends with the'].join('\n'),
+    );
+    const lines = cleaned.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) {
+      expect(line).not.toMatch(/\b(?:the|a|an|and|but|because|with|for|to|of|in|on|at|by|from)\s*$/i);
+    }
   });
 });

@@ -269,7 +269,10 @@ describe('CoverLettersService contract', () => {
     expect(result.exportReady).toBe(true);
     expect(result.preview?.coverLetter).toBeTruthy();
     expect((result as any).content).toBeTruthy();
-    expect(String((result as any).content)).not.toMatch(/\b(?:the|a|an|and|but|because|with|for|to|of|in|on|at|by|from)\s*$/i);
+    const content = String((result as any).content);
+    for (const line of content.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)) {
+      expect(line).not.toMatch(/\b(?:the|a|an|and|but|because|with|for|to|of|in|on|at|by|from)\s*$/i);
+    }
     expect(studioArtifactsService.recordCoverLetterSuccess).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.stringMatching(/\S/),
@@ -319,7 +322,7 @@ describe('CoverLettersService contract', () => {
         paragraphEvidence: [],
       },
       complianceResult: {
-        normalizedContent: 'valid',
+        normalizedContent: ['Line one ends with and', 'Second line ends with with', 'A complete sentence.'].join('\n'),
         complianceFlags: [],
         blocked: false,
         audit: { id: 'audit-1', baselineVersionHash: 'hash-1' },

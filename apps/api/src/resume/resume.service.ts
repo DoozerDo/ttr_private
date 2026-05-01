@@ -2616,7 +2616,7 @@ export class ResumeService {
         const cleanedBullets = bullets
           .map((b: unknown) => (typeof b === 'string' ? trimIncompleteTrailingFragments(b) : ''))
           .map((b: string) => b.trim())
-          .filter(Boolean);
+          .filter((b: string) => b.length >= 10);
         return { ...entry, bullets: cleanedBullets };
       });
     }

@@ -127,36 +127,42 @@ export function trimIncompleteTrailingFragments(text: string): string {
   const raw = typeof text === 'string' ? text : '';
   const lines = raw.split(/\r?\n/);
 
-  // Remove empty trailing lines.
-  while (lines.length > 0 && trimToText(lines[lines.length - 1]) === '') {
-    lines.pop();
+  const cleaned: string[] = [];
+  for (const line of lines) {
+    const trimmed = trimToText(line);
+    if (!trimmed) {
+      cleaned.push('');
+      continue;
+    }
+
+    if (!endsWithDanglingFragment(trimmed)) {
+      cleaned.push(trimmed);
+      continue;
+    }
+
+    const trimmedToSentence = trimToLastTerminalPunctuation(trimmed);
+    if (trimmedToSentence.length >= 10 && !endsWithDanglingFragment(trimmedToSentence)) {
+      cleaned.push(trimmedToSentence);
+      continue;
+    }
+
+    // Drop this line; it looks like an incomplete fragment and we couldn't safely trim it.
+    cleaned.push('');
   }
 
-  if (lines.length === 0) return '';
-
-  const last = trimToText(lines[lines.length - 1]);
-  if (!last) return lines.join('\n');
-
-  const dangling = endsWithDanglingFragment(last);
-
-  // Only act when we see a trailing dangling fragment marker; do not "fix" short
-  // strings (tests use short placeholders like "valid").
-  if (!dangling) {
-    return lines.join('\n');
+  // Collapse consecutive empty lines and trim leading/trailing empties.
+  const collapsed: string[] = [];
+  for (const line of cleaned) {
+    const isEmpty = trimToText(line) === '';
+    if (isEmpty && (collapsed.length === 0 || trimToText(collapsed[collapsed.length - 1]) === '')) {
+      continue;
+    }
+    collapsed.push(line);
   }
+  while (collapsed.length > 0 && trimToText(collapsed[0]) === '') collapsed.shift();
+  while (collapsed.length > 0 && trimToText(collapsed[collapsed.length - 1]) === '') collapsed.pop();
 
-  const trimmedToSentence = trimToLastTerminalPunctuation(last);
-  if (trimmedToSentence.length >= 10 && !endsWithDanglingFragment(trimmedToSentence)) {
-    lines[lines.length - 1] = trimmedToSentence;
-    return lines.join('\n');
-  }
-
-  // Drop the trailing line entirely if it looks incomplete.
-  lines.pop();
-  while (lines.length > 0 && trimToText(lines[lines.length - 1]) === '') {
-    lines.pop();
-  }
-  return lines.join('\n').trim();
+  return collapsed.join('\n').trim();
 }
 
 function detectPlaceholderReasons(value: string): string[] {
