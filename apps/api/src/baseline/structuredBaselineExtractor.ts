@@ -113,7 +113,16 @@ function parseExperienceHeaderLine(line: string): { company: string; roleTitle: 
 function looksLikeDatesLine(line: string): boolean {
   const raw = trimToText(line);
   if (!raw) return false;
-  return /\b(19|20)\d{2}\b/.test(raw) && raw.split(/\s+/).length <= 8;
+  const monthYear =
+    /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(?:19|20)\d{2}\b/i;
+  const hasYear = /\b(19|20)\d{2}\b/.test(raw);
+  const looksLikeMonthYear = monthYear.test(raw);
+  const looksLikeRange =
+    (looksLikeMonthYear || hasYear) &&
+    /(?:\s*(?:â€”|—|–|-)\s*|\s+to\s+)/i.test(raw);
+  const looksLikePresentRange =
+    (looksLikeMonthYear || hasYear) && /\b(?:present|current)\b/i.test(raw);
+  return (hasYear || looksLikeMonthYear) && raw.split(/\s+/).length <= 12 && (looksLikeRange || looksLikePresentRange || looksLikeMonthYear);
 }
 
 function parseCompanyWithDates(line: string): { company: string; dates?: string } | null {
@@ -125,6 +134,35 @@ function parseCompanyWithDates(line: string): { company: string; dates?: string 
   const dates = trimToText(match[2]);
   if (!company) return null;
   return { company, ...(dates ? { dates } : {}) };
+}
+
+function parseCompanyWithInlineDates(line: string): { company: string; dates: string } | null {
+  const raw = trimToText(line);
+  if (!raw) return null;
+  const monthToken =
+    '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s+(?:19|20)\\d{2}';
+  const rangeToken = `(${monthToken})(?:\\s*[â€”—–-]\\s*|\\s+to\\s+|\\s*[–-]\\s*)(${monthToken}|present|current)`;
+  const inlineRange = new RegExp(`^(.+?)\\s+${rangeToken}\\s*$`, 'i');
+  const match = raw.match(inlineRange);
+  if (!match) return null;
+  const company = trimToText(match[1]);
+  const start = trimToText(match[2]);
+  const end = trimToText(match[3]);
+  if (!company || !start || !end) return null;
+  return { company, dates: `${start} – ${end}` };
+}
+
+function parseCompanyWithTrailingStartDate(line: string): { company: string; start: string } | null {
+  const raw = trimToText(line);
+  if (!raw) return null;
+  const monthYear =
+    /^(.*?)(?:\s+)((?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(?:19|20)\d{2})\s*$/i;
+  const match = raw.match(monthYear);
+  if (!match) return null;
+  const company = trimToText(match[1]);
+  const start = trimToText(match[2]);
+  if (!company || !start) return null;
+  return { company, start };
 }
 
 function parseRoleAtCompany(line: string): { company: string; roleTitle: string; dates?: string } | null {
@@ -167,6 +205,34 @@ function readExperienceHeaderAt(
 
   const line1 = trimToText(lines[startIndex + 1] ?? '');
   if (line1 && !isBulletLine(line1)) {
+    const inlineDates = parseCompanyWithInlineDates(line0);
+    if (inlineDates) {
+      return {
+        header: { company: inlineDates.company, roleTitle: line1, dates: inlineDates.dates },
+        consumed: 2,
+      };
+    }
+
+    // Handle split date ranges like:
+    //   "Biblioso October 2023"
+    //   "March 2024"
+    //   "Senior Program Manager"
+    // where company/date were incorrectly treated as company/roleTitle.
+    if (looksLikeDatesLine(line1)) {
+      const trailingStart = parseCompanyWithTrailingStartDate(line0);
+      const line2 = trimToText(lines[startIndex + 2] ?? '');
+      if (trailingStart && line2 && !isBulletLine(line2) && !looksLikeDatesLine(line2)) {
+        return {
+          header: {
+            company: trailingStart.company,
+            roleTitle: line2,
+            dates: `${trailingStart.start} – ${line1}`,
+          },
+          consumed: 3,
+        };
+      }
+    }
+
     const companyWithDates = parseCompanyWithDates(line0);
     if (companyWithDates) {
       return {
