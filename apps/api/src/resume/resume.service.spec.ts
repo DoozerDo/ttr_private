@@ -279,6 +279,7 @@ describe('ResumeService contract', () => {
 
     const bullets = (resume?.experience?.[0]?.bullets ?? []).map((b) => String(b));
     expect(bullets.some((b) => /\bThe\s*$/.test(b))).toBe(false);
+    expect(bullets.some((b) => /\b(?:the|a|an|and|but|because|with|for|to|of|in|on|at|by|from)\s*$/i.test(b))).toBe(false);
 
     baseline.sections = [{ ...baseSection, content: original }];
   });

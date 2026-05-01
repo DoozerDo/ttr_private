@@ -191,7 +191,7 @@ describe('CoverLettersService contract', () => {
         paragraphEvidence: [],
       },
       complianceResult: {
-        normalizedContent: 'valid',
+        normalizedContent: 'This cover letter ends with and',
         complianceFlags: [],
         blocked: false,
         audit: { id: 'audit-1', baselineVersionHash: 'hash-1' },
@@ -268,7 +268,8 @@ describe('CoverLettersService contract', () => {
     expect(result.status).toBe('success');
     expect(result.exportReady).toBe(true);
     expect(result.preview?.coverLetter).toBeTruthy();
-    expect((result as any).content).toBe('valid');
+    expect((result as any).content).toBeTruthy();
+    expect(String((result as any).content)).not.toMatch(/\b(?:the|a|an|and|but|because|with|for|to|of|in|on|at|by|from)\s*$/i);
     expect(studioArtifactsService.recordCoverLetterSuccess).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.stringMatching(/\S/),

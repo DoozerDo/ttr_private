@@ -102,6 +102,7 @@ import {
   validateCoverLetterArtifactQuality,
   type ArtifactQualityGate,
 } from '../artifacts/artifactQualityValidator';
+import { trimIncompleteTrailingFragments } from '../artifacts/artifactQualityValidator';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
 import { assembleCoverLetterFromStructuredBaseline } from './coverLetterTemplateAssembler';
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
@@ -695,6 +696,7 @@ export class CoverLettersService {
         },
       } as unknown as CoverLetterGenerationResponse;
 
+      draft.complianceResult.normalizedContent = trimIncompleteTrailingFragments(draft.complianceResult.normalizedContent);
       (response as any).content = draft.complianceResult.normalizedContent;
 
       if (!draft.complianceResult.normalizedContent || draft.complianceResult.normalizedContent.trim().length < 1) {

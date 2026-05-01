@@ -93,6 +93,7 @@ import {
   validateResumeArtifactQuality,
   type ArtifactQualityGate,
 } from '../artifacts/artifactQualityValidator';
+import { trimIncompleteTrailingFragments } from '../artifacts/artifactQualityValidator';
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
 import { sanitizeResumePreviewForStudio } from './resumePreviewSanitizer';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
@@ -2605,7 +2606,22 @@ export class ResumeService {
         company: resume.experience?.[0]?.company,
       });
     }
-    const persistedContent = buildResumePlainText(normalizedDocument);
+    if (typeof normalizedDocument.summary === 'string') {
+      normalizedDocument.summary = trimIncompleteTrailingFragments(normalizedDocument.summary);
+    }
+    if (Array.isArray((normalizedDocument as any).experience)) {
+      (normalizedDocument as any).experience = (normalizedDocument as any).experience.map((entry: any) => {
+        if (!entry || typeof entry !== 'object') return entry;
+        const bullets = Array.isArray(entry.bullets) ? entry.bullets : [];
+        const cleanedBullets = bullets
+          .map((b: unknown) => (typeof b === 'string' ? trimIncompleteTrailingFragments(b) : ''))
+          .map((b: string) => b.trim())
+          .filter(Boolean);
+        return { ...entry, bullets: cleanedBullets };
+      });
+    }
+
+    const persistedContent = trimIncompleteTrailingFragments(buildResumePlainText(normalizedDocument));
     if (!persistedContent || persistedContent.trim().length < 10) {
       throw new UnprocessableEntityException({
         error: {

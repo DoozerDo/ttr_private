@@ -112,6 +112,53 @@ function endsWithDanglingFragment(value: string): boolean {
   return DANGLING_TRAILING_WORDS.has(lastToken);
 }
 
+function trimToLastTerminalPunctuation(value: string): string {
+  const text = trimToText(value);
+  if (!text) return '';
+  const lastMatch = text.match(/[\s\S]*[.!?](?=\s*$|\s+)/);
+  return lastMatch ? trimToText(lastMatch[0]) : '';
+}
+
+/**
+ * Remove trailing fragment-like lines (e.g. ending with "the", "and", "with") from generated text.
+ * This is a post-processing safety net and should run before persisting artifacts.
+ */
+export function trimIncompleteTrailingFragments(text: string): string {
+  const raw = typeof text === 'string' ? text : '';
+  const lines = raw.split(/\r?\n/);
+
+  // Remove empty trailing lines.
+  while (lines.length > 0 && trimToText(lines[lines.length - 1]) === '') {
+    lines.pop();
+  }
+
+  if (lines.length === 0) return '';
+
+  const last = trimToText(lines[lines.length - 1]);
+  if (!last) return lines.join('\n');
+
+  const dangling = endsWithDanglingFragment(last);
+
+  // Only act when we see a trailing dangling fragment marker; do not "fix" short
+  // strings (tests use short placeholders like "valid").
+  if (!dangling) {
+    return lines.join('\n');
+  }
+
+  const trimmedToSentence = trimToLastTerminalPunctuation(last);
+  if (trimmedToSentence.length >= 10 && !endsWithDanglingFragment(trimmedToSentence)) {
+    lines[lines.length - 1] = trimmedToSentence;
+    return lines.join('\n');
+  }
+
+  // Drop the trailing line entirely if it looks incomplete.
+  lines.pop();
+  while (lines.length > 0 && trimToText(lines[lines.length - 1]) === '') {
+    lines.pop();
+  }
+  return lines.join('\n').trim();
+}
+
 function detectPlaceholderReasons(value: string): string[] {
   const raw = trimToText(value);
   if (!raw) return [];
