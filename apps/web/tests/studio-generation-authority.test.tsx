@@ -128,25 +128,22 @@ describe("Studio artifact quality gating (soft)", () => {
     expect(resumeSource.textContent ?? "").toMatch(/reason:\s*stale_legacy/i);
     expect(within(resumeSection as HTMLElement).queryByText(/Your resume is ready/i)).toBeNull();
     expect(within(resumeSection as HTMLElement).getAllByText("Resume needs correction before export.").length).toBeGreaterThan(0);
-    // Placeholder header appears when title/company are sanitized.
-    expect(within(resumeSection as HTMLElement).getByText("Experience entry needs correction")).toBeInTheDocument();
-    // Expand the entry so bullets are rendered, then ensure the accomplishment only appears in bullets.
-    const resumeExperienceHeader = within(resumeSection as HTMLElement).getByText("Experience entry needs correction");
+    // Expand the entry so bullets are rendered.
+    const resumeExperienceHeader = within(resumeSection as HTMLElement).getByText(/Designed and built a full-stack production platform/i);
     const resumeExperienceHeaderButton = resumeExperienceHeader.closest("button");
     expect(resumeExperienceHeaderButton).toBeTruthy();
-    expect(resumeExperienceHeaderButton?.textContent ?? "").not.toMatch(/Designed and built a full-stack production platform/i);
-    expect(resumeExperienceHeaderButton?.textContent ?? "").not.toMatch(/Technical Architect & Full/i);
-
     fireEvent.click(resumeExperienceHeader);
     const accomplishmentNodes = await within(resumeSection as HTMLElement).findAllByText(
       /Designed and built a full-stack production platform/i,
     );
     expect(accomplishmentNodes.length).toBeGreaterThanOrEqual(1);
-    for (const node of accomplishmentNodes) {
-      expect(node.closest("li")).toBeTruthy();
-    }
     expect(within(resumeSection as HTMLElement).queryByText("Download DOCX")).toBeNull();
     expect(within(resumeSection as HTMLElement).queryByText("Download PDF")).toBeNull();
+
+    const qualityWarning = within(resumeSection as HTMLElement).getByTestId("studio-resume-quality-warning");
+    expect(within(qualityWarning).getByText("Contains an incomplete trailing fragment.")).toBeInTheDocument();
+    expect(within(qualityWarning).getByText("Contains a malformed experience company header.")).toBeInTheDocument();
+    expect(within(qualityWarning).getByText("Contains a malformed experience role title header.")).toBeInTheDocument();
   });
 
   it("renders cover letter preview but blocks export when cover letter quality fails", async () => {
@@ -1281,13 +1278,14 @@ function setupFetchWithQualityFailures() {
               qualityStatus: "needs_refinement",
               preview: {
                 heading: { name: "Test Candidate", contactLine: "test@example.com" },
-                summary: "Low quality resume preview.",
+                summary: "Low quality resume preview with",
                 experience: [
                   {
-                    company: "Experience entry needs correction",
-                    roleTitle: "",
+                    company:
+                      "Designed and built a full-stack production platform for Conquest of Fates (cof.gg), a sci-fi trading card game",
+                    roleTitle: "Technical Architect & Full",
                     bullets: [
-                      "Led support operations and improved team performance.",
+                      "Led support operations and improved team performance with",
                       "Designed and built a full-stack production platform for Conquest of Fates (cof.gg), a sci-fi trading card game.",
                     ],
                   },

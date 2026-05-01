@@ -51,6 +51,55 @@ const COVER_BANNED_PHRASES: Array<{ code: string; pattern: RegExp }> = [
   { code: "banned_strongest_fit", pattern: /\bstrongest fit\b/i },
 ];
 
+const EXPERIENCE_HEADER_ACTION_VERBS = new Set(
+  [
+    "designed",
+    "built",
+    "led",
+    "managed",
+    "created",
+    "implemented",
+    "developed",
+    "owned",
+    "improved",
+    "reduced",
+    "increased",
+    "delivered",
+    "supported",
+    "maintained",
+    "coordinated",
+    "partnered",
+    "collaborated",
+    "architected",
+    "automated",
+    "migrated",
+    "troubleshot",
+    "resolved",
+  ].map((value) => value.toLowerCase()),
+);
+
+const EXPERIENCE_HEADER_DANGLING_SUFFIXES = new Set(
+  [
+    "and",
+    "or",
+    "with",
+    "for",
+    "to",
+    "of",
+    "full",
+    "senior",
+    "lead",
+    "principal",
+    "technical",
+    "software",
+    "frontend",
+    "backend",
+    "cloud",
+    "platform",
+    "systems",
+  ].map((value) => value.toLowerCase()),
+);
+
 function trimToText(value: unknown): string {
   return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
 }
@@ -69,6 +118,31 @@ function endsWithDanglingFragment(value: string): boolean {
   const lastToken = normalized.split(/\s+/).pop()?.toLowerCase() ?? "";
   if (!lastToken) return false;
   return DANGLING_TRAILING_WORDS.has(lastToken);
+}
+
+function looksLikeSentence(value: string): boolean {
+  const text = trimToText(value);
+  if (!text) return false;
+  if (/[.!?]\s*$/.test(text)) return true;
+  if (/[.!?]/.test(text) && text.split(/\s+/).length > 6) return true;
+  if (/[,:;]\s/.test(text) && text.split(/\s+/).length > 10) return true;
+  return false;
+}
+
+function startsWithActionVerb(value: string): boolean {
+  const text = trimToText(value);
+  if (!text) return false;
+  const first = text.split(/\s+/)[0]?.toLowerCase() ?? "";
+  if (!first) return false;
+  return EXPERIENCE_HEADER_ACTION_VERBS.has(first);
+}
+
+function endsWithDanglingHeaderToken(value: string): boolean {
+  const normalized = normalizeForTrailingCheck(trimToText(value));
+  if (!normalized) return false;
+  const lastToken = normalized.split(/\s+/).pop()?.toLowerCase() ?? "";
+  if (!lastToken) return false;
+  return EXPERIENCE_HEADER_DANGLING_SUFFIXES.has(lastToken);
 }
 
 function detectPlaceholderIssues(value: string, location: string): ArtifactQualityIssue[] {
@@ -107,6 +181,24 @@ function detectResumeExperienceIssues(entry: ResumeExperience, index: number): A
   const company = trimToText(entry.company);
   const roleTitle = trimToText(entry.roleTitle);
   const bullets = Array.isArray(entry.bullets) ? entry.bullets.map((b) => trimToText(b)).filter(Boolean) : [];
+
+  if (company && (looksLikeSentence(company) || startsWithActionVerb(company))) {
+    issues.push({
+      code: "malformed_experience_header:company",
+      severity: "blocking",
+      message: "Contains a malformed experience company header.",
+      location: `${locationPrefix}.company`,
+    });
+  }
+
+  if (roleTitle && (looksLikeSentence(roleTitle) || startsWithActionVerb(roleTitle) || endsWithDanglingHeaderToken(roleTitle))) {
+    issues.push({
+      code: "malformed_experience_header:role_title",
+      severity: "blocking",
+      message: "Contains a malformed experience role title header.",
+      location: `${locationPrefix}.roleTitle`,
+    });
+  }
 
   if ((company || roleTitle) && bullets.length === 0) {
     issues.push({
@@ -276,4 +368,3 @@ export function validateStudioArtifactQuality(input: {
     coverLetter: validateCoverLetterQuality(input.coverLetterParagraphs),
   };
 }
-
