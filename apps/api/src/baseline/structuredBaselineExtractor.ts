@@ -304,8 +304,5 @@ export function extractStructuredBaselineFromSections(
     missingEvidenceReasons,
   };
 
-  // eslint-disable-next-line no-console
-  console.log('EXTRACTED_EXPERIENCE', structured.experience);
-
   return structured;
 }

@@ -147,8 +147,14 @@ const WEAK_TERMINAL_VERBS = new Set(
 type TrailingFragmentTraceBudget = {
   detected: number;
   logged: number;
-  remaining: number;
-  enabled: boolean;
+  offenders: Array<{
+    text: string;
+    endingToken: string | null;
+    reason: string;
+    source: string;
+    company: string | null;
+    roleTitle: string | null;
+  }>;
 };
 
 let activeTrailingFragmentTraceBudget: TrailingFragmentTraceBudget | null = null;
@@ -281,12 +287,22 @@ function detectTrailingFragmentReason(value: string): string | null {
   return isDangling ? 'incomplete_trailing_fragment' : null;
 }
 
-function logTrailingFragmentOffender(text: string) {
+function captureTrailingFragmentOffender(input: {
+  text: string;
+  source: string;
+  company: string | null;
+  roleTitle: string | null;
+}) {
   if (!activeTrailingFragmentTraceBudget) return;
-  if (activeTrailingFragmentTraceBudget.remaining <= 0) return;
+
+  activeTrailingFragmentTraceBudget.detected += 1;
+
+  // Temporary: keep logs to one compact summary line per run.
+  // Cap offender details to 3 entries to avoid Railway rate limits.
+  if (activeTrailingFragmentTraceBudget.offenders.length >= 3) return;
 
   try {
-    const raw = trimToText(text);
+    const raw = trimToText(input.text);
     const normalized = normalizeForTrailingCheck(raw);
     const tokens = normalized.split(/\s+/).filter(Boolean);
     const endingToken = (tokens[tokens.length - 1] ?? '').toLowerCase();
@@ -298,36 +314,17 @@ function logTrailingFragmentOffender(text: string) {
           ? 'weak_terminal_verb'
           : 'unknown';
 
-    // eslint-disable-next-line no-console
-    console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_OFFENDER]', {
+    activeTrailingFragmentTraceBudget.offenders.push({
       text: raw,
       endingToken: endingToken || null,
       reason: offenderReason,
-      hasTerminalPunctuation: /[.!?]\s*$/.test(raw),
-      isCompleteClause: isCompleteClause(raw),
+      source: input.source,
+      company: input.company,
+      roleTitle: input.roleTitle,
     });
   } catch {
-    // ignore debug logging failures
+    // ignore debug capture failures
   }
-}
-
-function logTrailingFragmentSource(payload: {
-  source: string;
-  company?: string | null;
-  roleTitle?: string | null;
-}) {
-  if (!activeTrailingFragmentTraceBudget) return;
-  if (activeTrailingFragmentTraceBudget.remaining <= 0) return;
-
-  // eslint-disable-next-line no-console
-  console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_SOURCE]', {
-    source: payload.source,
-    company: payload.company ?? null,
-    roleTitle: payload.roleTitle ?? null,
-  });
-
-  activeTrailingFragmentTraceBudget.logged += 1;
-  activeTrailingFragmentTraceBudget.remaining -= 1;
 }
 
 export function looksLikeSentence(value: string): boolean {
@@ -366,9 +363,9 @@ export function validateResumeArtifactQuality(
     };
   }
 
-  // Always enable a small offender-trace budget so production logs can show exactly what text
-  // was flagged by trailing-fragment validation (kept to 10 offenders max).
-  activeTrailingFragmentTraceBudget = { detected: 0, logged: 0, remaining: 10, enabled: true };
+  // Temporary: always capture a small set of trailing-fragment offenders so production logs can show
+  // exactly what text was flagged, without relying on env vars.
+  activeTrailingFragmentTraceBudget = { detected: 0, logged: 0, offenders: [] };
 
   // Always validate against a sanitized model so trailing-fragment checks cannot accidentally
   // evaluate pre-sanitized bullets/summaries (e.g. fail-safe paths, alternate assembly routes).
@@ -402,12 +399,13 @@ export function validateResumeArtifactQuality(
     reasons.push(...detectPlaceholderReasons(sanitizedResume.summary));
     const trailing = detectTrailingFragmentReason(sanitizedResume.summary);
     if (trailing) {
-      if (activeTrailingFragmentTraceBudget) {
-        activeTrailingFragmentTraceBudget.detected += 1;
-      }
       reasons.push(trailing);
-      logTrailingFragmentOffender(sanitizedResume.summary);
-      logTrailingFragmentSource({ source: 'summary', company: null, roleTitle: null });
+      captureTrailingFragmentOffender({
+        text: sanitizedResume.summary,
+        source: 'summary',
+        company: null,
+        roleTitle: null,
+      });
     }
     if (!trimToText(sanitizedResume.summary)) {
       reasons.push('empty_summary');
@@ -444,12 +442,9 @@ export function validateResumeArtifactQuality(
       reasons.push(...detectPlaceholderReasons(bullet));
       const trailing = detectTrailingFragmentReason(bullet);
       if (trailing) {
-        if (activeTrailingFragmentTraceBudget) {
-          activeTrailingFragmentTraceBudget.detected += 1;
-        }
         reasons.push(trailing);
-        logTrailingFragmentOffender(bullet);
-        logTrailingFragmentSource({
+        captureTrailingFragmentOffender({
+          text: bullet,
           source: 'experience.bullet',
           company: company || null,
           roleTitle: roleTitle || null,
@@ -461,10 +456,12 @@ export function validateResumeArtifactQuality(
   const unique = Array.from(new Set(reasons));
 
   if (activeTrailingFragmentTraceBudget && activeTrailingFragmentTraceBudget.detected > 0) {
+    activeTrailingFragmentTraceBudget.logged = activeTrailingFragmentTraceBudget.offenders.length;
     // eslint-disable-next-line no-console
     console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_SUMMARY]', {
       totalDetected: activeTrailingFragmentTraceBudget.detected,
       totalLogged: activeTrailingFragmentTraceBudget.logged,
+      offenders: activeTrailingFragmentTraceBudget.offenders,
     });
   }
   activeTrailingFragmentTraceBudget = null;
@@ -490,11 +487,11 @@ export function isMalformedResumeExperienceCompany(value: string): boolean {
 export function validateCoverLetterArtifactQuality(
   paragraphs: string[] | null | undefined,
 ): ArtifactQualityGate {
+  // Keep legacy env gating for cover letter tracing (unrelated to resume issue),
+  // but when enabled only emit a single summary line.
   const shouldTraceOffenders =
     process.env.DEBUG_DOCGEN === 'true' || process.env.DOCGEN_OFFENDER_TRACE === 'true';
-  activeTrailingFragmentTraceBudget = shouldTraceOffenders
-    ? { detected: 0, logged: 0, remaining: 10, enabled: true }
-    : null;
+  activeTrailingFragmentTraceBudget = shouldTraceOffenders ? { detected: 0, logged: 0, offenders: [] } : null;
 
   const normalizedParagraphs = Array.isArray(paragraphs)
     ? paragraphs.map((p) => String(p ?? '')).filter(Boolean)
@@ -528,12 +525,9 @@ export function validateCoverLetterArtifactQuality(
     reasons.push(...detectPlaceholderReasons(paragraph));
     const trailing = detectTrailingFragmentReason(paragraph);
     if (trailing) {
-      if (activeTrailingFragmentTraceBudget) {
-        activeTrailingFragmentTraceBudget.detected += 1;
-      }
       reasons.push(trailing);
-      logTrailingFragmentOffender(paragraph);
-      logTrailingFragmentSource({
+      captureTrailingFragmentOffender({
+        text: paragraph,
         source: 'cover_letter.paragraph',
         company: null,
         roleTitle: null,
@@ -544,10 +538,12 @@ export function validateCoverLetterArtifactQuality(
   const unique = Array.from(new Set(reasons));
 
   if (activeTrailingFragmentTraceBudget && activeTrailingFragmentTraceBudget.detected > 0) {
+    activeTrailingFragmentTraceBudget.logged = activeTrailingFragmentTraceBudget.offenders.length;
     // eslint-disable-next-line no-console
     console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_SUMMARY]', {
       totalDetected: activeTrailingFragmentTraceBudget.detected,
       totalLogged: activeTrailingFragmentTraceBudget.logged,
+      offenders: activeTrailingFragmentTraceBudget.offenders,
     });
   }
   activeTrailingFragmentTraceBudget = null;

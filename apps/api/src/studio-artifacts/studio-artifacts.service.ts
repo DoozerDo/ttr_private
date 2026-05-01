@@ -260,14 +260,8 @@ export class StudioArtifactsService {
         ? (structured?.missingEvidenceReasons?.slice(0, 8) ?? ['Missing structured baseline evidence.'])
         : [];
 
-    // eslint-disable-next-line no-console
-    console.log('STUDIO_ARTIFACT_READINESS_DEBUG', {
-      score,
-      artifactReadiness,
-      structuredBaselineExperienceCount,
-      structuredBaselineMissingEvidenceReasons,
-      structuredBaselineExtractedExperiencePreview,
-    });
+    // NOTE: Intentionally no logging here; this endpoint is high-volume and verbose logs can
+    // overwhelm production logging (Railway rate limits).
 
     const resumeRecordRaw = this.buildArtifactRecord(record, 'resume', resumeInputsHash);
     const coverRecordRaw = this.buildArtifactRecord(record, 'cover_letter', coverLetterInputsHash);

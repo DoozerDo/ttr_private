@@ -20,7 +20,7 @@ describe('artifactQualityValidator', () => {
     expect(gate.reasons).not.toContain('incomplete_trailing_fragment');
   });
 
-  it('emits debug logs with offending text for trailing fragment validation failures', () => {
+  it('emits a single trailing-fragment summary log (capped offenders) when enabled for cover letter validation', () => {
     const original = process.env.DEBUG_DOCGEN;
     process.env.DEBUG_DOCGEN = 'true';
 
@@ -33,7 +33,7 @@ describe('artifactQualityValidator', () => {
     expect(gate.reasons).toContain('incomplete_trailing_fragment');
     expect(
       logSpy.mock.calls.some(([first]) =>
-        String(first ?? '').includes('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_OFFENDER]'),
+        String(first ?? '').includes('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_SUMMARY]'),
       ),
     ).toBe(true);
 
@@ -41,7 +41,7 @@ describe('artifactQualityValidator', () => {
     process.env.DEBUG_DOCGEN = original;
   });
 
-  it('always logs trailing fragment offenders and sources for resume validation (up to 10) when detected', () => {
+  it('emits exactly one compact trailing-fragment summary log per run', () => {
     const original = process.env.DEBUG_DOCGEN;
     process.env.DEBUG_DOCGEN = 'true';
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -73,11 +73,16 @@ describe('artifactQualityValidator', () => {
       String(first ?? '').includes('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_SUMMARY]'),
     );
 
-    // 10 max offender/source pairs total per run.
-    expect(offenderCalls.length).toBeLessThanOrEqual(10);
-    expect(sourceCalls.length).toBeLessThanOrEqual(10);
-    expect(offenderCalls.length).toBe(sourceCalls.length);
+    // Only one compact summary log per run.
+    expect(offenderCalls.length).toBe(0);
+    expect(sourceCalls.length).toBe(0);
     expect(summaryCalls.length).toBe(1);
+
+    const summaryPayload = summaryCalls[0]?.[1] as any;
+    expect(summaryPayload?.totalDetected).toBeGreaterThan(0);
+    expect(summaryPayload?.totalLogged).toBeGreaterThan(0);
+    expect(Array.isArray(summaryPayload?.offenders)).toBe(true);
+    expect(summaryPayload.offenders.length).toBeLessThanOrEqual(3);
     logSpy.mockRestore();
     process.env.DEBUG_DOCGEN = original;
   });
