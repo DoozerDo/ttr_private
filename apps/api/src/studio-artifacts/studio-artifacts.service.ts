@@ -185,6 +185,42 @@ export class StudioArtifactsService {
       },
     });
 
+    if (process.env.DEBUG_STUDIO_ARTIFACTS_READSTATE === 'true') {
+      // eslint-disable-next-line no-console
+      console.log('[STUDIO_ARTIFACTS_READSTATE]', {
+        userId: input.userId,
+        baselineId: input.baselineId,
+        jobId: input.jobId,
+        baselineVersionId: input.baselineVersionId,
+        analysisId: input.analysisId ?? null,
+        found: {
+          baselineVersion: Boolean(baselineVersion),
+          job: Boolean(job),
+          assessment: Boolean(assessment),
+          baseline: Boolean(baseline),
+          artifactRow: Boolean(record),
+        },
+        expected: {
+          baselineVersionHash,
+          jobFingerprint,
+          resumeInputsHash,
+          coverLetterInputsHash,
+        },
+        stored: record
+          ? {
+              resumeStatus: record.resumeStatus,
+              coverLetterStatus: record.coverLetterStatus,
+              resumeInputsHash: record.resumeInputsHash,
+              coverLetterInputsHash: record.coverLetterInputsHash,
+              resumeHasResponseBody: Boolean(record.resumeResponseBody),
+              coverHasResponseBody: Boolean(record.coverLetterResponseBody),
+              resumeContentLength: record.resumeContent?.length ?? 0,
+              coverContentLength: record.coverLetterContent?.length ?? 0,
+            }
+          : null,
+      });
+    }
+
     const score = typeof assessment?.overallScore === 'number' ? assessment.overallScore : null;
     const TEMPLATE_THRESHOLD = 80;
     const structured = baseline?.sections?.length
@@ -241,14 +277,21 @@ export class StudioArtifactsService {
       );
     };
 
-    // For score >= 80, never rehydrate legacy artifacts as "current" output.
+    // Never drop persisted artifacts from readState; legacy/stale output should be signaled via metadata,
+    // not by returning `null` (which makes Studio think artifacts are missing).
     const resumeRecord =
-      artifactReadiness && !isStructuredTemplateResult(resumeRecordRaw?.responseBody ?? null)
-        ? null
+      artifactReadiness && resumeRecordRaw && !isStructuredTemplateResult(resumeRecordRaw.responseBody)
+        ? {
+            ...resumeRecordRaw,
+            metadata: { ...(resumeRecordRaw.metadata ?? {}), staleLegacy: true },
+          }
         : resumeRecordRaw;
     const coverRecord =
-      artifactReadiness && !isStructuredTemplateResult(coverRecordRaw?.responseBody ?? null)
-        ? null
+      artifactReadiness && coverRecordRaw && !isStructuredTemplateResult(coverRecordRaw.responseBody)
+        ? {
+            ...coverRecordRaw,
+            metadata: { ...(coverRecordRaw.metadata ?? {}), staleLegacy: true },
+          }
         : coverRecordRaw;
 
     return {

@@ -382,8 +382,13 @@ describe('StudioArtifactsService', () => {
     expect(state.structuredBaselineExperienceCount).toBeGreaterThan(0);
     expect(Array.isArray(state.structuredBaselineMissingEvidenceReasons)).toBe(true);
     expect(Array.isArray(state.structuredBaselineExtractedExperiencePreview)).toBe(true);
-    // Legacy internal metadata is filtered out for score>=80: record should not be treated as current.
-    expect(state.resume).toBeNull();
-    expect(state.resumeResult?.generationState).toBe('not_started');
+    // Score>=80 should not hide persisted artifacts; it should mark them as stale instead.
+    expect(state.resume).toEqual(
+      expect.objectContaining({
+        status: StudioArtifactLifecycleStatus.COMPLETED,
+        metadata: expect.objectContaining({ staleLegacy: true }),
+      }),
+    );
+    expect(state.resumeResult?.generationState).toBe('generated_needs_correction');
   });
 });
