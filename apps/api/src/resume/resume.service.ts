@@ -2474,6 +2474,7 @@ export class ResumeService {
       baselineVersionHash: studioArtifactContext.baselineVersionHash,
       jobFingerprint: studioArtifactContext.jobFingerprint,
       inputsHash: studioArtifactContext.inputsHash,
+      analysisId: studioArtifactContext.analysisId,
       metadata: {
         auditId: audit.id,
         analysisId: studioArtifactContext.analysisId,
@@ -2627,6 +2628,7 @@ export class ResumeService {
       baselineVersionHash: studioArtifactContext.baselineVersionHash,
       jobFingerprint: studioArtifactContext.jobFingerprint,
       inputsHash: studioArtifactContext.inputsHash,
+      analysisId: studioArtifactContext.analysisId,
       responseBody: response as unknown as Record<string, unknown>,
       content: persistedContent,
       metadata: {
@@ -2759,6 +2761,7 @@ export class ResumeService {
             baselineVersionHash: studioArtifactContext.baselineVersionHash,
             jobFingerprint: studioArtifactContext.jobFingerprint,
             inputsHash: studioArtifactContext.inputsHash,
+            analysisId: studioArtifactContext.analysisId,
             responseBody: response as unknown as Record<string, unknown>,
             content: normalizedDocument ? JSON.stringify(normalizedDocument) : '',
             metadata: {
@@ -2798,6 +2801,7 @@ export class ResumeService {
         baselineVersionHash: studioArtifactContext.baselineVersionHash,
         jobFingerprint: studioArtifactContext.jobFingerprint,
         inputsHash: studioArtifactContext.inputsHash,
+        analysisId: studioArtifactContext.analysisId,
         failureCode: error instanceof Error ? error.name : 'generation_failed',
         failureMessage: error instanceof Error ? error.message : String(error),
         metadata: {

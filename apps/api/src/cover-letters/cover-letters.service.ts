@@ -541,6 +541,7 @@ export class CoverLettersService {
         jobFingerprint: this.studioArtifactsService.computeJobFingerprint(draft.job),
       }),
     };
+    const resolvedAnalysisId = draft.analysisAssessment?.id ?? input.analysisId ?? null;
 
     try {
       if (
@@ -576,6 +577,7 @@ export class CoverLettersService {
         baselineVersionHash: studioArtifactContext.baselineVersionHash,
         jobFingerprint: studioArtifactContext.jobFingerprint,
         inputsHash: studioArtifactContext.inputsHash,
+        analysisId: resolvedAnalysisId,
         metadata: {
           auditId: draft.complianceResult.audit.id,
           closingTemplateKey: draft.closingTemplateKey,
@@ -733,6 +735,7 @@ export class CoverLettersService {
         baselineVersionHash: studioArtifactContext.baselineVersionHash,
         jobFingerprint: studioArtifactContext.jobFingerprint,
         inputsHash: studioArtifactContext.inputsHash,
+        analysisId: resolvedAnalysisId,
         responseBody: response as unknown as Record<string, unknown>,
         content: draft.complianceResult.normalizedContent,
         metadata: {
@@ -803,6 +806,7 @@ export class CoverLettersService {
         baselineVersionHash: studioArtifactContext.baselineVersionHash,
         jobFingerprint: studioArtifactContext.jobFingerprint,
         inputsHash: studioArtifactContext.inputsHash,
+        analysisId: resolvedAnalysisId,
         failureCode: error instanceof Error ? error.name : 'generation_failed',
         failureMessage: error instanceof Error ? error.message : String(error),
         metadata: {
