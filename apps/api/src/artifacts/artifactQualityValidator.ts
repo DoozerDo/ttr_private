@@ -269,7 +269,9 @@ function detectTrailingFragmentReason(value: string): string | null {
   const raw = trimToText(value);
   if (!raw) return null;
   const isDangling = endsWithDanglingFragment(raw);
-  if (isDangling && process.env.DEBUG_DOCGEN === 'true') {
+  const shouldTraceOffenders =
+    process.env.DEBUG_DOCGEN === 'true' || process.env.DOCGEN_OFFENDER_TRACE === 'true';
+  if (isDangling && shouldTraceOffenders) {
     try {
       const normalized = normalizeForTrailingCheck(raw);
       const tokens = normalized.split(/\s+/).filter(Boolean);
@@ -363,7 +365,7 @@ export function validateResumeArtifactQuality(
   if (typeof sanitizedResume.summary === 'string') {
     reasons.push(...detectPlaceholderReasons(sanitizedResume.summary));
     const trailing = detectTrailingFragmentReason(sanitizedResume.summary);
-    if (trailing && process.env.DEBUG_DOCGEN === 'true') {
+    if (trailing && (process.env.DEBUG_DOCGEN === 'true' || process.env.DOCGEN_OFFENDER_TRACE === 'true')) {
       // eslint-disable-next-line no-console
       console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_SOURCE]', {
         source: 'summary',
@@ -404,7 +406,7 @@ export function validateResumeArtifactQuality(
     for (const bullet of bullets) {
       reasons.push(...detectPlaceholderReasons(bullet));
       const trailing = detectTrailingFragmentReason(bullet);
-      if (trailing && process.env.DEBUG_DOCGEN === 'true') {
+      if (trailing && (process.env.DEBUG_DOCGEN === 'true' || process.env.DOCGEN_OFFENDER_TRACE === 'true')) {
         // eslint-disable-next-line no-console
         console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_SOURCE]', {
           source: 'experience.bullet',
