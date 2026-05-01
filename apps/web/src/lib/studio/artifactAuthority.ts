@@ -6,8 +6,6 @@ type StudioArtifactsRecordLike = {
 type StudioArtifactsPayloadLike = {
   resume?: StudioArtifactsRecordLike;
   coverLetter?: StudioArtifactsRecordLike;
-  resumeResult?: unknown;
-  coverLetterResult?: unknown;
 } | null;
 
 export type PersistedArtifactExistence = {
@@ -24,11 +22,9 @@ export function getArtifactExistence(normalizedArtifacts: StudioArtifactsPayload
   const coverLetter = normalizedArtifacts?.coverLetter ?? null;
 
   const hasResumeArtifactPersisted =
-    Boolean(resume?.responseBody) || hasNonEmptyText(resume?.content) || Boolean(normalizedArtifacts?.resumeResult);
+    Boolean(resume?.responseBody) || hasNonEmptyText(resume?.content);
   const hasCoverLetterArtifactPersisted =
-    Boolean(coverLetter?.responseBody) ||
-    hasNonEmptyText(coverLetter?.content) ||
-    Boolean(normalizedArtifacts?.coverLetterResult);
+    Boolean(coverLetter?.responseBody) || hasNonEmptyText(coverLetter?.content);
 
   return { hasResumeArtifactPersisted, hasCoverLetterArtifactPersisted };
 }

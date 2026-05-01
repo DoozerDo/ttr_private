@@ -600,6 +600,8 @@ function extractResumeResponseFromStudioArtifacts(payload: BackendStudioArtifact
   const responseBody = payload.resume?.responseBody ?? null;
   const normalized = normalizeHydratedArtifactResponse(responseBody);
   if (normalized) return normalized;
+  const content = typeof payload.resume?.content === "string" ? payload.resume.content.trim() : "";
+  if (content) return { content };
   return payload.resumeResult ? ({ resumeResult: payload.resumeResult } as unknown) : null;
 }
 
@@ -607,6 +609,8 @@ function extractCoverLetterResponseFromStudioArtifacts(payload: BackendStudioArt
   const responseBody = payload.coverLetter?.responseBody ?? null;
   const normalized = normalizeHydratedArtifactResponse(responseBody);
   if (normalized) return normalized;
+  const content = typeof payload.coverLetter?.content === "string" ? payload.coverLetter.content.trim() : "";
+  if (content) return { content };
   return payload.coverLetterResult ? ({ coverLetterResult: payload.coverLetterResult } as unknown) : null;
 }
 
@@ -641,7 +645,9 @@ function getBackendArtifactStatus(record: BackendStudioArtifactRecord | null | u
     // Some upstream records report `completed` even when no response body is available.
     // Studio can only treat an artifact as completed when the payload needed to render it exists.
     const responseBody = (record as unknown as { responseBody?: unknown } | null)?.responseBody;
-    return responseBody == null ? ("missing" as const) : ("completed" as const);
+    const content = (record as unknown as { content?: unknown } | null)?.content;
+    const hasContent = typeof content === "string" && content.trim().length > 0;
+    return responseBody == null && !hasContent ? ("missing" as const) : ("completed" as const);
   }
   if (status === "in_progress") return "in_progress" as const;
   if (status === "failed") return "failed" as const;
