@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
@@ -67,10 +67,23 @@ function readDateRange(entry: ResumeExperience): string {
   if (toText(entry.dateRange)) return toText(entry.dateRange);
   const start = toText(entry.startDate);
   const end = toText(entry.endDate);
-  if (start && end) return `${start} - ${end}`;
+  if (start && end) return `${start} – ${end}`;
   return start || end;
 }
 
+function stripCompanyDateBleed(company: string, dateRange: string): string {
+  const safeCompany = toText(company);
+  const safeDateRange = toText(dateRange);
+  if (!safeCompany || !safeDateRange) return safeCompany;
+
+  const startToken = safeDateRange.split("–")[0]?.trim() ?? "";
+  if (!startToken) return safeCompany;
+
+  const suffix = ` ${startToken}`;
+  if (!safeCompany.endsWith(suffix)) return safeCompany;
+
+  return safeCompany.slice(0, -suffix.length).trim();
+}
 function normalizePipeTokens(value: unknown): string[] {
   return toText(value)
     .split(/[|Â¦ï½œ]/)
@@ -172,7 +185,7 @@ export function ResumePreview({
   const experiences = model && Array.isArray(model.experience)
     ? model.experience
         .map((entry) => ({
-          company: toText(entry.company),
+          company: stripCompanyDateBleed(toText(entry.company), readDateRange(entry)),
           roleTitle: toText(entry.roleTitle),
           location: toText(entry.location),
           dateRange: readDateRange(entry),
@@ -534,3 +547,4 @@ export function ResumePreview({
     </div>
   );
 }
+

@@ -314,6 +314,54 @@ describe('ResumeService contract', () => {
     baseline.parsedRecords = originalParsed;
   });
 
+  it('preserves inline date ranges in structured baseline + generated resume output (no company/date bleed)', async () => {
+    const { service } = buildService();
+    const original = baseline.sections?.[0]?.content ?? '';
+    const originalParsed = baseline.parsedRecords;
+    baseline.parsedRecords = [
+      {
+        createdAt: new Date(),
+        parsedJson: { identity: { full_name: 'Jordan Lee' } },
+      } as any,
+    ];
+
+    baseline.sections = [
+      {
+        ...baseSection,
+        content: [
+          'Biblioso July 2024 - April 2026',
+          'Senior Customer Operations Manager',
+          '- Improved CSAT and reduced escalations.',
+          '',
+          'Biblioso April 2026 - Present',
+          'Director, Customer Experience',
+          '- Led a cross-functional CX program.',
+        ].join('\n'),
+      },
+    ];
+
+    const result = await service.generateResume('user-1', baseRequest);
+    const extracted = extractStructuredBaselineFromSections(baseline.sections as any);
+
+    expect(extracted.experience.slice(0, 2).map((e) => ({ company: e.company, dates: e.dates }))).toEqual([
+      { company: 'Biblioso', dates: 'July 2024 – April 2026' },
+      { company: 'Biblioso', dates: 'April 2026 – Present' },
+    ]);
+
+    const previewExperience = (result.preview?.resume as any)?.experience ?? [];
+    expect(previewExperience.length).toBeGreaterThanOrEqual(2);
+    expect(previewExperience.slice(0, 2).map((e: any) => ({ company: e.company, dateRange: e.dateRange }))).toEqual([
+      { company: 'Biblioso', dateRange: 'July 2024 – April 2026' },
+      { company: 'Biblioso', dateRange: 'April 2026 – Present' },
+    ]);
+
+    expect(String(previewExperience[0]?.company ?? '')).not.toContain('July 2024');
+    expect(String(previewExperience[1]?.company ?? '')).not.toContain('April 2026');
+
+    baseline.sections = [{ ...baseSection, content: original }];
+    baseline.parsedRecords = originalParsed;
+  });
+
   it('resolves analysisId when omitted (Studio generate) and still persists the resume artifact', async () => {
     const { service, studioArtifactsService } = buildService();
 

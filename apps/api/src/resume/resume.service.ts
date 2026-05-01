@@ -1030,7 +1030,7 @@ export class ResumeService {
           location: entry.location ?? null,
           dateRange:
             entry.dateRange ??
-            [entry.startDate, entry.endDate].filter(Boolean).join(' - ') ??
+            [entry.startDate, entry.endDate].filter(Boolean).join(' – ') ??
             null,
           bullets: entry.bullets,
         })),

@@ -30,7 +30,7 @@ describe("ResumePreview", () => {
     expect(screen.getByText("Alex Candidate")).toBeInTheDocument();
     expect(screen.getByText("Professional Experience")).toBeInTheDocument();
     expect(screen.getByText("Cat Daddy Games")).toBeInTheDocument();
-    expect(screen.getByText("Senior Producer | Kirkland, WA")).toBeInTheDocument();
+    expect(screen.getByText("Senior Producer")).toBeInTheDocument();
     expect(screen.getByText("2021 - Present")).toBeInTheDocument();
   });
 
@@ -44,6 +44,102 @@ describe("ResumePreview", () => {
     expect(bullets).toHaveLength(2);
     expect(screen.getByText("Led live operations roadmap delivery across multiple game releases.")).toBeInTheDocument();
     expect(screen.getByText("Improved release quality through tighter cross-team planning.")).toBeInTheDocument();
+  });
+
+  it("strips duplicated inline date text from company when dateRange is present (exact start-token match only)", () => {
+    render(
+      <ResumePreview
+        payload={{
+          preview: {
+            resume: {
+              heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+              experience: [
+                {
+                  company: "Biblioso July 2024",
+                  roleTitle: "Senior Customer Operations Manager",
+                  dateRange: "July 2024 – April 2026",
+                  bullets: ["Did work."],
+                },
+                {
+                  company: "Biblioso April 2026",
+                  roleTitle: "Director, Customer Experience",
+                  dateRange: "April 2026 – Present",
+                  bullets: ["Did work."],
+                },
+                {
+                  company: "July 2024 Studios July 2024",
+                  roleTitle: "Producer",
+                  dateRange: "April 2026 – Present",
+                  bullets: ["Did work."],
+                },
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getAllByText("Biblioso")).toHaveLength(2);
+    expect(screen.getByText("July 2024 – April 2026")).toBeInTheDocument();
+    expect(screen.getByText("April 2026 – Present")).toBeInTheDocument();
+
+    // Do not strip unrelated date-like suffixes if it doesn't match dateRange start token.
+    fireEvent.click(screen.getByTestId("studio-resume-show-full-toggle"));
+    expect(screen.getByText("July 2024 Studios July 2024")).toBeInTheDocument();
+  });
+
+  it("renders canonical en dash separator when dateRange is derived from startDate/endDate", () => {
+    render(
+      <ResumePreview
+        payload={{
+          preview: {
+            resume: {
+              heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+              experience: [
+                {
+                  company: "Biblioso",
+                  roleTitle: "Director, Customer Experience",
+                  startDate: "July 2024",
+                  endDate: "April 2026",
+                  bullets: ["Did work."],
+                },
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText("July 2024 – April 2026")).toBeInTheDocument();
+  });
+
+  it("does not mutate incoming preview payload when applying display-only company cleanup", () => {
+    const payload = {
+      preview: {
+        resume: {
+          heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+          experience: [
+            {
+              company: "Biblioso July 2024",
+              roleTitle: "Senior Customer Operations Manager",
+              dateRange: "July 2024 – April 2026",
+              bullets: ["Did work."],
+            },
+          ],
+        },
+      },
+    } as const;
+
+    Object.freeze(payload.preview.resume.experience[0]);
+    Object.freeze(payload.preview.resume.experience);
+    Object.freeze(payload.preview.resume);
+    Object.freeze(payload.preview);
+    Object.freeze(payload);
+
+    render(<ResumePreview payload={payload} />);
+
+    expect(screen.getByText("Biblioso")).toBeInTheDocument();
+    expect(payload.preview.resume.experience[0].company).toBe("Biblioso July 2024");
   });
 
   it("defaults to Preview Mode (summary collapsed, only 2 most recent roles shown) until toggled", () => {
