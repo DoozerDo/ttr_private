@@ -235,18 +235,44 @@ export function validateResumeArtifactQuality(
     };
   }
 
+  // Always validate against a sanitized model so trailing-fragment checks cannot accidentally
+  // evaluate pre-sanitized bullets/summaries (e.g. fail-safe paths, alternate assembly routes).
+  const sanitizedResume = sanitizeResumeForTrailingFragments(resume);
+
+  if (process.env.DEBUG_DOCGEN === 'true') {
+    try {
+      const experienceBullets = Array.isArray((sanitizedResume as any)?.experience)
+        ? (sanitizedResume as any).experience.flatMap((entry: any) =>
+            Array.isArray(entry?.bullets) ? entry.bullets : [],
+          )
+        : [];
+      // eslint-disable-next-line no-console
+      console.log('[RESUME_TRAILING_FRAGMENT_VALIDATION_INPUT]', {
+        summaryEnd: typeof (sanitizedResume as any)?.summary === 'string'
+          ? String((sanitizedResume as any).summary).slice(-12)
+          : null,
+        bulletEndings: experienceBullets.slice(0, 12).map((b: unknown) => {
+          const text = typeof b === 'string' ? b : String(b ?? '');
+          return text.slice(Math.max(0, text.length - 12));
+        }),
+      });
+    } catch {
+      // ignore debug logging failures
+    }
+  }
+
   const reasons: string[] = [];
 
-  if (typeof resume.summary === 'string') {
-    reasons.push(...detectPlaceholderReasons(resume.summary));
-    const trailing = detectTrailingFragmentReason(resume.summary);
+  if (typeof sanitizedResume.summary === 'string') {
+    reasons.push(...detectPlaceholderReasons(sanitizedResume.summary));
+    const trailing = detectTrailingFragmentReason(sanitizedResume.summary);
     if (trailing) reasons.push(trailing);
-    if (!trimToText(resume.summary)) {
+    if (!trimToText(sanitizedResume.summary)) {
       reasons.push('empty_summary');
     }
   }
 
-  const experience = Array.isArray(resume.experience) ? resume.experience : [];
+  const experience = Array.isArray(sanitizedResume.experience) ? sanitizedResume.experience : [];
   for (const entry of experience) {
     const company = trimToText((entry as any)?.company);
     const roleTitle = trimToText((entry as any)?.roleTitle);

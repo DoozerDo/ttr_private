@@ -1,6 +1,5 @@
 import {
   repairCoverLetterForQuality,
-  repairResumeForQuality,
   sanitizeResumeForTrailingFragments,
   validateCoverLetterArtifactQuality,
   validateResumeArtifactQuality,
@@ -8,7 +7,7 @@ import {
 } from './artifactQualityValidator';
 
 describe('artifactQualityValidator', () => {
-  it('repairs a trailing fragment in resume summary on retry', () => {
+  it('sanitizes resume trailing fragments before validation', () => {
     const resume: any = {
       heading: { name: 'Test', contactLine: 'test@example.com' },
       summary: 'Designed and built a full-stack production platform. The',
@@ -18,12 +17,7 @@ describe('artifactQualityValidator', () => {
     };
 
     const gate = validateResumeArtifactQuality(resume);
-    expect(gate.status).toBe('needs_refinement');
-    expect(gate.reasons).toContain('incomplete_trailing_fragment');
-
-    const repaired = repairResumeForQuality(resume, gate);
-    const repairedGate = validateResumeArtifactQuality(repaired as any);
-    expect(repairedGate.status).toBe('pass');
+    expect(gate.reasons).not.toContain('incomplete_trailing_fragment');
   });
 
   it('repairs a banned phrase in cover letter on retry', () => {
