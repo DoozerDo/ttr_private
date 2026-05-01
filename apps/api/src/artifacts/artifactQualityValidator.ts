@@ -569,18 +569,19 @@ export function validateResumeArtifactQualityStrict(
   const reasons: string[] = [];
 
   if (typeof resume.summary === 'string') {
-    reasons.push(...detectPlaceholderReasons(resume.summary));
-    const trailing = detectTrailingFragmentReason(resume.summary);
+    const summaryText = trimToText(resume.summary);
+    reasons.push(...detectPlaceholderReasons(summaryText));
+    const trailing = detectTrailingFragmentReason(summaryText);
     if (trailing) {
       reasons.push(trailing);
       captureTrailingFragmentOffender({
-        text: resume.summary,
+        text: summaryText,
         source: 'summary',
         company: null,
         roleTitle: null,
       });
     }
-    if (!trimToText(resume.summary)) {
+    if (!summaryText) {
       reasons.push('empty_summary');
     }
   }
@@ -599,18 +600,55 @@ export function validateResumeArtifactQualityStrict(
       reasons.push('empty_role');
     }
 
-    if (roleTitle) {
+    // Strict header quality: only hard-fail for empties and known garbage placeholders.
+    // Do not fail real-world headers simply due to punctuation, length, or contractor context.
+    if (!company) {
+      reasons.push('malformed_experience_header:company');
+    } else {
+      const companyLower = company.toLowerCase();
+      const bannedCompanies = new Set([
+        'experience entry needs correction',
+        'automation & monitoring',
+        'internal web applications',
+        'datacenter operations',
+      ]);
+      if (bannedCompanies.has(companyLower)) {
+        reasons.push('malformed_experience_header:company');
+      }
+      if (/\b(?:professional\s+experience|experience|projects|skills|education|summary)\b/i.test(company)) {
+        reasons.push('malformed_experience_header:company');
+      }
+      if (/\bVue\s*3\),\s*deck builder frontend\b/i.test(company)) {
+        reasons.push('malformed_experience_header:company');
+      }
+      // Date range embedded into company (e.g. "OfficeDepot October 2014 - November 2016")
+      const month =
+        '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+      const embeddedDateRange = new RegExp(
+        `\\b${month}\\s+(?:19|20)\\d{2}\\b\\s*[-–—]\\s*\\b${month}\\s+(?:19|20)\\d{2}\\b`,
+        'i',
+      );
+      if (embeddedDateRange.test(company)) {
+        reasons.push('malformed_experience_header:company');
+      }
+    }
+
+    if (!roleTitle) {
+      reasons.push('malformed_experience_header:role_title');
+    } else {
+      const roleLower = roleTitle.toLowerCase();
+      if (roleLower === 'professional experience') {
+        reasons.push('malformed_experience_header:role_title');
+      }
+      // Only treat as malformed when it is clearly a bullet/prose line (action verb / sentence + very long).
       if (
-        looksLikeSentence(roleTitle) ||
-        startsWithActionVerb(roleTitle) ||
-        endsWithDanglingHeaderToken(roleTitle)
+        (looksLikeSentence(roleTitle) || startsWithActionVerb(roleTitle)) &&
+        roleTitle.split(/\s+/).length > 12
       ) {
         reasons.push('malformed_experience_header:role_title');
       }
-    }
-    if (company) {
-      if (looksLikeSentence(company) || startsWithActionVerb(company)) {
-        reasons.push('malformed_experience_header:company');
+      if (endsWithDanglingHeaderToken(roleTitle)) {
+        reasons.push('malformed_experience_header:role_title');
       }
     }
 

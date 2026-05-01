@@ -39,6 +39,34 @@ describe('resume generation v2', () => {
     }
   });
 
+  it('produces a grounded non-empty summary and excludes known garbage experience entries', () => {
+    const baselineSections = [
+      {
+        sectionType: 'EXPERIENCE',
+        content: [
+          'AMS DataSerfs | Senior Data Analyst | 2021 - Present',
+          '- Built KPI dashboards and improved reporting cadence.',
+          '',
+          'Experience entry needs correction | Professional Experience',
+          '- Vue 3), deck builder frontend',
+          '',
+          'OfficeDepot October 2014 - November 2016 | Cashier',
+          '- Assisted customers.',
+        ].join('\n'),
+      },
+    ] as any[];
+
+    const result = buildDeterministicResumeV2FromBaseline({
+      baselineSections: baselineSections as any,
+      identity: { name: 'Test User', contactLine: 'test@example.com' },
+    });
+
+    expect(String((result.normalized as any).summary ?? '').trim().length).toBeGreaterThan(0);
+    expect(JSON.stringify(result.normalized.experience)).not.toContain('Vue 3), deck builder frontend');
+    expect(JSON.stringify(result.normalized.experience)).not.toContain('Experience entry needs correction');
+    expect(JSON.stringify(result.normalized.experience)).not.toContain('Professional Experience');
+  });
+
   it('rejects malformed fragments such as "Vue 3), deck builder frontend" with explicit reasons', () => {
     const baselineSections = [
       {

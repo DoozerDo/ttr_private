@@ -331,9 +331,14 @@ describe('ResumeService contract', () => {
       expect(persisted?.responseBody?.internal).toBeTruthy();
       expect(persisted?.responseBody?.internal?.generationPipeline).toBe('v2');
       expect(JSON.stringify(persisted?.responseBody?.preview ?? {})).not.toContain('Vue 3), deck builder frontend');
+      expect(JSON.stringify(persisted?.responseBody?.preview ?? {})).not.toContain('Experience entry needs correction');
+      expect(JSON.stringify(persisted?.responseBody?.preview ?? {})).not.toContain('Automation & Monitoring');
+      expect(JSON.stringify(persisted?.responseBody?.preview ?? {})).not.toContain('Internal Web Applications');
+      expect(JSON.stringify(persisted?.responseBody?.preview ?? {})).not.toContain('Datacenter Operations');
 
       expect((result as any)?.internal?.generationPipeline).toBe('v2');
       expect(JSON.stringify((result as any)?.preview ?? {})).not.toContain('Vue 3), deck builder frontend');
+      expect(String((result as any)?.preview?.resume?.summary ?? '').trim().length).toBeGreaterThan(0);
     } finally {
       baseline.sections = originalSections;
       if (typeof originalFlag === 'string') {

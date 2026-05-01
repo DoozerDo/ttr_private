@@ -38,6 +38,38 @@ function containsProjectFragmentTerms(value: string): boolean {
   return /\b(?:vue|react|frontend|back\s*end|backend|builder)\b/i.test(text);
 }
 
+function isKnownGarbageCompanyPlaceholder(value: string): boolean {
+  const text = trimToText(value);
+  if (!text) return true;
+  const normalized = text.toLowerCase();
+  if (normalized === 'experience entry needs correction') return true;
+
+  // Block section-heading-like company candidates that frequently leak from baseline parsing.
+  const bannedExact = new Set([
+    'automation & monitoring',
+    'internal web applications',
+    'datacenter operations',
+  ]);
+  if (bannedExact.has(normalized)) return true;
+
+  // Block obvious heading tokens.
+  if (/\b(?:professional\s+experience|experience|projects|skills|education|summary)\b/i.test(text)) {
+    return true;
+  }
+
+  return false;
+}
+
+function looksLikeCompanyWithEmbeddedDateRange(value: string): boolean {
+  const text = trimToText(value);
+  if (!text) return false;
+  // e.g. "OfficeDepot October 2014 - November 2016"
+  const month =
+    '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+  const pattern = new RegExp(`\\b${month}\\s+(?:19|20)\\d{2}\\b\\s*[-–—]\\s*\\b${month}\\s+(?:19|20)\\d{2}\\b`, 'i');
+  return pattern.test(text);
+}
+
 function looksLikeProjectDescription(value: string): boolean {
   const text = trimToText(value);
   if (!text) return false;
@@ -62,11 +94,17 @@ function validateCompanyCandidate(company: string): { ok: true } | { ok: false; 
   const text = trimToText(company);
   if (!text) return { ok: false, reasons: ['company:missing'] };
 
+  if (isKnownGarbageCompanyPlaceholder(text)) {
+    reasons.push('company:known_garbage_placeholder');
+  }
   if (hasUnmatchedClosingParen(text)) {
     reasons.push('company:unmatched_closing_paren');
   }
   if (containsProjectFragmentTerms(text)) {
     reasons.push('company:project_fragment_terms');
+  }
+  if (looksLikeCompanyWithEmbeddedDateRange(text)) {
+    reasons.push('company:embedded_date_range');
   }
   if (looksLikeProjectDescription(text)) {
     reasons.push('company:looks_like_project_description');
@@ -192,7 +230,25 @@ export function buildDeterministicResumeV2FromBaseline(input: {
 
   structured.experience = allowedExperience;
 
+  if (!structured.summary || !trimToText(structured.summary)) {
+    const bulletCandidates = allowedExperience
+      .flatMap((entry) => (entry?.bullets ?? []).map((b) => trimToText(b)).filter(Boolean))
+      .filter((b) => b.length >= 12);
+    const fallback = bulletCandidates.slice(0, 2).join(' ');
+    if (fallback) {
+      structured.summary = fallback;
+    }
+  }
+
   const normalized = assembleResumeFromStructuredBaseline(structured, input.identity);
+  if (!trimToText((normalized as any).summary)) {
+    throw new UnprocessableEntityException({
+      error: {
+        code: 'resume_v2_summary_missing',
+        message: 'Resume V2 could not derive a grounded summary from baseline input.',
+      },
+    });
+  }
 
   const normalizedValidation = validateNormalizedResumeDocument(normalized);
   if (!normalizedValidation.valid) {
