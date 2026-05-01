@@ -112,6 +112,8 @@ function shouldDebugDocgen() {
   return process.env.NODE_ENV !== 'production' || process.env.DEBUG_DOCGEN === 'true';
 }
 
+const shouldTraceArtifactIdentity = process.env.ARTIFACT_IDENTITY_TRACE === 'true';
+
 @Injectable()
 export class StudioArtifactsService {
   constructor(
@@ -168,17 +170,12 @@ export class StudioArtifactsService {
       jobFingerprint,
     });
 
-    // eslint-disable-next-line no-console
-    console.log('[ARTIFACT_READ]', {
-      baselineId: input.baselineId,
-      jobId: input.jobId,
-      baselineVersionId: input.baselineVersionId,
-      inputsHash: {
-        resume: resumeInputsHash,
-        coverLetter: coverLetterInputsHash,
-      },
-      analysisId: input.analysisId ?? null,
-    });
+    if (shouldTraceArtifactIdentity) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[ARTIFACT_READ] baselineVersionId=${input.baselineVersionId} jobId=${input.jobId} resumeInputsHash=${resumeInputsHash} coverInputsHash=${coverLetterInputsHash} analysisId=${input.analysisId ?? null}`,
+      );
+    }
 
     const record = await this.studioArtifactRepository.findOne({
       where: {
@@ -440,15 +437,12 @@ export class StudioArtifactsService {
     metadata?: Record<string, unknown>;
     analysisId?: string | null;
   }): Promise<string> {
-    // eslint-disable-next-line no-console
-    console.log('[ARTIFACT_WRITE]', {
-      type: 'resume',
-      baselineId: input.baselineId,
-      jobId: input.jobId,
-      baselineVersionId: input.baselineVersionId,
-      inputsHash: input.inputsHash,
-      analysisId: input.analysisId ?? null,
-    });
+    if (shouldTraceArtifactIdentity) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[ARTIFACT_WRITE] type=resume baselineVersionId=${input.baselineVersionId} jobId=${input.jobId} inputsHash=${input.inputsHash} analysisId=${input.analysisId ?? null}`,
+      );
+    }
     return this.upsertArtifactRow(input.userId, input.baselineId, input.jobId, {
       baselineVersionId: input.baselineVersionId,
       baselineVersionHash: input.baselineVersionHash,
@@ -531,15 +525,12 @@ export class StudioArtifactsService {
     metadata?: Record<string, unknown>;
     analysisId?: string | null;
   }): Promise<string> {
-    // eslint-disable-next-line no-console
-    console.log('[ARTIFACT_WRITE]', {
-      type: 'coverLetter',
-      baselineId: input.baselineId,
-      jobId: input.jobId,
-      baselineVersionId: input.baselineVersionId,
-      inputsHash: input.inputsHash,
-      analysisId: input.analysisId ?? null,
-    });
+    if (shouldTraceArtifactIdentity) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[ARTIFACT_WRITE] type=coverLetter baselineVersionId=${input.baselineVersionId} jobId=${input.jobId} inputsHash=${input.inputsHash} analysisId=${input.analysisId ?? null}`,
+      );
+    }
     return this.upsertArtifactRow(input.userId, input.baselineId, input.jobId, {
       baselineVersionId: input.baselineVersionId,
       baselineVersionHash: input.baselineVersionHash,
