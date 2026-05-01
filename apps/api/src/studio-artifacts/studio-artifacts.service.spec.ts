@@ -89,6 +89,82 @@ describe('StudioArtifactsService', () => {
     expect(state.coverLetter?.status).toBeUndefined();
   });
 
+  it('does not retain stale correction reasons after a successful regeneration', async () => {
+    const studioArtifactRepository = createRepository<any>();
+    const baselineVersionRepository = {
+      findOne: jest.fn(async () => baselineVersion),
+    };
+    const jobRepository = {
+      findOne: jest.fn(async () => job),
+    };
+    const assessmentRepository = {
+      findOne: jest.fn(async () => assessment),
+    };
+    const baselineRepository = {
+      findOne: jest.fn(async () => baseline),
+    };
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository as any,
+      baselineRepository as any,
+      baselineVersionRepository as any,
+      jobRepository as any,
+      assessmentRepository as any,
+    );
+
+    const inputsHash = service.computeResumeInputsHash({
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: service.computeJobFingerprint(job as any),
+      assessmentInputsHash: assessment.inputsHash,
+    });
+
+    await service.recordResumeSuccess({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: service.computeJobFingerprint(job as any),
+      inputsHash,
+      responseBody: {
+        status: 'success',
+        preview: { resume: { heading: { name: 'Alex' } } },
+        qualityGate: { status: 'needs_refinement', reasons: ['incomplete_trailing_fragment'] },
+      },
+      content: 'resume-content',
+      metadata: { auditId: 'audit-1' },
+    });
+
+    await service.recordResumeSuccess({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: service.computeJobFingerprint(job as any),
+      inputsHash,
+      responseBody: {
+        status: 'success',
+        preview: { resume: { heading: { name: 'Alex' } } },
+        qualityGate: { status: 'pass', reasons: [] },
+      },
+      content: 'resume-content-updated',
+      metadata: { auditId: 'audit-2' },
+    });
+
+    const state = await service.readState({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      analysisId: 'analysis-1',
+    });
+
+    expect(state.resume?.content).toBe('resume-content-updated');
+    expect(state.resumeResult?.qualityStatus).toBe('pass');
+    expect(state.resumeResult?.correctionReasons ?? []).toEqual([]);
+  });
+
   it('sanitizes stored resume preview on readState so malformed role titles never rehydrate to Studio', async () => {
     const studioArtifactRepository = createRepository<any>();
     const baselineVersionRepository = {

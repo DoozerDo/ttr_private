@@ -140,6 +140,10 @@ export class StudioArtifactsService {
     baselineVersionId: string;
     analysisId?: string | null;
   }): Promise<StudioArtifactsState> {
+    if (process.env.DEBUG_STUDIO_ARTIFACT_QUALITY === 'true') {
+      // eslint-disable-next-line no-console
+      console.log('[ARTIFACT_QUALITY_READ]', `baselineId=${input.baselineId} jobId=${input.jobId} baselineVersionId=${input.baselineVersionId} analysisId=${input.analysisId ?? null}`);
+    }
     const [baselineVersion, job, assessment, baseline] = await Promise.all([
       this.baselineVersionRepository.findOne({
         where: { id: input.baselineVersionId, baselineId: input.baselineId },
@@ -294,6 +298,32 @@ export class StudioArtifactsService {
           }
         : coverRecordRaw;
 
+    if (process.env.DEBUG_STUDIO_ARTIFACT_QUALITY === 'true') {
+      try {
+        const resumeGate = (resumeRecord?.responseBody as any)?.qualityGate;
+        const resumeStatus =
+          resumeGate && typeof resumeGate === 'object' ? String((resumeGate as any).status ?? '') : '';
+        const resumeReasons =
+          resumeGate && typeof resumeGate === 'object' && Array.isArray((resumeGate as any).reasons)
+            ? (resumeGate as any).reasons.map((r: unknown) => String(r ?? '')).slice(0, 8)
+            : [];
+        const coverGate = (coverRecord?.responseBody as any)?.qualityGate;
+        const coverStatus =
+          coverGate && typeof coverGate === 'object' ? String((coverGate as any).status ?? '') : '';
+        const coverReasons =
+          coverGate && typeof coverGate === 'object' && Array.isArray((coverGate as any).reasons)
+            ? (coverGate as any).reasons.map((r: unknown) => String(r ?? '')).slice(0, 8)
+            : [];
+        // eslint-disable-next-line no-console
+        console.log(
+          '[ARTIFACT_QUALITY_READ_RESULT]',
+          `resumeStatus=${resumeStatus || 'missing'} resumeReasons=${resumeReasons.join(',')} coverStatus=${coverStatus || 'missing'} coverReasons=${coverReasons.join(',')}`,
+        );
+      } catch {
+        // ignore debug logging failures
+      }
+    }
+
     return {
       status: this.resolvePairStatus(record, resumeInputsHash, coverLetterInputsHash),
       baselineId: input.baselineId,
@@ -401,6 +431,8 @@ export class StudioArtifactsService {
           .map((reason) => String(reason ?? '').trim())
           .filter(Boolean)
           .slice(0, 8)
+          // Avoid duplicates from previous retry loops or upstream serializers.
+          .filter((value, index, all) => all.indexOf(value) === index)
           .map((code) => ({
             code,
             message: code,
@@ -432,7 +464,12 @@ export class StudioArtifactsService {
       generationState,
       qualityStatus,
       preview: previewModel ?? null,
-      correctionReasons: correctionReasons.length ? correctionReasons : [{ code: 'needs_correction', message: 'Needs correction.', severity: 'warning' }],
+      correctionReasons:
+        qualityStatus === 'pass'
+          ? []
+          : correctionReasons.length
+            ? correctionReasons
+            : [{ code: 'needs_correction', message: 'Needs correction.', severity: 'warning' }],
       exportReady,
       exports,
       actions: {
@@ -486,6 +523,15 @@ export class StudioArtifactsService {
       console.log(
         `[ARTIFACT_WRITE] type=resume baselineVersionId=${input.baselineVersionId} jobId=${input.jobId} inputsHash=${input.inputsHash} analysisId=${input.analysisId ?? null}`,
       );
+    }
+    if (process.env.DEBUG_STUDIO_ARTIFACT_QUALITY === 'true') {
+      const gate = (input.responseBody as any)?.qualityGate;
+      const status = gate && typeof gate === 'object' ? String((gate as any).status ?? '') : '';
+      const reasons = gate && typeof gate === 'object' && Array.isArray((gate as any).reasons)
+        ? (gate as any).reasons.map((r: unknown) => String(r ?? '')).slice(0, 8)
+        : [];
+      // eslint-disable-next-line no-console
+      console.log('[ARTIFACT_QUALITY_WRITE]', `type=resume status=${status || 'missing'} reasons=${reasons.join(',')}`);
     }
     return this.upsertArtifactRow(input.userId, input.baselineId, input.jobId, {
       baselineVersionId: input.baselineVersionId,
