@@ -20,6 +20,27 @@ describe('artifactQualityValidator', () => {
     expect(gate.reasons).not.toContain('incomplete_trailing_fragment');
   });
 
+  it('emits debug logs with offending text for trailing fragment validation failures', () => {
+    const original = process.env.DEBUG_DOCGEN;
+    process.env.DEBUG_DOCGEN = 'true';
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    const gate = validateCoverLetterArtifactQuality([
+      'Dear Hiring Team,',
+      'I improved service operations with',
+    ]);
+    expect(gate.reasons).toContain('incomplete_trailing_fragment');
+    expect(
+      logSpy.mock.calls.some(([first]) =>
+        String(first ?? '').includes('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_OFFENDER]'),
+      ),
+    ).toBe(true);
+
+    logSpy.mockRestore();
+    process.env.DEBUG_DOCGEN = original;
+  });
+
   it('repairs a banned phrase in cover letter on retry', () => {
     const paragraphs = ['The strongest fit comes from the operating context I have already handled.'];
     const gate = validateCoverLetterArtifactQuality(paragraphs);

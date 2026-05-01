@@ -268,7 +268,32 @@ function detectPlaceholderReasons(value: string): string[] {
 function detectTrailingFragmentReason(value: string): string | null {
   const raw = trimToText(value);
   if (!raw) return null;
-  return endsWithDanglingFragment(raw) ? 'incomplete_trailing_fragment' : null;
+  const isDangling = endsWithDanglingFragment(raw);
+  if (isDangling && process.env.DEBUG_DOCGEN === 'true') {
+    try {
+      const normalized = normalizeForTrailingCheck(raw);
+      const tokens = normalized.split(/\s+/).filter(Boolean);
+      const endingToken = (tokens[tokens.length - 1] ?? '').toLowerCase();
+      const incompleteReason = DANGLING_TRAILING_WORDS.has(endingToken)
+        ? 'dangling_trailing_word'
+        : INCOMPLETE_TRAILING_PREPOSITIONS.has(endingToken)
+          ? 'trailing_preposition'
+          : WEAK_TERMINAL_VERBS.has(endingToken)
+            ? 'weak_terminal_verb'
+            : 'unknown';
+      // eslint-disable-next-line no-console
+      console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_OFFENDER]', {
+        endingToken: endingToken || null,
+        reason: incompleteReason,
+        hasTerminalPunctuation: /[.!?]\s*$/.test(raw),
+        isCompleteClause: isCompleteClause(raw),
+        text: raw,
+      });
+    } catch {
+      // ignore debug logging failures
+    }
+  }
+  return isDangling ? 'incomplete_trailing_fragment' : null;
 }
 
 export function looksLikeSentence(value: string): boolean {
@@ -338,6 +363,12 @@ export function validateResumeArtifactQuality(
   if (typeof sanitizedResume.summary === 'string') {
     reasons.push(...detectPlaceholderReasons(sanitizedResume.summary));
     const trailing = detectTrailingFragmentReason(sanitizedResume.summary);
+    if (trailing && process.env.DEBUG_DOCGEN === 'true') {
+      // eslint-disable-next-line no-console
+      console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_SOURCE]', {
+        source: 'summary',
+      });
+    }
     if (trailing) reasons.push(trailing);
     if (!trimToText(sanitizedResume.summary)) {
       reasons.push('empty_summary');
@@ -373,6 +404,14 @@ export function validateResumeArtifactQuality(
     for (const bullet of bullets) {
       reasons.push(...detectPlaceholderReasons(bullet));
       const trailing = detectTrailingFragmentReason(bullet);
+      if (trailing && process.env.DEBUG_DOCGEN === 'true') {
+        // eslint-disable-next-line no-console
+        console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_SOURCE]', {
+          source: 'experience.bullet',
+          company: company || null,
+          roleTitle: roleTitle || null,
+        });
+      }
       if (trailing) reasons.push(trailing);
     }
   }
