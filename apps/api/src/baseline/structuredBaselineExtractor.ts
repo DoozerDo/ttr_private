@@ -1,4 +1,4 @@
-import type { BaselineSection } from './baseline-section.entity';
+﻿import type { BaselineSection } from './baseline-section.entity';
 
 export type StructuredBaseline = {
   contact?: Record<string, unknown>;
@@ -102,6 +102,18 @@ function parseExperienceHeaderLine(line: string): { company: string; roleTitle: 
   // Support "Company — Role Title — dates" and "Company - Role Title - dates"
   const dashParts = raw.split(/\s[—-]\s/).map((p) => trimToText(p)).filter(Boolean);
   if (dashParts.length >= 2) {
+    // Avoid misclassifying "Company <Month YYYY> - <Month YYYY|Present>" as a header with company+roleTitle.
+    if (dashParts.length === 2 && looksLikeDatesLine(dashParts[1])) return null;
+
+    if (dashParts.length === 2) {
+      const monthYear =
+        /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(?:19|20)\d{2}\b/i;
+      const leftHasMonthYear = monthYear.test(dashParts[0]);
+      const leftEndsWithMonthYear = monthYear.test(dashParts[0].split(/\s+/).slice(-2).join(' '));
+      const rightIsEnd = monthYear.test(dashParts[1]) || /\b(?:present|current)\b/i.test(dashParts[1]);
+      if (leftHasMonthYear && leftEndsWithMonthYear && rightIsEnd) return null;
+    }
+
     const [company, roleTitle, dates] = dashParts;
     if (!company || !roleTitle) return null;
     return { company, roleTitle, ...(dates ? { dates } : {}) };
@@ -110,23 +122,47 @@ function parseExperienceHeaderLine(line: string): { company: string; roleTitle: 
   return null;
 }
 
+const MONTH_YEAR_TOKEN =
+  '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s+(?:19|20)\\d{2}';
+const MONTH_YEAR_RE = new RegExp(`\\b${MONTH_YEAR_TOKEN}\\b`, 'i');
+
+function normalizeDateRangeSeparators(text: string): string {
+  // Normalize dash-like separators (including mojibake artifacts) and "to" into a canonical hyphen.
+  return (
+    text
+      // Common UTF-8 mojibake renderings of en/em dashes when decoded as ISO-8859-1/Windows-1252.
+      .replace(/\u00C3\u00A2\u00E2\u0082\u00AC\u00E2\u0080\u009D/g, '-') // "Ã¢â‚¬â€"
+      .replace(/\u00E2\u0080\u0094/g, '-') // "â€”"
+      .replace(/\u00E2\u0080\u0093/g, '-') // "â€“"
+      // Real unicode dashes/minus.
+      .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g, '-')
+      .replace(/\s+to\s+/gi, ' - ')
+      .replace(/\s*-\s*/g, ' - ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
+}
+
+function canonicalizeDateRange(text: string): string {
+  const normalized = normalizeDateRangeSeparators(text);
+  const parts = normalized.split(' - ').map((p) => trimToText(p)).filter(Boolean);
+  if (parts.length < 2) return normalized;
+  const start = parts[0];
+  const end = parts.slice(1).join(' - ');
+  const canonicalEnd = /\bcurrent\b/i.test(end) ? 'Present' : end;
+  return `${start} – ${canonicalEnd}`.replace(/\s+/g, ' ').trim();
+}
+
 function looksLikeDatesLine(line: string): boolean {
   const raw = trimToText(line);
   if (!raw) return false;
-  const monthYear =
-    /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(?:19|20)\d{2}\b/i;
-  const hasYear = /\b(19|20)\d{2}\b/.test(raw);
-  const looksLikeMonthYear = monthYear.test(raw);
+  const normalized = normalizeDateRangeSeparators(raw);
+  const hasYear = /\b(19|20)\d{2}\b/.test(normalized);
+  const looksLikeMonthYear = MONTH_YEAR_RE.test(normalized);
   const looksLikeRange =
     (looksLikeMonthYear || hasYear) &&
-    /(?:\s*(?:â€”|—|–|-)\s*|\s+to\s+)/i.test(raw);
-  const looksLikePresentRange =
-    (looksLikeMonthYear || hasYear) && /\b(?:present|current)\b/i.test(raw);
-  return (
-    (hasYear || looksLikeMonthYear) &&
-    raw.split(/\s+/).length <= 12 &&
-    (looksLikeRange || looksLikePresentRange)
-  );
+    (normalized.includes(' - ') || /\b(?:present|current)\b/i.test(normalized));
+  return (hasYear || looksLikeMonthYear) && normalized.split(/\s+/).length <= 12 && looksLikeRange;
 }
 
 function parseCompanyWithDates(line: string): { company: string; dates?: string } | null {
@@ -143,36 +179,31 @@ function parseCompanyWithDates(line: string): { company: string; dates?: string 
 function parseCompanyWithInlineDates(line: string): { company: string; dates: string } | null {
   const raw = trimToText(line);
   if (!raw) return null;
-  // Keep this logic simple and resilient to encoding: find the first month+year token,
-  // then treat the remainder as a date range if it looks like one.
-  const monthYear = /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(?:19|20)\d{2}\b/i;
-  const first = raw.match(monthYear);
-  if (!first || first.index === undefined) return null;
 
-  const company = trimToText(raw.slice(0, first.index));
-  const remainder = trimToText(raw.slice(first.index));
-  if (!company || !looksLikeDatesLine(remainder)) return null;
-  const normalizedDates = remainder
-    .replace(/\s*(?:â€”|—|–|-)\s*/g, ' – ')
-    .replace(/\s+to\s+/gi, ' – ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return { company, dates: normalizedDates };
+  const normalized = normalizeDateRangeSeparators(raw);
+  const match = normalized.match(
+    new RegExp(`^(.+?)\\s+(${MONTH_YEAR_TOKEN})\\s*-\\s*(?:(${MONTH_YEAR_TOKEN})|present|current)\\s*$`, 'i'),
+  );
+  if (!match) return null;
+
+  const company = trimToText(match[1]);
+  const start = trimToText(match[2]);
+  const end = trimToText(match[3] ?? 'Present');
+  if (!company || !start || !end) return null;
+
+  return { company, dates: canonicalizeDateRange(`${start} - ${end}`) };
 }
 
 function parseCompanyWithTrailingStartDate(line: string): { company: string; start: string } | null {
   const raw = trimToText(line);
   if (!raw) return null;
-  const monthYear =
-    /^(.*?)(?:\s+)((?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(?:19|20)\d{2})\s*$/i;
-  const match = raw.match(monthYear);
+  const match = raw.match(new RegExp(`^(.*?)(?:\\s+)(${MONTH_YEAR_TOKEN})\\s*$`, 'i'));
   if (!match) return null;
   const company = trimToText(match[1]);
   const start = trimToText(match[2]);
   if (!company || !start) return null;
   return { company, start };
 }
-
 function parseRoleAtCompany(line: string): { company: string; roleTitle: string; dates?: string } | null {
   const raw = trimToText(line);
   if (!raw) return null;
@@ -221,12 +252,14 @@ function readExperienceHeaderAt(
       };
     }
 
+    const monthYearOnly = MONTH_YEAR_RE;
+
     // Handle split date ranges like:
     //   "Biblioso October 2023"
     //   "March 2024"
     //   "Senior Program Manager"
     // where company/date were incorrectly treated as company/roleTitle.
-    if (looksLikeDatesLine(line1)) {
+    if (looksLikeDatesLine(line1) || monthYearOnly.test(line1)) {
       const trailingStart = parseCompanyWithTrailingStartDate(line0);
       const line2 = trimToText(lines[startIndex + 2] ?? '');
       if (trailingStart && line2 && !isBulletLine(line2) && !looksLikeDatesLine(line2)) {
@@ -234,7 +267,7 @@ function readExperienceHeaderAt(
           header: {
             company: trailingStart.company,
             roleTitle: line2,
-            dates: `${trailingStart.start} – ${line1}`,
+            dates: canonicalizeDateRange(`${trailingStart.start} - ${line1}`),
           },
           consumed: 3,
         };
@@ -380,3 +413,4 @@ export function extractStructuredBaselineFromSections(
 
   return structured;
 }
+

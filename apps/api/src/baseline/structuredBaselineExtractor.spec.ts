@@ -1,4 +1,4 @@
-import { extractStructuredBaselineFromSections } from './structuredBaselineExtractor';
+﻿import { extractStructuredBaselineFromSections } from './structuredBaselineExtractor';
 
 describe('structuredBaselineExtractor', () => {
   it('parses company + inline date range on same line, with role title on next line', () => {
@@ -78,4 +78,50 @@ describe('structuredBaselineExtractor', () => {
     expect(structured.experience[0].roleTitle).toBe('Staff Program Manager');
     expect(structured.experience[0].dates).toBe('April 2026 – Present');
   });
+
+  it('parses inline date range with en dash (–)', () => {
+    const sections: any[] = [
+      {
+        sectionType: 'EXPERIENCE',
+        content: ['Biblioso July 2024 – April 2026', 'Senior Program Manager', '- Delivered outcomes.'].join('\n'),
+      },
+    ];
+
+    const structured = extractStructuredBaselineFromSections(sections as any);
+    expect(structured.experience.length).toBe(1);
+    expect(structured.experience[0].company).toBe('Biblioso');
+    expect(structured.experience[0].roleTitle).toBe('Senior Program Manager');
+    expect(structured.experience[0].dates).toBe('July 2024 – April 2026');
+  });
+
+  it('parses inline date range with em dash (—)', () => {
+    const sections: any[] = [
+      {
+        sectionType: 'EXPERIENCE',
+        content: ['Biblioso July 2024 — April 2026', 'Senior Program Manager', '- Delivered outcomes.'].join('\n'),
+      },
+    ];
+
+    const structured = extractStructuredBaselineFromSections(sections as any);
+    expect(structured.experience.length).toBe(1);
+    expect(structured.experience[0].company).toBe('Biblioso');
+    expect(structured.experience[0].roleTitle).toBe('Senior Program Manager');
+    expect(structured.experience[0].dates).toBe('July 2024 – April 2026');
+  });
+
+  it('parses inline date range using \"to Present\"', () => {
+    const sections: any[] = [
+      {
+        sectionType: 'EXPERIENCE',
+        content: ['Biblioso July 2024 to Present', 'Staff Program Manager', '- Delivered outcomes.'].join('\n'),
+      },
+    ];
+
+    const structured = extractStructuredBaselineFromSections(sections as any);
+    expect(structured.experience.length).toBe(1);
+    expect(structured.experience[0].company).toBe('Biblioso');
+    expect(structured.experience[0].roleTitle).toBe('Staff Program Manager');
+    expect(structured.experience[0].dates).toBe('July 2024 – Present');
+  });
 });
+

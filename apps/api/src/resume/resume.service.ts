@@ -1994,10 +1994,25 @@ export class ResumeService {
       Number.isFinite(scoreForTemplate) && scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD;
     let usedStructuredBaselineTemplate = false;
     let structuredBaselineExtractionMissingReasons: string[] | null = null;
+    let structuredBaselineTrace: {
+      source: 'freshly_parsed_baseline_content' | 'persisted_cached' | 'responseBody_previous_artifact' | 'unknown';
+      experienceCount: number;
+      headers: Array<{ company: string; roleTitle: string; dates: string | null; bulletCount: number }>;
+    } = { source: 'unknown', experienceCount: 0, headers: [] };
 
     let normalizedDocument = (() => {
       if (forceTemplateRegen) {
         const structured = extractStructuredBaselineFromSections(resumeInputSections);
+        structuredBaselineTrace = {
+          source: 'freshly_parsed_baseline_content',
+          experienceCount: (structured.experience ?? []).length,
+          headers: (structured.experience ?? []).slice(0, 5).map((entry) => ({
+            company: String((entry as any)?.company ?? ''),
+            roleTitle: String((entry as any)?.roleTitle ?? ''),
+            dates: typeof (entry as any)?.dates === 'string' ? String((entry as any).dates) : null,
+            bulletCount: Array.isArray((entry as any)?.bullets) ? (entry as any).bullets.length : 0,
+          })),
+        };
         // eslint-disable-next-line no-console
         console.log('FORCED_TEMPLATE_RESUME', {
           score: scoreForTemplate,
@@ -2068,6 +2083,19 @@ export class ResumeService {
     // Soft quality enforcement (server-side self-heal): validate the normalized resume model using
     // the same rules enforced in the Studio UI safety net. If the first pass fails, attempt a single
     // deterministic repair and re-check. Never loop indefinitely.
+    try {
+      const payload = {
+        baselineId: baseline.id,
+        baselineVersionId: baselineVersion?.id ?? null,
+        experiencePreviewCount: structuredBaselineTrace.experienceCount,
+        headers: structuredBaselineTrace.headers,
+        structuredBaselineSource: structuredBaselineTrace.source,
+      };
+      // eslint-disable-next-line no-console
+      console.log('[RESUME_BASELINE_HEADER_TRACE]', JSON.stringify(payload));
+    } catch {
+      // ignore logging failures
+    }
     const firstPassQualityGate = validateResumeArtifactQuality(normalizedDocument);
     let qualityGate = firstPassQualityGate;
     let repairAttempted = false;
