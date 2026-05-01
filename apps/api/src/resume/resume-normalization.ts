@@ -173,6 +173,45 @@ function isLikelyLocation(value: string): boolean {
   return LOCATION_HINT_PATTERN.test(normalized);
 }
 
+function isLikelyCompany(value: string): boolean {
+  const normalized = normalizeLine(value);
+  if (!normalized) return false;
+  if (isPaginationArtifact(normalized)) return false;
+  if (isLowQualityFragment(normalized)) return false;
+  if (isDiscardableCompanyToken(normalized)) return false;
+
+  // Reject obvious section headers.
+  if (/\b(?:experience|professional experience|projects|skills|education|summary|profile)\b/i.test(normalized)) {
+    return false;
+  }
+
+  // Reject unmatched closing punctuation (common wrapped fragment artifacts).
+  if (/[)\]}]$/.test(normalized) && !/[(\[{]/.test(normalized)) return false;
+  if ((normalized.match(/[()]/g)?.length ?? 0) % 2 === 1) return false;
+
+  // Reject tech / function phrases that frequently leak from bullets or skill buckets.
+  if (
+    /\b(?:vue|react|angular|frontend|back(?:\s|-)?end|full(?:\s|-)?stack|builder|deck\s*builder|deployment|infrastructure|kubernetes|docker|terraform|ci\/cd|devops)\b/i.test(
+      normalized,
+    )
+  ) {
+    return false;
+  }
+
+  // Reject generic "&" phrases like "Infrastructure & Deployment".
+  if (/\b(?:infrastructure|platform|systems|deployment|operations|security)\b/i.test(normalized) && normalized.includes('&')) {
+    return false;
+  }
+
+  // Basic positive signal: short-ish noun phrase with capitalized tokens.
+  const words = normalized.split(/\s+/).filter(Boolean);
+  if (words.length === 0 || words.length > 6) return false;
+  const capitalizedCount = words.filter((word) => /^[A-Z][A-Za-z0-9.'&-]*$/.test(word)).length;
+  if (capitalizedCount === 0) return false;
+
+  return true;
+}
+
 function uniquePush(target: string[], value: string) {
   const key = value.toLowerCase();
   if (target.some((item) => item.toLowerCase() === key)) return;
@@ -626,7 +665,7 @@ function buildExperienceFromSection(section: ResumeExportSection): NormalizedRes
     if (titleFromSection && isLikelyRoleTitle(titleFromSection)) {
       return titleFromSection;
     }
-    return 'Professional Experience';
+    return '';
   };
 
   const hasRenderableEntryShape = (entry: ExperienceCandidate | null): entry is ExperienceCandidate =>
@@ -832,7 +871,9 @@ function buildExperienceFromSection(section: ResumeExportSection): NormalizedRes
     const active = ensureCurrent();
     active.roleEvidenceLines.push(line);
     if (!active.company) {
-      active.company = line;
+      if (isLikelyCompany(line)) {
+        active.company = line;
+      }
     }
   }
 
@@ -1143,7 +1184,7 @@ function sanitizeNormalizedResumeDocument(
   const sanitizedExperience = document.experience
     .map((entry) => {
       const roleTitle =
-        repairRoleTitleFragment(sanitizeText(entry.roleTitle)) || 'Professional Experience';
+        repairRoleTitleFragment(sanitizeText(entry.roleTitle)) || '';
       const bulletLines = entry.bullets
         .flatMap((bullet) => sanitizeText(bullet).split(/\r?\n/))
         .map((bullet) => bullet.trim())

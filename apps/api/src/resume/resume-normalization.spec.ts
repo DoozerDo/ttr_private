@@ -323,6 +323,43 @@ describe('resume-normalization', () => {
     expect(plain).not.toContain('\ndeployment timelines\n');
   });
 
+  it('does not promote section labels or tech fragments into company headers during normalization', () => {
+    const document = buildNormalizedResumeDocument([
+      {
+        type: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        content: [
+          'Infrastructure & Deployment',
+          '- Owned incident response and improved reliability across systems.',
+          '',
+          'Vue 3), deck builder frontend',
+          '- Shipped customer-facing features and improved performance.',
+        ].join('\n'),
+      },
+    ] as any);
+
+    const companies = document.experience.map((entry) => entry.company);
+    expect(companies).not.toContain('Infrastructure & Deployment');
+    expect(companies).not.toContain('Vue 3), deck builder frontend');
+  });
+
+  it('does not fall back missing role titles to \"Professional Experience\"', () => {
+    const document = buildNormalizedResumeDocument([
+      {
+        type: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        content: [
+          // Company + date line, but no parseable role title line.
+          'Example Co | Seattle, WA | 2020 - 2024',
+          '- Led support operations across global teams.',
+        ].join('\n'),
+      },
+    ] as any);
+
+    expect(document.experience.length).toBeGreaterThan(0);
+    expect(document.experience.some((entry) => entry.roleTitle === 'Professional Experience')).toBe(false);
+  });
+
   it('never emits dangling fragment bullets in final plain text (ex: "... The")', () => {
     const document = buildNormalizedResumeDocument([
       {
@@ -661,7 +698,7 @@ describe('resume-normalization', () => {
       company: 'Cat Daddy Games',
       location: 'Kirkland, WA',
       dateRange: '2020 - 2025',
-      roleTitle: 'Professional Experience',
+      roleTitle: '',
       bullets: ['Led live operations roadmap delivery across multiple game releases.'],
     });
     expect(document.experience[1]).toMatchObject({
@@ -1152,8 +1189,9 @@ describe('resume-normalization', () => {
       const second = document.experience[1]!;
       expect(first.company.length).toBeGreaterThan(0);
       expect(second.company.length).toBeGreaterThan(0);
-      expect(first.roleTitle.length).toBeGreaterThan(0);
-      expect(second.roleTitle.length).toBeGreaterThan(0);
+      // Role titles may legitimately be empty when the input has no safely extractable title line.
+      expect(typeof first.roleTitle).toBe('string');
+      expect(typeof second.roleTitle).toBe('string');
       expect(first.bullets.length).toBeGreaterThan(0);
       expect(second.bullets.length).toBeGreaterThan(0);
 

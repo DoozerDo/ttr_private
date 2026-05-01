@@ -519,6 +519,45 @@ describe('ResumeService contract', () => {
     assessment.overallScore = originalScore;
   });
 
+  it('does not surface malformed_experience_header or incomplete_trailing_fragment reasons when normalization drops header noise (fresh regenerate path)', async () => {
+    const { service } = buildService();
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 70;
+
+    const original = baseline.sections?.[0]?.content ?? '';
+    baseline.sections = [
+      {
+        ...baseSection,
+        content: [
+          // Noise that previously could be promoted to company by normalization.
+          'Infrastructure & Deployment',
+          'Vue 3), deck builder frontend',
+          '',
+          // Valid header + bullets that should remain.
+          'Biblioso | Director, Customer Experience | 2024 - Present',
+          '- Led cross-functional CX initiatives across support and product.',
+          '- Improved customer experience and reduced escalations across teams.',
+        ].join('\n'),
+      },
+    ];
+
+    const result = await service.generateResume('user-1', baseRequest);
+    expect(result.qualityGate?.status).toBe('pass');
+
+    const reasons = (result.qualityGate?.reasons ?? []) as string[];
+    expect(reasons).not.toContain('incomplete_trailing_fragment');
+    expect(reasons).not.toContain('malformed_experience_header:company');
+    expect(reasons).not.toContain('malformed_experience_header:role_title');
+
+    const preview = result.preview?.resume as any;
+    const companies = (preview?.experience ?? []).map((e: any) => String(e.company ?? ''));
+    expect(companies).not.toContain('Infrastructure & Deployment');
+    expect(companies).not.toContain('Vue 3), deck builder frontend');
+
+    baseline.sections = [{ ...baseSection, content: original }];
+    assessment.overallScore = originalScore;
+  });
+
   it('extracts a minimal structured baseline model from EXPERIENCE section text (safe headers only)', () => {
     const sections = [
       {
