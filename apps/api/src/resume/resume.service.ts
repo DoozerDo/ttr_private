@@ -1993,6 +1993,12 @@ export class ResumeService {
     const scoreForTemplateRaw =
       effectiveAssessment?.overallScore ?? latestAssessment?.overallScore ?? 0;
     const scoreForTemplate = Number(scoreForTemplateRaw);
+    // eslint-disable-next-line no-console
+    console.log(
+      `[RESUME_GENERATE_RUNTIME_PROOF] version=runtime-proof-2026-05-01-template-filter forceRegenerate=${String(
+        Boolean(request.forceRegenerate),
+      )} score=${Number.isFinite(scoreForTemplate) ? String(scoreForTemplate) : 'nan'}`,
+    );
     forceTemplateRegen =
       Number.isFinite(scoreForTemplate) && scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD;
     let usedStructuredBaselineTemplate = false;
@@ -2006,11 +2012,47 @@ export class ResumeService {
     let normalizedDocument = (() => {
       if (forceTemplateRegen) {
         const structured = extractStructuredBaselineFromSections(resumeInputSections);
+        if (process.env.TEMPLATE_FILTER_TRACE === 'true') {
+          try {
+            // eslint-disable-next-line no-console
+            console.log(
+              '[TEMPLATE_FILTER_TRACE][STRUCTURED_BEFORE]',
+              JSON.stringify({
+                experience: (structured.experience ?? []).slice(0, 12).map((e: any) => ({
+                  company: String(e?.company ?? ''),
+                  roleTitle: String(e?.roleTitle ?? ''),
+                  dates: typeof e?.dates === 'string' ? String(e.dates) : null,
+                  bulletCount: Array.isArray(e?.bullets) ? e.bullets.length : 0,
+                })),
+              }),
+            );
+          } catch {
+            // ignore
+          }
+        }
         // Structured template path must not surface malformed extracted headers in preview output.
         // Filter them here (and fail cleanly if nothing remains).
         structured.experience = (structured.experience ?? []).filter((entry) =>
           isAllowedStructuredTemplateExperienceHeader(entry),
         );
+        if (process.env.TEMPLATE_FILTER_TRACE === 'true') {
+          try {
+            // eslint-disable-next-line no-console
+            console.log(
+              '[TEMPLATE_FILTER_TRACE][STRUCTURED_AFTER]',
+              JSON.stringify({
+                experience: (structured.experience ?? []).slice(0, 12).map((e: any) => ({
+                  company: String(e?.company ?? ''),
+                  roleTitle: String(e?.roleTitle ?? ''),
+                  dates: typeof e?.dates === 'string' ? String(e.dates) : null,
+                  bulletCount: Array.isArray(e?.bullets) ? e.bullets.length : 0,
+                })),
+              }),
+            );
+          } catch {
+            // ignore
+          }
+        }
         structuredBaselineTrace = {
           source: 'freshly_parsed_baseline_content',
           experienceCount: (structured.experience ?? []).length,
@@ -2091,6 +2133,23 @@ export class ResumeService {
     // Trailing-fragment sanitation must run before quality validation so the validator never evaluates
     // pre-sanitized bullets/summaries.
     normalizedDocument = sanitizeResumeForTrailingFragments(normalizedDocument);
+
+    if (process.env.TEMPLATE_FILTER_TRACE === 'true' && usedStructuredBaselineTemplate) {
+      try {
+        const previewExperience = Array.isArray((normalizedDocument as any)?.experience)
+          ? (normalizedDocument as any).experience.slice(0, 12).map((e: any) => ({
+              company: String(e?.company ?? ''),
+              roleTitle: String(e?.roleTitle ?? ''),
+              dateRange: String(e?.dateRange ?? ''),
+              bulletCount: Array.isArray(e?.bullets) ? e.bullets.length : 0,
+            }))
+          : [];
+        // eslint-disable-next-line no-console
+        console.log('[TEMPLATE_FILTER_TRACE][NORMALIZED_FOR_PREVIEW]', JSON.stringify({ experience: previewExperience }));
+      } catch {
+        // ignore
+      }
+    }
     if (process.env.RESUME_NORM_TRACE === 'true') {
       try {
         const offenders =

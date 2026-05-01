@@ -66,6 +66,12 @@ export class ResumeController {
     @Req() request: TieredResumeRequest,
   ): Promise<GenerationOutcome<ResumeGenerationResponse> & ResumeGenerationResponse> {
     // eslint-disable-next-line no-console
+    console.log(
+      `[RESUME_GENERATE_RUNTIME_PROOF] version=runtime-proof-2026-05-01-template-filter forceRegenerate=${String(
+        body.forceRegenerate ?? false,
+      )} score=null`,
+    );
+    // eslint-disable-next-line no-console
     console.log('[RESUME_GENERATE_ENTRY]', {
       forceRegenerate: Boolean(body.forceRegenerate),
       baselineId: body.baselineId?.trim() ?? null,
