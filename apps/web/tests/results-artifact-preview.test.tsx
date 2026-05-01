@@ -61,13 +61,51 @@ describe("results artifact preview contract", () => {
         artifactsCalls += 1;
         if (artifactsCalls < 2) {
           return jsonResponse({
-            resume: { status: "missing" },
-            coverLetter: { status: "missing" },
+            resume: { status: "missing", responseBody: null },
+            coverLetter: { status: "missing", responseBody: null },
           });
         }
         return jsonResponse({
-          resume: { status: "completed" },
-          coverLetter: { status: "completed" },
+          resume: {
+            status: "completed",
+            responseBody: {
+              status: "success",
+              generationStatus: "success",
+              exportReady: true,
+              exports: { docx: true, pdf: true },
+              preview: {
+                resume: {
+                  heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                  summary: "Support leader focused on scalable operations.",
+                  experience: [
+                    {
+                      company: "Acme",
+                      roleTitle: "Support Lead",
+                      location: "Remote",
+                      dateRange: "2022 - Present",
+                      bullets: ["Built support processes."],
+                    },
+                  ],
+                  education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+                  competencies: ["Customer strategy"],
+                },
+              },
+            },
+          },
+          coverLetter: {
+            status: "completed",
+            responseBody: {
+              status: "success",
+              generationStatus: "success",
+              exportReady: true,
+              exports: { docx: true, pdf: true },
+              preview: {
+                coverLetter: {
+                  paragraphs: coverParagraphs,
+                },
+              },
+            },
+          },
         });
       }
 

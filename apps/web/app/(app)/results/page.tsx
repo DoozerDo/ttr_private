@@ -72,6 +72,7 @@ import { tryAcquirePairGenerationLatch, releasePairGenerationLatch } from "@/lib
 import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
 import { isDocumentGenerationUnlocked, isMomentumGenerationAllowed } from "@/lib/documentGenerationGate";
 import { ResultsDocumentsTeaserSection } from "@/components/results/ResultsDocumentsTeaserSection";
+import { getArtifactExistence } from "@/src/lib/studio/artifactAuthority";
 import { WorkflowAuthorityPanel } from "@/components/workflow/WorkflowAuthorityPanel";
 import { WorkflowActivityBanner } from "@/components/workflow/WorkflowActivityBanner";
 import { resolveFitReviewGaps } from "@/lib/fitReviewResolver";
@@ -107,6 +108,8 @@ type ResultsGenerationRecoveryStage =
 
 type BackendStudioArtifactRecord = {
   status?: string | null;
+  responseBody?: unknown;
+  content?: string | null;
 } | null;
 
 type BackendStudioArtifactsResponse = {
@@ -2556,6 +2559,7 @@ export default function ResultsPage() {
     resume: ResultsArtifactStatus;
     coverLetter: ResultsArtifactStatus;
   }>({ resume: "missing", coverLetter: "missing" });
+  const [studioArtifactsPayload, setStudioArtifactsPayload] = useState<BackendStudioArtifactsResponse | null>(null);
   const hasFetchedArtifactsOnceRef = useRef(false);
   const [hasFetchedArtifactsOnce, setHasFetchedArtifactsOnce] = useState(false);
   const autoGenerationTriggeredRef = useRef<Set<string>>(new Set());
@@ -2868,6 +2872,25 @@ export default function ResultsPage() {
   ]);
 
   const normalizedArtifacts = workflowOrchestrator.artifactState;
+
+  const persistedExistence = useMemo(() => getArtifactExistence(studioArtifactsPayload), [studioArtifactsPayload]);
+  const hasResumeArtifactPersisted = persistedExistence.hasResumeArtifactPersisted;
+  const hasCoverLetterArtifactPersisted = persistedExistence.hasCoverLetterArtifactPersisted;
+  const hasAnyArtifactPersisted = hasResumeArtifactPersisted || hasCoverLetterArtifactPersisted;
+
+  const artifactAuthorityTrackedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const signature = `${hasResumeArtifactPersisted}:${hasCoverLetterArtifactPersisted}`;
+    if (artifactAuthorityTrackedRef.current === signature) return;
+    artifactAuthorityTrackedRef.current = signature;
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[ARTIFACT_AUTHORITY_SOURCE]", {
+        source: "studio_artifacts",
+        hasResume: hasResumeArtifactPersisted,
+        hasCover: hasCoverLetterArtifactPersisted,
+      });
+    }
+  }, [hasCoverLetterArtifactPersisted, hasResumeArtifactPersisted]);
 
   const normalizedArtifactsPanelModel = useMemo(() => {
     const state = normalizedArtifacts.artifactDisplayState;
@@ -3350,6 +3373,7 @@ export default function ResultsPage() {
         const payload = await readResponsePayload(response);
         if (cancelled) return;
         if (!response.ok) return;
+        setStudioArtifactsPayload(payload as BackendStudioArtifactsResponse);
         const statuses = deriveResultsArtifactStatuses(payload);
         const generationStarted =
           hasStartedGenerationRef.current || typeof generationRequestedAtRef.current === "number";
@@ -3426,6 +3450,7 @@ export default function ResultsPage() {
         const response = await fetch(backendUrl.toString(), { cache: "no-store" });
         const payload = await readResponsePayload(response);
         if (!response.ok) return;
+        setStudioArtifactsPayload(payload as BackendStudioArtifactsResponse);
         if (!hasFetchedArtifactsOnceRef.current) {
           hasFetchedArtifactsOnceRef.current = true;
           setHasFetchedArtifactsOnce(true);
@@ -5407,10 +5432,14 @@ export default function ResultsPage() {
                     : null
                 }
               />
-              {!normalizedArtifacts.shouldSuppressStalePreview ? (
+              {!normalizedArtifacts.shouldSuppressStalePreview || hasAnyArtifactPersisted ? (
                 <ResultsDocumentsTeaserSection
-                  resumePayload={pairWorkflowState.resumeStatus === "ready" ? resumeGenerationPayload : null}
-                  coverLetterPayload={pairWorkflowState.coverLetterStatus === "ready" ? coverLetterGenerationPayload : null}
+                  resumePayload={
+                    hasResumeArtifactPersisted ? studioArtifactsPayload?.resume?.responseBody ?? null : null
+                  }
+                  coverLetterPayload={
+                    hasCoverLetterArtifactPersisted ? studioArtifactsPayload?.coverLetter?.responseBody ?? null : null
+                  }
                   studioHref={studioNavigationHref}
                   confidence={productReadiness.confidence ?? null}
                   generationPhase={effectiveResultsGenerationPhase ?? null}

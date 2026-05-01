@@ -952,6 +952,72 @@ function setupFetch(readinessStatus: "ready" | "limited" | "blocked", score = 94
           }),
         );
       }
+      if (url.includes("/api/studio/artifacts")) {
+        if (typeof score === "number" && score < 80) {
+          return Promise.resolve(
+            createResponse({
+              status: "missing",
+              baselineId: "base-1",
+              jobId: "job-1",
+              baselineVersionId: "base-version-1",
+              resume: null,
+              coverLetter: null,
+            }),
+          );
+        }
+        return Promise.resolve(
+          createResponse({
+            status: "completed",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            generationContractVersion: "studio-artifacts-v1",
+            resume: {
+              status: "completed",
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exports: { docx: true, pdf: true },
+                preview: {
+                  resume: {
+                    heading: { name: "Test Candidate", contactLine: "test@example.com" },
+                    summary: "Verified support leader aligned to the role.",
+                    experience: [
+                      {
+                        company: "Acme",
+                        roleTitle: "Director of Support",
+                        bullets: ["Led support operations and improved team performance."],
+                      },
+                    ],
+                    education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+                    competencies: ["Customer strategy", "Operational leadership"],
+                  },
+                },
+              },
+            },
+            coverLetter: {
+              status: "completed",
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  coverLetter: {
+                    paragraphs: [
+                      "Dear Hiring Team,",
+                      "I am applying for this role.",
+                      "I have led support operations programs.",
+                      "Sincerely,",
+                      "Test Candidate",
+                    ],
+                  },
+                },
+              },
+            },
+          }),
+        );
+      }
       if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
         return Promise.resolve(
           createResponse({
@@ -1083,7 +1149,18 @@ function setupFetchWithQualityFailures() {
               failedAt: null,
               metadata: {},
             },
-            coverLetter: null,
+            coverLetter: {
+              status: "completed",
+              inputsHash: "ih-2",
+              responseBody: { status: "success", preview: { coverLetter: { paragraphs: ["Blocked phrase: operating context."] } } },
+              content: null,
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: null,
+              failedAt: null,
+              metadata: {},
+            },
           }),
         );
       }
@@ -1491,12 +1568,7 @@ describe("Studio generation authority", () => {
     );
   });
 
-  it("renders resume when response is wrapped under payload.preview.resume (late hydration must recompute)", async () => {
-    let resolveResume: ((value: ReturnType<typeof createResponse>) => void) | null = null;
-    const deferredResume = new Promise<ReturnType<typeof createResponse>>((resolve) => {
-      resolveResume = resolve;
-    });
-
+  it("renders resume when response is wrapped under payload.preview.resume (persisted artifacts are the only existence authority)", async () => {
     setFetchImplementation(
       vi.fn((input: RequestInfo) => {
         const url = typeof input === "string" ? input : input?.url ?? "";
@@ -1523,22 +1595,50 @@ describe("Studio generation authority", () => {
             }),
           );
         }
+        if (url.includes("/api/studio/artifacts")) {
+          return Promise.resolve(
+            createResponse({
+              status: "completed",
+              baselineId: "base-1",
+              jobId: "job-1",
+              baselineVersionId: "base-version-1",
+              generationContractVersion: "studio-artifacts-v1",
+              resume: {
+                status: "completed",
+                responseBody: {
+                  payload: {
+                    preview: {
+                      resume: {
+                        heading: { name: "Test Candidate", contactLine: "test@example.com" },
+                        summary: "Verified support leader aligned to the role.",
+                        experience: [{ company: "Acme", roleTitle: "Director of Support", bullets: ["Delivered results."] }],
+                        education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+                        competencies: ["Customer strategy"],
+                      },
+                    },
+                  },
+                },
+              },
+              coverLetter: {
+                status: "completed",
+                responseBody: {
+                  status: "success",
+                  generationStatus: "success",
+                  exports: { docx: true, pdf: true },
+                  preview: { coverLetter: { paragraphs: ["Dear Hiring Team,", "Sincerely,", "Test Candidate"] } },
+                },
+              },
+            }),
+          );
+        }
         if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
           return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
         }
         if (url.includes("/api/resume/export") || url.includes("/api/cover-letters/export")) {
           return Promise.resolve(createResponse(new Blob(["export"], { type: "application/pdf" })));
         }
-        if (url.includes("/api/resume")) return deferredResume;
-        if (url.includes("/api/cover-letters")) {
-          return Promise.resolve(
-            createResponse({
-              status: "success",
-              generationStatus: "success",
-              exports: { docx: true, pdf: true },
-              preview: { coverLetter: { paragraphs: ["Dear Hiring Team,", "Sincerely,", "Test Candidate"] } },
-            }),
-          );
+        if (url.includes("/api/resume") || url.includes("/api/cover-letters")) {
+          return Promise.resolve(createResponse({ status: "success" }));
         }
         return Promise.resolve(createResponse({}));
       }),
@@ -1547,38 +1647,11 @@ describe("Studio generation authority", () => {
     renderStudio({ intent: "generate" });
 
     await screen.findByTestId("studio-workflow-authority");
-
-    await screen.findByTestId("studio-primary-cta-complete-resume");
-    expect(screen.queryByText("Resume not generated yet")).toBeNull();
-
-    resolveResume?.(
-      createResponse({
-        status: "success",
-        generationStatus: "success",
-        exports: { docx: true, pdf: true },
-        preview: {
-          resume: {
-            heading: { name: "Test Candidate", contactLine: "test@example.com" },
-            summary: "Verified support leader aligned to the role.",
-            experience: [{ company: "Acme", roleTitle: "Director of Support", bullets: ["Delivered results."] }],
-            education: [{ degree: "BA", institution: "State University", location: "Remote" }],
-            competencies: ["Customer strategy"],
-          },
-        },
-      }),
-    );
-
-    // Resume preview should render once the wrapped payload is normalized; no CTA clicks required.
     await screen.findByTestId("studio-resume-ready-panel");
     expect(screen.queryByText("Resume not generated yet")).toBeNull();
   });
 
-  it("renders resume when response is wrapped under payload.resume (contract must normalize)", async () => {
-    let resolveResume: ((value: ReturnType<typeof createResponse>) => void) | null = null;
-    const deferredResume = new Promise<ReturnType<typeof createResponse>>((resolve) => {
-      resolveResume = resolve;
-    });
-
+  it("renders resume when response is wrapped under payload.resume (persisted artifacts are the only existence authority)", async () => {
     setFetchImplementation(
       vi.fn((input: RequestInfo) => {
         const url = typeof input === "string" ? input : input?.url ?? "";
@@ -1605,50 +1678,58 @@ describe("Studio generation authority", () => {
             }),
           );
         }
+        if (url.includes("/api/studio/artifacts")) {
+          return Promise.resolve(
+            createResponse({
+              status: "completed",
+              baselineId: "base-1",
+              jobId: "job-1",
+              baselineVersionId: "base-version-1",
+              generationContractVersion: "studio-artifacts-v1",
+              resume: {
+                status: "completed",
+                responseBody: {
+                  payload: {
+                    resume: {
+                      heading: { name: "Test Candidate", contactLine: "test@example.com" },
+                      summary: "Verified support leader aligned to the role.",
+                      experience: [{ company: "Acme", roleTitle: "Director of Support", bullets: ["Delivered results."] }],
+                      education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+                      competencies: ["Customer strategy"],
+                    },
+                  },
+                },
+              },
+              coverLetter: {
+                status: "completed",
+                responseBody: {
+                  status: "success",
+                  generationStatus: "success",
+                  exports: { docx: true, pdf: true },
+                  preview: { coverLetter: { paragraphs: ["Dear Hiring Team,", "Sincerely,", "Test Candidate"] } },
+                },
+              },
+            }),
+          );
+        }
         if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
           return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
         }
         if (url.includes("/api/resume/export") || url.includes("/api/cover-letters/export")) {
           return Promise.resolve(createResponse(new Blob(["export"], { type: "application/pdf" })));
         }
-        if (url.includes("/api/resume")) return deferredResume;
-        if (url.includes("/api/cover-letters")) {
-          return Promise.resolve(
-            createResponse({
-              status: "success",
-              generationStatus: "success",
-              exports: { docx: true, pdf: true },
-              preview: { coverLetter: { paragraphs: ["Dear Hiring Team,", "Sincerely,", "Test Candidate"] } },
-            }),
-          );
+        if (url.includes("/api/resume") || url.includes("/api/cover-letters")) {
+          return Promise.resolve(createResponse({ status: "success" }));
         }
         return Promise.resolve(createResponse({}));
       }),
     );
 
     renderStudio({ intent: "generate" });
+
     await screen.findByTestId("studio-workflow-authority");
-
-    resolveResume?.(
-      createResponse({
-        status: "success",
-        generationStatus: "success",
-        exports: { docx: true, pdf: true },
-        preview: {
-          resume: {
-            heading: { name: "Test Candidate", contactLine: "test@example.com" },
-            summary: "Verified support leader aligned to the role.",
-            experience: [{ company: "Acme", roleTitle: "Director of Support", bullets: ["Delivered results."] }],
-            education: [{ degree: "BA", institution: "State University", location: "Remote" }],
-            competencies: ["Customer strategy"],
-          },
-        },
-      }),
-    );
-
-    await waitFor(() => {
-      expect(screen.queryByText("Resume not generated yet")).toBeNull();
-    });
+    await screen.findByTestId("studio-resume-ready-panel");
+    expect(screen.queryByText("Resume not generated yet")).toBeNull();
   });
 
   it("does not restart auto-generation when baselineVersionId is missing initially (artifacts already exist)", async () => {
