@@ -2696,6 +2696,25 @@ export class ResumeService {
     });
     // eslint-disable-next-line no-console
     console.log('[RESUME_GENERATE_PERSISTED]', { artifactId });
+    try {
+      const qualityGate = (response as any)?.qualityGate;
+      const gateStatus =
+        qualityGate && typeof qualityGate === 'object' ? String((qualityGate as any).status ?? '') : null;
+      const gateReasons =
+        qualityGate && typeof qualityGate === 'object' && Array.isArray((qualityGate as any).reasons)
+          ? (qualityGate as any).reasons.map((r: unknown) => String(r ?? '')).filter(Boolean).slice(0, 8)
+          : [];
+      // eslint-disable-next-line no-console
+      console.log('[RESUME_PERSISTED_REASONS_TRACE]', {
+        artifactId,
+        runId: audit.id,
+        qualityStatus: gateStatus || null,
+        correctionReasons: gateReasons,
+        qualityGate: gateStatus ? { status: gateStatus, reasons: gateReasons } : null,
+      });
+    } catch {
+      // ignore logging failures
+    }
     if (!forceTemplateRegen) {
       await this.workflowIdempotencyService.complete({
         userId,

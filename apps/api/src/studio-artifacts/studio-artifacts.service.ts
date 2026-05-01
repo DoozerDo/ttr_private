@@ -318,6 +318,46 @@ export class StudioArtifactsService {
       }
     }
 
+    const resumeResult = this.buildCanonicalResultFromRecord('resume', resumeRecord);
+    const coverLetterResult = this.buildCanonicalResultFromRecord('cover_letter', coverRecord);
+
+    if (resumeResult?.correctionReasons?.length) {
+      try {
+        const gate = (resumeRecord?.responseBody as any)?.qualityGate as any;
+        const gateStatus = gate && typeof gate === 'object' ? String(gate.status ?? '') : null;
+        const gateReasons =
+          gate && typeof gate === 'object' && Array.isArray(gate.reasons)
+            ? gate.reasons.map((r: unknown) => String(r ?? '')).filter(Boolean).slice(0, 8)
+            : [];
+        const correctionReasons = Array.isArray(resumeResult.correctionReasons)
+          ? resumeResult.correctionReasons
+              .map((r) => String((r as any)?.code ?? ''))
+              .filter(Boolean)
+              .slice(0, 8)
+          : [];
+        // eslint-disable-next-line no-console
+        console.log('[STUDIO_ARTIFACT_REASONS_TRACE]', {
+          resume: {
+            status: resumeRecord?.status ?? null,
+            qualityStatus: resumeResult.qualityStatus ?? null,
+            correctionReasons,
+            qualityGate: gateStatus ? { status: gateStatus, reasons: gateReasons } : null,
+            metadataKeys: resumeRecord?.metadata ? Object.keys(resumeRecord.metadata).slice(0, 12) : [],
+            metadata: resumeRecord?.metadata ? { auditId: (resumeRecord.metadata as any)?.auditId ?? null } : null,
+            startedAt: resumeRecord?.startedAt ?? null,
+            completedAt: resumeRecord?.completedAt ?? null,
+            failedAt: resumeRecord?.failedAt ?? null,
+          },
+          artifactTimestamps: {
+            createdAt: (record as any)?.createdAt ? (record as any).createdAt.toISOString?.() ?? null : null,
+            updatedAt: (record as any)?.updatedAt ? (record as any).updatedAt.toISOString?.() ?? null : null,
+          },
+        });
+      } catch {
+        // ignore logging failures
+      }
+    }
+
     return {
       status: this.resolvePairStatus(record, resumeInputsHash, coverLetterInputsHash),
       baselineId: input.baselineId,
@@ -333,8 +373,8 @@ export class StudioArtifactsService {
       ...(artifactReadiness ? { artifactReadiness, artifactReadinessReasons } : {}),
       resume: resumeRecord,
       coverLetter: coverRecord,
-      resumeResult: this.buildCanonicalResultFromRecord('resume', resumeRecord),
-      coverLetterResult: this.buildCanonicalResultFromRecord('cover_letter', coverRecord),
+      resumeResult,
+      coverLetterResult,
     };
   }
 
