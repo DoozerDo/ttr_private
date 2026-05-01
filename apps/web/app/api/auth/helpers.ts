@@ -90,13 +90,20 @@ export async function forwardAuthRequest(
   const body = await req.text();
   let apiResponse: Response;
 
+  const tokenResult = requireAuthToken(req);
+  const token = "token" in tokenResult ? tokenResult.token : "";
+
   try {
     apiResponse = await backendFetch(apiUrl, {
       method: req.method,
       headers: {
         "content-type": req.headers.get("content-type") ?? "application/json",
         cookie: req.headers.get("cookie") ?? "",
-        authorization: req.headers.get("authorization") ?? "",
+        // Browser requests to Next API routes typically carry auth via cookie (not Authorization header).
+        // Always translate the cookie token into a Bearer header for upstream Nest JWT guards.
+        authorization: token
+          ? `Bearer ${token}`
+          : req.headers.get("authorization") ?? "",
       },
       body: body || undefined,
     });
