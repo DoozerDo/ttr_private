@@ -1866,6 +1866,7 @@ export class ResumeService {
     });
     const cachedResume = studioArtifactsState.resume;
     if (
+      !request.forceRegenerate &&
       cachedResume?.status === 'COMPLETED' &&
       cachedResume.responseBody &&
       cachedResume.inputsHash === studioArtifactContext.inputsHash

@@ -574,6 +574,74 @@ describe('ResumeService contract', () => {
     assessment.overallScore = originalScore;
   });
 
+  it('does not return cached completed studio artifact when forceRegenerate=true', async () => {
+    const { service, workflowIdempotencyService, studioArtifactsService } = buildService();
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 70;
+
+    (studioArtifactsService.readState as jest.Mock).mockResolvedValueOnce({
+      status: 'COMPLETED',
+      baselineId: baseline.id,
+      jobId: job.id,
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: 'job-fingerprint-1',
+      generationContractVersion: 'studio-artifacts-v1',
+      resume: {
+        status: 'COMPLETED',
+        inputsHash: 'resume-hash-1',
+        responseBody: {
+          ok: true,
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: false,
+          blocked: true,
+          baselineId: baseline.id,
+          baselineVersionId: baselineVersion.id,
+          jobId: job.id,
+          sections: [],
+          compliance_flags: [],
+          compliance_blocked: false,
+          audit_id: 'audit-cached-1',
+          auditId: 'audit-cached-1',
+          baseline_version_hash: baselineVersion.hash,
+          quality: 'draft',
+          exports: { docx: false, pdf: false },
+          preview: {
+            resume: {
+              heading: { name: 'Cached Candidate', contactLine: '' },
+              summary: 'Cached summary',
+              experience: [
+                {
+                  company: 'Stale Co',
+                  roleTitle: 'Stale Title',
+                  bullets: ['Stale bullet.'],
+                  dateRange: '2020 - 2024',
+                },
+              ],
+              education: [],
+              competencies: [],
+            },
+          },
+        },
+        content: null,
+        failureCode: null,
+        failureMessage: null,
+        startedAt: null,
+        completedAt: new Date().toISOString(),
+        failedAt: null,
+        metadata: {},
+      },
+      coverLetter: null,
+    });
+
+    const result = await service.generateResume('user-1', { ...baseRequest, forceRegenerate: true });
+    expect(result.preview?.resume?.heading?.name ?? '').not.toBe('Cached Candidate');
+    expect(workflowIdempotencyService.reserve).toHaveBeenCalled();
+
+    assessment.overallScore = originalScore;
+  });
+
   it('marks resume as not export-ready when experience headers are malformed (sentence-like title/company)', async () => {
     const { service } = buildService();
     const originalScore = assessment.overallScore;
