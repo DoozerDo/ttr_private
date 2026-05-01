@@ -72,9 +72,9 @@ export function ResultsCoverLetterTeaser({ teaser, studioHref }: CoverProps) {
         Preview of tailored cover letter
       </p>
       <div className="space-y-2 rounded-xl border border-white/10 bg-slate-950/40 p-4">
-        <p className="text-sm leading-7 text-slate-100" data-testid="results-cover-letter-preview-body">
-          {teaser.paragraph}
-        </p>
+        <div className="max-h-64 overflow-auto" data-testid="results-cover-letter-preview-body">
+          <p className="text-sm leading-7 text-slate-100">{teaser.paragraph}</p>
+        </div>
       </div>
       <p className="text-xs text-slate-400" data-testid="results-cover-letter-preview-truncated">
         Preview truncated.{" "}

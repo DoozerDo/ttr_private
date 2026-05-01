@@ -9,9 +9,12 @@ export default defineConfig({
     include: ["tests/**/*.test.*"],
   },
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "."),
-      "@shared": path.resolve(__dirname, "../../packages/shared"),
-    },
+    alias: [
+      // Use an explicit `@/` prefix alias so Vite reliably resolves imports like `@/app/(app)/...`
+      // on all platforms (route groups include parentheses).
+      { find: "@/", replacement: `${path.resolve(__dirname, ".")}/` },
+      { find: "@", replacement: path.resolve(__dirname, ".") },
+      { find: "@shared", replacement: path.resolve(__dirname, "../../packages/shared") },
+    ],
   },
 });

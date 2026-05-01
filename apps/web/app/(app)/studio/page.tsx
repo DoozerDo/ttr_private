@@ -1176,6 +1176,30 @@ export default function StudioPage() {
   const [claimEditText, setClaimEditText] = useState("");
   const [confidenceUpgradeMessage, setConfidenceUpgradeMessage] = useState<string | null>(null);
   const processedVerificationRef = useRef<string | null>(null);
+
+  const persistedExistence = useMemo(() => getArtifactExistence(studioArtifactsPayload), [studioArtifactsPayload]);
+  const hasResumeArtifactPersisted = persistedExistence.hasResumeArtifactPersisted;
+  const hasCoverLetterArtifactPersisted = persistedExistence.hasCoverLetterArtifactPersisted;
+  const hasAnyArtifactPersisted = hasResumeArtifactPersisted || hasCoverLetterArtifactPersisted;
+
+  // Artifact existence authority: only from /api/studio/artifacts (persisted payload).
+  // Keep legacy variable names as aliases so downstream UI branches do not accidentally switch back to UI-state checks.
+  const hasResumeArtifact = hasResumeArtifactPersisted;
+  const hasCoverLetterArtifact = hasCoverLetterArtifactPersisted;
+
+  const artifactAuthorityTrackedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const signature = `${hasResumeArtifactPersisted}:${hasCoverLetterArtifactPersisted}`;
+    if (artifactAuthorityTrackedRef.current === signature) return;
+    artifactAuthorityTrackedRef.current = signature;
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[ARTIFACT_AUTHORITY_SOURCE]", {
+        source: "studio_artifacts",
+        hasResume: hasResumeArtifactPersisted,
+        hasCover: hasCoverLetterArtifactPersisted,
+      });
+    }
+  }, [hasCoverLetterArtifactPersisted, hasResumeArtifactPersisted]);
   const confidencePanelTrackedRef = useRef<string | null>(null);
   const previousArtifactQualityRef = useRef<ArtifactQualityModel | null>(null);
   const critiquePanelTrackedRef = useRef<string | null>(null);
@@ -1687,6 +1711,7 @@ export default function StudioPage() {
       ].join("|"),
     [effectiveBaselineVersionId, requestedAnalysisId, studioArtifactStorageKey, studioArtifactsRefreshNonce],
   );
+
   useEffect(() => {
     if (!requestedAnalysisId) {
       setOpportunityContext(null);
@@ -1720,7 +1745,9 @@ export default function StudioPage() {
           }
         }
       } catch {
-        // non-blocking
+        if (process.env.NODE_ENV !== "production") {
+          console.error("[STUDIO_ARTIFACTS_FETCH_ERROR]");
+        }
       }
     })();
     return () => {
@@ -1794,6 +1821,76 @@ export default function StudioPage() {
     // If hydration confirms artifacts are missing, allow auto-generation to proceed afterwards.
     suppressAutoGenerationRef.current = pairStatus !== "missing";
   }, []);
+
+  // Studio must always reconcile artifact existence from persisted /api/studio/artifacts once IDs are known.
+  // Do not run before baselineId + baselineVersionId + jobId exist.
+  const artifactsFetchSignatureRef = useRef<string | null>(null);
+  useEffect(() => {
+    const baselineId = effectiveBaselineId ?? null;
+    const baselineVersionId = effectiveBaselineVersionId ?? null;
+    const jobId = effectiveJobId ?? null;
+    if (!baselineId || !baselineVersionId || !jobId) return;
+
+    const signature = [baselineId, baselineVersionId, jobId, requestedAnalysisId ?? "_"].join(":");
+    if (artifactsFetchSignatureRef.current === signature) return;
+    artifactsFetchSignatureRef.current = signature;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const params = new URLSearchParams();
+        params.set("baselineId", baselineId);
+        params.set("baselineVersionId", baselineVersionId);
+        params.set("jobId", jobId);
+        if (requestedAnalysisId) params.set("analysisId", requestedAnalysisId);
+
+        console.log("[STUDIO_ARTIFACTS_FETCH]", {
+          attempt: 0,
+          baselineId,
+          baselineVersionId,
+          jobId,
+          analysisId: requestedAnalysisId ?? null,
+        });
+
+        const response = await fetch(`/api/studio/artifacts?${params.toString()}`, { cache: "no-store" });
+        const payload = await readResponsePayload(response);
+        if (cancelled) return;
+
+        console.log("[STUDIO_ARTIFACTS_RESULT]", {
+          attempt: 0,
+          status: response.status,
+          ok: response.ok,
+          payloadType: payload ? typeof payload : "null",
+          hasResume:
+            payload && typeof payload === "object" && !Array.isArray(payload)
+              ? Boolean((payload as BackendStudioArtifactsResponse).resume?.responseBody) ||
+                Boolean((payload as BackendStudioArtifactsResponse).resume?.content) ||
+                Boolean((payload as BackendStudioArtifactsResponse).resumeResult)
+              : false,
+          hasCoverLetter:
+            payload && typeof payload === "object" && !Array.isArray(payload)
+              ? Boolean((payload as BackendStudioArtifactsResponse).coverLetter?.responseBody) ||
+                Boolean((payload as BackendStudioArtifactsResponse).coverLetter?.content) ||
+                Boolean((payload as BackendStudioArtifactsResponse).coverLetterResult)
+              : false,
+        });
+
+        if (!response.ok) return;
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) return;
+
+        applyStudioArtifactsPayload(payload as BackendStudioArtifactsResponse);
+        setStudioArtifactsHydrated(true);
+      } catch (error) {
+        if (process.env.NODE_ENV !== "production") {
+          console.error("[STUDIO_ARTIFACTS_FETCH_ERROR]", error);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyStudioArtifactsPayload, effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, requestedAnalysisId]);
 
   const refreshStudioArtifactsAfterGenerate = useCallback(
     async (options: { expectedResume?: boolean; expectedCover?: boolean }) => {
@@ -2632,8 +2729,26 @@ export default function StudioPage() {
   const artifactContract = useMemo(
     () =>
       buildStudioArtifactContract({
-        resumeResponse: studioArtifactsPayload ? extractResumeResponseFromStudioArtifacts(studioArtifactsPayload) : null,
-        coverLetterResponse: studioArtifactsPayload ? extractCoverLetterResponseFromStudioArtifacts(studioArtifactsPayload) : null,
+        resumeResponse: (() => {
+          if (!studioArtifactsPayload) return null;
+          const response = extractResumeResponseFromStudioArtifacts(studioArtifactsPayload);
+          const result = studioArtifactsPayload.resumeResult ?? null;
+          if (!result) return response;
+          if (response && typeof response === "object") {
+            return { ...(response as Record<string, unknown>), resumeResult: result };
+          }
+          return { resumeResult: result };
+        })(),
+        coverLetterResponse: (() => {
+          if (!studioArtifactsPayload) return null;
+          const response = extractCoverLetterResponseFromStudioArtifacts(studioArtifactsPayload);
+          const result = studioArtifactsPayload.coverLetterResult ?? null;
+          if (!result) return response;
+          if (response && typeof response === "object") {
+            return { ...(response as Record<string, unknown>), coverLetterResult: result };
+          }
+          return { coverLetterResult: result };
+        })(),
         canExportDocuments,
         isPro,
       }),
@@ -2668,31 +2783,7 @@ export default function StudioPage() {
     isResumeEditMode &&
     JSON.stringify(draftResumeModel ?? null) !==
       JSON.stringify((savedEditedResumeModel ?? generatedResumeModel) ?? null);
-  const hasResumeDraft = Boolean(artifactContract.resumeModel) && Boolean(resumeState.response);
-
-  const persistedExistence = useMemo(() => getArtifactExistence(studioArtifactsPayload), [studioArtifactsPayload]);
-  const hasResumeArtifactPersisted = persistedExistence.hasResumeArtifactPersisted;
-  const hasCoverLetterArtifactPersisted = persistedExistence.hasCoverLetterArtifactPersisted;
-  const hasAnyArtifactPersisted = hasResumeArtifactPersisted || hasCoverLetterArtifactPersisted;
-
-  // Artifact existence authority: only from /api/studio/artifacts (persisted payload).
-  // Keep legacy variable names as aliases so downstream UI branches do not accidentally switch back to UI-state checks.
-  const hasResumeArtifact = hasResumeArtifactPersisted;
-  const hasCoverLetterArtifact = hasCoverLetterArtifactPersisted;
-
-  const artifactAuthorityTrackedRef = useRef<string | null>(null);
-  useEffect(() => {
-    const signature = `${hasResumeArtifactPersisted}:${hasCoverLetterArtifactPersisted}`;
-    if (artifactAuthorityTrackedRef.current === signature) return;
-    artifactAuthorityTrackedRef.current = signature;
-    if (process.env.NODE_ENV !== "production") {
-      console.log("[ARTIFACT_AUTHORITY_SOURCE]", {
-        source: "studio_artifacts",
-        hasResume: hasResumeArtifactPersisted,
-        hasCover: hasCoverLetterArtifactPersisted,
-      });
-    }
-  }, [hasCoverLetterArtifactPersisted, hasResumeArtifactPersisted]);
+  const hasResumeDraft = hasResumeArtifact;
   // Quality validation must run on the same normalized resume model used for rendering (readResumeModel output).
   // Do not inspect raw payloads or presenter state for quality gating.
   const resumeQuality = artifactContract.quality.resume;
@@ -2748,9 +2839,7 @@ export default function StudioPage() {
     [artifactContract.normalized.coverLetterResponse],
   );
   const coverPresenter = artifactContract.presenters.coverLetter;
-  const hasCoverLetterDraft =
-    (Boolean(artifactContract.coverLetterModel) && Boolean(coverState.response)) ||
-    Boolean(artifactContract.results.coverLetter?.preview);
+  const hasCoverLetterDraft = hasCoverLetterArtifact;
   const coverLetterQuality = artifactContract.quality.coverLetter;
   const coverHasValidationFindings = coverLetterQuality.issues.length > 0;
   const coverLetterResult = artifactContract.results.coverLetter;
@@ -2789,11 +2878,11 @@ export default function StudioPage() {
         score: resolvedScoreForContract,
         generationReadiness: activeGenerationReadiness,
         resumeState: {
-          hasOutput: hasResumeDraft,
+          hasOutput: hasResumeArtifact,
           failed: Boolean(resumeState.error || resumeState.artifactFailure),
         },
         coverState: {
-          hasOutput: hasCoverLetterDraft,
+          hasOutput: hasCoverLetterArtifact,
           failed: Boolean(coverState.error || coverState.artifactFailure),
         },
         isPro,
@@ -2805,9 +2894,9 @@ export default function StudioPage() {
       analysisLoading,
       coverState.artifactFailure,
       coverState.error,
-      hasCoverLetterDraft,
       hasGeneratedOnce,
-      hasResumeDraft,
+      hasCoverLetterArtifact,
+      hasResumeArtifact,
       isPro,
       resumeState.artifactFailure,
       resumeState.error,
@@ -2818,22 +2907,18 @@ export default function StudioPage() {
   const pairWorkflowState = useMemo(() => {
     const resumeStatus: PairWorkflowArtifactStatus = resumeGenerating || autoGenerationInFlight
       ? "generating"
-      : Boolean(generatedResumeModel) && Boolean(resumeState.response)
+      : hasResumeArtifact
         ? "ready"
-        : resumePresenter.status === "blocked" || resumePresenter.status === "error"
-          ? "failed"
-          : resumeState.response
-            ? "pending"
-            : "missing";
+      : resumePresenter.status === "blocked" || resumePresenter.status === "error"
+        ? "failed"
+        : "missing";
     const coverLetterStatus: PairWorkflowArtifactStatus = coverGenerating || autoGenerationInFlight
       ? "generating"
-      : coverPresenter.status === "success" && Boolean(coverState.response)
+      : hasCoverLetterArtifact
         ? "ready"
-        : coverPresenter.status === "blocked" || coverPresenter.status === "error"
-          ? "failed"
-          : coverState.response
-            ? "pending"
-            : "missing";
+      : coverPresenter.status === "blocked" || coverPresenter.status === "error"
+        ? "failed"
+        : "missing";
 
     return resolvePairWorkflowState({
       baselineId: effectiveBaselineId ?? null,
@@ -2850,15 +2935,14 @@ export default function StudioPage() {
     autoGenerationInFlight,
     coverGenerating,
     coverPresenter.status,
-    coverState.response,
     effectiveBaselineId,
     effectiveJobId,
-    generatedResumeModel,
+    hasCoverLetterArtifact,
+    hasResumeArtifact,
     productDecisionState.canonicalDecision,
     requestedAnalysisId,
     resumeGenerating,
     resumePresenter.status,
-    resumeState.response,
   ]);
 
   useEffect(() => {
