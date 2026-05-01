@@ -8602,6 +8602,9 @@ export default function StudioPage() {
                       <p className="mt-1 text-sm text-slate-200">
                         Review the flagged issue, edit the resume, or regenerate.
                       </p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        If this artifact was generated earlier, try regenerating to apply the latest improvements.
+                      </p>
                     </div>
                   )}
                 </div>
@@ -11256,6 +11259,9 @@ export default function StudioPage() {
             data-testid="studio-resume-quality-warning"
           >
             <p className="text-sm font-semibold text-amber-100">Resume needs correction before export.</p>
+            <p className="text-xs text-slate-300">
+              If this artifact was generated earlier, try regenerating to apply the latest improvements.
+            </p>
             {resumeQualityIssueSummary.visible.length ? (
               <ul className="list-disc space-y-1 pl-5 text-sm text-slate-200">
                 {resumeQualityIssueSummary.visible.map((issue, index) => (
@@ -11653,6 +11659,9 @@ export default function StudioPage() {
             data-testid="studio-cover-quality-warning"
           >
             <p className="text-sm font-semibold text-amber-100">Cover letter needs correction before export.</p>
+            <p className="text-xs text-slate-300">
+              If this artifact was generated earlier, try regenerating to apply the latest improvements.
+            </p>
             {coverQualityIssueSummary.visible.length ? (
               <ul className="list-disc space-y-1 pl-5 text-sm text-slate-200">
                 {coverQualityIssueSummary.visible.map((issue, index) => (
