@@ -599,8 +599,18 @@ function normalizeHydratedArtifactResponse(value: unknown): unknown | null {
 function extractResumeResponseFromStudioArtifacts(payload: BackendStudioArtifactsResponse): unknown | null {
   const responseBody = payload.resume?.responseBody ?? null;
   const normalized = normalizeHydratedArtifactResponse(responseBody);
-  if (normalized) return normalized;
   const content = typeof payload.resume?.content === "string" ? payload.resume.content.trim() : "";
+  if (normalized) {
+    // Persisted artifacts may store the renderable resume text in the record `content` column even when the
+    // response body omits `preview.*` structured models. Merge the persisted content so Studio can render
+    // a fallback preview without requiring resumeModel/preview fields.
+    if (content && typeof normalized === "object" && !Array.isArray(normalized)) {
+      const record = normalized as Record<string, unknown>;
+      const existingContent = typeof record.content === "string" ? record.content.trim() : "";
+      if (!existingContent) return { ...record, content };
+    }
+    return normalized;
+  }
   if (content) return { content };
   return payload.resumeResult ? ({ resumeResult: payload.resumeResult } as unknown) : null;
 }
@@ -608,8 +618,16 @@ function extractResumeResponseFromStudioArtifacts(payload: BackendStudioArtifact
 function extractCoverLetterResponseFromStudioArtifacts(payload: BackendStudioArtifactsResponse): unknown | null {
   const responseBody = payload.coverLetter?.responseBody ?? null;
   const normalized = normalizeHydratedArtifactResponse(responseBody);
-  if (normalized) return normalized;
   const content = typeof payload.coverLetter?.content === "string" ? payload.coverLetter.content.trim() : "";
+  if (normalized) {
+    // Same as resume: merge persisted text content so preview rendering never depends on legacy structured fields.
+    if (content && typeof normalized === "object" && !Array.isArray(normalized)) {
+      const record = normalized as Record<string, unknown>;
+      const existingContent = typeof record.content === "string" ? record.content.trim() : "";
+      if (!existingContent) return { ...record, content };
+    }
+    return normalized;
+  }
   if (content) return { content };
   return payload.coverLetterResult ? ({ coverLetterResult: payload.coverLetterResult } as unknown) : null;
 }
