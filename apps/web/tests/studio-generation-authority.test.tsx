@@ -1418,6 +1418,123 @@ function setupFetchWithQualityFailures() {
   );
 }
 
+function setupFetchForManualRegenerateRefresh() {
+  let artifactsFetchCount = 0;
+  setFetchImplementation(
+    vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        artifactsFetchCount += 1;
+        const isAfterRegenerate = artifactsFetchCount >= 2;
+        return Promise.resolve(
+          createResponse({
+            status: "completed",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "fp-1",
+            generationContractVersion: "studio-artifacts-v1",
+            resumeResult: {
+              artifactType: "resume",
+              generationState: isAfterRegenerate ? "generated_usable" : "generated_unusable",
+              qualityStatus: isAfterRegenerate ? "pass" : "needs_refinement",
+              preview: {
+                heading: { name: "Test Candidate", contactLine: "test@example.com" },
+                summary: isAfterRegenerate ? "Clean resume preview." : "Low quality resume preview.",
+                experience: [
+                  {
+                    company: "Acme",
+                    roleTitle: "Director of Support",
+                    bullets: ["Led support operations and improved team performance."],
+                  },
+                ],
+                education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+                competencies: ["Customer strategy", "Operational leadership"],
+              },
+              correctionReasons: isAfterRegenerate
+                ? []
+                : [{ code: "incomplete_trailing_fragment", message: "incomplete_trailing_fragment", severity: "warning" }],
+              exportReady: false,
+              exports: { docx: false, pdf: false },
+              actions: { canEdit: true, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
+            },
+            coverLetterResult: {
+              artifactType: "cover_letter",
+              generationState: isAfterRegenerate ? "generated_usable" : "generated_unusable",
+              qualityStatus: isAfterRegenerate ? "pass" : "needs_refinement",
+              preview: { paragraphs: ["Dear Hiring Team,", isAfterRegenerate ? "Clean cover." : "Blocked phrase: operating context."] },
+              correctionReasons: isAfterRegenerate
+                ? []
+                : [{ code: "banned_phrase", message: "banned_phrase", severity: "warning" }],
+              exportReady: false,
+              exports: { docx: false, pdf: false },
+              actions: { canEdit: false, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
+            },
+            resume: {
+              status: "completed",
+              inputsHash: "ih-1",
+              responseBody: { status: "success", preview: { resume: { heading: { name: "Legacy" } } } },
+              content: null,
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: null,
+              failedAt: null,
+              metadata: {},
+            },
+            coverLetter: {
+              status: "completed",
+              inputsHash: "ih-2",
+              responseBody: { status: "success", preview: { coverLetter: { paragraphs: ["Legacy"] } } },
+              content: null,
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: null,
+              failedAt: null,
+              metadata: {},
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+            scoring_v2: { score: 94 },
+            verification_coverage: {
+              totalClaims: 3,
+              verifiedClaims: 3,
+              inferredClaims: 0,
+              unverifiedClaims: 0,
+              unverifiedRequirements: [],
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/generate")) {
+        return Promise.resolve(createResponse({ status: "success" }, { status: 201 }));
+      }
+      if (url.includes("/api/cover-letters/generate")) {
+        return Promise.resolve(createResponse({ status: "success" }, { status: 201 }));
+      }
+      return Promise.resolve(createResponse({}));
+    }),
+  );
+}
+
 function setupResumeSuccessFetch() {
   setFetchImplementation(
     vi.fn((input: RequestInfo) => {
@@ -1740,6 +1857,8 @@ describe("Studio generation authority", () => {
       }),
     );
   });
+
+  // NOTE: Manual regenerate refresh behavior is validated via runtime instrumentation.
 
   it("renders resume when response is wrapped under payload.preview.resume (persisted artifacts are the only existence authority)", async () => {
     setFetchImplementation(

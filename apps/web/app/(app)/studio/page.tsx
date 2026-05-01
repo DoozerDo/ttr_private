@@ -1855,7 +1855,15 @@ export default function StudioPage() {
     const jobId = effectiveJobId ?? null;
     if (!baselineId || !baselineVersionId || !jobId) return;
 
-    const signature = [baselineId, baselineVersionId, jobId, requestedAnalysisId ?? "_"].join(":");
+    // Include the refresh nonce so manual regenerate (and other explicit refresh triggers) can force a
+    // re-hydration even when the baseline/job identity is unchanged.
+    const signature = [
+      baselineId,
+      baselineVersionId,
+      jobId,
+      requestedAnalysisId ?? "_",
+      String(studioArtifactsRefreshNonce),
+    ].join(":");
     if (artifactsFetchSignatureRef.current === signature) return;
     artifactsFetchSignatureRef.current = signature;
 
@@ -1914,7 +1922,14 @@ export default function StudioPage() {
     return () => {
       cancelled = true;
     };
-  }, [applyStudioArtifactsPayload, effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, requestedAnalysisId]);
+  }, [
+    applyStudioArtifactsPayload,
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    requestedAnalysisId,
+    studioArtifactsRefreshNonce,
+  ]);
 
   const refreshStudioArtifactsAfterGenerate = useCallback(
     async (options: { expectedResume?: boolean; expectedCover?: boolean }) => {
@@ -9728,14 +9743,25 @@ export default function StudioPage() {
     }
 
     if (resumeResponse.ok && coverResponse.ok) {
-      // Trigger a fresh artifact hydration pass without relying on URL changes or refresh.
-      setStudioArtifactsRefreshNonce((current) => current + 1);
+      // Manual regenerate must always re-hydrate Studio artifacts from persisted readState,
+      // even if auto-generation logic thinks artifacts are already generated.
+      console.info("[studio][manual_regenerate_completed]");
+      const nonceBefore = studioArtifactsRefreshNonce;
+      console.info("[studio][manual_regenerate_nonce]", { before: nonceBefore });
+      await refreshStudioArtifactsAfterGenerate({ expectedResume: true, expectedCover: true });
+      setStudioArtifactsRefreshNonce((current) => {
+        const next = current + 1;
+        console.info("[studio][manual_regenerate_nonce]", { before: current, after: next });
+        return next;
+      });
     }
   }, [
     effectiveBaselineId,
     effectiveBaselineVersionId,
     effectiveJobId,
+    refreshStudioArtifactsAfterGenerate,
     requestedAnalysisId,
+    studioArtifactsRefreshNonce,
     workflowOrchestratorCore.contract?.generation.auto.signature,
   ]);
 
