@@ -2605,7 +2605,7 @@ export class ResumeService {
         company: resume.experience?.[0]?.company,
       });
     }
-    const persistedContent = JSON.stringify(normalizedDocument);
+    const persistedContent = buildResumePlainText(normalizedDocument);
     if (!persistedContent || persistedContent.trim().length < 10) {
       throw new UnprocessableEntityException({
         error: {
@@ -2614,10 +2614,12 @@ export class ResumeService {
         },
       });
     }
+    (response as any).content = persistedContent;
     // eslint-disable-next-line no-console
     console.log('[RESUME_GENERATE_OUTPUT]', {
       hasContent: true,
       length: persistedContent.length,
+      responseKeys: response && typeof response === 'object' ? Object.keys(response as any) : [],
     });
 
     const artifactId = await this.studioArtifactsService.recordResumeSuccess({
@@ -2763,7 +2765,7 @@ export class ResumeService {
             inputsHash: studioArtifactContext.inputsHash,
             analysisId: studioArtifactContext.analysisId,
             responseBody: response as unknown as Record<string, unknown>,
-            content: normalizedDocument ? JSON.stringify(normalizedDocument) : '',
+            content: normalizedDocument ? buildResumePlainText(normalizedDocument) : '',
             metadata: {
               auditId: minimalAuditId,
               baselineVersionHash: baselineVersionForFailSafe.hash ?? null,

@@ -323,7 +323,14 @@ describe('ResumeService contract', () => {
     } as any);
 
     expect(result.ok).toBe(true);
-    expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
+    expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringMatching(/\S/),
+        responseBody: expect.objectContaining({
+          content: expect.any(String),
+        }),
+      }),
+    );
   });
 
   it('sanitizes preview output by clearing malformed role titles like \"Technical Architect & Full\"', () => {

@@ -144,7 +144,7 @@ const buildService = (options?: {
     studioArtifactsService,
     applicationsService,
   );
-  return { service, complianceService, coverRepo, workflowIdempotencyService };
+  return { service, complianceService, coverRepo, workflowIdempotencyService, studioArtifactsService };
 };
 
 const request = {
@@ -156,7 +156,7 @@ const request = {
 
 describe('CoverLettersService contract', () => {
   it('allows generation when baselineVersionId is missing', async () => {
-    const { service } = buildService();
+    const { service, studioArtifactsService } = buildService();
     jest.spyOn(service as any, 'buildCoverLetterDraft').mockResolvedValue({
       baseline,
       baselineVersion,
@@ -203,7 +203,7 @@ describe('CoverLettersService contract', () => {
   });
 
   it('returns a controlled blocked readiness when required IDs are missing', async () => {
-    const { service } = buildService();
+    const { service, studioArtifactsService } = buildService();
     const buildDraftSpy = jest.spyOn(service as any, 'buildCoverLetterDraft');
 
     const readiness = await service.getGenerationReadiness('user-1', {
@@ -219,7 +219,7 @@ describe('CoverLettersService contract', () => {
   });
 
   it('returns readiness ready and allows generation in READY state', async () => {
-    const { service } = buildService();
+    const { service, studioArtifactsService } = buildService();
     const buildDraftSpy = jest.spyOn(service as any, 'buildCoverLetterDraft').mockResolvedValue({
       baseline,
       baselineVersion,
@@ -268,6 +268,15 @@ describe('CoverLettersService contract', () => {
     expect(result.status).toBe('success');
     expect(result.exportReady).toBe(true);
     expect(result.preview?.coverLetter).toBeTruthy();
+    expect((result as any).content).toBe('valid');
+    expect(studioArtifactsService.recordCoverLetterSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringMatching(/\S/),
+        responseBody: expect.objectContaining({
+          content: expect.any(String),
+        }),
+      }),
+    );
     buildDraftSpy.mockRestore();
   });
 

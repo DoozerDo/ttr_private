@@ -695,6 +695,8 @@ export class CoverLettersService {
         },
       } as unknown as CoverLetterGenerationResponse;
 
+      (response as any).content = draft.complianceResult.normalizedContent;
+
       if (!draft.complianceResult.normalizedContent || draft.complianceResult.normalizedContent.trim().length < 1) {
         throw new UnprocessableEntityException({
           error: {
@@ -707,6 +709,7 @@ export class CoverLettersService {
       console.log('[COVER_LETTER_GENERATE_OUTPUT]', {
         hasContent: true,
         length: draft.complianceResult.normalizedContent.length,
+        responseKeys: response && typeof response === 'object' ? Object.keys(response as any) : [],
       });
 
       emitArtifactQualityTelemetry(
