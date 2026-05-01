@@ -2871,12 +2871,16 @@ export default function StudioPage() {
     return typeof coverPreviewText === "string" && coverPreviewText.trim().length > 0;
   }, [coverLetterParagraphs.length, coverPreviewText]);
 
-  if (process.env.NODE_ENV !== "production") {
-    console.log("RENDER FLAGS", {
-      hasRenderableResumeContent,
-      hasRenderableCoverLetterContent,
-    });
-  }
+  console.log("STUDIO_RENDER_FLAGS_VISIBLE", {
+    hasRenderableResumeContent,
+    hasRenderableCoverLetterContent,
+    resumePreviewTextLength: typeof resumePreviewText === "string" ? resumePreviewText.length : null,
+    coverPreviewTextLength: typeof coverPreviewText === "string" ? coverPreviewText.length : null,
+    willRenderResumeMissingPanel:
+      !hasRenderableResumeContent && !(resumeState.artifactFailure != null) && !(resumePresenter.status === "blocked" && !hasResumeArtifact),
+    willRenderCoverMissingPanel:
+      !hasRenderableCoverLetterContent && !(coverState.artifactFailure != null) && !(coverState.error != null),
+  });
   const coverPresenter = artifactContract.presenters.coverLetter;
   const hasCoverLetterDraft = hasCoverLetterArtifact;
   const coverLetterQuality = artifactContract.quality.coverLetter;
