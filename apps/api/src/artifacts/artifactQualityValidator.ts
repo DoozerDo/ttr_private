@@ -278,8 +278,6 @@ function detectTrailingFragmentReason(value: string): string | null {
   const raw = trimToText(value);
   if (!raw) return null;
   const isDangling = endsWithDanglingFragment(raw);
-  const shouldTraceOffenders =
-    process.env.DEBUG_DOCGEN === 'true' || process.env.DOCGEN_OFFENDER_TRACE === 'true';
 
   if (isDangling && activeTrailingFragmentTraceBudget) {
     activeTrailingFragmentTraceBudget.detected += 1;
@@ -287,7 +285,6 @@ function detectTrailingFragmentReason(value: string): string | null {
 
   if (
     isDangling &&
-    shouldTraceOffenders &&
     activeTrailingFragmentTraceBudget &&
     activeTrailingFragmentTraceBudget.remaining > 0
   ) {
@@ -355,11 +352,9 @@ export function validateResumeArtifactQuality(
     };
   }
 
-  const shouldTraceOffenders =
-    process.env.DEBUG_DOCGEN === 'true' || process.env.DOCGEN_OFFENDER_TRACE === 'true';
-  activeTrailingFragmentTraceBudget = shouldTraceOffenders
-    ? { detected: 0, logged: 0, remaining: 10, enabled: true }
-    : null;
+  // Always enable a small offender-trace budget so production logs can show exactly what text
+  // was flagged by trailing-fragment validation (kept to 10 offenders max).
+  activeTrailingFragmentTraceBudget = { detected: 0, logged: 0, remaining: 10, enabled: true };
 
   // Always validate against a sanitized model so trailing-fragment checks cannot accidentally
   // evaluate pre-sanitized bullets/summaries (e.g. fail-safe paths, alternate assembly routes).
@@ -392,20 +387,19 @@ export function validateResumeArtifactQuality(
   if (typeof sanitizedResume.summary === 'string') {
     reasons.push(...detectPlaceholderReasons(sanitizedResume.summary));
     const trailing = detectTrailingFragmentReason(sanitizedResume.summary);
-    if (
-      trailing &&
-      (process.env.DEBUG_DOCGEN === 'true' || process.env.DOCGEN_OFFENDER_TRACE === 'true') &&
-      activeTrailingFragmentTraceBudget &&
-      activeTrailingFragmentTraceBudget.remaining > 0
-    ) {
-      // eslint-disable-next-line no-console
-      console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_SOURCE]', {
-        source: 'summary',
-      });
-      activeTrailingFragmentTraceBudget.logged += 1;
-      activeTrailingFragmentTraceBudget.remaining -= 1;
+    if (trailing) {
+      reasons.push(trailing);
+      if (activeTrailingFragmentTraceBudget && activeTrailingFragmentTraceBudget.remaining > 0) {
+        // eslint-disable-next-line no-console
+        console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_SOURCE]', {
+          source: 'summary',
+          company: null,
+          roleTitle: null,
+        });
+        activeTrailingFragmentTraceBudget.logged += 1;
+        activeTrailingFragmentTraceBudget.remaining -= 1;
+      }
     }
-    if (trailing) reasons.push(trailing);
     if (!trimToText(sanitizedResume.summary)) {
       reasons.push('empty_summary');
     }
@@ -440,22 +434,19 @@ export function validateResumeArtifactQuality(
     for (const bullet of bullets) {
       reasons.push(...detectPlaceholderReasons(bullet));
       const trailing = detectTrailingFragmentReason(bullet);
-      if (
-        trailing &&
-        (process.env.DEBUG_DOCGEN === 'true' || process.env.DOCGEN_OFFENDER_TRACE === 'true') &&
-        activeTrailingFragmentTraceBudget &&
-        activeTrailingFragmentTraceBudget.remaining > 0
-      ) {
-        // eslint-disable-next-line no-console
-        console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_SOURCE]', {
-          source: 'experience.bullet',
-          company: company || null,
-          roleTitle: roleTitle || null,
-        });
-        activeTrailingFragmentTraceBudget.logged += 1;
-        activeTrailingFragmentTraceBudget.remaining -= 1;
+      if (trailing) {
+        reasons.push(trailing);
+        if (activeTrailingFragmentTraceBudget && activeTrailingFragmentTraceBudget.remaining > 0) {
+          // eslint-disable-next-line no-console
+          console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_SOURCE]', {
+            source: 'experience.bullet',
+            company: company || null,
+            roleTitle: roleTitle || null,
+          });
+          activeTrailingFragmentTraceBudget.logged += 1;
+          activeTrailingFragmentTraceBudget.remaining -= 1;
+        }
       }
-      if (trailing) reasons.push(trailing);
     }
   }
 
@@ -464,8 +455,7 @@ export function validateResumeArtifactQuality(
   if (activeTrailingFragmentTraceBudget && activeTrailingFragmentTraceBudget.detected > 0) {
     // eslint-disable-next-line no-console
     console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_SUMMARY]', {
-      totalDetected: activeTrailingFragmentTraceBudget.detected,
-      totalLogged: activeTrailingFragmentTraceBudget.logged,
+      count: activeTrailingFragmentTraceBudget.detected,
     });
   }
   activeTrailingFragmentTraceBudget = null;
