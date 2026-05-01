@@ -24,6 +24,19 @@ function trimToText(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+function buildFallbackSummaryFromExperience(
+  experience: Array<{ bullets?: unknown }>,
+): string {
+  const bulletCandidates = experience
+    .flatMap((entry) =>
+      Array.isArray((entry as any)?.bullets) ? ((entry as any).bullets as unknown[]) : [],
+    )
+    .map((bullet) => trimToText(bullet))
+    .filter(Boolean)
+    .filter((bullet) => bullet.length >= 12);
+  return bulletCandidates.slice(0, 2).join(' ');
+}
+
 function hasUnmatchedClosingParen(value: string): boolean {
   const text = trimToText(value);
   if (!text) return false;
@@ -196,8 +209,20 @@ export function buildDeterministicResumeV2FromBaseline(input: {
     ? structured.experience
     : [];
 
+  // Enforce experience filtering: only allow headers we explicitly support in Studio preview.
+  const validExperience = structuredExperience.filter((entry) =>
+    isAllowedStructuredTemplateExperienceHeader(entry),
+  );
+
+  structured.experience = validExperience;
+
+  // Temporary assertion (explicitly requested): Vue fragments must never survive filtering.
+  if ((structured.experience ?? []).some((entry) => String((entry as any)?.company ?? '').includes('Vue'))) {
+    throw new Error('V2 failed to filter invalid experience entry');
+  }
+
   const invalidReasons: string[] = [];
-  const allowedExperience = structuredExperience.filter((entry, index) => {
+  const allowedExperience = validExperience.filter((entry, index) => {
     const reasons = buildInvalidExperienceReasons({
       company: (entry as any)?.company,
       roleTitle: (entry as any)?.roleTitle,
@@ -230,24 +255,14 @@ export function buildDeterministicResumeV2FromBaseline(input: {
 
   structured.experience = allowedExperience;
 
-  if (!structured.summary || !trimToText(structured.summary)) {
-    const bulletCandidates = allowedExperience
-      .flatMap((entry) => (entry?.bullets ?? []).map((b) => trimToText(b)).filter(Boolean))
-      .filter((b) => b.length >= 12);
-    const fallback = bulletCandidates.slice(0, 2).join(' ');
-    if (fallback) {
-      structured.summary = fallback;
-    }
-  }
-
   const normalized = assembleResumeFromStructuredBaseline(structured, input.identity);
+
+  // Enforce summary fallback (non-optional) after model creation.
   if (!trimToText((normalized as any).summary)) {
-    throw new UnprocessableEntityException({
-      error: {
-        code: 'resume_v2_summary_missing',
-        message: 'Resume V2 could not derive a grounded summary from baseline input.',
-      },
-    });
+    (normalized as any).summary = buildFallbackSummaryFromExperience(normalized.experience as any);
+  }
+  if (!trimToText((normalized as any).summary)) {
+    throw new Error('V2 failed to produce non-empty summary');
   }
 
   const normalizedValidation = validateNormalizedResumeDocument(normalized);
