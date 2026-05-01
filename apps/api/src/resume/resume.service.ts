@@ -2431,7 +2431,7 @@ export class ResumeService {
         enforceOneTap: shouldEnforceOneTap,
       });
     } else {
-      dedupeKey = this.buildResumeDedupeKey({
+      const baseDedupeKey = this.buildResumeDedupeKey({
         userId,
         baselineId: baseline.id,
         baselineVersionId: baselineVersion.id,
@@ -2441,6 +2441,16 @@ export class ResumeService {
         oneTap: Boolean(request.oneTap),
         enforceOneTap: shouldEnforceOneTap,
       });
+      dedupeKey = request.forceRegenerate ? `${baseDedupeKey}:regen:${audit.id}` : baseDedupeKey;
+
+      if (request.forceRegenerate) {
+        // eslint-disable-next-line no-console
+        console.log('[ARTIFACT_REGENERATE_OVERRIDE]', {
+          artifactType: 'resume',
+          dedupeKey: baseDedupeKey,
+          forcedKey: dedupeKey,
+        });
+      }
       reservation = await this.workflowIdempotencyService.reserve<ResumeGenerationResponse>({
         userId,
         operationName: 'generation.resume',
@@ -2448,25 +2458,13 @@ export class ResumeService {
         runId: audit.id,
       });
 
-      if (request.forceRegenerate && reservation.status === 'existing_completed') {
-        // Manual regeneration must not be blocked by the existing-completed idempotency latch.
-        // Use a one-off dedupe key so the pipeline runs and overwrites the persisted Studio artifact.
-        const forcedKey = `${dedupeKey}:regen:${audit.id}`;
-        // eslint-disable-next-line no-console
-        console.log('[ARTIFACT_REGENERATE_OVERRIDE]', {
-          artifactType: 'resume',
-          priorStatus: reservation.status,
-          dedupeKey,
-          forcedKey,
-        });
-        reservation = await this.workflowIdempotencyService.reserve<ResumeGenerationResponse>({
-          userId,
-          operationName: 'generation.resume',
-          dedupeKey: forcedKey,
-          runId: audit.id,
-        });
-        dedupeKey = forcedKey;
-      }
+      // eslint-disable-next-line no-console
+      console.log('[RESUME_GENERATE_FORCE_TRACE]', {
+        forceRegenerate: Boolean(request.forceRegenerate),
+        dedupeKey,
+        reservationStatus: reservation.status,
+        reservationRunId: reservation.runId,
+      });
 
       if (reservation.status === 'existing_completed' && reservation.responseBody) {
         const response = {

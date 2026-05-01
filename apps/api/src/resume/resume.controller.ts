@@ -66,6 +66,13 @@ export class ResumeController {
     @Req() request: TieredResumeRequest,
   ): Promise<GenerationOutcome<ResumeGenerationResponse> & ResumeGenerationResponse> {
     // eslint-disable-next-line no-console
+    console.log('[RESUME_GENERATE_ENTRY]', {
+      forceRegenerate: Boolean(body.forceRegenerate),
+      baselineId: body.baselineId?.trim() ?? null,
+      baselineVersionId: body.baselineVersionId?.trim() ?? null,
+      jobId: body.jobId?.trim() ?? null,
+    });
+    // eslint-disable-next-line no-console
     console.log('[RESUME_GENERATE_START]', {
       baselineId: body.baselineId?.trim() ?? null,
       baselineVersionId: body.baselineVersionId?.trim() ?? null,

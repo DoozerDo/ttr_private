@@ -9690,6 +9690,7 @@ export default function StudioPage() {
       baselineId,
       baselineVersionId: baselineVersionId ?? undefined,
       jobId,
+      forceRegenerate: true,
       ...(requestedAnalysisId ? { analysisId: requestedAnalysisId } : {}),
     };
     const [resumeResponse, coverResponse] = await Promise.all([

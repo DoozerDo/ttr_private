@@ -408,6 +408,31 @@ describe('ResumeService contract', () => {
     assessment.overallScore = originalScore;
   });
 
+  it('bypasses idempotency reuse/in-flight latches when forceRegenerate=true by using a one-off dedupe key', async () => {
+    const { service, workflowIdempotencyService } = buildService();
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 70;
+
+    (workflowIdempotencyService.reserve as jest.Mock).mockImplementation(({ dedupeKey }) => {
+      if (String(dedupeKey).includes(':regen:audit-1')) {
+        return Promise.resolve({ status: 'accepted_new', runId: 'run-forced-1', responseBody: null });
+      }
+      return Promise.resolve({ status: 'existing_in_flight', runId: 'run-previous-1', responseBody: null });
+    });
+
+    await expect(
+      service.generateResume('user-1', { ...baseRequest, forceRegenerate: true }),
+    ).resolves.toEqual(expect.objectContaining({ ok: true }));
+
+    expect(workflowIdempotencyService.reserve).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dedupeKey: expect.stringContaining(':regen:audit-1'),
+      }),
+    );
+
+    assessment.overallScore = originalScore;
+  });
+
   it('marks resume as not export-ready when experience headers are malformed (sentence-like title/company)', async () => {
     const { service } = buildService();
     const originalScore = assessment.overallScore;
