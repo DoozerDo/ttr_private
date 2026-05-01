@@ -2700,18 +2700,22 @@ export class ResumeService {
       const qualityGate = (response as any)?.qualityGate;
       const gateStatus =
         qualityGate && typeof qualityGate === 'object' ? String((qualityGate as any).status ?? '') : null;
-      const gateReasons =
+      const qualityGateReasonCodes =
         qualityGate && typeof qualityGate === 'object' && Array.isArray((qualityGate as any).reasons)
           ? (qualityGate as any).reasons.map((r: unknown) => String(r ?? '')).filter(Boolean).slice(0, 8)
           : [];
-      // eslint-disable-next-line no-console
-      console.log('[RESUME_PERSISTED_REASONS_TRACE]', {
+      const payload = {
         artifactId,
         runId: audit.id,
+        auditId: audit.id,
         qualityStatus: gateStatus || null,
-        correctionReasons: gateReasons,
-        qualityGate: gateStatus ? { status: gateStatus, reasons: gateReasons } : null,
-      });
+        correctionReasonCodes: qualityGateReasonCodes,
+        qualityGateReasonCodes,
+        createdAt: null,
+        updatedAt: null,
+      };
+      // eslint-disable-next-line no-console
+      console.log('[RESUME_PERSISTED_REASONS_TRACE]', JSON.stringify(payload));
     } catch {
       // ignore logging failures
     }

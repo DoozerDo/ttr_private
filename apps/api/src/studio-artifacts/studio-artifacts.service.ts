@@ -325,34 +325,38 @@ export class StudioArtifactsService {
       try {
         const gate = (resumeRecord?.responseBody as any)?.qualityGate as any;
         const gateStatus = gate && typeof gate === 'object' ? String(gate.status ?? '') : null;
-        const gateReasons =
+        const qualityGateReasonCodes =
           gate && typeof gate === 'object' && Array.isArray(gate.reasons)
             ? gate.reasons.map((r: unknown) => String(r ?? '')).filter(Boolean).slice(0, 8)
             : [];
-        const correctionReasons = Array.isArray(resumeResult.correctionReasons)
+        const correctionReasonCodes = Array.isArray(resumeResult.correctionReasons)
           ? resumeResult.correctionReasons
               .map((r) => String((r as any)?.code ?? ''))
               .filter(Boolean)
               .slice(0, 8)
           : [];
+        const createdAt =
+          (record as any)?.createdAt && typeof (record as any).createdAt.toISOString === 'function'
+            ? (record as any).createdAt.toISOString()
+            : null;
+        const updatedAt =
+          (record as any)?.updatedAt && typeof (record as any).updatedAt.toISOString === 'function'
+            ? (record as any).updatedAt.toISOString()
+            : null;
+        const payload = {
+          artifactId: String((record as any)?.id ?? ''),
+          runId: (resumeRecord?.metadata as any)?.auditId ?? null,
+          auditId: (resumeRecord?.metadata as any)?.auditId ?? null,
+          qualityStatus: resumeResult.qualityStatus ?? null,
+          resumeStatus: resumeRecord?.status ?? null,
+          correctionReasonCodes,
+          qualityGateStatus: gateStatus,
+          qualityGateReasonCodes,
+          createdAt,
+          updatedAt,
+        };
         // eslint-disable-next-line no-console
-        console.log('[STUDIO_ARTIFACT_REASONS_TRACE]', {
-          resume: {
-            status: resumeRecord?.status ?? null,
-            qualityStatus: resumeResult.qualityStatus ?? null,
-            correctionReasons,
-            qualityGate: gateStatus ? { status: gateStatus, reasons: gateReasons } : null,
-            metadataKeys: resumeRecord?.metadata ? Object.keys(resumeRecord.metadata).slice(0, 12) : [],
-            metadata: resumeRecord?.metadata ? { auditId: (resumeRecord.metadata as any)?.auditId ?? null } : null,
-            startedAt: resumeRecord?.startedAt ?? null,
-            completedAt: resumeRecord?.completedAt ?? null,
-            failedAt: resumeRecord?.failedAt ?? null,
-          },
-          artifactTimestamps: {
-            createdAt: (record as any)?.createdAt ? (record as any).createdAt.toISOString?.() ?? null : null,
-            updatedAt: (record as any)?.updatedAt ? (record as any).updatedAt.toISOString?.() ?? null : null,
-          },
-        });
+        console.log('[STUDIO_ARTIFACT_REASONS_TRACE]', JSON.stringify(payload));
       } catch {
         // ignore logging failures
       }
