@@ -93,7 +93,7 @@ import {
   validateResumeArtifactQuality,
   type ArtifactQualityGate,
 } from '../artifacts/artifactQualityValidator';
-import { trimIncompleteTrailingFragments } from '../artifacts/artifactQualityValidator';
+import { sanitizeResumeForTrailingFragments, trimIncompleteTrailingFragments } from '../artifacts/artifactQualityValidator';
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
 import { sanitizeResumePreviewForStudio } from './resumePreviewSanitizer';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
@@ -2043,6 +2043,26 @@ export class ResumeService {
     // experience header field. This is non-fabricating: it clears malformed header fields and
     // preserves the original text as bullets when appropriate.
     normalizedDocument = repairResumeStructure(normalizedDocument);
+
+    // Trailing-fragment sanitation must run before quality validation so the validator never evaluates
+    // pre-sanitized bullets/summaries.
+    normalizedDocument = sanitizeResumeForTrailingFragments(normalizedDocument);
+    if (process.env.DEBUG_DOCGEN === 'true') {
+      try {
+        const bullets = Array.isArray((normalizedDocument as any)?.experience)
+          ? (normalizedDocument as any).experience.flatMap((entry: any) => Array.isArray(entry?.bullets) ? entry.bullets : [])
+          : [];
+        // eslint-disable-next-line no-console
+        console.log('[RESUME_TRAILING_FRAGMENT_SANITIZED]', {
+          bulletEndings: bullets.slice(0, 12).map((b: unknown) => {
+            const text = typeof b === 'string' ? b : String(b ?? '');
+            return text.slice(Math.max(0, text.length - 5));
+          }),
+        });
+      } catch {
+        // ignore debug logging failures
+      }
+    }
 
     // Soft quality enforcement (server-side self-heal): validate the normalized resume model using
     // the same rules enforced in the Studio UI safety net. If the first pass fails, attempt a single

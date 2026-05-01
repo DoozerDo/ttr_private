@@ -1,6 +1,7 @@
 import {
   repairCoverLetterForQuality,
   repairResumeForQuality,
+  sanitizeResumeForTrailingFragments,
   validateCoverLetterArtifactQuality,
   validateResumeArtifactQuality,
   trimIncompleteTrailingFragments,
@@ -78,5 +79,25 @@ describe('artifactQualityValidator', () => {
     for (const line of lines) {
       expect(line).not.toMatch(/\b(?:the|a|an|and|but|because|with|for|to|of|in|on|at|by|from)\s*$/i);
     }
+  });
+
+  it('sanitizes resume bullets before validation so trailing fragments are removed', () => {
+    const resume: any = {
+      heading: { name: 'Test', contactLine: 'test@example.com' },
+      summary: 'Built systems and',
+      competencies: ['TypeScript'],
+      experience: [
+        {
+          company: 'Acme',
+          roleTitle: 'Director',
+          bullets: ['Led incident response and', 'Owned on-call with', 'Delivered measurable outcomes.'],
+        },
+      ],
+      education: [],
+    };
+
+    const sanitized = sanitizeResumeForTrailingFragments(resume);
+    const gate = validateResumeArtifactQuality(sanitized as any);
+    expect(gate.reasons).not.toContain('incomplete_trailing_fragment');
   });
 });

@@ -165,6 +165,28 @@ export function trimIncompleteTrailingFragments(text: string): string {
   return collapsed.join('\n').trim();
 }
 
+export function sanitizeResumeForTrailingFragments(resume: NormalizedResumeDocument): NormalizedResumeDocument {
+  const next: NormalizedResumeDocument = { ...resume };
+
+  if (typeof next.summary === 'string') {
+    next.summary = trimIncompleteTrailingFragments(next.summary);
+  }
+
+  if (Array.isArray((next as any).experience)) {
+    (next as any).experience = (next as any).experience.map((entry: any) => {
+      if (!entry || typeof entry !== 'object') return entry;
+      const bullets = Array.isArray(entry.bullets) ? entry.bullets : [];
+      const cleanedBullets = bullets
+        .map((b: unknown) => (typeof b === 'string' ? trimIncompleteTrailingFragments(b) : ''))
+        .map((b: string) => b.trim())
+        .filter((b: string) => b.length >= 10);
+      return { ...entry, bullets: cleanedBullets };
+    });
+  }
+
+  return next;
+}
+
 function detectPlaceholderReasons(value: string): string[] {
   const raw = trimToText(value);
   if (!raw) return [];
