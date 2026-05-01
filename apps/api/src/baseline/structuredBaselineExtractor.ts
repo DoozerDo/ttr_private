@@ -122,7 +122,11 @@ function looksLikeDatesLine(line: string): boolean {
     /(?:\s*(?:â€”|—|–|-)\s*|\s+to\s+)/i.test(raw);
   const looksLikePresentRange =
     (looksLikeMonthYear || hasYear) && /\b(?:present|current)\b/i.test(raw);
-  return (hasYear || looksLikeMonthYear) && raw.split(/\s+/).length <= 12 && (looksLikeRange || looksLikePresentRange || looksLikeMonthYear);
+  return (
+    (hasYear || looksLikeMonthYear) &&
+    raw.split(/\s+/).length <= 12 &&
+    (looksLikeRange || looksLikePresentRange)
+  );
 }
 
 function parseCompanyWithDates(line: string): { company: string; dates?: string } | null {
@@ -139,17 +143,21 @@ function parseCompanyWithDates(line: string): { company: string; dates?: string 
 function parseCompanyWithInlineDates(line: string): { company: string; dates: string } | null {
   const raw = trimToText(line);
   if (!raw) return null;
-  const monthToken =
-    '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s+(?:19|20)\\d{2}';
-  const rangeToken = `(${monthToken})(?:\\s*[â€”—–-]\\s*|\\s+to\\s+|\\s*[–-]\\s*)(${monthToken}|present|current)`;
-  const inlineRange = new RegExp(`^(.+?)\\s+${rangeToken}\\s*$`, 'i');
-  const match = raw.match(inlineRange);
-  if (!match) return null;
-  const company = trimToText(match[1]);
-  const start = trimToText(match[2]);
-  const end = trimToText(match[3]);
-  if (!company || !start || !end) return null;
-  return { company, dates: `${start} – ${end}` };
+  // Keep this logic simple and resilient to encoding: find the first month+year token,
+  // then treat the remainder as a date range if it looks like one.
+  const monthYear = /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(?:19|20)\d{2}\b/i;
+  const first = raw.match(monthYear);
+  if (!first || first.index === undefined) return null;
+
+  const company = trimToText(raw.slice(0, first.index));
+  const remainder = trimToText(raw.slice(first.index));
+  if (!company || !looksLikeDatesLine(remainder)) return null;
+  const normalizedDates = remainder
+    .replace(/\s*(?:â€”|—|–|-)\s*/g, ' – ')
+    .replace(/\s+to\s+/gi, ' – ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return { company, dates: normalizedDates };
 }
 
 function parseCompanyWithTrailingStartDate(line: string): { company: string; start: string } | null {
