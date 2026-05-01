@@ -40,6 +40,7 @@ interface ResumeRequestBody {
   analysisId?: string;
   format?: ResumeExportFormat;
   oneTap?: boolean;
+  forceRegenerate?: boolean;
   editedResume?: NormalizedResumeDocument;
 }
 
@@ -179,6 +180,7 @@ export class ResumeController {
       jobId,
       ...(analysisId ? { analysisId } : {}),
       oneTap,
+      forceRegenerate: Boolean(body.forceRegenerate),
       editedResume: body.editedResume,
     };
   }

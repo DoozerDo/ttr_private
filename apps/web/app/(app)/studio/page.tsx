@@ -5631,6 +5631,9 @@ export default function StudioPage() {
       emitAttempt(attempt);
       return attempt.ok;
     };
+    if (opts?.forceRegenerate) {
+      console.log("[ARTIFACT_REGENERATE_OVERRIDE]", { artifactType: "resume" });
+    }
     if (
       !opts?.forceRegenerate &&
       studioArtifactPresentationStateRef.current === "hydrated" &&
@@ -5876,6 +5879,7 @@ export default function StudioPage() {
       ...(request.requestId ? { requestId: request.requestId } : {}),
       ...(opts?.sessionKey ? { sessionKey: opts.sessionKey } : {}),
       ...(opts?.regenerationSource ? { regenerationSource: opts.regenerationSource } : {}),
+      ...(opts?.forceRegenerate ? { forceRegenerate: true } : {}),
     };
     const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
     const timeoutMs = 2 * 60_000;
@@ -6381,6 +6385,9 @@ export default function StudioPage() {
       emitAttempt(attempt);
       return attempt.ok;
     };
+    if (opts?.forceRegenerate) {
+      console.log("[ARTIFACT_REGENERATE_OVERRIDE]", { artifactType: "cover_letter" });
+    }
     const fail = (args: {
       errorCode: string;
       errorMessage: string;
@@ -6625,6 +6632,7 @@ export default function StudioPage() {
       ...(request.requestId ? { requestId: request.requestId } : {}),
       ...(opts?.sessionKey ? { sessionKey: opts.sessionKey } : {}),
       ...(opts?.regenerationSource ? { regenerationSource: opts.regenerationSource } : {}),
+      ...(opts?.forceRegenerate ? { forceRegenerate: true } : {}),
     };
     const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
     const timeoutMs = 2 * 60_000;

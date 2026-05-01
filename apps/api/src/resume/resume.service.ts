@@ -105,6 +105,7 @@ export type GenerateResumeRequest = {
   jobId?: string | null;
   analysisId?: string;
   oneTap?: boolean;
+  forceRegenerate?: boolean;
   editedResume?: NormalizedResumeDocument;
   documentStrategyPlan?: DocumentStrategyPlanLike;
 };
@@ -2446,6 +2447,26 @@ export class ResumeService {
         dedupeKey,
         runId: audit.id,
       });
+
+      if (request.forceRegenerate && reservation.status === 'existing_completed') {
+        // Manual regeneration must not be blocked by the existing-completed idempotency latch.
+        // Use a one-off dedupe key so the pipeline runs and overwrites the persisted Studio artifact.
+        const forcedKey = `${dedupeKey}:regen:${audit.id}`;
+        // eslint-disable-next-line no-console
+        console.log('[ARTIFACT_REGENERATE_OVERRIDE]', {
+          artifactType: 'resume',
+          priorStatus: reservation.status,
+          dedupeKey,
+          forcedKey,
+        });
+        reservation = await this.workflowIdempotencyService.reserve<ResumeGenerationResponse>({
+          userId,
+          operationName: 'generation.resume',
+          dedupeKey: forcedKey,
+          runId: audit.id,
+        });
+        dedupeKey = forcedKey;
+      }
 
       if (reservation.status === 'existing_completed' && reservation.responseBody) {
         const response = {
