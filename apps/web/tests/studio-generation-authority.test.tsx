@@ -1293,7 +1293,11 @@ function setupFetchWithQualityFailures() {
                 education: [{ degree: "BA", institution: "State University", location: "Remote" }],
                 competencies: ["Customer strategy", "Operational leadership"],
               },
-              correctionReasons: [{ code: "malformed_experience_header:role_title", message: "malformed", severity: "warning" }],
+              correctionReasons: [
+                { code: "incomplete_trailing_fragment", message: "incomplete_trailing_fragment", severity: "warning" },
+                { code: "malformed_experience_header:company", message: "malformed_experience_header:company", severity: "warning" },
+                { code: "malformed_experience_header:role_title", message: "malformed_experience_header:role_title", severity: "warning" },
+              ],
               exportReady: false,
               exports: { docx: false, pdf: false },
               actions: { canEdit: true, canRegenerate: true, canExport: false, canSaveToOpportunities: false },

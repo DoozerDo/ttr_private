@@ -15,6 +15,19 @@ export type ArtifactQualityResult = {
   issues: ArtifactQualityIssue[];
 };
 
+export function getMessageForResumeQualityReason(code: string): string {
+  switch (code) {
+    case "incomplete_trailing_fragment":
+      return "Contains an incomplete trailing fragment.";
+    case "malformed_experience_header:company":
+      return "Contains a malformed experience company header.";
+    case "malformed_experience_header:role_title":
+      return "Contains a malformed experience role title header.";
+    default:
+      return code ? String(code) : "Needs correction.";
+  }
+}
+
 const DANGLING_TRAILING_WORDS = new Set(
   [
     "the",

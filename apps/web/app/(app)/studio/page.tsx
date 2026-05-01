@@ -17,7 +17,7 @@ import { PageShell } from "@/components/PageShell";
 import { VerifiedGenerationTrustSummary } from "@/components/VerifiedGenerationTrustSummary";
 import { StudioNextMove } from "@/components/StudioNextMove";
 import { defaultClosingTemplateKey } from "@/lib/coverLetters";
-import { validateCoverLetterQuality, validateResumeQuality } from "@/src/lib/studio/artifactQuality";
+import { getMessageForResumeQualityReason, validateCoverLetterQuality, validateResumeQuality } from "@/src/lib/studio/artifactQuality";
 import { buildExportPayload } from "../lib/exportPayload";
 import { formatErrorMessage, readResponsePayload } from "@/lib/compliance/parseComplianceError";
 import { sanitizeRenderedTextValue } from "@/lib/renderedText";
@@ -2836,14 +2836,32 @@ export default function StudioPage() {
     : Boolean(generatedResumeModel) && resumeQuality.status === "needs_refinement";
   const resumeRequiresCorrectionCopy = hasResumeDraft && !resumeQualityPass;
   const resumeQualityIssueSummary = useMemo(() => {
-    const blocking = resumeQuality.issues.filter((issue) => issue.severity === "blocking");
-    const issues = blocking.length ? blocking : resumeQuality.issues;
-    const visible = issues.slice(0, 3);
+    const visible = (() => {
+      const reasonCodes = Array.isArray(resumeResult?.correctionReasons)
+        ? resumeResult.correctionReasons.map((reason) => String(reason?.code ?? "")).filter(Boolean)
+        : [];
+      if (reasonCodes.length) {
+        const uniqueCodes = Array.from(new Set(reasonCodes));
+        return uniqueCodes.slice(0, 3).map((code) => ({
+          code,
+          message: getMessageForResumeQualityReason(code),
+        }));
+      }
+
+      const blocking = resumeQuality.issues.filter((issue) => issue.severity === "blocking");
+      const issues = blocking.length ? blocking : resumeQuality.issues;
+      return issues.slice(0, 3).map((issue) => ({ code: issue.code, message: issue.message }));
+    })();
     return {
       visible,
-      remaining: Math.max(0, issues.length - visible.length),
+      remaining: Math.max(
+        0,
+        (Array.isArray(resumeResult?.correctionReasons)
+          ? Array.from(new Set(resumeResult.correctionReasons.map((r) => String(r?.code ?? "")).filter(Boolean))).length
+          : resumeQuality.issues.length) - visible.length,
+      ),
     };
-  }, [resumeQuality.issues]);
+  }, [resumeQuality.issues, resumeResult?.correctionReasons]);
   const showResumeDownloadActions =
     resumePresenter.status === "blocked" ||
     (artifactContract.results.resume
