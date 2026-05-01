@@ -100,6 +100,7 @@ import { extractStructuredBaselineFromSections } from '../baseline/structuredBas
 import {
   assembleResumeFromStructuredBaseline,
   isAllowedStructuredTemplateExperienceHeader,
+  type ResumeTemplateIdentityLike,
 } from './resumeTemplateAssembler';
 import {
   buildDeterministicResumeV2FromBaseline,
@@ -1998,6 +1999,11 @@ export class ResumeService {
             .map((bullet) => bullet.claimRisk),
         );
     const identity = resolveBaselineIdentity(baseline);
+    const resolvedIdentityForTemplate: ResumeTemplateIdentityLike = {
+      name: identity?.fullName ?? 'Candidate',
+      contactLine: identity?.location ?? '',
+      links: [],
+    };
 
     const TEMPLATE_ASSEMBLY_THRESHOLD = 80;
     const STRUCTURED_BASELINE_TEMPLATE_VERSION = 'structured-baseline-v1';
@@ -2026,7 +2032,7 @@ export class ResumeService {
       if (isResumeV2) {
         const result = buildDeterministicResumeV2FromBaseline({
           baselineSections: resumeInputSections,
-          identity,
+          identity: resolvedIdentityForTemplate,
         });
         v2QualityGate = result.qualityGate;
         return result.normalized;

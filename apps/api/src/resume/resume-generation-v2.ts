@@ -144,17 +144,6 @@ export function buildDeterministicResumeV2FromBaseline(input: {
   baselineSections: BaselineSection[];
   identity: ResumeTemplateIdentityLike;
 }): ResumeGenerationV2Result {
-  const normalizedIdentity: ResumeTemplateIdentityLike =
-    input.identity &&
-    typeof input.identity === 'object' &&
-    !Array.isArray(input.identity) &&
-    'fullName' in (input.identity as any) &&
-    !(input.identity as any).name
-      ? {
-          name: (input.identity as any).fullName,
-          contactLine: (input.identity as any).location ?? '',
-        }
-      : input.identity;
   const rawExperienceText = input.baselineSections
     .filter((section) => String((section as any)?.sectionType ?? '').toUpperCase() === 'EXPERIENCE')
     .map((section) => String((section as any)?.content ?? ''))
@@ -203,7 +192,7 @@ export function buildDeterministicResumeV2FromBaseline(input: {
 
   structured.experience = allowedExperience;
 
-  const normalized = assembleResumeFromStructuredBaseline(structured, normalizedIdentity);
+  const normalized = assembleResumeFromStructuredBaseline(structured, input.identity);
 
   const normalizedValidation = validateNormalizedResumeDocument(normalized);
   if (!normalizedValidation.valid) {
