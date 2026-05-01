@@ -707,6 +707,29 @@ export class CoverLettersService {
           },
         });
       }
+
+      // Final post-generation guard: never return or persist unresolved placeholders.
+      // This must run after final content assembly and immediately before success persistence.
+      const finalContent = String(draft.complianceResult.normalizedContent ?? '');
+      const normalizedFinal = finalContent.replace(/\s+/g, ' ').trim().toLowerCase();
+      const hasTemplatePlaceholder = /\[\[[^\]]+\]\]/.test(finalContent);
+      const bannedPlaceholderPhrases = [
+        'specific interest in company',
+        'insert company',
+        'your company here',
+        'placeholder',
+      ];
+      if (
+        hasTemplatePlaceholder ||
+        bannedPlaceholderPhrases.some((phrase) => normalizedFinal.includes(phrase))
+      ) {
+        throw new UnprocessableEntityException({
+          error: {
+            code: 'generation_unresolved_placeholders',
+            message: 'Cover letter generation produced unresolved placeholder content.',
+          },
+        });
+      }
       // eslint-disable-next-line no-console
       console.log('[COVER_LETTER_GENERATE_OUTPUT]', {
         hasContent: true,
@@ -2259,16 +2282,13 @@ export class CoverLettersService {
   ): string[] {
     const text = generation.content;
     const lowered = text.toLowerCase();
-    const paragraphs = text
-      .split(/\n\s*\n/)
+    const contentParagraphs = [
+      generation.document.opening,
+      ...(generation.document.bodyParagraphs ?? []),
+      generation.document.closingParagraph,
+    ]
       .map((part) => this.cleanText(part))
       .filter(Boolean);
-    const contentParagraphs = paragraphs.filter(
-      (line) =>
-        line.toLowerCase() !== COVER_LETTER_REQUIRED_SALUTATION.toLowerCase() &&
-        line.toLowerCase() !== COVER_LETTER_SIGNOFF.toLowerCase() &&
-        line.toLowerCase() !== candidateName.toLowerCase(),
-    );
 
     const flags: string[] = [];
     if (!text.startsWith(`${COVER_LETTER_REQUIRED_SALUTATION}\n\n`)) {
@@ -2315,8 +2335,8 @@ export class CoverLettersService {
       );
     }
     if (
-      contentParagraphs.some(
-        (paragraph) => this.countWords(paragraph) > COVER_LETTER_MAX_PARAGRAPH_WORDS,
+      (generation.document.bodyParagraphs ?? []).some(
+        (paragraph) => this.countWords(this.cleanText(paragraph)) > COVER_LETTER_MAX_PARAGRAPH_WORDS,
       )
     ) {
       flags.push('paragraph_too_long');
@@ -2335,8 +2355,8 @@ export class CoverLettersService {
     ) {
       flags.push('generic_filler');
     }
-    const paragraphOpeners = contentParagraphs
-      .map((paragraph) => paragraph.split(/\s+/)[0]?.toLowerCase() ?? '')
+    const paragraphOpeners = (generation.document.bodyParagraphs ?? [])
+      .map((paragraph) => this.cleanText(paragraph).split(/\s+/)[0]?.toLowerCase() ?? '')
       .filter(Boolean);
     if (new Set(paragraphOpeners).size !== paragraphOpeners.length) {
       flags.push('repetitive_openings');

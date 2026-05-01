@@ -155,6 +155,57 @@ const request = {
 };
 
 describe('CoverLettersService contract', () => {
+  it('rejects unresolved placeholder content and does not persist success', async () => {
+    const { service, studioArtifactsService } = buildService();
+    const buildDraftSpy = jest.spyOn(service as any, 'buildCoverLetterDraft').mockResolvedValue({
+      baseline,
+      baselineVersion,
+      job,
+      analysisAssessment: assessment,
+      allowedBlocks: [],
+      jobContext: {
+        id: 'job-1',
+        title: 'Program Manager',
+        company: 'Example Co',
+        responsibilities: [],
+        requirements: [],
+      },
+      jobContextAllowlist: { allowedCompanies: ['Example Co'], allowedRoleTitles: ['Program Manager'] },
+      closingTemplateKey: 'default',
+      generationInputsHash: 'hash',
+      generation: {
+        document: {
+          senderHeading: { name: 'Jordan Lee' },
+          salutation: 'Dear Hiring Team,',
+          opening: 'Opening.',
+          bodyParagraphs: ['Body one.', 'Body two.'],
+          closingParagraph: 'Closing.',
+          signoff: 'Sincerely,',
+          signatureName: 'Jordan Lee',
+        },
+        content: '[[company]]\\n\\nI have a specific interest in company.',
+        wordCount: 40,
+        greeting: 'Dear Hiring Team,',
+        paragraphs: ['Opening.', 'Body one.', 'Body two.'],
+        closingParagraphs: ['Closing.'],
+        paragraphEvidence: [],
+      },
+      complianceResult: {
+        normalizedContent: 'I have a specific interest in company. Please see [[company]].',
+        complianceFlags: [],
+        blocked: false,
+        audit: { id: 'audit-1', baselineVersionHash: 'hash-1' },
+      },
+    });
+
+    try {
+      await expect(service.generateCoverLetter('user-1', request as any)).rejects.toBeTruthy();
+      expect(studioArtifactsService.recordCoverLetterSuccess).not.toHaveBeenCalled();
+    } finally {
+      buildDraftSpy.mockRestore();
+    }
+  });
+
   it('allows generation when baselineVersionId is missing', async () => {
     const { service, studioArtifactsService } = buildService();
     jest.spyOn(service as any, 'buildCoverLetterDraft').mockResolvedValue({
@@ -254,7 +305,7 @@ describe('CoverLettersService contract', () => {
         paragraphEvidence: [],
       },
       complianceResult: {
-        normalizedContent: 'valid',
+        normalizedContent: 'This cover letter is complete and ready for export.',
         complianceFlags: [],
         blocked: false,
         audit: { id: 'audit-1', baselineVersionHash: 'hash-1' },
@@ -427,7 +478,7 @@ describe('CoverLettersService contract', () => {
           traceMap: {},
         },
         complianceResult: {
-          normalizedContent: 'valid',
+          normalizedContent: 'This cover letter is complete and ready for export.',
           complianceFlags: [],
           blocked: false,
           audit: { id: 'audit-1', baselineVersionHash: 'hash-1' },
@@ -475,9 +526,25 @@ describe('CoverLettersService contract', () => {
       jobContextAllowlist: { allowedCompanies: ['Example Co'], allowedRoleTitles: ['Program Manager'] },
       closingTemplateKey: 'default',
       generationInputsHash: 'hash',
-      generation: { document: { opening: '', bodyParagraphs: [], closingParagraph: '' } },
+      generation: {
+        document: {
+          senderHeading: { name: 'Jordan Lee' },
+          salutation: 'Dear Hiring Team,',
+          opening: 'Opening.',
+          bodyParagraphs: ['Body one.', 'Body two.'],
+          closingParagraph: 'Closing.',
+          signoff: 'Sincerely,',
+          signatureName: 'Jordan Lee',
+        },
+        content: 'Dear Hiring Team,\\n\\nOpening.\\n\\nBody one.\\n\\nBody two.\\n\\nClosing.\\n\\nSincerely,\\n\\nJordan Lee',
+        wordCount: 120,
+        greeting: 'Dear Hiring Team,',
+        paragraphs: ['Opening.', 'Body one.', 'Body two.'],
+        closingParagraphs: ['Closing.'],
+        paragraphEvidence: [],
+      },
       complianceResult: {
-        normalizedContent: 'limited',
+        normalizedContent: 'This cover letter is limited by verification constraints but still complete.',
         complianceFlags: [
           {
             code: 'personalization_limitation',
@@ -522,15 +589,31 @@ describe('CoverLettersService contract', () => {
         requirements: [], 
       }, 
       jobContextAllowlist: { allowedCompanies: ['Example Co'], allowedRoleTitles: ['Program Manager'] }, 
-      closingTemplateKey: 'default', 
-      generationInputsHash: 'hash', 
-      generation: { document: { opening: '', bodyParagraphs: [], closingParagraph: '' } }, 
-      complianceResult: { 
-        normalizedContent: 'blocked', 
-        complianceFlags: [ 
-          { 
-            code: 'full_block', 
-            message: 'Missing verified evidence for role-critical statements.', 
+      closingTemplateKey: 'default',
+      generationInputsHash: 'hash',
+      generation: {
+        document: {
+          senderHeading: { name: 'Jordan Lee' },
+          salutation: 'Dear Hiring Team,',
+          opening: 'Opening.',
+          bodyParagraphs: ['Body one.', 'Body two.'],
+          closingParagraph: 'Closing.',
+          signoff: 'Sincerely,',
+          signatureName: 'Jordan Lee',
+        },
+        content: 'Dear Hiring Team,\\n\\nOpening.\\n\\nBody one.\\n\\nBody two.\\n\\nClosing.\\n\\nSincerely,\\n\\nJordan Lee',
+        wordCount: 120,
+        greeting: 'Dear Hiring Team,',
+        paragraphs: ['Opening.', 'Body one.', 'Body two.'],
+        closingParagraphs: ['Closing.'],
+        paragraphEvidence: [],
+      },
+      complianceResult: {
+        normalizedContent: 'This cover letter draft is blocked due to missing verification but has content.',
+        complianceFlags: [
+          {
+            code: 'full_block',
+            message: 'Missing verified evidence for role-critical statements.',
             severity: ComplianceFlagSeverity.BLOCK, 
           }, 
         ], 
@@ -589,7 +672,7 @@ describe('CoverLettersService contract', () => {
     const draftRecovered = {
       ...draftBlocked,
       complianceResult: {
-        normalizedContent: 'limited',
+        normalizedContent: 'This cover letter is limited by verification constraints but still complete.',
         complianceFlags: [
           {
             code: 'personalization_limitation',
@@ -708,7 +791,7 @@ describe('CoverLettersService contract', () => {
         traceMap: {},
       },
       complianceResult: {
-        normalizedContent: 'valid',
+        normalizedContent: 'This cover letter is complete and ready for export.',
         complianceFlags: [],
         blocked: false,
         audit: { id: 'audit-1', baselineVersionHash: 'hash-1' },
