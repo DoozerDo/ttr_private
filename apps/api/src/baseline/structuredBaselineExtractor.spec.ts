@@ -123,5 +123,27 @@ describe('structuredBaselineExtractor', () => {
     expect(structured.experience[0].roleTitle).toBe('Staff Program Manager');
     expect(structured.experience[0].dates).toBe('July 2024 – Present');
   });
+
+  it('does not promote project/tech fragments into experience company headers (Vue 3), deck builder frontend)', () => {
+    const sections: any[] = [
+      {
+        sectionType: 'EXPERIENCE',
+        content: [
+          'Vue 3), deck builder frontend August 2024 – Present',
+          'Founder',
+          '- Built a deck builder.',
+          '',
+          'AMS DataSerfs August 2022 – August 2024',
+          'Infrastructure Engineer',
+          '- Improved reliability.',
+        ].join('\n'),
+      },
+    ];
+
+    const structured = extractStructuredBaselineFromSections(sections as any);
+    const companies = structured.experience.map((e) => e.company);
+    expect(companies).not.toContain('Vue 3), deck builder frontend');
+    expect(companies).toContain('AMS DataSerfs');
+  });
 });
 

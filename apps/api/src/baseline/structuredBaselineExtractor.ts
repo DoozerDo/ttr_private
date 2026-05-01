@@ -85,6 +85,35 @@ function isUnsafeHeaderCandidate(value: string): boolean {
   return false;
 }
 
+function hasUnmatchedCompanyPunctuation(value: string): boolean {
+  const text = trimToText(value);
+  if (!text) return false;
+  const openParens = (text.match(/\(/g) ?? []).length;
+  const closeParens = (text.match(/\)/g) ?? []).length;
+  return openParens !== closeParens;
+}
+
+function isLikelyCompanyName(value: string): boolean {
+  const text = trimToText(value);
+  if (!text) return false;
+
+  // Reject obvious section labels / headings.
+  if (/\b(?:professional\s+experience|experience|projects|skills|education|summary)\b/i.test(text)) {
+    return false;
+  }
+
+  // Reject technology / fragment-like "companies" that commonly appear in project bullets.
+  // Keep this narrow and conservative to avoid false positives on real company names.
+  if (/\b(?:vue|react|angular|frontend|back\s*end|full[-\s]*stack|builder)\b/i.test(text)) {
+    return false;
+  }
+
+  // Reject malformed fragments with unmatched punctuation (common in truncated bullets like "Vue 3), ...").
+  if (hasUnmatchedCompanyPunctuation(text)) return false;
+
+  return true;
+}
+
 function parseExperienceHeaderLine(line: string): { company: string; roleTitle: string; dates?: string } | null {
   const raw = trimToText(line);
   if (!raw) return null;
@@ -366,7 +395,11 @@ export function extractStructuredBaselineFromSections(
       const header = headerRead.header;
       idx += headerRead.consumed;
 
-      if (isUnsafeHeaderCandidate(header.company) || isUnsafeHeaderCandidate(header.roleTitle)) {
+      if (
+        isUnsafeHeaderCandidate(header.company) ||
+        isUnsafeHeaderCandidate(header.roleTitle) ||
+        !isLikelyCompanyName(header.company)
+      ) {
         missingEvidenceReasons.push('Skipped experience entry with malformed company/role title header.');
         continue;
       }

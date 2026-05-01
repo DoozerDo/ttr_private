@@ -1,6 +1,7 @@
 import { BadRequestException, UnprocessableEntityException } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { ResumeService, GenerateResumeRequest } from './resume.service';
+import { RESUME_GENERATION_V2_FEATURE_FLAG } from './resume-generation-v2';
 import { Baseline, BaselineStatus } from '../baseline/baseline.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
@@ -248,6 +249,101 @@ const buildService = (options?: {
 };
 
 describe('ResumeService contract', () => {
+  it('forces Studio regenerate to persist a fresh V2 artifact when RESUME_GENERATION_V2=true', async () => {
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
+    const originalSections = baseline.sections;
+    try {
+      const { service, studioArtifactsService } = buildService();
+      expect(process.env[RESUME_GENERATION_V2_FEATURE_FLAG]).toBe('true');
+
+      baseline.sections = [
+        {
+          ...baseSection,
+          id: 'section-name',
+          sectionType: BaselineSectionType.SUMMARY as any,
+          title: 'Summary',
+          order: 0,
+          content: [
+            'Test User',
+            'Support leader with 10+ years in B2B SaaS. Built repeatable processes, coached teams, and improved outcomes.',
+          ].join('\n'),
+        } as any,
+        {
+          ...baseSection,
+          order: 1,
+          content: [
+            'AMS DataSerfs | Senior Data Analyst | 2021 - Present',
+            '- Built KPI dashboards and improved reporting cadence.',
+            '- Automated weekly exports and reduced manual effort.',
+          ].join('\n'),
+        },
+        {
+          ...baseSection,
+          id: 'section-skills',
+          sectionType: BaselineSectionType.SKILLS as any,
+          title: 'Skills',
+          order: 2,
+          content: [
+            '- SQL',
+            '- Excel',
+            '- Looker',
+            '- Stakeholder management',
+            '- Incident response',
+          ].join('\n'),
+        } as any,
+      ];
+
+      (studioArtifactsService.readState as any).mockResolvedValue({
+        status: 'READY',
+        baselineId: baseline.id,
+        jobId: job.id,
+        baselineVersionId: baselineVersion.id,
+        baselineVersionHash: baselineVersion.hash,
+        jobFingerprint: 'job-fingerprint-1',
+        generationContractVersion: 'studio-artifacts-v1',
+        resume: {
+          status: 'COMPLETED',
+          inputsHash: 'stale-hash-0',
+          responseBody: {
+            ok: true,
+            status: 'success',
+            preview: {
+              resume: {
+                experience: [
+                  { company: 'Vue 3), deck builder frontend', roleTitle: 'Professional Experience', bullets: ['x'] },
+                ],
+              },
+            },
+            internal: { generationPipeline: 'v1' },
+          },
+        },
+        coverLetter: null,
+      });
+
+      const result = await service.generateResume('user-1', {
+        ...baseRequest,
+        forceRegenerate: true,
+      } as any);
+
+      expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
+      const persisted = (studioArtifactsService.recordResumeSuccess as any).mock.calls[0][0];
+      expect(persisted?.responseBody?.internal).toBeTruthy();
+      expect(persisted?.responseBody?.internal?.generationPipeline).toBe('v2');
+      expect(JSON.stringify(persisted?.responseBody?.preview ?? {})).not.toContain('Vue 3), deck builder frontend');
+
+      expect((result as any)?.internal?.generationPipeline).toBe('v2');
+      expect(JSON.stringify((result as any)?.preview ?? {})).not.toContain('Vue 3), deck builder frontend');
+    } finally {
+      baseline.sections = originalSections;
+      if (typeof originalFlag === 'string') {
+        process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      } else {
+        delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+      }
+    }
+  });
+
   it('repairs malformed role titles and removes dangling fragments in final preview resume output', async () => {
     const { service } = buildService();
 
@@ -338,10 +434,15 @@ describe('ResumeService contract', () => {
           '2021 - Present',
           '- Did work.',
           '',
-          'Vue 3), deck builder frontend',
-          'Professional Experience',
-          '2021 - Present',
-          '- Did work.',
+          // Inline date range variant observed in fresh regenerate output.
+          'Vue 3), deck builder frontend August 2024 – Present',
+          'Founder',
+          '- Built a deck builder frontend.',
+          '',
+          // Valid company that should remain intact.
+          'AMS DataSerfs August 2022 – August 2024',
+          'Infrastructure Engineer',
+          '- Improved reliability.',
           '',
           // Valid header we still expect.
           'Biblioso July 2024 - April 2026',
@@ -358,6 +459,7 @@ describe('ResumeService contract', () => {
     const preview = result.preview?.resume as any;
     const companies = (preview?.experience ?? []).map((e: any) => String(e.company ?? ''));
     expect(companies).toContain('Biblioso');
+    expect(companies).toContain('AMS DataSerfs');
     expect(companies).not.toContain('Infrastructure & Deployment');
     expect(companies).not.toContain('Vue 3), deck builder frontend');
     expect((preview?.experience ?? []).some((e: any) => String(e.roleTitle ?? '') === 'Professional Experience')).toBe(

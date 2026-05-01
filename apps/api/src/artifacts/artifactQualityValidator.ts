@@ -554,6 +554,100 @@ export function validateCoverLetterArtifactQuality(
   };
 }
 
+export function validateResumeArtifactQualityStrict(
+  resume: NormalizedResumeDocument | null,
+): ArtifactQualityGate {
+  if (!resume) {
+    return {
+      status: 'needs_refinement',
+      reasons: ['missing_model'],
+    };
+  }
+
+  activeTrailingFragmentTraceBudget = { detected: 0, logged: 0, offenders: [] };
+
+  const reasons: string[] = [];
+
+  if (typeof resume.summary === 'string') {
+    reasons.push(...detectPlaceholderReasons(resume.summary));
+    const trailing = detectTrailingFragmentReason(resume.summary);
+    if (trailing) {
+      reasons.push(trailing);
+      captureTrailingFragmentOffender({
+        text: resume.summary,
+        source: 'summary',
+        company: null,
+        roleTitle: null,
+      });
+    }
+    if (!trimToText(resume.summary)) {
+      reasons.push('empty_summary');
+    }
+  }
+
+  const experience = Array.isArray(resume.experience) ? resume.experience : [];
+  for (const entry of experience) {
+    const company = trimToText((entry as any)?.company);
+    const roleTitle = trimToText((entry as any)?.roleTitle);
+    const bullets = Array.isArray((entry as any)?.bullets)
+      ? ((entry as any).bullets as unknown[])
+          .map((b) => trimToText(b))
+          .filter(Boolean)
+      : [];
+
+    if ((company || roleTitle) && bullets.length === 0) {
+      reasons.push('empty_role');
+    }
+
+    if (roleTitle) {
+      if (
+        looksLikeSentence(roleTitle) ||
+        startsWithActionVerb(roleTitle) ||
+        endsWithDanglingHeaderToken(roleTitle)
+      ) {
+        reasons.push('malformed_experience_header:role_title');
+      }
+    }
+    if (company) {
+      if (looksLikeSentence(company) || startsWithActionVerb(company)) {
+        reasons.push('malformed_experience_header:company');
+      }
+    }
+
+    for (const bullet of bullets) {
+      reasons.push(...detectPlaceholderReasons(bullet));
+      const trailing = detectTrailingFragmentReason(bullet);
+      if (trailing) {
+        reasons.push(trailing);
+        captureTrailingFragmentOffender({
+          text: bullet,
+          source: 'experience.bullet',
+          company: company || null,
+          roleTitle: roleTitle || null,
+        });
+      }
+    }
+  }
+
+  const unique = Array.from(new Set(reasons));
+
+  if (activeTrailingFragmentTraceBudget && activeTrailingFragmentTraceBudget.detected > 0) {
+    activeTrailingFragmentTraceBudget.logged = activeTrailingFragmentTraceBudget.offenders.length;
+    // eslint-disable-next-line no-console
+    console.log('[DOCGEN][INCOMPLETE_TRAILING_FRAGMENT_SUMMARY]', {
+      totalDetected: activeTrailingFragmentTraceBudget.detected,
+      totalLogged: activeTrailingFragmentTraceBudget.logged,
+      offenders: activeTrailingFragmentTraceBudget.offenders,
+    });
+  }
+  activeTrailingFragmentTraceBudget = null;
+
+  return {
+    status: unique.length > 0 ? 'needs_refinement' : 'pass',
+    reasons: unique,
+  };
+}
+
 function removeDanglingTrailingWord(text: string): string {
   const normalized = normalizeForTrailingCheck(text);
   if (!normalized) return '';

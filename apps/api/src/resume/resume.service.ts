@@ -101,6 +101,10 @@ import {
   assembleResumeFromStructuredBaseline,
   isAllowedStructuredTemplateExperienceHeader,
 } from './resumeTemplateAssembler';
+import {
+  buildDeterministicResumeV2FromBaseline,
+  RESUME_GENERATION_V2_FEATURE_FLAG,
+} from './resume-generation-v2';
 
 export type GenerateResumeRequest = {
   baselineId: string;
@@ -1600,6 +1604,7 @@ export class ResumeService {
     let dedupeKey: string | undefined;
     let reservationRunId: string | undefined;
     try {
+      const isResumeV2 = process.env[RESUME_GENERATION_V2_FEATURE_FLAG] === 'true';
       const shouldEnforceOneTap = options?.enforceOneTap ?? true;
       const preflightOnly = options?.preflightOnly ?? false;
       const baselineId = request.baselineId?.trim();
@@ -1919,7 +1924,10 @@ export class ResumeService {
 
     let usedMinimalFallback = Boolean(forcedMinimalSections);
     let sections: ResumeDraftSection[] = forcedMinimalSections ?? [];
-    if (!forcedMinimalSections) {
+    if (isResumeV2) {
+      usedMinimalFallback = true;
+      sections = this.buildMinimalResumeSections(resumeInputSections);
+    } else if (!forcedMinimalSections) {
       try {
         sections = this.sanitizeDraftSections(ResumeDraftBullets.buildResumeDraftSections(resumeInputSections, {
           jobText: draftJobText || null,
@@ -1951,32 +1959,34 @@ export class ResumeService {
       }
     }
 
-    sections = this.applyJobAlignedPresentation({
-      sections,
-      jobText: job?.rawDescription ?? null,
-      dimensionScores: effectiveAssessment?.dimensionScores ?? null,
-      jobTitle: job?.title ?? null,
-    });
-    const hasExperienceBullets = sections.some(
-      (section) =>
-        String(section.type ?? '').toUpperCase() === 'EXPERIENCE' &&
-        Array.isArray(section.bullets) &&
-        section.bullets.length > 0,
-    );
-    if (!hasExperienceBullets) {
-      const fallbackExperienceSection = this.buildFallbackExperienceSection(
-        allowedSections,
-        claimRiskInventory,
+    if (!isResumeV2) {
+      sections = this.applyJobAlignedPresentation({
+        sections,
+        jobText: job?.rawDescription ?? null,
+        dimensionScores: effectiveAssessment?.dimensionScores ?? null,
+        jobTitle: job?.title ?? null,
+      });
+      const hasExperienceBullets = sections.some(
+        (section) =>
+          String(section.type ?? '').toUpperCase() === 'EXPERIENCE' &&
+          Array.isArray(section.bullets) &&
+          section.bullets.length > 0,
       );
-      if (fallbackExperienceSection) {
-        sections = this.sanitizeDraftSections([
-          ...sections.filter(
-            (section) =>
-              String(section.type ?? '').toUpperCase() !== 'EXPERIENCE' ||
-              (Array.isArray(section.bullets) && section.bullets.length > 0),
-          ),
-          fallbackExperienceSection,
-        ]);
+      if (!hasExperienceBullets) {
+        const fallbackExperienceSection = this.buildFallbackExperienceSection(
+          allowedSections,
+          claimRiskInventory,
+        );
+        if (fallbackExperienceSection) {
+          sections = this.sanitizeDraftSections([
+            ...sections.filter(
+              (section) =>
+                String(section.type ?? '').toUpperCase() !== 'EXPERIENCE' ||
+                (Array.isArray(section.bullets) && section.bullets.length > 0),
+            ),
+            fallbackExperienceSection,
+          ]);
+        }
       }
     }
     const traceSourceSections = usedMinimalFallback ? [] : this.cloneDraftSections(sections);
@@ -2001,7 +2011,8 @@ export class ResumeService {
       )} score=${Number.isFinite(scoreForTemplate) ? String(scoreForTemplate) : 'nan'}`,
     );
     forceTemplateRegen =
-      Number.isFinite(scoreForTemplate) && scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD;
+      isResumeV2 ||
+      (Number.isFinite(scoreForTemplate) && scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD);
     let usedStructuredBaselineTemplate = false;
     let structuredBaselineExtractionMissingReasons: string[] | null = null;
     let structuredBaselineTrace: {
@@ -2009,8 +2020,17 @@ export class ResumeService {
       experienceCount: number;
       headers: Array<{ company: string; roleTitle: string; dates: string | null; bulletCount: number }>;
     } = { source: 'unknown', experienceCount: 0, headers: [] };
+    let v2QualityGate: ArtifactQualityGate | null = null;
 
     let normalizedDocument = (() => {
+      if (isResumeV2) {
+        const result = buildDeterministicResumeV2FromBaseline({
+          baselineSections: resumeInputSections,
+          identity,
+        });
+        v2QualityGate = result.qualityGate;
+        return result.normalized;
+      }
       if (forceTemplateRegen) {
         const structured = extractStructuredBaselineFromSections(resumeInputSections);
         if (process.env.TEMPLATE_FILTER_TRACE === 'true') {
@@ -2113,10 +2133,12 @@ export class ResumeService {
       );
     })();
 
-    // Deterministic structural repair pass: prevent bullet-like prose from being treated as an
-    // experience header field. This is non-fabricating: it clears malformed header fields and
-    // preserves the original text as bullets when appropriate.
-    normalizedDocument = repairResumeStructure(normalizedDocument);
+    if (!isResumeV2) {
+      // Deterministic structural repair pass: prevent bullet-like prose from being treated as an
+      // experience header field. This is non-fabricating: it clears malformed header fields and
+      // preserves the original text as bullets when appropriate.
+      normalizedDocument = repairResumeStructure(normalizedDocument);
+    }
     if (process.env.RESUME_NORM_TRACE === 'true') {
       try {
         const offenders =
@@ -2131,9 +2153,11 @@ export class ResumeService {
       }
     }
 
-    // Trailing-fragment sanitation must run before quality validation so the validator never evaluates
-    // pre-sanitized bullets/summaries.
-    normalizedDocument = sanitizeResumeForTrailingFragments(normalizedDocument);
+    if (!isResumeV2) {
+      // Trailing-fragment sanitation must run before quality validation so the validator never evaluates
+      // pre-sanitized bullets/summaries.
+      normalizedDocument = sanitizeResumeForTrailingFragments(normalizedDocument);
+    }
 
     if (process.env.TEMPLATE_FILTER_TRACE === 'true' && usedStructuredBaselineTemplate) {
       try {
@@ -2197,10 +2221,11 @@ export class ResumeService {
     } catch {
       // ignore logging failures
     }
-    const firstPassQualityGate = validateResumeArtifactQuality(normalizedDocument);
+    const firstPassQualityGate =
+      isResumeV2 && v2QualityGate ? v2QualityGate : validateResumeArtifactQuality(normalizedDocument);
     let qualityGate = firstPassQualityGate;
     let repairAttempted = false;
-    if (firstPassQualityGate.status === 'needs_refinement') {
+    if (!isResumeV2 && firstPassQualityGate.status === 'needs_refinement') {
       repairAttempted = true;
       const repaired = repairResumeForQuality(normalizedDocument, firstPassQualityGate);
       const repairedGate = validateResumeArtifactQuality(repaired);
@@ -2741,6 +2766,7 @@ export class ResumeService {
       internal: {
         auditId: audit.id,
         baselineVersionHash: audit.baselineVersionHash,
+        generationPipeline: isResumeV2 ? 'v2' : 'v1',
         complianceFlags,
         resumeGenerationStage: experienceDiagnostics.resumeGenerationStage,
         resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
