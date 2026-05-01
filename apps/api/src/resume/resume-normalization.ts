@@ -755,6 +755,13 @@ function buildExperienceFromSection(section: ResumeExportSection): NormalizedRes
   for (const lineEntry of lines) {
     const line = lineEntry.text;
     const reconstructedFromAdjacentLines = lineEntry.reconstructed;
+    const shouldTrace =
+      process.env.RESUME_NORM_TRACE === 'true' &&
+      (line.includes('Vue 3), deck builder frontend') || line.includes('Infrastructure & Deployment'));
+    if (shouldTrace) {
+      // eslint-disable-next-line no-console
+      console.log('[RESUME_NORM_TRACE][LINE_SEEN]', JSON.stringify({ line }));
+    }
     if (BULLET_PATTERN.test(line)) {
       const bulletText = normalizeDisplayLine(line.replace(BULLET_PATTERN, ''));
       if (!bulletText || isLowQualityFragment(bulletText)) continue;
@@ -872,7 +879,14 @@ function buildExperienceFromSection(section: ResumeExportSection): NormalizedRes
     active.roleEvidenceLines.push(line);
     if (!active.company) {
       if (isLikelyCompany(line)) {
+        if (shouldTrace) {
+          // eslint-disable-next-line no-console
+          console.log('[RESUME_NORM_TRACE][COMPANY_ACCEPT]', JSON.stringify({ line }));
+        }
         active.company = line;
+      } else if (shouldTrace) {
+        // eslint-disable-next-line no-console
+        console.log('[RESUME_NORM_TRACE][COMPANY_REJECT]', JSON.stringify({ line }));
       }
     }
   }

@@ -97,7 +97,10 @@ import { sanitizeResumeForTrailingFragments, trimIncompleteTrailingFragments } f
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
 import { sanitizeResumePreviewForStudio } from './resumePreviewSanitizer';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
-import { assembleResumeFromStructuredBaseline } from './resumeTemplateAssembler';
+import {
+  assembleResumeFromStructuredBaseline,
+  isAllowedStructuredTemplateExperienceHeader,
+} from './resumeTemplateAssembler';
 
 export type GenerateResumeRequest = {
   baselineId: string;
@@ -2003,6 +2006,11 @@ export class ResumeService {
     let normalizedDocument = (() => {
       if (forceTemplateRegen) {
         const structured = extractStructuredBaselineFromSections(resumeInputSections);
+        // Structured template path must not surface malformed extracted headers in preview output.
+        // Filter them here (and fail cleanly if nothing remains).
+        structured.experience = (structured.experience ?? []).filter((entry) =>
+          isAllowedStructuredTemplateExperienceHeader(entry),
+        );
         structuredBaselineTrace = {
           source: 'freshly_parsed_baseline_content',
           experienceCount: (structured.experience ?? []).length,
@@ -2048,6 +2056,13 @@ export class ResumeService {
           links: identityRecord.links,
         });
       }
+      if (process.env.RESUME_NORM_TRACE === 'true') {
+        // eslint-disable-next-line no-console
+        console.log(
+          '[RESUME_NORM_TRACE][BRANCH]',
+          JSON.stringify({ forceTemplateRegen: false, scoreForTemplate, threshold: TEMPLATE_ASSEMBLY_THRESHOLD }),
+        );
+      }
       return buildNormalizedResumeDocument(
         sections as ResumeExportSection[],
         identity,
@@ -2059,10 +2074,36 @@ export class ResumeService {
     // experience header field. This is non-fabricating: it clears malformed header fields and
     // preserves the original text as bullets when appropriate.
     normalizedDocument = repairResumeStructure(normalizedDocument);
+    if (process.env.RESUME_NORM_TRACE === 'true') {
+      try {
+        const offenders =
+          (normalizedDocument as any)?.experience?.filter?.((entry: any) =>
+            String(entry?.company ?? '').includes('Vue 3), deck builder frontend') ||
+            String(entry?.company ?? '').includes('Infrastructure & Deployment'),
+          ) ?? [];
+        // eslint-disable-next-line no-console
+        console.log('[RESUME_NORM_TRACE][AFTER_REPAIR]', JSON.stringify({ offenderCompanies: offenders.map((e: any) => e.company) }));
+      } catch {
+        // ignore
+      }
+    }
 
     // Trailing-fragment sanitation must run before quality validation so the validator never evaluates
     // pre-sanitized bullets/summaries.
     normalizedDocument = sanitizeResumeForTrailingFragments(normalizedDocument);
+    if (process.env.RESUME_NORM_TRACE === 'true') {
+      try {
+        const offenders =
+          (normalizedDocument as any)?.experience?.filter?.((entry: any) =>
+            String(entry?.company ?? '').includes('Vue 3), deck builder frontend') ||
+            String(entry?.company ?? '').includes('Infrastructure & Deployment'),
+          ) ?? [];
+        // eslint-disable-next-line no-console
+        console.log('[RESUME_NORM_TRACE][AFTER_TRAILING_SAN]', JSON.stringify({ offenderCompanies: offenders.map((e: any) => e.company) }));
+      } catch {
+        // ignore
+      }
+    }
     if (process.env.DEBUG_DOCGEN === 'true') {
       try {
         const bullets = Array.isArray((normalizedDocument as any)?.experience)

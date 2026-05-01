@@ -314,6 +314,99 @@ describe('ResumeService contract', () => {
     baseline.parsedRecords = originalParsed;
   });
 
+  it('filters malformed structured-template experience headers from preview output (score >= 80 branch)', async () => {
+    const { service } = buildService();
+    const original = baseline.sections?.[0]?.content ?? '';
+    const originalParsed = baseline.parsedRecords;
+    baseline.parsedRecords = [
+      {
+        createdAt: new Date(),
+        parsedJson: { identity: { full_name: 'Jordan Lee' } },
+      } as any,
+    ];
+
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 90;
+
+    baseline.sections = [
+      {
+        ...baseSection,
+        content: [
+          // Malformed lines that must not reach preview output even in structured-template mode.
+          'Infrastructure & Deployment',
+          'Professional Experience',
+          '2021 - Present',
+          '- Did work.',
+          '',
+          'Vue 3), deck builder frontend',
+          'Professional Experience',
+          '2021 - Present',
+          '- Did work.',
+          '',
+          // Valid header we still expect.
+          'Biblioso July 2024 - April 2026',
+          'Director, Customer Experience',
+          '- Led cross-functional CX initiatives.',
+        ].join('\n'),
+      },
+    ];
+
+    const result = await service.generateResume('user-1', baseRequest);
+    expect(result.internal?.generationMode).toBe('structured_baseline_template');
+    expect(result.qualityGate?.status).toBe('pass');
+
+    const preview = result.preview?.resume as any;
+    const companies = (preview?.experience ?? []).map((e: any) => String(e.company ?? ''));
+    expect(companies).toContain('Biblioso');
+    expect(companies).not.toContain('Infrastructure & Deployment');
+    expect(companies).not.toContain('Vue 3), deck builder frontend');
+    expect((preview?.experience ?? []).some((e: any) => String(e.roleTitle ?? '') === 'Professional Experience')).toBe(
+      false,
+    );
+
+    baseline.sections = [{ ...baseSection, content: original }];
+    baseline.parsedRecords = originalParsed;
+    assessment.overallScore = originalScore;
+  });
+
+  it('fails cleanly when all structured-template experience headers are malformed (score >= 80 branch)', async () => {
+    const { service } = buildService();
+    const original = baseline.sections?.[0]?.content ?? '';
+    const originalParsed = baseline.parsedRecords;
+    baseline.parsedRecords = [
+      {
+        createdAt: new Date(),
+        parsedJson: { identity: { full_name: 'Jordan Lee' } },
+      } as any,
+    ];
+
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 90;
+
+    baseline.sections = [
+      {
+        ...baseSection,
+        content: [
+          'Infrastructure & Deployment',
+          'Professional Experience',
+          '2021 - Present',
+          '- Did work.',
+          '',
+          'Vue 3), deck builder frontend',
+          'Professional Experience',
+          '2021 - Present',
+          '- Did work.',
+        ].join('\n'),
+      },
+    ];
+
+    await expect(service.generateResume('user-1', baseRequest)).rejects.toBeInstanceOf(UnprocessableEntityException);
+
+    baseline.sections = [{ ...baseSection, content: original }];
+    baseline.parsedRecords = originalParsed;
+    assessment.overallScore = originalScore;
+  });
+
   it('preserves inline date ranges in structured baseline + generated resume output (no company/date bleed)', async () => {
     const { service } = buildService();
     const original = baseline.sections?.[0]?.content ?? '';
@@ -556,6 +649,50 @@ describe('ResumeService contract', () => {
 
     baseline.sections = [{ ...baseSection, content: original }];
     assessment.overallScore = originalScore;
+  });
+
+  it('emits RESUME_NORM_TRACE showing buildNormalizedResumeDocument branch and company rejection for header-noise lines', async () => {
+    const { service } = buildService();
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 70;
+
+    const originalTrace = process.env.RESUME_NORM_TRACE;
+    process.env.RESUME_NORM_TRACE = 'true';
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const original = baseline.sections?.[0]?.content ?? '';
+      baseline.sections = [
+        {
+          ...baseSection,
+          content: [
+            'Infrastructure & Deployment',
+            '- Owned incident response and improved reliability across systems.',
+            '',
+            'Vue 3), deck builder frontend',
+            '- Shipped customer-facing features and improved performance.',
+            '',
+            'Biblioso | Director, Customer Experience | 2024 - Present',
+            '- Led cross-functional CX initiatives across support and product.',
+          ].join('\n'),
+        },
+      ];
+
+      await expect(service.generateResume('user-1', baseRequest)).resolves.toEqual(
+        expect.objectContaining({ ok: true }),
+      );
+
+      const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
+      expect(lines.some((line) => line.includes('[RESUME_NORM_TRACE][BRANCH]'))).toBe(true);
+      expect(lines.some((line) => line.includes('[RESUME_NORM_TRACE][LINE_SEEN]'))).toBe(true);
+      expect(lines.some((line) => line.includes('[RESUME_NORM_TRACE][COMPANY_REJECT]'))).toBe(true);
+
+      baseline.sections = [{ ...baseSection, content: original }];
+    } finally {
+      logSpy.mockRestore();
+      process.env.RESUME_NORM_TRACE = originalTrace;
+      assessment.overallScore = originalScore;
+    }
   });
 
   it('extracts a minimal structured baseline model from EXPERIENCE section text (safe headers only)', () => {

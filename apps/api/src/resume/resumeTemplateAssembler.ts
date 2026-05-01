@@ -11,16 +11,34 @@ function trimToText(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+export function isAllowedStructuredTemplateExperienceHeader(input: {
+  company?: unknown;
+  roleTitle?: unknown;
+}): boolean {
+  const company = trimToText(input.company);
+  const roleTitle = trimToText(input.roleTitle);
+  if (!company) return false;
+
+  // Hard rejects for known malformed values we must never surface in preview output.
+  if (company === 'Vue 3), deck builder frontend') return false;
+  if (company === 'Infrastructure & Deployment') return false;
+  if (roleTitle === 'Professional Experience') return false;
+
+  return true;
+}
+
 export function assembleResumeFromStructuredBaseline(
   structured: StructuredBaseline,
   identity: ResumeTemplateIdentityLike,
 ): NormalizedResumeDocument {
-  const experience = (structured.experience ?? []).map((entry) => ({
-    company: trimToText(entry.company),
-    roleTitle: trimToText(entry.roleTitle),
-    dateRange: entry.dates ? trimToText(entry.dates) : undefined,
-    bullets: (entry.bullets ?? []).map((b) => trimToText(b)).filter(Boolean),
-  }));
+  const experience = (structured.experience ?? [])
+    .filter((entry) => isAllowedStructuredTemplateExperienceHeader(entry))
+    .map((entry) => ({
+      company: trimToText(entry.company),
+      roleTitle: trimToText(entry.roleTitle),
+      dateRange: entry.dates ? trimToText(entry.dates) : undefined,
+      bullets: (entry.bullets ?? []).map((b) => trimToText(b)).filter(Boolean),
+    }));
 
   const competencies = (structured.skills ?? []).map((s) => trimToText(s)).filter(Boolean);
   const education = (structured.education ?? [])
