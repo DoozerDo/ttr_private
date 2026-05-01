@@ -3131,15 +3131,29 @@ export class ResumeService {
     request: GenerateResumeRequest, 
     options?: { skipReadinessGate?: boolean }, 
   ) { 
-    const analysisAssessment = await validateAnalysisContext({
-      analysisRepository: this.fitAssessmentRepository,
-      baselineVersionRepository: this.baselineVersionRepository,
-      analysisId: request.analysisId?.trim() ?? '',
-      userId,
-      jobId: request.jobId?.trim() ?? '',
-      baselineId: request.baselineId?.trim() ?? null,
-      baselineVersionId: request.baselineVersionId?.trim() ?? '',
-    });
+    try {
+    const analysisId = request.analysisId?.trim() ?? '';
+    const analysisAssessment = analysisId
+      ? await validateAnalysisContext({
+          analysisRepository: this.fitAssessmentRepository,
+          baselineVersionRepository: this.baselineVersionRepository,
+          analysisId,
+          userId,
+          jobId: request.jobId?.trim() ?? '',
+          baselineId: request.baselineId?.trim() ?? null,
+          baselineVersionId: request.baselineVersionId?.trim() ?? '',
+        })
+      : await this.findLatestAssessment(userId, request.jobId ?? '', request.baselineId ?? '');
+
+    if (!analysisAssessment) {
+      throw new BadRequestException({
+        error: {
+          code: 'analysis_not_found',
+          message: 'Referenced analysis was not found.',
+          details: { analysisId: analysisId || null },
+        },
+      });
+    }
 
     let generation: Awaited<ReturnType<ResumeService['generateResume']>> | null = null;
     const preflightOneTap = Boolean(request.oneTap);
@@ -3416,6 +3430,19 @@ export class ResumeService {
               ] 
             : [], 
     }; 
+    } catch (error) {
+      this.logger.error('[resume-readiness] exception', {
+        userId,
+        baselineId: request.baselineId ?? null,
+        baselineVersionId: request.baselineVersionId ?? null,
+        jobId: request.jobId ?? null,
+        analysisId: request.analysisId ?? null,
+        name: error instanceof Error ? error.name : typeof error,
+        message: error instanceof Error ? error.message : String(error ?? ''),
+        stack: error instanceof Error ? error.stack : null,
+      });
+      throw error;
+    }
   } 
 } 
 

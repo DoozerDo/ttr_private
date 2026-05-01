@@ -117,9 +117,24 @@ export class ResumeController {
   ) {
     const userId = this.getUserId(request);
     const payload = this.parsePayload(body);
-    return withTimeout('generation', () =>
-      this.resumeService.getGenerationReadiness(userId, payload),
-    );
+    try {
+      return await withTimeout('generation', () =>
+        this.resumeService.getGenerationReadiness(userId, payload),
+      );
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('[resume-readiness][error]', {
+        userId,
+        baselineId: payload.baselineId ?? null,
+        baselineVersionId: payload.baselineVersionId ?? null,
+        jobId: payload.jobId ?? null,
+        analysisId: payload.analysisId ?? null,
+        name: error instanceof Error ? error.name : typeof error,
+        message: error instanceof Error ? error.message : String(error ?? ''),
+        stack: error instanceof Error ? error.stack : null,
+      });
+      throw error;
+    }
   }
 
   private normalizeFormat(value: string): ResumeExportFormat {

@@ -626,6 +626,20 @@ describe('ResumeService contract', () => {
     expect(readiness.reasons[0]?.code).toBe('verified_only_generation'); 
   }); 
 
+  it('does not 500 when resume readiness is called without analysisId (uses latest assessment fallback)', async () => {
+    const { service } = buildService();
+    const readiness = await service.getGenerationReadiness('user-1', {
+      ...baseRequest,
+      analysisId: undefined as any,
+    });
+    expect(readiness).toMatchObject({
+      status: expect.any(String),
+      blocked: expect.any(Boolean),
+      compliance_flags: expect.any(Array),
+      reasons: expect.any(Array),
+    });
+  });
+
   it('does not throw generation_blocked for score >= 70 when readiness is BLOCKED and verified-only mode is possible', async () => {
     const { service, applicationsService, opportunitiesService } = buildService({
       complianceFlags: [
