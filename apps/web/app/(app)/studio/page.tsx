@@ -9843,10 +9843,17 @@ export default function StudioPage() {
       state: { autoRepairing: boolean; generating: boolean },
     ): { eligible: boolean; reason: string } => {
       const canRegenerate = result?.actions?.canRegenerate === true;
-      if (!canRegenerate) return { eligible: false, reason: "no_canRegenerate" };
+      if (!canRegenerate) return { eligible: false, reason: "no_regeneration_permission" };
       if (state.autoRepairing) return { eligible: false, reason: "already_auto_repairing" };
       if (state.generating) return { eligible: false, reason: "generation_in_flight" };
-      if (activeGenerationReadiness.blocked) return { eligible: false, reason: "readiness_blocked" };
+
+      // Readiness must NOT block auto-repair when regeneration is allowed and an artifact already exists.
+      // Readiness may be "blocked" due to transient readiness API failures (e.g. 422), but Studio users
+      // must still be able to regenerate/repair existing artifacts when `canRegenerate` is true.
+      const hasExistingArtifact = Boolean(backendRecord);
+      if (!hasExistingArtifact && activeGenerationReadiness.blocked) {
+        return { eligible: false, reason: "missing_inputs" };
+      }
 
       // Do not auto repair artifacts already exportable and passing.
       if (result?.exportReady === true && result?.qualityStatus === "pass") {
@@ -9937,7 +9944,6 @@ export default function StudioPage() {
 
   useEffect(() => {
     if (!artifactContract.hasUsableArtifacts) return;
-    if (activeGenerationReadiness.blocked) return;
 
     const maybeTrigger = async () => {
       if (shouldAutoRepairResume) {

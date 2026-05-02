@@ -1890,6 +1890,94 @@ function setupAutoRepairResumeOnceFetch() {
   return { resumeGenerateDeferred, generateCalls, getArtifactsFetchCount: () => artifactsFetchCount };
 }
 
+function setupAutoRepairResumeReadiness422Fetch() {
+  const resumeGenerateDeferred = deferred<Response>();
+  const generateCalls: string[] = [];
+
+  setFetchImplementation(
+    vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(createResponse({ status: "blocked", reasons: ["unprocessable"] }, { status: 422 }));
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+
+      if (method === "POST" && url.includes("/api/resume/generate")) {
+        generateCalls.push("resume");
+        return resumeGenerateDeferred.promise;
+      }
+
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "completed",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "fp-1",
+            generationContractVersion: "studio-artifacts-v1",
+            resumeResult: {
+              artifactType: "resume",
+              generationState: "generated_usable",
+              qualityStatus: "needs_refinement",
+              preview: {
+                heading: { name: "Test Candidate", contactLine: "test@example.com" },
+                summary: "Bad resume preview.",
+                experience: [{ company: "Acme", roleTitle: "Director of Support", bullets: ["x"] }],
+              },
+              correctionReasons: [{ code: "resume_v2_quality_gate_failed", message: "resume_v2_quality_gate_failed", severity: "warning" }],
+              exportReady: true,
+              exports: { docx: false, pdf: false },
+              actions: { canEdit: true, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
+            },
+            coverLetterResult: null,
+            resume: {
+              status: "completed",
+              inputsHash: "ih-bad-422",
+              responseBody: { status: "success", qualityGate: { status: "needs_refinement" } },
+              content: null,
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: null,
+              failedAt: null,
+              metadata: {},
+            },
+            coverLetter: null,
+          }),
+        );
+      }
+
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+            scoring_v2: { score: 94 },
+            verification_coverage: { totalClaims: 1, verifiedClaims: 1, inferredClaims: 0, unverifiedClaims: 0, unverifiedRequirements: [] },
+          }),
+        );
+      }
+
+      return Promise.resolve(createResponse({}));
+    }),
+  );
+
+  return { resumeGenerateDeferred, generateCalls };
+}
+
 describe("Studio generation authority", () => {
   beforeEach(() => {
     clearRecentIntentSignals();
@@ -2694,5 +2782,17 @@ describe("Studio auto repair", () => {
       method: (c[1]?.method ?? "GET").toUpperCase(),
     }));
     expect(calls.some((c: any) => c.method === "POST" && c.url.includes("/api/resume/generate"))).toBe(false);
+  });
+
+  it("auto repairs even when readiness endpoint returns 422, as long as canRegenerate=true and artifact exists", async () => {
+    const { resumeGenerateDeferred, generateCalls } = setupAutoRepairResumeReadiness422Fetch();
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByText("Repairing resume…")).toBeInTheDocument();
+    });
+    expect(generateCalls.filter((c) => c === "resume").length).toBe(1);
+
+    resumeGenerateDeferred.resolve(createResponse({ status: "success" }, { status: 201 }));
   });
 });
