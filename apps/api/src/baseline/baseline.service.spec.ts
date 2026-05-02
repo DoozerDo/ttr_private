@@ -1149,7 +1149,7 @@ describe('BaselineService - score history persistence', () => {
     expect(result.latestAssessmentSummary.latestAssessmentCreatedAt).toBeInstanceOf(Date);
   });
 
-  it('rejects attempts to archive the current active baseline', async () => {
+  it('allows archiving the current baseline by promoting the next available baseline (or leaving none current)', async () => {
     const archiveManager = {
       findOne: jest.fn().mockResolvedValue({
         id: 'b-3',
@@ -1157,15 +1157,16 @@ describe('BaselineService - score history persistence', () => {
         status: BaselineStatus.ACTIVE,
         isActive: true,
       }),
-      find: jest.fn(),
+      find: jest.fn().mockResolvedValue([
+        { id: 'b-3', userId: 'user-1', status: BaselineStatus.ACTIVE, isActive: true, createdAt: new Date('2026-03-03') },
+        { id: 'b-2', userId: 'user-1', status: BaselineStatus.ACTIVE, isActive: false, createdAt: new Date('2026-03-02') },
+      ]),
       update: jest.fn(),
     };
     baselineRepository.manager.transaction.mockImplementation(async (cb: any) => cb(archiveManager));
 
-    await expect(service.archiveBaseline('user-1', 'b-3')).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
-    expect(archiveManager.update).not.toHaveBeenCalled();
+    await expect(service.archiveBaseline('user-1', 'b-3')).resolves.toBeTruthy();
+    expect(archiveManager.update).toHaveBeenCalled();
   });
 
   it('sets a new current baseline and demotes the previous current baseline', async () => {
@@ -1283,9 +1284,9 @@ describe('BaselineService - score history persistence', () => {
     expect(archived.isActive).toBe(false);
     expect(store.get('b-2')?.isActive).toBe(true);
 
-    await expect(service.archiveBaseline('user-1', 'b-2')).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    const archivedCurrent = await service.archiveBaseline('user-1', 'b-2');
+    expect(archivedCurrent.status).toBe(BaselineStatus.ARCHIVED);
+    expect(archivedCurrent.isActive).toBe(false);
   });
 
   it('archives a non-current baseline and does not change the active baseline pointer', async () => {

@@ -1168,7 +1168,9 @@ export class BaselineService {
         }
 
         if (status === BaselineStatus.ARCHIVED && baseline.isActive === true) {
-          throw new BadRequestException('Cannot archive current baseline');
+          // If the user is archiving their current baseline, automatically promote the next
+          // most recent non-archived baseline to current (if any). If none exist, allow the
+          // archive and leave the user with no current baseline until a new upload is created.
         }
 
         const baselines = await manager.find(Baseline, {
@@ -1187,13 +1189,7 @@ export class BaselineService {
           `updateBaselineStatus userId=${userId} baselineId=${baselineId} currentStatus=${baseline.status} currentIsActive=${baseline.isActive === true} targetStatus=${status} baselineCount=${baselines.length} nextActiveBaselineId=${nextActiveBaselineId ?? 'null'}`,
         );
 
-        await manager.update(
-          Baseline,
-          { userId },
-          {
-            isActive: false,
-          },
-        );
+        await manager.update(Baseline, { userId }, { isActive: false });
 
         if (nextActiveBaselineId) {
           await manager.update(
