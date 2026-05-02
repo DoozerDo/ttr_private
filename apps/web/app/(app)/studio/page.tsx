@@ -9942,14 +9942,36 @@ export default function StudioPage() {
     shouldAutoRepairArtifact,
   ]);
 
+  const resumeAutoRepairKey = useMemo(() => buildAutoRepairKey("resume", artifactContract.results.resume), [
+    artifactContract.results.resume,
+    buildAutoRepairKey,
+  ]);
+  const coverAutoRepairKey = useMemo(
+    () => buildAutoRepairKey("cover_letter", artifactContract.results.coverLetter),
+    [artifactContract.results.coverLetter, buildAutoRepairKey],
+  );
+
+  const autoRepairGenerationInFlight =
+    pageTruth.isGenerating ||
+    resumeGenerating ||
+    coverGenerating ||
+    resumeAutoGenerating ||
+    coverAutoGenerating ||
+    resumeGenerateNowPending ||
+    coverGenerateNowPending ||
+    resumeSingleFlightInFlight ||
+    coverSingleFlightInFlight;
+
   useEffect(() => {
-    if (!artifactContract.hasUsableArtifacts) return;
+    const hasAnyArtifactRecord = Boolean(artifactContract.results.resume || artifactContract.results.coverLetter);
+    if (!hasAnyArtifactRecord) return;
+    if (!effectiveBaselineId || !effectiveJobId) return;
+    if (autoRepairGenerationInFlight) return;
 
     const maybeTrigger = async () => {
       if (shouldAutoRepairResume) {
-        const key = buildAutoRepairKey("resume", artifactContract.results.resume);
-        if (!attemptedAutoRepairKeysRef.current[key]) {
-          attemptedAutoRepairKeysRef.current[key] = true;
+        if (!attemptedAutoRepairKeysRef.current[resumeAutoRepairKey]) {
+          attemptedAutoRepairKeysRef.current[resumeAutoRepairKey] = true;
           setResumeAutoRepairing(true);
           try {
             await generateArtifactsNow({ resume: true, coverLetter: false, source: "auto_repair" });
@@ -9959,9 +9981,8 @@ export default function StudioPage() {
         }
       }
       if (shouldAutoRepairCoverLetter) {
-        const key = buildAutoRepairKey("cover_letter", artifactContract.results.coverLetter);
-        if (!attemptedAutoRepairKeysRef.current[key]) {
-          attemptedAutoRepairKeysRef.current[key] = true;
+        if (!attemptedAutoRepairKeysRef.current[coverAutoRepairKey]) {
+          attemptedAutoRepairKeysRef.current[coverAutoRepairKey] = true;
           setCoverAutoRepairing(true);
           try {
             await generateArtifactsNow({ resume: false, coverLetter: true, source: "auto_repair" });
@@ -9974,13 +9995,16 @@ export default function StudioPage() {
 
     void maybeTrigger();
   }, [
-    activeGenerationReadiness.blocked,
-    artifactContract.hasUsableArtifacts,
-    buildAutoRepairKey,
+    artifactContract.results.coverLetter,
+    artifactContract.results.resume,
+    autoRepairGenerationInFlight,
+    coverAutoRepairKey,
+    effectiveBaselineId,
+    effectiveJobId,
     generateArtifactsNow,
+    resumeAutoRepairKey,
     shouldAutoRepairCoverLetter,
     shouldAutoRepairResume,
-    studioEffectiveGenerationState,
   ]);
 
   const handleGenerateResume = useCallback(async () => {
