@@ -9638,10 +9638,17 @@ export default function StudioPage() {
 
   const generationReadyAutoStartRef = useRef<string | null>(null);
 
-  const shouldShowResumeRegenerate =
-    studioEffectiveGenerationState === "generated_unusable" && resumeNeedsRefinement;
-  const shouldShowCoverRegenerate =
-    studioEffectiveGenerationState === "generated_unusable" && coverNeedsRefinement;
+  const shouldShowResumeRegenerate = resumeResult
+    ? resumeResult.actions?.canRegenerate === true ||
+      resumeResult.generationState === "generated_needs_correction" ||
+      resumeResult.qualityStatus === "needs_refinement"
+    : studioEffectiveGenerationState === "generated_unusable" && resumeNeedsRefinement;
+  const shouldShowCoverRegenerate = coverLetterResult
+    ? coverLetterResult.actions?.canRegenerate === true ||
+      coverLetterResult.generationState === "generated_needs_correction" ||
+      coverLetterResult.qualityStatus === "failed" ||
+      coverLetterResult.qualityStatus === "needs_refinement"
+    : studioEffectiveGenerationState === "generated_unusable" && coverNeedsRefinement;
 
   useEffect(() => {
     // Prod-safe diagnostic: only log when the UX is in the "generated unusable" lane.

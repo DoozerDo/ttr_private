@@ -139,6 +139,7 @@ describe("Studio artifact quality gating (soft)", () => {
     expect(accomplishmentNodes.length).toBeGreaterThanOrEqual(1);
     expect(within(resumeSection as HTMLElement).queryByText("Download DOCX")).toBeNull();
     expect(within(resumeSection as HTMLElement).queryByText("Download PDF")).toBeNull();
+    expect(within(resumeSection as HTMLElement).getByRole("button", { name: "Regenerate" })).toBeInTheDocument();
 
     const qualityWarning = within(resumeSection as HTMLElement).getByTestId("studio-resume-quality-warning");
     expect(within(qualityWarning).getByText("Contains an incomplete trailing fragment.")).toBeInTheDocument();
@@ -165,6 +166,7 @@ describe("Studio artifact quality gating (soft)", () => {
     expect(within(coverSection as HTMLElement).getAllByText("Cover letter needs correction before export.").length).toBeGreaterThan(0);
     expect(within(coverSection as HTMLElement).queryByText("Download DOCX")).toBeNull();
     expect(within(coverSection as HTMLElement).queryByText("Download PDF")).toBeNull();
+    expect(within(coverSection as HTMLElement).getByRole("button", { name: "Regenerate" })).toBeInTheDocument();
   });
 
   it("renders generation source diagnostics blocks visibly in the card headers", async () => {
@@ -1300,7 +1302,7 @@ function setupFetchWithQualityFailures() {
               ],
               exportReady: false,
               exports: { docx: false, pdf: false },
-              actions: { canEdit: true, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
+              actions: { canEdit: true, canRegenerate: false, canExport: false, canSaveToOpportunities: false },
             },
             coverLetterResult: {
               artifactType: "cover_letter",
@@ -1310,7 +1312,7 @@ function setupFetchWithQualityFailures() {
               correctionReasons: [{ code: "banned_phrase", message: "banned", severity: "warning" }],
               exportReady: false,
               exports: { docx: false, pdf: false },
-              actions: { canEdit: false, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
+              actions: { canEdit: false, canRegenerate: false, canExport: false, canSaveToOpportunities: false },
             },
             resume: {
               status: "completed",
