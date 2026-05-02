@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ResumePreview } from "@/app/(app)/studio/ResumePreview";
+import { vi } from "vitest";
 
 describe("ResumePreview", () => {
   const payload = {
@@ -355,5 +356,12 @@ describe("ResumePreview", () => {
       />,
     );
     expect(screen.queryByTestId("resume-preview")).toBeNull();
+  });
+
+  it("fires onEnterEditMode when Edit Resume is clicked", () => {
+    const onEnterEditMode = vi.fn();
+    render(<ResumePreview payload={payload} onEnterEditMode={onEnterEditMode} />);
+    fireEvent.click(screen.getByTestId("studio-edit-resume-button"));
+    expect(onEnterEditMode).toHaveBeenCalledTimes(1);
   });
 });

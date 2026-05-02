@@ -2796,3 +2796,18 @@ describe("Studio auto repair", () => {
     resumeGenerateDeferred.resolve(createResponse({ status: "success" }, { status: 201 }));
   });
 });
+
+describe("Studio resume editing", () => {
+  it("opens resume edit UI when Edit Resume is clicked", async () => {
+    setupExportableResumeFetch();
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-resume-ready-panel")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("studio-edit-resume-button"));
+    expect(await screen.findByText("Save edits")).toBeInTheDocument();
+    expect(screen.getByText("Cancel edits")).toBeInTheDocument();
+  });
+});

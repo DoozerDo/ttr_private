@@ -289,15 +289,24 @@ export function ResumePreview({
                 Save edits
               </button>
             </>
-          ) : (
-            <button
-              type="button"
-              onClick={onEnterEditMode}
-              className="rounded-xl border border-white/15 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-white/30 hover:text-white"
-            >
-              Edit Resume
-            </button>
-          )}
+           ) : (
+             <button
+               type="button"
+               onClick={(event) => {
+                 event.preventDefault();
+                 console.log("[STUDIO_EDIT_RESUME_CLICKED]");
+                 if (onEnterEditMode) {
+                   onEnterEditMode();
+                   return;
+                 }
+                 console.warn("[STUDIO_EDIT_RESUME_MISSING_HANDLER]");
+               }}
+               className="rounded-xl border border-white/15 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-white/30 hover:text-white"
+               data-testid="studio-edit-resume-button"
+             >
+               Edit Resume
+             </button>
+           )}
         </div>
       </div>
 

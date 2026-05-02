@@ -8603,7 +8603,16 @@ export default function StudioPage() {
                       </details>
                     </div>
                   ) : canonicalResumePreviewPayload ? (
-                    <ResumePreview payload={canonicalResumePreviewPayload} />
+                    <ResumePreview
+                      payload={canonicalResumePreviewPayload}
+                      isEditing={isResumeEditMode}
+                      hasUnsavedChanges={hasUnsavedResumeEdits}
+                      onEnterEditMode={handleEnterResumeEditMode}
+                      onSaveEdits={handleSaveResumeEdits}
+                      onCancelEdits={handleCancelResumeEdits}
+                      onSummaryChange={handleResumeSummaryChange}
+                      onBulletChange={handleResumeBulletChange}
+                    />
                   ) : (
                     <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
                       <p className="text-sm font-semibold text-slate-100">Resume needs correction before export.</p>
@@ -11691,7 +11700,16 @@ export default function StudioPage() {
                   </details>
                 </div>
               ) : canonicalResumePreviewPayload ? (
-                <ResumePreview payload={canonicalResumePreviewPayload} />
+                <ResumePreview
+                  payload={canonicalResumePreviewPayload}
+                  isEditing={isResumeEditMode}
+                  hasUnsavedChanges={hasUnsavedResumeEdits}
+                  onEnterEditMode={handleEnterResumeEditMode}
+                  onSaveEdits={handleSaveResumeEdits}
+                  onCancelEdits={handleCancelResumeEdits}
+                  onSummaryChange={handleResumeSummaryChange}
+                  onBulletChange={handleResumeBulletChange}
+                />
               ) : (
                 <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Template unknown</p>
