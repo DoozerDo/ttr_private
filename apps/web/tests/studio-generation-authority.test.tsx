@@ -1366,7 +1366,7 @@ function setupFetchWithQualityFailures() {
           }),
         );
       }
-      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+      if (url.includes("/readiness")) {
         return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
       }
       if (url.includes("/api/resume")) {
@@ -1692,6 +1692,202 @@ function setupFetchWithResumeFailureButStalePreview() {
       return Promise.resolve(createResponse({}));
     }),
   );
+}
+
+function setupExportableResumeFetch() {
+  setFetchImplementation(
+    vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+
+      if (method === "POST" && (url.includes("/api/resume/generate") || url.includes("/api/cover-letters/generate"))) {
+        return Promise.resolve(createResponse({ status: "success" }, { status: 201 }));
+      }
+
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "completed",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "fp-1",
+            generationContractVersion: "studio-artifacts-v1",
+            resumeResult: {
+              artifactType: "resume",
+              generationState: "generated_usable",
+              qualityStatus: "pass",
+              preview: {
+                heading: { name: "Test Candidate", contactLine: "test@example.com" },
+                summary: "Clean resume preview.",
+                experience: [{ company: "Acme", roleTitle: "Director of Support", bullets: ["Led support operations."] }],
+              },
+              correctionReasons: [],
+              exportReady: true,
+              exports: { docx: true, pdf: true },
+              actions: { canEdit: true, canRegenerate: false, canExport: true, canSaveToOpportunities: false },
+            },
+            coverLetterResult: null,
+            resume: { status: "completed", inputsHash: "ih-good-1", responseBody: { status: "success" }, content: null, failureCode: null, failureMessage: null, startedAt: null, completedAt: null, failedAt: null, metadata: {} },
+            coverLetter: null,
+          }),
+        );
+      }
+
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+            scoring_v2: { score: 94 },
+            verification_coverage: { totalClaims: 1, verifiedClaims: 1, inferredClaims: 0, unverifiedClaims: 0, unverifiedRequirements: [] },
+          }),
+        );
+      }
+
+      return Promise.resolve(createResponse({}));
+    }),
+  );
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: any) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+function setupAutoRepairResumeOnceFetch() {
+  const resumeGenerateDeferred = deferred<Response>();
+  let artifactsFetchCount = 0;
+  const generateCalls: string[] = [];
+
+  setFetchImplementation(
+    vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+
+      if (method === "POST" && url.includes("/api/resume/generate")) {
+        generateCalls.push("resume");
+        return resumeGenerateDeferred.promise;
+      }
+      if (method === "POST" && url.includes("/api/cover-letters/generate")) {
+        generateCalls.push("cover");
+        return Promise.resolve(createResponse({ status: "success" }, { status: 201 }));
+      }
+
+      if (url.includes("/api/studio/artifacts")) {
+        artifactsFetchCount += 1;
+        // Always return the same unusable resume result to ensure loop-prevention is working.
+        return Promise.resolve(
+          createResponse({
+            status: "completed",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "fp-1",
+            generationContractVersion: "studio-artifacts-v1",
+            resumeResult: {
+              artifactType: "resume",
+              generationState: "generated_needs_correction",
+              qualityStatus: "needs_refinement",
+              preview: {
+                heading: { name: "Test Candidate", contactLine: "test@example.com" },
+                summary: "Bad resume preview.",
+                experience: [{ company: "Acme", roleTitle: "Director of Support", bullets: ["x"] }],
+              },
+              correctionReasons: [{ code: "incomplete_trailing_fragment", message: "incomplete_trailing_fragment", severity: "warning" }],
+              exportReady: false,
+              exports: { docx: false, pdf: false },
+              actions: { canEdit: true, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
+            },
+            coverLetterResult: {
+              artifactType: "cover_letter",
+              generationState: "generated_usable",
+              qualityStatus: "pass",
+              preview: { paragraphs: ["Clean cover."] },
+              correctionReasons: [],
+              exportReady: true,
+              exports: { docx: true, pdf: true },
+              actions: { canEdit: false, canRegenerate: false, canExport: true, canSaveToOpportunities: false },
+            },
+            resume: {
+              status: "completed",
+              inputsHash: "ih-bad-1",
+              responseBody: { status: "success", preview: { resume: { heading: { name: "Legacy" } } } },
+              content: null,
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: null,
+              failedAt: null,
+              metadata: {},
+            },
+            coverLetter: {
+              status: "completed",
+              inputsHash: "ih-good-1",
+              responseBody: { status: "success", preview: { coverLetter: { paragraphs: ["Legacy"] } } },
+              content: null,
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: null,
+              failedAt: null,
+              metadata: {},
+            },
+          }),
+        );
+      }
+
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+            scoring_v2: { score: 94 },
+            verification_coverage: {
+              totalClaims: 3,
+              verifiedClaims: 3,
+              inferredClaims: 0,
+              unverifiedClaims: 0,
+              unverifiedRequirements: [],
+            },
+          }),
+        );
+      }
+
+      return Promise.resolve(createResponse({}));
+    }),
+  );
+
+  return { resumeGenerateDeferred, generateCalls, getArtifactsFetchCount: () => artifactsFetchCount };
 }
 
 describe("Studio generation authority", () => {
@@ -2458,5 +2654,45 @@ describe("Studio resume failure authority", () => {
       expect(screen.queryByText("Vue 3), deck builder frontend")).toBeNull();
       expect(screen.getByTestId("resume-partial-retry-panel")).toBeInTheDocument();
     });
+  });
+});
+
+describe("Studio auto repair", () => {
+  it("auto repairs resume once when generated_needs_correction and canRegenerate=true", async () => {
+    const { resumeGenerateDeferred, generateCalls } = setupAutoRepairResumeOnceFetch();
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByText("Repairing resume…")).toBeInTheDocument();
+    });
+    expect(generateCalls.filter((c) => c === "resume").length).toBe(1);
+
+    // Resolve the generation call; artifacts remain bad, but auto repair must not loop.
+    resumeGenerateDeferred.resolve(createResponse({ status: "success" }, { status: 201 }));
+
+    await waitFor(() => {
+      expect(screen.queryByText("Repairing resume…")).toBeNull();
+    });
+
+    // Still only one resume generation attempt, even though artifacts still indicate needs correction.
+    expect(generateCalls.filter((c) => c === "resume").length).toBe(1);
+
+    // Manual regenerate remains available after auto repair completes and artifact is still unusable.
+    expect(screen.getByTestId("studio-resume-regenerate")).toBeInTheDocument();
+  });
+
+  it("does not auto repair exportable artifacts", async () => {
+    setupExportableResumeFetch();
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-resume-ready-panel")).toBeInTheDocument();
+    });
+
+    const calls = (globalThis.fetch as any).mock.calls.map((c: any[]) => ({
+      url: typeof c[0] === "string" ? c[0] : c[0]?.url ?? "",
+      method: (c[1]?.method ?? "GET").toUpperCase(),
+    }));
+    expect(calls.some((c: any) => c.method === "POST" && c.url.includes("/api/resume/generate"))).toBe(false);
   });
 });

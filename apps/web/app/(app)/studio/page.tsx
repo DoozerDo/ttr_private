@@ -3503,6 +3503,10 @@ export default function StudioPage() {
     storage.removeItem(generationStorageKey);
   }, [generationStorageKey, hasCompletedGeneration]);
 
+  const [resumeAutoRepairing, setResumeAutoRepairing] = useState(false);
+  const [coverAutoRepairing, setCoverAutoRepairing] = useState(false);
+  const attemptedAutoRepairKeysRef = useRef<Record<string, true>>({});
+
   const applicationPairSignature = useMemo(() => {
     if (!effectiveBaselineId || !effectiveJobId) return null;
     return buildWorkflowRequestKey("application_pair", {
@@ -8810,6 +8814,8 @@ export default function StudioPage() {
           studioGenerationRenderState.isGenerating ||
             resumeGenerating ||
             coverGenerating ||
+            resumeAutoRepairing ||
+            coverAutoRepairing ||
             autoGenerationInFlight,
         ),
     hasAnyArtifacts: Boolean(hasCompletedGeneration || resumeState.response || coverState.response),
@@ -9654,6 +9660,151 @@ export default function StudioPage() {
       coverLetterResult.qualityStatus === "needs_refinement"
     : studioEffectiveGenerationState === "generated_unusable" && coverNeedsRefinement;
 
+  const buildAutoRepairKey = useCallback(
+    (artifactType: "resume" | "cover_letter") => {
+      const baselineVersionId = effectiveBaselineVersionId ?? "none";
+      const inputsHash =
+        artifactType === "resume"
+          ? String(artifactContract.results.resume?.inputsHash ?? "none")
+          : String(artifactContract.results.coverLetter?.inputsHash ?? "none");
+      const failureCode =
+        artifactType === "resume"
+          ? String(artifactContract.results.resume?.failureCode ?? "none")
+          : String(artifactContract.results.coverLetter?.failureCode ?? "none");
+      const result =
+        artifactType === "resume"
+          ? artifactContract.results.resumeResult
+          : artifactContract.results.coverLetterResult;
+      const generationState = String((result as any)?.generationState ?? "none");
+      const qualityStatus = String((result as any)?.qualityStatus ?? "none");
+      const exportReady = String((result as any)?.exportReady ?? "none");
+      return [
+        artifactType,
+        effectiveBaselineId ?? "none",
+        baselineVersionId,
+        effectiveJobId ?? "none",
+        requestedAnalysisId ?? "none",
+        inputsHash,
+        failureCode,
+        generationState,
+        qualityStatus,
+        exportReady,
+      ].join("|");
+    },
+    [
+      artifactContract.results.coverLetter?.failureCode,
+      artifactContract.results.coverLetter?.inputsHash,
+      artifactContract.results.coverLetterResult,
+      artifactContract.results.resume?.failureCode,
+      artifactContract.results.resume?.inputsHash,
+      artifactContract.results.resumeResult,
+      effectiveBaselineId,
+      effectiveBaselineVersionId,
+      effectiveJobId,
+      requestedAnalysisId,
+    ],
+  );
+
+  const generateArtifactsNow = useCallback(
+    async (input: { resume: boolean; coverLetter: boolean; source: "manual" | "auto_repair" }) => {
+      const signature = workflowOrchestratorCore.contract?.generation.auto.signature ?? null;
+      const baselineId = effectiveBaselineId ?? null;
+      const jobId = effectiveJobId ?? null;
+      if (!baselineId || !jobId) {
+        console.warn("[studio][generate_missing_context]", { baselineId, jobId, source: input.source });
+        return;
+      }
+
+      const baselineVersionId = effectiveBaselineVersionId ?? null;
+      const payload = {
+        baselineId,
+        baselineVersionId: baselineVersionId ?? undefined,
+        jobId,
+        forceRegenerate: true,
+        ...(requestedAnalysisId ? { analysisId: requestedAnalysisId } : {}),
+      };
+
+      if (input.source === "manual") {
+        // Bypass the auto-generation succeeded latch for this signature so a user-initiated retry
+        // always triggers generation without relying on URL noise.
+        try {
+          if (signature && typeof window !== "undefined" && window.localStorage) {
+            const storageKey = `ttr:studio:auto-generate:${signature}`;
+            if (typeof window.localStorage.removeItem === "function") {
+              window.localStorage.removeItem(storageKey);
+            }
+          }
+        } catch {
+          // ignore
+        }
+        generationReadyAutoStartRef.current = null;
+      }
+
+      const tasks: Array<Promise<Response>> = [];
+      if (input.resume) {
+        tasks.push(
+          fetch("/api/resume/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }),
+        );
+      }
+      if (input.coverLetter) {
+        tasks.push(
+          fetch("/api/cover-letters/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }),
+        );
+      }
+
+      const responses = await Promise.all(tasks);
+      const bodies = await Promise.all(responses.map((res) => readResponsePayload(res.clone())));
+
+      const resumeResponse = input.resume ? responses.shift() ?? null : null;
+      const coverResponse = input.coverLetter ? responses.pop() ?? null : null;
+      const resumeBody = input.resume ? bodies.shift() : null;
+      const coverBody = input.coverLetter ? bodies.pop() : null;
+
+      if (resumeResponse && !resumeResponse.ok) {
+        setResumeState((current) => ({
+          ...current,
+          response: null,
+          error: `Resume generation failed (${resumeResponse.status}): ${summarizeStudioBody(resumeBody)}`,
+          tierGateError: null,
+          artifactFailure: null,
+        }));
+      }
+      if (coverResponse && !coverResponse.ok) {
+        setCoverState((current) => ({
+          ...current,
+          response: null,
+          error: `Cover letter generation failed (${coverResponse.status}): ${summarizeStudioBody(coverBody)}`,
+          tierGateError: null,
+          artifactFailure: null,
+        }));
+      }
+
+      if ((resumeResponse ? resumeResponse.ok : true) && (coverResponse ? coverResponse.ok : true)) {
+        await refreshStudioArtifactsAfterGenerate({
+          expectedResume: input.resume,
+          expectedCover: input.coverLetter,
+        });
+        setStudioArtifactsRefreshNonce((current) => current + 1);
+      }
+    },
+    [
+      effectiveBaselineId,
+      effectiveBaselineVersionId,
+      effectiveJobId,
+      refreshStudioArtifactsAfterGenerate,
+      requestedAnalysisId,
+      workflowOrchestratorCore.contract?.generation.auto.signature,
+    ],
+  );
+
   useEffect(() => {
     // Prod-safe diagnostic: only log when the UX is in the "generated unusable" lane.
     if (studioEffectiveGenerationState !== "generated_unusable") return;
@@ -9679,131 +9830,123 @@ export default function StudioPage() {
   const handleManualRegenerate = useCallback(async (source: "resume" | "cover") => {
     console.log("[studio][manual_regenerate_handler_entered]", { source });
     console.log("REGENERATE_TRIGGERED");
-    const signature = workflowOrchestratorCore.contract?.generation.auto.signature ?? null;
     if (process.env.NODE_ENV !== "production") {
       console.warn("[studio][manual_regenerate_clicked]", {
-        contractSignature: signature,
-        retryCount: signature ? (retryCountRef.current[signature] ?? 0) : null,
+        contractSignature: workflowOrchestratorCore.contract?.generation.auto.signature ?? null,
+        retryCount: workflowOrchestratorCore.contract?.generation.auto.signature
+          ? (retryCountRef.current[workflowOrchestratorCore.contract?.generation.auto.signature] ?? 0)
+          : null,
       });
     }
 
-    // Bypass the auto-generation succeeded latch for this signature so a user-initiated retry
-    // always triggers POST /api/resume and POST /api/cover-letters without relying on URL noise.
-    try {
-      if (signature && typeof window !== "undefined" && window.localStorage) {
-        const storageKey = `ttr:studio:auto-generate:${signature}`;
-        if (typeof window.localStorage.removeItem === "function") {
-          window.localStorage.removeItem(storageKey);
+    await generateArtifactsNow({ resume: true, coverLetter: true, source: "manual" });
+  }, [
+    generateArtifactsNow,
+    workflowOrchestratorCore.contract?.generation.auto.signature,
+  ]);
+
+  const shouldAutoRepairResume = useMemo(() => {
+    if (resumeAutoRepairing) return false;
+    if (pageTruth.isGenerating || resumeGenerating || resumeAutoGenerating || resumeGenerateNowPending || resumeSingleFlightInFlight) return false;
+    if (activeGenerationReadiness.blocked) return false;
+    if (resumeResult?.exportReady === true) return false;
+    if (resumeResult?.actions?.canRegenerate !== true) return false;
+    const state = resumeResult?.generationState;
+    const quality = resumeResult?.qualityStatus;
+    const notExportable = resumeResult?.actions?.canExport === false || resumeResult?.exportReady === false;
+    return (
+      notExportable &&
+      (state === "generated_needs_correction" ||
+        state === "generated_unusable" ||
+        quality === "needs_refinement" ||
+        artifactContract.results.resume?.status === "failed" ||
+        Boolean(artifactContract.results.resume?.failureCode) ||
+        Boolean((artifactContract.results.resume as any)?.metadata?.staleLegacy))
+    );
+  }, [
+    activeGenerationReadiness.blocked,
+    artifactContract.results.resume,
+    pageTruth.isGenerating,
+    resumeAutoGenerating,
+    resumeAutoRepairing,
+    resumeGenerateNowPending,
+    resumeGenerating,
+    resumeResult,
+    resumeSingleFlightInFlight,
+  ]);
+
+  const shouldAutoRepairCoverLetter = useMemo(() => {
+    if (coverAutoRepairing) return false;
+    if (pageTruth.isGenerating || coverGenerating || coverAutoGenerating || coverGenerateNowPending || coverSingleFlightInFlight) return false;
+    if (activeGenerationReadiness.blocked) return false;
+    if (coverLetterResult?.exportReady === true) return false;
+    if (coverLetterResult?.actions?.canRegenerate !== true) return false;
+    const state = coverLetterResult?.generationState;
+    const quality = coverLetterResult?.qualityStatus;
+    const notExportable = coverLetterResult?.actions?.canExport === false || coverLetterResult?.exportReady === false;
+    return (
+      notExportable &&
+      (state === "generated_needs_correction" ||
+        state === "generated_unusable" ||
+        quality === "failed" ||
+        quality === "needs_refinement" ||
+        artifactContract.results.coverLetter?.status === "failed" ||
+        Boolean(artifactContract.results.coverLetter?.failureCode) ||
+        Boolean((artifactContract.results.coverLetter as any)?.metadata?.staleLegacy))
+    );
+  }, [
+    activeGenerationReadiness.blocked,
+    artifactContract.results.coverLetter,
+    coverAutoGenerating,
+    coverAutoRepairing,
+    coverGenerateNowPending,
+    coverGenerating,
+    coverLetterResult,
+    coverSingleFlightInFlight,
+    pageTruth.isGenerating,
+  ]);
+
+  useEffect(() => {
+    if (!artifactContract.hasUsableArtifacts) return;
+    if (studioEffectiveGenerationState === "unlock_required") return;
+    if (activeGenerationReadiness.blocked) return;
+
+    const maybeTrigger = async () => {
+      if (shouldAutoRepairResume) {
+        const key = buildAutoRepairKey("resume");
+        if (!attemptedAutoRepairKeysRef.current[key]) {
+          attemptedAutoRepairKeysRef.current[key] = true;
+          setResumeAutoRepairing(true);
+          try {
+            await generateArtifactsNow({ resume: true, coverLetter: false, source: "auto_repair" });
+          } finally {
+            setResumeAutoRepairing(false);
+          }
         }
       }
-    } catch {
-      // ignore
-    }
-
-    // Do not rely on the auto-start effect re-running; call generation directly.
-    // Also prevent the auto-start effect from treating this signature as "already started".
-    generationReadyAutoStartRef.current = null;
-
-    if (process.env.NODE_ENV !== "production") {
-      console.warn("[studio][manual_regenerate_start]", { contractSignature: signature });
-    }
-
-    // Manual retry must hit explicit generation endpoints (not readiness-only paths) and then
-    // re-hydrate Studio artifacts from the readState endpoint.
-    const baselineId = effectiveBaselineId ?? null;
-    const jobId = effectiveJobId ?? null;
-    if (!baselineId || !jobId) {
-      console.warn("[studio][manual_regenerate_missing_context]", { baselineId, jobId });
-      return;
-    }
-
-    const baselineVersionId = effectiveBaselineVersionId ?? null;
-    const payload = {
-      baselineId,
-      baselineVersionId: baselineVersionId ?? undefined,
-      jobId,
-      forceRegenerate: true,
-      ...(requestedAnalysisId ? { analysisId: requestedAnalysisId } : {}),
+      if (shouldAutoRepairCoverLetter) {
+        const key = buildAutoRepairKey("cover_letter");
+        if (!attemptedAutoRepairKeysRef.current[key]) {
+          attemptedAutoRepairKeysRef.current[key] = true;
+          setCoverAutoRepairing(true);
+          try {
+            await generateArtifactsNow({ resume: false, coverLetter: true, source: "auto_repair" });
+          } finally {
+            setCoverAutoRepairing(false);
+          }
+        }
+      }
     };
-    const [resumeResponse, coverResponse] = await Promise.all([
-      fetch("/api/resume/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }),
-      fetch("/api/cover-letters/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }),
-    ]);
 
-    const [resumePayload, coverPayload] = await Promise.all([
-      readResponsePayload(resumeResponse.clone()),
-      readResponsePayload(coverResponse.clone()),
-    ]);
-
-    if (process.env.NODE_ENV === "development") {
-      console.info("[STUDIO_GENERATE_RESPONSE]", {
-        type: "resume",
-        status: resumeResponse.status,
-        ok: resumeResponse.ok,
-        bodySummary: summarizeStudioBody(resumePayload),
-      });
-      console.info("[STUDIO_GENERATE_RESPONSE]", {
-        type: "cover_letter",
-        status: coverResponse.status,
-        ok: coverResponse.ok,
-        bodySummary: summarizeStudioBody(coverPayload),
-      });
-    }
-
-    console.log("[studio][manual_regenerate_result]", {
-      ok: resumeResponse.ok && coverResponse.ok,
-      resumeStatus: resumeResponse.status,
-      coverStatus: coverResponse.status,
-    });
-
-    if (!resumeResponse.ok) {
-      setResumeState((current) => ({
-        ...current,
-        response: null,
-        error: `Resume generation failed (${resumeResponse.status}): ${summarizeStudioBody(resumePayload)}`,
-        tierGateError: null,
-        artifactFailure: null,
-      }));
-    }
-    if (!coverResponse.ok) {
-      setCoverState((current) => ({
-        ...current,
-        response: null,
-        error: `Cover letter generation failed (${coverResponse.status}): ${summarizeStudioBody(coverPayload)}`,
-        tierGateError: null,
-        artifactFailure: null,
-      }));
-    }
-
-    if (resumeResponse.ok && coverResponse.ok) {
-      // Manual regenerate must always re-hydrate Studio artifacts from persisted readState,
-      // even if auto-generation logic thinks artifacts are already generated.
-      console.info("[studio][manual_regenerate_completed]");
-      const nonceBefore = studioArtifactsRefreshNonce;
-      console.info("[studio][manual_regenerate_nonce]", { before: nonceBefore });
-      await refreshStudioArtifactsAfterGenerate({ expectedResume: true, expectedCover: true });
-      setStudioArtifactsRefreshNonce((current) => {
-        const next = current + 1;
-        console.info("[studio][manual_regenerate_nonce]", { before: current, after: next });
-        return next;
-      });
-    }
+    void maybeTrigger();
   }, [
-    effectiveBaselineId,
-    effectiveBaselineVersionId,
-    effectiveJobId,
-    refreshStudioArtifactsAfterGenerate,
-    requestedAnalysisId,
-    studioArtifactsRefreshNonce,
-    workflowOrchestratorCore.contract?.generation.auto.signature,
+    activeGenerationReadiness.blocked,
+    artifactContract.hasUsableArtifacts,
+    buildAutoRepairKey,
+    generateArtifactsNow,
+    shouldAutoRepairCoverLetter,
+    shouldAutoRepairResume,
+    studioEffectiveGenerationState,
   ]);
 
   const handleGenerateResume = useCallback(async () => {
@@ -11196,13 +11339,15 @@ export default function StudioPage() {
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Resume</h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-              {resumeNeedsRefinement || resumeRequiresCorrectionCopy
-                ? studioEffectiveGenerationState === "generated_unusable"
-                  ? studioRetryInProgress
-                    ? "Resume failed quality checks. Regenerating..."
-                    : "Generation failed quality checks. Please edit or regenerate manually."
-                  : "Resume needs refinement before export."
-                : renderCardStatus(resumeCardStatus, "Resume")}
+              {resumeAutoRepairing
+                ? "Repairing resume…"
+                : resumeNeedsRefinement || resumeRequiresCorrectionCopy
+                  ? studioEffectiveGenerationState === "generated_unusable"
+                    ? studioRetryInProgress
+                      ? "Resume failed quality checks. Regenerating..."
+                      : "Generation failed quality checks. Please edit or regenerate manually."
+                    : "Resume needs refinement before export."
+                  : renderCardStatus(resumeCardStatus, "Resume")}
             </p>
             {(() => {
               const { generationMode, templateVersion } = readGenerationDebug(artifactContract.normalized.resumeResponse);
@@ -11542,7 +11687,9 @@ export default function StudioPage() {
             ) : null}
 
           </div>
-        ) : resumeState.artifactFailure ? null : !hasRenderableResumeContent && (resumeAutoGenerating || resumeGenerateNowPending) ? (
+        ) : resumeState.artifactFailure ? null : resumeAutoRepairing ? (
+          <EmptyState testId="studio-resume-auto-repairing" title="Repairing resume…" body="Regenerating the latest artifact." />
+        ) : !hasRenderableResumeContent && (resumeAutoGenerating || resumeGenerateNowPending) ? (
           <EmptyState
             testId="studio-resume-generating"
             title="Generating your resume..."
@@ -11582,13 +11729,15 @@ export default function StudioPage() {
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Cover letter</h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-              {coverNeedsRefinement || coverRequiresCorrectionCopy
-                ? studioEffectiveGenerationState === "generated_unusable"
-                  ? studioRetryInProgress
-                    ? "Cover letter failed quality checks. Regenerating..."
-                    : "Generation failed quality checks. Please edit or regenerate manually."
-                  : "Cover letter needs refinement before export."
-                : renderCardStatus(coverCardStatus, "Cover letter")}
+              {coverAutoRepairing
+                ? "Repairing cover letter…"
+                : coverNeedsRefinement || coverRequiresCorrectionCopy
+                  ? studioEffectiveGenerationState === "generated_unusable"
+                    ? studioRetryInProgress
+                      ? "Cover letter failed quality checks. Regenerating..."
+                      : "Generation failed quality checks. Please edit or regenerate manually."
+                    : "Cover letter needs refinement before export."
+                  : renderCardStatus(coverCardStatus, "Cover letter")}
             </p>
             {(() => {
               const { generationMode, templateVersion } = readGenerationDebug(artifactContract.normalized.coverLetterResponse);
