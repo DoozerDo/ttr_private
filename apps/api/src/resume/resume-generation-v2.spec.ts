@@ -169,4 +169,74 @@ describe('resume generation v2', () => {
       expect(payload.error.details.rejected.join(',')).toContain('company_candidate:company:project_fragment_terms');
     }
   });
+
+  it('exposes quality gate failure details with path/field/value and fixes trailing fragments', () => {
+    const baselineSections = [
+      {
+        sectionType: 'SUMMARY',
+        content: 'Support leader with 10+ years in B2B SaaS.',
+      },
+      {
+        sectionType: 'EXPERIENCE',
+        content: [
+          'AMS DataSerfs | Senior Data Analyst | 2021 - Present',
+          // Trailing fragment that should be cleaned by V2 before quality gate.
+          '- Built a production platform for a game. The',
+          '- Led incident response and reliability work across teams.',
+        ].join('\n'),
+      },
+    ] as any[];
+
+    const result = buildDeterministicResumeV2FromBaseline({
+      baselineSections: baselineSections as any,
+      identity: { name: 'Test User', contactLine: 'test@example.com' },
+    });
+
+    expect(result.qualityGate.status).toBe('pass');
+    const bullets = result.normalized.experience?.[0]?.bullets ?? [];
+    expect(bullets.some((b) => /\bThe\s*$/.test(String(b)))).toBe(false);
+  });
+
+  it('includes detailed quality gate failures when strict validation rejects the model', () => {
+    const baselineSections = [
+      {
+        sectionType: 'SUMMARY',
+        content: 'Support leader with 10+ years in B2B SaaS.',
+      },
+      {
+        sectionType: 'EXPERIENCE',
+        content: [
+          'AMS DataSerfs | Senior Data Analyst | 2021 - Present',
+          // Placeholder token should trigger strict quality gate (placeholder detection) and yield detailed failures.
+          '- Insert company.',
+        ].join('\n'),
+      },
+    ] as any[];
+
+    try {
+      buildDeterministicResumeV2FromBaseline({
+        baselineSections: baselineSections as any,
+        identity: { name: 'Test User', contactLine: 'test@example.com' },
+      });
+      throw new Error('Expected V2 to fail');
+    } catch (error) {
+      const payload =
+        (error as any)?.response ??
+        (typeof (error as any)?.getResponse === 'function'
+          ? (error as any).getResponse()
+          : null);
+      expect(payload?.error?.code).toBe('resume_v2_quality_gate_failed');
+      expect(Array.isArray(payload?.error?.details?.reasons)).toBe(true);
+      expect(Array.isArray(payload?.error?.details?.failures)).toBe(true);
+      expect(
+        payload.error.details.failures.some(
+          (f: any) =>
+            typeof f?.path === 'string' &&
+            typeof f?.field === 'string' &&
+            'message' in f &&
+            'value' in f,
+        ),
+      ).toBe(true);
+    }
+  });
 });

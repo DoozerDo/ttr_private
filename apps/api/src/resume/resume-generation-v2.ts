@@ -27,8 +27,43 @@ type NormalizedResumeValidationFailure = {
   message: string;
 };
 
+type ResumeQualityGateFailure = {
+  path: string;
+  field: string;
+  value: unknown;
+  message: string;
+  reason: string;
+};
+
 function trimToText(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function removeDanglingTrailingWord(text: string): string {
+  // Keep this local (V2-only) to avoid relying on V1 repair passes.
+  const normalized = trimToText(text);
+  if (!normalized) return '';
+  const tokens = normalized.split(/\s+/);
+  const last = tokens[tokens.length - 1]?.toLowerCase() ?? '';
+  const dangling = new Set([
+    'the',
+    'a',
+    'an',
+    'and',
+    'but',
+    'because',
+    'with',
+    'for',
+    'to',
+    'of',
+    'in',
+    'on',
+    'at',
+    'by',
+    'from',
+  ]);
+  if (!dangling.has(last)) return normalized;
+  return tokens.slice(0, -1).join(' ').trim();
 }
 
 function buildNormalizedResumeValidationFailures(
@@ -164,6 +199,206 @@ function buildFallbackSummaryFromExperience(
     .filter(Boolean)
     .filter((bullet) => bullet.length >= 12);
   return bulletCandidates.slice(0, 2).join(' ');
+}
+
+function buildResumeQualityGateFailures(
+  resume: NormalizedResumeDocument,
+  reasons: string[],
+): ResumeQualityGateFailure[] {
+  const failures: ResumeQualityGateFailure[] = [];
+
+  const experience = Array.isArray(resume.experience) ? resume.experience : [];
+
+  for (const reason of reasons) {
+    if (reason === 'empty_summary') {
+      failures.push({
+        path: 'summary',
+        field: 'summary',
+        value: resume.summary,
+        message: 'Summary is empty.',
+        reason,
+      });
+      continue;
+    }
+
+    if (reason === 'malformed_experience_header:company') {
+      for (let index = 0; index < experience.length; index++) {
+        const entry = experience[index] as any;
+        const company = trimToText(entry?.company);
+        if (!company) {
+          failures.push({
+            path: `experience[${index}].company`,
+            field: 'company',
+            value: entry?.company,
+            message: 'Company is missing.',
+            reason,
+          });
+          continue;
+        }
+        const companyLower = company.toLowerCase();
+        const bannedCompanies = new Set([
+          'experience entry needs correction',
+          'automation & monitoring',
+          'internal web applications',
+          'datacenter operations',
+        ]);
+        if (bannedCompanies.has(companyLower)) {
+          failures.push({
+            path: `experience[${index}].company`,
+            field: 'company',
+            value: entry?.company,
+            message: 'Company is a known invalid placeholder/heading.',
+            reason,
+          });
+          continue;
+        }
+        if (/\b(?:professional\s+experience|experience|projects|skills|education|summary)\b/i.test(company)) {
+          failures.push({
+            path: `experience[${index}].company`,
+            field: 'company',
+            value: entry?.company,
+            message: 'Company looks like a section heading.',
+            reason,
+          });
+          continue;
+        }
+        if (/\bVue\s*3\),\s*deck builder frontend\b/i.test(company)) {
+          failures.push({
+            path: `experience[${index}].company`,
+            field: 'company',
+            value: entry?.company,
+            message: 'Company looks like a project fragment.',
+            reason,
+          });
+          continue;
+        }
+      }
+      continue;
+    }
+
+    if (reason === 'malformed_experience_header:role_title') {
+      for (let index = 0; index < experience.length; index++) {
+        const entry = experience[index] as any;
+        const roleTitle = trimToText(entry?.roleTitle);
+        if (!roleTitle) {
+          failures.push({
+            path: `experience[${index}].roleTitle`,
+            field: 'roleTitle',
+            value: entry?.roleTitle,
+            message: 'Role title is missing.',
+            reason,
+          });
+        } else if (roleTitle.toLowerCase() === 'professional experience') {
+          failures.push({
+            path: `experience[${index}].roleTitle`,
+            field: 'roleTitle',
+            value: entry?.roleTitle,
+            message: 'Role title is a placeholder heading.',
+            reason,
+          });
+        }
+      }
+      continue;
+    }
+
+    if (reason === 'empty_role') {
+      for (let index = 0; index < experience.length; index++) {
+        const entry = experience[index] as any;
+        const company = trimToText(entry?.company);
+        const roleTitle = trimToText(entry?.roleTitle);
+        const bullets = Array.isArray(entry?.bullets)
+          ? (entry.bullets as unknown[]).map((b) => trimToText(b)).filter(Boolean)
+          : [];
+        if ((company || roleTitle) && bullets.length === 0) {
+          failures.push({
+            path: `experience[${index}].bullets`,
+            field: 'bullets',
+            value: entry?.bullets,
+            message: 'Experience entry contains no bullets.',
+            reason,
+          });
+        }
+      }
+      continue;
+    }
+
+    if (reason === 'trailing_fragment') {
+      // Best-effort pinpointing: flag any summary/bullet with dangling trailing word.
+      const summary = typeof resume.summary === 'string' ? trimToText(resume.summary) : '';
+      if (summary && removeDanglingTrailingWord(summary) !== summary) {
+        failures.push({
+          path: 'summary',
+          field: 'summary',
+          value: resume.summary,
+          message: 'Summary ends with a dangling fragment.',
+          reason,
+        });
+      }
+      for (let index = 0; index < experience.length; index++) {
+        const entry = experience[index] as any;
+        const bullets = Array.isArray(entry?.bullets) ? (entry.bullets as unknown[]) : [];
+        for (let bulletIndex = 0; bulletIndex < bullets.length; bulletIndex++) {
+          const bullet = trimToText(bullets[bulletIndex]);
+          if (!bullet) continue;
+          if (removeDanglingTrailingWord(bullet) !== bullet) {
+            failures.push({
+              path: `experience[${index}].bullets[${bulletIndex}]`,
+              field: 'bullets',
+              value: bullets[bulletIndex],
+              message: 'Bullet ends with a dangling fragment.',
+              reason,
+            });
+          }
+        }
+      }
+      continue;
+    }
+
+    if (reason.startsWith('placeholder:')) {
+      const label = reason.slice('placeholder:'.length).toLowerCase();
+      const patterns: Record<string, RegExp> = {
+        tbd: /\bTBD\b/i,
+        todo: /\bTODO\b/i,
+        'lorem ipsum': /\bLorem ipsum\b/i,
+        insert: /\bInsert\b/i,
+        placeholder: /\bPlaceholder\b/i,
+        'n/a': /^(?:N\/A|NA)\b/i,
+      };
+      const pattern = patterns[label] ?? null;
+      if (!pattern) continue;
+
+      const summary = typeof resume.summary === 'string' ? String(resume.summary) : '';
+      if (summary && pattern.test(summary)) {
+        failures.push({
+          path: 'summary',
+          field: 'summary',
+          value: resume.summary,
+          message: `Summary contains placeholder text (${reason}).`,
+          reason,
+        });
+      }
+      for (let index = 0; index < experience.length; index++) {
+        const entry = experience[index] as any;
+        const bullets = Array.isArray(entry?.bullets) ? (entry.bullets as unknown[]) : [];
+        for (let bulletIndex = 0; bulletIndex < bullets.length; bulletIndex++) {
+          const bulletRaw = String(bullets[bulletIndex] ?? '');
+          if (pattern.test(bulletRaw)) {
+            failures.push({
+              path: `experience[${index}].bullets[${bulletIndex}]`,
+              field: 'bullets',
+              value: bullets[bulletIndex],
+              message: `Bullet contains placeholder text (${reason}).`,
+              reason,
+            });
+          }
+        }
+      }
+
+      continue;
+    }
+  }
+
+  return failures;
 }
 
 function hasUnmatchedClosingParen(value: string): boolean {
@@ -391,6 +626,22 @@ export function buildDeterministicResumeV2FromBaseline(input: {
 
   const normalized = assembleResumeFromStructuredBaseline(structured, input.identity);
 
+  // V2 cleanup (deterministic): remove dangling trailing fragments that cause strict quality failures.
+  (normalized as any).summary =
+    typeof (normalized as any).summary === 'string'
+      ? removeDanglingTrailingWord((normalized as any).summary)
+      : (normalized as any).summary;
+  (normalized as any).experience = (Array.isArray((normalized as any).experience) ? (normalized as any).experience : []).map(
+    (entry: any) => {
+      const bullets = Array.isArray(entry?.bullets)
+        ? (entry.bullets as unknown[])
+            .map((b) => removeDanglingTrailingWord(trimToText(b)))
+            .filter(Boolean)
+        : entry?.bullets;
+      return { ...entry, bullets };
+    },
+  );
+
   // Enforce summary fallback (non-optional) after model creation.
   if (!trimToText((normalized as any).summary)) {
     (normalized as any).summary = buildFallbackSummaryFromExperience(normalized.experience as any);
@@ -416,11 +667,15 @@ export function buildDeterministicResumeV2FromBaseline(input: {
 
   const qualityGate = validateResumeArtifactQualityStrict(normalized);
   if (qualityGate.status !== 'pass') {
+    const failures = buildResumeQualityGateFailures(normalized as NormalizedResumeDocument, qualityGate.reasons ?? []);
     throw new UnprocessableEntityException({
       error: {
         code: 'resume_v2_quality_gate_failed',
         message: 'Resume V2 quality gate rejected the normalized model.',
-        details: qualityGate,
+        details: {
+          reasons: qualityGate.reasons ?? [],
+          failures,
+        },
       },
     });
   }
