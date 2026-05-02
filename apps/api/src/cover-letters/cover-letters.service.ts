@@ -104,6 +104,7 @@ import {
 } from '../artifacts/artifactQualityValidator';
 import { trimIncompleteTrailingFragments } from '../artifacts/artifactQualityValidator';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
+import { evaluateBaselineTemplateReadiness } from '../baseline/baselineTemplateReadiness';
 import { assembleCoverLetterFromStructuredBaseline } from './coverLetterTemplateAssembler';
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
 import { resolveSyntheticCandidateName } from './candidate-name.util';
@@ -135,6 +136,7 @@ type CoverLetterDraft = {
     audit: ValidateAndAuditResult['audit'];
   };
   analysisAssessment: FitAssessment;
+  templateReadiness: ReturnType<typeof evaluateBaselineTemplateReadiness>;
 };
 
 type ComplianceEvaluationResult = {
@@ -987,6 +989,15 @@ export class CoverLettersService {
         draft.analysisAssessment, 
       ); 
       const readiness = this.buildReadinessFromFlags(flags); 
+      if (!draft.templateReadiness.canGenerateCoverLetter) {
+        return {
+          status: 'blocked',
+          blocked: true,
+          compliance_flags: flags,
+          reasons: draft.templateReadiness.reasons,
+          canGenerateCoverLetter: false,
+        } as const;
+      }
       const score = draft.analysisAssessment?.overallScore ?? null; 
       if ( 
         typeof score === 'number' && 
@@ -1006,7 +1017,10 @@ export class CoverLettersService {
           ], 
         } as const; 
       } 
-      return readiness; 
+      return {
+        ...readiness,
+        canGenerateCoverLetter: true,
+      } as const;
     } catch (error) { 
       // Readiness is a preflight signal. If post-processing rejects the first-pass draft, 
       // return a limited readiness signal rather than surfacing a terminal generation failure. 
@@ -1223,6 +1237,11 @@ export class CoverLettersService {
         BaselineIncludePolicy.NEVER,
     );
 
+    const structuredBaseline = extractStructuredBaselineFromSections(
+      allowedSections as any,
+    );
+    const templateReadiness = evaluateBaselineTemplateReadiness(structuredBaseline);
+
     const baselineText = allowedSections
       .map((section) => section.content ?? '')
       .join('\n');
@@ -1299,25 +1318,25 @@ export class CoverLettersService {
       const TEMPLATE_ASSEMBLY_THRESHOLD = 80;
       const scoreForTemplate = latestAssessment?.overallScore ?? 0;
       if (typeof scoreForTemplate === 'number' && scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD) {
-        const structured = extractStructuredBaselineFromSections(allowedSections as any);
-        if ((structured.experience ?? []).length === 0) {
+        if (!templateReadiness.canGenerateCoverLetter) {
           throw new UnprocessableEntityException(buildArtifactFailurePayload({
-            code: 'generation_blocked',
-            category: 'generation_blocked',
-            message: 'Cover letter could not be assembled because required baseline evidence is missing.',
-            detail: 'A fit score >= 80 requires structured baseline experience entries (company + role title).',
+            code: 'baseline_template_not_ready',
+            category: 'unsupported_input',
+            message: 'Cover letter could not be assembled because the baseline is not template-safe.',
+            detail: 'A baseline that is usable for scoring must be template-safe for cover letter generation.',
             retryable: false,
             userAction: {
               title: 'Add verified experience structure',
               description: 'Ensure your baseline includes Experience entries with company and role title headers.',
             },
             diagnostics: {
-              missingRequirements: structured.missingEvidenceReasons.slice(0, 6),
+              missingRequirements: structuredBaseline.missingEvidenceReasons.slice(0, 6),
+              failureReasons: templateReadiness.reasons.map((reason) => reason.message),
             },
           }));
         }
         const document = assembleCoverLetterFromStructuredBaseline({
-          structured,
+          structured: structuredBaseline,
           senderName: candidateName || 'Candidate',
           senderContactLine: null,
           jobTitle: job?.title ?? null,
@@ -1656,6 +1675,7 @@ export class CoverLettersService {
       generationInputsHash,
       generation,
       complianceResult,
+      templateReadiness,
     };
   }
 

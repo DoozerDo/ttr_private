@@ -19,10 +19,39 @@ export function isAllowedStructuredTemplateExperienceHeader(input: {
   const roleTitle = trimToText(input.roleTitle);
   if (!company) return false;
 
-  // Hard rejects for known malformed values we must never surface in preview output.
-  if (company === 'Vue 3), deck builder frontend') return false;
-  if (company === 'Infrastructure & Deployment') return false;
-  if (roleTitle === 'Professional Experience') return false;
+  const normalizedCompany = company.toLowerCase();
+  const normalizedRole = roleTitle.toLowerCase();
+
+  // Reject obvious section headings / placeholders.
+  if (/\b(?:professional\s+experience|experience|projects|skills|education|summary)\b/i.test(company)) return false;
+  if (normalizedRole === 'professional experience') return false;
+  if (
+    [
+      'automation & monitoring',
+      'internal web applications',
+      'datacenter operations',
+      'infrastructure & deployment',
+    ].includes(normalizedCompany)
+  ) {
+    return false;
+  }
+
+  // Reject unmatched closing punctuation commonly found in fragments like "Vue 3), ...".
+  const openParens = (company.match(/\(/g) ?? []).length;
+  const closeParens = (company.match(/\)/g) ?? []).length;
+  if (closeParens > openParens) return false;
+
+  // Reject technology / project fragments being promoted as companies.
+  if (/\b(?:vue|react|angular|frontend|back\s*end|backend|full[-\s]*stack|builder|deck)\b/i.test(company)) {
+    return false;
+  }
+
+  // Reject obvious sentence/project fragments.
+  if (/[,.]/.test(company)) return false;
+  if (company.endsWith('.')) return false;
+
+  // Reject known invalid placeholders.
+  if (normalizedCompany === 'experience entry needs correction') return false;
 
   return true;
 }

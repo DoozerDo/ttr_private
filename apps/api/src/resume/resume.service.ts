@@ -97,6 +97,7 @@ import { sanitizeResumeForTrailingFragments, trimIncompleteTrailingFragments } f
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
 import { sanitizeResumePreviewForStudio } from './resumePreviewSanitizer';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
+import { evaluateBaselineTemplateReadiness } from '../baseline/baselineTemplateReadiness';
 import {
   assembleResumeFromStructuredBaseline,
   isAllowedStructuredTemplateExperienceHeader,
@@ -1720,6 +1721,20 @@ export class ResumeService {
         skipReadinessGate: true,
       });
       if (readiness.status !== 'ready') {
+        const templateNotReadyReason = (readiness as any)?.reasons?.find?.(
+          (r: any) => r?.code === 'baseline_template_not_ready',
+        );
+        if (templateNotReadyReason && jobId && analysisId && !request.oneTap) {
+          throw new UnprocessableEntityException({
+            error: {
+              code: 'baseline_template_not_ready',
+              message:
+                'Baseline is usable for scoring but is not template-safe for resume generation.',
+              details: templateNotReadyReason?.details ?? {},
+            },
+          });
+        }
+
         const score = effectiveAssessment?.overallScore ?? null;
         if (
           typeof score === 'number' &&
@@ -1796,6 +1811,28 @@ export class ResumeService {
     const resumeInputSections =
       this.promoteExperienceLikeSections(allowedSections);
 
+    const templateReadinessForBaseline = evaluateBaselineTemplateReadiness(
+      extractStructuredBaselineFromSections(resumeInputSections as any),
+    );
+
+    const enforceTemplateReadiness =
+      // Enforce when Studio is requesting generation against a completed analysis context
+      // (baseline was accepted as usable enough to score) and we are not in verified-only mode.
+      Boolean(jobId?.trim()) && Boolean(analysisId?.trim()) && !Boolean(request.oneTap);
+
+    if (enforceTemplateReadiness && !templateReadinessForBaseline.canGenerateResume) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'baseline_template_not_ready',
+          message:
+            'Baseline is usable for scoring but is not template-safe for resume generation.',
+          details: {
+            reasons: templateReadinessForBaseline.reasons,
+          },
+        },
+      });
+    }
+
     minimalDraftSectionsForFailSafe = this.buildMinimalResumeSections(resumeInputSections);
 
     const baselineText = allowedSections
@@ -1819,6 +1856,21 @@ export class ResumeService {
           },
         };
         throw new UnprocessableEntityException(payload);
+      }
+
+      if (enforceTemplateReadiness) {
+        // In the Studio template lane we fail loudly instead of persisting a minimal fallback.
+        throw new UnprocessableEntityException({
+          error: {
+            code: 'baseline_template_not_ready',
+            message:
+              'Baseline is usable for scoring but is not template-safe for resume generation.',
+            details: {
+              reasons: templateReadinessForBaseline.reasons,
+              insufficientExtractedText: insufficientBaselineDetails,
+            },
+          },
+        });
       }
 
       // Fail-soft: if extraction heuristics say the baseline is thin, still return a minimal,
@@ -1851,6 +1903,9 @@ export class ResumeService {
     const latestAssessment = jobId
       ? await this.findLatestAssessment(userId, jobId, baseline.id)
       : null;
+
+    // Template readiness enforcement is gated by Studio/template-lane context (see above) rather
+    // than raw score heuristics.
     studioArtifactContext.baselineId = baseline.id;
     studioArtifactContext.jobId = job?.id ?? jobId;
     studioArtifactContext.baselineVersionId = baselineVersion.id;
@@ -2019,7 +2074,9 @@ export class ResumeService {
     );
     forceTemplateRegen =
       isResumeV2 ||
-      (Number.isFinite(scoreForTemplate) && scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD);
+      (!request.oneTap &&
+        Number.isFinite(scoreForTemplate) &&
+        scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD);
     let usedStructuredBaselineTemplate = false;
     let structuredBaselineExtractionMissingReasons: string[] | null = null;
     let structuredBaselineTrace: {
@@ -2063,6 +2120,24 @@ export class ResumeService {
         structured.experience = (structured.experience ?? []).filter((entry) =>
           isAllowedStructuredTemplateExperienceHeader(entry),
         );
+        if (
+          Boolean(request.analysisId?.trim()) &&
+          Boolean(jobId) &&
+          (structured.experience ?? []).length === 0
+        ) {
+          // Studio contract: if analysis/scoring context exists and the template lane is selected,
+          // the baseline must already be template-safe. Do not emit a "successful" minimal fallback.
+          throw new UnprocessableEntityException({
+            error: {
+              code: 'baseline_template_not_ready',
+              message:
+                'Baseline is usable for scoring but is not template-safe for resume generation.',
+              details: {
+                missingEvidenceReasons: structured.missingEvidenceReasons ?? [],
+              },
+            },
+          });
+        }
         if (process.env.TEMPLATE_FILTER_TRACE === 'true') {
           try {
             // eslint-disable-next-line no-console
@@ -3403,6 +3478,35 @@ export class ResumeService {
       });
     }
 
+    const shouldEnforceTemplateReadiness =
+      // Enforce template readiness when Studio is requesting generation against a completed
+      // analysis context (baseline accepted as usable enough to score).
+      Boolean(request.analysisId?.trim()) &&
+      Boolean(request.jobId?.trim()) &&
+      !Boolean(request.oneTap);
+
+    if (shouldEnforceTemplateReadiness) {
+      const baseline = await this.baselineRepository.findOne({
+        where: { id: request.baselineId, userId },
+        relations: ['sections', 'parsedRecords'],
+        order: { sections: { order: 'ASC' } },
+      });
+      if (baseline) {
+        const sourceSections = resolveBaselineSectionsForGeneration(baseline);
+        const structuredBaseline = extractStructuredBaselineFromSections(sourceSections as any);
+        const templateReadiness = evaluateBaselineTemplateReadiness(structuredBaseline);
+        if (!templateReadiness.canGenerateResume) {
+          return {
+            status: 'blocked' as const,
+            blocked: true,
+            compliance_flags: [],
+            reasons: templateReadiness.reasons as any,
+            canGenerateResume: false,
+          };
+        }
+      }
+    }
+
     let generation: Awaited<ReturnType<ResumeService['generateResume']>> | null = null;
     const preflightOneTap = Boolean(request.oneTap);
     try {
@@ -3425,6 +3529,18 @@ export class ResumeService {
         (responseRecord?.code as string | undefined) ??
         ((responseRecord?.error as Record<string, unknown> | undefined)
           ?.code as string | undefined);
+      if (code === 'baseline_template_not_ready') {
+        return {
+          status: 'blocked' as const,
+          blocked: true,
+          compliance_flags: [],
+          reasons:
+            ((responseRecord?.error as Record<string, unknown> | undefined)
+              ?.details as any)?.reasons ??
+            ([{ code: 'baseline_template_not_ready', message: 'Baseline is not template-ready.' }] as any),
+          canGenerateResume: false,
+        };
+      }
       if (code === 'generation_blocked' || code === 'generation_failed') { 
         const score = analysisAssessment?.overallScore ?? null; 
         const generateNowEligible =
@@ -3545,7 +3661,6 @@ export class ResumeService {
     ); 
     const blocked = flags.some((flag) => flag.severity === 'block'); 
     const warningFlags = flags.filter((flag) => flag.severity === 'warn'); 
-    const score = analysisAssessment?.overallScore ?? null;
     const generateNowEligible =
       typeof score === 'number' && score >= VERIFIED_ONLY_GENERATION_THRESHOLD;
     if (warningFlags.length > 0 || blocked) {
@@ -3645,20 +3760,20 @@ export class ResumeService {
           })()
         : null;
 
-    return { 
-      status: blocked ? 'blocked' : warningFlags.length > 0 ? 'limited' : 'ready', 
-      blocked, 
-      compliance_flags: flags, 
-      reasons: 
-        blocked 
-          ? [ 
-              { 
-                code: 'full_block', 
-                message: 
-                  'Some claims required for tailored generation could not be verified against your baseline.', 
-              }, 
-            ] 
-          : warningFlags.length > 0 
+    return {
+      status: blocked ? 'blocked' : warningFlags.length > 0 ? 'limited' : 'ready',
+      blocked,
+      compliance_flags: flags,
+      reasons:
+        blocked
+          ? [
+              {
+                code: 'full_block',
+                message:
+                  'Some claims required for tailored generation could not be verified against your baseline.',
+              },
+            ]
+          : warningFlags.length > 0
             ? [
                 ...(readinessDiagnostics
                   ? [
@@ -3670,14 +3785,15 @@ export class ResumeService {
                       } as any,
                     ]
                   : []),
-                { 
-                  code: 'personalization_limitation', 
-                  message: 
-                    'This role scored highly, but document generation is currently limited by verification constraints.', 
-                }, 
-              ] 
-            : [], 
-    }; 
+                {
+                  code: 'personalization_limitation',
+                  message:
+                    'This role scored highly, but document generation is currently limited by verification constraints.',
+                },
+              ]
+            : [],
+      canGenerateResume: true,
+    };
     } catch (error) {
       this.logger.error('[resume-readiness] exception', {
         userId,

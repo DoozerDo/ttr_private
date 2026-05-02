@@ -1159,6 +1159,10 @@ export default function StudioPage() {
   const [resumeFocus, setResumeFocus] = useState<ResumeFocusOption>("Auto (recommended)");
   const [savedEditedResumeModel, setSavedEditedResumeModel] = useState<ResumeModel | null>(null);
   const [draftResumeModel, setDraftResumeModel] = useState<ResumeModel | null>(null);
+  const draftResumeModelRef = useRef<ResumeModel | null>(null);
+  useEffect(() => {
+    draftResumeModelRef.current = draftResumeModel;
+  }, [draftResumeModel]);
   const [isResumeEditMode, setIsResumeEditMode] = useState(false);
   const [resumeEditError, setResumeEditError] = useState<string | null>(null);
 
@@ -1701,6 +1705,26 @@ export default function StudioPage() {
   const effectiveBaselineId = selectedBaselineId || requestedBaselineId || trimId(analysis?.baselineId);
   const effectiveBaselineVersionId =
     selectedBaselineVersionId || requestedBaselineVersionId || trimId(analysis?.baselineVersionId);
+
+  const editedResumeStorageKey = useMemo(() => {
+    const baselineVersionId = effectiveBaselineVersionId ?? "none";
+    const jobId = effectiveJobId ?? "none";
+    return `ttr:studio:editedResume:${baselineVersionId}:${jobId}`;
+  }, [effectiveBaselineVersionId, effectiveJobId]);
+
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined" || !window.localStorage) return;
+      const raw = window.localStorage.getItem(editedResumeStorageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as ResumeModel;
+      if (parsed && typeof parsed === "object") {
+        setSavedEditedResumeModel(parsed);
+      }
+    } catch {
+      // ignore
+    }
+  }, [editedResumeStorageKey]);
   const currentWorkflowScope = useMemo<WorkflowRequestScope>(
     () => ({
       baselineId: effectiveBaselineId || null,
@@ -2885,11 +2909,23 @@ export default function StudioPage() {
         : readCanonicalResumePreviewPayload(artifactContract.normalized.resumeResponse),
     [artifactContract.normalized.resumeResponse, artifactContract.results.resume, resumeState.artifactFailure],
   );
+  const resumePreviewPayloadForRender = useMemo(() => {
+    if (!canonicalResumePreviewPayload) {
+      if (effectiveResumeModel) return { preview: { resume: effectiveResumeModel } };
+      return null;
+    }
+    if (isResumeEditMode || hasSavedResumeEdits) {
+      // Render from the editable model so edits are reflected immediately.
+      if (!effectiveResumeModel) return canonicalResumePreviewPayload;
+      return { preview: { resume: effectiveResumeModel } };
+    }
+    return canonicalResumePreviewPayload;
+  }, [canonicalResumePreviewPayload, effectiveResumeModel, hasSavedResumeEdits, isResumeEditMode]);
   const hasRenderableResumeContent = useMemo(() => {
     if (resumeState.artifactFailure) return false;
-    if (canonicalResumePreviewPayload) return true;
+    if (resumePreviewPayloadForRender) return true;
     return typeof resumePreviewText === "string" && resumePreviewText.trim().length > 0;
-  }, [canonicalResumePreviewPayload, resumePreviewText, resumeState.artifactFailure]);
+  }, [resumePreviewPayloadForRender, resumePreviewText, resumeState.artifactFailure]);
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
     if (!canonicalResumePreviewPayload) return;
@@ -6185,14 +6221,28 @@ export default function StudioPage() {
   };
 
   const handleEnterResumeEditMode = useCallback(() => {
-    if (!effectiveResumeModel) {
+    const modelForEdit = effectiveResumeModel ?? readResumeModel(resumePreviewPayloadForRender);
+    if (!modelForEdit) {
       setResumeEditError("Generate a resume before editing.");
       return;
     }
-    setDraftResumeModel(JSON.parse(JSON.stringify(effectiveResumeModel)) as ResumeModel);
+    const cloned = JSON.parse(JSON.stringify(modelForEdit)) as ResumeModel;
+    // Guardrail: if the current artifact contains known-malformed experience fragments,
+    // keep them editable/removable by ensuring they render as proper experience entries.
+    // (This does not persist until the user saves edits.)
+    if (Array.isArray(cloned.experience)) {
+      cloned.experience = cloned.experience.map((entry) => ({
+        ...entry,
+        company: typeof entry.company === "string" ? entry.company : "",
+        roleTitle: typeof entry.roleTitle === "string" ? entry.roleTitle : "",
+        dateRange: typeof (entry as any).dateRange === "string" ? (entry as any).dateRange : "",
+        bullets: Array.isArray((entry as any).bullets) ? (entry as any).bullets : [],
+      }));
+    }
+    setDraftResumeModel(cloned);
     setResumeEditError(null);
     setIsResumeEditMode(true);
-  }, [effectiveResumeModel]);
+  }, [effectiveResumeModel, resumePreviewPayloadForRender]);
 
   const handleResumeSummaryChange = useCallback((value: string) => {
     setDraftResumeModel((current) => {
@@ -6217,6 +6267,50 @@ export default function StudioPage() {
     [],
   );
 
+  const handleResumeExperienceHeaderChange = useCallback(
+    (experienceIndex: number, field: "company" | "roleTitle" | "location", value: string) => {
+      setDraftResumeModel((current) => {
+        if (!current?.experience) return current;
+        const nextExperience = current.experience.map((entry, index) => {
+          if (index !== experienceIndex) return entry;
+          return { ...entry, [field]: value };
+        });
+        return { ...current, experience: nextExperience };
+      });
+    },
+    [],
+  );
+
+  const handleResumeExperienceDateRangeChange = useCallback((experienceIndex: number, value: string) => {
+    setDraftResumeModel((current) => {
+      if (!current?.experience) return current;
+      const nextExperience = current.experience.map((entry, index) => {
+        if (index !== experienceIndex) return entry;
+        return { ...entry, dateRange: value };
+      });
+      return { ...current, experience: nextExperience };
+    });
+  }, []);
+
+  const handleRemoveResumeExperienceEntry = useCallback((experienceIndex: number) => {
+    setDraftResumeModel((current) => {
+      if (!current?.experience) return current;
+      const nextExperience = current.experience.filter((_, index) => index !== experienceIndex);
+      return { ...current, experience: nextExperience };
+    });
+  }, []);
+
+  const handleAddResumeExperienceEntry = useCallback(() => {
+    setDraftResumeModel((current) => {
+      if (!current) return current;
+      const nextExperience = [
+        ...(current.experience ?? []),
+        { company: "", roleTitle: "", location: "", dateRange: "", bullets: [""] },
+      ];
+      return { ...current, experience: nextExperience };
+    });
+  }, []);
+
   const handleCancelResumeEdits = useCallback(() => {
     setDraftResumeModel(savedEditedResumeModel ?? generatedResumeModel);
     setIsResumeEditMode(false);
@@ -6224,15 +6318,35 @@ export default function StudioPage() {
   }, [generatedResumeModel, savedEditedResumeModel]);
 
   const handleSaveResumeEdits = useCallback(() => {
-    if (!draftResumeModel) {
+    const modelToSave = draftResumeModelRef.current;
+    if (!modelToSave) {
       setResumeEditError("No generated resume content is available to save.");
       return;
     }
 
-    setSavedEditedResumeModel(draftResumeModel);
+    const sanitized: ResumeModel = (() => {
+      if (!Array.isArray(modelToSave.experience)) return modelToSave;
+      const filtered = modelToSave.experience.filter((entry) => {
+        const company = typeof entry.company === "string" ? entry.company.trim() : "";
+        if (!company) return true;
+        // Hard block known malformed "company" fragments that should never be treated as organizations.
+        if (/vue/i.test(company) && company.includes(")")) return false;
+        return true;
+      });
+      return filtered === modelToSave.experience ? modelToSave : { ...modelToSave, experience: filtered };
+    })();
+
+    setSavedEditedResumeModel(sanitized);
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        window.localStorage.setItem(editedResumeStorageKey, JSON.stringify(sanitized));
+      }
+    } catch {
+      // ignore
+    }
     setIsResumeEditMode(false);
     setResumeEditError(null);
-  }, [draftResumeModel]);
+  }, [editedResumeStorageKey]);
 
   const exportResume = async (format: "docx" | "pdf") => {
     if (!canProceedWithStudioDrafts) {
@@ -8602,9 +8716,9 @@ export default function StudioPage() {
                         </summary>
                       </details>
                     </div>
-                  ) : canonicalResumePreviewPayload ? (
+                  ) : resumePreviewPayloadForRender ? (
                     <ResumePreview
-                      payload={canonicalResumePreviewPayload}
+                      payload={resumePreviewPayloadForRender}
                       isEditing={isResumeEditMode}
                       hasUnsavedChanges={hasUnsavedResumeEdits}
                       onEnterEditMode={handleEnterResumeEditMode}
@@ -8612,6 +8726,10 @@ export default function StudioPage() {
                       onCancelEdits={handleCancelResumeEdits}
                       onSummaryChange={handleResumeSummaryChange}
                       onBulletChange={handleResumeBulletChange}
+                      onExperienceHeaderChange={handleResumeExperienceHeaderChange}
+                      onExperienceDateRangeChange={handleResumeExperienceDateRangeChange}
+                      onRemoveExperienceEntry={handleRemoveResumeExperienceEntry}
+                      onAddExperienceEntry={handleAddResumeExperienceEntry}
                     />
                   ) : (
                     <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
@@ -9893,7 +10011,7 @@ export default function StudioPage() {
     [activeGenerationReadiness.blocked],
   );
 
-  const shouldAutoRepairResume = useMemo(() => {
+  const resumeAutoRepairEvaluation = useMemo(() => {
     const evaluation = shouldAutoRepairArtifact("resume", resumeResult, artifactContract.results.resume, {
       autoRepairing: resumeAutoRepairing,
       generating: Boolean(
@@ -9909,7 +10027,7 @@ export default function StudioPage() {
       eligible: evaluation.eligible,
       reason: evaluation.reason,
     });
-    return evaluation.eligible;
+    return evaluation;
   }, [
     artifactContract.results.resume,
     pageTruth.isGenerating,
@@ -9922,7 +10040,7 @@ export default function StudioPage() {
     shouldAutoRepairArtifact,
   ]);
 
-  const shouldAutoRepairCoverLetter = useMemo(() => {
+  const coverAutoRepairEvaluation = useMemo(() => {
     const evaluation = shouldAutoRepairArtifact("cover_letter", coverLetterResult, artifactContract.results.coverLetter, {
       autoRepairing: coverAutoRepairing,
       generating: Boolean(
@@ -9938,7 +10056,7 @@ export default function StudioPage() {
       eligible: evaluation.eligible,
       reason: evaluation.reason,
     });
-    return evaluation.eligible;
+    return evaluation;
   }, [
     artifactContract.results.coverLetter,
     coverAutoGenerating,
@@ -9978,26 +10096,26 @@ export default function StudioPage() {
     if (autoRepairGenerationInFlight) return;
 
     const maybeTrigger = async () => {
-      if (shouldAutoRepairResume) {
-        if (!attemptedAutoRepairKeysRef.current[resumeAutoRepairKey]) {
-          attemptedAutoRepairKeysRef.current[resumeAutoRepairKey] = true;
-          setResumeAutoRepairing(true);
-          try {
-            await generateArtifactsNow({ resume: true, coverLetter: false, source: "auto_repair" });
-          } finally {
-            setResumeAutoRepairing(false);
-          }
+      const resumeEligible = resumeAutoRepairEvaluation.eligible;
+      const coverEligible = coverAutoRepairEvaluation.eligible;
+
+      if (resumeEligible && !attemptedAutoRepairKeysRef.current[resumeAutoRepairKey]) {
+        attemptedAutoRepairKeysRef.current[resumeAutoRepairKey] = true;
+        setResumeAutoRepairing(true);
+        try {
+          await generateArtifactsNow({ resume: true, coverLetter: false, source: "auto_repair" });
+        } finally {
+          setResumeAutoRepairing(false);
         }
       }
-      if (shouldAutoRepairCoverLetter) {
-        if (!attemptedAutoRepairKeysRef.current[coverAutoRepairKey]) {
-          attemptedAutoRepairKeysRef.current[coverAutoRepairKey] = true;
-          setCoverAutoRepairing(true);
-          try {
-            await generateArtifactsNow({ resume: false, coverLetter: true, source: "auto_repair" });
-          } finally {
-            setCoverAutoRepairing(false);
-          }
+
+      if (coverEligible && !attemptedAutoRepairKeysRef.current[coverAutoRepairKey]) {
+        attemptedAutoRepairKeysRef.current[coverAutoRepairKey] = true;
+        setCoverAutoRepairing(true);
+        try {
+          await generateArtifactsNow({ resume: false, coverLetter: true, source: "auto_repair" });
+        } finally {
+          setCoverAutoRepairing(false);
         }
       }
     };
@@ -10008,12 +10126,12 @@ export default function StudioPage() {
     artifactContract.results.resume,
     autoRepairGenerationInFlight,
     coverAutoRepairKey,
+    coverAutoRepairEvaluation.eligible,
     effectiveBaselineId,
     effectiveJobId,
     generateArtifactsNow,
     resumeAutoRepairKey,
-    shouldAutoRepairCoverLetter,
-    shouldAutoRepairResume,
+    resumeAutoRepairEvaluation.eligible,
   ]);
 
   const handleGenerateResume = useCallback(async () => {
@@ -11699,9 +11817,9 @@ export default function StudioPage() {
                     </summary>
                   </details>
                 </div>
-              ) : canonicalResumePreviewPayload ? (
+              ) : resumePreviewPayloadForRender ? (
                 <ResumePreview
-                  payload={canonicalResumePreviewPayload}
+                  payload={resumePreviewPayloadForRender}
                   isEditing={isResumeEditMode}
                   hasUnsavedChanges={hasUnsavedResumeEdits}
                   onEnterEditMode={handleEnterResumeEditMode}
@@ -11709,6 +11827,10 @@ export default function StudioPage() {
                   onCancelEdits={handleCancelResumeEdits}
                   onSummaryChange={handleResumeSummaryChange}
                   onBulletChange={handleResumeBulletChange}
+                  onExperienceHeaderChange={handleResumeExperienceHeaderChange}
+                  onExperienceDateRangeChange={handleResumeExperienceDateRangeChange}
+                  onRemoveExperienceEntry={handleRemoveResumeExperienceEntry}
+                  onAddExperienceEntry={handleAddResumeExperienceEntry}
                 />
               ) : (
                 <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">

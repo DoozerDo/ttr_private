@@ -2,6 +2,7 @@ import { UnprocessableEntityException } from '@nestjs/common';
 import type { BaselineSection } from '../baseline/baseline-section.entity';
 import type { NormalizedResumeDocument } from '../documents/normalized-document.models';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
+import { evaluateBaselineTemplateReadiness } from '../baseline/baselineTemplateReadiness';
 import {
   assembleResumeFromStructuredBaseline,
   isAllowedStructuredTemplateExperienceHeader,
@@ -609,14 +610,17 @@ export function buildDeterministicResumeV2FromBaseline(input: {
   });
 
   if (allowedExperience.length === 0) {
+    const templateReadiness = evaluateBaselineTemplateReadiness(structured);
     throw new UnprocessableEntityException({
       error: {
-        code: 'resume_v2_invalid_experience_fragments',
-        message: 'Resume V2 rejected malformed experience headers (company + role title required).',
+        code: 'baseline_template_not_ready',
+        message:
+          'Baseline is usable for scoring but is not template-safe for resume generation.',
         details: {
           extractedExperienceCount: structuredExperience.length,
           extractedMissingEvidenceReasons: structured.missingEvidenceReasons ?? [],
           rejected: [...invalidReasons, ...companyCandidateDiagnostics],
+          reasons: templateReadiness.reasons,
         },
       },
     });

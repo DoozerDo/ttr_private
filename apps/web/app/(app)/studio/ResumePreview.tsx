@@ -40,6 +40,14 @@ type Props = {
   onCancelEdits?: () => void;
   onSummaryChange?: (value: string) => void;
   onBulletChange?: (experienceIndex: number, bulletIndex: number, value: string) => void;
+  onExperienceHeaderChange?: (
+    experienceIndex: number,
+    field: "company" | "roleTitle" | "location",
+    value: string,
+  ) => void;
+  onExperienceDateRangeChange?: (experienceIndex: number, value: string) => void;
+  onRemoveExperienceEntry?: (experienceIndex: number) => void;
+  onAddExperienceEntry?: () => void;
 };
 
 function toText(value: unknown): string {
@@ -154,6 +162,10 @@ export function ResumePreview({
   onCancelEdits,
   onSummaryChange,
   onBulletChange,
+  onExperienceHeaderChange,
+  onExperienceDateRangeChange,
+  onRemoveExperienceEntry,
+  onAddExperienceEntry,
 }: Props) {
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
@@ -396,9 +408,21 @@ export function ResumePreview({
 
       {visibleExperiences.length ? (
         <section className="space-y-4" data-testid="studio-resume-experience-section">
-          <h3 className="text-xs font-semibold uppercase tracking-[0.32em] text-slate-400">
-            Professional Experience
-          </h3>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-xs font-semibold uppercase tracking-[0.32em] text-slate-400">
+              Professional Experience
+            </h3>
+            {isEditing ? (
+              <button
+                type="button"
+                onClick={() => onAddExperienceEntry?.()}
+                className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-slate-100 transition hover:bg-white/[0.06]"
+                data-testid="studio-add-experience-entry"
+              >
+                Add role
+              </button>
+            ) : null}
+          </div>
           <div className="space-y-6" data-testid="studio-resume-experience-accordion">
             {visibleExperiences.map(({ entry, index: experienceIndex }) => {
               const expanded = expandedExperienceIndex === experienceIndex;
@@ -416,23 +440,65 @@ export function ResumePreview({
                 >
                   {isEditing ? (
                     <div className="flex items-start justify-between gap-3 border-b border-white/10 px-6 py-5 text-left">
-                      <div className="space-y-1">
-                        {safeHeader.company ? (
-                          <p className="text-lg font-semibold text-slate-50">{safeHeader.company}</p>
-                        ) : null}
-                        {safeHeader.roleTitle ? (
-                          <p className="text-base font-medium text-slate-200">{safeHeader.roleTitle}</p>
-                        ) : null}
+                      <div className="w-full space-y-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-[220px] flex-1 space-y-2">
+                            <input
+                              aria-label={`Company ${experienceIndex + 1}`}
+                              value={safeHeader.company}
+                              onChange={(event) =>
+                                onExperienceHeaderChange?.(experienceIndex, "company", event.target.value)
+                              }
+                              className="w-full rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2 text-sm font-semibold text-slate-100 outline-none transition focus:border-sky-300/40"
+                              data-testid={`studio-experience-company-input-${experienceIndex}`}
+                            />
+                            <input
+                              aria-label={`Role title ${experienceIndex + 1}`}
+                              value={safeHeader.roleTitle}
+                              onChange={(event) =>
+                                onExperienceHeaderChange?.(experienceIndex, "roleTitle", event.target.value)
+                              }
+                              className="w-full rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-sky-300/40"
+                              data-testid={`studio-experience-role-input-${experienceIndex}`}
+                            />
+                            <input
+                              aria-label={`Location ${experienceIndex + 1}`}
+                              value={entry.location ?? ""}
+                              onChange={(event) =>
+                                onExperienceHeaderChange?.(experienceIndex, "location", event.target.value)
+                              }
+                              className="w-full rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-sky-300/40"
+                              data-testid={`studio-experience-location-input-${experienceIndex}`}
+                            />
+                          </div>
+                          <div className="flex flex-col items-end gap-2">
+                            <input
+                              aria-label={`Date range ${experienceIndex + 1}`}
+                              value={entry.dateRange ?? ""}
+                              onChange={(event) => onExperienceDateRangeChange?.(experienceIndex, event.target.value)}
+                              className="w-[200px] rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-200 outline-none transition focus:border-sky-300/40"
+                              data-testid={`studio-experience-date-input-${experienceIndex}`}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                console.log("[STUDIO_EDIT_RESUME_REMOVE_ROLE_CLICKED]", { index: experienceIndex });
+                                if (!onRemoveExperienceEntry) {
+                                  console.warn("[STUDIO_EDIT_RESUME_MISSING_REMOVE_HANDLER]");
+                                  return;
+                                }
+                                onRemoveExperienceEntry(experienceIndex);
+                              }}
+                              className="relative z-10 pointer-events-auto rounded-xl border border-rose-300/30 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-100 transition hover:bg-rose-500/15"
+                              data-testid={`studio-remove-experience-entry-${experienceIndex}`}
+                            >
+                              Remove role
+                            </button>
+                          </div>
+                        </div>
                         <p className="text-xs text-slate-400">
                           {entry.bullets.length} {entry.bullets.length === 1 ? "bullet" : "bullets"}
                         </p>
-                      </div>
-                      <div className="flex items-start gap-3 text-right">
-                        {entry.dateRange ? (
-                          <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500/80">
-                            {entry.dateRange}
-                          </p>
-                        ) : null}
                       </div>
                     </div>
                   ) : (

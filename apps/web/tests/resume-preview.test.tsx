@@ -364,4 +364,22 @@ describe("ResumePreview", () => {
     fireEvent.click(screen.getByTestId("studio-edit-resume-button"));
     expect(onEnterEditMode).toHaveBeenCalledTimes(1);
   });
+
+  it("renders editable experience header fields in edit mode", () => {
+    render(
+      <ResumePreview
+        payload={payload}
+        isEditing
+        onEnterEditMode={() => {}}
+        onExperienceHeaderChange={() => {}}
+        onExperienceDateRangeChange={() => {}}
+        onRemoveExperienceEntry={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("studio-experience-company-input-0")).toBeInTheDocument();
+    expect(screen.getByTestId("studio-experience-role-input-0")).toBeInTheDocument();
+    expect(screen.getByTestId("studio-experience-date-input-0")).toBeInTheDocument();
+    expect(screen.getByTestId("studio-remove-experience-entry-0")).toBeInTheDocument();
+  });
 });

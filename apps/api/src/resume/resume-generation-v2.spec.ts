@@ -134,7 +134,7 @@ describe('resume generation v2', () => {
         (typeof (error as any)?.getResponse === 'function'
           ? (error as any).getResponse()
           : null);
-      expect(payload?.error?.code).toBe('resume_v2_invalid_experience_fragments');
+      expect(payload?.error?.code).toBe('baseline_template_not_ready');
       expect(Array.isArray(payload?.error?.details?.rejected)).toBe(true);
       expect(payload.error.details.rejected.join(',')).toContain('company_candidate:company:unmatched_closing_paren');
       expect(payload.error.details.rejected.join(',')).toContain('company_candidate:company:project_fragment_terms');
@@ -164,7 +164,7 @@ describe('resume generation v2', () => {
         (typeof (error as any)?.getResponse === 'function'
           ? (error as any).getResponse()
           : null);
-      expect(payload?.error?.code).toBe('resume_v2_invalid_experience_fragments');
+      expect(payload?.error?.code).toBe('baseline_template_not_ready');
       expect(Array.isArray(payload?.error?.details?.rejected)).toBe(true);
       expect(payload.error.details.rejected.join(',')).toContain('company_candidate:company:project_fragment_terms');
     }
