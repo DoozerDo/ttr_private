@@ -2899,15 +2899,34 @@ export default function StudioPage() {
     () => formatPreview(artifactContract.normalized.resumeResponse) || readArtifactTextFallback(artifactContract.normalized.resumeResponse),
     [artifactContract.normalized.resumeResponse],
   );
+
+  const resumeHardRenderBlocked = useMemo(() => {
+    const qualityStatus = String(resumeResult?.qualityStatus ?? "");
+    if (qualityStatus && qualityStatus !== "pass") return { blocked: true, reason: "qualityStatus_not_pass" as const };
+
+    const correctionCodes = Array.isArray(resumeResult?.correctionReasons)
+      ? resumeResult.correctionReasons.map((reason) => String(reason?.code ?? "")).filter(Boolean)
+      : [];
+    if (correctionCodes.includes("resume_v2_quality_gate_failed")) {
+      return { blocked: true, reason: "resume_v2_quality_gate_failed" as const };
+    }
+
+    const backendFailureCode = String((studioArtifactsPayload as any)?.resume?.failureCode ?? "");
+    if (backendFailureCode) return { blocked: true, reason: "backendRecord_failureCode" as const };
+
+    if (resumeState.artifactFailure) return { blocked: true, reason: "artifactFailure" as const };
+
+    return { blocked: false, reason: "ok" as const };
+  }, [resumeResult?.correctionReasons, resumeResult?.qualityStatus, resumeState.artifactFailure, studioArtifactsPayload]);
   const canonicalResumePreviewPayload = useMemo(
     () =>
-      resumeState.artifactFailure
+      resumeHardRenderBlocked.blocked
         ? null
         : 
       artifactContract.results.resume?.preview && typeof artifactContract.results.resume.preview === "object"
         ? artifactContract.results.resume.preview
         : readCanonicalResumePreviewPayload(artifactContract.normalized.resumeResponse),
-    [artifactContract.normalized.resumeResponse, artifactContract.results.resume, resumeState.artifactFailure],
+    [artifactContract.normalized.resumeResponse, artifactContract.results.resume, resumeHardRenderBlocked.blocked],
   );
   const resumePreviewPayloadForRender = useMemo(() => {
     if (!canonicalResumePreviewPayload) {
@@ -2922,10 +2941,10 @@ export default function StudioPage() {
     return canonicalResumePreviewPayload;
   }, [canonicalResumePreviewPayload, effectiveResumeModel, hasSavedResumeEdits, isResumeEditMode]);
   const hasRenderableResumeContent = useMemo(() => {
-    if (resumeState.artifactFailure) return false;
+    if (resumeHardRenderBlocked.blocked) return false;
     if (resumePreviewPayloadForRender) return true;
     return typeof resumePreviewText === "string" && resumePreviewText.trim().length > 0;
-  }, [resumePreviewPayloadForRender, resumePreviewText, resumeState.artifactFailure]);
+  }, [resumeHardRenderBlocked.blocked, resumePreviewPayloadForRender, resumePreviewText]);
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
     if (!canonicalResumePreviewPayload) return;

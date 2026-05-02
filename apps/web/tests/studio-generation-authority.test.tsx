@@ -118,7 +118,6 @@ describe("Studio artifact quality gating (soft)", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.queryByTestId("studio-resume-missing")).toBeNull();
       expect(screen.getByTestId("studio-resume-quality-warning")).toBeInTheDocument();
     });
 
@@ -128,15 +127,11 @@ describe("Studio artifact quality gating (soft)", () => {
     expect(resumeSource.textContent ?? "").toMatch(/reason:\s*stale_legacy/i);
     expect(within(resumeSection as HTMLElement).queryByText(/Your resume is ready/i)).toBeNull();
     expect(within(resumeSection as HTMLElement).getAllByText("Resume needs correction before export.").length).toBeGreaterThan(0);
-    // Expand the entry so bullets are rendered.
-    const resumeExperienceHeader = within(resumeSection as HTMLElement).getByText(/Designed and built a full-stack production platform/i);
-    const resumeExperienceHeaderButton = resumeExperienceHeader.closest("button");
-    expect(resumeExperienceHeaderButton).toBeTruthy();
-    fireEvent.click(resumeExperienceHeader);
-    const accomplishmentNodes = await within(resumeSection as HTMLElement).findAllByText(
-      /Designed and built a full-stack production platform/i,
-    );
-    expect(accomplishmentNodes.length).toBeGreaterThanOrEqual(1);
+
+    // Hard guard: do not render any resume preview content when qualityStatus != pass.
+    expect(within(resumeSection as HTMLElement).queryByTestId("studio-resume-experience-section")).toBeNull();
+    expect(within(resumeSection as HTMLElement).queryByTestId("experience-entry-block")).toBeNull();
+    expect(within(resumeSection as HTMLElement).queryByText(/Designed and built a full-stack production platform/i)).toBeNull();
     expect(within(resumeSection as HTMLElement).queryByText("Download DOCX")).toBeNull();
     expect(within(resumeSection as HTMLElement).queryByText("Download PDF")).toBeNull();
     expect(within(resumeSection as HTMLElement).getByRole("button", { name: "Regenerate" })).toBeInTheDocument();
@@ -2824,7 +2819,7 @@ describe("Studio auto repair", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Repairing resume…")).toBeInTheDocument();
+      expect(screen.queryAllByText(/Repairing resume/).length).toBeGreaterThan(0);
     });
     expect(generateCalls.filter((c) => c === "resume").length).toBe(1);
 
@@ -2832,7 +2827,7 @@ describe("Studio auto repair", () => {
     resumeGenerateDeferred.resolve(createResponse({ status: "success" }, { status: 201 }));
 
     await waitFor(() => {
-      expect(screen.queryByText("Repairing resume…")).toBeNull();
+      expect(screen.queryByText(/Repairing resume/)).toBeNull();
     });
 
     // Still only one resume generation attempt, even though artifacts still indicate needs correction.
@@ -2862,7 +2857,7 @@ describe("Studio auto repair", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Repairing resume…")).toBeInTheDocument();
+      expect(screen.queryAllByText(/Repairing resume/).length).toBeGreaterThan(0);
     });
     expect(generateCalls.filter((c) => c === "resume").length).toBe(1);
 
@@ -2884,26 +2879,15 @@ describe("Studio resume editing", () => {
     expect(screen.getByText("Cancel edits")).toBeInTheDocument();
   });
 
-  it("can remove a malformed Vue experience entry in edit mode", async () => {
+  it("does not render resume preview when qualityStatus is needs_refinement", async () => {
     setupNeedsRefinementResumeWithVueFetch();
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Vue 3), deck builder frontend")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-resume-quality-warning")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByTestId("studio-edit-resume-button"));
-
-    await screen.findByDisplayValue("Vue 3), deck builder frontend");
-    fireEvent.click(screen.getByTestId("studio-remove-experience-entry-0"));
-    fireEvent.click(screen.getByText("Save edits"));
-
-    // Back in preview mode, the malformed company should no longer be visible.
-    await waitFor(() => {
-      expect(screen.queryByText("Cancel edits")).toBeNull();
-      const experienceSection = screen.getByTestId("studio-resume-experience-section");
-      expect(within(experienceSection).queryByText("Vue 3), deck builder frontend")).toBeNull();
-      expect(within(experienceSection).getByText("AMS DataSerfs")).toBeInTheDocument();
-    });
+    expect(screen.queryByTestId("studio-resume-experience-section")).toBeNull();
+    expect(screen.queryByText("Vue 3), deck builder frontend")).toBeNull();
   });
 });
