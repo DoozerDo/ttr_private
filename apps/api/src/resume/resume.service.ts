@@ -3659,6 +3659,7 @@ export class ResumeService {
       generation.compliance_flags ?? [], 
       analysisAssessment, 
     ); 
+    const score = analysisAssessment?.overallScore ?? null;
     const blocked = flags.some((flag) => flag.severity === 'block'); 
     const warningFlags = flags.filter((flag) => flag.severity === 'warn'); 
     const generateNowEligible =
