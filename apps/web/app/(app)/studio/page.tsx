@@ -9661,20 +9661,14 @@ export default function StudioPage() {
     : studioEffectiveGenerationState === "generated_unusable" && coverNeedsRefinement;
 
   const buildAutoRepairKey = useCallback(
-    (artifactType: "resume" | "cover_letter") => {
+    (artifactType: "resume" | "cover_letter", backendRecord: any) => {
       const baselineVersionId = effectiveBaselineVersionId ?? "none";
-      const inputsHash =
-        artifactType === "resume"
-          ? String(artifactContract.results.resume?.inputsHash ?? "none")
-          : String(artifactContract.results.coverLetter?.inputsHash ?? "none");
-      const failureCode =
-        artifactType === "resume"
-          ? String(artifactContract.results.resume?.failureCode ?? "none")
-          : String(artifactContract.results.coverLetter?.failureCode ?? "none");
+      const inputsHash = String(backendRecord?.inputsHash ?? "none");
+      const failureCode = String(backendRecord?.failureCode ?? "none");
       const result =
         artifactType === "resume"
-          ? artifactContract.results.resumeResult
-          : artifactContract.results.coverLetterResult;
+          ? resumeResult
+          : coverLetterResult;
       const generationState = String((result as any)?.generationState ?? "none");
       const qualityStatus = String((result as any)?.qualityStatus ?? "none");
       const exportReady = String((result as any)?.exportReady ?? "none");
@@ -9692,16 +9686,12 @@ export default function StudioPage() {
       ].join("|");
     },
     [
-      artifactContract.results.coverLetter?.failureCode,
-      artifactContract.results.coverLetter?.inputsHash,
-      artifactContract.results.coverLetterResult,
-      artifactContract.results.resume?.failureCode,
-      artifactContract.results.resume?.inputsHash,
-      artifactContract.results.resumeResult,
+      coverLetterResult,
       effectiveBaselineId,
       effectiveBaselineVersionId,
       effectiveJobId,
       requestedAnalysisId,
+      resumeResult,
     ],
   );
 
@@ -9947,12 +9937,11 @@ export default function StudioPage() {
 
   useEffect(() => {
     if (!artifactContract.hasUsableArtifacts) return;
-    if (studioEffectiveGenerationState === "unlock_required") return;
     if (activeGenerationReadiness.blocked) return;
 
     const maybeTrigger = async () => {
       if (shouldAutoRepairResume) {
-        const key = buildAutoRepairKey("resume");
+        const key = buildAutoRepairKey("resume", artifactContract.results.resume);
         if (!attemptedAutoRepairKeysRef.current[key]) {
           attemptedAutoRepairKeysRef.current[key] = true;
           setResumeAutoRepairing(true);
@@ -9964,7 +9953,7 @@ export default function StudioPage() {
         }
       }
       if (shouldAutoRepairCoverLetter) {
-        const key = buildAutoRepairKey("cover_letter");
+        const key = buildAutoRepairKey("cover_letter", artifactContract.results.coverLetter);
         if (!attemptedAutoRepairKeysRef.current[key]) {
           attemptedAutoRepairKeysRef.current[key] = true;
           setCoverAutoRepairing(true);
