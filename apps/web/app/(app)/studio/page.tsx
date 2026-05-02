@@ -9845,26 +9845,66 @@ export default function StudioPage() {
     workflowOrchestratorCore.contract?.generation.auto.signature,
   ]);
 
+  const shouldAutoRepairArtifact = useCallback(
+    (
+      kind: "resume" | "cover_letter",
+      result: any,
+      backendRecord: any,
+      state: { autoRepairing: boolean; generating: boolean },
+    ): { eligible: boolean; reason: string } => {
+      const canRegenerate = result?.actions?.canRegenerate === true;
+      if (!canRegenerate) return { eligible: false, reason: "no_canRegenerate" };
+      if (state.autoRepairing) return { eligible: false, reason: "already_auto_repairing" };
+      if (state.generating) return { eligible: false, reason: "generation_in_flight" };
+      if (activeGenerationReadiness.blocked) return { eligible: false, reason: "readiness_blocked" };
+
+      // Do not auto repair artifacts already exportable and passing.
+      if (result?.exportReady === true && result?.qualityStatus === "pass") {
+        return { eligible: false, reason: "already_export_ready" };
+      }
+
+      if (result?.generationState === "generated_needs_correction") {
+        return { eligible: true, reason: "generationState:generated_needs_correction" };
+      }
+      if (result?.qualityStatus === "needs_refinement") {
+        return { eligible: true, reason: "qualityStatus:needs_refinement" };
+      }
+      if (
+        Array.isArray(result?.correctionReasons) &&
+        result.correctionReasons.some((r: any) => r?.code === "resume_v2_quality_gate_failed")
+      ) {
+        return { eligible: true, reason: "correctionReasons:resume_v2_quality_gate_failed" };
+      }
+      if (backendRecord?.failureCode) {
+        return { eligible: true, reason: "backendRecord:failureCode" };
+      }
+      if (backendRecord?.responseBody?.qualityGate?.status && backendRecord.responseBody.qualityGate.status !== "pass") {
+        return { eligible: true, reason: "backendRecord:qualityGate_not_pass" };
+      }
+
+      return { eligible: false, reason: "no_repair_signal" };
+    },
+    [activeGenerationReadiness.blocked],
+  );
+
   const shouldAutoRepairResume = useMemo(() => {
-    if (resumeAutoRepairing) return false;
-    if (pageTruth.isGenerating || resumeGenerating || resumeAutoGenerating || resumeGenerateNowPending || resumeSingleFlightInFlight) return false;
-    if (activeGenerationReadiness.blocked) return false;
-    if (resumeResult?.exportReady === true) return false;
-    if (resumeResult?.actions?.canRegenerate !== true) return false;
-    const state = resumeResult?.generationState;
-    const quality = resumeResult?.qualityStatus;
-    const notExportable = resumeResult?.actions?.canExport === false || resumeResult?.exportReady === false;
-    return (
-      notExportable &&
-      (state === "generated_needs_correction" ||
-        state === "generated_unusable" ||
-        quality === "needs_refinement" ||
-        artifactContract.results.resume?.status === "failed" ||
-        Boolean(artifactContract.results.resume?.failureCode) ||
-        Boolean((artifactContract.results.resume as any)?.metadata?.staleLegacy))
-    );
+    const evaluation = shouldAutoRepairArtifact("resume", resumeResult, artifactContract.results.resume, {
+      autoRepairing: resumeAutoRepairing,
+      generating: Boolean(
+        pageTruth.isGenerating ||
+          resumeGenerating ||
+          resumeAutoGenerating ||
+          resumeGenerateNowPending ||
+          resumeSingleFlightInFlight,
+      ),
+    });
+    console.info("[STUDIO_AUTO_REPAIR_ELIGIBILITY]", {
+      kind: "resume",
+      eligible: evaluation.eligible,
+      reason: evaluation.reason,
+    });
+    return evaluation.eligible;
   }, [
-    activeGenerationReadiness.blocked,
     artifactContract.results.resume,
     pageTruth.isGenerating,
     resumeAutoGenerating,
@@ -9873,29 +9913,27 @@ export default function StudioPage() {
     resumeGenerating,
     resumeResult,
     resumeSingleFlightInFlight,
+    shouldAutoRepairArtifact,
   ]);
 
   const shouldAutoRepairCoverLetter = useMemo(() => {
-    if (coverAutoRepairing) return false;
-    if (pageTruth.isGenerating || coverGenerating || coverAutoGenerating || coverGenerateNowPending || coverSingleFlightInFlight) return false;
-    if (activeGenerationReadiness.blocked) return false;
-    if (coverLetterResult?.exportReady === true) return false;
-    if (coverLetterResult?.actions?.canRegenerate !== true) return false;
-    const state = coverLetterResult?.generationState;
-    const quality = coverLetterResult?.qualityStatus;
-    const notExportable = coverLetterResult?.actions?.canExport === false || coverLetterResult?.exportReady === false;
-    return (
-      notExportable &&
-      (state === "generated_needs_correction" ||
-        state === "generated_unusable" ||
-        quality === "failed" ||
-        quality === "needs_refinement" ||
-        artifactContract.results.coverLetter?.status === "failed" ||
-        Boolean(artifactContract.results.coverLetter?.failureCode) ||
-        Boolean((artifactContract.results.coverLetter as any)?.metadata?.staleLegacy))
-    );
+    const evaluation = shouldAutoRepairArtifact("cover_letter", coverLetterResult, artifactContract.results.coverLetter, {
+      autoRepairing: coverAutoRepairing,
+      generating: Boolean(
+        pageTruth.isGenerating ||
+          coverGenerating ||
+          coverAutoGenerating ||
+          coverGenerateNowPending ||
+          coverSingleFlightInFlight,
+      ),
+    });
+    console.info("[STUDIO_AUTO_REPAIR_ELIGIBILITY]", {
+      kind: "cover_letter",
+      eligible: evaluation.eligible,
+      reason: evaluation.reason,
+    });
+    return evaluation.eligible;
   }, [
-    activeGenerationReadiness.blocked,
     artifactContract.results.coverLetter,
     coverAutoGenerating,
     coverAutoRepairing,
@@ -9904,6 +9942,7 @@ export default function StudioPage() {
     coverLetterResult,
     coverSingleFlightInFlight,
     pageTruth.isGenerating,
+    shouldAutoRepairArtifact,
   ]);
 
   useEffect(() => {

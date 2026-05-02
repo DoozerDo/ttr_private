@@ -1809,15 +1809,15 @@ function setupAutoRepairResumeOnceFetch() {
             generationContractVersion: "studio-artifacts-v1",
             resumeResult: {
               artifactType: "resume",
-              generationState: "generated_needs_correction",
+              generationState: "generated_usable",
               qualityStatus: "needs_refinement",
               preview: {
                 heading: { name: "Test Candidate", contactLine: "test@example.com" },
                 summary: "Bad resume preview.",
                 experience: [{ company: "Acme", roleTitle: "Director of Support", bullets: ["x"] }],
               },
-              correctionReasons: [{ code: "incomplete_trailing_fragment", message: "incomplete_trailing_fragment", severity: "warning" }],
-              exportReady: false,
+              correctionReasons: [{ code: "resume_v2_quality_gate_failed", message: "resume_v2_quality_gate_failed", severity: "warning" }],
+              exportReady: true,
               exports: { docx: false, pdf: false },
               actions: { canEdit: true, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
             },
@@ -1834,7 +1834,7 @@ function setupAutoRepairResumeOnceFetch() {
             resume: {
               status: "completed",
               inputsHash: "ih-bad-1",
-              responseBody: { status: "success", preview: { resume: { heading: { name: "Legacy" } } } },
+              responseBody: { status: "success", qualityGate: { status: "needs_refinement" }, preview: { resume: { heading: { name: "Legacy" } } } },
               content: null,
               failureCode: null,
               failureMessage: null,
