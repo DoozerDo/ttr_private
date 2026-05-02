@@ -490,6 +490,7 @@ describe('BaselineService - library capacity', () => {
         if (Array.isArray(payload)) return payload;
         return { ...payload, id: payload.id ?? 'generated-id', version: payload.version ?? 1 };
       }),
+      findOne: jest.fn().mockResolvedValue(null),
       find: jest.fn().mockResolvedValue([]),
       delete: jest.fn(),
     };
@@ -603,14 +604,15 @@ describe('BaselineService - library capacity', () => {
 
   it('returns a structured duplicate conflict when the same file hash exists on an active baseline', async () => {
     baselineRepository.findOne.mockImplementation(async ({ where }: any) => {
-      if (where?.hash && where?.status === BaselineStatus.ACTIVE) {
+      if (where?.hash && where?.userId === 'user-1') {
         return {
           id: 'baseline-dup',
           userId: 'user-1',
           hash: 'hash-1',
           status: BaselineStatus.ACTIVE,
+          isActive: true,
           createdAt: new Date('2026-03-01T00:00:00.000Z'),
-        } as Baseline;
+        } as any;
       }
       return null;
     });
@@ -630,15 +632,38 @@ describe('BaselineService - library capacity', () => {
     });
   });
 
-  it('does not treat archived baseline hashes as duplicates for uploads', async () => {
+  it('reuses archived baselines when the same resume hash is uploaded again (no 500)', async () => {
     baselineRepository.findOne.mockImplementation(async ({ where }: any) => {
-      if (where?.hash) {
-        // Even if an archived baseline exists with this hash, the duplicate lookup
-        // only considers ACTIVE baselines.
-        return null;
+      if (where?.hash && where?.userId === 'user-1') {
+        return {
+          id: 'baseline-archived',
+          userId: 'user-1',
+          hash: 'hash-1',
+          status: BaselineStatus.ARCHIVED,
+          isActive: false,
+          archivedAt: new Date('2026-03-01T00:00:00.000Z'),
+          createdAt: new Date('2026-03-01T00:00:00.000Z'),
+          sections: [],
+        } as any;
       }
       return null;
     });
+
+    // No active current baseline exists; revived baseline should become current.
+    transactionManager.count.mockImplementation(async (_entity: any, options: any) => {
+      if (options?.where?.isActive === true) return 0;
+      return 0;
+    });
+    transactionManager.findOne.mockResolvedValue({
+      id: 'baseline-archived',
+      userId: 'user-1',
+      hash: 'hash-1',
+      status: BaselineStatus.ACTIVE,
+      isActive: true,
+      archivedAt: null,
+      createdAt: new Date('2026-03-01T00:00:00.000Z'),
+      sections: [],
+    } as any);
 
     const result = await service.createBaseline(
       'user-1',
@@ -646,15 +671,9 @@ describe('BaselineService - library capacity', () => {
       parseResult as any,
     );
 
-    expect(result.baselineId).toBeDefined();
-    expect(baselineRepository.findOne).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          hash: 'hash-1',
-          status: BaselineStatus.ACTIVE,
-        }),
-      }),
-    );
+    expect(result.baselineId).toBe('baseline-archived');
+    expect(result.baseline.status).toBe(BaselineStatus.ACTIVE);
+    expect(result.baseline.isActive).toBe(true);
   });
 
   it('increments the active baseline version and keeps only one active baseline', async () => {

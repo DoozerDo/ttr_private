@@ -489,28 +489,75 @@ export class BaselineService {
         throw new BadRequestException('Baseline file hash is required');
       }
 
-      const duplicate = await this.findDuplicateBaseline(userId, fileHash);
-      if (duplicate) {
+      const existingByHash = await this.findBaselineByUserAndHash(userId, fileHash);
+      if (existingByHash) {
+        if (existingByHash.status === BaselineStatus.ARCHIVED) {
+          return await this.baselineRepository.manager.transaction(async (manager) => {
+            const activePointerCount = await manager.count(Baseline, {
+              where: { userId, status: BaselineStatus.ACTIVE, isActive: true },
+            });
+            const shouldBecomeActive = activePointerCount === 0;
+            if (shouldBecomeActive) {
+              await this.setSingleActiveBaseline(manager, userId, existingByHash.id);
+            }
+            await manager.update(
+              Baseline,
+              { id: existingByHash.id, userId },
+              {
+                status: BaselineStatus.ACTIVE,
+                archivedAt: null,
+                isActive: shouldBecomeActive ? true : existingByHash.isActive,
+              },
+            );
+            const revived = await manager.findOne(Baseline, {
+              where: { id: existingByHash.id, userId },
+              relations: ['sections'],
+              order: { sections: { order: 'ASC' } },
+            });
+            return {
+              baseline:
+                revived ??
+                ({ ...existingByHash, status: BaselineStatus.ACTIVE, archivedAt: null } as Baseline),
+              baselineId: existingByHash.id,
+              ingestion: parseResult?.ingestion,
+            } as BaselineCreationResult;
+          });
+        }
+
         throw new ConflictException({
           error: {
             code: 'BASELINE_DUPLICATE',
             message: 'This file has already been uploaded.',
-            existingBaselineId: duplicate.id,
+            existingBaselineId: existingByHash.id,
           },
         });
       }
 
-      return await this.baselineRepository.manager.transaction(async (manager) => {
-        await this.enforceBaselineLimit(manager, userId);
+      try {
+        return await this.baselineRepository.manager.transaction(async (manager) => {
+          await this.enforceBaselineLimit(manager, userId);
 
-        return this.createBaselineRecord(
-          manager,
-          userId,
-          file,
-          fileHash,
-          parseResult,
-        );
-      });
+          return this.createBaselineRecord(
+            manager,
+            userId,
+            file,
+            fileHash,
+            parseResult,
+          );
+        });
+      } catch (error) {
+        if (this.isPostgresUniqueViolation(error, 'UQ_baselines_user_hash')) {
+          const existing = await this.findBaselineByUserAndHash(userId, fileHash);
+          if (existing) {
+            return {
+              baseline: existing,
+              baselineId: existing.id,
+              ingestion: parseResult?.ingestion,
+            } as BaselineCreationResult;
+          }
+        }
+        throw error;
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const stack = error instanceof Error ? error.stack : undefined;
@@ -678,6 +725,23 @@ export class BaselineService {
       },
       order: { createdAt: 'DESC' },
     });
+  }
+
+  private async findBaselineByUserAndHash(
+    userId: string,
+    hash: string,
+  ): Promise<Baseline | null> {
+    return this.baselineRepository.findOne({
+      where: { userId, hash },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  private isPostgresUniqueViolation(error: unknown, constraintName: string): boolean {
+    const record = error && typeof error === 'object' ? (error as Record<string, unknown>) : null;
+    const code = record?.code;
+    const constraint = record?.constraint;
+    return code === '23505' && constraint === constraintName;
   }
 
   private async createBaselineRecord(
