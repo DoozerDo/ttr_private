@@ -20,8 +20,137 @@ export type ResumeGenerationV2Result = {
   qualityGate: ArtifactQualityGate;
 };
 
+type NormalizedResumeValidationFailure = {
+  path: string;
+  field: string;
+  value: unknown;
+  message: string;
+};
+
 function trimToText(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function buildNormalizedResumeValidationFailures(
+  document: NormalizedResumeDocument,
+): NormalizedResumeValidationFailure[] {
+  const failures: NormalizedResumeValidationFailure[] = [];
+
+  if (!trimToText(document.heading?.name)) {
+    failures.push({
+      path: 'heading.name',
+      field: 'name',
+      value: document.heading?.name,
+      message: 'Missing heading name.',
+    });
+  }
+
+  const contactTokens = trimToText(document.heading?.contactLine)
+    .split('|')
+    .map((token) => trimToText(token))
+    .filter(Boolean);
+  const dedupeContact = new Set<string>();
+  for (const token of contactTokens) {
+    const phoneDigits = token.replace(/\D/g, '');
+    const key = phoneDigits.length === 10 ? `phone:${phoneDigits}` : `text:${token.toLowerCase()}`;
+    if (dedupeContact.has(key)) {
+      failures.push({
+        path: 'heading.contactLine',
+        field: 'contactLine',
+        value: document.heading?.contactLine,
+        message: 'Duplicate contact token detected.',
+      });
+      break;
+    }
+    dedupeContact.add(key);
+  }
+
+  for (let index = 0; index < (document.experience ?? []).length; index++) {
+    const entry = document.experience[index] as any;
+    const company = trimToText(entry?.company);
+    const roleTitle = trimToText(entry?.roleTitle);
+    const bullets = Array.isArray(entry?.bullets) ? (entry.bullets as unknown[]) : [];
+
+    if (!company) {
+      failures.push({
+        path: `experience[${index}].company`,
+        field: 'company',
+        value: entry?.company,
+        message: 'Missing company.',
+      });
+    } else if (/^company$/i.test(company)) {
+      failures.push({
+        path: `experience[${index}].company`,
+        field: 'company',
+        value: entry?.company,
+        message: 'Company is a placeholder value.',
+      });
+    }
+
+    if (!roleTitle) {
+      failures.push({
+        path: `experience[${index}].roleTitle`,
+        field: 'roleTitle',
+        value: entry?.roleTitle,
+        message: 'Missing role title.',
+      });
+    }
+
+    if (bullets.length === 0) {
+      failures.push({
+        path: `experience[${index}].bullets`,
+        field: 'bullets',
+        value: entry?.bullets,
+        message: 'Experience entry has no bullets.',
+      });
+      continue;
+    }
+
+    for (let bulletIndex = 0; bulletIndex < bullets.length; bulletIndex++) {
+      const bullet = trimToText(bullets[bulletIndex]);
+      if (!bullet) {
+        failures.push({
+          path: `experience[${index}].bullets[${bulletIndex}]`,
+          field: 'bullets',
+          value: bullets[bulletIndex],
+          message: 'Experience bullet is empty.',
+        });
+        continue;
+      }
+      if (bullet.length > 420) {
+        failures.push({
+          path: `experience[${index}].bullets[${bulletIndex}]`,
+          field: 'bullets',
+          value: bullets[bulletIndex],
+          message: 'Experience bullet is too long.',
+        });
+      }
+      const pipeCount = (bullet.match(/[|]/g) ?? []).length;
+      if (pipeCount >= 6) {
+        failures.push({
+          path: `experience[${index}].bullets[${bulletIndex}]`,
+          field: 'bullets',
+          value: bullets[bulletIndex],
+          message: 'Experience bullet contains too many pipe separators.',
+        });
+      }
+    }
+  }
+
+  for (let index = 0; index < (document.education ?? []).length; index++) {
+    const entry = (document.education as any)[index];
+    const institution = trimToText(entry?.institution);
+    if (!institution) {
+      failures.push({
+        path: `education[${index}].institution`,
+        field: 'institution',
+        value: entry?.institution,
+        message: 'Education institution is missing.',
+      });
+    }
+  }
+
+  return failures;
 }
 
 function buildFallbackSummaryFromExperience(
@@ -164,14 +293,18 @@ function buildCompanyRejectionDiagnostics(company: string): string[] {
 function buildInvalidExperienceReasons(input: {
   company: unknown;
   roleTitle: unknown;
+  bullets?: unknown;
   index: number;
 }): string[] {
   const reasons: string[] = [];
   const company = trimToText(input.company);
   const roleTitle = trimToText(input.roleTitle);
+  const bullets = Array.isArray(input.bullets) ? (input.bullets as unknown[]) : [];
+  const hasAtLeastOneBullet = bullets.map((b) => trimToText(b)).some(Boolean);
 
   if (!company) reasons.push(`experience[${input.index}].company:missing`);
   if (!roleTitle) reasons.push(`experience[${input.index}].roleTitle:missing`);
+  if (!hasAtLeastOneBullet) reasons.push(`experience[${input.index}].bullets:missing_or_empty`);
 
   if (company) {
     const companyCheck = validateCompanyCandidate(company);
@@ -226,6 +359,7 @@ export function buildDeterministicResumeV2FromBaseline(input: {
     const reasons = buildInvalidExperienceReasons({
       company: (entry as any)?.company,
       roleTitle: (entry as any)?.roleTitle,
+      bullets: (entry as any)?.bullets,
       index,
     });
     if (reasons.length > 0) {
@@ -267,11 +401,15 @@ export function buildDeterministicResumeV2FromBaseline(input: {
 
   const normalizedValidation = validateNormalizedResumeDocument(normalized);
   if (!normalizedValidation.valid) {
+    const failures = buildNormalizedResumeValidationFailures(normalized as NormalizedResumeDocument);
     throw new UnprocessableEntityException({
       error: {
         code: 'resume_v2_normalized_model_invalid',
         message: 'Resume V2 produced an invalid normalized resume model.',
-        details: normalizedValidation,
+        details: {
+          reasons: normalizedValidation.reasons,
+          failures,
+        },
       },
     });
   }

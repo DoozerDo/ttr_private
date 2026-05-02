@@ -2091,7 +2091,9 @@ export default function StudioPage() {
       const coverFailure = isBackendStudioArtifactsResponse(payload)
         ? buildFailureFromBackendRecord("cover_letter", payload.coverLetter)
         : null;
-      if (resumeResponseWithResult) {
+      if (resumeFailure) {
+        setResumeState((current) => ({ ...current, artifactFailure: resumeFailure, error: null, response: null }));
+      } else if (resumeResponseWithResult) {
         setResumeState((current) => ({
           ...current,
           response:
@@ -2104,10 +2106,10 @@ export default function StudioPage() {
         }));
         setHasGeneratedOnce(true);
         studioArtifactPresentationStateRef.current = "hydrated";
-      } else if (resumeFailure) {
-        setResumeState((current) => ({ ...current, artifactFailure: resumeFailure, error: null }));
       }
-      if (coverResponseWithResult) {
+      if (coverFailure) {
+        setCoverState((current) => ({ ...current, artifactFailure: coverFailure, error: null, response: null }));
+      } else if (coverResponseWithResult) {
         setCoverState((current) => ({
           ...current,
           response:
@@ -2120,8 +2122,6 @@ export default function StudioPage() {
         }));
         setHasGeneratedOnce(true);
         studioArtifactPresentationStateRef.current = "hydrated";
-      } else if (coverFailure) {
-        setCoverState((current) => ({ ...current, artifactFailure: coverFailure, error: null }));
       }
       const pairStatus =
         "status" in payload
@@ -2877,15 +2877,19 @@ export default function StudioPage() {
   );
   const canonicalResumePreviewPayload = useMemo(
     () =>
+      resumeState.artifactFailure
+        ? null
+        : 
       artifactContract.results.resume?.preview && typeof artifactContract.results.resume.preview === "object"
         ? artifactContract.results.resume.preview
         : readCanonicalResumePreviewPayload(artifactContract.normalized.resumeResponse),
-    [artifactContract.normalized.resumeResponse, artifactContract.results.resume],
+    [artifactContract.normalized.resumeResponse, artifactContract.results.resume, resumeState.artifactFailure],
   );
   const hasRenderableResumeContent = useMemo(() => {
+    if (resumeState.artifactFailure) return false;
     if (canonicalResumePreviewPayload) return true;
     return typeof resumePreviewText === "string" && resumePreviewText.trim().length > 0;
-  }, [canonicalResumePreviewPayload, resumePreviewText]);
+  }, [canonicalResumePreviewPayload, resumePreviewText, resumeState.artifactFailure]);
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
     if (!canonicalResumePreviewPayload) return;

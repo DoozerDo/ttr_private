@@ -2,6 +2,50 @@ import { buildDeterministicResumeV2FromBaseline } from './resume-generation-v2';
 import { sanitizeResumePreviewForStudio } from './resumePreviewSanitizer';
 
 describe('resume generation v2', () => {
+  it('includes detailed normalized model validation failures when validation rejects the model', () => {
+    const baselineSections = [
+      {
+        sectionType: 'SUMMARY',
+        content: 'Support leader.',
+      },
+      {
+        sectionType: 'EXPERIENCE',
+        content: [
+          'AMS DataSerfs | Senior Data Analyst | 2021 - Present',
+          '- Built KPI dashboards.',
+        ].join('\n'),
+      },
+    ] as any[];
+
+    try {
+      buildDeterministicResumeV2FromBaseline({
+        baselineSections: baselineSections as any,
+        // Duplicate token should trigger normalized validation failure (contactLine dedupe).
+        identity: { name: 'Dalen Example', contactLine: 'dalen@example.com | dalen@example.com' },
+      });
+      throw new Error('Expected V2 normalized validation to fail');
+    } catch (error) {
+      const payload =
+        (error as any)?.response ??
+        (typeof (error as any)?.getResponse === 'function'
+          ? (error as any).getResponse()
+          : null);
+      expect(payload?.error?.code).toBe('resume_v2_normalized_model_invalid');
+      expect(Array.isArray(payload?.error?.details?.reasons)).toBe(true);
+      expect(Array.isArray(payload?.error?.details?.failures)).toBe(true);
+      expect(payload.error.details.failures.some((f: any) => f?.path === 'heading.contactLine')).toBe(true);
+      expect(
+        payload.error.details.failures.some(
+          (f: any) =>
+            typeof f?.path === 'string' &&
+            typeof f?.field === 'string' &&
+            'message' in f &&
+            'value' in f,
+        ),
+      ).toBe(true);
+    }
+  });
+
   it('produces clean Studio preview experience entries (preserves AMS DataSerfs)', () => {
     const baselineSections = [
       {

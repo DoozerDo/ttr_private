@@ -1625,6 +1625,75 @@ function setupResumeSuccessFetch() {
   );
 }
 
+function setupFetchWithResumeFailureButStalePreview() {
+  setFetchImplementation(
+    vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "completed",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "fp-1",
+            generationContractVersion: "studio-artifacts-v1",
+            resumeResult: null,
+            coverLetterResult: null,
+            resume: {
+              status: "failed",
+              inputsHash: "ih-failed",
+              responseBody: {
+                status: "success",
+                preview: {
+                  resume: {
+                    heading: { name: "Legacy", contactLine: "" },
+                    summary: "Old summary",
+                    experience: [{ company: "Vue 3), deck builder frontend", roleTitle: "Professional Experience", bullets: ["x"] }],
+                  },
+                },
+              },
+              content: null,
+              failureCode: "resume_v2_normalized_model_invalid",
+              failureMessage: "Resume V2 produced an invalid normalized resume model.",
+              startedAt: null,
+              completedAt: null,
+              failedAt: new Date().toISOString(),
+              metadata: {},
+            },
+            coverLetter: null,
+          }),
+        );
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+            scoring_v2: { score: 94 },
+            verification_coverage: {
+              totalClaims: 3,
+              verifiedClaims: 3,
+              inferredClaims: 0,
+              unverifiedClaims: 0,
+              unverifiedRequirements: [],
+            },
+          }),
+        );
+      }
+      return Promise.resolve(createResponse({}));
+    }),
+  );
+}
+
 describe("Studio generation authority", () => {
   beforeEach(() => {
     clearRecentIntentSignals();
@@ -2378,4 +2447,16 @@ describe("Studio generation authority", () => {
   });
 
 
+});
+
+describe("Studio resume failure authority", () => {
+  it("does not render stale resume preview when latest resume artifact is FAILED", async () => {
+    setupFetchWithResumeFailureButStalePreview();
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.queryByText("Vue 3), deck builder frontend")).toBeNull();
+      expect(screen.getByTestId("resume-partial-retry-panel")).toBeInTheDocument();
+    });
+  });
 });
