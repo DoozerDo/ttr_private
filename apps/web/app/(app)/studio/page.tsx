@@ -10822,27 +10822,84 @@ export default function StudioPage() {
             typeof (penalty as { code?: unknown }).code === "string" &&
             (penalty as { code: string }).code === "insufficient_baseline_support",
         ) as { code?: string; reason?: string } | undefined;
-        if (!capPenalty) return null;
-        const reason = typeof capPenalty.reason === "string" ? capPenalty.reason : "";
-        const signals = reason ? parseInsufficientBaselineSupportSignals(reason) : null;
+        const capReason = typeof capPenalty?.reason === "string" ? capPenalty.reason : "";
+        const capSignals = capReason ? parseInsufficientBaselineSupportSignals(capReason) : null;
+
+        const hasScoreCapPenalty = Boolean(capPenalty);
+        const hasUnsupportedRequirements =
+          generationBlockerCodes.includes("unsupported_technology_claim") ||
+          (typeof verificationCoverage.unsupportedClaims === "number" && verificationCoverage.unsupportedClaims > 0);
+        const hasArtifactRefinementRequired = Boolean(resumeNeedsRefinement || coverNeedsRefinement);
+        const hasBaselineTemplateWarning = Boolean(
+          baselineTemplateReadinessSignal.degraded || (baselineTemplateReadinessSignal.hasReason && !baselineTemplateReadinessSignal.hardBlocked),
+        );
+        const hasDegradedReadiness = String(studioArtifactsPayload?.artifactReadiness ?? "") === "degraded";
+        const blocked = Boolean(activeGenerationReadiness.blocked || baselineTemplateReadinessSignal.hardBlocked);
+        const degraded =
+          !blocked &&
+          Boolean(
+            hasDegradedReadiness ||
+              hasBaselineTemplateWarning ||
+              hasUnsupportedRequirements ||
+              hasScoreCapPenalty ||
+              hasArtifactRefinementRequired,
+          );
+
+        const generationState: "ready" | "degraded" | "blocked" = blocked ? "blocked" : degraded ? "degraded" : "ready";
+
+        const bannerIntent = generationState === "ready" ? "info" : generationState === "degraded" ? "warning" : "warning";
+        const bannerTitle =
+          generationState === "ready" ? "Ready to generate" : generationState === "degraded" ? "Generation is limited" : "Generation is blocked";
+
         return (
-          <Alert intent="warning" title="Score capped" data-testid="studio-score-cap-warning">
-            <div className="space-y-2">
-              <p className="text-sm text-slate-100">
-                Score capped because the verified baseline does not show enough support for this role scope.
-              </p>
-              {signals ? (
-                <ul className="list-disc space-y-1 pl-5 text-xs text-slate-200">
-                  {typeof signals.baselineRecall === "number" ? (
-                    <li>Baseline recall: {signals.baselineRecall.toFixed(1)}%</li>
-                  ) : null}
-                  {typeof signals.responsibilityOverlap === "number" ? (
-                    <li>Responsibility overlap: {signals.responsibilityOverlap.toFixed(1)}%</li>
-                  ) : null}
-                  {typeof signals.requiredToolCoverage === "number" ? (
-                    <li>Required tool coverage: {signals.requiredToolCoverage.toFixed(1)}%</li>
-                  ) : null}
-                </ul>
+          <Alert intent={bannerIntent} title={bannerTitle}>
+            <div data-testid="studio-generation-state-banner" className="space-y-2">
+              {generationState === "ready" ? (
+                <p data-testid="studio-generation-state-ready" className="text-sm text-slate-100">
+                  This role is ready for generation using your verified baseline.
+                </p>
+              ) : null}
+
+              {generationState === "degraded" ? (
+                <div data-testid="studio-generation-state-degraded" className="space-y-2">
+                  <p className="text-sm text-slate-100">
+                    Your baseline partially supports this role. You can generate, but results are limited.
+                  </p>
+                  <div className="space-y-1 text-sm text-slate-100">
+                    {hasUnsupportedRequirements ? (
+                      <p>Remove unsupported requirements to continue with a partial match.</p>
+                    ) : null}
+                    {hasScoreCapPenalty ? (
+                      <div data-testid="studio-score-cap-warning" className="space-y-1">
+                        <p>
+                          Score capped because the verified baseline does not show enough support for this role scope.
+                        </p>
+                        {capSignals ? (
+                          <ul className="list-disc space-y-1 pl-5 text-xs text-slate-200">
+                            {typeof capSignals.baselineRecall === "number" ? (
+                              <li>Baseline recall: {capSignals.baselineRecall.toFixed(1)}%</li>
+                            ) : null}
+                            {typeof capSignals.responsibilityOverlap === "number" ? (
+                              <li>Responsibility overlap: {capSignals.responsibilityOverlap.toFixed(1)}%</li>
+                            ) : null}
+                            {typeof capSignals.requiredToolCoverage === "number" ? (
+                              <li>Required tool coverage: {capSignals.requiredToolCoverage.toFixed(1)}%</li>
+                            ) : null}
+                          </ul>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {hasArtifactRefinementRequired ? (
+                      <p>Some generated materials need correction before export.</p>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              {generationState === "blocked" ? (
+                <p data-testid="studio-generation-state-blocked" className="text-sm text-slate-100">
+                  Generation is blocked because your verified baseline does not contain enough usable experience.
+                </p>
               ) : null}
             </div>
           </Alert>

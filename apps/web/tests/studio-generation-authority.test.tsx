@@ -147,8 +147,10 @@ describe("Studio artifact quality gating (soft)", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByTestId("studio-score-cap-warning")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-generation-state-banner")).toBeInTheDocument();
     });
+    expect(screen.getByTestId("studio-generation-state-degraded")).toBeInTheDocument();
+    expect(screen.getByTestId("studio-score-cap-warning")).toBeInTheDocument();
     expect(
       screen.getByText(
         "Score capped because the verified baseline does not show enough support for this role scope.",
@@ -161,6 +163,42 @@ describe("Studio artifact quality gating (soft)", () => {
     expect(screen.getByTestId("studio-score-cap-warning")).toHaveTextContent(
       "Required tool coverage: 9.5%",
     );
+  });
+
+  it("renders the ready generation state banner when generation is allowed and no degraded warnings apply", async () => {
+    setupFetch("ready", 94, 3);
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-generation-state-ready")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("This role is ready for generation using your verified baseline."),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the blocked generation state banner when baseline template readiness hard-blocks generation", async () => {
+    setupBaselineTemplateNotReadyFetch();
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-generation-state-blocked")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText(
+        "Generation is blocked because your verified baseline does not contain enough usable experience.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("treats artifact refinement required as degraded generation state", async () => {
+    setupFetchWithQualityFailures();
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-generation-state-degraded")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Some generated materials need correction before export.")).toBeInTheDocument();
   });
 
   it("renders cover letter preview but blocks export when cover letter quality fails", async () => {
