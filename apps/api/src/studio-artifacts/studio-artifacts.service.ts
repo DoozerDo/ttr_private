@@ -244,17 +244,13 @@ export class StudioArtifactsService {
         ...(safeText((entry as any)?.dates) ? { dates: safeText((entry as any)?.dates) } : {}),
         bulletCount: Array.isArray((entry as any)?.bullets) ? (entry as any).bullets.length : 0,
       }));
-    const hasUsableExperience =
-      Boolean(structured) &&
-      (structured?.experience ?? []).some((entry) => {
-        const company = safeText((entry as any)?.company);
-        const roleTitle = safeText((entry as any)?.roleTitle);
-        const bullets = Array.isArray((entry as any)?.bullets) ? (entry as any).bullets : [];
-        const usableBullets = bullets.map((b: unknown) => safeText(b)).filter(Boolean);
-        return company.length > 0 && roleTitle.length > 0 && usableBullets.length > 0;
-      });
     const templateReadiness =
       structured && assessment ? evaluateBaselineTemplateReadiness(structured as any) : null;
+    const validExperienceCount =
+      templateReadiness && typeof (templateReadiness as any).stats?.validExperience === 'number'
+        ? (templateReadiness as any).stats.validExperience
+        : 0;
+    const hasUsableExperience = validExperienceCount > 0;
 
     const isHardBlocked =
       Boolean(templateReadiness) &&
@@ -267,7 +263,9 @@ export class StudioArtifactsService {
         : templateReadiness && !isHardBlocked && hasWarnings
           ? 'degraded'
           : templateReadiness && isHardBlocked
-            ? 'blocked'
+            ? hasUsableExperience
+              ? 'degraded'
+              : 'blocked'
             : undefined;
 
     const readinessReasonCodes =
@@ -286,12 +284,24 @@ export class StudioArtifactsService {
           ].slice(0, 8)
         : [];
 
-    const artifactReadinessReasonDetails: BaselineTemplateReadinessReason[] =
+    const rawReadinessReasonDetails: BaselineTemplateReadinessReason[] =
       artifactReadiness === 'blocked'
         ? templateReadiness?.hardBlockReasons ?? []
         : artifactReadiness === 'degraded'
           ? templateReadiness?.warnings ?? []
           : [];
+
+    const artifactReadinessReasonDetails: BaselineTemplateReadinessReason[] = rawReadinessReasonDetails.map((reason) => ({
+      ...reason,
+      details: {
+        ...((reason as any)?.details ?? {}),
+        validExperience: validExperienceCount,
+        stats: {
+          ...(((reason as any)?.details as any)?.stats ?? {}),
+          validExperience: validExperienceCount,
+        },
+      },
+    }));
 
     // NOTE: Intentionally no logging here; this endpoint is high-volume and verbose logs can
     // overwhelm production logging (Railway rate limits).
@@ -309,7 +319,8 @@ export class StudioArtifactsService {
     };
 
     const isTemplateNotReadyBlocked =
-      artifactReadiness === 'blocked' &&
+      Boolean(templateReadiness) &&
+      (!templateReadiness!.canGenerateResume || !templateReadiness!.canGenerateCoverLetter) &&
       (templateReadiness?.hardBlockReasons ?? []).some((r) => safeText(r.code) === 'baseline_template_not_ready');
 
     const stripArtifactPayload = (artifact: StudioArtifactRecord | null): StudioArtifactRecord | null => {
