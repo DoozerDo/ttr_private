@@ -5,6 +5,7 @@ import StudioPage from "@/app/(app)/studio/page";
 import { buildStudioArtifactSingleFlightKey } from "@/lib/studioArtifactSingleFlight";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
 import { overrideSearchParams, setFetchImplementation } from "@/tests/setup";
+import * as generationProductReadiness from "@/lib/generationProductReadiness";
 
 vi.mock("@/app/(app)/studio/BaselineBlockPolicyPanel", () => ({
   BaselineBlockPolicyPanel: () => null,
@@ -141,6 +142,15 @@ describe("Studio generation authority transition", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
     vi.restoreAllMocks();
+    vi.spyOn(generationProductReadiness, "buildGenerationProductReadiness").mockReturnValue({
+      generation_readiness: { canGenerate: true, canExport: false, reasonsBlocked: [] },
+      state: "ALLOWED",
+      confidence: "LOW",
+      needsVerification: false,
+      tier: "generation_allowed",
+      canOpenStudio: true,
+      generationMode: "verified",
+    });
   });
 
   it("A. generation_ready -> generation starts: switches immediately to generation_in_progress and removes ready copy", async () => {

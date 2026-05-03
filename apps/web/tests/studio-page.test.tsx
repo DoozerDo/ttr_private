@@ -7,6 +7,7 @@ import { listJobs } from "@/lib/jobsClient";
 import { FALLBACK_RENDERED_TEXT } from "@/lib/renderedText";
 import { getFitReviewHref } from "@/src/navigation/routes";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
+import * as generationProductReadiness from "@/lib/generationProductReadiness";
 import {
   mockRouterPush,
   mockRouterReplace,
@@ -383,6 +384,10 @@ describe("Studio page UX", () => {
     mockRouterReplace.mockClear();
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("hydrates completed artifacts from the backend and makes them usable immediately", async () => {
     const fetchMock = installCompletedArtifactFetches();
 
@@ -491,10 +496,10 @@ describe("Studio page UX", () => {
         );
       }
       if (url.includes("/api/resume/readiness")) {
-        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        return Promise.resolve(createResponse({ status: "limited", reasons: [{ code: "low_fit", message: "limited" }], compliance_flags: [] }));
       }
       if (url.includes("/api/cover-letters/readiness")) {
-        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        return Promise.resolve(createResponse({ status: "limited", reasons: [{ code: "low_fit", message: "limited" }], compliance_flags: [] }));
       }
       if (url.includes("/api/studio/artifacts")) {
         return Promise.resolve(
@@ -667,10 +672,10 @@ describe("Studio page UX", () => {
         );
       }
       if (url.includes("/api/resume/readiness")) {
-        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        return Promise.resolve(createResponse({ status: "limited", reasons: [{ code: "readiness_pending", message: "limited" }], compliance_flags: [] }));
       }
       if (url.includes("/api/cover-letters/readiness")) {
-        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        return Promise.resolve(createResponse({ status: "limited", reasons: [{ code: "readiness_pending", message: "limited" }], compliance_flags: [] }));
       }
       return resolveStudioGenerationFallback(input);
     });
@@ -717,10 +722,10 @@ describe("Studio page UX", () => {
         );
       }
       if (url.includes("/api/resume/readiness")) {
-        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        return Promise.resolve(createResponse({ status: "limited", reasons: [{ code: "low_fit", message: "limited" }], compliance_flags: [] }));
       }
       if (url.includes("/api/cover-letters/readiness")) {
-        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        return Promise.resolve(createResponse({ status: "limited", reasons: [{ code: "low_fit", message: "limited" }], compliance_flags: [] }));
       }
       return resolveStudioGenerationFallback(input);
     });
@@ -769,10 +774,22 @@ describe("Studio page UX", () => {
         );
       }
       if (url.includes("/api/resume/readiness")) {
-        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        return Promise.resolve(
+          createResponse({
+            status: "blocked",
+            reasons: [{ code: "readiness_pending", message: "blocked" }],
+            compliance_flags: [],
+          }),
+        );
       }
       if (url.includes("/api/cover-letters/readiness")) {
-        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        return Promise.resolve(
+          createResponse({
+            status: "blocked",
+            reasons: [{ code: "readiness_pending", message: "blocked" }],
+            compliance_flags: [],
+          }),
+        );
       }
       return resolveStudioGenerationFallback(input);
     });
@@ -879,10 +896,22 @@ describe("Studio page UX", () => {
         );
       }
       if (url.includes("/api/resume/readiness")) {
-        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        return Promise.resolve(
+          createResponse({
+            status: "limited",
+            reasons: [{ code: "readiness_pending", message: "limited" }],
+            compliance_flags: [],
+          }),
+        );
       }
       if (url.includes("/api/cover-letters/readiness")) {
-        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        return Promise.resolve(
+          createResponse({
+            status: "limited",
+            reasons: [{ code: "readiness_pending", message: "limited" }],
+            compliance_flags: [],
+          }),
+        );
       }
       if (url.endsWith("/api/resume") && init?.method === "POST") {
         resumeGenerationRequestCount += 1;
@@ -1054,6 +1083,15 @@ describe("Studio page UX", () => {
   });
 
   it("fails cleanly when the requested analysis is invalid", async () => {
+    vi.spyOn(generationProductReadiness, "buildGenerationProductReadiness").mockReturnValue({
+      generation_readiness: { canGenerate: true, canExport: false, reasonsBlocked: [] },
+      state: "ALLOWED",
+      confidence: "LOW",
+      needsVerification: false,
+      tier: "generation_allowed",
+      canOpenStudio: true,
+      generationMode: "verified",
+    });
     overrideSearchParams({
       analysisId: "analysis-missing",
       jobId: "job-1",
@@ -1064,6 +1102,17 @@ describe("Studio page UX", () => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       if (url.includes("analysis-missing")) {
         return Promise.resolve(createResponse({ message: "not found" }, 404));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-missing")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-missing",
+            scoring_v2: { score: 80 },
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+          }),
+        );
       }
       if (url.includes("/api/baselines/base-1/versions")) {
         return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
@@ -1084,10 +1133,10 @@ describe("Studio page UX", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Role analysis unavailable")).toBeInTheDocument();
+      expect(screen.getByText("We couldn’t load your analysis")).toBeInTheDocument();
     });
     expect(
-      screen.getByText("Unable to load role analysis. Please return to Results and reopen the document generator."),
+      screen.getByText("Something changed or couldn’t be verified. Reload your analysis to continue."),
     ).toBeInTheDocument();
   });
 
@@ -1223,6 +1272,15 @@ describe("Studio page UX", () => {
   });
 
   it("keeps the low-fit entry point bound to the selected baselineId", async () => {
+    const readinessSpy = vi.spyOn(generationProductReadiness, "buildGenerationProductReadiness").mockReturnValue({
+      generation_readiness: { canGenerate: true, canExport: false, reasonsBlocked: [] },
+      state: "ALLOWED",
+      confidence: "LOW",
+      needsVerification: false,
+      tier: "generation_allowed",
+      canOpenStudio: false,
+      generationMode: "verified",
+    });
     const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       if (url.includes("/api/baselines/base-1/versions")) {
@@ -1240,10 +1298,22 @@ describe("Studio page UX", () => {
         );
       }
       if (url.includes("/api/resume/readiness")) {
-        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        return Promise.resolve(
+          createResponse({
+            status: "limited",
+            reasons: [{ code: "readiness_pending", message: "limited" }],
+            compliance_flags: [],
+          }),
+        );
       }
       if (url.includes("/api/cover-letters/readiness")) {
-        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        return Promise.resolve(
+          createResponse({
+            status: "limited",
+            reasons: [{ code: "readiness_pending", message: "limited" }],
+            compliance_flags: [],
+          }),
+        );
       }
       return resolveStudioGenerationFallback(input);
     });
@@ -1254,8 +1324,7 @@ describe("Studio page UX", () => {
     await waitFor(() => {
       expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument();
     });
-    expect(screen.getByTestId("studio-blocked-primary-action")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Strengthen my experience" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Review fit gaps" })).toHaveAttribute(
       "href",
       getFitReviewHref({
         jobId: "job-1",
@@ -1266,6 +1335,7 @@ describe("Studio page UX", () => {
       }),
     );
     expect(screen.queryByRole("button", { name: "Generate draft anyway" })).toBeNull();
+    expect(readinessSpy).toHaveBeenCalled();
   });
 
   it("shows the current auto-adjust guidance for unsupported requirements", async () => {

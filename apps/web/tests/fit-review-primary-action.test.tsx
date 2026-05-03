@@ -71,6 +71,7 @@ describe("FitReview primary unlock action", () => {
               "HIPAA-regulated customer support context",
             ],
           },
+          scoringReliability: "ok",
         });
       }
 
@@ -82,6 +83,7 @@ describe("FitReview primary unlock action", () => {
 
     expect(await screen.findByText("Your fastest path to unlock")).toBeInTheDocument();
     expect(screen.getAllByText("Almost there").length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("fit-review-score-reliability-warning")).toBeNull();
 
     const primaryGap = screen.getByTestId("fit-review-primary-gap");
     expect(primaryGap).toBeInTheDocument();

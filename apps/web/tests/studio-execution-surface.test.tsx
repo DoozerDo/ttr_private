@@ -6,6 +6,7 @@ import { listBaselines } from "@/lib/baselines";
 import * as generationAuthority from "@/lib/generationAuthority";
 import { listJobs } from "@/lib/jobsClient";
 import * as studioTrustGate from "@/lib/studioTrustGate";
+import * as generationProductReadiness from "@/lib/generationProductReadiness";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
 import { overrideSearchParams, setFetchImplementation } from "./setup";
 
@@ -58,6 +59,15 @@ function renderStudio() {
 describe("Studio execution surface", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(generationProductReadiness, "buildGenerationProductReadiness").mockReturnValue({
+      generation_readiness: { canGenerate: true, canExport: false, reasonsBlocked: [] },
+      state: "ALLOWED",
+      confidence: "LOW",
+      needsVerification: false,
+      tier: "generation_allowed",
+      canOpenStudio: true,
+      generationMode: "verified",
+    });
     overrideSearchParams({
       analysisId: "analysis-1",
       jobId: "job-1",

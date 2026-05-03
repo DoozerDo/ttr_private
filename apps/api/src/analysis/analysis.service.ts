@@ -111,6 +111,8 @@ export type AnalysisResult = {
   strengths: string[];
   gaps: string[];
   summary: string;
+  scoringReliability?: 'ok' | 'unreliable';
+  scoringReliabilityReason?: 'job_description_terms_empty' | 'job_description_empty' | 'unknown';
   compliance_flags?: Array<{ code: string; message?: string }>;
   compliance_debug?: ComplianceDebugTrace;
   audit_id?: string | null;
@@ -301,6 +303,8 @@ type FitScoreResponse = {
   scoreSanityFlags?: string[];
   likelyUnderestimatedFit?: boolean;
   scorePresentationMode?: 'normal' | 'caution' | 'fix_first';
+  scoringReliability?: 'ok' | 'unreliable';
+  scoringReliabilityReason?: 'job_description_terms_empty' | 'job_description_empty' | 'unknown';
 
   scoring_v2?: CxFitV2Result;
   supportingSignals?: string[];
@@ -400,6 +404,8 @@ type RunFitAssessmentComplianceBlockedResponse = {
   scoreSanityFlags?: string[];
   likelyUnderestimatedFit?: boolean;
   scorePresentationMode?: 'normal' | 'caution' | 'fix_first';
+  scoringReliability?: 'ok' | 'unreliable';
+  scoringReliabilityReason?: 'job_description_terms_empty' | 'job_description_empty' | 'unknown';
   assessmentId?: string;
   jobId?: string;
   baselineId?: string;
@@ -2227,7 +2233,7 @@ export class AnalysisService {
         baselineSelection.originalBaselineChars,
       );
 
-      const confidenceResult = computeConfidenceScore(scoringV2.debug);
+    const confidenceResult = computeConfidenceScore(scoringV2.debug);
 
     const legacyDimensionScores =
       this.mapCxFitV2ToLegacyDimensionScores(scoringV2);
@@ -2379,6 +2385,21 @@ export class AnalysisService {
       jobTextSource,
     };
 
+    const computedSummary =
+      scoring?.summary ?? this.buildSummaryFromTerms(strengths, gaps);
+    const jobDescriptionNonEmpty = jobTextForScoring.jobRawTextCharCount > 0;
+    const jobDescriptionTermsEmpty =
+      jobNormDebug.responsibilitiesCount === 0 &&
+      jobNormDebug.requirementsCount === 0;
+    const scoringReliability: AnalysisResult['scoringReliability'] =
+      jobDescriptionNonEmpty && jobDescriptionTermsEmpty ? 'unreliable' : 'ok';
+    const scoringReliabilityReason: AnalysisResult['scoringReliabilityReason'] =
+      jobDescriptionNonEmpty && jobDescriptionTermsEmpty
+        ? 'job_description_terms_empty'
+        : jobDescriptionNonEmpty
+          ? undefined
+          : 'job_description_empty';
+
     return {
       status: 'ok',
       fit_score: finalScore,
@@ -2408,7 +2429,9 @@ export class AnalysisService {
       overallScore: finalScore,
       dimensionScores: legacyDimensionScores,
       complianceFlags,
-      summary: scoring?.summary ?? this.buildSummaryFromTerms(strengths, gaps),
+      summary: computedSummary,
+      scoringReliability,
+      ...(scoringReliabilityReason ? { scoringReliabilityReason } : {}),
       ...(debugInfo ? { debug: debugInfo } : {}),
       ...(fitScoreDebug ? { fit_score_debug: fitScoreDebug } : {}),
       scoringProof,
@@ -2996,6 +3019,16 @@ export class AnalysisService {
       const gaps = gapInsights.criticalGaps.map((gap) => gap.title);
       const complianceFlags = debugScoring?.complianceFlags ?? [];
       const finalScore = scoringV2.score;
+      const scoringReliability =
+        jobTextForScoring.jobRawTextCharCount > 0 &&
+        jobNormDebug.responsibilitiesCount === 0 &&
+        jobNormDebug.requirementsCount === 0
+          ? ('unreliable' as const)
+          : ('ok' as const);
+      const scoringReliabilityReason =
+        scoringReliability === 'unreliable'
+          ? ('job_description_terms_empty' as const)
+          : undefined;
 
       const breakdown = {
         experience_alignment: legacyDimensionScores.experienceAlignment,
@@ -3116,6 +3149,22 @@ export class AnalysisService {
           blockedFlags: normalizedFlags.map((flag) => flag.code ?? flag.message),
         });
 
+      const blockedSummary =
+        debugScoring?.summary ?? this.buildSummaryFromTerms(strengths, gaps);
+      const blockedJobDescriptionNonEmpty =
+        jobTextForScoring.jobRawTextCharCount > 0;
+      const blockedJobDescriptionTermsEmpty =
+        jobNormDebug.responsibilitiesCount === 0 &&
+        jobNormDebug.requirementsCount === 0;
+      const blockedScoringReliability: AnalysisResult['scoringReliability'] =
+        blockedJobDescriptionNonEmpty && blockedJobDescriptionTermsEmpty
+          ? 'unreliable'
+          : 'ok';
+      const blockedScoringReliabilityReason: AnalysisResult['scoringReliabilityReason'] | undefined =
+        blockedJobDescriptionNonEmpty && blockedJobDescriptionTermsEmpty
+          ? 'job_description_terms_empty'
+          : undefined;
+
       const blockedResponse: RunFitAssessmentComplianceBlockedResponse = {
         status: 'compliance_blocked',
         fit_score: finalScore,
@@ -3133,9 +3182,11 @@ export class AnalysisService {
         ...(debugInfo ? { debug: debugInfo } : {}),
         ...(fitScoreDebug ? { fit_score_debug: fitScoreDebug } : {}),
         scoringProof,
-        summary:
-          debugScoring?.summary ??
-          this.buildSummaryFromTerms(strengths, gaps),
+        summary: blockedSummary,
+        scoringReliability: blockedScoringReliability,
+        ...(blockedScoringReliabilityReason
+          ? { scoringReliabilityReason: blockedScoringReliabilityReason }
+          : {}),
         confidenceScore: confidenceResult.confidenceScore,
         confidenceReasons: confidenceResult.confidenceReasons,
         scoreConfidence: scoringV2.scoreConfidence,
@@ -3264,6 +3315,8 @@ export class AnalysisService {
         inputsHash,
         confidenceScore: confidenceResult.confidenceScore,
         confidenceReasons: confidenceResult.confidenceReasons,
+        scoringReliability,
+        ...(scoringReliabilityReason ? { scoringReliabilityReason } : {}),
       });
       if (syntheticMetadata?.isSynthetic) {
         applySyntheticMetadata(assessment, syntheticMetadata);
@@ -3444,6 +3497,17 @@ export class AnalysisService {
         summary:
           debugScoring?.summary ??
           this.buildSummaryFromTerms(strengths, gaps),
+        scoringReliability:
+          jobTextForScoring.jobRawTextCharCount > 0 &&
+          jobNormDebug.responsibilitiesCount === 0 &&
+          jobNormDebug.requirementsCount === 0
+            ? 'unreliable'
+            : 'ok',
+        ...(jobTextForScoring.jobRawTextCharCount > 0 &&
+        jobNormDebug.responsibilitiesCount === 0 &&
+        jobNormDebug.requirementsCount === 0
+          ? { scoringReliabilityReason: 'job_description_terms_empty' as const }
+          : {}),
         ...(debugInfo ? { debug: debugInfo } : {}),
         scoringProof: successScoringProof,
         confidenceScore: confidenceResult.confidenceScore,
@@ -3973,6 +4037,10 @@ export class AnalysisService {
       recommendedActions: gapInsights.recommendedActions,
       complianceFlags: assessment.complianceFlags,
       summary,
+      scoringReliability: assessment.scoringReliability ?? 'ok',
+      ...(assessment.scoringReliabilityReason
+        ? { scoringReliabilityReason: assessment.scoringReliabilityReason }
+        : {}),
       confidenceScore: assessment.confidenceScore ?? null,
       confidenceReasons: assessment.confidenceReasons ?? [],
       createdAt: assessment.createdAt,

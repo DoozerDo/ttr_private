@@ -43,6 +43,8 @@ type FitAssessment = {
   score?: number;
   verdict?: string;
   summary?: string;
+  scoringReliability?: "ok" | "unreliable";
+  scoringReliabilityReason?: string;
   dimensionScores?: FitDimensionScores;
   breakdown?: {
     experience_alignment?: number;
@@ -449,9 +451,16 @@ export default function FitReviewClient() {
 
   const heroScoreText = `Score: ${getAssessmentScore(displayAssessment)?.toFixed(1) ?? "Pending"}`;
   const numericScore = getAssessmentScore(displayAssessment);
+  const scoringReliability =
+    displayAssessment?.scoringReliability === "unreliable" ? "unreliable" : "ok";
+  const scoringReliabilityReason =
+    scoringReliability === "unreliable" && typeof displayAssessment?.scoringReliabilityReason === "string"
+      ? displayAssessment.scoringReliabilityReason
+      : undefined;
   const isGuidedUnlockScore =
     typeof numericScore === "number" &&
     Number.isFinite(numericScore) &&
+    scoringReliability === "ok" &&
     numericScore >= GUIDED_UNLOCK_MIN_SCORE &&
     numericScore <= GUIDED_UNLOCK_MAX_SCORE;
   const verdictInfo = useMemo(
@@ -923,6 +932,17 @@ export default function FitReviewClient() {
                   </div>
                   {error ? <div style={ttrComponents.dangerBox}>{error}</div> : null}
                   <p className="text-lg font-semibold text-slate-100">{heroScoreText}</p>
+                  {scoringReliability === "unreliable" ? (
+                    <div
+                      className="rounded-2xl border border-amber-300/25 bg-amber-500/10 p-4 text-slate-100"
+                      data-testid="fit-review-score-reliability-warning"
+                      data-reliability-reason={scoringReliabilityReason}
+                    >
+                      <p className="text-sm text-slate-100">
+                        This score may be unreliable because we couldn’t parse the job description well enough.
+                      </p>
+                    </div>
+                  ) : null}
                   <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-3">
                     <p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">
                       Why you can trust this score
@@ -1016,6 +1036,17 @@ export default function FitReviewClient() {
                     </div>
                   </details>
                 ) : null}
+              </div>
+            ) : scoringReliability === "unreliable" ? (
+              <div
+                className="mt-4 rounded-2xl border border-amber-300/25 bg-amber-500/10 p-4 text-slate-100"
+                data-testid="fit-review-unreliable-score-guidance"
+                data-reliability-reason={scoringReliabilityReason}
+              >
+                <p className="text-sm text-slate-100">
+                  Before using this score to guide next steps, review the job description. We couldn’t extract enough
+                  structured terms to score it reliably.
+                </p>
               </div>
             ) : (
               <div

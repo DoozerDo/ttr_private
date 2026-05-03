@@ -199,6 +199,8 @@ type LatestAnalysis = {
   overallScore?: number | string | null;
   verdict?: string | null;
   summary?: string | null;
+  scoringReliability?: "ok" | "unreliable" | null;
+  scoringReliabilityReason?: string | null;
   strengths?: string[] | null;
   gaps?: string[] | null;
   recommendedActions?: string[] | null;
@@ -1731,6 +1733,11 @@ export default function StudioPage() {
     return getScoreBand(analysisScore);
   }, [analysisScore]);
   const isTopBand = scoreBand === ScoreBand.TOP;
+  const scoringReliability = analysis?.scoringReliability === "unreliable" ? "unreliable" : "ok";
+  const scoringReliabilityReason =
+    scoringReliability === "unreliable" && typeof analysis?.scoringReliabilityReason === "string"
+      ? analysis.scoringReliabilityReason
+      : null;
   // Effective IDs must be derived consistently from the URL and/or hydrated analysis.
   // In particular, auto-generation eligibility depends on these being available as soon as the URL provides them.
   const effectiveJobId = selectedJobId || requestedJobId || trimId(analysis?.jobId);
@@ -9552,8 +9559,10 @@ export default function StudioPage() {
     // When `shouldStart` is true, the auto-generation effect will start through the
     // ready shell entrypoint (`shell_auto`), so suppression would incorrectly block
     // legitimate auto-starts (including in tests).
-    suppressAutoGenerationRef.current = workflowOrchestratorCore.contract.generation.auto.shouldStart !== true;
-  }, [generationReadyShellActive, workflowOrchestratorCore.contract.generation.auto.shouldStart]);
+    suppressAutoGenerationRef.current =
+      scoringReliability === "unreliable" ||
+      workflowOrchestratorCore.contract.generation.auto.shouldStart !== true;
+  }, [generationReadyShellActive, scoringReliability, workflowOrchestratorCore.contract.generation.auto.shouldStart]);
 
   const generationReadyAnalyticsContext = useMemo(() => {
     const trust = generationReadyModel.trustSummary;
@@ -10963,6 +10972,18 @@ export default function StudioPage() {
         return (
           <Alert intent={bannerIntent} title={bannerTitle}>
             <div data-testid="studio-generation-state-banner" className="space-y-2">
+              {scoringReliability === "unreliable" ? (
+                <div
+                  className="rounded-2xl border border-amber-300/25 bg-amber-500/10 p-4 text-slate-100"
+                  data-testid="studio-score-reliability-warning"
+                  data-reliability-reason={scoringReliabilityReason ?? undefined}
+                >
+                  <p className="text-sm text-slate-100">
+                    Fit score may be unreliable because we couldn’t parse the job description well enough. You can still
+                    generate drafts, but review the job description for best results.
+                  </p>
+                </div>
+              ) : null}
               {generationState === "ready" ? (
                 <p data-testid="studio-generation-state-ready" className="text-sm text-slate-100">
                   This role is ready for generation using your verified baseline.

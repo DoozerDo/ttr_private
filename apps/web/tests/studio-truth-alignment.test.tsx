@@ -5,6 +5,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import StudioPage from "@/app/(app)/studio/page";
 import { overrideSearchParams, setFetchImplementation } from "./setup";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
+import * as generationProductReadiness from "@/lib/generationProductReadiness";
 
 vi.mock("@/app/(app)/studio/BaselineBlockPolicyPanel", () => ({
   BaselineBlockPolicyPanel: () => null,
@@ -39,6 +40,15 @@ function renderStudio() {
 
 describe("Studio truth alignment", () => {
   it("blocked state never renders draft-in-progress hero messaging", async () => {
+    vi.spyOn(generationProductReadiness, "buildGenerationProductReadiness").mockReturnValue({
+      generation_readiness: { canGenerate: true, canExport: false, reasonsBlocked: [] },
+      state: "ALLOWED",
+      confidence: "LOW",
+      needsVerification: false,
+      tier: "generation_allowed",
+      canOpenStudio: false,
+      generationMode: "verified",
+    });
     overrideSearchParams({
       analysisId: "analysis-1",
       jobId: "job-1",
@@ -62,6 +72,13 @@ describe("Studio truth alignment", () => {
           baselineVersionId: "base-version-1",
           company: "Acme",
           title: "Director of Support",
+        });
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return createResponse({
+          status: "blocked",
+          reasons: [{ code: "low_fit", message: "blocked" }],
+          compliance_flags: [],
         });
       }
       if (url.includes("/api/baselines/base-1")) {
@@ -203,6 +220,15 @@ describe("Studio truth alignment", () => {
   });
 
   it("failed page state can coexist with one failed artifact while the other remains reviewable", async () => {
+    vi.spyOn(generationProductReadiness, "buildGenerationProductReadiness").mockReturnValue({
+      generation_readiness: { canGenerate: true, canExport: false, reasonsBlocked: [] },
+      state: "ALLOWED",
+      confidence: "LOW",
+      needsVerification: false,
+      tier: "generation_allowed",
+      canOpenStudio: true,
+      generationMode: "verified",
+    });
     overrideSearchParams({
       analysisId: "analysis-1",
       jobId: "job-1",

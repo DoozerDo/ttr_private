@@ -10,6 +10,8 @@ describe("assessment source normalization", () => {
           score: 88,
           createdAt: "2026-03-25T00:00:00.000Z",
           compliance_flags: [],
+          scoringReliability: "unreliable",
+          scoringReliabilityReason: "job_description_terms_empty",
         },
       ],
     });
@@ -21,6 +23,8 @@ describe("assessment source normalization", () => {
         score: 88,
         createdAt: "2026-03-25T00:00:00.000Z",
         complianceFlags: [],
+        scoringReliability: "unreliable",
+        scoringReliabilityReason: "job_description_terms_empty",
       },
     ]);
   });
@@ -37,5 +41,7 @@ describe("assessment source normalization", () => {
 
     expect(result[0]?.assessmentId).toBe("a-2");
     expect(result[0]?.score).toBe(91.5);
+    expect(result[0]?.scoringReliability).toBe("ok");
+    expect(result[0]?.scoringReliabilityReason).toBeUndefined();
   });
 });

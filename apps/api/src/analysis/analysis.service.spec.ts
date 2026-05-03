@@ -1154,6 +1154,58 @@ const sampleScoringV2: CxFitV2Result = {
     const rawCharCount = jobRecord.rawDescription.trim().length;
     expect(result.scoringProof?.jobTextCharsScored).toBe(rawCharCount);
     expect(result.scoringProof?.jobTextSource).toBe('normalized');
+    expect(result.scoringReliability).toBe('ok');
+  });
+
+  it('flags scoring as unreliable when a non-empty job description yields zero extracted terms', async () => {
+    const monicaJobRecord: Partial<Job> = {
+      ...defaultJobRecord,
+      rawDescription:
+        'Equal opportunity employer. Benefits and compensation details. All qualified applicants will receive consideration.',
+      normalizedResponsibilities: [],
+      normalizedRequirements: [],
+      jdIngestionMethod: JobIngestionMethod.PASTE,
+    };
+    jobRepository.findOne.mockResolvedValue(monicaJobRecord);
+
+    fitScoringServiceMock.score.mockResolvedValueOnce({
+      overallScore: 11,
+      rawScore: 11,
+      verdict: 'Skip',
+      persistenceVerdict: FitAssessmentVerdict.SKIP,
+      dimensionScores: {
+        experienceAlignment: 10,
+        leadershipLevel: 10,
+        technicalPlatformFit: 10,
+        industryContext: 10,
+        strategicTacticalFit: 10,
+      },
+      strengths: [],
+      gaps: [],
+      summary: undefined,
+      missingRequiredTools: [],
+      missingRequiredToolsCount: 0,
+      missingRequiredToolsPenalty: 0,
+      leadershipOverrideApplied: false,
+      complianceFlags: [],
+    });
+
+    (scoreCxFitV2 as unknown as jest.Mock).mockReturnValueOnce({
+      ...sampleScoringV2,
+      score: 11,
+      scoreConfidence: 'low',
+    } satisfies CxFitV2Result);
+
+    const result = await service.runFitAssessment('user-1', {
+      baselineId: 'b-1',
+      jobId: 'job-1',
+      baselineVersion: 2,
+    });
+
+    expect(result.summary).toBe('No keywords found in the job description.');
+    expect(result.scoringReliability).toBe('unreliable');
+    expect(result.scoringReliabilityReason).toBe('job_description_terms_empty');
+    expect(result.overallScore).toBe(11);
   });
 
   it('does not classify the first scoring run as stale when raw sections and canonical parsed records differ in ordering', async () => {

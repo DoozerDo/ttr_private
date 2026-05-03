@@ -4,6 +4,8 @@ export type CanonicalAssessmentSummary = {
   score: number | null;
   createdAt: string | null;
   complianceFlags: unknown[];
+  scoringReliability: "ok" | "unreliable";
+  scoringReliabilityReason?: string;
 };
 
 type AssessmentRecord = {
@@ -15,7 +17,14 @@ type AssessmentRecord = {
   createdAt?: unknown;
   compliance_flags?: unknown;
   complianceFlags?: unknown;
+  scoringReliability?: unknown;
+  scoringReliabilityReason?: unknown;
 };
+
+function normalizeScoringReliability(value: unknown): "ok" | "unreliable" {
+  if (value === "unreliable") return "unreliable";
+  return "ok";
+}
 
 function normalizeScore(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -37,12 +46,19 @@ function toAssessmentSummary(record: AssessmentRecord): CanonicalAssessmentSumma
     : Array.isArray(record.complianceFlags)
       ? record.complianceFlags
       : [];
+  const scoringReliability = normalizeScoringReliability(record.scoringReliability);
+  const scoringReliabilityReason =
+    typeof record.scoringReliabilityReason === "string" && record.scoringReliabilityReason.trim()
+      ? record.scoringReliabilityReason.trim()
+      : undefined;
   return {
     assessmentId,
     baselineId,
     score: normalizeScore(record.score ?? record.overallScore),
     createdAt: typeof record.createdAt === "string" ? record.createdAt : null,
     complianceFlags,
+    scoringReliability,
+    ...(scoringReliabilityReason ? { scoringReliabilityReason } : {}),
   };
 }
 

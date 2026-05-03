@@ -74,6 +74,16 @@ export class FitAssessment {
   @Column({ type: 'jsonb', nullable: true })
   confidenceReasons?: string[] | null;
 
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  scoringReliability?: 'ok' | 'unreliable' | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  scoringReliabilityReason?:
+    | 'job_description_terms_empty'
+    | 'job_description_empty'
+    | 'unknown'
+    | null;
+
   @Column({ type: 'jsonb', nullable: true })
   scoringV2!: CxFitV2Result | null;
 

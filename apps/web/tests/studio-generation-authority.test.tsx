@@ -177,6 +177,18 @@ describe("Studio artifact quality gating (soft)", () => {
     ).toBeInTheDocument();
     expect(screen.queryByTestId("studio-generate-resume-button")).toBeNull();
     expect(screen.queryByTestId("studio-generate-cover-button")).toBeNull();
+    expect(screen.queryByTestId("studio-score-reliability-warning")).toBeNull();
+  });
+
+  it("surfaces a cautionary banner in Studio when scoringReliability is unreliable without blocking generation actions", async () => {
+    setupFetch("ready", 94, 3, "unreliable");
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-generation-state-ready")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("studio-score-reliability-warning")).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-generation-state-blocked")).toBeNull();
   });
 
   it("renders the blocked generation state banner only when the backend indicates zero valid experience entries", async () => {
@@ -1223,7 +1235,12 @@ function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   };
 }
 
-function setupFetch(readinessStatus: "ready" | "limited" | "blocked", score = 94, totalClaims = 3) {
+function setupFetch(
+  readinessStatus: "ready" | "limited" | "blocked",
+  score = 94,
+  totalClaims = 3,
+  scoringReliability: "ok" | "unreliable" = "ok",
+) {
   setFetchImplementation(
     vi.fn((input: RequestInfo) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
@@ -1242,6 +1259,10 @@ function setupFetch(readinessStatus: "ready" | "limited" | "blocked", score = 94
             company: "Acme",
             title: "Director of Support",
             scoring_v2: { score },
+            scoringReliability,
+            ...(scoringReliability === "unreliable"
+              ? { scoringReliabilityReason: "job_description_terms_empty" }
+              : {}),
             verification_coverage: {
               totalClaims,
               verifiedClaims: readinessStatus === "ready" ? totalClaims : 0,
