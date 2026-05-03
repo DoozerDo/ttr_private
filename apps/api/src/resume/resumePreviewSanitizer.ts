@@ -22,7 +22,15 @@ export function sanitizeResumePreviewForStudio(
   resume: NormalizedResumeDocument,
 ): NormalizedResumeDocument {
   const experience = Array.isArray(resume.experience) ? resume.experience : [];
-  if (!experience.length) return resume;
+  const sanitizedRoot = { ...(resume as any) } as NormalizedResumeDocument;
+  if (typeof (sanitizedRoot as any).summary === 'string') {
+    (sanitizedRoot as any).summary = String((sanitizedRoot as any).summary)
+      .replace(/\bSummary\s*\|\s*Summary\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  if (!experience.length) return sanitizedRoot;
 
   const sanitizedExperience = experience.map((entry) => {
     const rawEntry = entry as unknown as Record<string, unknown>;
@@ -70,7 +78,7 @@ export function sanitizeResumePreviewForStudio(
   });
 
   return {
-    ...(resume as unknown as Record<string, unknown>),
+    ...(sanitizedRoot as unknown as Record<string, unknown>),
     experience: sanitizedExperience as unknown as NormalizedResumeDocument['experience'],
   } as NormalizedResumeDocument;
 }

@@ -46,9 +46,17 @@ export function isAllowedStructuredTemplateExperienceHeader(input: {
     return false;
   }
 
-  // Reject obvious sentence/project fragments.
-  if (/[,.]/.test(company)) return false;
-  if (company.endsWith('.')) return false;
+  // Reject obvious sentence/project fragments. Do not blanket-reject punctuation because
+  // legitimate company names often include commas and suffix abbreviations (e.g., "Foo, Inc.").
+  // Instead, reject punctuation-heavy headers that look like clauses or bullet fragments.
+  const commaCount = (company.match(/,/g) ?? []).length;
+  if (commaCount > 1) return false;
+  if (company.endsWith('.')) {
+    // Allow common legal suffix abbreviations like "Inc.", "Co.", "Ltd.", "Corp.".
+    if (!/\b(?:inc|co|corp|ltd|llc|pllc)\.\s*$/i.test(company)) return false;
+  }
+  // Reject clause-like patterns that are very unlikely to be a company name.
+  if (/[,:]\s+(?:and|but|so|because|which|that)\b/i.test(company)) return false;
 
   // Reject known invalid placeholders.
   if (normalizedCompany === 'experience entry needs correction') return false;

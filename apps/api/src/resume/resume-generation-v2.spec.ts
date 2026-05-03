@@ -239,4 +239,36 @@ describe('resume generation v2', () => {
       ).toBe(true);
     }
   });
+
+  it('does not block generation when experience bullets are missing (marks needs_refinement if needed)', () => {
+    const baselineSections = [
+      {
+        sectionType: 'SUMMARY',
+        content: 'Hybrid engineer with software and infrastructure experience.',
+      },
+      {
+        sectionType: 'SKILLS',
+        content: ['Python, Docker, Kubernetes'].join('\n'),
+      },
+      {
+        sectionType: 'EXPERIENCE',
+        content: [
+          'AMS DataSerfs, Inc. | Linux System Administrator | 2022 - 2024',
+          // Paragraph-style responsibilities (no bullet prefix) should be treated as usable evidence.
+          'Managed Linux systems, VMs, DNS, and VPN connectivity.',
+          'Biblioso | Infrastructure Engineer | 2023 - 2024',
+          'Maintained Kubernetes workloads and CI/CD.',
+        ].join('\n'),
+      },
+    ] as any[];
+
+    const result = buildDeterministicResumeV2FromBaseline({
+      baselineSections: baselineSections as any,
+      identity: { name: 'Test User', contactLine: 'test@example.com' },
+    });
+
+    expect(Array.isArray(result.normalized.experience)).toBe(true);
+    expect(result.normalized.experience.length).toBeGreaterThan(0);
+    expect(['pass', 'needs_refinement']).toContain(result.qualityGate.status);
+  });
 });

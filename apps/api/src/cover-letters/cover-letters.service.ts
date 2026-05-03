@@ -1256,7 +1256,7 @@ export class CoverLettersService {
       .join('\n');
     const insufficientBaselineDetails =
       getInsufficientExtractedTextDetails(baselineText);
-    if (insufficientBaselineDetails) {
+    if (insufficientBaselineDetails && !templateReadiness.canGenerateCoverLetter) {
       throw new UnprocessableEntityException(buildArtifactFailurePayload({
         code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
         category: 'unsupported_input',

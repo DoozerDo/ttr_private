@@ -310,10 +310,10 @@ describe('artifact acceptance harness', () => {
     expect(result.preview.resume.experience?.[0]?.bullets?.length ?? 0).toBeGreaterThan(0);
   });
 
-  it('keeps paragraph-only resume inputs unsupported', async () => {
-    await expect(generateResume(paragraphOnlyResumeFixture as never)).rejects.toMatchObject({
-      status: 422,
-    });
+  it('allows paragraph-only resume inputs to generate in degraded mode (needs refinement)', async () => {
+    const result = await generateResume(paragraphOnlyResumeFixture as never);
+    expect(result.ok).toBe(true);
+    expect(['pass', 'needs_refinement']).toContain(result.qualityGate?.status);
   });
 
   it('suppresses education duplication and token soup in the resume export path', async () => {

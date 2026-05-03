@@ -198,10 +198,21 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       ids.forEach((id) => usedEvidenceIds.add(id));
     };
 
-    if (!paragraphEvidence.opening.length) {
+    const openingCandidates =
+      paragraphEvidence.opening.length > 0
+        ? paragraphEvidence.opening
+        : selectedEvidence.length > 0
+          ? selectedEvidence
+          : allEvidence.length > 0
+            ? allEvidence
+          : [];
+
+    // Only hard-fail when we truly have no evidence to ground the cover letter.
+    if (!openingCandidates.length) {
       throw new Error('Cover letter generation failed validation: insufficient baseline evidence.');
     }
-    const openingEvidence = paragraphEvidence.opening.slice(0, 1);
+
+    const openingEvidence = openingCandidates.slice(0, 1);
     const body1Evidence = paragraphEvidence.body1.length
       ? paragraphEvidence.body1.slice(0, 1)
       : openingEvidence;

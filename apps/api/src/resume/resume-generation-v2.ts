@@ -536,11 +536,12 @@ function buildInvalidExperienceReasons(input: {
   const company = trimToText(input.company);
   const roleTitle = trimToText(input.roleTitle);
   const bullets = Array.isArray(input.bullets) ? (input.bullets as unknown[]) : [];
-  const hasAtLeastOneBullet = bullets.map((b) => trimToText(b)).some(Boolean);
 
   if (!company) reasons.push(`experience[${input.index}].company:missing`);
   if (!roleTitle) reasons.push(`experience[${input.index}].roleTitle:missing`);
-  if (!hasAtLeastOneBullet) reasons.push(`experience[${input.index}].bullets:missing_or_empty`);
+  // Bullets are a quality signal, not a hard requirement for baseline usability.
+  // Strong resumes often have paragraph responsibilities or lightly structured bullets; allow generation
+  // and let Fit Review surface refinement suggestions.
 
   if (company) {
     const companyCheck = validateCompanyCandidate(company);

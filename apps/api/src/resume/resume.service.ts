@@ -1866,18 +1866,22 @@ export class ResumeService {
       }
 
       if (enforceTemplateReadiness) {
-        // In the Studio template lane we fail loudly instead of persisting a minimal fallback.
-        throw new UnprocessableEntityException({
-          error: {
-            code: 'baseline_template_not_ready',
-            message:
-              'Baseline is usable for scoring but is not template-safe for resume generation.',
-            details: {
-              reasons: templateReadinessForBaseline.hardBlockReasons,
-              insufficientExtractedText: insufficientBaselineDetails,
+        // Studio lane: only hard-block when we truly have no usable experience evidence.
+        // If evidence is usable-but-imperfect (e.g., sparse text / lightly structured bullets),
+        // proceed with generation and let Fit Review + quality gates surface refinements.
+        if (!templateReadinessForBaseline.canGenerateResume) {
+          throw new UnprocessableEntityException({
+            error: {
+              code: 'baseline_template_not_ready',
+              message:
+                'Baseline is usable for scoring but is not template-safe for resume generation.',
+              details: {
+                reasons: templateReadinessForBaseline.hardBlockReasons,
+                insufficientExtractedText: insufficientBaselineDetails,
+              },
             },
-          },
-        });
+          });
+        }
       }
 
       // Fail-soft: if extraction heuristics say the baseline is thin, still return a minimal,
@@ -2661,7 +2665,7 @@ export class ResumeService {
       | WorkflowIdempotencyReservation<ResumeGenerationResponse>
       | { status: 'accepted_new'; runId: string; responseBody: null };
     let reservation: ReservationLike;
-    if (forceTemplateRegen) {
+    if (forceTemplateRegen || request.forceRegenerate) {
       reservation = { status: 'accepted_new', runId: audit.id, responseBody: null };
       dedupeKey = this.buildResumeDedupeKey({
         userId,
@@ -2673,6 +2677,9 @@ export class ResumeService {
         oneTap: Boolean(request.oneTap),
         enforceOneTap: shouldEnforceOneTap,
       });
+      if (request.forceRegenerate) {
+        dedupeKey = `${dedupeKey}:regen:${audit.id}`;
+      }
     } else {
       const baseDedupeKey = this.buildResumeDedupeKey({
         userId,

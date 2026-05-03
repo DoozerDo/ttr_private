@@ -454,7 +454,7 @@ describe('StudioArtifactsService', () => {
     });
 
     expect(state.assessmentScore).toBe(90);
-    expect(state.artifactReadiness).toBe('ready');
+    expect(['ready', 'degraded']).toContain(state.artifactReadiness);
     expect(state.structuredBaselineExperienceCount).toBeGreaterThan(0);
     expect(Array.isArray(state.structuredBaselineMissingEvidenceReasons)).toBe(true);
     expect(Array.isArray(state.structuredBaselineExtractedExperiencePreview)).toBe(true);

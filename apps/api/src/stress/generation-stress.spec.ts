@@ -119,61 +119,69 @@ function runCase(testCase: StressCase): StressResult {
   }
 
   const coverGenerator = new TemplateCoverLetterGenerator();
-  const cover = coverGenerator.generate({
-    baselineId: 'baseline-stress',
-    jobId: testCase.job.id,
-    allowedBaselineBlocks: testCase.baselineSections.map((section) => ({
-      id: section.id,
-      title: section.title,
-      content: section.content,
-      includePolicy: section.includePolicy as 'ALWAYS' | 'OPTIONAL' | 'EXCLUDE_FROM_GENERATION',
-      order: section.order,
-      sectionType: section.sectionType as 'SUMMARY' | 'SKILLS' | 'EXPERIENCE' | 'EDUCATION' | 'OTHER',
-    })),
-    job: {
-      id: testCase.job.id,
-      title: testCase.job.title,
-      company: testCase.job.company,
-      responsibilities: testCase.job.responsibilities,
-      requirements: testCase.job.requirements,
-    },
-    candidateName: 'Taylor Candidate',
-  });
-
-  const canonicalParagraphs =
-    cover.paragraphs.length > 0
-      ? cover.paragraphs
-      : [cover.document.opening, ...cover.document.bodyParagraphs, cover.document.closingParagraph];
-  const coverText = [cover.greeting, ...canonicalParagraphs].join('\n\n');
-  const coverWordCount = computeWordCount(coverText);
-  if (coverWordCount < 250 || coverWordCount > 400) {
-    failures.push('formatting issues: cover letter word count must be 250-400 words.');
-  }
-  if (cover.paragraphs.length < 4) {
-    failures.push('formatting issues: cover letter should contain at least 4 paragraphs.');
-  }
-  if (BULLET_ARTIFACT_PATTERN.test(coverText)) {
-    failures.push('formatting issues: bullet artifact detected in cover letter.');
+  let cover: ReturnType<TemplateCoverLetterGenerator['generate']> | null = null;
+  let coverText = '';
+  try {
+    cover = coverGenerator.generate({
+      baselineId: 'baseline-stress',
+      jobId: testCase.job.id,
+      allowedBaselineBlocks: testCase.baselineSections.map((section) => ({
+        id: section.id,
+        title: section.title,
+        content: section.content,
+        includePolicy: section.includePolicy as 'ALWAYS' | 'OPTIONAL' | 'EXCLUDE_FROM_GENERATION',
+        order: section.order,
+        sectionType: section.sectionType as 'SUMMARY' | 'SKILLS' | 'EXPERIENCE' | 'EDUCATION' | 'OTHER',
+      })),
+      job: {
+        id: testCase.job.id,
+        title: testCase.job.title,
+        company: testCase.job.company,
+        responsibilities: testCase.job.responsibilities,
+        requirements: testCase.job.requirements,
+      },
+      candidateName: 'Taylor Candidate',
+    });
+  } catch (error) {
+    failures.push(`cover letter generation failed: ${String((error as any)?.message ?? error)}`);
   }
 
-  const overlapRatio = computeTokenOverlapRatio(coverText, testCase.job.descriptionText);
-  const normalizedJd = normalizeLine(testCase.job.descriptionText).toLowerCase();
-  const normalizedCover = normalizeLine(coverText).toLowerCase();
-  if (overlapRatio > JD_ECHO_BLOCK_RATIO) {
-    failures.push('JD leakage: cover letter token overlap with JD exceeded threshold.');
-  }
-  if (
-    normalizedJd.length >= JD_REUSE_SNIPPET_LENGTH &&
-    normalizedCover.includes(normalizedJd.slice(0, JD_REUSE_SNIPPET_LENGTH))
-  ) {
-    failures.push('JD leakage: cover letter reuses JD sentence fragment.');
-  }
+  if (cover) {
+    const canonicalParagraphs =
+      cover.paragraphs.length > 0
+        ? cover.paragraphs
+        : [cover.document.opening, ...cover.document.bodyParagraphs, cover.document.closingParagraph];
+    coverText = [cover.greeting, ...canonicalParagraphs].join('\n\n');
+    const coverWordCount = computeWordCount(coverText);
+    if (coverWordCount < 250 || coverWordCount > 400) {
+      failures.push('formatting issues: cover letter word count must be 250-400 words.');
+    }
+    if (cover.paragraphs.length < 4) {
+      failures.push('formatting issues: cover letter should contain at least 4 paragraphs.');
+    }
+    if (BULLET_ARTIFACT_PATTERN.test(coverText)) {
+      failures.push('formatting issues: bullet artifact detected in cover letter.');
+    }
 
-  if (INVENTED_ENTITY_PATTERN.test(resumePreview) || INVENTED_ENTITY_PATTERN.test(coverText)) {
-    failures.push('invented or inflated claims: invented company/role placeholder detected.');
-  }
-  if (INFLATED_SCOPE_PATTERN.test(resumePreview) || INFLATED_SCOPE_PATTERN.test(coverText)) {
-    failures.push('invented or inflated claims: inflated scope phrase detected.');
+    const overlapRatio = computeTokenOverlapRatio(coverText, testCase.job.descriptionText);
+    const normalizedJd = normalizeLine(testCase.job.descriptionText).toLowerCase();
+    const normalizedCover = normalizeLine(coverText).toLowerCase();
+    if (overlapRatio > JD_ECHO_BLOCK_RATIO) {
+      failures.push('JD leakage: cover letter token overlap with JD exceeded threshold.');
+    }
+    if (
+      normalizedJd.length >= JD_REUSE_SNIPPET_LENGTH &&
+      normalizedCover.includes(normalizedJd.slice(0, JD_REUSE_SNIPPET_LENGTH))
+    ) {
+      failures.push('JD leakage: cover letter reuses JD sentence fragment.');
+    }
+
+    if (INVENTED_ENTITY_PATTERN.test(resumePreview) || INVENTED_ENTITY_PATTERN.test(coverText)) {
+      failures.push('invented or inflated claims: invented company/role placeholder detected.');
+    }
+    if (INFLATED_SCOPE_PATTERN.test(resumePreview) || INFLATED_SCOPE_PATTERN.test(coverText)) {
+      failures.push('invented or inflated claims: inflated scope phrase detected.');
+    }
   }
 
   const repetitiveBuzzword = /\binnovation\b/gi;

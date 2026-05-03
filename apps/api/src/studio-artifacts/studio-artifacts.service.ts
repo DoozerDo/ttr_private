@@ -279,7 +279,11 @@ export class StudioArtifactsService {
 
     const artifactReadinessReasons =
       artifactReadiness === 'blocked' || artifactReadiness === 'degraded'
-        ? [...readinessReasonCodes, ...(structured?.missingEvidenceReasons?.slice(0, 8) ?? [])].slice(0, 8)
+        ? [
+            ...readinessReasonCodes,
+            ...(structured?.missingEvidenceReasons?.slice(0, 6) ?? []),
+            ...((templateReadiness as any)?.evidence?.improvementSuggestions ?? []),
+          ].slice(0, 8)
         : [];
 
     const artifactReadinessReasonDetails: BaselineTemplateReadinessReason[] =

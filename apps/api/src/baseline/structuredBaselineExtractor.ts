@@ -265,10 +265,12 @@ function parseRoleAtCompany(line: string): { company: string; roleTitle: string;
 function isImplicitBulletCandidate(line: string): boolean {
   const raw = trimToText(line);
   if (!raw) return false;
-  if (looksLikeSentence(raw)) return false;
+  // Accept lightly structured bullet-like lines without explicit bullet prefixes.
+  // Many strong resumes use sentence punctuation; require an action-verb start to avoid
+  // promoting arbitrary prose into bullets.
   if (!startsWithActionVerb(raw)) return false;
   const wordCount = raw.split(/\s+/).filter(Boolean).length;
-  if (wordCount > 18) return false;
+  if (wordCount > 28) return false;
   if (raw.length > 160) return false;
   return true;
 }
