@@ -9826,6 +9826,10 @@ export default function StudioPage() {
       coverLetterResult.qualityStatus === "needs_refinement"
     : studioEffectiveGenerationState === "generated_unusable" && coverNeedsRefinement;
 
+  const generationHardBlockedByTemplateReadiness = baselineTemplateNotReady;
+  const shouldShowResumeRegenerateBlockedSafe = shouldShowResumeRegenerate && !generationHardBlockedByTemplateReadiness;
+  const shouldShowCoverRegenerateBlockedSafe = shouldShowCoverRegenerate && !generationHardBlockedByTemplateReadiness;
+
   const buildAutoRepairKey = useCallback(
     (artifactType: "resume" | "cover_letter", backendRecord: any) => {
       const baselineVersionId = effectiveBaselineVersionId ?? "none";
@@ -9984,6 +9988,10 @@ export default function StudioPage() {
   ]);
 
   const handleManualRegenerate = useCallback(async (source: "resume" | "cover") => {
+    if (baselineTemplateNotReady) {
+      console.warn("[studio][manual_regenerate_blocked]", { source, reason: "baseline_template_not_ready" });
+      return;
+    }
     console.log("[studio][manual_regenerate_handler_entered]", { source });
     console.log("REGENERATE_TRIGGERED");
     if (process.env.NODE_ENV !== "production") {
@@ -9997,6 +10005,7 @@ export default function StudioPage() {
 
     await generateArtifactsNow({ resume: true, coverLetter: true, source: "manual" });
   }, [
+    baselineTemplateNotReady,
     generateArtifactsNow,
     workflowOrchestratorCore.contract?.generation.auto.signature,
   ]);
@@ -10008,6 +10017,7 @@ export default function StudioPage() {
       backendRecord: any,
       state: { autoRepairing: boolean; generating: boolean },
     ): { eligible: boolean; reason: string } => {
+      if (baselineTemplateNotReady) return { eligible: false, reason: "baseline_template_not_ready" };
       const canRegenerate = result?.actions?.canRegenerate === true;
       if (!canRegenerate) return { eligible: false, reason: "no_regeneration_permission" };
       if (state.autoRepairing) return { eligible: false, reason: "already_auto_repairing" };
@@ -10047,7 +10057,7 @@ export default function StudioPage() {
 
       return { eligible: false, reason: "no_repair_signal" };
     },
-    [activeGenerationReadiness.blocked],
+    [activeGenerationReadiness.blocked, baselineTemplateNotReady],
   );
 
   const resumeAutoRepairEvaluation = useMemo(() => {
@@ -10870,7 +10880,7 @@ export default function StudioPage() {
               We can’t generate strong documents yet because key experience isn’t clearly supported.{readinessMessageScopeSuffix}
             </div>
 
-            {draftAnywayEligible ? (
+            {draftAnywayEligible && !baselineTemplateNotReady ? (
             <section className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-draft-anyway">
               <p className="text-sm font-semibold text-slate-100">Draft mode</p>
               <p className="text-sm text-slate-300">
@@ -11599,7 +11609,7 @@ export default function StudioPage() {
               );
             })()}
           </div>
-          {shouldShowResumeRegenerate ? (
+          {shouldShowResumeRegenerateBlockedSafe ? (
             <FormButton
               variant="secondary"
               onClick={() => {
@@ -12013,7 +12023,7 @@ export default function StudioPage() {
                 {coverGenerating ? "Generating..." : "Generate Cover Letter"}
               </FormButton>
             ) : null}
-            {shouldShowCoverRegenerate ? (
+            {shouldShowCoverRegenerateBlockedSafe ? (
               <FormButton
                 variant="secondary"
                 onClick={() => {

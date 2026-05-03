@@ -2966,6 +2966,8 @@ describe("Studio resume editing", () => {
     });
 
     expect(screen.getByRole("link", { name: /View fit review/i })).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-resume-regenerate")).toBeNull();
+    expect(screen.queryByTestId("studio-cover-regenerate")).toBeNull();
     expect(screen.queryByTestId("studio-resume-experience-section")).toBeNull();
     expect(screen.queryByText("Vue 3), deck builder frontend")).toBeNull();
   });

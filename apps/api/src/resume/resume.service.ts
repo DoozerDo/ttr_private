@@ -1732,12 +1732,17 @@ export class ResumeService {
         );
         if (templateNotReadyReason && jobId && analysisId && !request.oneTap) {
           throw new UnprocessableEntityException({
-            error: {
-              code: 'baseline_template_not_ready',
-              message:
-                'Baseline is usable for scoring but is not template-safe for resume generation.',
-              details: templateNotReadyReason?.details ?? {},
-            },
+            code: 'baseline_template_not_ready',
+            reasons:
+              (templateNotReadyReason?.details as any)?.reasons ??
+              [
+                {
+                  code: 'baseline_template_not_ready',
+                  message:
+                    'Baseline is usable for scoring but is not template-safe for resume generation.',
+                },
+              ],
+            details: templateNotReadyReason?.details ?? {},
           });
         }
 
@@ -1828,14 +1833,9 @@ export class ResumeService {
 
     if (enforceTemplateReadiness && !templateReadinessForBaseline.canGenerateResume) {
       throw new UnprocessableEntityException({
-        error: {
-          code: 'baseline_template_not_ready',
-          message:
-            'Baseline is usable for scoring but is not template-safe for resume generation.',
-          details: {
-            reasons: templateReadinessForBaseline.reasons,
-          },
-        },
+        code: 'baseline_template_not_ready',
+        reasons: templateReadinessForBaseline.reasons,
+        details: templateReadinessForBaseline,
       });
     }
 
@@ -3536,14 +3536,17 @@ export class ResumeService {
         ((responseRecord?.error as Record<string, unknown> | undefined)
           ?.code as string | undefined);
       if (code === 'baseline_template_not_ready') {
+        const reasons =
+          (responseRecord?.reasons as any) ??
+          ((responseRecord?.details as any)?.reasons as any) ??
+          (((responseRecord?.error as Record<string, unknown> | undefined)
+            ?.details as any)?.reasons as any) ??
+          ([{ code: 'baseline_template_not_ready', message: 'Baseline is not template-ready.' }] as any);
         return {
           status: 'blocked' as const,
           blocked: true,
           compliance_flags: [],
-          reasons:
-            ((responseRecord?.error as Record<string, unknown> | undefined)
-              ?.details as any)?.reasons ??
-            ([{ code: 'baseline_template_not_ready', message: 'Baseline is not template-ready.' }] as any),
+          reasons,
           canGenerateResume: false,
         };
       }

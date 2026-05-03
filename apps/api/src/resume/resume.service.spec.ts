@@ -590,7 +590,7 @@ describe('ResumeService contract', () => {
     await expect(service.generateResume('user-1', baseRequest)).rejects.toMatchObject({
       status: 422,
       response: expect.objectContaining({
-        error: expect.objectContaining({ code: 'baseline_template_not_ready' }),
+        code: 'baseline_template_not_ready',
       }),
     });
 
@@ -1065,7 +1065,7 @@ describe('ResumeService contract', () => {
     await expect(service.generateResume('user-1', baseRequest)).rejects.toMatchObject({
       status: 422,
       response: expect.objectContaining({
-        error: expect.objectContaining({ code: 'baseline_template_not_ready' }),
+        code: 'baseline_template_not_ready',
       }),
     });
 
@@ -1147,7 +1147,7 @@ describe('ResumeService contract', () => {
     await expect(service.generateResume('user-1', baseRequest)).rejects.toMatchObject({
       status: 422,
       response: expect.objectContaining({
-        error: expect.objectContaining({ code: 'baseline_template_not_ready' }),
+        code: 'baseline_template_not_ready',
       }),
     });
 

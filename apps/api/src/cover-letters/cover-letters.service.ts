@@ -1315,26 +1315,17 @@ export class CoverLettersService {
     try {
       const requestSafeMode = oneTap || complianceConstraints?.mode === 'strict';
 
-      const TEMPLATE_ASSEMBLY_THRESHOLD = 80;
-      const scoreForTemplate = latestAssessment?.overallScore ?? 0;
-      if (typeof scoreForTemplate === 'number' && scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD) {
-        if (!templateReadiness.canGenerateCoverLetter) {
-          throw new UnprocessableEntityException(buildArtifactFailurePayload({
-            code: 'baseline_template_not_ready',
-            category: 'unsupported_input',
-            message: 'Cover letter could not be assembled because the baseline is not template-safe.',
-            detail: 'A baseline that is usable for scoring must be template-safe for cover letter generation.',
-            retryable: false,
-            userAction: {
-              title: 'Add verified experience structure',
-              description: 'Ensure your baseline includes Experience entries with company and role title headers.',
-            },
-            diagnostics: {
-              missingRequirements: structuredBaseline.missingEvidenceReasons.slice(0, 6),
-              failureReasons: templateReadiness.reasons.map((reason) => reason.message),
-            },
-          }));
-        }
+      const enforceTemplateReadiness =
+        Boolean(input.jobId?.trim()) && Boolean(input.analysisId?.trim()) && !Boolean(oneTap);
+      if (enforceTemplateReadiness && !templateReadiness.canGenerateCoverLetter) {
+        throw new UnprocessableEntityException({
+          code: 'baseline_template_not_ready',
+          reasons: templateReadiness.reasons,
+          details: templateReadiness,
+        });
+      }
+
+      if (templateReadiness.canGenerateCoverLetter) {
         const document = assembleCoverLetterFromStructuredBaseline({
           structured: structuredBaseline,
           senderName: candidateName || 'Candidate',

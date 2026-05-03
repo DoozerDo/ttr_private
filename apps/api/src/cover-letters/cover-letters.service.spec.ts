@@ -155,6 +155,45 @@ const request = {
 };
 
 describe('CoverLettersService contract', () => {
+  it('blocks cover letter generation with baseline_template_not_ready and does not persist success', async () => {
+    const { service, studioArtifactsService } = buildService();
+    const original = baseline.sections?.[0]?.content ?? '';
+
+    baseline.sections = [
+      {
+        title: 'Experience',
+        sectionType: 'EXPERIENCE',
+        content: [
+          'Vue 3), deck builder frontend',
+          'Professional Experience',
+          '2021 - Present',
+          '- Did work.',
+          '',
+          // Add enough text so this is not rejected as insufficient_extracted_text.
+          'Additional verified baseline context '.repeat(60),
+        ].join('\n'),
+      } as any,
+    ];
+
+    try {
+      await expect(service.generateCoverLetter('user-1', request as any)).rejects.toMatchObject({
+        status: 422,
+        response: expect.objectContaining({
+          code: 'baseline_template_not_ready',
+        }),
+      });
+      expect(studioArtifactsService.recordCoverLetterSuccess).not.toHaveBeenCalled();
+    } finally {
+      baseline.sections = [
+        {
+          title: 'Experience',
+          sectionType: 'EXPERIENCE',
+          content: original,
+        } as any,
+      ];
+    }
+  });
+
   it('rejects unresolved placeholder content and does not persist success', async () => {
     const { service, studioArtifactsService } = buildService();
     const buildDraftSpy = jest.spyOn(service as any, 'buildCoverLetterDraft').mockResolvedValue({
@@ -708,17 +747,32 @@ describe('CoverLettersService contract', () => {
     const privateService = service as unknown as {
       buildCoverLetterDraft: (userId: string, input: typeof request) => Promise<unknown>;
     };
+    const original = baseline.sections?.[0]?.content ?? '';
+    baseline.sections = [
+      {
+        title: 'Experience',
+        sectionType: 'EXPERIENCE',
+        content: [
+          'Example Co | Program Manager | 2020 - 2024',
+          '- Led operational programs across teams with measurable outcomes.',
+          'Additional verified baseline context '.repeat(40),
+        ].join('\n'),
+      } as any,
+    ];
 
     try {
       await privateService.buildCoverLetterDraft('user-1', request as any);
-      fail('expected unsupported_input rejection');
+      fail('expected insufficient baseline evidence validation error');
     } catch (error) {
-      expect(error).toBeInstanceOf(UnprocessableEntityException);
-      expect((error as UnprocessableEntityException).getResponse()).toMatchObject({
-        code: 'generation_failed',
-        message: 'Cover letter generation failed validation.',
-      });
+      expect(String((error as any)?.message ?? '')).toMatch(/insufficient baseline evidence/i);
     } finally {
+      baseline.sections = [
+        {
+          title: 'Experience',
+          sectionType: 'EXPERIENCE',
+          content: original,
+        } as any,
+      ];
       assessment.overallScore = originalScore;
     }
   });
