@@ -168,12 +168,22 @@ function pickPrimaryDimension(input: {
 
 function buildGapCopy(dimensionLabel: string, missingEvidence: string[]) {
   const evidenceSnippet = missingEvidence.slice(0, 2).join(" or ");
-  const reason = evidenceSnippet
-    ? `You haven't demonstrated ${evidenceSnippet} in verified evidence.`
-    : `You haven't demonstrated enough verified evidence for ${dimensionLabel.toLowerCase()}.`;
-  const suggestedAction = evidenceSnippet
-    ? `Add a specific example of ${evidenceSnippet} now. This is required to unlock document generation.`
-    : "Add one specific, verified example now. This is required to unlock document generation.";
+  const normalizedDimensionLabel = dimensionLabel.toLowerCase();
+  const isDomainAlignment = normalizedDimensionLabel.includes("domain alignment");
+
+  const reason = isDomainAlignment
+    ? "We couldn't verify enough experience aligned to this role’s domain."
+    : evidenceSnippet
+      ? `We couldn't verify enough evidence for ${evidenceSnippet}.`
+      : `We couldn't verify enough evidence for ${normalizedDimensionLabel}.`;
+
+  const suggestedAction = isDomainAlignment
+    ? evidenceSnippet
+      ? `Add one verified example showing experience in ${evidenceSnippet} or similar environments.`
+      : "Add one verified example that clearly shows experience in this type of environment or domain."
+    : evidenceSnippet
+      ? `Add one verified example of ${evidenceSnippet}.`
+      : "Add one verified example to strengthen this dimension.";
   return { reason, suggestedAction };
 }
 

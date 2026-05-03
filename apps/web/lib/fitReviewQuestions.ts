@@ -17,7 +17,7 @@ export const fitReviewDimensionLabels: Record<FitReviewDimensionKey, string> = {
   role_scope_and_seniority: "Leadership level",
   support_operations_and_process_rigor: "Support operations",
   tooling_and_platform_experience: "Tools and systems",
-  domain_and_business_context: "Industry experience",
+  domain_and_business_context: "Domain alignment",
   change_leadership_and_customer_advocacy: "Change and customer impact",
 };
 
