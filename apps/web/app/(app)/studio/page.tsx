@@ -10944,7 +10944,7 @@ export default function StudioPage() {
 
               {generationState === "blocked" ? (
                 <p data-testid="studio-generation-state-blocked" className="text-sm text-slate-100">
-                  Generation is blocked because your verified baseline does not contain enough usable experience.
+                  Generation is blocked because we don’t yet have enough verified, structured examples to generate reliable documents.
                 </p>
               ) : null}
             </div>
@@ -11054,7 +11054,7 @@ export default function StudioPage() {
             </section>
 
             <div className="rounded-2xl border border-amber-300/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-50" data-testid="studio-blocked-message">
-              We can’t generate strong documents yet because key experience isn’t clearly supported.{readinessMessageScopeSuffix}
+              We need clearer, verified examples of your experience before we can generate reliable documents.{readinessMessageScopeSuffix}
             </div>
 
             {draftAnywayEligible && !baselineTemplateReadinessSignal.hardBlocked ? (
@@ -11197,12 +11197,14 @@ export default function StudioPage() {
                           ? canonicalUnverifiedRequirements.slice(0, 4)
                           : evidenceLedger.remainingWeakAreas.slice(0, 4)
                     ).map((item) => (
-                      <li
-                        key={`studio-decision-gap-${item}`}
-                        className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2"
-                      >
-                        {item}
-                      </li>
+                      item && String(item).trim().toLowerCase() !== "next" ? (
+                        <li
+                          key={`studio-decision-gap-${item}`}
+                          className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2"
+                        >
+                          {item}
+                        </li>
+                      ) : null
                     ))}
                   </ul>
                   {showLowQualityRecoveryLane ? ( 

@@ -186,7 +186,7 @@ describe("Studio artifact quality gating (soft)", () => {
     });
     expect(
       screen.getByText(
-        "Generation is blocked because your verified baseline does not contain enough usable experience.",
+        "Generation is blocked because we don’t yet have enough verified, structured examples to generate reliable documents.",
       ),
     ).toBeInTheDocument();
   });
@@ -3034,7 +3034,7 @@ describe("Studio generation authority", () => {
     renderStudio(); 
  
     const blockedMessage = await screen.findByTestId("studio-blocked-message"); 
-    expect(blockedMessage).toHaveTextContent(/can.?t generate/i); 
+    expect(blockedMessage).toHaveTextContent(/need clearer, verified examples/i); 
     expect(screen.getAllByRole("link", { name: /strengthen my experience/i }).length).toBeGreaterThan(0); 
   }); 
  
