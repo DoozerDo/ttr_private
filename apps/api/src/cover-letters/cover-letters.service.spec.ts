@@ -10,6 +10,7 @@ import { ComplianceAction, ComplianceFlagSeverity } from '../compliance/complian
 import { GapAnalysisService } from '../analysis/gap-analysis.service';
 import { BaselineIncludePolicy, BaselineSectionType } from '../baseline/baseline-section.entity';
 import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
+import { buildDalenDeterministicBaselineSections } from '../resume/__fixtures__/dalen-deterministic-baseline.fixture';
 
 const baseline: Partial<Baseline> = {
   id: 'baseline-1',
@@ -155,7 +156,7 @@ const request = {
 };
 
 describe('CoverLettersService contract', () => {
-  it('blocks cover letter generation with baseline_template_not_ready and does not persist success', async () => {
+  it('does not block cover letter generation with baseline_template_not_ready when interpreted evidence is meaningful', async () => {
     const { service, studioArtifactsService } = buildService();
     const original = baseline.sections?.[0]?.content ?? '';
 
@@ -167,7 +168,9 @@ describe('CoverLettersService contract', () => {
           'Vue 3), deck builder frontend',
           'Professional Experience',
           '2021 - Present',
-          '- Did work.',
+          '- Built and maintained backend services using Node.js, PostgreSQL, and AWS.',
+          '',
+          '- Improved p95 API latency by 35% by optimizing database queries and caching.',
           '',
           // Add enough text so this is not rejected as insufficient_extracted_text.
           'Additional verified baseline context '.repeat(60),
@@ -176,13 +179,22 @@ describe('CoverLettersService contract', () => {
     ];
 
     try {
-      await expect(service.generateCoverLetter('user-1', request as any)).rejects.toMatchObject({
-        status: 422,
-        response: expect.objectContaining({
-          code: 'baseline_template_not_ready',
+      const result = await service.generateCoverLetter('user-1', request as any);
+      expect(result.status).toBe('success');
+      expect(studioArtifactsService.recordCoverLetterSuccess).toHaveBeenCalled();
+      expect(String((result as any).content ?? '')).toMatch(/Node\.js|PostgreSQL|AWS|35%/i);
+      const evidenceDetailsMap = (result as any).evidenceDetailsMap ?? {};
+      expect(Object.keys(evidenceDetailsMap).length).toBeGreaterThan(0);
+      expect((result as any).internal?.interpretedEvidenceSummary).toEqual(
+        expect.objectContaining({ strongEvidenceCount: expect.any(Number), partialEvidenceCount: expect.any(Number) }),
+      );
+      expect((result as any).internal?.omittedInterpretedEvidence).toEqual(
+        expect.objectContaining({
+          weak: expect.any(Array),
+          unusable: expect.any(Array),
+          no_tools_or_metrics: expect.any(Array),
         }),
-      });
-      expect(studioArtifactsService.recordCoverLetterSuccess).not.toHaveBeenCalled();
+      );
     } finally {
       baseline.sections = [
         {
@@ -191,6 +203,103 @@ describe('CoverLettersService contract', () => {
           content: original,
         } as any,
       ];
+    }
+  });
+
+  it('does not invent metrics or inflated scope when generating a cover letter from partial interpreted evidence (tools-only, no explicit metrics)', async () => {
+    const { service } = buildService();
+    const original = baseline.sections?.[0]?.content ?? '';
+    const originalParsed = baseline.parsedRecords;
+    (baseline as any).parsedRecords = [
+      { createdAt: new Date(), parsedJson: { identity: { full_name: 'Jordan Lee' } } } as any,
+    ];
+
+    baseline.sections = [
+      {
+        title: 'Experience',
+        sectionType: 'EXPERIENCE',
+        content: [
+          'Professional Experience',
+          '2021 - Present',
+          '- Built and maintained backend services using Node.js, PostgreSQL, and AWS.',
+          '',
+          // Ensure we are not rejected as insufficient_extracted_text.
+          'Additional verified baseline context '.repeat(60),
+        ].join('\n'),
+      } as any,
+      {
+        title: 'Summary',
+        sectionType: 'SUMMARY',
+        content:
+          'Backend engineer with experience building and maintaining services. ' +
+          'Comfortable collaborating with cross-functional partners and iterating on reliability improvements. ' +
+          'Additional verified baseline context '.repeat(40),
+      } as any,
+      {
+        title: 'Skills',
+        sectionType: 'SKILLS',
+        content: 'Node.js, PostgreSQL, AWS',
+      } as any,
+    ];
+
+    try {
+      const result = await service.generateCoverLetter('user-1', request as any);
+      expect(result.status).toBe('success');
+      const text = String((result as any).content ?? '');
+      // Tools should only appear when explicitly present in baseline/evidence (no invention).
+      expect(text).toMatch(/\bNode\b/i);
+      expect(text).not.toMatch(/\bKubernetes\b/i);
+      // No invented percent/x-style improvements.
+      expect(text).not.toMatch(/\b\d+%/);
+      expect(text).not.toMatch(/\b\d+x\b/i);
+      // Avoid inflated ownership/scope language unless explicitly supported.
+      expect(text).not.toMatch(/\benterprise-?wide\b/i);
+      expect(text).not.toMatch(/\bmanaged teams?\b/i);
+      expect(text).not.toMatch(/\bincreased revenue\b/i);
+      expect(text).not.toMatch(/\breduced costs?\b/i);
+      expect(text).not.toMatch(/\bimproved csat\b/i);
+      expect(text).not.toMatch(/\breduced churn\b/i);
+      // Audit details should be present when interpreted evidence is used.
+      const evidenceDetailsMap = (result as any).evidenceDetailsMap ?? {};
+      expect(Object.keys(evidenceDetailsMap).length).toBeGreaterThan(0);
+    } finally {
+      baseline.sections = [
+        {
+          title: 'Experience',
+          sectionType: 'EXPERIENCE',
+          content: original,
+        } as any,
+      ];
+      (baseline as any).parsedRecords = originalParsed;
+    }
+  });
+
+  it('Dalen regression: malformed headers + real technical evidence yields interpreted-evidence audit when traceable', async () => {
+    const { service } = buildService();
+    const original = baseline.sections?.[0]?.content ?? '';
+    const originalParsed = baseline.parsedRecords;
+    (baseline as any).parsedRecords = [
+      { createdAt: new Date(), parsedJson: { identity: { full_name: 'Jordan Lee' } } } as any,
+    ];
+
+    baseline.sections = buildDalenDeterministicBaselineSections() as any;
+
+    try {
+      const result = await service.generateCoverLetter('user-1', request as any);
+      expect(result.status).toBe('success');
+      expect((result as any).evidenceDetailsMap).toBeTruthy();
+      expect((result as any).internal?.interpretedEvidenceSummary).toEqual(
+        expect.objectContaining({ strongEvidenceCount: expect.any(Number), partialEvidenceCount: expect.any(Number) }),
+      );
+    } finally {
+      baseline.sections = [
+        {
+          title: 'Experience',
+          sectionType: 'EXPERIENCE',
+          content: original,
+        } as any,
+      ];
+      (baseline as any).parsedRecords = originalParsed;
     }
   });
 
@@ -566,6 +675,8 @@ describe('CoverLettersService contract', () => {
       expect(result.id).toBeTruthy();
       expect(result.internal?.generationMode).toBe('structured_baseline_template');
       expect(result.internal?.templateVersion).toBe('structured-baseline-v1');
+      expect((result as any).evidenceDetailsMap).toBeUndefined();
+      expect((result as any).internal?.interpretedEvidenceSummary).toBeUndefined();
       expect(coverRepo.save).toHaveBeenCalled();
       buildDraftSpy.mockRestore();
     } finally {

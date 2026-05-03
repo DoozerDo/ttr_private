@@ -15,6 +15,8 @@ import {
   evaluateBaselineTemplateReadiness,
   type BaselineTemplateReadinessReason,
 } from '../baseline/baselineTemplateReadiness';
+import { interpretEvidenceFromResumeText } from '../evidence/evidence-interpreter';
+import { resolveEvidenceReadinessFromSummary } from '../evidence/readiness-thresholds';
 
 export type StudioArtifactKind = 'resume' | 'cover_letter';
 
@@ -29,6 +31,14 @@ export type StudioArtifactRecord = {
   completedAt: string | null;
   failedAt: string | null;
   metadata: Record<string, unknown>;
+  resumeMetadata?: Record<string, unknown>;
+  interpretedEvidenceAudit?: {
+    interpretedEvidenceSummary?: unknown;
+    interpretedEvidenceReadiness?: unknown;
+    omittedInterpretedEvidence?: unknown;
+    evidenceDetailsMap?: unknown;
+    bypassedTemplateHardBlockWithInterpretedEvidence?: unknown;
+  };
 };
 
 export type StudioArtifactsState = {
@@ -115,6 +125,42 @@ function sanitizeStoredResumeResponseBody(value: Record<string, unknown> | null)
 
 function shouldDebugDocgen() {
   return process.env.NODE_ENV !== 'production' || process.env.DEBUG_DOCGEN === 'true';
+}
+
+function extractInterpretedEvidenceAuditFromResponseBody(
+  responseBody: Record<string, unknown> | null,
+): StudioArtifactRecord['interpretedEvidenceAudit'] | null {
+  if (!responseBody) return null;
+  const internal = responseBody.internal;
+  const internalRecord = internal && typeof internal === 'object' ? (internal as Record<string, unknown>) : null;
+  const interpretedEvidenceSummary =
+    internalRecord?.interpretedEvidenceSummary ?? (responseBody as any).interpretedEvidenceSummary;
+  const interpretedEvidenceReadiness =
+    internalRecord?.interpretedEvidenceReadiness ?? (responseBody as any).interpretedEvidenceReadiness;
+  const omittedInterpretedEvidence =
+    internalRecord?.omittedInterpretedEvidence ?? (responseBody as any).omittedInterpretedEvidence;
+  const bypassedTemplateHardBlockWithInterpretedEvidence =
+    internalRecord?.bypassedTemplateHardBlockWithInterpretedEvidence ??
+    (responseBody as any).bypassedTemplateHardBlockWithInterpretedEvidence;
+  const evidenceDetailsMap = responseBody.evidenceDetailsMap;
+
+  const hasAny =
+    Boolean(interpretedEvidenceSummary) ||
+    Boolean(interpretedEvidenceReadiness) ||
+    Boolean(omittedInterpretedEvidence) ||
+    Boolean(bypassedTemplateHardBlockWithInterpretedEvidence) ||
+    Boolean(evidenceDetailsMap);
+  if (!hasAny) return null;
+
+  return {
+    ...(interpretedEvidenceSummary ? { interpretedEvidenceSummary } : {}),
+    ...(interpretedEvidenceReadiness ? { interpretedEvidenceReadiness } : {}),
+    ...(omittedInterpretedEvidence ? { omittedInterpretedEvidence } : {}),
+    ...(evidenceDetailsMap ? { evidenceDetailsMap } : {}),
+    ...(bypassedTemplateHardBlockWithInterpretedEvidence
+      ? { bypassedTemplateHardBlockWithInterpretedEvidence }
+      : {}),
+  };
 }
 
 const shouldTraceArtifactIdentity = process.env.ARTIFACT_IDENTITY_TRACE === 'true';
@@ -252,6 +298,21 @@ export class StudioArtifactsService {
         : 0;
     const hasUsableExperience = validExperienceCount > 0;
 
+    const baselineTextForInterpretation = (baseline?.sections ?? [])
+      .map((section) => String((section as any)?.content ?? ''))
+      .filter(Boolean)
+      .join('\n');
+    const interpretedEvidence = interpretEvidenceFromResumeText({
+      baselineId: String(baseline?.id ?? ''),
+      baselineVersionId: String(baselineVersion?.id ?? ''),
+      resumeText: baselineTextForInterpretation,
+    });
+    const interpretedMeaningfulEvidenceCount =
+      (interpretedEvidence.summary.strongEvidenceCount ?? 0) + (interpretedEvidence.summary.partialEvidenceCount ?? 0);
+    const hasInterpretedMeaningfulEvidence = interpretedMeaningfulEvidenceCount > 0;
+
+    const interpretedEvidenceReadiness = resolveEvidenceReadinessFromSummary(interpretedEvidence.summary);
+
     const isHardBlocked =
       Boolean(templateReadiness) &&
       (!templateReadiness!.canGenerateResume || !templateReadiness!.canGenerateCoverLetter);
@@ -263,10 +324,14 @@ export class StudioArtifactsService {
         : templateReadiness && !isHardBlocked && hasWarnings
           ? 'degraded'
           : templateReadiness && isHardBlocked
-            ? hasUsableExperience
+            ? hasUsableExperience || hasInterpretedMeaningfulEvidence
               ? 'degraded'
               : 'blocked'
-            : undefined;
+            : templateReadiness && !hasUsableExperience && hasInterpretedMeaningfulEvidence
+              ? interpretedEvidenceReadiness === 'ready'
+                ? 'ready'
+                : 'degraded'
+              : undefined;
 
     const readinessReasonCodes =
       artifactReadiness === 'blocked'
@@ -288,7 +353,11 @@ export class StudioArtifactsService {
       artifactReadiness === 'blocked'
         ? templateReadiness?.hardBlockReasons ?? []
         : artifactReadiness === 'degraded'
-          ? templateReadiness?.warnings ?? []
+          ? // If we degraded specifically because interpreted evidence is meaningful while structured experience is missing,
+            // preserve the baseline_template_not_ready context from hardBlockReasons (warnings will be empty in this lane).
+            isHardBlocked && !hasUsableExperience && hasInterpretedMeaningfulEvidence
+            ? templateReadiness?.hardBlockReasons ?? []
+            : templateReadiness?.warnings ?? []
           : [];
 
     const artifactReadinessReasonDetails: BaselineTemplateReadinessReason[] = rawReadinessReasonDetails.map((reason) => ({
@@ -300,6 +369,7 @@ export class StudioArtifactsService {
           ...(((reason as any)?.details as any)?.stats ?? {}),
           validExperience: validExperienceCount,
         },
+        interpretedEvidenceSummary: interpretedEvidence.summary,
       },
     }));
 
@@ -884,6 +954,7 @@ export class StudioArtifactsService {
       artifact === 'resume' ? record.resumeFailedAt : record.coverLetterFailedAt;
     const metadata =
       artifact === 'resume' ? record.resumeMetadata : record.coverLetterMetadata;
+    const interpretedEvidenceAudit = extractInterpretedEvidenceAuditFromResponseBody(responseBody);
 
     return {
       status,
@@ -896,6 +967,8 @@ export class StudioArtifactsService {
       completedAt: completedAt?.toISOString() ?? null,
       failedAt: failedAt?.toISOString() ?? null,
       metadata: metadata ?? {},
+      ...(artifact === 'resume' ? { resumeMetadata: (metadata ?? {}) as Record<string, unknown> } : {}),
+      ...(interpretedEvidenceAudit ? { interpretedEvidenceAudit } : {}),
     };
   }
 

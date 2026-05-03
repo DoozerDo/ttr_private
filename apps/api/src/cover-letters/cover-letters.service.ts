@@ -105,6 +105,15 @@ import {
 import { trimIncompleteTrailingFragments } from '../artifacts/artifactQualityValidator';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
 import { evaluateBaselineTemplateReadiness } from '../baseline/baselineTemplateReadiness';
+import { buildBaselineEvidenceSignals } from '../baseline/baselineEvidenceSignals';
+import type { EvidenceItem } from '../evidence/evidence-model';
+import {
+  evaluateInterpretedEvidenceEligibility,
+  buildSyntheticAllowedBlocksFromInterpretedEvidence,
+  buildInterpretedEvidenceIdToItemMapFromSyntheticContainers,
+  buildEvidenceDetailsMapFromTraceMap,
+} from '../generation/interpreted-evidence-artifact-support';
+import { resolveEvidenceReadinessFromSummary } from '../evidence/readiness-thresholds';
 import { assembleCoverLetterFromStructuredBaseline } from './coverLetterTemplateAssembler';
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
 import { resolveSyntheticCandidateName } from './candidate-name.util';
@@ -114,6 +123,11 @@ type CoverLetterDraft = {
   baselineVersion: BaselineVersion;
   job: Job;
   allowedBlocks: AllowedBaselineBlock[];
+  interpretedEvidenceIdToItem?: Map<string, EvidenceItem>;
+  interpretedEvidenceSummary?: { strongEvidenceCount: number; partialEvidenceCount: number; weakEvidenceCount: number; unusableEvidenceCount: number };
+  interpretedEvidenceReadiness?: ReturnType<typeof resolveEvidenceReadinessFromSummary>;
+  omittedInterpretedEvidence?: { weak: string[]; unusable: string[]; no_tools_or_metrics: string[] };
+  bypassedTemplateHardBlockWithInterpretedEvidence?: boolean;
   candidateName: string;
   qualityGate: ArtifactQualityGate;
   firstPassQualityGate: ArtifactQualityGate;
@@ -179,6 +193,7 @@ export type CoverLetterGenerationResponse = {
   safeDisplay: UserSafeDisplayPayload;
   traceMap: ArtifactTraceAudit['traceMap'];
   debugTrace: ArtifactTraceAudit['debugTrace'];
+  evidenceDetailsMap?: ArtifactTraceAudit['evidenceDetailsMap'];
   internal: {
     auditId: string;
     baselineVersionHash: string | null;
@@ -677,12 +692,30 @@ export class CoverLettersService {
           unusedEvidence: [],
           selectedEvidence: [],
         },
+        ...(draft.interpretedEvidenceIdToItem
+          ? (() => {
+              const evidenceDetailsMap = buildEvidenceDetailsMapFromTraceMap({
+                traceMap: draft.generation.traceMap,
+                interpretedEvidenceByGeneratedEvidenceId: draft.interpretedEvidenceIdToItem,
+              });
+              return evidenceDetailsMap ? { evidenceDetailsMap } : {};
+            })()
+          : {}),
         display,
         safeDisplay: display,
         internal: {
           auditId: draft.complianceResult.audit.id,
           baselineVersionHash: draft.complianceResult.audit.baselineVersionHash,
           complianceFlags: draft.complianceResult.complianceFlags,
+          ...(draft.interpretedEvidenceIdToItem
+            ? {
+                interpretedEvidenceSummary: draft.interpretedEvidenceSummary,
+                interpretedEvidenceReadiness: draft.interpretedEvidenceReadiness,
+                omittedInterpretedEvidence: draft.omittedInterpretedEvidence,
+                bypassedTemplateHardBlockWithInterpretedEvidence:
+                  draft.bypassedTemplateHardBlockWithInterpretedEvidence,
+              }
+            : {}),
           ...(forceTemplateRegen || dedupeKey.includes('mode:structured_baseline_template')
             ? {
                 generationMode: 'structured_baseline_template',
@@ -1246,17 +1279,28 @@ export class CoverLettersService {
         BaselineIncludePolicy.NEVER,
     );
 
-    const structuredBaseline = extractStructuredBaselineFromSections(
-      allowedSections as any,
-    );
+    const evidenceSignals = buildBaselineEvidenceSignals({
+      baselineId: baseline.id,
+      baselineVersionId: baselineVersion.id,
+      baselineSections: allowedSections as any,
+    });
+    const structuredBaseline = evidenceSignals.structuredBaseline;
     const templateReadiness = evaluateBaselineTemplateReadiness(structuredBaseline);
+    const interpretedEvidence = evidenceSignals.interpretedEvidence ?? [];
+    const interpretedEligibility = evaluateInterpretedEvidenceEligibility(interpretedEvidence);
+    const meaningfulInterpretedEvidenceExists = interpretedEligibility.hasMeaningfulInterpretedEvidence;
+    const interpretedEvidenceReadiness = resolveEvidenceReadinessFromSummary(evidenceSignals.interpretedEvidenceSummary);
 
     const baselineText = allowedSections
       .map((section) => section.content ?? '')
       .join('\n');
     const insufficientBaselineDetails =
       getInsufficientExtractedTextDetails(baselineText);
-    if (insufficientBaselineDetails && !templateReadiness.canGenerateCoverLetter) {
+    if (
+      insufficientBaselineDetails &&
+      !templateReadiness.canGenerateCoverLetter &&
+      !meaningfulInterpretedEvidenceExists
+    ) {
       throw new UnprocessableEntityException(buildArtifactFailurePayload({
         code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
         category: 'unsupported_input',
@@ -1274,7 +1318,30 @@ export class CoverLettersService {
       }));
     }
 
-    const allowedBlocks = this.mapToAllowedBlocks(allowedSections);
+    let allowedBlocks = this.mapToAllowedBlocks(allowedSections);
+    const interpretedEvidenceIdToItem = new Map<string, EvidenceItem>();
+    const enforceTemplateReadiness =
+      Boolean(input.jobId?.trim()) && Boolean(input.analysisId?.trim()) && !Boolean(oneTap);
+    const bypassedTemplateHardBlockWithInterpretedEvidence =
+      enforceTemplateReadiness && !templateReadiness.canGenerateCoverLetter && meaningfulInterpretedEvidenceExists;
+    if (!templateReadiness.canGenerateCoverLetter && meaningfulInterpretedEvidenceExists) {
+      const injectedBlocks = buildSyntheticAllowedBlocksFromInterpretedEvidence({
+        eligibleEvidence: interpretedEligibility.eligibleEvidence,
+        includePolicy: BaselineIncludePolicy.OPTIONAL,
+        sectionType: BaselineSectionType.SUMMARY,
+        baseOrder: (allowedBlocks.length + 1) * 1000,
+      }) as AllowedBaselineBlock[];
+      if (injectedBlocks.length) {
+        allowedBlocks = allowedBlocks.concat(injectedBlocks);
+        const map = buildInterpretedEvidenceIdToItemMapFromSyntheticContainers({
+          syntheticContainers: injectedBlocks.map((block) => ({ id: String(block.id), content: block.content ?? '' })),
+          eligibleEvidence: interpretedEligibility.eligibleEvidence,
+          reconstructLogicalTextUnits,
+          extractEvidenceUnitsFromLogicalUnits,
+        });
+        map.forEach((value, key) => interpretedEvidenceIdToItem.set(key, value));
+      }
+    }
     const jobContext = {
       id: job.id,
       title: this.cleanText(job.title),
@@ -1324,9 +1391,11 @@ export class CoverLettersService {
     try {
       const requestSafeMode = oneTap || complianceConstraints?.mode === 'strict';
 
-      const enforceTemplateReadiness =
-        Boolean(input.jobId?.trim()) && Boolean(input.analysisId?.trim()) && !Boolean(oneTap);
-      if (enforceTemplateReadiness && !templateReadiness.canGenerateCoverLetter) {
+      if (
+        enforceTemplateReadiness &&
+        !templateReadiness.canGenerateCoverLetter &&
+        !meaningfulInterpretedEvidenceExists
+      ) {
         throw new UnprocessableEntityException({
           code: 'baseline_template_not_ready',
           reasons: templateReadiness.hardBlockReasons,
@@ -1665,6 +1734,19 @@ export class CoverLettersService {
       job,
       analysisAssessment,
       allowedBlocks,
+      ...(interpretedEvidenceIdToItem.size ? { interpretedEvidenceIdToItem } : {}),
+      ...(interpretedEvidenceIdToItem.size
+        ? {
+            interpretedEvidenceSummary: evidenceSignals.interpretedEvidenceSummary,
+            interpretedEvidenceReadiness,
+            omittedInterpretedEvidence: {
+              weak: interpretedEligibility.omissions.omittedWeakEvidenceIds,
+              unusable: interpretedEligibility.omissions.omittedUnusableEvidenceIds,
+              no_tools_or_metrics: interpretedEligibility.omissions.omittedNoToolsOrMetricsIds,
+            },
+            bypassedTemplateHardBlockWithInterpretedEvidence,
+          }
+        : {}),
       candidateName,
       qualityGate: artifactQuality,
       firstPassQualityGate: firstPassArtifactQuality,

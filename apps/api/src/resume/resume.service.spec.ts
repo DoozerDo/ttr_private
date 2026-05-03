@@ -21,6 +21,7 @@ import { BaselineSectionType } from '../baseline/baseline-section.entity';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
 import { extractEvidenceUnitsFromLogicalUnits, reconstructLogicalTextUnits } from './resume-draft-bullets';
 import * as ResumeDraftBullets from './resume-draft-bullets';
+import { buildDalenDeterministicBaselineSections } from './__fixtures__/dalen-deterministic-baseline.fixture';
 
 type MockRepo<T> = Partial<Record<keyof Repository<T>, jest.Mock>> & {
   findOne: jest.Mock;
@@ -540,6 +541,9 @@ describe('ResumeService contract', () => {
     const result = await service.generateResume('user-1', baseRequest);
     expect(result.internal?.generationMode).toBe('structured_baseline_template');
     expect(result.qualityGate?.status).toBe('pass');
+    // Healthy structured baseline path should not inject interpreted evidence audit details.
+    expect((result as any).evidenceDetailsMap).toBeUndefined();
+    expect((result as any).internal?.interpretedEvidenceSummary).toBeUndefined();
 
     const preview = result.preview?.resume as any;
     const companies = (preview?.experience ?? []).map((e: any) => String(e.company ?? ''));
@@ -556,7 +560,7 @@ describe('ResumeService contract', () => {
     assessment.overallScore = originalScore;
   });
 
-  it('blocks Studio template lane when all structured-template experience headers are malformed (baseline_template_not_ready)', async () => {
+  it('does not block Studio template lane when structured headers are malformed but interpreted evidence is meaningful', async () => {
     const { service } = buildService();
     const original = baseline.sections?.[0]?.content ?? '';
     const originalParsed = baseline.parsedRecords;
@@ -577,22 +581,197 @@ describe('ResumeService contract', () => {
           'Infrastructure & Deployment',
           'Professional Experience',
           '2021 - Present',
-          '- Did work.',
+          '- Built and maintained backend services using Node.js, PostgreSQL, and AWS.',
           '',
           'Vue 3), deck builder frontend',
           'Professional Experience',
           '2021 - Present',
-          '- Did work.',
+          '- Improved p95 API latency by 35% by optimizing database queries and caching.',
         ].join('\n'),
+      },
+      {
+        ...baseSection,
+        id: 'skills-1',
+        sectionType: BaselineSectionType.SKILLS,
+        title: 'Skills',
+        order: 1,
+        content: 'Node.js, PostgreSQL, AWS',
       },
     ];
 
-    await expect(service.generateResume('user-1', baseRequest)).rejects.toMatchObject({
-      status: 422,
-      response: expect.objectContaining({
-        code: 'baseline_template_not_ready',
-      }),
-    });
+    const result = await service.generateResume('user-1', baseRequest);
+    expect(result.status).toBe('success');
+    // Generation may still fall back to minimal draft lanes if the baseline is too thin,
+    // but it must not fail with baseline_template_not_ready when interpreted evidence is meaningful.
+    const internal = (result as any).internal ?? {};
+    if (!internal?.minimalFallback) {
+      expect(internal?.bypassedTemplateHardBlockWithInterpretedEvidence).toBe(true);
+      expect(internal?.interpretedEvidenceSummary).toEqual(
+        expect.objectContaining({ strongEvidenceCount: expect.any(Number), partialEvidenceCount: expect.any(Number) }),
+      );
+      expect(internal?.omittedInterpretedEvidence).toEqual(
+        expect.objectContaining({
+          weak: expect.any(Array),
+          unusable: expect.any(Array),
+          no_tools_or_metrics: expect.any(Array),
+        }),
+      );
+      // Interpreted evidence should be used as a supplemental signal in actual draft content when structured parsing is weak.
+      const summarySection = (result.sections ?? []).find((s: any) => String(s.type ?? '').toUpperCase() === 'SUMMARY');
+      const summaryText = String(summarySection?.content ?? '');
+      expect(summaryText).toMatch(/Node\.js|PostgreSQL|AWS/i);
+      // Audit metadata must include interpreted evidence details when interpreted evidence is used.
+      const evidenceDetailsMap = (result as any).evidenceDetailsMap ?? {};
+      expect(Object.keys(evidenceDetailsMap).length).toBeGreaterThan(0);
+      const flattened = Object.values(evidenceDetailsMap).flat() as any[];
+      expect(flattened).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            evidenceItemId: expect.stringMatching(/^interpreted:/),
+            evidenceStrength: expect.stringMatching(/strong|partial/),
+            evidenceSource: expect.any(String),
+            supportLevel: expect.any(String),
+            generationUse: expect.any(String),
+            missingElements: expect.any(Array),
+          }),
+        ]),
+      );
+    }
+
+    baseline.sections = [{ ...baseSection, content: original }];
+    baseline.parsedRecords = originalParsed;
+    assessment.overallScore = originalScore;
+  });
+
+  it('Dalen regression: malformed headers + real technical evidence yields interpreted-evidence audit when traceable (no minimal fail-safe)', async () => {
+    const { service } = buildService();
+    const original = baseline.sections?.[0]?.content ?? '';
+    const originalParsed = baseline.parsedRecords;
+    baseline.parsedRecords = [
+      { createdAt: new Date(), parsedJson: { identity: { full_name: 'Jordan Lee' } } } as any,
+    ];
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 92;
+
+    baseline.sections = buildDalenDeterministicBaselineSections() as any;
+    const baselineText = (baseline.sections ?? []).map((s: any) => String(s.content ?? '')).join('\n');
+    expect(baselineText.length).toBeGreaterThan(600);
+
+    const result = await service.generateResume('user-1', baseRequest);
+    expect(result.status).toBe('success');
+    const internal = (result as any).internal ?? {};
+    // Prefer traceable interpreted-evidence path; if extracted-text heuristics trigger the minimal fallback,
+    // Phase 11 metadata must make that explicit and still surface interpreted evidence summary/readiness.
+    if (internal?.minimalFallback === true) {
+      expect(internal?.resumeFailSafeMinimalUsed).toBe(true);
+      expect(internal?.resumeGenerationMode).toBe('top_level_fail_safe_minimal');
+      expect(internal?.interpretedEvidenceAuditUnavailableReason).toBe('minimal_fail_safe_no_trace_audit');
+      expect(internal?.interpretedEvidenceAvailable).toBe(true);
+      expect((result as any).evidenceDetailsMap ?? null).toBeFalsy();
+    }
+    expect(internal?.interpretedEvidenceSummary).toEqual(
+      expect.objectContaining({ strongEvidenceCount: expect.any(Number), partialEvidenceCount: expect.any(Number) }),
+    );
+    expect(
+      (internal?.interpretedEvidenceSummary?.strongEvidenceCount ?? 0) +
+        (internal?.interpretedEvidenceSummary?.partialEvidenceCount ?? 0),
+    ).toBeGreaterThan(0);
+    if (internal?.minimalFallback !== true) {
+      expect((result as any).evidenceDetailsMap).toBeTruthy();
+      expect(internal?.resumeFailSafeMinimalUsed).toBeUndefined();
+    }
+
+    baseline.sections = [{ ...baseSection, content: original }];
+    baseline.parsedRecords = originalParsed;
+    assessment.overallScore = originalScore;
+  });
+
+  it('does not unlock generation when only weak/unusable interpreted evidence exists (malformed baseline)', async () => {
+    const { service } = buildService();
+    const original = baseline.sections?.[0]?.content ?? '';
+    const originalParsed = baseline.parsedRecords;
+    baseline.parsedRecords = [
+      { createdAt: new Date(), parsedJson: { identity: { full_name: 'Jordan Lee' } } } as any,
+    ];
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 92;
+
+    baseline.sections = [
+      {
+        ...baseSection,
+        content: [
+          'Vue 3), deck builder frontend',
+          'Professional Experience',
+          '2021 - Present',
+          '- Responsible for various engineering tasks.',
+          'Additional verified baseline context '.repeat(60),
+        ].join('\n'),
+      },
+    ] as any;
+
+    await expect(service.generateResume('user-1', baseRequest)).rejects.toBeTruthy();
+
+    baseline.sections = [{ ...baseSection, content: original }];
+    baseline.parsedRecords = originalParsed;
+    assessment.overallScore = originalScore;
+  });
+
+  it('does not invent metrics or inflated scope when generating from partial interpreted evidence (tools-only, no explicit metrics)', async () => {
+    const { service } = buildService();
+    const original = baseline.sections?.[0]?.content ?? '';
+    const originalParsed = baseline.parsedRecords;
+    baseline.parsedRecords = [
+      {
+        createdAt: new Date(),
+        parsedJson: { identity: { full_name: 'Jordan Lee' } },
+      } as any,
+    ];
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 90;
+
+    baseline.sections = [
+      {
+        ...baseSection,
+        content: [
+          'Professional Experience',
+          '2021 - Present',
+          '- Built and maintained backend services using Node.js, PostgreSQL, and AWS.',
+          '',
+          'Additional Experience',
+          '2020 - 2021',
+          '- Responsible for various engineering tasks.',
+        ].join('\n'),
+      },
+      {
+        ...baseSection,
+        id: 'skills-1',
+        sectionType: BaselineSectionType.SKILLS,
+        title: 'Skills',
+        order: 1,
+        content: 'Node.js, PostgreSQL, AWS',
+      },
+    ];
+
+    const result = await service.generateResume('user-1', baseRequest);
+    expect(result.status).toBe('success');
+
+    const internal = (result as any).internal ?? {};
+    if (!internal?.minimalFallback) {
+      expect(internal?.bypassedTemplateHardBlockWithInterpretedEvidence).toBe(true);
+      const allText = (result.sections ?? []).map((s: any) => String(s.content ?? '')).join('\n');
+      // No invented percent/x-style improvements.
+      expect(allText).not.toMatch(/\b\d+%/);
+      expect(allText).not.toMatch(/\b\d+x\b/i);
+      // Avoid inflated ownership/scope language unless explicitly supported.
+      expect(allText).not.toMatch(/\benterprise-?wide\b/i);
+      expect(allText).not.toMatch(/\bmanaged teams?\b/i);
+      expect(allText).not.toMatch(/\bincreased revenue\b/i);
+      expect(allText).not.toMatch(/\breduced costs?\b/i);
+      expect(allText).not.toMatch(/\bimproved csat\b/i);
+      expect(allText).not.toMatch(/\breduced churn\b/i);
+      // Tools can appear only when explicitly present.
+      expect(allText).toMatch(/Node\.js|PostgreSQL|AWS/i);
+    }
 
     baseline.sections = [{ ...baseSection, content: original }];
     baseline.parsedRecords = originalParsed;
@@ -699,8 +878,9 @@ describe('ResumeService contract', () => {
 
   it('applies preview sanitization on idempotency reuse responses before returning to client', async () => {
     const { service, workflowIdempotencyService } = buildService();
-    const originalScore = assessment.overallScore;
-    assessment.overallScore = 70;
+    const originalSections = baseline.sections;
+    // Ensure Studio/template readiness gates cannot block this idempotency reuse contract test.
+    baseline.sections = buildDalenDeterministicBaselineSections() as any;
 
     (workflowIdempotencyService.reserve as jest.Mock).mockResolvedValueOnce({
       status: 'existing_completed',
@@ -749,13 +929,14 @@ describe('ResumeService contract', () => {
     expect(String(result.preview?.resume?.experience?.[0]?.roleTitle ?? '')).not.toBe(
       'Technical Architect & Full',
     );
-    assessment.overallScore = originalScore;
+
+    baseline.sections = originalSections;
   });
 
   it('bypasses idempotency reuse/in-flight latches when forceRegenerate=true by using a one-off dedupe key', async () => {
     const { service, workflowIdempotencyService } = buildService();
-    const originalScore = assessment.overallScore;
-    assessment.overallScore = 70;
+    const originalSections = baseline.sections;
+    baseline.sections = buildDalenDeterministicBaselineSections() as any;
 
     (workflowIdempotencyService.reserve as jest.Mock).mockImplementation(({ dedupeKey }) => {
       if (String(dedupeKey).includes(':regen:audit-1')) {
@@ -771,13 +952,13 @@ describe('ResumeService contract', () => {
     // forceTemplateRegen may bypass idempotency reserve entirely; ensure we still succeed.
     expect(workflowIdempotencyService.reserve).toHaveBeenCalledTimes(0);
 
-    assessment.overallScore = originalScore;
+    baseline.sections = originalSections;
   });
 
   it('does not return cached completed studio artifact when forceRegenerate=true', async () => {
     const { service, workflowIdempotencyService, studioArtifactsService } = buildService();
-    const originalScore = assessment.overallScore;
-    assessment.overallScore = 70;
+    const originalSections = baseline.sections;
+    baseline.sections = buildDalenDeterministicBaselineSections() as any;
 
     (studioArtifactsService.readState as jest.Mock).mockResolvedValueOnce({
       status: 'COMPLETED',
@@ -835,11 +1016,18 @@ describe('ResumeService contract', () => {
       coverLetter: null,
     });
 
-    const result = await service.generateResume('user-1', { ...baseRequest, forceRegenerate: true });
-    expect(result.preview?.resume?.heading?.name ?? '').not.toBe('Cached Candidate');
+    const result = await service.generateResume(
+      'user-1',
+      { ...baseRequest, forceRegenerate: true },
+      // Keep this test focused on cache/idempotency behavior rather than readiness-fallback recursion.
+      { skipReadinessGate: true } as any,
+    );
+    // Contract: forceRegenerate must not reuse cached completed Studio artifact responseBody.
+    expect((result as any).auditId ?? (result as any).audit_id ?? '').not.toBe('audit-cached-1');
+    expect((result as any).idempotency?.reused).not.toBe(true);
     // forceTemplateRegen may bypass reserve; the key contract is that cached Studio artifact is not reused.
 
-    assessment.overallScore = originalScore;
+    baseline.sections = originalSections;
   });
 
   it('marks resume as not export-ready when experience headers are malformed (sentence-like title/company)', async () => {

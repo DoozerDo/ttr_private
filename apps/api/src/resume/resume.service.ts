@@ -80,6 +80,12 @@ import {
 } from '../common/readiness-claim-truth';
 import { validateGenerationTrace } from '../generation/generation-validation';
 import type { ArtifactTraceAudit } from '../generation/artifact-trace-audit';
+import {
+  evaluateInterpretedEvidenceEligibility,
+  buildSyntheticBaselineSectionsFromInterpretedEvidence,
+  buildInterpretedEvidenceIdToItemMapFromSyntheticContainers,
+  buildEvidenceDetailsMapFromTraceMap,
+} from '../generation/interpreted-evidence-artifact-support';
 import { buildArtifactFailurePayload } from '../generation/artifact-failure';
 import type {
   DocumentGenerationExports,
@@ -98,6 +104,9 @@ import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTeleme
 import { sanitizeResumePreviewForStudio } from './resumePreviewSanitizer';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
 import { evaluateBaselineTemplateReadiness } from '../baseline/baselineTemplateReadiness';
+import { interpretEvidenceFromResumeText } from '../evidence/evidence-interpreter';
+import { resolveEvidenceReadinessFromSummary } from '../evidence/readiness-thresholds';
+import type { EvidenceItem } from '../evidence/evidence-model';
 import {
   assembleResumeFromStructuredBaseline,
   isAllowedStructuredTemplateExperienceHeader,
@@ -222,6 +231,7 @@ export type ResumeGenerationResponse = {
   quality: 'optimized' | 'draft';
   traceMap: ArtifactTraceAudit['traceMap'];
   debugTrace: ArtifactTraceAudit['debugTrace'];
+  evidenceDetailsMap?: ArtifactTraceAudit['evidenceDetailsMap'];
   exports: DocumentGenerationExports;
   preview: {
     resume: NormalizedResumeDocument | null;
@@ -539,14 +549,17 @@ export class ResumeService {
   private buildResumeTraceAudit(
     sections: ResumeExportSection[],
     resumeInputSections: BaselineSection[],
+    interpretedEvidenceByGeneratedEvidenceId?: Map<string, EvidenceItem>,
   ): ArtifactTraceAudit {
+    const interpretedEvidenceById = interpretedEvidenceByGeneratedEvidenceId ?? new Map<string, EvidenceItem>();
     const availableEvidenceIds = resumeInputSections.flatMap((section) => {
       const logicalUnits = ResumeDraftBullets.reconstructLogicalTextUnits(section.content ?? '');
       return ResumeDraftBullets.extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits).map((unit) => unit.id);
     });
 
     const traceMap: Record<string, string[]> = {};
-    const tracedLines: Array<{ id: string; text: string; sourceEvidenceIds?: string[] }> = [];
+    const tracedLines: Array<{ id: string; text: string; sourceEvidenceIds?: string[]; sourceEvidenceDetails?: any[] }> =
+      [];
     const debugLines: Array<{
       lineId: string;
       text: string;
@@ -566,7 +579,19 @@ export class ResumeService {
         classification: 'required_content' | 'structural',
       ) => {
         traceMap[lineId] = ids;
-        tracedLines.push({ id: lineId, text, sourceEvidenceIds: ids });
+        const details = ids
+          .map((id) => interpretedEvidenceById.get(id))
+          .filter(Boolean)
+          .map((item) => ({
+            evidenceItemId: item!.id,
+            evidenceStrength: item!.evidenceStrength,
+            evidenceSource: item!.evidenceSource,
+            supportLevel: item!.supportLevel,
+            generationUse: item!.generationUse,
+            constraintsApplied: item!.constraints ?? [],
+            missingElements: item!.missingElements,
+          }));
+        tracedLines.push({ id: lineId, text, sourceEvidenceIds: ids, sourceEvidenceDetails: details.length ? details : undefined });
         debugLines.push({
           lineId,
           text,
@@ -645,8 +670,14 @@ export class ResumeService {
       });
     }
 
+    const evidenceDetailsMap = buildEvidenceDetailsMapFromTraceMap({
+      traceMap,
+      interpretedEvidenceByGeneratedEvidenceId: interpretedEvidenceById,
+    });
+
     return {
       traceMap,
+      ...(evidenceDetailsMap ? { evidenceDetailsMap } : {}),
       debugTrace: validation,
     };
   }
@@ -1613,6 +1644,9 @@ export class ResumeService {
       const baselineId = request.baselineId?.trim();
       const baselineVersionId = request.baselineVersionId?.trim() || null;
       const jobId = request.jobId?.trim();
+      const forceRegenerate =
+        request.forceRegenerate === true ||
+        String((request as any).forceRegenerate ?? '').toLowerCase() === 'true';
       let analysisId = request.analysisId?.trim();
       jobIdForFailSafe = jobId ?? null;
       analysisIdForFailSafe = analysisId ?? null;
@@ -1722,6 +1756,20 @@ export class ResumeService {
     const isVerifiedOnlyRequest =
       Boolean(request.oneTap) || Boolean(options?.enforceOneTap);
 
+    const interpretedEvidenceForGate = interpretEvidenceFromResumeText({
+      baselineId: baseline.id,
+      baselineVersionId: baselineVersion.id,
+      resumeText: (baseline.sections ?? []).map((section) => section.content ?? '').join('\n'),
+    });
+    const hasMeaningfulInterpretedEvidenceForGate =
+      interpretedEvidenceForGate.items.some((item) => {
+        const strength = item.evidenceStrength;
+        if (strength !== 'strong' && strength !== 'partial') return false;
+        const tools = Array.isArray(item.extracted?.tools) ? item.extracted?.tools ?? [] : [];
+        const metrics = Array.isArray(item.extracted?.metrics) ? item.extracted?.metrics ?? [] : [];
+        return tools.length > 0 || metrics.length > 0;
+      });
+
     if (!options?.skipReadinessGate && !isVerifiedOnlyRequest) {
       const readiness = await this.getGenerationReadiness(userId, request, {
         skipReadinessGate: true,
@@ -1731,7 +1779,14 @@ export class ResumeService {
         const templateNotReadyReason = (readiness as any)?.reasons?.find?.(
           (r: any) => r?.code === 'baseline_template_not_ready',
         );
-        if (templateNotReadyReason && readiness.blocked === true && jobId && analysisId && !request.oneTap) {
+        if (
+          templateNotReadyReason &&
+          readiness.blocked === true &&
+          jobId &&
+          analysisId &&
+          !request.oneTap &&
+          !hasMeaningfulInterpretedEvidenceForGate
+        ) {
           throw new UnprocessableEntityException({
             code: 'baseline_template_not_ready',
             reasons:
@@ -1820,7 +1875,7 @@ export class ResumeService {
         (section.includePolicy ?? BaselineIncludePolicy.OPTIONAL) !==
         BaselineIncludePolicy.NEVER,
     );
-    const resumeInputSections =
+    let resumeInputSections =
       this.promoteExperienceLikeSections(allowedSections);
 
     const templateReadinessForBaseline = evaluateBaselineTemplateReadiness(
@@ -1832,7 +1887,43 @@ export class ResumeService {
       // (baseline was accepted as usable enough to score) and we are not in verified-only mode.
       Boolean(jobId?.trim()) && Boolean(analysisId?.trim()) && !Boolean(request.oneTap);
 
-    if (enforceTemplateReadiness && !templateReadinessForBaseline.canGenerateResume) {
+    const interpretedEvidenceForBaseline = interpretEvidenceFromResumeText({
+      baselineId: baseline.id,
+      baselineVersionId: baselineVersion.id,
+      resumeText: allowedSections.map((section) => section.content ?? '').join('\n'),
+    });
+    const interpretedEligibility = evaluateInterpretedEvidenceEligibility(interpretedEvidenceForBaseline.items);
+    const hasMeaningfulInterpretedEvidence = interpretedEligibility.hasMeaningfulInterpretedEvidence;
+    const interpretedEvidenceReadiness = resolveEvidenceReadinessFromSummary(interpretedEvidenceForBaseline.summary);
+    const bypassedTemplateHardBlockWithInterpretedEvidence =
+      enforceTemplateReadiness && !templateReadinessForBaseline.canGenerateResume && hasMeaningfulInterpretedEvidence;
+
+    const interpretedEvidenceIdToItem = new Map<string, EvidenceItem>();
+    let usedInterpretedEvidenceInDraft = false;
+    if (!templateReadinessForBaseline.canGenerateResume && hasMeaningfulInterpretedEvidence) {
+      const interpretedSections: BaselineSection[] = buildSyntheticBaselineSectionsFromInterpretedEvidence({
+        eligibleEvidence: interpretedEligibility.eligibleEvidence,
+        includePolicy: BaselineIncludePolicy.OPTIONAL,
+        sectionType: BaselineSectionType.SUMMARY,
+        baseOrder: 10_000,
+      }) as any;
+
+      if (interpretedSections.length) {
+        usedInterpretedEvidenceInDraft = true;
+        resumeInputSections = [...resumeInputSections, ...interpretedSections];
+      }
+
+      // Precompute evidence ids produced by ResumeDraftBullets for these synthetic sections so trace/audit can map them.
+      const map = buildInterpretedEvidenceIdToItemMapFromSyntheticContainers({
+        syntheticContainers: interpretedSections.map((section) => ({ id: String(section.id), content: section.content ?? '' })),
+        eligibleEvidence: interpretedEligibility.eligibleEvidence,
+        reconstructLogicalTextUnits: ResumeDraftBullets.reconstructLogicalTextUnits,
+        extractEvidenceUnitsFromLogicalUnits: ResumeDraftBullets.extractEvidenceUnitsFromLogicalUnits,
+      });
+      map.forEach((value, key) => interpretedEvidenceIdToItem.set(key, value));
+    }
+
+    if (enforceTemplateReadiness && !templateReadinessForBaseline.canGenerateResume && !hasMeaningfulInterpretedEvidence) {
       throw new UnprocessableEntityException({
         code: 'baseline_template_not_ready',
         reasons: templateReadinessForBaseline.hardBlockReasons,
@@ -1939,7 +2030,7 @@ export class ResumeService {
     });
     const cachedResume = studioArtifactsState.resume;
     if (
-      !request.forceRegenerate &&
+      !forceRegenerate &&
       cachedResume?.status === 'COMPLETED' &&
       cachedResume.responseBody &&
       cachedResume.inputsHash === studioArtifactContext.inputsHash
@@ -2590,6 +2681,7 @@ export class ResumeService {
       resumeTraceAudit = this.buildResumeTraceAudit(
         traceSourceSections,
         resumeInputSections,
+        interpretedEvidenceIdToItem,
       );
     }
 
@@ -2628,6 +2720,9 @@ export class ResumeService {
             : 'draft',
         traceMap: resumeTraceAudit.traceMap,
         debugTrace: resumeTraceAudit.debugTrace,
+        ...(resumeTraceAudit.evidenceDetailsMap
+          ? { evidenceDetailsMap: resumeTraceAudit.evidenceDetailsMap }
+          : {}),
         exports: { docx: false, pdf: false } as DocumentGenerationExports,
         preview: {
           resume: null,
@@ -2665,7 +2760,7 @@ export class ResumeService {
       | WorkflowIdempotencyReservation<ResumeGenerationResponse>
       | { status: 'accepted_new'; runId: string; responseBody: null };
     let reservation: ReservationLike;
-    if (forceTemplateRegen || request.forceRegenerate) {
+    if (forceTemplateRegen || forceRegenerate) {
       reservation = { status: 'accepted_new', runId: audit.id, responseBody: null };
       dedupeKey = this.buildResumeDedupeKey({
         userId,
@@ -2677,7 +2772,7 @@ export class ResumeService {
         oneTap: Boolean(request.oneTap),
         enforceOneTap: shouldEnforceOneTap,
       });
-      if (request.forceRegenerate) {
+      if (forceRegenerate) {
         dedupeKey = `${dedupeKey}:regen:${audit.id}`;
       }
     } else {
@@ -2691,9 +2786,9 @@ export class ResumeService {
         oneTap: Boolean(request.oneTap),
         enforceOneTap: shouldEnforceOneTap,
       });
-      dedupeKey = request.forceRegenerate ? `${baseDedupeKey}:regen:${audit.id}` : baseDedupeKey;
+      dedupeKey = forceRegenerate ? `${baseDedupeKey}:regen:${audit.id}` : baseDedupeKey;
 
-      if (request.forceRegenerate) {
+      if (forceRegenerate) {
         // eslint-disable-next-line no-console
         console.log('[ARTIFACT_REGENERATE_OVERRIDE]', {
           artifactType: 'resume',
@@ -2710,7 +2805,7 @@ export class ResumeService {
 
       // eslint-disable-next-line no-console
       console.log('[RESUME_GENERATE_FORCE_TRACE]', {
-        forceRegenerate: Boolean(request.forceRegenerate),
+        forceRegenerate: Boolean(forceRegenerate),
         dedupeKey,
         reservationStatus: reservation.status,
         reservationRunId: reservation.runId,
@@ -2847,6 +2942,9 @@ export class ResumeService {
       quality,
       traceMap: resumeTraceAudit.traceMap,
       debugTrace: resumeTraceAudit.debugTrace,
+      ...(resumeTraceAudit.evidenceDetailsMap
+        ? { evidenceDetailsMap: resumeTraceAudit.evidenceDetailsMap }
+        : {}),
       exports: exportable ? exports : ({ docx: false, pdf: false } as DocumentGenerationExports),
       preview: {
         resume: sanitizedPreviewDocument,
@@ -2868,6 +2966,18 @@ export class ResumeService {
         resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
         resumeGenerationDiagnostics: experienceDiagnostics,
         normalizationDiagnostics: experienceDiagnostics,
+        ...(usedInterpretedEvidenceInDraft
+          ? {
+              interpretedEvidenceSummary: interpretedEvidenceForBaseline.summary,
+              interpretedEvidenceReadiness,
+              bypassedTemplateHardBlockWithInterpretedEvidence,
+              omittedInterpretedEvidence: {
+                weak: interpretedEligibility.omissions.omittedWeakEvidenceIds,
+                unusable: interpretedEligibility.omissions.omittedUnusableEvidenceIds,
+                no_tools_or_metrics: interpretedEligibility.omissions.omittedNoToolsOrMetricsIds,
+              },
+            }
+          : {}),
         ...(usedStructuredBaselineTemplate
           ? {
               generationMode: 'structured_baseline_template',
@@ -3080,6 +3190,24 @@ export class ResumeService {
             repairAttempted: false,
           },
         );
+        // Minimal fail-safe intentionally skips tailoring + trace auditing.
+        // Still surface interpreted evidence summary/readiness when available so Studio can distinguish:
+        // - evidence used + auditable
+        // - evidence available but minimal fail-safe (no trace/audit)
+        // - no interpreted evidence involved
+        const interpretedEvidenceForFailSafe = interpretEvidenceFromResumeText({
+          baselineId: baselineForFailSafe.id,
+          baselineVersionId: baselineVersionForFailSafe.id,
+          resumeText: (baselineForFailSafe.sections ?? []).map((s: any) => s?.content ?? '').join('\n'),
+        });
+        const interpretedEligibilityForFailSafe = evaluateInterpretedEvidenceEligibility(
+          interpretedEvidenceForFailSafe.items,
+        );
+        const interpretedEvidenceAvailable = interpretedEligibilityForFailSafe.hasMeaningfulInterpretedEvidence;
+        const interpretedEvidenceReadinessForFailSafe = resolveEvidenceReadinessFromSummary(
+          interpretedEvidenceForFailSafe.summary,
+        );
+
         const response: ResumeGenerationResponse = {
           ok: true,
           status: 'success',
@@ -3120,6 +3248,21 @@ export class ResumeService {
           safeDisplay: this.buildSuccessDisplayPayload(),
           internal: {
             minimalFallback: true,
+            resumeGenerationMode: 'top_level_fail_safe_minimal',
+            resumeFailSafeMinimalUsed: true,
+            interpretedEvidenceAuditUnavailableReason: 'minimal_fail_safe_no_trace_audit',
+            ...(interpretedEvidenceAvailable
+              ? {
+                  interpretedEvidenceAvailable: true,
+                  interpretedEvidenceSummary: interpretedEvidenceForFailSafe.summary,
+                  interpretedEvidenceReadiness: interpretedEvidenceReadinessForFailSafe,
+                  omittedInterpretedEvidence: {
+                    weak: interpretedEligibilityForFailSafe.omissions.omittedWeakEvidenceIds,
+                    unusable: interpretedEligibilityForFailSafe.omissions.omittedUnusableEvidenceIds,
+                    no_tools_or_metrics: interpretedEligibilityForFailSafe.omissions.omittedNoToolsOrMetricsIds,
+                  },
+                }
+              : { interpretedEvidenceAvailable: false }),
             failureReason: error instanceof Error ? error.message : String(error),
           },
           ...(qualityGate.status === 'pass'
@@ -3143,6 +3286,21 @@ export class ResumeService {
               auditId: minimalAuditId,
               baselineVersionHash: baselineVersionForFailSafe.hash ?? null,
               analysisId: studioArtifactContext.analysisId,
+              resumeGenerationMode: 'top_level_fail_safe_minimal',
+              resumeFailSafeMinimalUsed: true,
+              interpretedEvidenceAuditUnavailableReason: 'minimal_fail_safe_no_trace_audit',
+              interpretedEvidenceAvailable,
+              ...(interpretedEvidenceAvailable
+                ? {
+                    interpretedEvidenceSummary: interpretedEvidenceForFailSafe.summary,
+                    interpretedEvidenceReadiness: interpretedEvidenceReadinessForFailSafe,
+                    omittedInterpretedEvidence: {
+                      weak: interpretedEligibilityForFailSafe.omissions.omittedWeakEvidenceIds,
+                      unusable: interpretedEligibilityForFailSafe.omissions.omittedUnusableEvidenceIds,
+                      no_tools_or_metrics: interpretedEligibilityForFailSafe.omissions.omittedNoToolsOrMetricsIds,
+                    },
+                  }
+                : {}),
             },
           });
         } catch {

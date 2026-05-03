@@ -1,5 +1,6 @@
 import { StudioArtifactsService } from './studio-artifacts.service';
 import { StudioArtifactLifecycleStatus } from './studio-artifact.entity';
+import { buildDalenDeterministicBaselineSections } from '../resume/__fixtures__/dalen-deterministic-baseline.fixture';
 
 const baselineVersion = { id: 'baseline-version-1', baselineId: 'baseline-1', hash: 'baseline-hash-1' };
 const job = { id: 'job-1', userId: 'user-1', title: 'Director of Support', company: 'Acme', rawDescription: 'Lead support teams.' };
@@ -348,6 +349,237 @@ describe('StudioArtifactsService', () => {
     );
   });
 
+  it('surfaces interpreted evidence audit metadata for resume artifacts when present (additive only)', async () => {
+    const studioArtifactRepository = createRepository<any>();
+    const baselineRepository = { findOne: jest.fn(async () => baseline) };
+    const baselineVersionRepository = { findOne: jest.fn(async () => baselineVersion) };
+    const jobRepository = { findOne: jest.fn(async () => job) };
+    const assessmentRepository = { findOne: jest.fn(async () => assessment) };
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository as any,
+      baselineRepository as any,
+      baselineVersionRepository as any,
+      jobRepository as any,
+      assessmentRepository as any,
+    );
+
+    const jobFingerprint = service.computeJobFingerprint(job as any);
+    const inputsHash = service.computeResumeInputsHash({
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint,
+      assessmentInputsHash: assessment.inputsHash,
+    });
+
+    await service.recordResumeSuccess({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint,
+      inputsHash,
+      content: 'content',
+      responseBody: {
+        status: 'success',
+        content: 'content',
+        traceMap: { 'summary:0:0': ['interpreted:evidence:baseline-1:baseline-version-1:0:evidence:0'] },
+        evidenceDetailsMap: {
+          'summary:0:0': [
+            {
+              evidenceItemId: 'evidence:baseline-1:baseline-version-1:0',
+              evidenceStrength: 'partial',
+              evidenceSource: 'inferred_from_resume_text',
+              supportLevel: 'partial',
+              generationUse: 'use_with_constraints',
+              constraintsApplied: ['no_invented_metrics'],
+              missingElements: ['metrics'],
+            },
+          ],
+        },
+        internal: {
+          interpretedEvidenceSummary: {
+            strongEvidenceCount: 0,
+            partialEvidenceCount: 1,
+            weakEvidenceCount: 1,
+            unusableEvidenceCount: 0,
+          },
+          interpretedEvidenceReadiness: { status: 'degraded' },
+          omittedInterpretedEvidence: { weak: ['w1'], unusable: [], no_tools_or_metrics: ['p0'] },
+          bypassedTemplateHardBlockWithInterpretedEvidence: true,
+        },
+      },
+      metadata: { auditId: 'audit-1' },
+      analysisId: 'analysis-1',
+    });
+
+    const state = await service.readState({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      analysisId: 'analysis-1',
+    });
+
+    expect(state.resume?.interpretedEvidenceAudit).toEqual(
+      expect.objectContaining({
+        interpretedEvidenceSummary: expect.any(Object),
+        interpretedEvidenceReadiness: expect.any(Object),
+        omittedInterpretedEvidence: expect.any(Object),
+        evidenceDetailsMap: expect.any(Object),
+        bypassedTemplateHardBlockWithInterpretedEvidence: true,
+      }),
+    );
+  });
+
+  it('surfaces interpreted evidence audit metadata for cover letter artifacts when present (additive only)', async () => {
+    const studioArtifactRepository = createRepository<any>();
+    const baselineRepository = { findOne: jest.fn(async () => baseline) };
+    const baselineVersionRepository = { findOne: jest.fn(async () => baselineVersion) };
+    const jobRepository = { findOne: jest.fn(async () => job) };
+    const assessmentRepository = { findOne: jest.fn(async () => assessment) };
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository as any,
+      baselineRepository as any,
+      baselineVersionRepository as any,
+      jobRepository as any,
+      assessmentRepository as any,
+    );
+
+    const jobFingerprint = service.computeJobFingerprint(job as any);
+    const inputsHash = service.computeCoverLetterInputsHash({
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint,
+    });
+
+    await service.recordCoverLetterSuccess({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint,
+      inputsHash,
+      content: 'content',
+      responseBody: {
+        status: 'success',
+        content: 'content',
+        traceMap: { opening: ['interpreted:evidence:baseline-1:baseline-version-1:0:evidence:0'] },
+        evidenceDetailsMap: {
+          opening: [
+            {
+              evidenceItemId: 'evidence:baseline-1:baseline-version-1:0',
+              evidenceStrength: 'partial',
+              evidenceSource: 'inferred_from_resume_text',
+              supportLevel: 'partial',
+              generationUse: 'use_with_constraints',
+              constraintsApplied: ['no_invented_metrics'],
+              missingElements: ['metrics'],
+            },
+          ],
+        },
+        internal: {
+          interpretedEvidenceSummary: {
+            strongEvidenceCount: 0,
+            partialEvidenceCount: 1,
+            weakEvidenceCount: 0,
+            unusableEvidenceCount: 0,
+          },
+          interpretedEvidenceReadiness: { status: 'degraded' },
+          omittedInterpretedEvidence: { weak: [], unusable: [], no_tools_or_metrics: [] },
+          bypassedTemplateHardBlockWithInterpretedEvidence: true,
+        },
+      },
+      metadata: { auditId: 'audit-1' },
+      analysisId: 'analysis-1',
+    });
+
+    const state = await service.readState({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      analysisId: 'analysis-1',
+    });
+
+    expect(state.coverLetter?.interpretedEvidenceAudit).toEqual(
+      expect.objectContaining({
+        interpretedEvidenceSummary: expect.any(Object),
+        interpretedEvidenceReadiness: expect.any(Object),
+        omittedInterpretedEvidence: expect.any(Object),
+        evidenceDetailsMap: expect.any(Object),
+        bypassedTemplateHardBlockWithInterpretedEvidence: true,
+      }),
+    );
+  });
+
+  it('does not emit interpreted evidence audit metadata for healthy structured artifacts', async () => {
+    const studioArtifactRepository = createRepository<any>();
+    const baselineRepository = { findOne: jest.fn(async () => baseline) };
+    const baselineVersionRepository = { findOne: jest.fn(async () => baselineVersion) };
+    const jobRepository = { findOne: jest.fn(async () => job) };
+    const assessmentRepository = { findOne: jest.fn(async () => assessment) };
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository as any,
+      baselineRepository as any,
+      baselineVersionRepository as any,
+      jobRepository as any,
+      assessmentRepository as any,
+    );
+
+    const jobFingerprint = service.computeJobFingerprint(job as any);
+    const resumeInputsHash = service.computeResumeInputsHash({
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint,
+      assessmentInputsHash: assessment.inputsHash,
+    });
+    const coverInputsHash = service.computeCoverLetterInputsHash({
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint,
+    });
+
+    await service.recordResumeSuccess({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint,
+      inputsHash: resumeInputsHash,
+      content: 'content',
+      responseBody: { status: 'success', content: 'content', traceMap: {} },
+      metadata: { auditId: 'audit-1' },
+      analysisId: 'analysis-1',
+    });
+
+    await service.recordCoverLetterSuccess({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint,
+      inputsHash: coverInputsHash,
+      content: 'content',
+      responseBody: { status: 'success', content: 'content', traceMap: {} },
+      metadata: { auditId: 'audit-1' },
+      analysisId: 'analysis-1',
+    });
+
+    const state = await service.readState({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      analysisId: 'analysis-1',
+    });
+
+    expect(state.resume?.interpretedEvidenceAudit).toBeUndefined();
+    expect(state.coverLetter?.interpretedEvidenceAudit).toBeUndefined();
+  });
+
   it('invalidates stale artifacts when the generation inputs change', async () => {
     const studioArtifactRepository = createRepository<any>();
     const baselineRepository = {
@@ -592,6 +824,178 @@ describe('StudioArtifactsService', () => {
     expect(state.artifactReadinessReasonDetails?.[0]?.code).toBe('baseline_template_not_ready');
     expect(state.artifactReadinessReasonDetails?.[0] as any).toEqual(
       expect.objectContaining({ details: expect.objectContaining({ validExperience: 0 }) }),
+    );
+  });
+
+  it('uses interpreted evidence to avoid blocked readiness when structured baseline has zero valid experience', async () => {
+    const studioArtifactRepository = createRepository<any>();
+    const baselineRepository = {
+      findOne: jest.fn(async () => ({
+        ...baseline,
+        // Malformed header -> structured baseline likely yields no valid experience.
+        sections: [
+          {
+            title: 'Experience',
+            content: [
+              'Vue 3), deck builder frontend | Contractor | 2022 - 2023',
+              '- Built and maintained backend services using Node.js, PostgreSQL, and AWS.',
+              '- Improved p95 API latency by 35% by optimizing database queries and caching.',
+            ].join('\n'),
+            sectionType: 'EXPERIENCE',
+          },
+          {
+            title: 'Skills',
+            content: 'Node.js, PostgreSQL, AWS',
+            sectionType: 'SKILLS',
+          },
+        ],
+      })),
+    };
+    const baselineVersionRepository = {
+      findOne: jest.fn(async () => baselineVersion),
+    };
+    const jobRepository = {
+      findOne: jest.fn(async () => job),
+    };
+    const assessmentRepository = {
+      findOne: jest.fn(async () => ({ ...assessment, overallScore: 92 })),
+    };
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository as any,
+      baselineRepository as any,
+      baselineVersionRepository as any,
+      jobRepository as any,
+      assessmentRepository as any,
+    );
+
+    const state = await service.readState({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      analysisId: 'analysis-1',
+    });
+
+    expect(state.artifactReadiness).toBe('degraded');
+    expect(state.artifactReadinessReasonDetails?.[0] as any).toEqual(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          interpretedEvidenceSummary: expect.objectContaining({
+            strongEvidenceCount: expect.any(Number),
+            partialEvidenceCount: expect.any(Number),
+          }),
+        }),
+      }),
+    );
+    const summary = ((state.artifactReadinessReasonDetails?.[0] as any)?.details?.interpretedEvidenceSummary ?? {}) as any;
+    expect((summary.strongEvidenceCount ?? 0) + (summary.partialEvidenceCount ?? 0)).toBeGreaterThan(0);
+  });
+
+  it('includes interpretedEvidenceSummary in readiness reason details and counts meaningful evidence (Dalen-style) as strong/partial', async () => {
+    const studioArtifactRepository = createRepository<any>();
+    const baselineVersionRepository = {
+      findOne: jest.fn(async () => baselineVersion),
+    };
+    const jobRepository = {
+      findOne: jest.fn(async () => job),
+    };
+    const assessmentRepository = {
+      findOne: jest.fn(async () => ({ ...assessment, overallScore: 92 })),
+    };
+
+    const baselineWithMessyExperience = {
+      ...baseline,
+      sections: buildDalenDeterministicBaselineSections().map((s) => ({
+        title: s.title,
+        content: s.content,
+        sectionType: String(s.sectionType ?? '').toUpperCase(),
+      })),
+    };
+    const baselineRepository = {
+      findOne: jest.fn(async () => baselineWithMessyExperience),
+    };
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository as any,
+      baselineRepository as any,
+      baselineVersionRepository as any,
+      jobRepository as any,
+      assessmentRepository as any,
+    );
+
+    const state = await service.readState({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      analysisId: 'analysis-1',
+    });
+
+    expect(['degraded', 'ready']).toContain(state.artifactReadiness);
+    const details = state.artifactReadinessReasonDetails ?? [];
+    expect(Array.isArray(details)).toBe(true);
+    if (details.length) {
+      const summary = details[0]?.details?.interpretedEvidenceSummary as any;
+      expect(summary).toBeTruthy();
+      expect((summary?.strongEvidenceCount ?? 0) + (summary?.partialEvidenceCount ?? 0)).toBeGreaterThan(0);
+    }
+  });
+
+  it('never counts padding or weak filler as usable interpreted evidence (strong/partial remain zero) and remains blocked', async () => {
+    const studioArtifactRepository = createRepository<any>();
+    const baselineVersionRepository = {
+      findOne: jest.fn(async () => baselineVersion),
+    };
+    const jobRepository = {
+      findOne: jest.fn(async () => job),
+    };
+    const assessmentRepository = {
+      findOne: jest.fn(async () => ({ ...assessment, overallScore: 92 })),
+    };
+    const baselineRepository = {
+      findOne: jest.fn(async () => ({
+        ...baseline,
+        sections: [
+          {
+            title: 'Experience',
+            sectionType: 'EXPERIENCE',
+            // No tools, no metrics, no explicit outcomes; plus padding that must not be treated as evidence.
+            content: [
+              'Various tasks.',
+              'Additional verified baseline context '.repeat(40),
+              'Verified professional experience context '.repeat(40),
+            ].join('\n'),
+          },
+        ],
+      })),
+    };
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository as any,
+      baselineRepository as any,
+      baselineVersionRepository as any,
+      jobRepository as any,
+      assessmentRepository as any,
+    );
+
+    const state = await service.readState({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      analysisId: 'analysis-1',
+    });
+
+    expect(state.artifactReadiness).toBe('blocked');
+    const details = state.artifactReadinessReasonDetails ?? [];
+    expect(details.length).toBeGreaterThan(0);
+    const summary = details[0]?.details?.interpretedEvidenceSummary as any;
+    expect(summary).toEqual(
+      expect.objectContaining({
+        strongEvidenceCount: 0,
+        partialEvidenceCount: 0,
+      }),
     );
   });
 });

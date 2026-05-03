@@ -175,6 +175,8 @@ describe("Studio artifact quality gating (soft)", () => {
     expect(
       screen.getByText("This role is ready for generation using your verified baseline."),
     ).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-generate-resume-button")).toBeNull();
+    expect(screen.queryByTestId("studio-generate-cover-button")).toBeNull();
   });
 
   it("renders the blocked generation state banner only when the backend indicates zero valid experience entries", async () => {
@@ -201,6 +203,38 @@ describe("Studio artifact quality gating (soft)", () => {
     expect(screen.queryByTestId("studio-generation-state-blocked")).toBeNull();
     expect(screen.queryByText(/\bgeneration is blocked\b/i)).toBeNull();
     expect(screen.queryByText(/^next$/i)).toBeNull();
+    expect(await screen.findByTestId("studio-generate-resume-button")).toBeInTheDocument();
+    expect(await screen.findByTestId("studio-generate-cover-button")).toBeInTheDocument();
+  });
+
+  it("reads interpreted-evidence reason details from artifactReadinessReasonDetails for degraded readiness and keeps generation actions available", async () => {
+    buildGenerationProductReadinessMock.mockReturnValue({
+      generation_readiness: { canGenerate: true, canExport: false, reasonsBlocked: [] },
+      state: "ALLOWED",
+      confidence: "LOW",
+      needsVerification: false,
+      tier: "generation_allowed",
+      canOpenStudio: true,
+      generationMode: "verified",
+    });
+    evaluateStudioTrustGateMock.mockReturnValue({
+      allowed: true,
+      reason: null,
+      generation_readiness: { canGenerate: true, canExport: false, reasonsBlocked: [] },
+      blocked: false,
+      authority: "READY",
+      reasons: [],
+      verificationIssues: [],
+    });
+    setupBaselineTemplateDegradedMissingArtifactsFetch();
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-generation-state-degraded")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("studio-generation-state-blocked")).toBeNull();
+    expect(screen.queryByText(/\bgeneration is blocked\b/i)).toBeNull();
+
     expect(await screen.findByTestId("studio-generate-resume-button")).toBeInTheDocument();
     expect(await screen.findByTestId("studio-generate-cover-button")).toBeInTheDocument();
   });
@@ -2235,6 +2269,12 @@ function setupBaselineTemplateNotReadyFetch(options?: { validExperience?: number
                   invalidCompanies: [{ company: "Vue 3), deck builder frontend", reason: "unsafe_company_header" }],
                   validExperience,
                   stats: { validExperience },
+                  interpretedEvidenceSummary: {
+                    strongEvidenceCount: 0,
+                    partialEvidenceCount: 0,
+                    weakEvidenceCount: 1,
+                    unusableEvidenceCount: 1,
+                  },
                 },
               },
             ],
@@ -2287,7 +2327,20 @@ function setupBaselineTemplateDegradedFetch() {
             artifactReadiness: "degraded",
             artifactReadinessReasons: ["baseline_template_not_ready"],
             artifactReadinessReasonDetails: [
-              { code: "baseline_template_not_ready", message: "warning", details: { validExperience: 1, invalidExperience: 1 } },
+              {
+                code: "baseline_template_not_ready",
+                message: "warning",
+                details: {
+                  validExperience: 0,
+                  stats: { validExperience: 0 },
+                  interpretedEvidenceSummary: {
+                    strongEvidenceCount: 1,
+                    partialEvidenceCount: 1,
+                    weakEvidenceCount: 0,
+                    unusableEvidenceCount: 0,
+                  },
+                },
+              },
             ],
             resumeResult: {
               artifactType: "resume",
@@ -2315,6 +2368,70 @@ function setupBaselineTemplateDegradedFetch() {
             },
             resume: { status: "completed", inputsHash: "ih-degraded", responseBody: { status: "success", qualityGate: { status: "pass" } }, content: null, failureCode: null, failureMessage: null, startedAt: null, completedAt: null, failedAt: null, metadata: {} },
             coverLetter: { status: "completed", inputsHash: "ih-degraded-cover", responseBody: { status: "success", qualityGate: { status: "pass" } }, content: null, failureCode: null, failureMessage: null, startedAt: null, completedAt: null, failedAt: null, metadata: {} },
+          }),
+        );
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+            scoring_v2: { score: 82 },
+            verification_coverage: { totalClaims: 1, verifiedClaims: 1, inferredClaims: 0, unverifiedClaims: 0, unverifiedRequirements: [] },
+          }),
+        );
+      }
+      return Promise.resolve(createResponse({}));
+    }),
+  );
+}
+
+function setupBaselineTemplateDegradedMissingArtifactsFetch() {
+  setFetchImplementation(
+    vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "missing",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "fp-1",
+            generationContractVersion: "studio-artifacts-v1",
+            artifactReadiness: "degraded",
+            artifactReadinessReasons: ["baseline_template_not_ready"],
+            artifactReadinessReasonDetails: [
+              {
+                code: "baseline_template_not_ready",
+                message: "warning",
+                details: {
+                  validExperience: 0,
+                  stats: { validExperience: 0 },
+                  interpretedEvidenceSummary: {
+                    strongEvidenceCount: 1,
+                    partialEvidenceCount: 1,
+                    weakEvidenceCount: 0,
+                    unusableEvidenceCount: 0,
+                  },
+                },
+              },
+            ],
+            resumeResult: { artifactType: "resume", generationState: "not_started", qualityStatus: "needs_refinement", preview: null, correctionReasons: [], exportReady: false, exports: { docx: false, pdf: false }, actions: { canEdit: true, canRegenerate: true, canExport: false, canSaveToOpportunities: false } },
+            coverLetterResult: { artifactType: "cover_letter", generationState: "not_started", qualityStatus: "needs_refinement", preview: null, correctionReasons: [], exportReady: false, exports: { docx: false, pdf: false }, actions: { canEdit: false, canRegenerate: true, canExport: false, canSaveToOpportunities: false } },
+            resume: null,
+            coverLetter: null,
           }),
         );
       }
