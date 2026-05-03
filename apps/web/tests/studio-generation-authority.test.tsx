@@ -199,6 +199,36 @@ describe("Studio artifact quality gating (soft)", () => {
       expect(screen.getByTestId("studio-generation-state-degraded")).toBeInTheDocument();
     });
     expect(screen.getByText("Some generated materials need correction before export.")).toBeInTheDocument();
+    expect(screen.getAllByText("Cover letter needs correction before export.")).toHaveLength(1);
+  });
+
+  it("shows unsupported requirements remediation inside the degraded banner and hides the standalone one-step panel", async () => {
+    setupFetch("limited", 94, 3);
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-generation-state-degraded")).toBeInTheDocument();
+    });
+    expect(screen.getByText("This role is a partial match")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Some requirements are not supported by your verified experience. You can continue, but results are limited.",
+      ),
+    ).toBeInTheDocument();
+
+    const remediation = screen.getByTestId("studio-degraded-unsupported-requirements");
+    expect(remediation).toBeInTheDocument();
+    expect(within(remediation).getByTestId("studio-degraded-unsupported-list")).toHaveTextContent("Salesforce");
+    expect(screen.queryByTestId("studio-auto-adjust-panel")).toBeNull();
+
+    const button = within(remediation).getByRole("button", {
+      name: "Remove unsupported requirements and continue",
+    });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-targeting-adjustment-feedback")).toBeInTheDocument();
+    });
   });
 
   it("renders cover letter preview but blocks export when cover letter quality fails", async () => {
@@ -3180,7 +3210,8 @@ describe("Studio resume editing", () => {
 
     expect(screen.queryByTestId("studio-baseline-template-blocked-panel")).toBeNull();
     expect(screen.getByText(/We generated documents using your cleanest verified experience/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Improve in Fit Review/i })).toBeInTheDocument();
+    const banner = screen.getByTestId("studio-generation-state-banner");
+    expect(within(banner).getByRole("link", { name: /Improve in Fit Review/i })).toBeInTheDocument();
     // Still renders documents and only valid experience entries
     expect(screen.queryByText("Vue 3), deck builder frontend")).toBeNull();
     expect(screen.queryByText("AMS DataSerfs")).toBeTruthy();

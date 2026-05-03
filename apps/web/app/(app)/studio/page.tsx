@@ -3032,6 +3032,60 @@ export default function StudioPage() {
     ? coverLetterResult.qualityStatus !== "pass"
     : coverLetterParagraphs.length > 0 && coverLetterQuality.status === "needs_refinement";
   const coverRequiresCorrectionCopy = hasCoverLetterDraft && !coverQualityPass;
+
+  const studioGenerationStateInfo = useMemo(() => {
+    const penalties =
+      (analysis as unknown as { scoring_v2?: { rubric?: { penalties?: unknown } } | null })?.scoring_v2?.rubric
+        ?.penalties ?? [];
+    const normalizedPenalties = Array.isArray(penalties) ? penalties : [];
+    const capPenalty = normalizedPenalties.find(
+      (penalty) =>
+        typeof (penalty as { code?: unknown }).code === "string" &&
+        (penalty as { code: string }).code === "insufficient_baseline_support",
+    ) as { code?: string; reason?: string } | undefined;
+    const capReason = typeof capPenalty?.reason === "string" ? capPenalty.reason : "";
+    const capSignals = capReason ? parseInsufficientBaselineSupportSignals(capReason) : null;
+
+    const hasScoreCapPenalty = Boolean(capPenalty);
+    const hasUnsupportedRequirements = canonicalUnverifiedRequirements.length > 0;
+    const hasArtifactRefinementRequired = Boolean(resumeNeedsRefinement || coverNeedsRefinement);
+    const hasBaselineTemplateWarning = Boolean(
+      baselineTemplateReadinessSignal.degraded ||
+        (baselineTemplateReadinessSignal.hasReason && !baselineTemplateReadinessSignal.hardBlocked),
+    );
+    const hasDegradedReadiness = String(studioArtifactsPayload?.artifactReadiness ?? "") === "degraded";
+    const blocked = Boolean(activeGenerationReadiness.blocked || baselineTemplateReadinessSignal.hardBlocked);
+    const degraded =
+      !blocked &&
+      Boolean(
+        hasDegradedReadiness ||
+          hasBaselineTemplateWarning ||
+          hasUnsupportedRequirements ||
+          hasScoreCapPenalty ||
+          hasArtifactRefinementRequired,
+      );
+
+    const state: "ready" | "degraded" | "blocked" = blocked ? "blocked" : degraded ? "degraded" : "ready";
+
+    return {
+      state,
+      hasUnsupportedRequirements,
+      unsupportedRequirements: canonicalUnverifiedRequirements,
+      hasScoreCapPenalty,
+      capSignals,
+      hasArtifactRefinementRequired,
+    };
+  }, [
+    activeGenerationReadiness.blocked,
+    analysis,
+    baselineTemplateReadinessSignal.degraded,
+    baselineTemplateReadinessSignal.hardBlocked,
+    baselineTemplateReadinessSignal.hasReason,
+    canonicalUnverifiedRequirements,
+    coverNeedsRefinement,
+    resumeNeedsRefinement,
+    studioArtifactsPayload,
+  ]);
   const coverQualityIssueSummary = useMemo(() => {
     const blocking = coverLetterQuality.issues.filter((issue) => issue.severity === "blocking");
     const issues = blocking.length ? blocking : coverLetterQuality.issues;
@@ -10813,43 +10867,14 @@ export default function StudioPage() {
         {canonicalStudioReadinessMessage}
       </p>
       {(() => {
-        const penalties =
-          (analysis as unknown as { scoring_v2?: { rubric?: { penalties?: unknown } } | null })?.scoring_v2?.rubric
-            ?.penalties ?? [];
-        const normalizedPenalties = Array.isArray(penalties) ? penalties : [];
-        const capPenalty = normalizedPenalties.find(
-          (penalty) =>
-            typeof (penalty as { code?: unknown }).code === "string" &&
-            (penalty as { code: string }).code === "insufficient_baseline_support",
-        ) as { code?: string; reason?: string } | undefined;
-        const capReason = typeof capPenalty?.reason === "string" ? capPenalty.reason : "";
-        const capSignals = capReason ? parseInsufficientBaselineSupportSignals(capReason) : null;
-
-        const hasScoreCapPenalty = Boolean(capPenalty);
-        const hasUnsupportedRequirements =
-          generationBlockerCodes.includes("unsupported_technology_claim") ||
-          (typeof verificationCoverage.unsupportedClaims === "number" && verificationCoverage.unsupportedClaims > 0);
-        const hasArtifactRefinementRequired = Boolean(resumeNeedsRefinement || coverNeedsRefinement);
-        const hasBaselineTemplateWarning = Boolean(
-          baselineTemplateReadinessSignal.degraded || (baselineTemplateReadinessSignal.hasReason && !baselineTemplateReadinessSignal.hardBlocked),
-        );
-        const hasDegradedReadiness = String(studioArtifactsPayload?.artifactReadiness ?? "") === "degraded";
-        const blocked = Boolean(activeGenerationReadiness.blocked || baselineTemplateReadinessSignal.hardBlocked);
-        const degraded =
-          !blocked &&
-          Boolean(
-            hasDegradedReadiness ||
-              hasBaselineTemplateWarning ||
-              hasUnsupportedRequirements ||
-              hasScoreCapPenalty ||
-              hasArtifactRefinementRequired,
-          );
-
-        const generationState: "ready" | "degraded" | "blocked" = blocked ? "blocked" : degraded ? "degraded" : "ready";
-
-        const bannerIntent = generationState === "ready" ? "info" : generationState === "degraded" ? "warning" : "warning";
+        const generationState = studioGenerationStateInfo.state;
+        const bannerIntent = generationState === "ready" ? "info" : "warning";
         const bannerTitle =
-          generationState === "ready" ? "Ready to generate" : generationState === "degraded" ? "Generation is limited" : "Generation is blocked";
+          generationState === "ready"
+            ? "Ready to generate"
+            : generationState === "degraded"
+              ? "This role is a partial match"
+              : "Generation is blocked";
 
         return (
           <Alert intent={bannerIntent} title={bannerTitle}>
@@ -10863,35 +10888,56 @@ export default function StudioPage() {
               {generationState === "degraded" ? (
                 <div data-testid="studio-generation-state-degraded" className="space-y-2">
                   <p className="text-sm text-slate-100">
-                    Your baseline partially supports this role. You can generate, but results are limited.
+                    Some requirements are not supported by your verified experience. You can continue, but results are limited.
                   </p>
                   <div className="space-y-1 text-sm text-slate-100">
-                    {hasUnsupportedRequirements ? (
-                      <p>Remove unsupported requirements to continue with a partial match.</p>
+                    {studioGenerationStateInfo.hasUnsupportedRequirements ? (
+                      <div className="space-y-2" data-testid="studio-degraded-unsupported-requirements">
+                        <p>Remove unsupported requirements to continue with a partial match.</p>
+                        <ul className="list-disc space-y-1 pl-5 text-sm text-slate-100" data-testid="studio-degraded-unsupported-list">
+                          {studioGenerationStateInfo.unsupportedRequirements.map((requirement) => (
+                            <li key={`studio-degraded-unsupported-${requirement}`}>{requirement}</li>
+                          ))}
+                        </ul>
+                        <div>
+                          <FormButton onClick={handleAutoAdjustTargeting} disabled={!studioGenerationStateInfo.unsupportedRequirements.length}>
+                            Remove unsupported requirements and continue
+                          </FormButton>
+                        </div>
+                      </div>
                     ) : null}
-                    {hasScoreCapPenalty ? (
+                    {studioGenerationStateInfo.hasScoreCapPenalty ? (
                       <div data-testid="studio-score-cap-warning" className="space-y-1">
                         <p>
                           Score capped because the verified baseline does not show enough support for this role scope.
                         </p>
-                        {capSignals ? (
+                        {studioGenerationStateInfo.capSignals ? (
                           <ul className="list-disc space-y-1 pl-5 text-xs text-slate-200">
-                            {typeof capSignals.baselineRecall === "number" ? (
-                              <li>Baseline recall: {capSignals.baselineRecall.toFixed(1)}%</li>
+                            {typeof studioGenerationStateInfo.capSignals.baselineRecall === "number" ? (
+                              <li>Baseline recall: {studioGenerationStateInfo.capSignals.baselineRecall.toFixed(1)}%</li>
                             ) : null}
-                            {typeof capSignals.responsibilityOverlap === "number" ? (
-                              <li>Responsibility overlap: {capSignals.responsibilityOverlap.toFixed(1)}%</li>
+                            {typeof studioGenerationStateInfo.capSignals.responsibilityOverlap === "number" ? (
+                              <li>Responsibility overlap: {studioGenerationStateInfo.capSignals.responsibilityOverlap.toFixed(1)}%</li>
                             ) : null}
-                            {typeof capSignals.requiredToolCoverage === "number" ? (
-                              <li>Required tool coverage: {capSignals.requiredToolCoverage.toFixed(1)}%</li>
+                            {typeof studioGenerationStateInfo.capSignals.requiredToolCoverage === "number" ? (
+                              <li>Required tool coverage: {studioGenerationStateInfo.capSignals.requiredToolCoverage.toFixed(1)}%</li>
                             ) : null}
                           </ul>
                         ) : null}
                       </div>
                     ) : null}
-                    {hasArtifactRefinementRequired ? (
+                    {studioGenerationStateInfo.hasArtifactRefinementRequired ? (
                       <p>Some generated materials need correction before export.</p>
                     ) : null}
+                    <div className="pt-1">
+                      <p>Improve your baseline to fully support this role.</p>
+                      <Link
+                        href={strengthenPrimaryHref}
+                        className="text-sm font-medium text-slate-200 underline underline-offset-4 transition hover:text-white"
+                      >
+                        Improve in Fit Review
+                      </Link>
+                    </div>
                   </div>
                 </div>
               ) : null}
@@ -11472,7 +11518,8 @@ export default function StudioPage() {
       ) : null}
       {requestedAnalysisId && 
       (activeGenerationReadiness.status === "blocked" || activeGenerationReadiness.status === "limited") && 
-      canonicalUnverifiedRequirements.length ? ( 
+      canonicalUnverifiedRequirements.length &&
+      !(studioGenerationStateInfo.state === "degraded" && studioGenerationStateInfo.hasUnsupportedRequirements) ? ( 
         <div 
           id="studio-auto-adjust-panel" 
           className="rounded-2xl border border-amber-300/40 bg-amber-500/10 px-4 py-3" 
@@ -12456,10 +12503,16 @@ export default function StudioPage() {
               ) : null}
               {!coverQualityPass ? (
                 <div className="space-y-1">
-                  <p className="text-sm font-semibold text-amber-100">Cover letter needs correction before export.</p>
-                  <p className="text-sm text-slate-200">
-                    Regenerate or edit the draft to remove blocked language.
-                  </p>
+                  {!coverNeedsRefinement ? (
+                    <>
+                      <p className="text-sm font-semibold text-amber-100">
+                        Cover letter needs correction before export.
+                      </p>
+                      <p className="text-sm text-slate-200">
+                        Regenerate or edit the draft to remove blocked language.
+                      </p>
+                    </>
+                  ) : null}
                 </div>
               ) : null}
               <div className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-3"> 
