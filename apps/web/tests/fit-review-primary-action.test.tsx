@@ -106,6 +106,7 @@ describe("FitReview primary unlock action", () => {
     expect(pushedHref).toContain("jobId=job-1");
     expect(pushedHref).toContain("baselineId=baseline-1");
     expect(pushedHref).toContain("baselineVersionId=baseline-version-4");
+    expect(pushedHref).toContain("analysisId=analysis-77");
     expect(pushedHref).toContain("fromUnlock=true");
     expect(pushedHref).toContain("unlockDimension=Tools+and+systems");
     expect(pushedHref).toContain("missingEvidence=Salesforce+Service+Cloud+administration");

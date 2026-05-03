@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
@@ -618,6 +618,11 @@ export default function FitReviewClient() {
   );
 
   const handleAddExperienceNow = () => {
+    if (!startJobId || !fitAssessmentId) {
+      setReturnToStudioError("Reload the role analysis before returning to Studio.");
+      return;
+    }
+    setReturnToStudioError(null);
     void router.push(
       getStudioHref({
         jobId: startJobId,
@@ -780,6 +785,19 @@ export default function FitReviewClient() {
     }
   };
 
+  const sanitizedHighlightedClaim = useMemo(() => {
+    const claim = typeof highlightedClaim === "string" ? highlightedClaim.trim() : "";
+    if (!claim) return null;
+    const normalized = claim.toLowerCase();
+    if (normalized === "next" || normalized === "unknown" || normalized === "undefined" || normalized === "null") {
+      return null;
+    }
+    return claim;
+  }, [highlightedClaim]);
+
+  const canReturnToStudio = Boolean(startJobId && fitAssessmentId);
+  const [returnToStudioError, setReturnToStudioError] = useState<string | null>(null);
+
   const returnToStudioHref = useMemo(() => {
     const params = new URLSearchParams();
     if (startJobId) params.set("jobId", startJobId);
@@ -789,9 +807,18 @@ export default function FitReviewClient() {
       params.set("analysisId", fitAssessmentId);
       params.set("assessmentId", fitAssessmentId);
     }
-    if (highlightedClaim) params.set("verifiedClaim", highlightedClaim);
+    if (sanitizedHighlightedClaim) params.set("verifiedClaim", sanitizedHighlightedClaim);
     return `/studio?${params.toString()}`;
-  }, [baselineId, baselineVersionId, fitAssessmentId, highlightedClaim, startJobId]);
+  }, [baselineId, baselineVersionId, fitAssessmentId, sanitizedHighlightedClaim, startJobId]);
+
+  const handleReturnToStudio = useCallback(() => {
+    if (!canReturnToStudio) {
+      setReturnToStudioError("Reload the role analysis before returning to Studio.");
+      return;
+    }
+    setReturnToStudioError(null);
+    void router.push(returnToStudioHref);
+  }, [canReturnToStudio, returnToStudioHref, router]);
 
   return (
     <InstrumentShell
@@ -799,12 +826,22 @@ export default function FitReviewClient() {
       title="Fit Review"
       subtitle={HERO_MESSAGE}
     >
-      {highlightedClaim ? (
+      {returnToStudioError ? (
+        <div className="px-6 pt-6">
+          <Alert intent="warning" title="We couldn’t load your analysis">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="max-w-3xl text-sm text-slate-100">{returnToStudioError}</p>
+              <FormButton onClick={() => void router.push("/analyze")}>Run Analyze again</FormButton>
+            </div>
+          </Alert>
+        </div>
+      ) : null}
+      {sanitizedHighlightedClaim ? (
         <div className="px-6 pt-6">
           <Alert intent="info" title="Claim to verify">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="max-w-3xl text-sm text-slate-100">{highlightedClaim}</p>
-              <FormButton onClick={() => void router.push(returnToStudioHref)}>
+              <p className="max-w-3xl text-sm text-slate-100">{sanitizedHighlightedClaim}</p>
+              <FormButton onClick={handleReturnToStudio}>
                 Confirm and return to Studio
               </FormButton>
             </div>
