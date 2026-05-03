@@ -277,6 +277,9 @@ type BackendStudioArtifactsResponse = {
   baselineVersionHash?: string | null;
   jobFingerprint?: string | null;
   generationContractVersion?: string | null;
+  artifactReadiness?: "ready" | "blocked";
+  artifactReadinessReasons?: string[];
+  artifactReadinessReasonDetails?: Array<{ code?: string; message?: string; details?: Record<string, unknown> }>;
   resume?: BackendStudioArtifactRecord | null;
   coverLetter?: BackendStudioArtifactRecord | null;
   resumeResult?: unknown;
@@ -2900,6 +2903,12 @@ export default function StudioPage() {
     [artifactContract.normalized.resumeResponse],
   );
 
+  const baselineTemplateNotReady = useMemo(() => {
+    if (studioArtifactsPayload?.artifactReadiness !== "blocked") return false;
+    const reasons = studioArtifactsPayload?.artifactReadinessReasons;
+    return Array.isArray(reasons) && reasons.includes("baseline_template_not_ready");
+  }, [studioArtifactsPayload]);
+
   const resumeHardRenderBlocked = useMemo(() => {
     const qualityStatus = String(resumeResult?.qualityStatus ?? "");
     if (qualityStatus && qualityStatus !== "pass") return { blocked: true, reason: "qualityStatus_not_pass" as const };
@@ -2911,13 +2920,23 @@ export default function StudioPage() {
       return { blocked: true, reason: "resume_v2_quality_gate_failed" as const };
     }
 
+    if (baselineTemplateNotReady) {
+      return { blocked: true, reason: "baseline_template_not_ready" as const };
+    }
+
     const backendFailureCode = String((studioArtifactsPayload as any)?.resume?.failureCode ?? "");
     if (backendFailureCode) return { blocked: true, reason: "backendRecord_failureCode" as const };
 
     if (resumeState.artifactFailure) return { blocked: true, reason: "artifactFailure" as const };
 
     return { blocked: false, reason: "ok" as const };
-  }, [resumeResult?.correctionReasons, resumeResult?.qualityStatus, resumeState.artifactFailure, studioArtifactsPayload]);
+  }, [
+    baselineTemplateNotReady,
+    resumeResult?.correctionReasons,
+    resumeResult?.qualityStatus,
+    resumeState.artifactFailure,
+    studioArtifactsPayload,
+  ]);
   const canonicalResumePreviewPayload = useMemo(
     () =>
       resumeHardRenderBlocked.blocked
@@ -9082,13 +9101,14 @@ export default function StudioPage() {
   // Avoid flashing blocked/recovery UI before analysis hydration resolves score + readiness.
   const showReadinessRecoveryExperience =
     hasLoadedAnalysis &&
-    !generateNowEligible &&
-    ((resumeGating.accessState === "allowed" &&
-      (resumeGating.primaryBlocker === "readiness_block" || resumeGating.primaryBlocker === "draft_only")) ||
-      (coverGating.accessState === "allowed" &&
-        (coverGating.primaryBlocker === "readiness_block" || coverGating.primaryBlocker === "draft_only")) ||
-      (pageTruth.state === "blocked_evidence" &&
-        (!shouldGenerateDocuments(analysisScore) || productReadiness?.state === "BLOCKED")));
+    (baselineTemplateNotReady ||
+      (!generateNowEligible &&
+        ((resumeGating.accessState === "allowed" &&
+          (resumeGating.primaryBlocker === "readiness_block" || resumeGating.primaryBlocker === "draft_only")) ||
+          (coverGating.accessState === "allowed" &&
+            (coverGating.primaryBlocker === "readiness_block" || coverGating.primaryBlocker === "draft_only")) ||
+          (pageTruth.state === "blocked_evidence" &&
+            (!shouldGenerateDocuments(analysisScore) || productReadiness?.state === "BLOCKED")))));
 
   const draftAnywayEligible =
     !activeGenerationReadiness.blocked &&

@@ -11,6 +11,10 @@ import type { NormalizedResumeDocument } from '../documents/normalized-document.
 import { sanitizeResumePreviewForStudio } from '../resume/resumePreviewSanitizer';
 import type { ArtifactGenerationResult, ArtifactCorrectionReason } from '@shared/artifactGenerationResult';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
+import {
+  evaluateBaselineTemplateReadiness,
+  type BaselineTemplateReadinessReason,
+} from '../baseline/baselineTemplateReadiness';
 
 export type StudioArtifactKind = 'resume' | 'cover_letter';
 
@@ -37,6 +41,7 @@ export type StudioArtifactsState = {
   generationContractVersion: string;
   artifactReadiness?: 'ready' | 'blocked';
   artifactReadinessReasons?: string[];
+  artifactReadinessReasonDetails?: BaselineTemplateReadinessReason[];
   assessmentScore?: number | null;
   structuredBaselineExperienceCount?: number;
   structuredBaselineMissingEvidenceReasons?: string[];
@@ -226,7 +231,6 @@ export class StudioArtifactsService {
     }
 
     const score = typeof assessment?.overallScore === 'number' ? assessment.overallScore : null;
-    const TEMPLATE_THRESHOLD = 80;
     const structured = baseline?.sections?.length
       ? extractStructuredBaselineFromSections(baseline.sections as any)
       : null;
@@ -249,16 +253,26 @@ export class StudioArtifactsService {
         const usableBullets = bullets.map((b: unknown) => safeText(b)).filter(Boolean);
         return company.length > 0 && roleTitle.length > 0 && usableBullets.length > 0;
       });
+    const templateReadiness =
+      structured && assessment ? evaluateBaselineTemplateReadiness(structured as any) : null;
+
     const artifactReadiness =
-      typeof score === 'number' && score >= TEMPLATE_THRESHOLD && hasUsableExperience
+      templateReadiness && templateReadiness.canGenerateResume && templateReadiness.canGenerateCoverLetter && hasUsableExperience
         ? 'ready'
-        : typeof score === 'number' && score >= TEMPLATE_THRESHOLD
+        : templateReadiness
           ? 'blocked'
           : undefined;
+
     const artifactReadinessReasons =
       artifactReadiness === 'blocked'
-        ? (structured?.missingEvidenceReasons?.slice(0, 8) ?? ['Missing structured baseline evidence.'])
+        ? [
+            ...(templateReadiness?.reasons?.map((reason) => reason.code).filter(Boolean) ?? []),
+            ...(structured?.missingEvidenceReasons?.slice(0, 8) ?? []),
+          ].slice(0, 8)
         : [];
+
+    const artifactReadinessReasonDetails: BaselineTemplateReadinessReason[] =
+      artifactReadiness === 'blocked' ? (templateReadiness?.reasons ?? []) : [];
 
     // NOTE: Intentionally no logging here; this endpoint is high-volume and verbose logs can
     // overwhelm production logging (Railway rate limits).
@@ -275,17 +289,28 @@ export class StudioArtifactsService {
       );
     };
 
-    // Never drop persisted artifacts from readState; legacy/stale output should be signaled via metadata,
-    // not by returning `null` (which makes Studio think artifacts are missing).
-    const resumeRecord =
-      artifactReadiness && resumeRecordRaw && !isStructuredTemplateResult(resumeRecordRaw.responseBody)
+    const isTemplateNotReadyBlocked =
+      artifactReadiness === 'blocked' &&
+      artifactReadinessReasons.some((reason) => safeText(reason) === 'baseline_template_not_ready');
+
+    const stripArtifactPayload = (artifact: StudioArtifactRecord | null): StudioArtifactRecord | null => {
+      if (!artifact) return artifact;
+      return { ...artifact, responseBody: null, content: null };
+    };
+
+    // Default: never drop persisted artifacts from readState; legacy/stale output should be signaled via metadata.
+    // Exception: baseline_template_not_ready means Studio must not receive stale/legacy preview payloads.
+    const resumeRecord = isTemplateNotReadyBlocked
+      ? stripArtifactPayload(resumeRecordRaw)
+      : artifactReadiness && resumeRecordRaw && !isStructuredTemplateResult(resumeRecordRaw.responseBody)
         ? {
             ...resumeRecordRaw,
             metadata: { ...(resumeRecordRaw.metadata ?? {}), staleLegacy: true },
           }
         : resumeRecordRaw;
-    const coverRecord =
-      artifactReadiness && coverRecordRaw && !isStructuredTemplateResult(coverRecordRaw.responseBody)
+    const coverRecord = isTemplateNotReadyBlocked
+      ? stripArtifactPayload(coverRecordRaw)
+      : artifactReadiness && coverRecordRaw && !isStructuredTemplateResult(coverRecordRaw.responseBody)
         ? {
             ...coverRecordRaw,
             metadata: { ...(coverRecordRaw.metadata ?? {}), staleLegacy: true },
@@ -374,7 +399,9 @@ export class StudioArtifactsService {
       structuredBaselineExperienceCount,
       structuredBaselineMissingEvidenceReasons,
       structuredBaselineExtractedExperiencePreview,
-      ...(artifactReadiness ? { artifactReadiness, artifactReadinessReasons } : {}),
+      ...(artifactReadiness
+        ? { artifactReadiness, artifactReadinessReasons, artifactReadinessReasonDetails }
+        : {}),
       resume: resumeRecord,
       coverLetter: coverRecord,
       resumeResult,

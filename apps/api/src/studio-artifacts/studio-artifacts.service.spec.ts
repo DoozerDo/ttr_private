@@ -403,7 +403,7 @@ describe('StudioArtifactsService', () => {
     expect(staleState.status).toBe(StudioArtifactLifecycleStatus.MISSING);
   });
 
-  it('filters out legacy/stale artifacts as current output when score >= 80', async () => {
+  it('signals persisted legacy artifacts as stale when template readiness is resolved', async () => {
     const studioArtifactRepository = createRepository<any>();
     const baselineRepository = {
       findOne: jest.fn(async () => baseline),
@@ -466,5 +466,74 @@ describe('StudioArtifactsService', () => {
       }),
     );
     expect(state.resumeResult?.generationState).toBe('generated_needs_correction');
+  });
+
+  it('blocks Studio artifacts with baseline_template_not_ready and strips resume preview payloads', async () => {
+    const studioArtifactRepository = createRepository<any>();
+    const baselineRepository = {
+      findOne: jest.fn(async () => ({
+        ...baseline,
+        sections: [
+          {
+            title: 'Experience',
+            content: [
+              'Vue 3), deck builder frontend | Contractor | 2022 - 2023',
+              '- Built UI components.',
+            ].join('\n'),
+            sectionType: 'EXPERIENCE',
+          },
+        ],
+      })),
+    };
+    const baselineVersionRepository = {
+      findOne: jest.fn(async () => baselineVersion),
+    };
+    const jobRepository = {
+      findOne: jest.fn(async () => job),
+    };
+    const assessmentRepository = {
+      findOne: jest.fn(async () => ({ ...assessment, overallScore: 92 })),
+    };
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository as any,
+      baselineRepository as any,
+      baselineVersionRepository as any,
+      jobRepository as any,
+      assessmentRepository as any,
+    );
+
+    const inputsHash = service.computeResumeInputsHash({
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: service.computeJobFingerprint(job as any),
+      assessmentInputsHash: assessment.inputsHash,
+    });
+
+    await service.recordResumeSuccess({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: service.computeJobFingerprint(job as any),
+      inputsHash,
+      responseBody: { status: 'success', preview: { resume: { heading: { name: 'Alex' } } }, internal: {} },
+      content: 'resume-content',
+      metadata: {},
+    });
+
+    const state = await service.readState({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      analysisId: 'analysis-1',
+    });
+
+    expect(state.artifactReadiness).toBe('blocked');
+    expect(state.artifactReadinessReasons).toEqual(expect.arrayContaining(['baseline_template_not_ready']));
+    expect(state.artifactReadinessReasonDetails?.[0]?.code).toBe('baseline_template_not_ready');
+    expect(state.resume?.responseBody).toBeNull();
+    expect(state.resume?.content).toBeNull();
   });
 });

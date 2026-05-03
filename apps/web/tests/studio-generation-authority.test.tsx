@@ -2046,6 +2046,72 @@ function setupNeedsRefinementResumeWithVueFetch() {
   );
 }
 
+function setupBaselineTemplateNotReadyFetch() {
+  setFetchImplementation(
+    vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "completed",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "fp-1",
+            generationContractVersion: "studio-artifacts-v1",
+            artifactReadiness: "blocked",
+            artifactReadinessReasons: ["baseline_template_not_ready"],
+            artifactReadinessReasonDetails: [
+              {
+                code: "baseline_template_not_ready",
+                message: "Baseline is usable for scoring but is not template-safe for generation.",
+                details: { invalidCompanies: [{ company: "Vue 3), deck builder frontend", reason: "unsafe_company_header" }] },
+              },
+            ],
+            resumeResult: null,
+            coverLetterResult: null,
+            resume: {
+              status: "completed",
+              inputsHash: "ih-blocked",
+              responseBody: null,
+              content: null,
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: null,
+              failedAt: null,
+              metadata: {},
+            },
+            coverLetter: null,
+          }),
+        );
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+            scoring_v2: { score: 94 },
+            verification_coverage: { totalClaims: 1, verifiedClaims: 1, inferredClaims: 0, unverifiedClaims: 0, unverifiedRequirements: [] },
+          }),
+        );
+      }
+      return Promise.resolve(createResponse({}));
+    }),
+  );
+}
+
 describe("Studio generation authority", () => {
   beforeEach(() => {
     clearRecentIntentSignals();
@@ -2887,6 +2953,19 @@ describe("Studio resume editing", () => {
       expect(screen.getByTestId("studio-resume-quality-warning")).toBeInTheDocument();
     });
 
+    expect(screen.queryByTestId("studio-resume-experience-section")).toBeNull();
+    expect(screen.queryByText("Vue 3), deck builder frontend")).toBeNull();
+  });
+
+  it("blocks Studio rendering and routes to Fit Review when baseline_template_not_ready", async () => {
+    setupBaselineTemplateNotReadyFetch();
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-blocked-primary-action")).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("link", { name: /View fit review/i })).toBeInTheDocument();
     expect(screen.queryByTestId("studio-resume-experience-section")).toBeNull();
     expect(screen.queryByText("Vue 3), deck builder frontend")).toBeNull();
   });

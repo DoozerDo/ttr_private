@@ -1623,6 +1623,12 @@ export class ResumeService {
       if (!jobId) {
         throw new BadRequestException('jobId is required');
       }
+
+      // Ensure failure persistence always has stable identity, even if generation is blocked early.
+      studioArtifactContext.baselineId = baselineId;
+      studioArtifactContext.jobId = jobId;
+      studioArtifactContext.baselineVersionId = baselineVersionId ?? '';
+      studioArtifactContext.analysisId = analysisId ?? '';
       // analysisId may be omitted by Studio generate buttons; resolve the latest assessment for this pair.
 
       const baseline = await this.baselineRepository.findOne({
