@@ -921,7 +921,7 @@ describe("Studio artifact quality gating (soft)", () => {
     expect(screen.queryByText(/complete your profile/i)).toBeNull();
   });
 
-  it("keeps previews visible when analysis fetch fails but artifacts exist", async () => {
+  it("renders an invalid-state fallback when analysis fetch fails, even if artifacts exist", async () => {
     setFetchImplementation(
       vi.fn((input: RequestInfo, init?: RequestInit) => {
         const url = typeof input === "string" ? input : input?.url ?? "";
@@ -992,16 +992,12 @@ describe("Studio artifact quality gating (soft)", () => {
     renderStudio({ intent: null });
 
     await waitFor(() => {
-      expect(
-        screen.queryByTestId("studio-resume-ready-panel") ?? screen.queryByTestId("studio-resume-correction-panel"),
-      ).toBeTruthy();
+      expect(screen.getByTestId("studio-invalid-state-fallback")).toBeTruthy();
     });
-    await waitFor(() => {
-      expect(
-        screen.queryByTestId("studio-cover-ready-panel") ?? screen.queryByTestId("studio-cover-correction-panel"),
-      ).toBeTruthy();
-    });
-    expect(screen.queryByText(/Role analysis unavailable/i)).toBeNull();
+    expect(screen.queryByTestId("studio-resume-ready-panel")).toBeNull();
+    expect(screen.queryByTestId("studio-cover-ready-panel")).toBeNull();
+    expect(screen.queryByText(/fetch failed/i)).toBeNull();
+    expect(screen.queryByText(/Unknown company/i)).toBeNull();
   });
 
   it("clicking Generate cover letter refreshes artifacts and renders a cover letter preview", async () => {

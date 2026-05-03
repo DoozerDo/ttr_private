@@ -10860,6 +10860,48 @@ export default function StudioPage() {
     </PageShell>
   );
 
+  const isStateInvalid = (() => {
+    const jobCompanyRaw = selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "";
+    const jobTitleRaw = selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "";
+    const jobCompany = trimString(jobCompanyRaw);
+    const jobTitle = trimString(jobTitleRaw);
+    const companyUnknownOrEmpty =
+      !jobCompany || jobCompany.toLowerCase() === "unknown company" || jobCompany.toLowerCase().startsWith("unknown");
+    const roleUnknownOrEmpty =
+      !jobTitle || jobTitle.toLowerCase() === "unknown role" || jobTitle.toLowerCase().startsWith("unknown");
+
+    const requiredIdsMissing = !effectiveJobId || !effectiveRequestedAnalysisId;
+    const analysisMissingOrIncomplete = !analysis || analysisScore === null || Boolean(analysisError && !analysisLoading);
+
+    const baselineSourceUnavailable = !effectiveBaselineId && !selectedBaselineId && !requestedBaselineId;
+
+    return (
+      requiredIdsMissing ||
+      analysisMissingOrIncomplete ||
+      companyUnknownOrEmpty ||
+      roleUnknownOrEmpty ||
+      baselineSourceUnavailable
+    );
+  })();
+
+  const invalidStateFallback = (
+    <PageShell className="space-y-4 pb-4">
+      <div data-testid="studio-invalid-state-fallback">
+        <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
+        <Alert intent="warning" title="We couldn’t load your analysis">
+          <div className="space-y-3">
+            <p className="text-sm text-slate-100">
+              Something changed or couldn’t be verified. Reload your analysis to continue.
+            </p>
+            <div>
+              <FormButton onClick={() => void router.push("/analyze")}>Run Analyze again</FormButton>
+            </div>
+          </div>
+        </Alert>
+      </div>
+    </PageShell>
+  );
+
   const studioContent = (
     <PageShell className="space-y-4 pb-4">
       <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
@@ -12980,7 +13022,7 @@ export default function StudioPage() {
 
   return (
     <div data-testid="studio-root" suppressHydrationWarning>
-      {mounted ? studioContent : stableSkeleton}
+      {mounted ? (isStateInvalid ? invalidStateFallback : studioContent) : stableSkeleton}
     </div>
   );
-} 
+}
