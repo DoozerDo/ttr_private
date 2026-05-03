@@ -39,7 +39,7 @@ export type StudioArtifactsState = {
   baselineVersionHash: string | null;
   jobFingerprint: string | null;
   generationContractVersion: string;
-  artifactReadiness?: 'ready' | 'blocked';
+  artifactReadiness?: 'ready' | 'degraded' | 'blocked';
   artifactReadinessReasons?: string[];
   artifactReadinessReasonDetails?: BaselineTemplateReadinessReason[];
   assessmentScore?: number | null;
@@ -256,23 +256,38 @@ export class StudioArtifactsService {
     const templateReadiness =
       structured && assessment ? evaluateBaselineTemplateReadiness(structured as any) : null;
 
+    const isHardBlocked =
+      Boolean(templateReadiness) &&
+      (!templateReadiness!.canGenerateResume || !templateReadiness!.canGenerateCoverLetter);
+    const hasWarnings = Boolean(templateReadiness?.warnings?.length);
+
     const artifactReadiness =
-      templateReadiness && templateReadiness.canGenerateResume && templateReadiness.canGenerateCoverLetter && hasUsableExperience
+      templateReadiness && !isHardBlocked && !hasWarnings && hasUsableExperience
         ? 'ready'
-        : templateReadiness
-          ? 'blocked'
-          : undefined;
+        : templateReadiness && !isHardBlocked && hasWarnings
+          ? 'degraded'
+          : templateReadiness && isHardBlocked
+            ? 'blocked'
+            : undefined;
+
+    const readinessReasonCodes =
+      artifactReadiness === 'blocked'
+        ? templateReadiness?.hardBlockReasons?.map((reason) => reason.code).filter(Boolean) ?? []
+        : artifactReadiness === 'degraded'
+          ? templateReadiness?.warnings?.map((reason) => reason.code).filter(Boolean) ?? []
+          : [];
 
     const artifactReadinessReasons =
-      artifactReadiness === 'blocked'
-        ? [
-            ...(templateReadiness?.reasons?.map((reason) => reason.code).filter(Boolean) ?? []),
-            ...(structured?.missingEvidenceReasons?.slice(0, 8) ?? []),
-          ].slice(0, 8)
+      artifactReadiness === 'blocked' || artifactReadiness === 'degraded'
+        ? [...readinessReasonCodes, ...(structured?.missingEvidenceReasons?.slice(0, 8) ?? [])].slice(0, 8)
         : [];
 
     const artifactReadinessReasonDetails: BaselineTemplateReadinessReason[] =
-      artifactReadiness === 'blocked' ? (templateReadiness?.reasons ?? []) : [];
+      artifactReadiness === 'blocked'
+        ? templateReadiness?.hardBlockReasons ?? []
+        : artifactReadiness === 'degraded'
+          ? templateReadiness?.warnings ?? []
+          : [];
 
     // NOTE: Intentionally no logging here; this endpoint is high-volume and verbose logs can
     // overwhelm production logging (Railway rate limits).
@@ -291,7 +306,7 @@ export class StudioArtifactsService {
 
     const isTemplateNotReadyBlocked =
       artifactReadiness === 'blocked' &&
-      artifactReadinessReasons.some((reason) => safeText(reason) === 'baseline_template_not_ready');
+      (templateReadiness?.hardBlockReasons ?? []).some((r) => safeText(r.code) === 'baseline_template_not_ready');
 
     const stripArtifactPayload = (artifact: StudioArtifactRecord | null): StudioArtifactRecord | null => {
       if (!artifact) return artifact;

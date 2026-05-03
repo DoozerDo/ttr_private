@@ -10,7 +10,13 @@ export type BaselineTemplateReadinessReason = {
 export type BaselineTemplateReadiness = {
   canGenerateResume: boolean;
   canGenerateCoverLetter: boolean;
-  reasons: BaselineTemplateReadinessReason[];
+  hardBlockReasons: BaselineTemplateReadinessReason[];
+  warnings: BaselineTemplateReadinessReason[];
+  stats: {
+    totalExperience: number;
+    validExperience: number;
+    invalidExperience: number;
+  };
 };
 
 function summarizeInvalidExperienceCompanies(experience: StructuredBaseline['experience']) {
@@ -40,34 +46,57 @@ export function evaluateBaselineTemplateReadiness(
   });
 
   const hasValidExperience = validExperience.length > 0;
-  if (hasValidExperience) {
-    return {
-      canGenerateResume: true,
-      canGenerateCoverLetter: true,
-      reasons: [],
-    };
-  }
-
   const invalidCompanies = summarizeInvalidExperienceCompanies(experience);
   const missingEvidenceReasons = Array.isArray(structured?.missingEvidenceReasons)
     ? structured.missingEvidenceReasons.slice(0, 5)
     : [];
 
+  const stats = {
+    totalExperience: experience.length,
+    validExperience: validExperience.length,
+    invalidExperience: Math.max(0, experience.length - validExperience.length),
+  };
+
+  if (hasValidExperience) {
+    return {
+      canGenerateResume: true,
+      canGenerateCoverLetter: true,
+      hardBlockReasons: [],
+      warnings:
+        invalidCompanies.length || missingEvidenceReasons.length
+          ? [
+              {
+                code: 'baseline_template_not_ready',
+                message:
+                  'Baseline contains some experience evidence that is not template-safe. Documents can be generated from the cleanest entries, but Fit Review is recommended to strengthen missing or malformed areas.',
+                details: {
+                  invalidCompanies,
+                  missingEvidenceReasons,
+                  ...stats,
+                },
+              },
+            ]
+          : [],
+      stats,
+    };
+  }
+
   return {
     canGenerateResume: false,
     canGenerateCoverLetter: false,
-    reasons: [
+    hardBlockReasons: [
       {
         code: 'baseline_template_not_ready',
         message:
-          'Baseline is usable for scoring but is not template-safe for generation. Review and correct baseline experience headers.',
+          'Baseline is not template-safe for generation because no clean experience entries were found.',
         details: {
           invalidCompanies,
           missingEvidenceReasons,
-          totalExperience: experience.length,
-          validExperience: validExperience.length,
+          ...stats,
         },
       },
     ],
+    warnings: [],
+    stats,
   };
 }

@@ -1726,11 +1726,12 @@ export class ResumeService {
       const readiness = await this.getGenerationReadiness(userId, request, {
         skipReadinessGate: true,
       });
-      if (readiness.status !== 'ready') {
+      // Limited readiness is non-blocking; proceed with generation and rely on strict template safety filtering.
+      if (readiness.status === 'blocked') {
         const templateNotReadyReason = (readiness as any)?.reasons?.find?.(
           (r: any) => r?.code === 'baseline_template_not_ready',
         );
-        if (templateNotReadyReason && jobId && analysisId && !request.oneTap) {
+        if (templateNotReadyReason && readiness.blocked === true && jobId && analysisId && !request.oneTap) {
           throw new UnprocessableEntityException({
             code: 'baseline_template_not_ready',
             reasons:
@@ -1834,7 +1835,7 @@ export class ResumeService {
     if (enforceTemplateReadiness && !templateReadinessForBaseline.canGenerateResume) {
       throw new UnprocessableEntityException({
         code: 'baseline_template_not_ready',
-        reasons: templateReadinessForBaseline.reasons,
+        reasons: templateReadinessForBaseline.hardBlockReasons,
         details: templateReadinessForBaseline,
       });
     }
@@ -1872,7 +1873,7 @@ export class ResumeService {
             message:
               'Baseline is usable for scoring but is not template-safe for resume generation.',
             details: {
-              reasons: templateReadinessForBaseline.reasons,
+              reasons: templateReadinessForBaseline.hardBlockReasons,
               insufficientExtractedText: insufficientBaselineDetails,
             },
           },
@@ -3506,8 +3507,17 @@ export class ResumeService {
             status: 'blocked' as const,
             blocked: true,
             compliance_flags: [],
-            reasons: templateReadiness.reasons as any,
+            reasons: templateReadiness.hardBlockReasons as any,
             canGenerateResume: false,
+          };
+        }
+        if (templateReadiness.warnings.length) {
+          return {
+            status: 'limited' as const,
+            blocked: false,
+            compliance_flags: [],
+            reasons: templateReadiness.warnings as any,
+            canGenerateResume: true,
           };
         }
       }

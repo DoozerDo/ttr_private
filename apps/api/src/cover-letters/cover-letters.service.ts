@@ -994,8 +994,17 @@ export class CoverLettersService {
           status: 'blocked',
           blocked: true,
           compliance_flags: flags,
-          reasons: draft.templateReadiness.reasons,
+          reasons: draft.templateReadiness.hardBlockReasons,
           canGenerateCoverLetter: false,
+        } as const;
+      }
+      if (draft.templateReadiness.warnings.length) {
+        return {
+          status: 'limited',
+          blocked: false,
+          compliance_flags: flags,
+          reasons: draft.templateReadiness.warnings,
+          canGenerateCoverLetter: true,
         } as const;
       }
       const score = draft.analysisAssessment?.overallScore ?? null; 
@@ -1320,7 +1329,7 @@ export class CoverLettersService {
       if (enforceTemplateReadiness && !templateReadiness.canGenerateCoverLetter) {
         throw new UnprocessableEntityException({
           code: 'baseline_template_not_ready',
-          reasons: templateReadiness.reasons,
+          reasons: templateReadiness.hardBlockReasons,
           details: templateReadiness,
         });
       }

@@ -995,6 +995,65 @@ const sampleScoringV2: CxFitV2Result = {
     }
   });
 
+  it('serializes insufficient_baseline_support penalty in scoring_v2 rubric for Fit Review + Studio consumers', async () => {
+    const penaltyReason =
+      'Score capped below strong-apply territory due to insufficient baseline evidence (baseline_recall=11.2% responsibility_overlap=38.7% required_tool_coverage=9.5%).';
+
+    fitAssessmentRepository.findOne.mockResolvedValue({
+      id: 'fit-1',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: 2,
+      overallScore: 82,
+      verdict: 'CONSIDER',
+      dimensionScores: {
+        experienceAlignment: 10,
+        leadershipLevel: 9,
+        technicalPlatformFit: 8,
+        industryContext: 7,
+        strategicTacticalFit: 6,
+      },
+      strengths: ['aws'],
+      gaps: ['golang'],
+      complianceFlags: [],
+      scoringV2: {
+        ...sampleScoringV2,
+        score: 79,
+        rubric: {
+          ...sampleScoringV2.rubric,
+          penalties: [
+            ...(sampleScoringV2.rubric.penalties ?? []),
+            {
+              code: 'insufficient_baseline_support',
+              points: 0,
+              reason: penaltyReason,
+            },
+          ],
+        },
+      },
+      createdAt: new Date(),
+    });
+
+    const result = await service.getFitAssessmentById('user-1', 'fit-1');
+
+    expect(result.scoring_v2?.score).toBeLessThan(80);
+    expect(result.scoring_v2?.score).toBe(79);
+    expect(result.scoring_v2?.rubric?.penalties).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'insufficient_baseline_support',
+          reason: expect.stringContaining('baseline_recall=11.2%'),
+        }),
+      ]),
+    );
+    const penalty = (result.scoring_v2?.rubric?.penalties ?? []).find(
+      (entry) => entry.code === 'insufficient_baseline_support',
+    );
+    expect(penalty?.reason).toEqual(expect.stringContaining('responsibility_overlap=38.7%'));
+    expect(penalty?.reason).toEqual(expect.stringContaining('required_tool_coverage=9.5%'));
+  });
+
   it('rejects missing JD inputs', async () => {
     expect.assertions(1);
     try {

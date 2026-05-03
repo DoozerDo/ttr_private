@@ -212,6 +212,12 @@ type LatestAnalysis = {
   title?: string | null;
   scoring_v2?: {
     score?: number | null;
+    rubric?: {
+      penalties?: Array<{
+        code?: string;
+        reason?: string;
+      }>;
+    };
     debug?: {
       toolingCoverage?: {
         claims?: unknown;
@@ -236,6 +242,29 @@ type LatestAnalysis = {
     unverifiedRequirements?: string[] | null;
   } | null;
 };
+
+function parseInsufficientBaselineSupportSignals(reason: string) {
+  const recallMatch = reason.match(/baseline_recall=([0-9]+(?:\.[0-9]+)?)%/i);
+  const overlapMatch = reason.match(/responsibility_overlap=([0-9]+(?:\.[0-9]+)?)%/i);
+  const toolCoverageMatch = reason.match(/required_tool_coverage=([0-9]+(?:\.[0-9]+)?)%/i);
+
+  const baselineRecall =
+    recallMatch && Number.isFinite(Number(recallMatch[1])) ? Number(recallMatch[1]) : null;
+  const responsibilityOverlap =
+    overlapMatch && Number.isFinite(Number(overlapMatch[1])) ? Number(overlapMatch[1]) : null;
+  const requiredToolCoverage =
+    toolCoverageMatch && Number.isFinite(Number(toolCoverageMatch[1])) ? Number(toolCoverageMatch[1]) : null;
+
+  if (baselineRecall === null && responsibilityOverlap === null && requiredToolCoverage === null) {
+    return null;
+  }
+
+  return {
+    baselineRecall,
+    responsibilityOverlap,
+    requiredToolCoverage,
+  };
+}
 
 type ApplicationInsight = {
   message?: string;
@@ -277,7 +306,7 @@ type BackendStudioArtifactsResponse = {
   baselineVersionHash?: string | null;
   jobFingerprint?: string | null;
   generationContractVersion?: string | null;
-  artifactReadiness?: "ready" | "blocked";
+  artifactReadiness?: "ready" | "degraded" | "blocked";
   artifactReadinessReasons?: string[];
   artifactReadinessReasonDetails?: Array<{ code?: string; message?: string; details?: Record<string, unknown> }>;
   resume?: BackendStudioArtifactRecord | null;
@@ -2903,10 +2932,19 @@ export default function StudioPage() {
     [artifactContract.normalized.resumeResponse],
   );
 
-  const baselineTemplateNotReady = useMemo(() => {
-    if (studioArtifactsPayload?.artifactReadiness !== "blocked") return false;
+  const baselineTemplateReadinessSignal = useMemo(() => {
+    const readiness = String(studioArtifactsPayload?.artifactReadiness ?? "");
     const reasons = studioArtifactsPayload?.artifactReadinessReasons;
-    return Array.isArray(reasons) && reasons.includes("baseline_template_not_ready");
+    const details = studioArtifactsPayload?.artifactReadinessReasonDetails;
+    const hasReason =
+      (Array.isArray(reasons) && reasons.includes("baseline_template_not_ready")) ||
+      (Array.isArray(details) && details.some((detail) => String((detail as any)?.code ?? "") === "baseline_template_not_ready"));
+    return {
+      readiness,
+      hasReason,
+      hardBlocked: readiness === "blocked" && hasReason,
+      degraded: readiness === "degraded" && hasReason,
+    };
   }, [studioArtifactsPayload]);
 
   const resumeHardRenderBlocked = useMemo(() => {
@@ -2920,7 +2958,7 @@ export default function StudioPage() {
       return { blocked: true, reason: "resume_v2_quality_gate_failed" as const };
     }
 
-    if (baselineTemplateNotReady) {
+    if (baselineTemplateReadinessSignal.hardBlocked) {
       return { blocked: true, reason: "baseline_template_not_ready" as const };
     }
 
@@ -2931,7 +2969,7 @@ export default function StudioPage() {
 
     return { blocked: false, reason: "ok" as const };
   }, [
-    baselineTemplateNotReady,
+    baselineTemplateReadinessSignal.hardBlocked,
     resumeResult?.correctionReasons,
     resumeResult?.qualityStatus,
     resumeState.artifactFailure,
@@ -9101,7 +9139,7 @@ export default function StudioPage() {
   // Avoid flashing blocked/recovery UI before analysis hydration resolves score + readiness.
   const showReadinessRecoveryExperience =
     hasLoadedAnalysis &&
-    (baselineTemplateNotReady ||
+    (baselineTemplateReadinessSignal.hardBlocked ||
       (!generateNowEligible &&
         ((resumeGating.accessState === "allowed" &&
           (resumeGating.primaryBlocker === "readiness_block" || resumeGating.primaryBlocker === "draft_only")) ||
@@ -9826,7 +9864,7 @@ export default function StudioPage() {
       coverLetterResult.qualityStatus === "needs_refinement"
     : studioEffectiveGenerationState === "generated_unusable" && coverNeedsRefinement;
 
-  const generationHardBlockedByTemplateReadiness = baselineTemplateNotReady;
+  const generationHardBlockedByTemplateReadiness = baselineTemplateReadinessSignal.hardBlocked;
   const shouldShowResumeRegenerateBlockedSafe = shouldShowResumeRegenerate && !generationHardBlockedByTemplateReadiness;
   const shouldShowCoverRegenerateBlockedSafe = shouldShowCoverRegenerate && !generationHardBlockedByTemplateReadiness;
 
@@ -9988,7 +10026,7 @@ export default function StudioPage() {
   ]);
 
   const handleManualRegenerate = useCallback(async (source: "resume" | "cover") => {
-    if (baselineTemplateNotReady) {
+    if (baselineTemplateReadinessSignal.hardBlocked) {
       console.warn("[studio][manual_regenerate_blocked]", { source, reason: "baseline_template_not_ready" });
       return;
     }
@@ -10005,7 +10043,7 @@ export default function StudioPage() {
 
     await generateArtifactsNow({ resume: true, coverLetter: true, source: "manual" });
   }, [
-    baselineTemplateNotReady,
+    baselineTemplateReadinessSignal.hardBlocked,
     generateArtifactsNow,
     workflowOrchestratorCore.contract?.generation.auto.signature,
   ]);
@@ -10017,7 +10055,7 @@ export default function StudioPage() {
       backendRecord: any,
       state: { autoRepairing: boolean; generating: boolean },
     ): { eligible: boolean; reason: string } => {
-      if (baselineTemplateNotReady) return { eligible: false, reason: "baseline_template_not_ready" };
+      if (baselineTemplateReadinessSignal.hardBlocked) return { eligible: false, reason: "baseline_template_not_ready" };
       const canRegenerate = result?.actions?.canRegenerate === true;
       if (!canRegenerate) return { eligible: false, reason: "no_regeneration_permission" };
       if (state.autoRepairing) return { eligible: false, reason: "already_auto_repairing" };
@@ -10057,7 +10095,7 @@ export default function StudioPage() {
 
       return { eligible: false, reason: "no_repair_signal" };
     },
-    [activeGenerationReadiness.blocked, baselineTemplateNotReady],
+    [activeGenerationReadiness.blocked, baselineTemplateReadinessSignal.hardBlocked],
   );
 
   const resumeAutoRepairEvaluation = useMemo(() => {
@@ -10774,6 +10812,42 @@ export default function StudioPage() {
       <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
         {canonicalStudioReadinessMessage}
       </p>
+      {(() => {
+        const penalties =
+          (analysis as unknown as { scoring_v2?: { rubric?: { penalties?: unknown } } | null })?.scoring_v2?.rubric
+            ?.penalties ?? [];
+        const normalizedPenalties = Array.isArray(penalties) ? penalties : [];
+        const capPenalty = normalizedPenalties.find(
+          (penalty) =>
+            typeof (penalty as { code?: unknown }).code === "string" &&
+            (penalty as { code: string }).code === "insufficient_baseline_support",
+        ) as { code?: string; reason?: string } | undefined;
+        if (!capPenalty) return null;
+        const reason = typeof capPenalty.reason === "string" ? capPenalty.reason : "";
+        const signals = reason ? parseInsufficientBaselineSupportSignals(reason) : null;
+        return (
+          <Alert intent="warning" title="Score capped" data-testid="studio-score-cap-warning">
+            <div className="space-y-2">
+              <p className="text-sm text-slate-100">
+                Score capped because the verified baseline does not show enough support for this role scope.
+              </p>
+              {signals ? (
+                <ul className="list-disc space-y-1 pl-5 text-xs text-slate-200">
+                  {typeof signals.baselineRecall === "number" ? (
+                    <li>Baseline recall: {signals.baselineRecall.toFixed(1)}%</li>
+                  ) : null}
+                  {typeof signals.responsibilityOverlap === "number" ? (
+                    <li>Responsibility overlap: {signals.responsibilityOverlap.toFixed(1)}%</li>
+                  ) : null}
+                  {typeof signals.requiredToolCoverage === "number" ? (
+                    <li>Required tool coverage: {signals.requiredToolCoverage.toFixed(1)}%</li>
+                  ) : null}
+                </ul>
+              ) : null}
+            </div>
+          </Alert>
+        );
+      })()}
       {showInstantDraftHeroSafe ? instantDraftHero : null}
       {showReadinessRecoveryExperience && !activeGenerationReadiness.blocked ? unlockEntryPanel : null}
       {unlockGenerationLoadingMessage && showPrimaryGeneratingNotice ? (
@@ -10880,7 +10954,7 @@ export default function StudioPage() {
               We can’t generate strong documents yet because key experience isn’t clearly supported.{readinessMessageScopeSuffix}
             </div>
 
-            {draftAnywayEligible && !baselineTemplateNotReady ? (
+            {draftAnywayEligible && !baselineTemplateReadinessSignal.hardBlocked ? (
             <section className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-draft-anyway">
               <p className="text-sm font-semibold text-slate-100">Draft mode</p>
               <p className="text-sm text-slate-300">
@@ -11560,6 +11634,49 @@ export default function StudioPage() {
           Generate, preview, and export your resume and cover letter.
         </p>
       </section>
+      {baselineTemplateReadinessSignal.hardBlocked ? (
+        <section
+          className="space-y-3 rounded-2xl border border-amber-300/30 bg-amber-500/10 p-5 text-amber-50 shadow"
+          data-testid="studio-baseline-template-blocked-panel"
+        >
+          <div className="space-y-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-100">Blocked</p>
+            <h3 className="text-lg font-semibold text-amber-50">
+              Your baseline needs strengthening before documents can be generated.
+            </h3>
+            <p className="text-sm text-amber-50/90">
+              We found enough information to score this role, but not enough clean, template-ready experience evidence
+              to generate reliable documents.
+            </p>
+            <p className="text-sm text-amber-50/80">
+              Use Fit Review to add or clarify the missing experience details, then Studio will generate your resume and
+              cover letter automatically.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href={fitReviewHref}
+              className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+              data-testid="studio-template-blocked-fit-review-cta"
+            >
+              Go to Fit Review
+            </Link>
+          </div>
+        </section>
+      ) : null}
+      {baselineTemplateReadinessSignal.degraded ? (
+        <div
+          className="rounded-2xl border border-amber-300/25 bg-amber-500/5 px-4 py-3 text-sm text-amber-50"
+          data-testid="studio-baseline-template-degraded-banner"
+        >
+          We generated documents using your cleanest verified experience. Some resume sections need review.{" "}
+          <Link href={fitReviewHref} className="font-semibold underline underline-offset-4">
+            Improve in Fit Review
+          </Link>
+        </div>
+      ) : null}
+      {!baselineTemplateReadinessSignal.hardBlocked ? (
+      <>
       <section
         ref={(node) => {
           generationSectionRef.current = node;
@@ -12447,6 +12564,8 @@ export default function StudioPage() {
           )
         ) : null}
       </section> 
+      </> 
+      ) : null}
       {isReadySuccessState && artifactQuality.confidence === "LOW" ? (
         <section
           className="rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4"

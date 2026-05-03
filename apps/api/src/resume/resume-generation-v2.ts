@@ -620,7 +620,7 @@ export function buildDeterministicResumeV2FromBaseline(input: {
           extractedExperienceCount: structuredExperience.length,
           extractedMissingEvidenceReasons: structured.missingEvidenceReasons ?? [],
           rejected: [...invalidReasons, ...companyCandidateDiagnostics],
-          reasons: templateReadiness.reasons,
+          reasons: templateReadiness.hardBlockReasons,
         },
       },
     });

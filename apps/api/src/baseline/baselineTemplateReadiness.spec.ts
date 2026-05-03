@@ -20,7 +20,7 @@ describe('baselineTemplateReadiness', () => {
 
     expect(readiness.canGenerateResume).toBe(true);
     expect(readiness.canGenerateCoverLetter).toBe(true);
-    expect(readiness.reasons).toEqual([]);
+    expect(readiness.hardBlockReasons).toEqual([]);
   });
 
   it('blocks template generation when only malformed fragments exist', () => {
@@ -41,7 +41,7 @@ describe('baselineTemplateReadiness', () => {
 
     expect(readiness.canGenerateResume).toBe(false);
     expect(readiness.canGenerateCoverLetter).toBe(false);
-    expect(readiness.reasons[0]?.code).toBe('baseline_template_not_ready');
+    expect(readiness.hardBlockReasons[0]?.code).toBe('baseline_template_not_ready');
+    expect(readiness.stats.validExperience).toBe(0);
   });
 });
-

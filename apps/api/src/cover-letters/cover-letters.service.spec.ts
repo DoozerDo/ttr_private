@@ -202,7 +202,13 @@ describe('CoverLettersService contract', () => {
       job,
       analysisAssessment: assessment,
       allowedBlocks: [],
-      templateReadiness: { canGenerateResume: true, canGenerateCoverLetter: true, reasons: [] },
+      templateReadiness: {
+        canGenerateResume: true,
+        canGenerateCoverLetter: true,
+        hardBlockReasons: [],
+        warnings: [],
+        stats: { totalExperience: 1, validExperience: 1, invalidExperience: 0 },
+      },
       jobContext: {
         id: 'job-1',
         title: 'Program Manager',
@@ -254,7 +260,13 @@ describe('CoverLettersService contract', () => {
       job,
       analysisAssessment: assessment,
       allowedBlocks: [],
-      templateReadiness: { canGenerateResume: true, canGenerateCoverLetter: true, reasons: [] },
+      templateReadiness: {
+        canGenerateResume: true,
+        canGenerateCoverLetter: true,
+        hardBlockReasons: [],
+        warnings: [],
+        stats: { totalExperience: 1, validExperience: 1, invalidExperience: 0 },
+      },
       jobContext: {
         id: 'job-1',
         title: 'Program Manager',
@@ -318,7 +330,13 @@ describe('CoverLettersService contract', () => {
       job,
       analysisAssessment: assessment,
       allowedBlocks: [],
-      templateReadiness: { canGenerateResume: true, canGenerateCoverLetter: true, reasons: [] },
+      templateReadiness: {
+        canGenerateResume: true,
+        canGenerateCoverLetter: true,
+        hardBlockReasons: [],
+        warnings: [],
+        stats: { totalExperience: 1, validExperience: 1, invalidExperience: 0 },
+      },
       jobContext: {
         id: 'job-1',
         title: 'Program Manager',
@@ -387,7 +405,13 @@ describe('CoverLettersService contract', () => {
       job,
       analysisAssessment: assessment,
       allowedBlocks: [],
-      templateReadiness: { canGenerateResume: true, canGenerateCoverLetter: true, reasons: [] },
+      templateReadiness: {
+        canGenerateResume: true,
+        canGenerateCoverLetter: true,
+        hardBlockReasons: [],
+        warnings: [],
+        stats: { totalExperience: 1, validExperience: 1, invalidExperience: 0 },
+      },
       jobContext: {
         id: 'job-1',
         title: 'Program Manager',
@@ -479,7 +503,13 @@ describe('CoverLettersService contract', () => {
         job,
         analysisAssessment: assessment,
         allowedBlocks: [],
-        templateReadiness: { canGenerateResume: true, canGenerateCoverLetter: true, reasons: [] },
+        templateReadiness: {
+          canGenerateResume: true,
+          canGenerateCoverLetter: true,
+          hardBlockReasons: [],
+          warnings: [],
+          stats: { totalExperience: 1, validExperience: 1, invalidExperience: 0 },
+        },
         jobContext: {
           id: 'job-1',
           title: 'Program Manager',
@@ -560,7 +590,13 @@ describe('CoverLettersService contract', () => {
       job,
       analysisAssessment: assessment,
       allowedBlocks: [],
-      templateReadiness: { canGenerateResume: true, canGenerateCoverLetter: true, reasons: [] },
+      templateReadiness: {
+        canGenerateResume: true,
+        canGenerateCoverLetter: true,
+        hardBlockReasons: [],
+        warnings: [],
+        stats: { totalExperience: 1, validExperience: 1, invalidExperience: 0 },
+      },
       jobContext: {
         id: 'job-1',
         title: 'Program Manager',
@@ -626,7 +662,13 @@ describe('CoverLettersService contract', () => {
       job, 
       analysisAssessment: assessment, 
       allowedBlocks: [], 
-      templateReadiness: { canGenerateResume: true, canGenerateCoverLetter: true, reasons: [] },
+      templateReadiness: {
+        canGenerateResume: true,
+        canGenerateCoverLetter: true,
+        hardBlockReasons: [],
+        warnings: [],
+        stats: { totalExperience: 1, validExperience: 1, invalidExperience: 0 },
+      },
       jobContext: { 
         id: 'job-1', 
         title: 'Program Manager', 
@@ -691,7 +733,13 @@ describe('CoverLettersService contract', () => {
       job,
       analysisAssessment: assessment,
       allowedBlocks: [],
-      templateReadiness: { canGenerateResume: true, canGenerateCoverLetter: true, reasons: [] },
+      templateReadiness: {
+        canGenerateResume: true,
+        canGenerateCoverLetter: true,
+        hardBlockReasons: [],
+        warnings: [],
+        stats: { totalExperience: 1, validExperience: 1, invalidExperience: 0 },
+      },
       jobContext: {
         id: 'job-1',
         title: 'Program Manager',
@@ -811,7 +859,13 @@ describe('CoverLettersService contract', () => {
       job,
       analysisAssessment: assessment,
       allowedBlocks: [],
-      templateReadiness: { canGenerateResume: true, canGenerateCoverLetter: true, reasons: [] },
+      templateReadiness: {
+        canGenerateResume: true,
+        canGenerateCoverLetter: true,
+        hardBlockReasons: [],
+        warnings: [],
+        stats: { totalExperience: 1, validExperience: 1, invalidExperience: 0 },
+      },
       jobContext: {
         id: 'job-1',
         title: 'Program Manager',

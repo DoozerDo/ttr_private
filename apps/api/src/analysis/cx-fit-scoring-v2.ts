@@ -157,7 +157,8 @@ export type ScoringContractV1Weights = Record<ScoringContractV1DimensionKey, num
 
 export type ScoringContractV1PenaltyCode =
   | 'scope_mismatch_downlevel'
-  | 'domain_mismatch_hard';
+  | 'domain_mismatch_hard'
+  | 'insufficient_baseline_support';
 
 export type ScoringContractV1Penalty = {
   code: ScoringContractV1PenaltyCode;
@@ -2161,12 +2162,37 @@ export const scoreCxFitV2 = (
     });
   }
 
+  // insufficient_baseline_support: apply when baseline evidence is too thin to justify a strong score
+  // This is a guardrail against inflated scores when the job description is rich but the baseline lacks
+  // enough directly relevant, structured coverage.
+  // Note: score guardrails for baseline insufficiency are applied later as a cap (post-penalty),
+  // so we don't disturb other calibration expectations.
+
   const penaltyTotal = penalties.reduce((sum, p) => sum + p.points, 0);
   const finalBeforeClamp = subtotal + penaltyTotal;
 
   // contract rounding: round half up, final only
   const roundedFinal = roundHalfUp(finalBeforeClamp);
-  const finalScore = clamp(roundedFinal);
+  let finalScore = clamp(roundedFinal);
+
+  // Guardrail: cap scores in "strong apply" territory when baseline evidence coverage is clearly insufficient.
+  // This prevents inflated 80s scores when experience depth/scope is materially unsupported.
+  const baselineEvidenceInsufficient =
+    baselineCoveragePercent < 12 &&
+    responsibilityOverlapPercent < 45 &&
+    toolingCoverage.requiredCoverage < 0.15;
+  if (baselineEvidenceInsufficient && finalScore >= 80) {
+    finalScore = 79;
+    penalties.push({
+      code: 'insufficient_baseline_support',
+      points: -0,
+      reason:
+        `Score capped below strong-apply territory due to insufficient baseline evidence ` +
+        `(baseline_recall=${baselineCoveragePercent.toFixed(1)}% responsibility_overlap=${responsibilityOverlapPercent.toFixed(
+          1,
+        )}% required_tool_coverage=${(toolingCoverage.requiredCoverage * 100).toFixed(1)}%).`,
+    });
+  }
   const scoreConfidenceClassification = assessScoreConfidence({
     score: finalScore,
     debug: {

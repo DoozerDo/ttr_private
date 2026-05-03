@@ -142,6 +142,27 @@ describe("Studio artifact quality gating (soft)", () => {
     expect(within(qualityWarning).getByText("Contains a malformed experience role title header.")).toBeInTheDocument();
   });
 
+  it("renders an insufficient baseline support score-cap warning when scoring penalties include it", async () => {
+    setupFetchWithInsufficientBaselineSupportPenalty();
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-score-cap-warning")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText(
+        "Score capped because the verified baseline does not show enough support for this role scope.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("studio-score-cap-warning")).toHaveTextContent("Baseline recall: 11.2%");
+    expect(screen.getByTestId("studio-score-cap-warning")).toHaveTextContent(
+      "Responsibility overlap: 38.7%",
+    );
+    expect(screen.getByTestId("studio-score-cap-warning")).toHaveTextContent(
+      "Required tool coverage: 9.5%",
+    );
+  });
+
   it("renders cover letter preview but blocks export when cover letter quality fails", async () => {
     setupFetchWithQualityFailures();
     renderStudio();
@@ -1417,6 +1438,66 @@ function setupFetchWithQualityFailures() {
   );
 }
 
+function setupFetchWithInsufficientBaselineSupportPenalty() {
+  setFetchImplementation(
+    vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+            scoring_v2: {
+              score: 79,
+              rubric: {
+                penalties: [
+                  {
+                    code: "insufficient_baseline_support",
+                    reason:
+                      "Score capped below strong-apply territory due to insufficient baseline evidence (baseline_recall=11.2% responsibility_overlap=38.7% required_tool_coverage=9.5%).",
+                  },
+                ],
+              },
+            },
+            verification_coverage: {
+              totalClaims: 3,
+              verifiedClaims: 3,
+              inferredClaims: 0,
+              unverifiedClaims: 0,
+              unverifiedRequirements: [],
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "missing",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            resume: null,
+            coverLetter: null,
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    }),
+  );
+}
+
 function setupFetchForManualRegenerateRefresh() {
   let artifactsFetchCount = 0;
   setFetchImplementation(
@@ -2103,6 +2184,79 @@ function setupBaselineTemplateNotReadyFetch() {
             company: "Acme",
             title: "Director of Support",
             scoring_v2: { score: 94 },
+            verification_coverage: { totalClaims: 1, verifiedClaims: 1, inferredClaims: 0, unverifiedClaims: 0, unverifiedRequirements: [] },
+          }),
+        );
+      }
+      return Promise.resolve(createResponse({}));
+    }),
+  );
+}
+
+function setupBaselineTemplateDegradedFetch() {
+  setFetchImplementation(
+    vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "completed",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "fp-1",
+            generationContractVersion: "studio-artifacts-v1",
+            artifactReadiness: "degraded",
+            artifactReadinessReasons: ["baseline_template_not_ready"],
+            artifactReadinessReasonDetails: [
+              { code: "baseline_template_not_ready", message: "warning", details: { validExperience: 1, invalidExperience: 1 } },
+            ],
+            resumeResult: {
+              artifactType: "resume",
+              generationState: "generated_usable",
+              qualityStatus: "pass",
+              preview: {
+                heading: { name: "Test Candidate", contactLine: "test@example.com" },
+                summary: "Clean summary.",
+                experience: [{ company: "AMS DataSerfs", roleTitle: "Senior Data Analyst", dateRange: "2021 - Present", bullets: ["Did work."] }],
+              },
+              correctionReasons: [],
+              exportReady: true,
+              exports: { docx: true, pdf: true },
+              actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
+            },
+            coverLetterResult: {
+              artifactType: "cover_letter",
+              generationState: "generated_usable",
+              qualityStatus: "pass",
+              preview: { paragraphs: ["Dear Hiring Team,", "Clean cover."] },
+              correctionReasons: [],
+              exportReady: true,
+              exports: { docx: true, pdf: true },
+              actions: { canEdit: false, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
+            },
+            resume: { status: "completed", inputsHash: "ih-degraded", responseBody: { status: "success", qualityGate: { status: "pass" } }, content: null, failureCode: null, failureMessage: null, startedAt: null, completedAt: null, failedAt: null, metadata: {} },
+            coverLetter: { status: "completed", inputsHash: "ih-degraded-cover", responseBody: { status: "success", qualityGate: { status: "pass" } }, content: null, failureCode: null, failureMessage: null, startedAt: null, completedAt: null, failedAt: null, metadata: {} },
+          }),
+        );
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+            scoring_v2: { score: 82 },
             verification_coverage: { totalClaims: 1, verifiedClaims: 1, inferredClaims: 0, unverifiedClaims: 0, unverifiedRequirements: [] },
           }),
         );
@@ -2965,10 +3119,32 @@ describe("Studio resume editing", () => {
       expect(screen.getByTestId("studio-blocked-primary-action")).toBeInTheDocument();
     });
 
+    expect(screen.getByTestId("studio-baseline-template-blocked-panel")).toBeInTheDocument();
+    expect(screen.getByText("Your baseline needs strengthening before documents can be generated.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Go to Fit Review/i })).toBeInTheDocument();
+
+    expect(screen.queryByTestId("studio-generate-resume-button")).toBeNull();
+    expect(screen.queryByTestId("studio-generate-cover-button")).toBeNull();
     expect(screen.getByRole("link", { name: /View fit review/i })).toBeInTheDocument();
     expect(screen.queryByTestId("studio-resume-regenerate")).toBeNull();
     expect(screen.queryByTestId("studio-cover-regenerate")).toBeNull();
     expect(screen.queryByTestId("studio-resume-experience-section")).toBeNull();
     expect(screen.queryByText("Vue 3), deck builder frontend")).toBeNull();
+  });
+
+  it("shows degraded warning but still renders Studio workspace when baseline_template_not_ready is warning-only", async () => {
+    setupBaselineTemplateDegradedFetch();
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-baseline-template-degraded-banner")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("studio-baseline-template-blocked-panel")).toBeNull();
+    expect(screen.getByText(/We generated documents using your cleanest verified experience/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Improve in Fit Review/i })).toBeInTheDocument();
+    // Still renders documents and only valid experience entries
+    expect(screen.queryByText("Vue 3), deck builder frontend")).toBeNull();
+    expect(screen.queryByText("AMS DataSerfs")).toBeTruthy();
   });
 });

@@ -58,6 +58,13 @@ type ScoringV2Rubric = {
   weights?: Record<FitReviewDimensionKey, number>;
   dimensionPercents?: Record<FitReviewDimensionKey, number>;
   dimensionPoints?: Record<FitReviewDimensionKey, number>;
+  penalties?: ScoringV2Penalty[];
+};
+
+type ScoringV2Penalty = {
+  code: string;
+  points?: number;
+  reason?: string;
 };
 
 type ScoringV2Result = {
@@ -271,6 +278,29 @@ function extractGapAnalysis(value: Record<string, unknown> | null): FitReviewGap
   };
 }
 
+function parseInsufficientBaselineSupportSignals(reason: string) {
+  const recallMatch = reason.match(/baseline_recall=([0-9]+(?:\.[0-9]+)?)%/i);
+  const overlapMatch = reason.match(/responsibility_overlap=([0-9]+(?:\.[0-9]+)?)%/i);
+  const toolCoverageMatch = reason.match(/required_tool_coverage=([0-9]+(?:\.[0-9]+)?)%/i);
+
+  const baselineRecall =
+    recallMatch && Number.isFinite(Number(recallMatch[1])) ? Number(recallMatch[1]) : null;
+  const responsibilityOverlap =
+    overlapMatch && Number.isFinite(Number(overlapMatch[1])) ? Number(overlapMatch[1]) : null;
+  const requiredToolCoverage =
+    toolCoverageMatch && Number.isFinite(Number(toolCoverageMatch[1])) ? Number(toolCoverageMatch[1]) : null;
+
+  if (baselineRecall === null && responsibilityOverlap === null && requiredToolCoverage === null) {
+    return null;
+  }
+
+  return {
+    baselineRecall,
+    responsibilityOverlap,
+    requiredToolCoverage,
+  };
+}
+
 export default function FitReviewClient() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -356,6 +386,17 @@ export default function FitReviewClient() {
     if (!isFitAssessment(displayAssessment)) return null;
     return displayAssessment.scoring_v2?.rubric ?? null;
   }, [displayAssessment]);
+
+  const insufficientBaselineSupportPenalty = useMemo(() => {
+    const penalties = scoringRubric?.penalties ?? [];
+    return penalties.find((penalty) => penalty?.code === "insufficient_baseline_support") ?? null;
+  }, [scoringRubric?.penalties]);
+
+  const insufficientBaselineSupportSignals = useMemo(() => {
+    const reason = insufficientBaselineSupportPenalty?.reason;
+    if (typeof reason !== "string" || !reason.trim()) return null;
+    return parseInsufficientBaselineSupportSignals(reason);
+  }, [insufficientBaselineSupportPenalty?.reason]);
 
   const fitAssessment = useMemo<FitAssessment | null>(() => {
     return isFitAssessment(displayAssessment) ? displayAssessment : null;
@@ -853,6 +894,35 @@ export default function FitReviewClient() {
                       The score is tied to rubric dimensions and your exact baseline and job context.
                     </p>
                   </div>
+                  {insufficientBaselineSupportPenalty ? (
+                    <div
+                      className="rounded-2xl border border-amber-300/25 bg-amber-500/10 p-4 text-slate-100"
+                      data-testid="fit-review-score-cap-warning"
+                    >
+                      <p className="text-sm text-slate-100">
+                        Score capped because the verified baseline does not show enough support for this role scope.
+                      </p>
+                      {insufficientBaselineSupportSignals ? (
+                        <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-amber-100/90">
+                          {typeof insufficientBaselineSupportSignals.baselineRecall === "number" ? (
+                            <li>Baseline recall: {insufficientBaselineSupportSignals.baselineRecall.toFixed(1)}%</li>
+                          ) : null}
+                          {typeof insufficientBaselineSupportSignals.responsibilityOverlap === "number" ? (
+                            <li>
+                              Responsibility overlap:{" "}
+                              {insufficientBaselineSupportSignals.responsibilityOverlap.toFixed(1)}%
+                            </li>
+                          ) : null}
+                          {typeof insufficientBaselineSupportSignals.requiredToolCoverage === "number" ? (
+                            <li>
+                              Required tool coverage:{" "}
+                              {insufficientBaselineSupportSignals.requiredToolCoverage.toFixed(1)}%
+                            </li>
+                          ) : null}
+                        </ul>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </section>

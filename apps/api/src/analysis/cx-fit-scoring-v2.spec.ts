@@ -221,6 +221,39 @@ describe('scoreCxFitV2', () => {
     expect(result.score).toBeLessThan(85);
   });
 
+  it('caps inflated scores when baseline evidence is too thin to support the role scope', () => {
+    const weakBaselineSections = [
+      {
+        type: 'EXPERIENCE',
+        content:
+          'Handled tickets and general support tasks.\n' +
+          'Helped with basic troubleshooting.\n' +
+          'Assisted with documentation updates.',
+      },
+      { type: 'SKILLS', content: 'Excel, email, basic troubleshooting' },
+    ];
+    const seniorScopedJob = {
+      rawDescription:
+        'Own enterprise support operations, manage managers, define operating model and tooling roadmap, and lead global incident management. ServiceNow required.',
+      normalizedResponsibilities: [
+        'Define operating model and KPI frameworks for support operations',
+        'Lead incident management and escalation programs across global teams',
+        'Manage managers and drive process rigor with tooling roadmap ownership',
+      ],
+      normalizedRequirements: ['Hands-on ServiceNow administration experience'],
+    };
+
+    const result = scoreCxFitV2({
+      job: seniorScopedJob as any,
+      baselineSections: weakBaselineSections as any,
+    });
+
+    expect(result.score).toBeLessThan(80);
+    if (result.score === 79) {
+      expect(result.rubric.penalties.some((p) => p.code === 'insufficient_baseline_support')).toBe(true);
+    }
+  });
+
   it('recognizes direct network-infrastructure evidence strongly enough to avoid collapsing a Dalen-style baseline', () => {
     const result = scoreCxFitV2(
       {
