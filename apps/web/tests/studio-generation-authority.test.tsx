@@ -177,8 +177,8 @@ describe("Studio artifact quality gating (soft)", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders the blocked generation state banner when baseline template readiness hard-blocks generation", async () => {
-    setupBaselineTemplateNotReadyFetch();
+  it("renders the blocked generation state banner only when the backend indicates zero valid experience entries", async () => {
+    setupBaselineTemplateNotReadyFetch({ validExperience: 0 });
     renderStudio();
 
     await waitFor(() => {
@@ -189,6 +189,20 @@ describe("Studio artifact quality gating (soft)", () => {
         "Generation is blocked because we don’t yet have enough verified, structured examples to generate reliable documents.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("treats baseline template readiness blocks as degraded when backend indicates usable evidence exists", async () => {
+    setupBaselineTemplateNotReadyFetch({ validExperience: 1, score: 70 });
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-generation-state-degraded")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("studio-generation-state-blocked")).toBeNull();
+    expect(screen.queryByText(/\bgeneration is blocked\b/i)).toBeNull();
+    expect(screen.queryByText(/^next$/i)).toBeNull();
+    expect(await screen.findByTestId("studio-generate-resume-button")).toBeInTheDocument();
+    expect(await screen.findByTestId("studio-generate-cover-button")).toBeInTheDocument();
   });
 
   it("treats artifact refinement required as degraded generation state", async () => {
@@ -1447,7 +1461,7 @@ function setupFetchWithQualityFailures() {
         );
       }
       if (url.includes("/readiness")) {
-        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        return Promise.resolve(createResponse({ status: "ready", blocked: false, reasons: [], compliance_flags: [] }));
       }
       if (url.includes("/api/resume")) {
         return Promise.resolve(
@@ -1891,6 +1905,7 @@ function setupExportableResumeFetch() {
             baselineVersionId: "base-version-1",
             company: "Acme",
             title: "Director of Support",
+            overallScore: 94,
             scoring_v2: { score: 94 },
             verification_coverage: { totalClaims: 1, verifiedClaims: 1, inferredClaims: 0, unverifiedClaims: 0, unverifiedRequirements: [] },
           }),
@@ -2191,7 +2206,9 @@ function setupNeedsRefinementResumeWithVueFetch() {
   );
 }
 
-function setupBaselineTemplateNotReadyFetch() {
+function setupBaselineTemplateNotReadyFetch(options?: { validExperience?: number; score?: number }) {
+  const validExperience = typeof options?.validExperience === "number" ? options.validExperience : 0;
+  const score = typeof options?.score === "number" ? options.score : 94;
   setFetchImplementation(
     vi.fn((input: RequestInfo) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
@@ -2214,23 +2231,16 @@ function setupBaselineTemplateNotReadyFetch() {
               {
                 code: "baseline_template_not_ready",
                 message: "Baseline is usable for scoring but is not template-safe for generation.",
-                details: { invalidCompanies: [{ company: "Vue 3), deck builder frontend", reason: "unsafe_company_header" }] },
+                details: {
+                  invalidCompanies: [{ company: "Vue 3), deck builder frontend", reason: "unsafe_company_header" }],
+                  validExperience,
+                  stats: { validExperience },
+                },
               },
             ],
-            resumeResult: null,
-            coverLetterResult: null,
-            resume: {
-              status: "completed",
-              inputsHash: "ih-blocked",
-              responseBody: null,
-              content: null,
-              failureCode: null,
-              failureMessage: null,
-              startedAt: null,
-              completedAt: null,
-              failedAt: null,
-              metadata: {},
-            },
+             resumeResult: null,
+             coverLetterResult: null,
+            resume: null,
             coverLetter: null,
           }),
         );
@@ -2247,7 +2257,7 @@ function setupBaselineTemplateNotReadyFetch() {
             baselineVersionId: "base-version-1",
             company: "Acme",
             title: "Director of Support",
-            scoring_v2: { score: 94 },
+            scoring_v2: { score },
             verification_coverage: { totalClaims: 1, verifiedClaims: 1, inferredClaims: 0, unverifiedClaims: 0, unverifiedRequirements: [] },
           }),
         );
@@ -3180,7 +3190,7 @@ describe("Studio resume editing", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByTestId("studio-blocked-primary-action")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-baseline-template-blocked-panel")).toBeInTheDocument();
     });
 
     expect(screen.getByTestId("studio-baseline-template-blocked-panel")).toBeInTheDocument();
@@ -3189,7 +3199,9 @@ describe("Studio resume editing", () => {
 
     expect(screen.queryByTestId("studio-generate-resume-button")).toBeNull();
     expect(screen.queryByTestId("studio-generate-cover-button")).toBeNull();
-    expect(screen.getByRole("link", { name: /View fit review/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /View fit review/i }) ?? screen.getByRole("link", { name: /Go to Fit Review/i }),
+    ).toBeInTheDocument();
     expect(screen.queryByTestId("studio-resume-regenerate")).toBeNull();
     expect(screen.queryByTestId("studio-cover-regenerate")).toBeNull();
     expect(screen.queryByTestId("studio-resume-experience-section")).toBeNull();

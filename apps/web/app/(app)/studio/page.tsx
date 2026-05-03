@@ -2939,10 +2939,23 @@ export default function StudioPage() {
     const hasReason =
       (Array.isArray(reasons) && reasons.includes("baseline_template_not_ready")) ||
       (Array.isArray(details) && details.some((detail) => String((detail as any)?.code ?? "") === "baseline_template_not_ready"));
+
+    const templateDetail = Array.isArray(details)
+      ? details.find((detail) => String((detail as any)?.code ?? "") === "baseline_template_not_ready")
+      : null;
+    const detailStats = templateDetail && typeof (templateDetail as any)?.details === "object" ? (templateDetail as any).details : null;
+    const validExperience =
+      detailStats && typeof (detailStats as any).validExperience === "number"
+        ? (detailStats as any).validExperience
+        : detailStats && typeof (detailStats as any)?.stats?.validExperience === "number"
+          ? (detailStats as any).stats.validExperience
+          : null;
+    const usableEvidenceExists = typeof validExperience === "number" ? validExperience > 0 : false;
     return {
       readiness,
       hasReason,
-      hardBlocked: readiness === "blocked" && hasReason,
+      usableEvidenceExists,
+      hardBlocked: readiness === "blocked" && hasReason && !usableEvidenceExists,
       degraded: readiness === "degraded" && hasReason,
     };
   }, [studioArtifactsPayload]);
@@ -3207,7 +3220,30 @@ export default function StudioPage() {
     resumeState.response,
   ]);
 
-  const canGenerateDocuments = pairWorkflowState.canGenerate;
+  const canGenerateWithUsableEvidence = useMemo(() => {
+    if (pairWorkflowState.canGenerate) return true;
+    if (!baselineTemplateReadinessSignal.usableEvidenceExists) return false;
+    if (baselineTemplateReadinessSignal.hardBlocked) return false;
+    if (!hasLoadedAnalysis) return false;
+    if (!requestedAnalysisId?.trim()) return false;
+    if (!effectiveBaselineId?.trim()) return false;
+    if (!effectiveBaselineVersionId?.trim()) return false;
+    if (!effectiveJobId?.trim()) return false;
+    if (activeGenerationReadiness.blocked) return false;
+    return true;
+  }, [
+    activeGenerationReadiness.blocked,
+    baselineTemplateReadinessSignal.hardBlocked,
+    baselineTemplateReadinessSignal.usableEvidenceExists,
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    hasLoadedAnalysis,
+    pairWorkflowState.canGenerate,
+    requestedAnalysisId,
+  ]);
+
+  const canGenerateDocuments = canGenerateWithUsableEvidence;
   const generationLifecycle = useMemo(
     () =>
       resolvePairGenerationLifecycle({
@@ -3617,6 +3653,7 @@ export default function StudioPage() {
     }
   }, [effectiveBaselineId, effectiveJobId, hasGeneratedDocumentPair, roleMatchFinalPass, roleMatchFinalSignature]);
   const studioGenerationRenderState = useMemo(() => {
+    const canGenerateByEvidence = canGenerateWithUsableEvidence;
     const isGenerating = pairWorkflowState.pairStatus === "generating";
     const artifactType =
       pairWorkflowState.coverLetterStatus === "ready" || pairWorkflowState.coverLetterStatus === "generating"
@@ -3625,10 +3662,10 @@ export default function StudioPage() {
           ? "resume"
           : null;
     const shouldShowTrustSummary =
-      pairWorkflowState.canGenerate && (pairWorkflowState.resumeStatus === "ready" || pairWorkflowState.coverLetterStatus === "ready");
+      canGenerateByEvidence && (pairWorkflowState.resumeStatus === "ready" || pairWorkflowState.coverLetterStatus === "ready");
     return {
-      isBlocked: !pairWorkflowState.canGenerate,
-      isReady: pairWorkflowState.canGenerate,
+      isBlocked: !canGenerateByEvidence,
+      isReady: canGenerateByEvidence,
       isFromUnlock,
       isFirstGenerationAfterUnlock,
       isGenerating,
@@ -3642,7 +3679,8 @@ export default function StudioPage() {
     hasGeneratedOnce,
     isFirstGenerationAfterUnlock,
     isFromUnlock,
-    pairWorkflowState.canGenerate,
+    canGenerateWithUsableEvidence,
+    baselineTemplateReadinessSignal.usableEvidenceExists,
     pairWorkflowState.coverLetterStatus,
     pairWorkflowState.pairStatus,
     pairWorkflowState.resumeStatus,
@@ -4087,7 +4125,10 @@ export default function StudioPage() {
     studioCanonicalDecision.workflowState,
   ]);
   const studioBlockedByNextAction =
-    primaryNextAction.type === "start_fit_review" && !hasResumeArtifact && !hasCoverLetterArtifact;
+    primaryNextAction.type === "start_fit_review" &&
+    !canGenerateDocuments &&
+    !hasResumeArtifact &&
+    !hasCoverLetterArtifact;
   // Important: do not auto-redirect based on legacy `primaryNextAction` here.
   // Redirecting to Results/Fit Review while Studio can still render (or auto-generate) creates Results <-> Studio loops.
   const evidenceLedger = useMemo(
@@ -9193,6 +9234,7 @@ export default function StudioPage() {
   // Avoid flashing blocked/recovery UI before analysis hydration resolves score + readiness.
   const showReadinessRecoveryExperience =
     hasLoadedAnalysis &&
+    !baselineTemplateReadinessSignal.usableEvidenceExists &&
     (baselineTemplateReadinessSignal.hardBlocked ||
       (!generateNowEligible &&
         ((resumeGating.accessState === "allowed" &&
@@ -11061,39 +11103,43 @@ export default function StudioPage() {
         ) : null}
         {showReadinessRecoveryExperience && !studioDraftMode ? (
           <>
-            <section className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-blocked-primary-action">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-                Strengthen your experience to unlock stronger documents
-              </p>
-              <p className="text-sm text-slate-300">
-                Use the highest-impact evidence gaps from this analysis.
-              </p>
-              <div className="space-y-2">
-                {highestImpactEvidenceActions.map((action) => (
+            {highestImpactEvidenceActions.filter((action) => String(action ?? "").trim().toLowerCase() !== "next").length ? (
+              <section className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-blocked-primary-action">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                  Strengthen your experience to unlock stronger documents
+                </p>
+                <p className="text-sm text-slate-300">
+                  Use the highest-impact evidence gaps from this analysis.
+                </p>
+                <div className="space-y-2">
+                  {highestImpactEvidenceActions
+                    .filter((action) => String(action ?? "").trim().toLowerCase() !== "next")
+                    .map((action) => (
+                      <Link
+                        key={`studio-strengthen-action-${action}`}
+                        href={buildClaimVerificationHref(action)}
+                        className="block rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.06]"
+                      >
+                        {action}
+                      </Link>
+                    ))}
+                </div>
+                <div className="flex flex-wrap gap-3 pt-1">
                   <Link
-                    key={`studio-strengthen-action-${action}`}
-                    href={buildClaimVerificationHref(action)}
-                    className="block rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.06]"
+                    href={strengthenPrimaryHref}
+                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
                   >
-                    {action}
+                    Strengthen my experience
                   </Link>
-                ))}
-              </div>
-              <div className="flex flex-wrap gap-3 pt-1">
-                <Link
-                  href={strengthenPrimaryHref}
-                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
-                >
-                  Strengthen my experience
-                </Link>
-                <Link
-                  href={fitReviewHref}
-                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
-                >
-                  View fit review
-                </Link>
-              </div>
-            </section>
+                  <Link
+                    href={fitReviewHref}
+                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-slate-100 transition hover:bg-white/[0.06]"
+                  >
+                    View fit review
+                  </Link>
+                </div>
+              </section>
+            ) : null}
 
             <div className="rounded-2xl border border-amber-300/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-50" data-testid="studio-blocked-message">
               We need clearer, verified examples of your experience before we can generate reliable documents.{readinessMessageScopeSuffix}
