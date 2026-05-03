@@ -37,7 +37,14 @@ function stripBulletPrefix(line: string): string {
 function looksLikeSentence(value: string): boolean {
   const text = trimToText(value);
   if (!text) return false;
-  if (/[.!?]\s*$/.test(text)) return true;
+  if (/[.!?]\s*$/.test(text)) {
+    // Avoid treating common company suffix punctuation as prose.
+    const wordCount = text.split(/\s+/).filter(Boolean).length;
+    if (wordCount <= 6 && /\b(?:inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corp\.|ltd|ltd\.|pllc|pllc\.)\b/i.test(text)) {
+      return false;
+    }
+    return true;
+  }
   if (/[.!?]/.test(text) && text.split(/\s+/).length > 6) return true;
   return false;
 }
@@ -112,6 +119,16 @@ function isLikelyCompanyName(value: string): boolean {
   if (hasUnmatchedCompanyPunctuation(text)) return false;
 
   return true;
+}
+
+function looksLikeRoleTitle(value: string): boolean {
+  const text = trimToText(value);
+  if (!text) return false;
+  // Heuristic: common role tokens that should not be treated as organizations.
+  // Keep conservative: only triggers swap logic when the next line is company-like.
+  return /\b(?:engineer|architect|administrator|sysadmin|developer|technician|specialist|founder|co-?founder|webmaster|assistant|manager|director|analyst)\b/i.test(
+    text,
+  );
 }
 
 function parseExperienceHeaderLine(line: string): { company: string; roleTitle: string; dates?: string } | null {
@@ -311,10 +328,26 @@ function readExperienceHeaderAt(
       };
     }
 
-    const company = line0;
-    const roleTitle = line1;
     const line2 = trimToText(lines[startIndex + 2] ?? '');
     const maybeDates = line2 && !isBulletLine(line2) && looksLikeDatesLine(line2) ? line2 : undefined;
+
+    // Common PDF-derived ordering: role title first, company second, optional dates third.
+    // Example:
+    //   "Technical Architect & Full-Stack Engineer"
+    //   "Of Fates Games LLC"
+    //   "May 2021 – Present"
+    const line0LooksLikeCompany = isLikelyCompanyName(line0);
+    const line1LooksLikeCompany = isLikelyCompanyName(line1);
+    const line0LooksLikeRole = looksLikeRoleTitle(line0);
+    if ((!line0LooksLikeCompany || line0LooksLikeRole) && line1LooksLikeCompany) {
+      return {
+        header: { company: line1, roleTitle: line0, ...(maybeDates ? { dates: maybeDates } : {}) },
+        consumed: maybeDates ? 3 : 2,
+      };
+    }
+
+    const company = line0;
+    const roleTitle = line1;
     return {
       header: { company, roleTitle, ...(maybeDates ? { dates: maybeDates } : {}) },
       consumed: maybeDates ? 3 : 2,
