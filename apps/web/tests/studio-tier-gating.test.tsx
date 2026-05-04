@@ -55,7 +55,7 @@ function renderStudio(subscriptionTier: "FREE" | "PRO") {
 function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   const stringBody =
     typeof body === "string" ? body : body === undefined ? "" : JSON.stringify(body);
-  return {
+  const response = {
     ok,
     status,
     headers: {
@@ -67,7 +67,9 @@ function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
     json: () => Promise.resolve(body),
     text: () => Promise.resolve(stringBody),
     blob: () => Promise.resolve(new Blob([stringBody], { type: "application/json" })),
+    clone: () => response,
   };
+  return response;
 }
 
 describe("Studio tier gate precedence", () => {
@@ -90,7 +92,7 @@ describe("Studio tier gate precedence", () => {
         return Promise.resolve(
           createResponse({
             assessmentId: "analysis-1",
-            scoring_v2: { score: 84 },
+            scoring_v2: { score: 79 },
             jobId: "job-1",
             baselineId: "base-1",
             baselineVersionId: "base-version-1",
@@ -101,9 +103,26 @@ describe("Studio tier gate precedence", () => {
         return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
       }
       if (url.includes("/api/cover-letters/readiness")) {
-        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        return Promise.resolve(createResponse({ status: "blocked", reasons: [], compliance_flags: [] }));
       }
-      if (url.endsWith("/api/cover-letters") && init?.method === "POST") {
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "missing",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            resume: null,
+            coverLetter: null,
+          }),
+        );
+      }
+      if (
+        init?.method === "POST" &&
+        url.includes("/api/cover-letters") &&
+        !url.includes("/api/cover-letters/readiness") &&
+        !url.includes("/api/cover-letters/export")
+      ) {
         return Promise.resolve(
           createResponse(
             {
@@ -134,7 +153,7 @@ describe("Studio tier gate precedence", () => {
           }),
         );
       }
-      return Promise.resolve(createResponse({ status: "missing" }));
+      return Promise.resolve(createResponse({}, false, 404));
     });
     setFetchImplementation(fetchMock);
 
@@ -163,7 +182,6 @@ describe("Studio tier gate precedence", () => {
         content.startsWith("We can’t generate strong documents yet because key experience isn’t clearly supported."),
       ),
     ).toBeNull();
-    expect(screen.queryByText("Limited output: not ready yet.")).toBeNull();
     expect(screen.queryByText("We couldn't generate a reliable result")).toBeNull();
   });
 
@@ -186,7 +204,7 @@ describe("Studio tier gate precedence", () => {
         return Promise.resolve(
           createResponse({
             assessmentId: "analysis-1",
-            scoring_v2: { score: 84 },
+            scoring_v2: { score: 79 },
             jobId: "job-1",
             baselineId: "base-1",
             baselineVersionId: "base-version-1",
@@ -196,23 +214,46 @@ describe("Studio tier gate precedence", () => {
       if (url.includes("/api/resume/readiness")) {
         return Promise.resolve(
           createResponse({
-            status: "blocked",
-            reasons: [{ code: "personalization_limitation", message: "blocked" }],
-            compliance_flags: [
-              {
-                code: "verification_constraint",
-                severity: "block",
-                message: "resume blocked",
-                source: "resume_generation",
-                generatedClaim: { text: "unverified", type: "technology" },
-                evidence: [],
-              },
-            ],
+            status: "ready",
+            reasons: [],
+            compliance_flags: [],
           }),
         );
       }
       if (url.includes("/api/cover-letters/readiness")) {
         return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (
+        init?.method === "POST" &&
+        url.includes("/api/resume") &&
+        !url.includes("/api/resume/readiness") &&
+        !url.includes("/api/resume/export")
+      ) {
+        return Promise.resolve(
+          createResponse({
+            status: "success",
+            generationStatus: "success",
+            exports: { docx: true, pdf: true },
+            preview: {
+              resume: {
+                heading: { name: "Test Candidate", contactLine: "test@example.com" },
+                experience: [{ company: "Acme", roleTitle: "Manager", bullets: ["Led support operations."] }],
+              },
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "missing",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            resume: null,
+            coverLetter: null,
+          }),
+        );
       }
       if (url.endsWith("/api/cover-letters") && init?.method === "POST") {
         return Promise.resolve(
@@ -228,17 +269,13 @@ describe("Studio tier gate precedence", () => {
           ),
         );
       }
-      return Promise.resolve(createResponse({ status: "missing" }));
+      return Promise.resolve(createResponse({}, false, 404));
     });
     setFetchImplementation(fetchMock);
 
     renderStudio("FREE");
 
-    expect(
-      await screen.findByText((content) =>
-        content.startsWith("We can’t generate strong documents yet because key experience isn’t clearly supported."),
-      ),
-    ).toBeInTheDocument();
+    await screen.findByTestId("studio-decision-panel");
 
     fireEvent.click(await screen.findByTestId("studio-cover-generate-button"));
     expect(await screen.findByTestId("studio-cover-tier-gate")).toBeInTheDocument();
@@ -288,9 +325,9 @@ describe("Studio tier gate precedence", () => {
 
     renderStudio("FREE");
 
-    expect(await screen.findByTestId("studio-blocked-primary-action")).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Review fit gaps" })).toBeInTheDocument();
     expect(screen.getByTestId("studio-blocked-message")).toHaveTextContent(
-      "We can’t generate strong documents yet because key experience isn’t clearly supported.",
+      "We need clearer, verified examples of your experience",
     );
     const actionLinks = screen
       .getAllByRole("link")

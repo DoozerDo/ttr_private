@@ -131,7 +131,7 @@ describe("Studio post-unlock outcome shell", () => {
     });
     setFetchImplementation(fetchMock);
 
-    renderStudio();
+    const view = renderStudio();
 
     expect(await screen.findByTestId("studio-post-unlock-shell")).toBeInTheDocument();
     expect(screen.getByText("You’re unlocked. Generate your documents.")).toBeInTheDocument();
@@ -150,6 +150,8 @@ describe("Studio post-unlock outcome shell", () => {
         }),
       ).toBe(true);
     });
+
+    view.unmount();
   });
 
   it("shows improved_still_blocked and routes to evidence on primary CTA", async () => {
@@ -190,7 +192,7 @@ describe("Studio post-unlock outcome shell", () => {
     });
     setFetchImplementation(fetchMock);
 
-    renderStudio();
+    const view = renderStudio();
 
     expect(await screen.findByText("You made progress, but one blocker remains.")).toBeInTheDocument();
     expect(screen.queryByTestId("studio-generation-readiness")).toBeNull();
@@ -202,6 +204,8 @@ describe("Studio post-unlock outcome shell", () => {
     });
     const pushedHref = String(mockRouterPush.mock.calls.at(-1)?.[0] ?? "");
     expect(pushedHref).toContain("/fit-review");
+
+    view.unmount();
   });
 
   it("shows no_material_change and retries reanalysis from secondary CTA", async () => {
@@ -245,7 +249,7 @@ describe("Studio post-unlock outcome shell", () => {
     });
     setFetchImplementation(fetchMock);
 
-    renderStudio();
+    const view = renderStudio();
 
     expect(await screen.findByText("That update didn’t change your readiness yet.")).toBeInTheDocument();
     expect(screen.getByTestId("studio-post-unlock-secondary")).toHaveTextContent("Try re-evaluating again");
@@ -256,6 +260,8 @@ describe("Studio post-unlock outcome shell", () => {
     const replacedHref = String(mockRouterReplace.mock.calls.at(-1)?.[0] ?? "");
     expect(replacedHref).toContain("postUnlock=1");
     expect(replacedHref).toContain("priorScore=77");
+
+    view.unmount();
   });
 
   it("shows reanalysis_failed when analysis hydration fails and supports retry", async () => {
@@ -290,7 +296,7 @@ describe("Studio post-unlock outcome shell", () => {
     });
     setFetchImplementation(fetchMock);
 
-    renderStudio();
+    const view = renderStudio();
 
     expect(await screen.findByText("Re-evaluation failed.")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("studio-post-unlock-primary"));
@@ -298,6 +304,7 @@ describe("Studio post-unlock outcome shell", () => {
     await waitFor(() => expect(mockRouterReplace).toHaveBeenCalled());
     const replacedHref = String(mockRouterReplace.mock.calls.at(-1)?.[0] ?? "");
     expect(replacedHref).toContain("postUnlock=1");
+
+    view.unmount();
   });
 });
-

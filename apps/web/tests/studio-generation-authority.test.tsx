@@ -1221,18 +1221,24 @@ function renderStudio(
 
 function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   const stringBody = typeof body === "string" ? body : JSON.stringify(body);
-  const response = {
+  const response: {
+    ok: boolean;
+    status: number;
+    headers: { get: () => string };
+    json: () => Promise<unknown>;
+    text: () => Promise<string>;
+    blob: () => Promise<Blob>;
+    clone: () => unknown;
+  } = {
     ok,
     status,
     headers: { get: () => "application/json" },
     json: () => Promise.resolve(body),
     text: () => Promise.resolve(stringBody),
     blob: () => Promise.resolve(new Blob([stringBody], { type: "application/json" })),
+    clone: () => response,
   };
-  return {
-    ...response,
-    clone: () => ({ ...response }),
-  };
+  return response;
 }
 
 function setupFetch(

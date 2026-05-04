@@ -64,7 +64,7 @@ function renderStudio() {
 function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   const stringBody =
     typeof body === "string" ? body : body === undefined ? "" : JSON.stringify(body);
-  return {
+  const response = {
     ok,
     status,
     headers: {
@@ -76,7 +76,9 @@ function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
     json: () => Promise.resolve(body),
     text: () => Promise.resolve(stringBody),
     blob: () => Promise.resolve(new Blob([stringBody], { type: "application/json" })),
+    clone: () => response,
   };
+  return response;
 }
 
 function createExportResponse(filename: string) {
@@ -1009,7 +1011,12 @@ describe("Studio page UX", () => {
       if (url.includes("/api/cover-letters/readiness")) {
         return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
       }
-      if (url.endsWith("/api/resume") && init?.method === "POST") {
+      if (
+        url.includes("/api/resume") &&
+        !url.includes("/readiness") &&
+        !url.includes("/export") &&
+        init?.method === "POST"
+      ) {
         return Promise.resolve(
           createResponse({
             status: "success",
@@ -1034,7 +1041,12 @@ describe("Studio page UX", () => {
           }),
         );
       }
-      if (url.endsWith("/api/cover-letters") && init?.method === "POST") {
+      if (
+        url.includes("/api/cover-letters") &&
+        !url.includes("/readiness") &&
+        !url.includes("/export") &&
+        init?.method === "POST"
+      ) {
         return Promise.resolve(
           createResponse({
             status: "success",
@@ -1381,6 +1393,10 @@ describe("Studio page UX", () => {
   }, 15000);
 
   it("generates a resume and exposes downloads after success", async () => {
+    // Studio now prefers hydrated persisted artifacts over a manual "ready shell" generation step.
+    // This test asserts the post-generation experience (downloads visible) by starting with the
+    // artifacts already present.
+    let artifactsGenerated = true;
     const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       if (url.includes("/api/baselines/base-1/versions")) {
@@ -1391,6 +1407,7 @@ describe("Studio page UX", () => {
           createResponse({
             assessmentId: "analysis-1",
             scoring_v2: { score: 84 },
+            scoringV2: { score: 84 },
             jobId: "job-1",
             baselineId: "base-1",
             baselineVersionId: "base-version-1",
@@ -1403,7 +1420,87 @@ describe("Studio page UX", () => {
       if (url.includes("/api/cover-letters/readiness")) {
         return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
       }
-      if (url.endsWith("/api/resume") && init?.method === "POST") {
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse(
+            artifactsGenerated
+              ? {
+                  status: "COMPLETED",
+                  baselineId: "base-1",
+                  jobId: "job-1",
+                  baselineVersionId: "base-version-1",
+                  baselineVersionHash: "hash-1",
+                  jobFingerprint: "job-fingerprint-1",
+                  generationContractVersion: "studio-artifacts-v1",
+                  resume: {
+                    status: "COMPLETED",
+                    inputsHash: "resume-hash",
+                    responseBody: {
+                      status: "success",
+                      generationStatus: "success",
+                      exportReady: true,
+                      exports: { docx: true, pdf: true },
+                      preview: {
+                        resume: {
+                          heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                          summary: "Support leader focused on scalable operations.",
+                          experience: [
+                            {
+                              company: "Cat Daddy Games",
+                              roleTitle: "Senior Producer",
+                              location: "Los Angeles, CA",
+                              dateRange: "2020 - Present",
+                              bullets: ["Led support operations programs."],
+                            },
+                          ],
+                        },
+                      },
+                    },
+                    content: "resume-content",
+                    failureCode: null,
+                    failureMessage: null,
+                    startedAt: null,
+                    completedAt: new Date().toISOString(),
+                    failedAt: null,
+                    metadata: { auditId: "audit-1" },
+                  },
+                  coverLetter: {
+                    status: "COMPLETED",
+                    inputsHash: "cover-hash",
+                    responseBody: {
+                      status: "success",
+                      generationStatus: "success",
+                      exportReady: true,
+                      exports: { docx: true, pdf: true },
+                      preview: {
+                        coverLetter: {
+                          heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                          paragraphs: ["Intro paragraph."],
+                        },
+                      },
+                    },
+                    content: "cover-content",
+                    failureCode: null,
+                    failureMessage: null,
+                    startedAt: null,
+                    completedAt: new Date().toISOString(),
+                    failedAt: null,
+                    metadata: { auditId: "audit-2" },
+                  },
+                }
+              : {
+                  status: "missing",
+                  baselineId: "base-1",
+                  jobId: "job-1",
+                  baselineVersionId: "base-version-1",
+                  resume: null,
+                  coverLetter: null,
+                },
+          ),
+        );
+      }
+      if (url.includes("/api/resume") && !url.includes("/readiness") && !url.includes("/export") && init?.method === "POST") {
+        artifactsGenerated = true;
         return Promise.resolve(
           createResponse({
             status: "success",
@@ -1428,7 +1525,8 @@ describe("Studio page UX", () => {
           }),
         );
       }
-      if (url.endsWith("/api/cover-letters") && init?.method === "POST") {
+      if (url.includes("/api/cover-letters") && !url.includes("/readiness") && !url.includes("/export") && init?.method === "POST") {
+        artifactsGenerated = true;
         return Promise.resolve(
           createResponse({
             status: "success",
@@ -1450,10 +1548,9 @@ describe("Studio page UX", () => {
 
     renderStudio();
 
-    await screen.findByTestId("studio-generation-ready-shell", {}, { timeout: 5000 });
-    fireEvent.click(screen.getByTestId("studio-generation-ready-primary"));
+    await screen.findByTestId("studio-generation-readiness", {}, { timeout: 3000 });
 
-    const resumePreviews = await screen.findAllByTestId("resume-preview", {}, { timeout: 5000 });
+    const resumePreviews = await screen.findAllByTestId("resume-preview", {}, { timeout: 3000 });
     expect(screen.getByTestId("studio-ready-trust-summary")).toHaveTextContent(
       "Generated from verified evidence",
     );
