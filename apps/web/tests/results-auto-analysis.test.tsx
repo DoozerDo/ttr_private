@@ -351,7 +351,7 @@ describe("results auto analysis loading", () => {
       );
     });
     expect(authority.querySelector("[data-testid='results-hero-primary-cta']")?.textContent ?? "").toContain(
-      "Open workspace",
+      "Generate documents",
     );
   });
 

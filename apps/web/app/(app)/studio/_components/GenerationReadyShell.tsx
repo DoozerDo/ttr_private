@@ -77,7 +77,7 @@ export function GenerationReadyShell(props: {
           testId: "studio-generation-ready-primary",
         }}
         secondaryAction={{
-          label: "Open workspace",
+          label: "Generate documents",
           onClick: props.onOpenWorkspace,
           disabled: disable,
           testId: "studio-generation-ready-secondary",
@@ -94,12 +94,12 @@ export function GenerationReadyShell(props: {
       model={{
         canonicalState: "generation_ready",
         headline: "You're ready to generate",
-        body: "Your latest evidence cleared the blocker. Starting generation automatically...",
+        body: "Your baseline and fit score meet the requirements. Generate your documents when you're ready.",
         trustTone: "ready",
       }}
       supporting={supporting}
       secondaryAction={{
-        label: "Open workspace",
+        label: "Generate documents",
         onClick: props.onOpenWorkspace,
         disabled: disable,
         testId: "studio-generation-ready-secondary",
