@@ -31,10 +31,22 @@ function textResponse(body: string, ok = false, status = 500): Response {
 }
 
 describe("BaselineDetailPage", () => {
+  beforeEach(() => {
+    process.env.API_BASE_URL = "http://upstream.test";
+  });
+
+  afterEach(() => {
+    delete process.env.API_BASE_URL;
+    delete process.env.NEXT_PUBLIC_API_BASE_URL;
+    delete process.env.NEXT_PUBLIC_API_URL;
+    delete process.env.API_URL;
+    delete process.env.BACKEND_API_BASE_URL;
+  });
+
   it("loads a valid baseline using the canonical route id", async () => {
     const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
-      expect(url).toContain("/api/baselines/base-1");
+      expect(url).toContain("/baselines/base-1");
       return jsonResponse({
         id: "base-1",
         userId: "user-1",

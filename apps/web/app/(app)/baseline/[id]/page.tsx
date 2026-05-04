@@ -5,9 +5,12 @@ import { notFound } from "next/navigation";
 import { Alert } from "@/components/Alert";
 import { RetryButton } from "@/components/RetryButton";
 import type { BaselineDto, BaselineSectionDto } from "@/lib/baselines";
+import { AUTH_COOKIE_NAME } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format-date";
 import { sanitizeRenderedTextValue } from "@/lib/renderedText";
 import { getBaselineDetailsHref } from "@/src/navigation/routes";
+import { backendFetch } from "@/app/api/_lib/backendFetch";
+import { getRequiredServerApiBaseUrl, UpstreamApiConfigError } from "@/app/api/_lib/serverApiConfig";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -78,6 +81,21 @@ async function getRequestContext() {
   };
 }
 
+function extractCookieValue(cookieHeader: string | null | undefined, name: string) {
+  if (!cookieHeader) return "";
+  // Fast path for simple cookie strings (avoid bringing in a full parser in RSC code).
+  const parts = cookieHeader.split(";").map((part) => part.trim());
+  for (const part of parts) {
+    if (!part) continue;
+    const eqIndex = part.indexOf("=");
+    if (eqIndex <= 0) continue;
+    const key = part.slice(0, eqIndex).trim();
+    if (key !== name) continue;
+    return decodeURIComponent(part.slice(eqIndex + 1).trim());
+  }
+  return "";
+}
+
 function extractErrorMessage(bodyText: string, status: number) {
   if (!bodyText.trim()) {
     return null;
@@ -130,12 +148,51 @@ async function fetchBaseline(id: string): Promise<BaselineDetailResult> {
     field: "params.id",
   });
   const resolvedId = requestedId;
-  const { baseUrl, fetchOptions, authState } = await getRequestContext();
+  const { authState, fetchOptions } = await getRequestContext();
+  const cookieHeader = (fetchOptions.headers as { cookie?: string } | undefined)?.cookie ?? null;
+  const token =
+    extractCookieValue(cookieHeader, AUTH_COOKIE_NAME) ||
+    extractCookieValue(cookieHeader, "ttr_token");
 
   try {
-    const response = await fetch(
-      new URL(`/api/baselines/${encodeURIComponent(resolvedId)}`, baseUrl).toString(),
-      fetchOptions,
+    let upstreamBaseUrl: string;
+    try {
+      upstreamBaseUrl = getRequiredServerApiBaseUrl();
+    } catch (error) {
+      const configError =
+        error instanceof UpstreamApiConfigError ? error : null;
+      const internalMessage = configError
+        ? `${configError.code}: ${configError.message}`
+        : error instanceof Error
+          ? error.message
+          : String(error);
+
+      logDetailLoadFailure({
+        requestedId,
+        resolvedId,
+        status: null,
+        failureClass: "server_error",
+        authState,
+        message: internalMessage,
+      });
+
+      return {
+        kind: "error",
+        errorKind: "server_error",
+        requestedId,
+        resolvedId,
+        status: null,
+        internalMessage,
+      };
+    }
+
+    const response = await backendFetch(
+      `${upstreamBaseUrl}/baselines/${encodeURIComponent(resolvedId)}`,
+      {
+        method: "GET",
+        cache: "no-store",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      },
     );
 
     if (response.ok) {
@@ -244,10 +301,26 @@ async function fetchBaseline(id: string): Promise<BaselineDetailResult> {
       }
     }
 
+    let errorKind: BaselineDetailErrorKind = "server_error";
+
+    // Treat controlled upstream connection failures as network errors (even though we have an HTTP response).
+    if (response.status === 503) {
+      const contentType = response.headers.get("content-type") ?? "";
+      if (contentType.toLowerCase().includes("application/json")) {
+        try {
+          const payload = (await response.clone().json()) as { error?: unknown; message?: unknown };
+          if (payload?.error === "UPSTREAM_UNAVAILABLE") {
+            errorKind = "network_error";
+          }
+        } catch {
+          // ignore payload parse failures; fall back to server_error
+        }
+      }
+    }
+
     const bodyText = await response.text().catch(() => "");
     const internalMessage = extractErrorMessage(bodyText, response.status);
 
-    let errorKind: BaselineDetailErrorKind = "server_error";
     if (response.status === 404) {
       errorKind = "not_found";
     } else if (response.status === 401 || response.status === 403) {
