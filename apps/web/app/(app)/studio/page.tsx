@@ -2931,43 +2931,59 @@ export default function StudioPage() {
       ? artifactContract.results.resume.actions.canExport
       : resumePresenter.status === "success" && hasResumeArtifact && resumeQualityPass);
   const isResumeDownloadLocked = !isPro;
-  const canExportResume = artifactContract.results.resume
-    ? artifactContract.results.resume.actions.canExport
-    : artifactContract.resumeExportAvailable && resumeQuality.exportable;
+  // Studio is execution-only. Baseline eligibility is the only gating authority.
+  // Template readiness / evidence readiness must not block generation or export in Studio.
+  const canGenerate = useMemo(() => {
+    const resolvedBaselineId =
+      (typeof effectiveBaselineId === "string" && effectiveBaselineId.trim()
+        ? effectiveBaselineId
+        : typeof selectedBaselineId === "string" && selectedBaselineId.trim()
+          ? selectedBaselineId
+          : typeof requestedBaselineId === "string"
+            ? requestedBaselineId
+            : "") || "";
+    const resolvedBaselineVersionId =
+      (typeof effectiveBaselineVersionId === "string" && effectiveBaselineVersionId.trim()
+        ? effectiveBaselineVersionId
+        : typeof selectedBaselineVersionId === "string" && selectedBaselineVersionId.trim()
+          ? selectedBaselineVersionId
+          : typeof requestedBaselineVersionId === "string"
+            ? requestedBaselineVersionId
+            : "") || "";
+    const baselineExists = Boolean(resolvedBaselineId.trim()) && Boolean(resolvedBaselineVersionId.trim());
+    const score = typeof analysisScore === "number" ? analysisScore : null;
+    return baselineExists && typeof score === "number" && score >= 80;
+  }, [
+    analysisScore,
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    requestedBaselineId,
+    requestedBaselineVersionId,
+    selectedBaselineId,
+    selectedBaselineVersionId,
+  ]);
+
+  const canExportResume = canGenerate;
   const resumePreviewText = useMemo(
     () => formatPreview(artifactContract.normalized.resumeResponse) || readArtifactTextFallback(artifactContract.normalized.resumeResponse),
     [artifactContract.normalized.resumeResponse],
   );
 
-  const baselineTemplateReadinessSignal = useMemo(() => {
-    const readiness = String(studioArtifactsPayload?.artifactReadiness ?? "");
-    const reasons = studioArtifactsPayload?.artifactReadinessReasons;
-    const details = studioArtifactsPayload?.artifactReadinessReasonDetails;
-    const hasReason =
-      (Array.isArray(reasons) && reasons.includes("baseline_template_not_ready")) ||
-      (Array.isArray(details) && details.some((detail) => String((detail as any)?.code ?? "") === "baseline_template_not_ready"));
-
-    const templateDetail = Array.isArray(details)
-      ? details.find((detail) => String((detail as any)?.code ?? "") === "baseline_template_not_ready")
-      : null;
-    const detailStats = templateDetail && typeof (templateDetail as any)?.details === "object" ? (templateDetail as any).details : null;
-    const validExperience =
-      detailStats && typeof (detailStats as any).validExperience === "number"
-        ? (detailStats as any).validExperience
-        : detailStats && typeof (detailStats as any)?.stats?.validExperience === "number"
-          ? (detailStats as any).stats.validExperience
-          : null;
-    const usableEvidenceExists = typeof validExperience === "number" ? validExperience > 0 : false;
-    return {
-      readiness,
-      hasReason,
-      usableEvidenceExists,
-      hardBlocked: readiness === "blocked" && hasReason && !usableEvidenceExists,
-      degraded: readiness === "degraded" && hasReason,
-    };
-  }, [studioArtifactsPayload]);
+  // Legacy readiness/template/evidence gating must not block Studio execution.
+  // Keep a neutral signal to avoid refactors cascading through the file.
+  const baselineTemplateReadinessSignal = useMemo(
+    () => ({
+      readiness: "ready",
+      hasReason: false,
+      usableEvidenceExists: true,
+      hardBlocked: false,
+      degraded: false,
+    }),
+    [],
+  );
 
   const resumeHardRenderBlocked = useMemo(() => {
+    if (canGenerate) return { blocked: false, reason: "ok" as const };
     const qualityStatus = String(resumeResult?.qualityStatus ?? "");
     if (qualityStatus && qualityStatus !== "pass") return { blocked: true, reason: "qualityStatus_not_pass" as const };
 
@@ -2978,10 +2994,6 @@ export default function StudioPage() {
       return { blocked: true, reason: "resume_v2_quality_gate_failed" as const };
     }
 
-    if (baselineTemplateReadinessSignal.hardBlocked) {
-      return { blocked: true, reason: "baseline_template_not_ready" as const };
-    }
-
     const backendFailureCode = String((studioArtifactsPayload as any)?.resume?.failureCode ?? "");
     if (backendFailureCode) return { blocked: true, reason: "backendRecord_failureCode" as const };
 
@@ -2989,7 +3001,7 @@ export default function StudioPage() {
 
     return { blocked: false, reason: "ok" as const };
   }, [
-    baselineTemplateReadinessSignal.hardBlocked,
+    canGenerate,
     resumeResult?.correctionReasons,
     resumeResult?.qualityStatus,
     resumeState.artifactFailure,
@@ -3074,9 +3086,9 @@ export default function StudioPage() {
         (baselineTemplateReadinessSignal.hasReason && !baselineTemplateReadinessSignal.hardBlocked),
     );
     const hasDegradedReadiness = String(studioArtifactsPayload?.artifactReadiness ?? "") === "degraded";
-    const blocked = Boolean(activeGenerationReadiness.blocked || baselineTemplateReadinessSignal.hardBlocked);
-    const degraded =
-      !blocked &&
+    const blockedBySignals = Boolean(activeGenerationReadiness.blocked || baselineTemplateReadinessSignal.hardBlocked);
+    const degradedBySignals =
+      !blockedBySignals &&
       Boolean(
         hasDegradedReadiness ||
           hasBaselineTemplateWarning ||
@@ -3085,7 +3097,15 @@ export default function StudioPage() {
           hasArtifactRefinementRequired,
       );
 
-    const state: "ready" | "degraded" | "blocked" = blocked ? "blocked" : degraded ? "degraded" : "ready";
+    // Studio must not pre-block generation when the single eligibility gate is satisfied.
+    // These signals remain available as non-blocking quality warnings only.
+    const state: "ready" | "degraded" | "blocked" = canGenerate
+      ? "ready"
+      : blockedBySignals
+        ? "blocked"
+        : degradedBySignals
+          ? "degraded"
+          : "ready";
 
     return {
       state,
@@ -3098,6 +3118,7 @@ export default function StudioPage() {
   }, [
     activeGenerationReadiness.blocked,
     analysis,
+    canGenerate,
     baselineTemplateReadinessSignal.degraded,
     baselineTemplateReadinessSignal.hardBlocked,
     baselineTemplateReadinessSignal.hasReason,
@@ -3227,30 +3248,8 @@ export default function StudioPage() {
     resumeState.response,
   ]);
 
-  const canGenerateWithUsableEvidence = useMemo(() => {
-    if (pairWorkflowState.canGenerate) return true;
-    if (!baselineTemplateReadinessSignal.usableEvidenceExists) return false;
-    if (baselineTemplateReadinessSignal.hardBlocked) return false;
-    if (!hasLoadedAnalysis) return false;
-    if (!requestedAnalysisId?.trim()) return false;
-    if (!effectiveBaselineId?.trim()) return false;
-    if (!effectiveBaselineVersionId?.trim()) return false;
-    if (!effectiveJobId?.trim()) return false;
-    if (activeGenerationReadiness.blocked) return false;
-    return true;
-  }, [
-    activeGenerationReadiness.blocked,
-    baselineTemplateReadinessSignal.hardBlocked,
-    baselineTemplateReadinessSignal.usableEvidenceExists,
-    effectiveBaselineId,
-    effectiveBaselineVersionId,
-    effectiveJobId,
-    hasLoadedAnalysis,
-    pairWorkflowState.canGenerate,
-    requestedAnalysisId,
-  ]);
-
-  const canGenerateDocuments = canGenerateWithUsableEvidence;
+  const canGenerateWithUsableEvidence = canGenerate;
+  const canGenerateDocuments = canGenerate;
   const generationLifecycle = useMemo(
     () =>
       resolvePairGenerationLifecycle({
@@ -4152,12 +4151,7 @@ export default function StudioPage() {
       advanceStep("GENERATE");
     }
   }, [advanceStep, isGuidedActive, primaryNextAction.type]);
-  const canExportCover =
-    canExportDocuments &&
-    coverPresenter.status === "success" &&
-    hasCoverLetterArtifact &&
-    !coverLetterComplianceBlocked &&
-    coverLetterQuality.exportable;
+  const canExportCover = canGenerate;
   const showCoverDownloadActions =
     Boolean(coverLetterComplianceBlocked) ||
     coverPresenter.status === "blocked" ||
@@ -9313,7 +9307,7 @@ export default function StudioPage() {
   const canonicalStudioReadinessMessage =
     activeGenerationReadiness.status === "ready" && !activeGenerationReadiness.blocked
       ? "You're ready to generate"
-      : "Add more verified experience";
+      : "Review your fit";
 
   const postUnlockNewReadiness: PostUnlockReadiness | null =
     hasLoadedAnalysis
@@ -9510,14 +9504,19 @@ export default function StudioPage() {
 
   const generationReadyModel = workflowOrchestratorCore.generationReadyState.model;
 
-  const generationReadyShellActive =
-    !generationReadyDismissed &&
-    !isApplicationApplied &&
-    !showReadinessRecoveryExperience &&
-    !activeGenerationReadiness.blocked &&
-    workflowOrchestratorCore.authorityState.canonicalState !== "generation_in_progress" &&
-    generationReadyPhase !== "generating" &&
-    (generationReadyModel.isGenerationReadyPriority || generationReadyPhase === "failed");
+  const generationReadyShellActive = canGenerate
+    ? !generationReadyDismissed &&
+      !isApplicationApplied &&
+      !showReadinessRecoveryExperience &&
+      workflowOrchestratorCore.authorityState.canonicalState !== "generation_in_progress" &&
+      generationReadyPhase !== "generating"
+    : !generationReadyDismissed &&
+      !isApplicationApplied &&
+      !showReadinessRecoveryExperience &&
+      !activeGenerationReadiness.blocked &&
+      workflowOrchestratorCore.authorityState.canonicalState !== "generation_in_progress" &&
+      generationReadyPhase !== "generating" &&
+      (generationReadyModel.isGenerationReadyPriority || generationReadyPhase === "failed");
 
   const suppressGeneratingMessaging = showReadinessRecoveryExperience || activeGenerationReadiness.blocked;
   const workflowActivityBannerTracker = suppressGeneratingMessaging
@@ -9621,7 +9620,7 @@ export default function StudioPage() {
       return {
         category: "generation_blocked",
         retryable: false,
-        message: "Generation is blocked. Add more verified evidence to unlock document generation.",
+        message: "Generation is unavailable for this role.",
       };
     }
 
@@ -10967,7 +10966,7 @@ export default function StudioPage() {
             ? "Ready to generate"
             : generationState === "degraded"
               ? "This role is a partial match"
-              : "Generation is blocked";
+              : "Review your fit";
 
         return (
           <Alert intent={bannerIntent} title={bannerTitle}>
@@ -11049,7 +11048,7 @@ export default function StudioPage() {
 
               {generationState === "blocked" ? (
                 <p data-testid="studio-generation-state-blocked" className="text-sm text-slate-100">
-                  Generation is blocked because we don’t yet have enough verified, structured examples to generate reliable documents.
+                  Document generation is unavailable for this role.
                 </p>
               ) : null}
             </div>
@@ -11849,48 +11848,6 @@ export default function StudioPage() {
           Generate, preview, and export your resume and cover letter.
         </p>
       </section>
-      {baselineTemplateReadinessSignal.hardBlocked ? (
-        <section
-          className="space-y-3 rounded-2xl border border-amber-300/30 bg-amber-500/10 p-5 text-amber-50 shadow"
-          data-testid="studio-baseline-template-blocked-panel"
-        >
-          <div className="space-y-1">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-100">Blocked</p>
-            <h3 className="text-lg font-semibold text-amber-50">
-              Your baseline needs strengthening before documents can be generated.
-            </h3>
-            <p className="text-sm text-amber-50/90">
-              We found enough information to score this role, but not enough clean, template-ready experience evidence
-              to generate reliable documents.
-            </p>
-            <p className="text-sm text-amber-50/80">
-              Use Fit Review to add or clarify the missing experience details, then Studio will generate your resume and
-              cover letter automatically.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <Link
-              href={fitReviewHref}
-              className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
-              data-testid="studio-template-blocked-fit-review-cta"
-            >
-              Go to Fit Review
-            </Link>
-          </div>
-        </section>
-      ) : null}
-      {baselineTemplateReadinessSignal.degraded ? (
-        <div
-          className="rounded-2xl border border-amber-300/25 bg-amber-500/5 px-4 py-3 text-sm text-amber-50"
-          data-testid="studio-baseline-template-degraded-banner"
-        >
-          We generated documents using your cleanest verified experience. Some resume sections need review.{" "}
-          <Link href={fitReviewHref} className="font-semibold underline underline-offset-4">
-            Improve in Fit Review
-          </Link>
-        </div>
-      ) : null}
-      {!baselineTemplateReadinessSignal.hardBlocked ? (
       <>
       <section
         ref={(node) => {
@@ -12510,7 +12467,7 @@ export default function StudioPage() {
                 <div className="space-y-1">
                   <p className="text-sm font-semibold text-amber-100">Cover letter generation is blocked</p>
                   <p className="text-sm text-slate-200">
-                    Add more verified experience to generate a complete cover letter.
+                    Review your fit to generate a complete cover letter.
                   </p>
                 </div>
                 <div className="flex justify-end">
@@ -12551,7 +12508,7 @@ export default function StudioPage() {
                 <div className="space-y-1">
                   <p className="text-sm font-semibold text-amber-100">Cover letter generation is blocked</p>
                   <p className="text-sm text-slate-200">
-                    Add more verified experience to generate a complete cover letter.
+                    Review your fit to generate a complete cover letter.
                   </p>
                 </div>
                 <div className="flex justify-end">
@@ -12714,7 +12671,7 @@ export default function StudioPage() {
                 <div className="space-y-3 rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4">
                   <p className="text-sm font-semibold text-amber-100">Cover letter generation is blocked</p>
                   <p className="text-sm text-slate-200">
-                    Add more verified experience to generate a complete cover letter.
+                    Review your fit to generate a complete cover letter.
                   </p>
                   <div className="flex justify-end">
                     <FormButton
@@ -12785,8 +12742,7 @@ export default function StudioPage() {
           )
         ) : null}
       </section> 
-      </> 
-      ) : null}
+      </>
       {isReadySuccessState && artifactQuality.confidence === "LOW" ? (
         <section
           className="rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4"

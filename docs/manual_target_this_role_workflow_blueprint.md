@@ -304,17 +304,13 @@ The evidence must not appear in generated materials.
 
 The CX Fit Score measures role compatibility.
 
-Evidence readiness measures whether the app has enough verified and structured content to generate truthful materials.
+Evidence and compliance checks are enforced during baseline creation and scoring.
 
-These are related but not identical.
+After baseline creation + scoring, Studio is execution only: it must not introduce a second eligibility gate based on evidence readiness, template readiness, structured examples, or normalized model completeness.
 
-A candidate can be a strong fit even if the parser did a poor job extracting structured evidence.
+If the system has a valid baseline and calculates a CX Fit Score of 80 or higher, the user is eligible for usable resume and cover letter generation.
 
-The score must not be lowered to hide parser weakness.
-
-The app must not punish the candidate because the extraction pipeline failed.
-
-Instead, the system should improve evidence interpretation and readiness handling.
+The score must not be lowered to hide parser weakness. The app must not punish the candidate because the extraction pipeline failed.
 
 ## 15. CX Fit Score rule
 
@@ -375,7 +371,7 @@ Use this product behavior:
 
 1. Apply
 
-The role aligns strongly with the candidate's verified background. Generate materials if readiness permits.
+The role aligns strongly with the candidate's verified background. Generate materials when the user is eligible.
 
 2. Consider
 
@@ -538,7 +534,7 @@ Return Strong, Moderate, or Borderline, plus Apply, Consider, or Skip.
 
 Step 8. Evaluate evidence readiness
 
-Decide whether generation is ready, degraded, or blocked based on usable evidence.
+Compute evidence/readiness signals for quality and audit purposes, but do not use them as a Studio eligibility gate.
 
 Step 9. Generate if allowed
 
@@ -550,11 +546,13 @@ Record which evidence was used, how it was supported, what constraints applied, 
 
 Step 11. Return materials or guidance
 
-If ready, return strong drafts. If degraded, return truthful drafts and improvement guidance. If blocked, explain what evidence is missing and ask for targeted details.
+If the baseline is unusable, unreadable, unsupported, or unsafe, the workflow must fail before Studio.
+
+Once a user reaches Studio with a valid baseline and CX Fit Score >= 80, generation and export must proceed. Any readiness/evidence/compliance diagnostics may be shown as non-blocking guidance only.
 
 ## 26. Ready, degraded, and blocked behavior
 
-Readiness is not the same as scoring.
+Readiness is not the same as scoring, and it is not a Studio gate.
 
 1. Ready
 
@@ -574,15 +572,15 @@ Allow generation. Use constrained language. Tell the user the draft is truthful 
 
 3. Blocked
 
-There is no meaningful usable evidence, or every relevant evidence item is unusable.
+The baseline is unusable, unreadable, unsupported, or unsafe and must be rejected before Studio.
 
 Behavior:
 
-Do not generate. Explain exactly what evidence is missing. Ask for specific details that would unlock generation.
+Fail fast upstream (before Studio). Studio must not present a "generation blocked" state for users who have already passed baseline eligibility.
 
 Critical rule:
 
-Do not show Generation is blocked when valid verified experience exists and partial generation is possible.
+Studio must not show "Generation is blocked" messaging due to missing structured examples or evidence readiness once baseline eligibility has been met (valid baseline + CX Fit Score >= 80).
 
 ## 27. Degraded generation message
 
@@ -590,7 +588,7 @@ When readiness is degraded, use language like this:
 
 We found usable verified experience, but some areas are thin. We can generate truthful drafts using the strongest supported content. Add more detail later to improve quality.
 
-Do not use blocked language unless generation is genuinely blocked.
+This message is informational only and must not block generation or export in Studio once baseline eligibility is met.
 
 ## 28. Blocked generation message
 
@@ -599,6 +597,8 @@ When readiness is blocked, use language like this:
 Generation is blocked because the baseline does not contain enough usable verified experience for this target role. Add specific experience, tools, outcomes, or scope details so the system can generate without inventing claims.
 
 The system should also list the exact missing evidence categories.
+
+This is an upstream (pre-Studio) failure mode. Studio must not enforce this as a second gate after baseline eligibility.
 
 ## 29. Constrained language rules
 
@@ -913,7 +913,7 @@ Do not ask for confirmation unless:
 2. The target role is missing.
 3. The candidate identity is unclear.
 4. The user explicitly asks for analysis only.
-5. Generation is blocked by lack of usable evidence.
+5. Baseline creation/scoring failed because the baseline was unusable, unreadable, unsupported, or unsafe (this must be resolved before Studio).
 
 ## 46. When not to generate
 
@@ -924,11 +924,13 @@ Do not generate when:
 3. The candidate is a poor fit and generation would misrepresent them.
 4. The user requests no generation.
 5. The role requires unsupported must have experience that cannot be truthfully bridged.
-6. Evidence readiness is blocked.
+6. Baseline creation/scoring failed or was rejected upstream (pre-Studio).
 
 ## 47. Guided improvement behavior
 
 When generation is degraded or blocked, the system should help the user improve the baseline.
+
+Note: any blocked state must be determined upstream (before Studio). Studio must not act as a second eligibility gate after baseline eligibility has been met (valid baseline + CX Fit Score >= 80).
 
 Ask for targeted details, not vague requests.
 
@@ -997,7 +999,7 @@ Each engine needs inputs, outputs, tests, and audit behavior.
 7. ReadinessEvaluator creates ArtifactReadinessResult.
 8. Generator creates ResumeDraft and CoverLetterDraft if allowed.
 9. AuditBuilder creates ArtifactAudit.
-10. Studio displays result based on readiness.
+10. Studio displays results and execution controls based on baseline eligibility (valid baseline + CX Fit Score >= 80). Readiness is informational only and must not block generation or export in Studio once eligibility is met.
 
 ## 51. Suggested TypeScript style interfaces
 

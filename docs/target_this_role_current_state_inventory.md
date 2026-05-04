@@ -86,9 +86,10 @@ This document inventories how the repo works *today*, and where it diverges from
   - Readiness is derived from `evaluateBaselineTemplateReadiness(structured)`.
   - The service now ensures `validExperience` appears in reason details.
 
-**Current divergence risk vs blueprint**
-- Readiness is still anchored to “validExperience” derived from strict structured extraction.
-- Blueprint requires a new interpretation layer that can detect usable evidence even when structured parsing is weak, and use that for readiness decisions.
+**Contract note (authoritative)**
+- Baseline creation + CX Fit scoring is the only eligibility gate.
+- Any readiness/evidence/template/compliance signals must not act as separate Studio generation or export gates once the user has reached Studio.
+- If `baselineExists === true` and `cxFitScore >= 80`, Studio must allow resume generation, cover letter generation, and export.
 
 ## 6. Studio generation gating (current)
 
@@ -100,13 +101,13 @@ This document inventories how the repo works *today*, and where it diverges from
   - `artifactReadiness`, `artifactReadinessReasons`, `artifactReadinessReasonDetails`
 
 **Gating behavior**
-- Studio derives `usableEvidenceExists` from `artifactReadinessReasonDetails[*].details.validExperience` (or `.details.stats.validExperience`).
-- Studio uses a derived boolean (`canGenerateWithUsableEvidence`) to allow generation actions even when legacy workflow authority says REVIEW_REQUIRED, as long as there is usable evidence and no hard block.
-- Studio suppresses the blocked recovery panel and avoids placeholder “next” gaps when usable evidence exists.
+- Studio currently derives eligibility inputs from readiness/evidence/template signals (ex: `validExperience`, hard block reasons).
 
-**Blueprint alignment**
-- The recent Studio changes align the *UI gating* with backend evidence truth when backend reports usable evidence.
-- Remaining blueprint gap: backend must be able to report usable evidence even when structured parsing is weak (requires interpretation layer).
+**Required contract**
+- Studio is execution only and must not judge eligibility based on structured examples, evidence count, missing evidence reasons, normalized model completeness, or template readiness.
+- Studio eligibility must be derived only from:
+  - `baselineExists === true`
+  - `cxFitScore >= 80`
 
 ## 7. Audit metadata / trust & compliance (current)
 
@@ -137,11 +138,11 @@ This document inventories how the repo works *today*, and where it diverges from
 
 ### B) Partial evidence handling is incomplete
 - Current readiness uses structured experience headers as the main truth signal.
-- Blueprint requires partial evidence to unlock degraded generation (truthful but thinner) even when structure is imperfect.
+- Under the updated contract, partial/weak evidence handling is still important for quality and truthfulness, but it must not be used as a Studio gate once baseline eligibility is met.
 
 ### C) Readiness depends on parser success more than evidence truth
 - The extractor requires safe company+role headers; failure leads to `validExperience === 0`.
-- Blueprint requires readiness to reflect meaningful verified experience even when structure is messy.
+- The system should improve extraction and interpretation accuracy, but Studio must not block generation or export based on parser output when `baselineExists === true` and `cxFitScore >= 80`.
 
 ### D) Constrained generation rules are not modeled centrally
 - There are many compliance checks, but no explicit generation constraints derived from evidenceStrength (e.g., “never add metrics unless explicit” for partial evidence).
@@ -168,4 +169,3 @@ This document inventories how the repo works *today*, and where it diverges from
   - only block when evidence is truly unusable/absent
 
 No scoring changes.
-
