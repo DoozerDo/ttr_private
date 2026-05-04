@@ -142,6 +142,20 @@ describe("BaselineDetailPage", () => {
     expect(screen.getAllByRole("status")).toHaveLength(1);
   });
 
+  it("treats 200 invalid JSON as a server error (not a network error)", async () => {
+    setFetchImplementation(async () => textResponse("not-json", true, 200) as unknown as typeof fetch);
+
+    const element = await BaselineDetailPage({
+      params: Promise.resolve({ id: "base-1" }),
+      searchParams: {},
+    });
+    render(<>{element}</>);
+
+    expect(screen.queryByText("We couldn't reach the baseline service.")).toBeNull();
+    expect(screen.getByText("We couldn't load this baseline. Try again.")).toBeInTheDocument();
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+  });
+
   it("does not render duplicate fallback panels on error", async () => {
     setFetchImplementation(async () => textResponse("service down", false, 503) as unknown as typeof fetch);
 

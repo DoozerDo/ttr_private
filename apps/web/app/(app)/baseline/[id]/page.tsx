@@ -139,13 +139,109 @@ async function fetchBaseline(id: string): Promise<BaselineDetailResult> {
     );
 
     if (response.ok) {
-      const data = (await response.json()) as BaselineDto;
-      return {
-        kind: "success",
-        baseline: data,
-        requestedId,
-        resolvedId,
-      };
+      const contentType = response.headers.get("content-type") ?? "";
+      const isJson = contentType.toLowerCase().includes("application/json");
+
+      let rawBody = "";
+      try {
+        rawBody = await response.text();
+      } catch {
+        rawBody = "";
+      }
+
+      if (!isJson || !rawBody.trim()) {
+        const excerpt = rawBody.trim().slice(0, 280);
+        const internalMessage = [
+          "baseline_decode_failed",
+          `status=${response.status}`,
+          `contentType=${contentType || "unknown"}`,
+          excerpt ? `excerpt=${excerpt}` : "excerpt=<empty>",
+        ].join(" ");
+
+        logDetailLoadFailure({
+          requestedId,
+          resolvedId,
+          status: response.status,
+          failureClass: "server_error",
+          authState,
+          message: internalMessage,
+        });
+
+        return {
+          kind: "error",
+          errorKind: "server_error",
+          requestedId,
+          resolvedId,
+          status: response.status,
+          internalMessage,
+        };
+      }
+
+      try {
+        const parsed = JSON.parse(rawBody) as BaselineDto;
+        const hasId = typeof (parsed as { id?: unknown })?.id === "string";
+        const hasSections = Array.isArray((parsed as { sections?: unknown })?.sections);
+        if (!hasId || !hasSections) {
+          const internalMessage = [
+            "baseline_decode_failed",
+            `status=${response.status}`,
+            `contentType=${contentType || "unknown"}`,
+            "shape=invalid",
+          ].join(" ");
+
+          logDetailLoadFailure({
+            requestedId,
+            resolvedId,
+            status: response.status,
+            failureClass: "server_error",
+            authState,
+            message: internalMessage,
+          });
+
+          return {
+            kind: "error",
+            errorKind: "server_error",
+            requestedId,
+            resolvedId,
+            status: response.status,
+            internalMessage,
+          };
+        }
+
+        return {
+          kind: "success",
+          baseline: parsed,
+          requestedId,
+          resolvedId,
+        };
+      } catch (error) {
+        const excerpt = rawBody.trim().slice(0, 280);
+        const internalMessage = [
+          "baseline_decode_failed",
+          `status=${response.status}`,
+          `contentType=${contentType || "unknown"}`,
+          `error=${error instanceof Error ? error.message : String(error)}`,
+          excerpt ? `excerpt=${excerpt}` : "excerpt=<empty>",
+        ].join(" ");
+
+        logDetailLoadFailure({
+          requestedId,
+          resolvedId,
+          status: response.status,
+          failureClass: "server_error",
+          authState,
+          message: internalMessage,
+        });
+
+        return {
+          kind: "error",
+          errorKind: "server_error",
+          requestedId,
+          resolvedId,
+          status: response.status,
+          internalMessage,
+        };
+      }
     }
 
     const bodyText = await response.text().catch(() => "");

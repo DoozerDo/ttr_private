@@ -43,4 +43,47 @@ describe("baseline detail API route", () => {
       message: "Service temporarily unavailable. Please retry shortly.",
     });
   });
+
+  it("logs suspicious 200 non-JSON upstream responses for diagnostics", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchSpy = vi.fn(async () => {
+      return {
+        ok: true,
+        status: 200,
+        headers: {
+          get: (name: string) => (name.toLowerCase() === "content-type" ? "text/html; charset=utf-8" : null),
+          forEach: (cb: (value: string, key: string) => void) => {
+            cb("text/html; charset=utf-8", "content-type");
+          },
+        },
+        clone() {
+          return this;
+        },
+        text: async () => "<html><body>ok</body></html>",
+        arrayBuffer: async () => new TextEncoder().encode("<html><body>ok</body></html>").buffer,
+      } as unknown as Response;
+    });
+    setFetchImplementation(fetchSpy as unknown as typeof fetch);
+    process.env.API_BASE_URL = "http://upstream.test";
+
+    const request = new NextRequest("http://localhost/api/baselines/base-1", {
+      headers: {
+        cookie: "access_token=test-token",
+      },
+    });
+
+    const response = await GET(request, {
+      params: Promise.resolve({ baselineId: "base-1" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "baseline_proxy_suspicious_200_response",
+      expect.objectContaining({
+        baselineId: "base-1",
+        upstreamStatus: 200,
+        upstreamContentType: "text/html; charset=utf-8",
+      }),
+    );
+  });
 });
