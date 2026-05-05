@@ -8909,7 +8909,7 @@ export default function StudioPage() {
                       data-testid="studio-resume-preview-unavailable"
                     >
                       <div className="space-y-1">
-                        <p className="text-sm font-semibold text-slate-100">We hit an issue generating your resume.</p>
+                        <p className="text-sm font-semibold text-slate-100">Resume preview unavailable.</p>
                         <p className="text-sm text-slate-300">
                           Try regenerating it. If the issue continues, report it and we’ll review the artifact.
                         </p>
@@ -11491,7 +11491,7 @@ export default function StudioPage() {
               >
                 Review fit gaps
               </Link>
-            ) : (
+            ) : null && (
               <>
                 {workflowAuthority.primaryAction === "REVIEW" ? (
                   <Link
@@ -11967,7 +11967,7 @@ export default function StudioPage() {
         ) : null}
         {/* Resume download actions are rendered as buttons; no extra status line needed here. */}
 
-        {resumeNeedsRefinement && !resumeState.artifactFailure ? (
+        {false ? (
           <div
             className="space-y-2 rounded-2xl border border-amber-300/25 bg-amber-500/5 p-4"
             data-testid="studio-resume-quality-warning"
@@ -12048,7 +12048,7 @@ export default function StudioPage() {
           </Alert>
         ) : null}
 
-        {resumeState.artifactFailure ? (
+        {resumeState.artifactFailure || (!resumeQualityPass && hasRenderableResumeContent) ? (
           <div
             className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
             data-testid="studio-resume-artifact-issue"
@@ -12066,9 +12066,10 @@ export default function StudioPage() {
                   scrollToStudioTop("smooth");
                   void handleResumeDraft();
                 }}
+                disabled={resumeGenerating}
                 data-testid="studio-resume-regenerate-cta"
               >
-                Regenerate resume
+                {resumeGenerating ? "Regenerating resume..." : "Regenerate resume"}
               </FormButton>
             </div>
           </div>
@@ -12375,7 +12376,7 @@ export default function StudioPage() {
           <p className="text-xs text-slate-400">Download: DOCX | PDF</p>
         ) : null}
 
-        {coverNeedsRefinement && !coverState.artifactFailure ? (
+        {false ? (
           <div
             className="space-y-2 rounded-2xl border border-amber-300/25 bg-amber-500/5 p-4"
             data-testid="studio-cover-quality-warning"
@@ -12464,7 +12465,7 @@ export default function StudioPage() {
         ) : null}
         {/* Opportunities handoff is rendered below the resume preview for post-review flow. */}
 
-        {coverState.artifactFailure ? (
+        {coverState.artifactFailure || (!coverQualityPass && hasRenderableCoverLetterContent) ? (
           <div
             className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
             data-testid="studio-cover-artifact-issue"
@@ -12485,7 +12486,7 @@ export default function StudioPage() {
                 disabled={coverGenerating}
                 data-testid="studio-cover-regenerate-cta"
               >
-                Regenerate cover letter
+                {coverGenerating ? "Regenerating cover letter..." : "Regenerate cover letter"}
               </FormButton>
             </div>
           </div>
@@ -12535,7 +12536,7 @@ export default function StudioPage() {
                   {unlockGenerationConfirmation}
                 </p>
               ) : null}
-              {!coverQualityPass ? (
+              {false ? (
                 <div className="space-y-1">
                   <div data-testid="studio-cover-export-blocked-message">
                     <p className="text-sm font-semibold text-slate-100">We hit an issue generating your cover letter.</p>
