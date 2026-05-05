@@ -10887,7 +10887,6 @@ export default function StudioPage() {
           {canonicalStudioReadinessMessage}
         </p>
         <div
-          data-testid="studio-generation-ready-shell"
           data-workflow-shell="generation-ready-shell"
           data-workflow-state={workflowOrchestratorCore.authorityState.canonicalState}
           data-workflow-trust-tone={workflowOrchestratorCore.authorityState.trustTone}
