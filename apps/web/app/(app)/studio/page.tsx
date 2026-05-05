@@ -11491,7 +11491,7 @@ export default function StudioPage() {
               >
                 Review fit gaps
               </Link>
-            ) : null && (
+            ) : (
               <>
                 {workflowAuthority.primaryAction === "REVIEW" ? (
                   <Link
