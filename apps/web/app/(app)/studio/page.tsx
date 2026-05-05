@@ -8904,14 +8904,29 @@ export default function StudioPage() {
                       onAddExperienceEntry={handleAddResumeExperienceEntry}
                     />
                   ) : (
-                    <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
-                      <p className="text-sm font-semibold text-slate-100">Resume needs correction before export.</p>
-                      <p className="mt-1 text-sm text-slate-200">
-                        Review the flagged issue, edit the resume, or regenerate.
-                      </p>
-                      <p className="mt-1 text-xs text-slate-400">
-                        If this artifact was generated earlier, try regenerating to apply the latest improvements.
-                      </p>
+                    <div
+                      className="space-y-3 rounded-xl border border-white/10 bg-slate-950/40 p-3"
+                      data-testid="studio-resume-preview-unavailable"
+                    >
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold text-slate-100">We hit an issue generating your resume.</p>
+                        <p className="text-sm text-slate-300">
+                          Try regenerating it. If the issue continues, report it and we’ll review the artifact.
+                        </p>
+                      </div>
+                      <div className="flex justify-end">
+                        <FormButton
+                          variant="secondary"
+                          onClick={() => {
+                            scrollToStudioTop("smooth");
+                            void handleResumeDraft();
+                          }}
+                          disabled={resumeGenerating}
+                          data-testid="studio-resume-preview-unavailable-regenerate"
+                        >
+                          Regenerate resume
+                        </FormButton>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -11872,31 +11887,51 @@ export default function StudioPage() {
                     : "Resume needs refinement before export."
                   : renderCardStatus(resumeCardStatus, "Resume")}
             </p>
-            {(() => {
-              const { generationMode, templateVersion } = readGenerationDebug(artifactContract.normalized.resumeResponse);
-              const score = typeof analysisScore === "number" ? analysisScore : null;
-              const artifactCurrent = score !== null && score >= 80 && generationMode === "structured_baseline_template";
-              const hasMissingStructuredBaseline = readMissingStructuredBaselineSignal(artifactContract.normalized.resumeResponse);
-              const reason = score !== null && score < 80
-                ? "below_80"
-                : score !== null && score >= 80 && hasMissingStructuredBaseline
-                  ? "missing_structured_baseline"
-                  : score !== null && score >= 80 && generationMode !== "structured_baseline_template"
-                    ? "stale_legacy"
-                    : "current";
-              return (
-                <div className="mt-1 text-[10px] leading-4 text-slate-500" data-testid="studio-resume-generation-source">
-                  <div>generationMode: {generationMode}</div>
-                  <div>templateVersion: {templateVersion}</div>
-                  <div>score: {score ?? "unknown"}</div>
-                  <div>artifact current: {String(artifactCurrent)}</div>
-                  <div>reason: {reason}</div>
-                  <div>structuredBaselineExperienceCount: {String((artifactContract as any)?.structuredBaselineExperienceCount ?? "unknown")}</div>
-                  <div>structuredBaselineMissingEvidenceReasons: {JSON.stringify((artifactContract as any)?.structuredBaselineMissingEvidenceReasons ?? [])}</div>
-                  <div>structuredBaselineExtractedExperiencePreview: {JSON.stringify((artifactContract as any)?.structuredBaselineExtractedExperiencePreview ?? [])}</div>
-                </div>
-              );
-            })()}
+            {process.env.NODE_ENV === "development"
+              ? (() => {
+                  const { generationMode, templateVersion } = readGenerationDebug(
+                    artifactContract.normalized.resumeResponse,
+                  );
+                  const score = typeof analysisScore === "number" ? analysisScore : null;
+                  const artifactCurrent =
+                    score !== null && score >= 80 && generationMode === "structured_baseline_template";
+                  const hasMissingStructuredBaseline = readMissingStructuredBaselineSignal(
+                    artifactContract.normalized.resumeResponse,
+                  );
+                  const reason =
+                    score !== null && score < 80
+                      ? "below_80"
+                      : score !== null && score >= 80 && hasMissingStructuredBaseline
+                        ? "missing_structured_baseline"
+                        : score !== null && score >= 80 && generationMode !== "structured_baseline_template"
+                          ? "stale_legacy"
+                          : "current";
+                  return (
+                    <div
+                      className="mt-1 text-[10px] leading-4 text-slate-500"
+                      data-testid="studio-resume-generation-source"
+                    >
+                      <div>generationMode: {generationMode}</div>
+                      <div>templateVersion: {templateVersion}</div>
+                      <div>score: {score ?? "unknown"}</div>
+                      <div>artifact current: {String(artifactCurrent)}</div>
+                      <div>reason: {reason}</div>
+                      <div>
+                        structuredBaselineExperienceCount:{" "}
+                        {String((artifactContract as any)?.structuredBaselineExperienceCount ?? "unknown")}
+                      </div>
+                      <div>
+                        structuredBaselineMissingEvidenceReasons:{" "}
+                        {JSON.stringify((artifactContract as any)?.structuredBaselineMissingEvidenceReasons ?? [])}
+                      </div>
+                      <div>
+                        structuredBaselineExtractedExperiencePreview:{" "}
+                        {JSON.stringify((artifactContract as any)?.structuredBaselineExtractedExperiencePreview ?? [])}
+                      </div>
+                    </div>
+                  );
+                })()
+              : null}
           </div>
           {shouldShowResumeRegenerateBlockedSafe ? (
             <FormButton
@@ -11932,25 +11967,28 @@ export default function StudioPage() {
         ) : null}
         {/* Resume download actions are rendered as buttons; no extra status line needed here. */}
 
-        {resumeNeedsRefinement ? (
+        {resumeNeedsRefinement && !resumeState.artifactFailure ? (
           <div
             className="space-y-2 rounded-2xl border border-amber-300/25 bg-amber-500/5 p-4"
             data-testid="studio-resume-quality-warning"
           >
-            <p className="text-sm font-semibold text-amber-100">Resume needs correction before export.</p>
-            <p className="text-xs text-slate-300">
-              If this artifact was generated earlier, try regenerating to apply the latest improvements.
+            <p className="text-sm font-semibold text-slate-100">We hit an issue generating your resume.</p>
+            <p className="text-sm text-slate-300">
+              Try regenerating it. If the issue continues, report it and we’ll review the artifact.
             </p>
-            {resumeQualityIssueSummary.visible.length ? (
-              <ul className="list-disc space-y-1 pl-5 text-sm text-slate-200">
-                {resumeQualityIssueSummary.visible.map((issue, index) => (
-                  <li key={`resume-quality-issue-${issue.code}-${index}`}>{issue.message}</li>
-                ))}
-              </ul>
-            ) : null}
-            {resumeQualityIssueSummary.remaining ? (
-              <p className="text-xs text-slate-300">and {resumeQualityIssueSummary.remaining} more</p>
-            ) : null}
+            <div className="flex justify-end pt-1">
+              <FormButton
+                variant="secondary"
+                onClick={() => {
+                  scrollToStudioTop("smooth");
+                  void handleResumeDraft();
+                }}
+                disabled={resumeGenerating}
+                data-testid="studio-resume-regenerate-cta"
+              >
+                Regenerate resume
+              </FormButton>
+            </div>
           </div>
         ) : null}
 
@@ -12011,41 +12049,29 @@ export default function StudioPage() {
         ) : null}
 
         {resumeState.artifactFailure ? (
-          hasCompletedGeneration ? (
-            <div
-              className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
-              data-testid="resume-partial-retry-panel"
-            >
-              <div className="space-y-1">
-                <p className="text-sm font-semibold text-slate-100">Resume generation needs a retry</p>
-                <p className="text-sm text-slate-300">
-                  We produced usable output for this role, but the resume draft needs one more generation pass to
-                  complete.
-                </p>
-                <p className="text-xs text-slate-400">{resumeState.artifactFailure.explanation}</p>
-              </div>
-              <div className="flex justify-end">
-                <FormButton
-                  variant="secondary"
-                  onClick={() => {
-                    scrollToStudioTop("smooth");
-                    void handleResumeDraft();
-                  }}
-                >
-                  Retry resume generation
-                </FormButton>
-              </div>
+          <div
+            className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
+            data-testid="studio-resume-artifact-issue"
+          >
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-slate-100">We hit an issue generating your resume.</p>
+              <p className="text-sm text-slate-300">
+                Try regenerating it. If the issue continues, report it and we’ll review the artifact.
+              </p>
             </div>
-          ) : (
-            <ArtifactFailureState
-              failure={resumeState.artifactFailure}
-              onRetry={() => {
-                scrollToStudioTop("smooth");
-                void handleResumeDraft();
-              }}
-              retryLabel="Retry resume generation"
-            />
-          )
+            <div className="flex justify-end">
+              <FormButton
+                variant="secondary"
+                onClick={() => {
+                  scrollToStudioTop("smooth");
+                  void handleResumeDraft();
+                }}
+                data-testid="studio-resume-regenerate-cta"
+              >
+                Regenerate resume
+              </FormButton>
+            </div>
+          </div>
         ) : null}
 
         {isResumeDownloadLocked ? (
@@ -12106,10 +12132,10 @@ export default function StudioPage() {
                   : "Your resume is ready. Download or refine below."}
               </p>
             ) : (
-              <div className="space-y-1">
-                <p className="text-sm font-semibold text-amber-100">Resume needs correction before export.</p>
-                <p className="text-sm text-slate-200">
-                  Review the flagged issue, edit the resume, or regenerate.
+              <div className="space-y-1" data-testid="studio-resume-export-blocked-message">
+                <p className="text-sm font-semibold text-slate-100">We hit an issue generating your resume.</p>
+                <p className="text-sm text-slate-300">
+                  Try regenerating it. If the issue continues, report it and we’ll review the artifact.
                 </p>
               </div>
             )}
@@ -12349,25 +12375,25 @@ export default function StudioPage() {
           <p className="text-xs text-slate-400">Download: DOCX | PDF</p>
         ) : null}
 
-        {coverNeedsRefinement ? (
+        {coverNeedsRefinement && !coverState.artifactFailure ? (
           <div
             className="space-y-2 rounded-2xl border border-amber-300/25 bg-amber-500/5 p-4"
             data-testid="studio-cover-quality-warning"
           >
-            <p className="text-sm font-semibold text-amber-100">Cover letter needs correction before export.</p>
-            <p className="text-xs text-slate-300">
-              If this artifact was generated earlier, try regenerating to apply the latest improvements.
+            <p className="text-sm font-semibold text-slate-100">We hit an issue generating your cover letter.</p>
+            <p className="text-sm text-slate-300">
+              Try regenerating it. If the issue continues, report it and we’ll review the artifact.
             </p>
-            {coverQualityIssueSummary.visible.length ? (
-              <ul className="list-disc space-y-1 pl-5 text-sm text-slate-200">
-                {coverQualityIssueSummary.visible.map((issue, index) => (
-                  <li key={`cover-quality-issue-${issue.code}-${index}`}>{issue.message}</li>
-                ))}
-              </ul>
-            ) : null}
-            {coverQualityIssueSummary.remaining ? (
-              <p className="text-xs text-slate-300">and {coverQualityIssueSummary.remaining} more</p>
-            ) : null}
+            <div className="flex justify-end pt-1">
+              <FormButton
+                variant="secondary"
+                onClick={() => void handleCoverDraft()}
+                disabled={coverGenerating}
+                data-testid="studio-cover-regenerate-cta"
+              >
+                Regenerate cover letter
+              </FormButton>
+            </div>
           </div>
         ) : null}
 
@@ -12439,90 +12465,30 @@ export default function StudioPage() {
         {/* Opportunities handoff is rendered below the resume preview for post-review flow. */}
 
         {coverState.artifactFailure ? (
-          hasCompletedGeneration ? (
-            isCoverFailureRetryEligible ? (
-              <div
-                className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
-                data-testid="cover-partial-retry-panel"
-              >
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-slate-100">Cover letter generation needs a retry</p>
-                  <p className="text-sm text-slate-300">
-                    We produced usable output for this role, but the cover letter draft needs one more generation pass
-                    to complete.
-                  </p>
-                  <p className="text-xs text-slate-400">{coverState.artifactFailure.explanation}</p>
-                </div>
-                <div className="flex justify-end">
-                  <FormButton variant="secondary" onClick={() => void handleCoverDraft()}>
-                    Retry cover letter generation
-                  </FormButton>
-                </div>
-              </div>
-            ) : isCoverFailureNonRetryable ? (
-              <div
-                className="space-y-3 rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4"
-                data-testid="cover-generation-blocked-panel"
-              >
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-amber-100">Cover letter generation is blocked</p>
-                  <p className="text-sm text-slate-200">
-                    Review your fit to generate a complete cover letter.
-                  </p>
-                </div>
-                <div className="flex justify-end">
-                  <FormButton
-                    variant="secondary"
-                    onClick={() => focusResumeTarget({ type: "role", index: 0 })}
-                    data-testid="studio-cover-blocked-improve-resume"
-                  >
-                    Improve your resume
-                  </FormButton>
-                </div>
-              </div>
-            ) : (
-              <ArtifactFailureState
-                failure={coverState.artifactFailure}
-                onRetry={() => {
+          <div
+            className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
+            data-testid="studio-cover-artifact-issue"
+          >
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-slate-100">We hit an issue generating your cover letter.</p>
+              <p className="text-sm text-slate-300">
+                Try regenerating it. If the issue continues, report it and we’ll review the artifact.
+              </p>
+            </div>
+            <div className="flex justify-end">
+              <FormButton
+                variant="secondary"
+                onClick={() => {
                   scrollToStudioTop("smooth");
                   void handleCoverDraft();
                 }}
-                retryLabel="Retry cover letter generation"
-              />
-            )
-          ) : (
-            isCoverFailureRetryEligible ? (
-              <ArtifactFailureState
-                failure={coverState.artifactFailure}
-                onRetry={() => {
-                  scrollToStudioTop("smooth");
-                  void handleCoverDraft();
-                }}
-                retryLabel="Retry cover letter generation"
-              />
-            ) : (
-              <div
-                className="space-y-3 rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4"
-                data-testid="cover-generation-blocked-panel"
+                disabled={coverGenerating}
+                data-testid="studio-cover-regenerate-cta"
               >
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-amber-100">Cover letter generation is blocked</p>
-                  <p className="text-sm text-slate-200">
-                    Review your fit to generate a complete cover letter.
-                  </p>
-                </div>
-                <div className="flex justify-end">
-                  <FormButton
-                    variant="secondary"
-                    onClick={() => focusResumeTarget({ type: "role", index: 0 })}
-                    data-testid="studio-cover-blocked-improve-resume"
-                  >
-                    Improve your resume
-                  </FormButton>
-                </div>
-              </div>
-            )
-          )
+                Regenerate cover letter
+              </FormButton>
+            </div>
+          </div>
         ) : coverPresenter.display &&
         coverQualityPass &&
         !coverLetterComplianceBlocked &&
@@ -12571,16 +12537,12 @@ export default function StudioPage() {
               ) : null}
               {!coverQualityPass ? (
                 <div className="space-y-1">
-                  {!coverNeedsRefinement ? (
-                    <>
-                      <p className="text-sm font-semibold text-amber-100">
-                        Cover letter needs correction before export.
-                      </p>
-                      <p className="text-sm text-slate-200">
-                        Regenerate or edit the draft to remove blocked language.
-                      </p>
-                    </>
-                  ) : null}
+                  <div data-testid="studio-cover-export-blocked-message">
+                    <p className="text-sm font-semibold text-slate-100">We hit an issue generating your cover letter.</p>
+                    <p className="text-sm text-slate-300">
+                      Try regenerating it. If the issue continues, report it and we’ll review the artifact.
+                    </p>
+                  </div>
                 </div>
               ) : null}
               <div className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-3"> 
