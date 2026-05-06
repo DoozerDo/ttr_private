@@ -645,6 +645,7 @@ describe('Studio artifact persistence contract (e2e)', () => {
         baselineId: baseline.id,
         baselineVersionId: baselineVersion.id,
         jobId: job.id,
+        analysisId: '11111111-1111-4111-8111-111111111111',
       });
 
     expect(studioState.status).toBe(200);
@@ -652,6 +653,97 @@ describe('Studio artifact persistence contract (e2e)', () => {
     expect((studioState.body as any)?.resume?.status).toBe(StudioArtifactLifecycleStatus.FAILED);
     expect(String((studioState.body as any)?.resume?.failureCode ?? '')).toBe('resume_v2_invalid');
     expect(String((studioState.body as any)?.resume?.failureMessage ?? '')).toMatch(/invalid normalized resume model/i);
+  });
+
+  it('GET /studio/artifacts returns 200 even when ResumeV2 backfill fails (no 422 for ResumeV2 validity)', async () => {
+    const baseline = await baselineRepository.save(
+      baselineRepository.create({
+        userId,
+        version: 1,
+        versionNumber: 1,
+        originalFilename: 'resume.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        storagePath: '/tmp/resume.docx',
+        hash: null,
+        isActive: true,
+        archivedAt: null,
+      }),
+    );
+
+    const baselineVersion = await baselineVersionRepository.save(
+      baselineVersionRepository.create({
+        baselineId: baseline.id,
+        versionNumber: 1,
+        fileHash: `file-hash-${Date.now()}`,
+        storagePath: '/tmp/baseline-version-1',
+      }),
+    );
+
+    const job = await jobRepository.save(
+      jobRepository.create({
+        userId,
+        title: 'Backend Engineer',
+        company: 'ExampleCo',
+        rawDescription: 'Build backend services and partner cross-functionally.',
+        normalizedResponsibilities: [],
+        normalizedRequirements: [],
+        jdIngestionMethod: JobIngestionMethod.PASTE,
+        jdParsedAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        archivedAt: null,
+        isArchived: false,
+      } as Partial<Job>),
+    );
+
+    // Persist a parsed record with missing ResumeV2 + empty experience so backfill throws.
+    await baselineParsedRepository.save(
+      baselineParsedRepository.create({
+        baselineId: baseline.id,
+        sourceFileId: baseline.id,
+        schemaVersion: 'baseline_schema_v1',
+        sourceFormat: 'docx',
+        ingestedAt: new Date(),
+        parsedJson: {
+          schema_version: 'baseline_schema_v1',
+          user_verified: false,
+          baseline_id: baseline.id,
+          source_file_id: baseline.id,
+          source_format: 'docx',
+          ingested_at: new Date().toISOString(),
+          identity: { full_name: 'Test Person', location: 'Test City', current_title: null, current_company: null, summary: null },
+          experience: [],
+          education: [],
+          skills: [],
+          people_leadership: { direct_reports: null, managers_led: null, global_teams: null },
+          operational_ownership: { functions_owned: [], process_design: null, process_scaling: null },
+          tooling_and_platforms: { tools: [], ownership_level: 'unknown' },
+          cross_functional_partnership: { product: null, engineering: null, sales_cs: null, executive: null },
+          customer_advocacy: { executive_escalations: null, voice_of_customer: null, post_incident_rca: null },
+          scale_and_scope: { customer_segment: 'unknown', geo_scope: 'unknown', org_stage: 'unknown' },
+          metrics_and_outcomes: { metrics_present: false, metrics: [] },
+          skills_and_tools: { tools: [], methodologies: [], domains: [] },
+          system_generated_read_only: { missing_fields: [], ambiguity_flags: [], low_confidence_extractions: [] },
+        } as any,
+        resumeV2Json: null,
+        flagsJson: { missing_fields: [], ambiguity_flags: [], low_confidence_extractions: [] } as any,
+      }),
+    );
+
+    const studioState = await request(app.getHttpServer())
+      .get('/studio/artifacts')
+      .set('Authorization', `Bearer ${authToken}`)
+      .query({
+        baselineId: baseline.id,
+        baselineVersionId: baselineVersion.id,
+        jobId: job.id,
+        analysisId: '22222222-2222-4222-8222-222222222222',
+      });
+
+    expect(studioState.status).toBe(200);
+    expectObject(studioState.body);
+    expect(Array.isArray((studioState.body as any).errors)).toBe(true);
+    expect(String(((studioState.body as any).errors?.[0]?.code ?? ''))).toMatch(/baseline_resume_v2/i);
   });
 
   it('healthy structured baseline artifacts do not emit interpretedEvidenceAudit in GET /studio/artifacts', async () => {

@@ -56,6 +56,11 @@ export type StudioArtifactsState = {
   baselineVersionHash: string | null;
   jobFingerprint: string | null;
   generationContractVersion: string;
+  errors?: Array<{
+    code: string;
+    message: string;
+    details?: Record<string, unknown> | null;
+  }>;
   artifactReadiness?: 'ready' | 'degraded' | 'blocked';
   artifactReadinessReasons?: string[];
   artifactReadinessReasonDetails?: BaselineTemplateReadinessReason[];
@@ -199,6 +204,7 @@ export class StudioArtifactsService {
     baselineVersionId: string;
     analysisId?: string | null;
   }): Promise<StudioArtifactsState> {
+    const errors: NonNullable<StudioArtifactsState['errors']> = [];
     if (process.env.DEBUG_STUDIO_ARTIFACT_QUALITY === 'true') {
       // eslint-disable-next-line no-console
       console.log('[ARTIFACT_QUALITY_READ]', `baselineId=${input.baselineId} jobId=${input.jobId} baselineVersionId=${input.baselineVersionId} analysisId=${input.analysisId ?? null}`);
@@ -309,8 +315,32 @@ export class StudioArtifactsService {
 
     let persisted = (baseline?.parsedRecords?.[0] as any)?.resumeV2Json ?? null;
     if (!persisted || typeof persisted !== 'object') {
-      const backfilled = await this.baselineResumeV2BackfillService.backfillLatestIfMissing({ baselineId: String(baseline?.id ?? '') });
-      persisted = backfilled?.resumeV2Json ?? null;
+      try {
+        const backfilled = await this.baselineResumeV2BackfillService.backfillLatestIfMissing({
+          baselineId: String(baseline?.id ?? ''),
+        });
+        persisted = backfilled?.resumeV2Json ?? null;
+      } catch (error) {
+        const response =
+          typeof (error as any)?.getResponse === 'function' ? (error as any).getResponse() : null;
+        const code =
+          (response as any)?.error?.code ??
+          (response as any)?.code ??
+          (error instanceof Error ? error.name : 'baseline_resume_v2_backfill_failed');
+        const message =
+          (response as any)?.error?.message ??
+          (response as any)?.message ??
+          (error instanceof Error ? error.message : String(error));
+        errors.push({
+          code: String(code || 'baseline_resume_v2_backfill_failed'),
+          message: String(message || 'Baseline ResumeV2 backfill failed.'),
+          details:
+            response && typeof response === 'object'
+              ? ((response as any)?.error?.details ?? (response as any)?.details ?? null)
+              : null,
+        });
+        persisted = null;
+      }
     }
 
     // Artifacts retrieval must never 422 due to readiness/template gating.
@@ -533,6 +563,7 @@ export class StudioArtifactsService {
       baselineVersionHash,
       jobFingerprint,
       generationContractVersion: ARTIFACT_CONTRACT_VERSION,
+      ...(errors.length ? { errors } : {}),
       assessmentScore: score,
       structuredBaselineExperienceCount,
       structuredBaselineMissingEvidenceReasons,

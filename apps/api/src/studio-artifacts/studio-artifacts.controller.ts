@@ -9,6 +9,10 @@ type UserRequest = Request & {
   };
 };
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 @Controller('studio/artifacts')
 @UseGuards(AuthGuard('jwt'))
 export class StudioArtifactsController {
@@ -26,11 +30,19 @@ export class StudioArtifactsController {
     if (!userId) {
       throw new BadRequestException('Invalid user context');
     }
-    if (!baselineId?.trim() || !baselineVersionId?.trim() || !jobId?.trim()) {
+    if (!baselineId?.trim() || !baselineVersionId?.trim() || !jobId?.trim() || !analysisId?.trim()) {
       throw new UnprocessableEntityException({
         error: {
           code: 'studio_artifacts_missing_ids',
-          message: 'baselineId, baselineVersionId, and jobId are required',
+          message: 'baselineId, baselineVersionId, jobId, and analysisId are required',
+        },
+      });
+    }
+    if (![baselineId, baselineVersionId, jobId, analysisId].every((id) => isUuid(String(id).trim()))) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'studio_artifacts_invalid_ids',
+          message: 'baselineId, baselineVersionId, jobId, and analysisId must be valid UUIDs',
         },
       });
     }
