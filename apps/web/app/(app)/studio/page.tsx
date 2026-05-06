@@ -9814,6 +9814,7 @@ export default function StudioPage() {
   const generationReadyAutoStartRef = useRef<string | null>(null);
   const autoGenerationHadRequiredIdsRef = useRef(false);
   const autoGenerationLastSignatureRef = useRef<string | null>(null);
+  const autoGenerationWasReadyRef = useRef(false);
 
   const shouldShowResumeRegenerate = resumeResult
     ? resumeResult.actions?.canRegenerate === true ||
@@ -10335,12 +10336,20 @@ export default function StudioPage() {
     const signature = contract.generation.auto.signature;
     if (generationReadyAutoStartRef.current === signature) return;
 
+    const hasRequiredIdsNow = Boolean(effectiveBaselineVersionId && effectiveJobId && effectiveRequestedAnalysisId);
+
     const effectiveGenerationState =
       contract.generation.state === "generated" && !artifactContract.hasUsableArtifacts
         ? "generated_unusable"
         : contract.generation.state;
 
-    let contractShouldStart = contract.generation.auto.shouldStart === true;
+    const wasReadyBefore = autoGenerationWasReadyRef.current;
+    const isReadyNow = contract.generation.state === "ready";
+    autoGenerationWasReadyRef.current = isReadyNow;
+
+    // Single source of truth: the contract (READY) + required IDs.
+    // Latches are used only to prevent duplicate runs after a confirmed success for the same signature.
+    let contractShouldStart = contract.generation.state === "ready" && hasRequiredIdsNow;
     if (effectiveGenerationState === "generated_unusable") {
       const retryCount = retryCountRef.current[signature] ?? 0;
       if (retryCount >= MAX_AUTO_RETRIES) {
@@ -10353,7 +10362,7 @@ export default function StudioPage() {
           });
         }
       } else {
-        contractShouldStart = true;
+        contractShouldStart = hasRequiredIdsNow;
       }
     }
     const ready = effectiveGenerationState === "ready" || effectiveGenerationState === "generated_unusable";
@@ -10385,7 +10394,6 @@ export default function StudioPage() {
     const lastSignatureKey = "ttr:studio:auto-generate:last-signature";
     const storage = typeof window !== "undefined" ? window.localStorage : null;
 
-    const hasRequiredIdsNow = Boolean(effectiveBaselineVersionId && effectiveJobId && effectiveRequestedAnalysisId);
     const hadRequiredIdsBefore = autoGenerationHadRequiredIdsRef.current;
     autoGenerationHadRequiredIdsRef.current = hasRequiredIdsNow;
     const lastSignatureInMemory = autoGenerationLastSignatureRef.current;
@@ -10421,6 +10429,18 @@ export default function StudioPage() {
       latch = storage && typeof storage.getItem === "function" ? storage.getItem(storageKey) : null;
     } catch {
       latch = null;
+    }
+
+    // If the contract just became READY, clear any stale latch for this signature so it cannot override authority.
+    if (!wasReadyBefore && isReadyNow) {
+      try {
+        if (storage && typeof storage.removeItem === "function") {
+          storage.removeItem(storageKey);
+          latch = null;
+        }
+      } catch {
+        // ignore
+      }
     }
 
     // Instrumentation: run on every dependency change for this effect scope.

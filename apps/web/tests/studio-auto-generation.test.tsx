@@ -127,7 +127,7 @@ function resolveAutoGenerationSuccess(input: RequestInfo) {
 
 function installStrongFitFetches(options?: {
   score?: number;
-  readinessStatus?: "ready" | "limited";
+  readinessStatus?: "ready" | "limited" | "blocked";
   resumeOk?: boolean;
   coverOk?: boolean;
 }) {
@@ -173,6 +173,7 @@ function installStrongFitFetches(options?: {
                     message: "Some evidence is still lighter than others.",
                   },
                 ],
+          blocked: readinessStatus === "blocked",
           compliance_flags: [],
         }),
       );
@@ -492,6 +493,54 @@ describe("Studio auto-generation", () => {
       expect.stringContaining("/api/opportunities"),
       expect.objectContaining({ method: "POST" }),
     );
+  }, 15000);
+
+  it("does not let a persisted failed latch block auto-generation when the contract is READY", async () => {
+    const originalLocalStorage = window.localStorage;
+    const memoryStorage = (() => {
+      const store = new Map<string, string>();
+      return {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => store.set(key, value),
+        removeItem: (key: string) => {
+          store.delete(key);
+        },
+        clear: () => store.clear(),
+        _dump: () => store,
+      } satisfies Pick<Storage, "getItem" | "setItem" | "removeItem" | "clear"> & { _dump: () => Map<string, string> };
+    })();
+
+    Object.defineProperty(window, "localStorage", {
+      value: memoryStorage,
+      configurable: true,
+    });
+
+    // Hydrated signature (valid IDs) already has a failed latch from a previous attempt.
+    const signature = "autoGen:v1:base-version-1:job-1:analysis-1";
+    memoryStorage.setItem(`ttr:studio:auto-generate:${signature}`, "failed");
+    memoryStorage.setItem("ttr:studio:auto-generate:last-signature", signature);
+
+    const fetchMock = installStrongFitFetches({ readinessStatus: "ready" });
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(countPostCalls(fetchMock, "/api/resume")).toBeGreaterThan(0);
+      expect(countPostCalls(fetchMock, "/api/cover-letters")).toBeGreaterThan(0);
+    }, { timeout: 6000 });
+
+    Object.defineProperty(window, "localStorage", { value: originalLocalStorage, configurable: true });
+  }, 15000);
+
+  it("auto-generates when readiness is blocked but contract is READY (score >= 80)", async () => {
+    const fetchMock = installStrongFitFetches({ readinessStatus: "blocked" });
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(countPostCalls(fetchMock, "/api/resume")).toBeGreaterThan(0);
+      expect(countPostCalls(fetchMock, "/api/cover-letters")).toBeGreaterThan(0);
+    }, { timeout: 6000 });
   }, 15000);
 
   it("still auto-generates when verification confidence is limited", async () => {

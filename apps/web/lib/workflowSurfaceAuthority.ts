@@ -47,7 +47,8 @@ export function resolveWorkflowSurfaceAuthority(input: {
     normalizedPairStatus === "generation_failed";
 
   const unlockFlowActive = Boolean(input.unlockContext?.active && input.unlockContext?.hasMissingEvidence);
-  const blocked = Boolean(input.generationReadiness.blocked || input.workflowAuthority.workflowState === "BLOCKED");
+  // Readiness is informational only. Only workflow-level authority can hard-block surfaces.
+  const blocked = Boolean(input.workflowAuthority.workflowState === "BLOCKED");
 
   const workflowSupportsImmediateGeneration =
     input.workflowAuthority.workflowState === "READY" && input.workflowAuthority.primaryAction === "GENERATE";
