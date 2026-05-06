@@ -25,7 +25,6 @@ export function resolveWorkflowSurfaceAuthority(input: {
   };
   unlockContext?: { active: boolean; hasMissingEvidence: boolean } | null;
   postUnlockOutcomeState?: PostUnlockOutcomeState | null;
-  generationReady?: { active: boolean; phase: "ready" | "generating" | "failed" } | null;
 }): WorkflowSurfaceAuthorityModel {
   const score = typeof input.score === "number" && Number.isFinite(input.score) ? input.score : null;
   // "limited" with `blocked=false` is a warning lane, not a hard blocker.
@@ -46,9 +45,6 @@ export function resolveWorkflowSurfaceAuthority(input: {
   const pairFailed =
     normalizedPairStatus === "failed" ||
     normalizedPairStatus === "generation_failed";
-
-  const generationReadyActive = Boolean(input.generationReady?.active);
-  const generationPhase = input.generationReady?.phase ?? "ready";
 
   const unlockFlowActive = Boolean(input.unlockContext?.active && input.unlockContext?.hasMissingEvidence);
   const blocked = Boolean(input.generationReadiness.blocked || input.workflowAuthority.workflowState === "BLOCKED");
@@ -119,30 +115,6 @@ export function resolveWorkflowSurfaceAuthority(input: {
     };
   }
 
-  if (generationReadyActive && generationPhase === "generating") {
-    return {
-      canonicalState: "generation_in_progress",
-      headline: "Generating your documents...",
-      body: "We're building your tailored resume and cover letter now.",
-      primaryAction: { label: "Open workspace", destination: "studio_workspace" },
-      trustTone: "in_progress",
-    };
-  }
-
-  if (generationReadyActive && generationPhase === "failed") {
-    const retryable = Boolean(input.artifact.failure?.retryable);
-    return {
-      canonicalState: "generation_failed",
-      headline: "Document generation failed.",
-      body: "Generation didn't complete from the current inputs. Retry generation, or return to evidence to clear the blocker.",
-      primaryAction: retryable
-        ? { label: "Retry generation", destination: "studio_generate" }
-        : { label: "Fix evidence gaps", destination: "fit_review" },
-      secondaryAction: { label: "Open workspace", destination: "studio_workspace" },
-      trustTone: "failure",
-    };
-  }
-
   if (pairGenerating && !blocked) {
     return {
       canonicalState: "generation_in_progress",
@@ -153,7 +125,7 @@ export function resolveWorkflowSurfaceAuthority(input: {
     };
   }
 
-  if (!blocked && (eligibleForGenerationReady || (generationReadyActive && generationPhase === "ready"))) {
+  if (!blocked && eligibleForGenerationReady) {
     return {
       canonicalState: "generation_ready",
       headline: "Generate in Studio",

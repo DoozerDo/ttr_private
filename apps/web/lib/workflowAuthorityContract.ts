@@ -222,7 +222,6 @@ export function resolveWorkflowAuthorityContract(input: {
   contexts?: {
     unlockContext?: { active: boolean; hasMissingEvidence: boolean } | null;
     postUnlockOutcomeState?: PostUnlockOutcomeState | null;
-    generationReady?: { active: boolean; phase: "ready" | "generating" | "failed" } | null;
   } | null;
 }): WorkflowAuthorityContract {
   const pathname = typeof input.currentPathname === "string" ? input.currentPathname : null;
@@ -303,7 +302,6 @@ export function resolveWorkflowAuthorityContract(input: {
     },
     unlockContext: input.contexts?.unlockContext ?? null,
     postUnlockOutcomeState: input.contexts?.postUnlockOutcomeState ?? null,
-    generationReady: input.contexts?.generationReady ?? null,
   });
 
   const retryableFailure = Boolean(pairArtifact?.failure?.retryable);

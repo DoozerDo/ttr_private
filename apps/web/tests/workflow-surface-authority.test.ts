@@ -8,9 +8,11 @@ function readiness(status: GenerationReadiness["status"], blocked: boolean): Gen
   return {
     status,
     blocked,
-    badgeLabel: status === "ready" ? "Ready" : status === "blocked" ? "Blocked" : "Limited",
+    badgeLabel: status === "ready" ? "READY" : status === "blocked" ? "BLOCKED" : "LIMITED",
+    reasonCodes: [],
     reasons: [],
     verificationIssues: [],
+    summary: "",
   };
 }
 
@@ -30,7 +32,6 @@ describe("workflow surface authority resolver", () => {
       artifact: { hasResume: false, hasCoverLetter: false, pairStatus: "missing" },
       unlockContext: { active: false, hasMissingEvidence: false },
       postUnlockOutcomeState: null,
-      generationReady: null,
     });
 
     expect(model.canonicalState).toBe("generation_ready");
@@ -46,7 +47,6 @@ describe("workflow surface authority resolver", () => {
       artifact: { hasResume: false, hasCoverLetter: false, pairStatus: "missing" },
       unlockContext: { active: false, hasMissingEvidence: false },
       postUnlockOutcomeState: null,
-      generationReady: null,
     });
 
     expect(model.canonicalState).toBe("generation_ready");
@@ -62,7 +62,6 @@ describe("workflow surface authority resolver", () => {
       artifact: { hasResume: false, hasCoverLetter: false, pairStatus: "missing" },
       unlockContext: { active: false, hasMissingEvidence: false },
       postUnlockOutcomeState: null,
-      generationReady: null,
     });
 
     expect(model.canonicalState).toBe("unlock_required");
@@ -78,7 +77,6 @@ describe("workflow surface authority resolver", () => {
       artifact: { hasResume: true, hasCoverLetter: true, pairStatus: "completed" },
       unlockContext: { active: false, hasMissingEvidence: false },
       postUnlockOutcomeState: null,
-      generationReady: null,
     });
 
     expect(model.canonicalState).toBe("documents_ready");
@@ -94,7 +92,6 @@ describe("workflow surface authority resolver", () => {
       artifact: { hasResume: false, hasCoverLetter: false, pairStatus: "generation_failed" },
       unlockContext: { active: false, hasMissingEvidence: false },
       postUnlockOutcomeState: null,
-      generationReady: null,
     });
 
     expect(model.canonicalState).toBe("generation_failed");

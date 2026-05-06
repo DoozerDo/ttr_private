@@ -25,8 +25,8 @@ function readiness(status: GenerationReadiness["status"], blocked: boolean): Gen
 function workflowAuthority(
   workflowState: WorkflowAuthorityResult["workflowState"],
   primaryAction: WorkflowAuthorityResult["primaryAction"],
-): Pick<WorkflowAuthorityResult, "workflowState" | "primaryAction" | "suppressFailureMessaging"> {
-  return { workflowState, primaryAction, suppressFailureMessaging: false };
+): Pick<WorkflowAuthorityResult, "workflowState" | "primaryAction" | "canGenerate" | "suppressFailureMessaging"> {
+  return { workflowState, primaryAction, canGenerate: true, suppressFailureMessaging: false };
 }
 
 function baseInput(overrides: Partial<WorkflowOrchestratorInput> = {}): WorkflowOrchestratorInput {
@@ -59,7 +59,6 @@ function baseInput(overrides: Partial<WorkflowOrchestratorInput> = {}): Workflow
       generationAllowedNow: false,
       returnToEvidenceHref: "/fit-review",
     },
-    generationReady: { dismissed: false, phase: "ready" },
     resumeFailure: null,
     coverFailure: null,
     activity: { isActive: false, activeOperations: [] },
@@ -72,7 +71,6 @@ function baseInput(overrides: Partial<WorkflowOrchestratorInput> = {}): Workflow
     resume: { ...base.resume, ...(overrides.resume ?? {}) },
     coverLetter: { ...base.coverLetter, ...(overrides.coverLetter ?? {}) },
     postUnlock: { ...base.postUnlock, ...(overrides.postUnlock ?? {}) },
-    generationReady: { ...base.generationReady, ...(overrides.generationReady ?? {}) },
   };
 }
 
@@ -106,7 +104,6 @@ describe("workflow orchestrator contract", () => {
           generating: true,
           failure: null,
         },
-        generationReady: { dismissed: false, phase: "ready" },
       }),
     );
 
@@ -147,7 +144,6 @@ describe("workflow orchestrator contract", () => {
         },
         resume: { status: "generating" },
         coverLetter: { status: "missing" },
-        generationReady: { dismissed: false, phase: "ready" },
       }),
     );
 
@@ -168,7 +164,6 @@ describe("workflow orchestrator contract", () => {
         },
         resume: { status: "missing" },
         coverLetter: { status: "missing" },
-        generationReady: { dismissed: false, phase: "ready" },
       }),
     );
 
@@ -214,7 +209,6 @@ describe("workflow orchestrator contract", () => {
           generationAllowedNow: true,
           returnToEvidenceHref: "/fit-review",
         },
-        generationReady: { dismissed: false, phase: "ready" },
       }),
     );
 
@@ -237,7 +231,6 @@ describe("workflow orchestrator contract", () => {
         },
         resume: { status: "ready", confidence: "HIGH", failure: null },
         coverLetter: { status: "ready", confidence: "HIGH", failure: null },
-        generationReady: { dismissed: false, phase: "generating" },
       }),
     );
 
@@ -262,7 +255,6 @@ describe("workflow orchestrator contract", () => {
           generationAllowedNow: true,
           returnToEvidenceHref: "/fit-review",
         },
-        generationReady: { dismissed: false, phase: "ready" },
       }),
     );
 

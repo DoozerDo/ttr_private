@@ -2827,7 +2827,6 @@ export default function ResultsPage() {
         generationAllowedNow: false,
         returnToEvidenceHref: "",
       },
-      generationReady: { dismissed: true, phase: "ready" },
       resumeFailure: null,
       coverFailure: null,
       activity: workflowActivity,

@@ -824,7 +824,6 @@ describe("workflow journey scenarios (synthetic)", () => {
         generationAllowedNow: false,
         returnToEvidenceHref: "",
       },
-      generationReady: { dismissed: true, phase: "ready" },
       resumeFailure: null,
       coverFailure: null,
       activity: { isActive: false, activeOperations: [] },

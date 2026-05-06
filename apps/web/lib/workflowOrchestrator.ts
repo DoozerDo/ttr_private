@@ -76,11 +76,6 @@ export type WorkflowOrchestratorInput = {
     returnToEvidenceHref: string;
   };
 
-  generationReady: {
-    dismissed: boolean;
-    phase: "ready" | "generating" | "failed";
-  };
-
   // Studio-only failure surfaces (used by generation-ready resolver).
   resumeFailure: StudioArtifactFailurePresentation | null;
   coverFailure: StudioArtifactFailurePresentation | null;
@@ -284,7 +279,6 @@ export function resolveWorkflowOrchestrator(input: WorkflowOrchestratorInput): W
               ? { active: unlockFlowActive, hasMissingEvidence: unlockContext.missingEvidence.length > 0 }
               : null,
           postUnlockOutcomeState: postUnlockOutcomeModel?.outcomeState ?? null,
-          generationReady: { active: !input.generationReady.dismissed, phase: input.generationReady.phase },
         },
       });
     } catch (error) {
@@ -296,7 +290,7 @@ export function resolveWorkflowOrchestrator(input: WorkflowOrchestratorInput): W
         authorityFlags: {
           unlockActive: unlockFlowActive,
           postUnlockActive: postUnlockActive,
-          generationReadyActive: !input.generationReady.dismissed,
+          generationReadyActive: false,
           failureActive: false,
         },
         artifactFlags: {
@@ -462,12 +456,7 @@ export function resolveWorkflowOrchestrator(input: WorkflowOrchestratorInput): W
     coverFailure: input.coverFailure,
   });
 
-  const generationReadyPriority =
-    input.surface === "studio" &&
-    !input.generationReady.dismissed &&
-    Boolean(generationReadyModel.isGenerationReadyPriority) &&
-    !unlockFlowActive &&
-    !postUnlockActive;
+  const generationReadyPriority = false;
 
   if (process.env.NODE_ENV !== "production") {
     console.log("[WORKFLOW][ORCHESTRATOR_OUTPUT]", {
