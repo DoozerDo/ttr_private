@@ -42,7 +42,9 @@ export function buildValidatedResumeV2FromParsedBaseline(parsedBaseline: Record<
           '';
         const start = typeof entry['start_date'] === 'string' ? entry['start_date'] : '';
         const end = typeof entry['end_date'] === 'string' ? entry['end_date'] : '';
-        const header = [role, company, [start, end].filter(Boolean).join(' - ')].filter(Boolean).join(' | ');
+        // `structuredBaselineExtractor.parseExperienceHeaderLine` expects: "Company | Role Title | Dates".
+        // This ordering matters; reversing it can cause experience entries to be rejected as unsafe/not-company-like.
+        const header = [company, role, [start, end].filter(Boolean).join(' - ')].filter(Boolean).join(' | ');
         const detailsText = typeof entry['details_text'] === 'string' ? entry['details_text'] : '';
         const details = detailsText
           .replace(/\r\n/g, '\n')
@@ -55,6 +57,19 @@ export function buildValidatedResumeV2FromParsedBaseline(parsedBaseline: Record<
       })
       .filter(Boolean);
     sections[0].content = blocks.join('\n\n');
+  }
+
+  if (!sections[0].content.trim()) {
+    throw new UnprocessableEntityException({
+      error: {
+        code: 'baseline_resume_v2_ingestion_failed',
+        message:
+          'Baseline ingestion did not produce any usable experience entries for Resume V2. Please re-upload or reprocess your baseline resume.',
+        details: {
+          missing: ['experience'],
+        },
+      },
+    });
   }
 
   const result = buildDeterministicResumeV2FromBaseline({
@@ -80,4 +95,3 @@ export function buildValidatedResumeV2FromParsedBaseline(parsedBaseline: Record<
 
   return normalized;
 }
-
