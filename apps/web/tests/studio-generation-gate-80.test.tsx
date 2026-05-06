@@ -99,13 +99,26 @@ describe("Studio generation gate (score >= 80)", () => {
 
     renderStudio();
 
+    await waitFor(() => expect(screen.getByText("Your application materials")).toBeInTheDocument());
     await waitFor(() => expect(screen.getByRole("heading", { name: "Resume" })).toBeInTheDocument());
     expect(screen.getByRole("heading", { name: "Cover letter" })).toBeInTheDocument();
 
     expect(screen.queryByText(/You're ready to generate/i)).toBeNull();
     expect(screen.queryByText(/Generate documents/i)).toBeNull();
-    expect(screen.queryByText(/Your documents are ready to generate/i)).toBeNull();
+    expect(screen.queryByText(/Ready to generate/i)).toBeNull();
+    expect(screen.queryByText(/This role is ready for generation/i)).toBeNull();
+    expect(screen.queryByText(/Decision \\+ Action/i)).toBeNull();
     expect(screen.queryByTestId("studio-generation-ready-shell")).toBeNull();
+    expect(screen.queryByTestId("studio-readiness-message")).toBeNull();
+    expect(screen.queryByTestId("studio-generation-state-banner")).toBeNull();
+    expect(screen.queryByTestId("studio-decision-panel")).toBeNull();
+    expect(screen.queryByTestId("studio-evidence-allowed-panel")).toBeNull();
+
+    // No debug metadata in normal Studio view.
+    expect(screen.queryByText(/generationMode:/i)).toBeNull();
+    expect(screen.queryByText(/templateVersion:/i)).toBeNull();
+    expect(screen.queryByText(/artifact current:/i)).toBeNull();
+    expect(screen.queryByText(/^reason:/i)).toBeNull();
   });
 
   it("shows generate resume and cover letter buttons when score >= 80 and required ids exist", async () => {

@@ -9680,6 +9680,7 @@ export default function StudioPage() {
   const [debugAutoGenerationEnabled, setDebugAutoGenerationEnabled] = useState(
     process.env.NODE_ENV !== "production",
   );
+  const [debugStudioMetadataEnabled, setDebugStudioMetadataEnabled] = useState(false);
   useEffect(() => {
     if (process.env.NODE_ENV !== "production") return;
     try {
@@ -9688,6 +9689,15 @@ export default function StudioPage() {
       );
     } catch {
       setDebugAutoGenerationEnabled(false);
+    }
+  }, []);
+  useEffect(() => {
+    try {
+      setDebugStudioMetadataEnabled(
+        typeof window !== "undefined" && window.localStorage?.getItem("ttr:debug:studioMetadata") === "true",
+      );
+    } catch {
+      setDebugStudioMetadataEnabled(false);
     }
   }, []);
 
@@ -10203,10 +10213,10 @@ export default function StudioPage() {
       setResumeGenerating(true);
       try {
         console.log("[STUDIO_GENERATE_FETCH_START]");
-        const response = await fetch("/api/resume/generate", {
+      const response = await fetch("/api/resume/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ baselineId, baselineVersionId, jobId }),
+          body: JSON.stringify({ baselineId, baselineVersionId, jobId, analysisId: effectiveRequestedAnalysisId ?? null }),
         });
 
         console.log("[STUDIO_GENERATE_RESPONSE]", {
@@ -10243,19 +10253,27 @@ export default function StudioPage() {
     } finally {
       console.log("[STUDIO_GENERATE_HANDLER_END]");
     }
-  }, [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, refreshStudioArtifactsAfterGenerate]);
+  }, [
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    effectiveRequestedAnalysisId,
+    refreshStudioArtifactsAfterGenerate,
+  ]);
 
   const handleGenerateCoverLetter = useCallback(async () => {
     const baselineId = effectiveBaselineId ?? null;
     const baselineVersionId = effectiveBaselineVersionId ?? null;
     const jobId = effectiveJobId ?? null;
+    const analysisId = effectiveRequestedAnalysisId ?? null;
     console.log("GENERATE_COVER_CLICKED");
-    console.log("GENERATE_PAYLOAD", { baselineId, baselineVersionId, jobId });
-    if (!baselineId || !jobId || !baselineVersionId) {
+    console.log("GENERATE_PAYLOAD", { baselineId, baselineVersionId, jobId, analysisId });
+    if (!baselineId || !jobId || !baselineVersionId || !analysisId) {
       console.error("[studio][generate_missing_context]", {
         baselineId,
         baselineVersionId,
         jobId,
+        analysisId,
         source: "cover_letter",
       });
       setCoverState((current) => ({
@@ -10263,7 +10281,9 @@ export default function StudioPage() {
         response: null,
         artifactFailure: null,
         tierGateError: null,
-        error: "We couldn't start generation yet. Please reload Studio and try again.",
+        error: analysisId
+          ? "We couldn't start generation yet. Please reload Studio and try again."
+          : "We couldn't start cover letter generation because analysisId is missing. Return to Results and open Studio again.",
       }));
       return;
     }
@@ -10272,7 +10292,7 @@ export default function StudioPage() {
       const response = await fetch("/api/cover-letters/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ baselineId, baselineVersionId, jobId }),
+        body: JSON.stringify({ baselineId, baselineVersionId, jobId, analysisId }),
       });
       const payload = await readResponsePayload(response.clone());
       if (process.env.NODE_ENV === "development") {
@@ -10299,7 +10319,13 @@ export default function StudioPage() {
     } finally {
       setCoverGenerating(false);
     }
-  }, [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, refreshStudioArtifactsAfterGenerate]);
+  }, [
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    effectiveRequestedAnalysisId,
+    refreshStudioArtifactsAfterGenerate,
+  ]);
   useEffect(() => {
     const contract = workflowOrchestratorCore.contract;
     if (!contract) return;
@@ -10779,10 +10805,12 @@ export default function StudioPage() {
   const studioContent = (
     <PageShell className="space-y-4 pb-4">
       <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
-      <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
-        {canonicalStudioReadinessMessage}
-      </p>
-      {(() => {
+      {!generateNowEligible ? (
+        <>
+          <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
+            {canonicalStudioReadinessMessage}
+          </p>
+          {(() => {
         const generationState = studioGenerationStateInfo.state;
         const bannerIntent = generationState === "ready" ? "info" : "warning";
         const bannerTitle =
@@ -10878,7 +10906,9 @@ export default function StudioPage() {
             </div>
           </Alert>
         );
-      })()}
+          })()}
+        </>
+      ) : null}
       {showInstantDraftHeroSafe ? instantDraftHero : null}
       {showReadinessRecoveryExperience && !activeGenerationReadiness.blocked ? unlockEntryPanel : null}
       {unlockGenerationLoadingMessage && showPrimaryGeneratingNotice ? (
@@ -11078,7 +11108,7 @@ export default function StudioPage() {
               </div>
 
               ) : null}
-            {!isReadySuccessState ? (
+            {!generateNowEligible && !isReadySuccessState ? (
             <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-decision-panel"> 
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Decision + Action</p> 
               {generateNowEligible ? (
@@ -11349,7 +11379,7 @@ export default function StudioPage() {
           </div>
         ) : null}
       </section>
-      {!isReadySuccessState && (workflowAuthority.workflowState === "READY" || canGenerateDocuments) ? (
+      {!generateNowEligible && !isReadySuccessState && (workflowAuthority.workflowState === "READY" || canGenerateDocuments) ? (
         <section className="rounded-2xl border border-white/10 bg-white/5 p-4" data-testid="studio-evidence-allowed-panel">
           <h2 className="text-base font-semibold text-slate-100">
             {workflowAuthority.workflowState === "READY" ? "Why this output is grounded" : "Why this output is limited"}
@@ -11710,7 +11740,7 @@ export default function StudioPage() {
                     : "Resume needs refinement before export."
                   : renderCardStatus(resumeCardStatus, "Resume")}
             </p>
-            {process.env.NODE_ENV === "development"
+            {debugStudioMetadataEnabled
               ? (() => {
                   const { generationMode, templateVersion } = readGenerationDebug(
                     artifactContract.normalized.resumeResponse,
@@ -12159,7 +12189,8 @@ export default function StudioPage() {
                     : "Cover letter needs refinement before export."
                   : renderCardStatus(coverCardStatus, "Cover letter")}
             </p>
-            {(() => {
+            {debugStudioMetadataEnabled
+              ? (() => {
               const { generationMode, templateVersion } = readGenerationDebug(artifactContract.normalized.coverLetterResponse);
               const score = typeof analysisScore === "number" ? analysisScore : null;
               const artifactCurrent = score !== null && score >= 80 && generationMode === "structured_baseline_template";
@@ -12180,7 +12211,8 @@ export default function StudioPage() {
                   <div>reason: {reason}</div>
                 </div>
               );
-            })()}
+              })()
+              : null}
           </div>
           <div className="flex flex-wrap gap-2">
             {!generateNowEligible ? (
