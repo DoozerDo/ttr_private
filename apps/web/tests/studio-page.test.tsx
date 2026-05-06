@@ -1134,6 +1134,67 @@ describe("Studio page UX", () => {
     expect(screen.queryByTestId("studio-unlock-generation-confirmation")).toBeNull();
   });
 
+  it("lets the user manually generate cover letter artifacts from the Studio workspace when score >= 80", async () => {
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(createResponse(createFitAssessment(84)));
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "missing",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            resume: null,
+            coverLetter: null,
+          }),
+        );
+      }
+      if (
+        url.includes("/api/cover-letters") &&
+        !url.includes("/readiness") &&
+        !url.includes("/export") &&
+        init?.method === "POST"
+      ) {
+        return Promise.resolve(
+          createResponse({
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: {
+              coverLetter: {
+                heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                paragraphs: ["Intro paragraph."],
+              },
+            },
+          }),
+        );
+      }
+      return resolveStudioGenerationFallback(input);
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await openStudioWorkspaceFromReadyShell();
+    fireEvent.click(await screen.findByTestId("studio-generate-cover-button", {}, { timeout: 5000 }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/cover-letters"),
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+  });
+
   it("fails cleanly when no baselineId is provided", async () => {
     overrideSearchParams({
       analysisId: "analysis-1",

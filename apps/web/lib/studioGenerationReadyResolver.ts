@@ -42,15 +42,8 @@ export function resolveStudioGenerationReadyModel(input: {
   const workflowSupportsImmediateGeneration =
     input.workflowState === "READY" && input.workflowPrimaryAction === "GENERATE";
 
-  const isGenerationReadyPriority =
-    !input.hasBlockingAuthority &&
-    !input.hasAnyUsableOutput &&
-    !isGeneratedAlready &&
-    !isGeneratingAlready &&
-    !input.resumeFailure &&
-    !input.coverFailure &&
-    readinessIsReady &&
-    (input.postUnlockOutcomeState === "unlocked_ready" || workflowSupportsImmediateGeneration);
+  // Studio no longer shows an intermediate "generation ready" step. Score >= 80 renders artifact cards directly.
+  const isGenerationReadyPriority = false;
 
   const evidenceStatus =
     input.readiness.blocked ? "Blocked" : readinessIsReady ? "Evidence blocker: Cleared" : "Evidence blocker: Unclear";

@@ -102,7 +102,6 @@ import { type JobDto } from "@/lib/jobs";
 import { getFitReviewHref, getStudioHref } from "@/src/navigation/routes";
 import { UnlockPanel } from "./_components/UnlockPanel";
 import { PostUnlockOutcomeShell } from "./_components/PostUnlockOutcomeShell";
-import { GenerationReadyShell, type GenerationReadyShellFailure } from "./_components/GenerationReadyShell";
 import {
   buildCoverLetterParagraphs,
   copyTextToClipboard,
@@ -961,10 +960,7 @@ export default function StudioPage() {
   const postUnlockTrackedRef = useRef(false);
   const [postUnlockRetrying, setPostUnlockRetrying] = useState(false);
   const [postUnlockRetryError, setPostUnlockRetryError] = useState<string | null>(null);
-  const [generationReadyDismissed, setGenerationReadyDismissed] = useState(false);
-  const [generationReadyPhase, setGenerationReadyPhase] = useState<"ready" | "generating" | "failed">("ready");
-  const [generationReadyFailure, setGenerationReadyFailure] = useState<GenerationReadyShellFailure | null>(null);
-  const generationReadyTrackedRef = useRef(false);
+  // Studio does not render an intermediate "generation ready" shell.
   const trackedStudioOpenRef = useRef(false);
   const lastReadinessKeyRef = useRef<string | null>(null);
   const studioDecisionLogKeyRef = useRef<string | null>(null);
@@ -4524,7 +4520,6 @@ export default function StudioPage() {
   // Canonical READY truth: if we have any usable output, behave as READY. Confidence only modulates tone.
   const isReadySuccessState = hasUsableResume || hasUsableCoverLetter;
   const isApplicationFullyReady = hasUsableResume && hasUsableCoverLetter;
-  const suppressAutoGenerationForGenerationReadyShell = false;
   const [showFullLowQualityResume, setShowFullLowQualityResume] = useState(false); 
   const [showFullLowQualityCover, setShowFullLowQualityCover] = useState(false); 
   const [showOptionalEvidenceDetails, setShowOptionalEvidenceDetails] = useState(false);
@@ -9337,7 +9332,7 @@ export default function StudioPage() {
 
   const canonicalStudioReadinessMessage =
     activeGenerationReadiness.status === "ready" && !activeGenerationReadiness.blocked
-      ? "You're ready to generate"
+      ? "Studio"
       : "Review your fit";
 
   const postUnlockNewReadiness: PostUnlockReadiness | null =
@@ -9428,7 +9423,7 @@ export default function StudioPage() {
         generationAllowedNow: Boolean(generateNowEligible || activeGenerationReadiness.status === "ready"),
         returnToEvidenceHref: strengthenPrimaryHref,
       },
-      generationReady: { dismissed: generationReadyDismissed, phase: generationReadyPhase },
+      generationReady: null,
       resumeFailure: resumeState.artifactFailure,
       coverFailure: coverState.artifactFailure,
       activity: workflowActivity,
@@ -9448,8 +9443,6 @@ export default function StudioPage() {
     coverSingleFlightInFlight,
     coverState.artifactFailure,
     generateNowEligible,
-    generationReadyDismissed,
-    generationReadyPhase,
     hasLoadedAnalysis,
     hasUsableCoverLetter,
     hasUsableResume,
@@ -9533,22 +9526,6 @@ export default function StudioPage() {
     postUnlockParams.priorScore,
   ]);
 
-  const generationReadyModel = workflowOrchestratorCore.generationReadyState.model;
-
-  const generationReadyShellActive = canGenerate
-    ? !generationReadyDismissed &&
-      !isApplicationApplied &&
-      !showReadinessRecoveryExperience &&
-      workflowOrchestratorCore.authorityState.canonicalState !== "generation_in_progress" &&
-      generationReadyPhase !== "generating"
-    : !generationReadyDismissed &&
-      !isApplicationApplied &&
-      !showReadinessRecoveryExperience &&
-      !activeGenerationReadiness.blocked &&
-      workflowOrchestratorCore.authorityState.canonicalState !== "generation_in_progress" &&
-      generationReadyPhase !== "generating" &&
-      (generationReadyModel.isGenerationReadyPriority || generationReadyPhase === "failed");
-
   const suppressGeneratingMessaging = showReadinessRecoveryExperience || activeGenerationReadiness.blocked;
   const workflowActivityBannerTracker = suppressGeneratingMessaging
     ? { ...workflowActivity, isActive: false, activeOperations: [] }
@@ -9561,11 +9538,10 @@ export default function StudioPage() {
       workflowAuthorityPanel:
         showInstantDraftHeroSafe &&
         !unlockFlowActive &&
-        !(postUnlockActive && Boolean(postUnlockModel)) &&
-        !generationReadyShellActive,
+        !(postUnlockActive && Boolean(postUnlockModel)),
       unlockFlow: unlockFlowActive,
       postUnlockOutcome: postUnlockActive && Boolean(postUnlockModel),
-      generationReadyShell: generationReadyShellActive,
+      generationReadyShell: false,
       artifactTruthPanel: Boolean(normalizedArtifactsPanelModel),
       staleArtifactPreview: false,
       activityBanner: true,
@@ -9582,133 +9558,7 @@ export default function StudioPage() {
     trackEvent,
   });
 
-  useEffect(() => {
-    if (!generationReadyShellActive) return;
-    // Generation-ready shell is the explicit authority for starting generation.
-    // Only suppress auto-generation when the contract is not instructing an auto-start.
-    // When `shouldStart` is true, the auto-generation effect will start through the
-    // ready shell entrypoint (`shell_auto`), so suppression would incorrectly block
-    // legitimate auto-starts (including in tests).
-    suppressAutoGenerationRef.current =
-      scoringReliability === "unreliable" ||
-      workflowOrchestratorCore.contract.generation.auto.shouldStart !== true;
-  }, [generationReadyShellActive, scoringReliability, workflowOrchestratorCore.contract.generation.auto.shouldStart]);
-
-  const generationReadyAnalyticsContext = useMemo(() => {
-    const trust = generationReadyModel.trustSummary;
-    return {
-      fit_score: typeof trust?.fitScore === "number" ? Math.round(trust.fitScore) : null,
-      readiness_state: trust?.readinessState ?? null,
-      outcome_state: postUnlockModel?.outcomeState ?? null,
-    };
-  }, [generationReadyModel.trustSummary, postUnlockModel?.outcomeState]);
-
-  useEffect(() => {
-    if (!generationReadyShellActive) return;
-    if (unlockFlowActive || postUnlockActive) return;
-    if (generationReadyTrackedRef.current) return;
-    generationReadyTrackedRef.current = true;
-
-    trackEvent("generation_ready_shell_viewed", {
-      source: "studio",
-      ...generationReadyAnalyticsContext,
-    });
-  }, [
-    generationReadyAnalyticsContext,
-    generationReadyShellActive,
-    postUnlockActive,
-    trackEvent,
-    unlockFlowActive,
-  ]);
-
-  const deriveGenerationReadyShellFailure = useCallback((): GenerationReadyShellFailure => {
-    const resumeFailure = resumeStateSnapshotRef.current.artifactFailure;
-    const coverFailure = coverStateSnapshotRef.current.artifactFailure;
-
-    const resumeError = resumeStateSnapshotRef.current.error;
-    const coverError = coverStateSnapshotRef.current.error;
-
-    const failures = [resumeFailure, coverFailure].filter(
-      (failure): failure is StudioArtifactFailurePresentation => Boolean(failure),
-    );
-    const nonRetryableCategories: StudioArtifactFailurePresentation["category"][] = [
-      "generation_blocked",
-      "insufficient_verified_evidence",
-      "unsupported_input",
-      "trace_failure",
-    ];
-    const retryableCategories: StudioArtifactFailurePresentation["category"][] = [
-      "generation_failed",
-      "generation_timeout",
-      "invalid_pair_state",
-    ];
-
-    const readinessBlocked = activeGenerationReadiness.blocked;
-    const blockedByReadinessGate =
-      resumeGating.primaryBlocker === "readiness_block" || coverGating.primaryBlocker === "readiness_block";
-
-    if (readinessBlocked || blockedByReadinessGate) {
-      return {
-        category: "generation_blocked",
-        retryable: false,
-        message: "Generation is unavailable for this role.",
-      };
-    }
-
-    const hasNonRetryableFailure =
-      failures.some((failure) => nonRetryableCategories.includes(failure.category)) ||
-      failures.some((failure) => !failure.retryable);
-
-    if (hasNonRetryableFailure) {
-      const failure = failures.find((candidate) => nonRetryableCategories.includes(candidate.category)) ?? failures[0];
-      return {
-        category: failure?.category ?? null,
-        retryable: false,
-        message: failure?.explanation ?? "Generation can't continue from the current state.",
-      };
-    }
-
-    const hasRetryableFailure = failures.some(
-      (failure) => failure.retryable && retryableCategories.includes(failure.category),
-    );
-
-    if (hasRetryableFailure) {
-      const failure = failures.find((candidate) => retryableCategories.includes(candidate.category)) ?? failures[0];
-      return {
-        category: failure?.category ?? null,
-        retryable: true,
-        message: failure?.explanation ?? "Generation failed. Retry generation now.",
-      };
-    }
-
-    const errorMessage = String(resumeError || coverError || "").trim();
-    return {
-      category: failures[0]?.category ?? null,
-      retryable: true,
-      message: failures[0]?.explanation ?? (errorMessage || "Generation failed. Retry generation now."),
-    };
-  }, [
-    activeGenerationReadiness.blocked,
-    coverGating.primaryBlocker,
-    resumeGating.primaryBlocker,
-    coverStateSnapshotRef,
-    resumeStateSnapshotRef,
-  ]);
-
-  const dismissGenerationReadyShell = useCallback(
-    (reason: "open_workspace" | "dismiss") => {
-      setGenerationReadyDismissed(true);
-      setGenerationReadyFailure(null);
-      setGenerationReadyPhase("ready");
-      suppressAutoGenerationRef.current = true;
-      trackEvent("generation_ready_shell_dismissed", {
-        source: "studio",
-        ...generationReadyAnalyticsContext,
-        reason,
-      });
-    },
-    [generationReadyAnalyticsContext, trackEvent],
-  );
+  // Studio: score >= 80 renders artifact cards directly; no intermediate "generation ready" shell.
 
   const startGenerationFromReadyShell = useCallback(
     async (
@@ -9719,14 +9569,6 @@ export default function StudioPage() {
       coverResult: StudioArtifactGenerationAttemptResult | null;
     }> => {
       console.log("[STUDIO][AUTO_GEN][START_CALLED_INNER]", { source });
-      if (generationReadyPhase === "generating" && source !== "manual_retry") {
-        return {
-          ok: false,
-          resumeResult: null,
-          coverResult: null,
-        };
-      }
-
       if (source === "shell_auto") {
         const contractSignature = workflowOrchestratorCore.contract?.generation.auto.signature;
         if (contractSignature) {
@@ -9743,14 +9585,8 @@ export default function StudioPage() {
       }
 
       scrollToStudioTop("smooth");
-      setGenerationReadyFailure(null);
-      setGenerationReadyPhase("generating");
       setAutoGenerationInFlight(true);
-      trackEvent("generation_ready_shell_started", {
-        source: "studio",
-        ...generationReadyAnalyticsContext,
-        entrypoint: source === "shell_auto" ? "shell" : source === "manual_retry" ? "shell" : source,
-      });
+      // Note: kept intentionally quiet; Studio renders generation affordances directly.
 
       try {
         const manualRequestId = source === "manual_retry" ? createRequestId() : null;
@@ -9823,34 +9659,17 @@ export default function StudioPage() {
         }
 
         if (ok) {
-          setGenerationReadyDismissed(true);
-          setGenerationReadyFailure(null);
-          setGenerationReadyPhase("ready");
           return { ok: true, resumeResult, coverResult };
         }
-
-        const failure = deriveGenerationReadyShellFailure();
-        setGenerationReadyFailure(failure);
-        setGenerationReadyPhase("failed");
-
-        trackEvent("generation_ready_shell_failed", {
-          source: "studio",
-          ...generationReadyAnalyticsContext,
-          failure_category: failure.category,
-          retryable: failure.retryable,
-        });
         return { ok: false, resumeResult, coverResult };
       } finally {
         setAutoGenerationInFlight(false);
       }
     },
     [
-      deriveGenerationReadyShellFailure,
       effectiveBaselineId,
       effectiveJobId,
       requestedAnalysisId,
-      generationReadyAnalyticsContext,
-      generationReadyPhase,
       handleCoverDraft,
       handleResumeDraft,
       makeStudioAttempt,
@@ -9974,7 +9793,6 @@ export default function StudioPage() {
     studioEffectiveGenerationState === "generated_unusable" &&
     studioHasRetriesRemaining &&
     (autoGenerationInFlight ||
-      generationReadyPhase === "generating" ||
       resumeGenerating ||
       coverGenerating ||
       resumeAutoGenerating ||
@@ -10372,7 +10190,15 @@ export default function StudioPage() {
           jobId,
           source: "resume",
         });
-        console.error("[STUDIO_GENERATE_ERROR]", new Error("generate_missing_context"));
+        const err = new Error("generate_missing_context");
+        console.error("[STUDIO_GENERATE_ERROR]", err);
+        setResumeState((current) => ({
+          ...current,
+          response: null,
+          artifactFailure: null,
+          tierGateError: null,
+          error: "We couldn't start generation yet. Please reload Studio and try again.",
+        }));
         return;
       }
 
@@ -10434,6 +10260,13 @@ export default function StudioPage() {
         jobId,
         source: "cover_letter",
       });
+      setCoverState((current) => ({
+        ...current,
+        response: null,
+        artifactFailure: null,
+        tierGateError: null,
+        error: "We couldn't start generation yet. Please reload Studio and try again.",
+      }));
       return;
     }
     setCoverGenerating(true);
@@ -10520,8 +10353,7 @@ export default function StudioPage() {
       autoGenerationInFlight ||
       resumeGenerating ||
       coverGenerating ||
-      studioArtifactPairStatus === "in_progress" ||
-      generationReadyPhase === "generating";
+      studioArtifactPairStatus === "in_progress";
 
     const storageKey = `ttr:studio:auto-generate:${signature}`;
     const lastSignatureKey = "ttr:studio:auto-generate:last-signature";
@@ -10693,7 +10525,6 @@ export default function StudioPage() {
     autoGenerationInFlight,
     coverGenerating,
     debugAutoGenerationEnabled,
-    generationReadyPhase,
     hasUsableCoverLetter,
     hasUsableResume,
     resumeGenerating,
@@ -10710,8 +10541,7 @@ export default function StudioPage() {
   useEffect(() => {
     if (!hasGenerateIntent) return;
     if (generationIntentHandledRef.current) return;
-    if (!generationReadyShellActive) return;
-    if (generationReadyPhase !== "ready") return;
+    if (!canGenerate) return;
     if (!effectiveBaselineVersionId) return;
     generationIntentHandledRef.current = true;
 
@@ -10731,9 +10561,8 @@ export default function StudioPage() {
       }
     })();
   }, [
+    canGenerate,
     effectiveBaselineVersionId,
-    generationReadyPhase,
-    generationReadyShellActive,
     hasGenerateIntent,
     router,
     startGenerationFromReadyShell,
@@ -10888,40 +10717,6 @@ export default function StudioPage() {
             dismissPostUnlockOutcome();
           }}
           onDismiss={dismissPostUnlockOutcome}
-        />
-        </div>
-      </PageShell>
-    );
-  }
-
-  if (generationReadyShellActive) {
-    const trust = generationReadyModel.trustSummary;
-    return (
-      <PageShell className="space-y-4 pb-4">
-        <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
-        <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
-          {canonicalStudioReadinessMessage}
-        </p>
-        <div
-          data-testid="studio-generation-ready-shell"
-          data-workflow-shell="generation-ready-shell"
-          data-workflow-state={workflowOrchestratorCore.authorityState.canonicalState}
-          data-workflow-trust-tone={workflowOrchestratorCore.authorityState.trustTone}
-        >
-        <GenerationReadyShell
-          fitScore={typeof trust?.fitScore === "number" ? trust.fitScore : null}
-          readinessState={trust?.readinessState ?? "Ready"}
-          evidenceStatus={trust?.evidenceStatus ?? "Evidence blocker: Cleared"}
-          phase={generationReadyPhase}
-          failure={generationReadyFailure}
-          disableActions={isWorkflowOperationActive("generation_running")}
-          onGenerate={() => void startGenerationFromReadyShell("shell")}
-          onRetry={() => void startGenerationFromReadyShell("shell")}
-          onOpenWorkspace={() => dismissGenerationReadyShell("open_workspace")}
-          onReturnToEvidence={() => {
-            void router.push(strengthenPrimaryHref);
-            dismissGenerationReadyShell("dismiss");
-          }}
         />
         </div>
       </PageShell>
@@ -12314,27 +12109,36 @@ export default function StudioPage() {
             body="This usually finishes in a moment."
           />
         ) : !hasRenderableResumeContent ? (
-          <EmptyState
-            testId="studio-resume-missing"
-            title="Resume not generated yet"
-            body="Generate your resume to preview and refine your application."
-            cta={
-              <FormButton
-                type="button"
-                onClick={() => void handleGenerateResume()}
-                disabled={
-                  !effectiveBaselineVersionId ||
-                  pageTruth.isGenerating ||
-                  resumeGenerating ||
-                  coverGenerating
+              <EmptyState
+                testId="studio-resume-missing"
+                title="Resume not generated yet"
+                body={
+                  !canGenerateDocuments
+                    ? "Improve your baseline to generate materials."
+                    : resumeState.error
+                      ? resumeState.error
+                      : "Generate your resume to preview and refine your application."
                 }
-                data-testid="studio-generate-resume-button"
-              >
-                Generate resume
-              </FormButton>
-            }
-          />
-        ) : null}
+                cta={
+                  <FormButton
+                    type="button"
+                    onClick={() => void handleGenerateResume()}
+                    disabled={
+                      !canGenerateDocuments ||
+                      !effectiveBaselineId ||
+                      !effectiveBaselineVersionId ||
+                      !effectiveJobId ||
+                      pageTruth.isGenerating ||
+                      resumeGenerating ||
+                      coverGenerating
+                    }
+                    data-testid="studio-generate-resume-button"
+                  >
+                    {resumeGenerating ? "Generating..." : "Generate resume"}
+                  </FormButton>
+                }
+              />
+            ) : null}
       </section>
 
       <section
@@ -12769,14 +12573,17 @@ export default function StudioPage() {
                       type="button"
                       onClick={() => void handleGenerateCoverLetter()}
                       disabled={
+                        !canGenerateDocuments ||
+                        !effectiveBaselineId ||
                         !effectiveBaselineVersionId ||
+                        !effectiveJobId ||
                         pageTruth.isGenerating ||
                         resumeGenerating ||
                         coverGenerating
                       }
                       data-testid="studio-generate-cover-button"
                     >
-                      Generate cover letter
+                      {coverGenerating ? "Generating..." : "Generate cover letter"}
                     </FormButton>
                   )
                 }

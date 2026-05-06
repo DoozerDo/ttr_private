@@ -83,8 +83,8 @@ export function resolveWorkflowSurfaceAuthority(input: {
     if (state === "unlocked_ready") {
       return {
         canonicalState: "post_unlock_outcome",
-        headline: "Your documents are ready to generate.",
-        body: "Your latest evidence cleared the blocker. Generate your tailored resume and cover letter now.",
+        headline: "Generate in Studio",
+        body: "Your latest evidence cleared the blocker. Generate your tailored resume and cover letter in Studio.",
         primaryAction: {
           label: "Generate resume and cover letter",
           destination: "studio_generate",
@@ -156,8 +156,8 @@ export function resolveWorkflowSurfaceAuthority(input: {
   if (!blocked && (eligibleForGenerationReady || (generationReadyActive && generationPhase === "ready"))) {
     return {
       canonicalState: "generation_ready",
-      headline: "Your documents are ready to generate.",
-      body: "Your latest evidence cleared the blocker. Generate your tailored resume and cover letter now.",
+      headline: "Generate in Studio",
+      body: "Generate your tailored resume and cover letter directly in Studio.",
       primaryAction: {
         label: "Generate resume and cover letter",
         destination: "studio_generate",
