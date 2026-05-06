@@ -16,6 +16,7 @@ import {
   type BaselineTemplateReadinessReason,
 } from '../baseline/baselineTemplateReadiness';
 import { interpretEvidenceFromResumeText } from '../evidence/evidence-interpreter';
+import type { InterpretedEvidenceSummary } from '../evidence/evidence-model';
 import { resolveEvidenceReadinessFromSummary } from '../evidence/readiness-thresholds';
 import {
   buildResumePlainText,
@@ -326,6 +327,13 @@ export class StudioArtifactsService {
       }
     })();
 
+    const emptyInterpretedEvidenceSummary: InterpretedEvidenceSummary = {
+      strongEvidenceCount: 0,
+      partialEvidenceCount: 0,
+      weakEvidenceCount: 0,
+      unusableEvidenceCount: 0,
+    };
+
     const interpretedEvidence = baselineTextForInterpretation
       ? interpretEvidenceFromResumeText({
           baselineId: String(baseline?.id ?? ''),
@@ -333,7 +341,7 @@ export class StudioArtifactsService {
           resumeText: baselineTextForInterpretation,
         })
       : {
-          summary: { strongEvidenceCount: 0, partialEvidenceCount: 0 },
+          summary: emptyInterpretedEvidenceSummary,
           omittedInterpretedEvidence: [],
           evidenceDetailsMap: {},
         };
