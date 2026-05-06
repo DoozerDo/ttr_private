@@ -562,6 +562,12 @@ function presentArtifactFailureV2(failure: ArtifactFailurePayload): StudioArtifa
         failure.userAction?.title ||
         "Retry generation after the storage issue clears.",
     },
+    baseline_requires_reprocess: {
+      headline: "Your baseline needs to be reprocessed before documents can be generated.",
+      explanation:
+        "We need to rebuild your structured resume profile from your baseline resume. This keeps generated resumes and cover letters accurate and grounded.",
+      nextStep: "Reprocess baseline",
+    },
   };
 
   const copy = base[failure.category] ?? base.generation_failed!;
