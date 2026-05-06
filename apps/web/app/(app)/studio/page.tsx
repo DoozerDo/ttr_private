@@ -9812,6 +9812,8 @@ export default function StudioPage() {
     studioEffectiveGenerationState === "generated_unusable" && studioAutoRetryCount >= MAX_AUTO_RETRIES;
 
   const generationReadyAutoStartRef = useRef<string | null>(null);
+  const autoGenerationHadRequiredIdsRef = useRef(false);
+  const autoGenerationLastSignatureRef = useRef<string | null>(null);
 
   const shouldShowResumeRegenerate = resumeResult
     ? resumeResult.actions?.canRegenerate === true ||
@@ -10382,6 +10384,38 @@ export default function StudioPage() {
     const storageKey = `ttr:studio:auto-generate:${signature}`;
     const lastSignatureKey = "ttr:studio:auto-generate:last-signature";
     const storage = typeof window !== "undefined" ? window.localStorage : null;
+
+    const hasRequiredIdsNow = Boolean(effectiveBaselineVersionId && effectiveJobId && effectiveRequestedAnalysisId);
+    const hadRequiredIdsBefore = autoGenerationHadRequiredIdsRef.current;
+    autoGenerationHadRequiredIdsRef.current = hasRequiredIdsNow;
+    const lastSignatureInMemory = autoGenerationLastSignatureRef.current;
+    autoGenerationLastSignatureRef.current = signature;
+
+    // Recovery: Studio often renders once before hydration provides IDs. That early evaluation can produce
+    // an "unknown_*" signature that must not permanently poison auto-generation for the real hydrated signature.
+    // When required IDs transition from missing -> present, clear any stale failed latch for the last-known
+    // signature that contained unknown placeholders.
+    if (!hadRequiredIdsBefore && hasRequiredIdsNow) {
+      try {
+        if (storage && typeof storage.getItem === "function" && typeof storage.removeItem === "function") {
+          const persistedLastSignature = storage.getItem(lastSignatureKey);
+          const candidates = [persistedLastSignature, lastSignatureInMemory].filter(Boolean) as string[];
+          for (const candidate of candidates) {
+            if (!candidate) continue;
+            if (!candidate.includes("unknown_")) continue;
+            const key = `ttr:studio:auto-generate:${candidate}`;
+            const value = storage.getItem(key);
+            if (value === "failed" || value === "started") storage.removeItem(key);
+          }
+          // Do not carry forward an unknown last-signature into the hydrated lane.
+          if (persistedLastSignature && persistedLastSignature.includes("unknown_")) {
+            storage.removeItem(lastSignatureKey);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
     let latch: string | null = null;
     try {
       latch = storage && typeof storage.getItem === "function" ? storage.getItem(storageKey) : null;

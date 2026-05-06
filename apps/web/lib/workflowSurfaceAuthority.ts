@@ -54,7 +54,8 @@ export function resolveWorkflowSurfaceAuthority(input: {
   const eligibleForGenerationReady =
     !unlockFlowActive &&
     !input.postUnlockOutcomeState &&
-    readinessIsReady &&
+    // Product rule: score >= 80 means generation is allowed. Readiness is informational only and must
+    // not gate Studio generation entry/auto-start.
     workflowSupportsImmediateGeneration &&
     !hasAnyOutput &&
     !pairGenerating &&
