@@ -50,7 +50,7 @@ describe('StudioArtifactsService', () => {
   const backfillService = {
     backfillLatestIfMissing: jest.fn(async () => null),
   };
-  it('fails early when persisted ResumeV2 is missing (does not use raw baseline section text)', async () => {
+  it('does not 422 when persisted ResumeV2 is missing (artifacts retrieval still returns a state payload)', async () => {
     const studioArtifactRepository = createRepository<any>();
     const baselineVersionRepository = { findOne: jest.fn(async () => baselineVersion) };
     const jobRepository = { findOne: jest.fn(async () => job) };
@@ -68,16 +68,19 @@ describe('StudioArtifactsService', () => {
       backfillService as any,
     );
 
-    await expect(
-      service.readState({
-        userId: 'user-1',
-        baselineId: 'baseline-1',
-        jobId: 'job-1',
-        baselineVersionId: baselineVersion.id,
-        analysisId: assessment.id,
-      } as any),
-    ).rejects.toMatchObject({
-      response: { error: { code: 'baseline_resume_v2_missing' } },
+    const state = await service.readState({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      analysisId: assessment.id,
+    } as any);
+
+    expect(state).toMatchObject({
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      generationContractVersion: expect.any(String),
     });
   });
 

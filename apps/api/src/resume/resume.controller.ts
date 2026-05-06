@@ -9,6 +9,7 @@ import {
   Req,
   Res,
   StreamableFile,
+  UnprocessableEntityException,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
@@ -136,6 +137,23 @@ export class ResumeController {
         this.resumeService.getGenerationReadiness(userId, payload),
       );
     } catch (error) {
+      // Product rule: readiness is informational only. Never fail readiness with 422 for non-ID reasons.
+      if (error instanceof UnprocessableEntityException) {
+        const response = (error as any).getResponse?.() as any;
+        const errorRecord = response && typeof response === 'object' ? (response as any).error : null;
+        const code = typeof errorRecord?.code === 'string' ? errorRecord.code : 'readiness_error';
+        const message =
+          typeof errorRecord?.message === 'string'
+            ? errorRecord.message
+            : 'Readiness could not be evaluated from the current state.';
+
+        return {
+          status: 'blocked',
+          blocked: true,
+          compliance_flags: [],
+          reasons: [{ code, message }],
+        };
+      }
       // eslint-disable-next-line no-console
       console.error('[resume-readiness][error]', {
         userId,
@@ -172,7 +190,7 @@ export class ResumeController {
     const oneTap = Boolean(body.oneTap);
 
     if (!baselineId) {
-      throw new BadRequestException({
+      throw new UnprocessableEntityException({
         error: {
           code: 'studio_not_ready',
           message: 'baselineId is required',
@@ -180,7 +198,7 @@ export class ResumeController {
       });
     }
     if (!jobId) {
-      throw new BadRequestException({
+      throw new UnprocessableEntityException({
         error: {
           code: 'target_context_missing',
           message: 'jobId is required',

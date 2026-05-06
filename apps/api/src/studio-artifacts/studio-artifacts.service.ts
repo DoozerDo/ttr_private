@@ -18,9 +18,7 @@ import {
 import { interpretEvidenceFromResumeText } from '../evidence/evidence-interpreter';
 import { resolveEvidenceReadinessFromSummary } from '../evidence/readiness-thresholds';
 import {
-  buildNormalizedResumeValidationFailures,
   buildResumePlainText,
-  formatResumeV2InvalidMessage,
   normalizeNormalizedResumeDocument,
   validateNormalizedResumeDocument,
 } from '../resume/resume-normalization';
@@ -314,36 +312,31 @@ export class StudioArtifactsService {
       persisted = backfilled?.resumeV2Json ?? null;
     }
 
+    // Artifacts retrieval must never 422 due to readiness/template gating.
+    // Baseline ResumeV2 is used only to enrich readiness with interpreted evidence; treat it as optional here.
     const baselineTextForInterpretation = (() => {
-      if (!persisted || typeof persisted !== 'object') {
-        throw new UnprocessableEntityException({
-          error: {
-            code: 'baseline_resume_v2_missing',
-            message:
-              'Baseline is missing a persisted ResumeV2 model. Re-run baseline processing (Fit Review) or re-upload your resume to re-ingest.',
-            details: { expected: ['baseline_parsed.resumeV2Json'] },
-          },
-        });
+      try {
+        if (!persisted || typeof persisted !== 'object') return null;
+        const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
+        const validation = validateNormalizedResumeDocument(normalized);
+        if (!validation.valid) return null;
+        return buildResumePlainText(normalized);
+      } catch {
+        return null;
       }
-      const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
-      const validation = validateNormalizedResumeDocument(normalized);
-      if (!validation.valid) {
-        const failures = buildNormalizedResumeValidationFailures(normalized);
-        throw new UnprocessableEntityException({
-          error: {
-            code: 'baseline_resume_v2_invalid',
-            message: formatResumeV2InvalidMessage({ reasons: validation.reasons, failures }),
-            details: { reasons: validation.reasons, failures },
-          },
-        });
-      }
-      return buildResumePlainText(normalized);
     })();
-    const interpretedEvidence = interpretEvidenceFromResumeText({
-      baselineId: String(baseline?.id ?? ''),
-      baselineVersionId: String(baselineVersion?.id ?? ''),
-      resumeText: baselineTextForInterpretation,
-    });
+
+    const interpretedEvidence = baselineTextForInterpretation
+      ? interpretEvidenceFromResumeText({
+          baselineId: String(baseline?.id ?? ''),
+          baselineVersionId: String(baselineVersion?.id ?? ''),
+          resumeText: baselineTextForInterpretation,
+        })
+      : {
+          summary: { strongEvidenceCount: 0, partialEvidenceCount: 0 },
+          omittedInterpretedEvidence: [],
+          evidenceDetailsMap: {},
+        };
     const interpretedMeaningfulEvidenceCount =
       (interpretedEvidence.summary.strongEvidenceCount ?? 0) + (interpretedEvidence.summary.partialEvidenceCount ?? 0);
     const hasInterpretedMeaningfulEvidence = interpretedMeaningfulEvidenceCount > 0;

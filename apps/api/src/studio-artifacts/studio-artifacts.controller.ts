@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Query, Req, UnprocessableEntityException, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
 import { StudioArtifactsService } from './studio-artifacts.service';
@@ -27,7 +27,12 @@ export class StudioArtifactsController {
       throw new BadRequestException('Invalid user context');
     }
     if (!baselineId?.trim() || !baselineVersionId?.trim() || !jobId?.trim()) {
-      throw new BadRequestException('baselineId, baselineVersionId, and jobId are required');
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'studio_artifacts_missing_ids',
+          message: 'baselineId, baselineVersionId, and jobId are required',
+        },
+      });
     }
 
     // eslint-disable-next-line no-console

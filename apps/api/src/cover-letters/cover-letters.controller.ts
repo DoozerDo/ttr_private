@@ -12,6 +12,7 @@ import {
   Req,
   Res,
   StreamableFile,
+  UnprocessableEntityException,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
@@ -148,6 +149,23 @@ export class CoverLettersController {
         this.coverLettersService.getGenerationReadiness(userId, body),
       );
     } catch (error) {
+      // Product rule: readiness is informational only. Never fail readiness with 422 for non-ID reasons.
+      if (error instanceof UnprocessableEntityException) {
+        const response = (error as any).getResponse?.() as any;
+        const errorRecord = response && typeof response === 'object' ? (response as any).error : null;
+        const code = typeof errorRecord?.code === 'string' ? errorRecord.code : 'readiness_error';
+        const message =
+          typeof errorRecord?.message === 'string'
+            ? errorRecord.message
+            : 'Readiness could not be evaluated from the current state.';
+
+        return {
+          status: 'blocked',
+          blocked: true,
+          compliance_flags: [],
+          reasons: [{ code, message }],
+        };
+      }
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(
         `[readiness] cover_letters.readiness failed userId=${userId} message=${message}`,

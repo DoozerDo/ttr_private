@@ -1,4 +1,5 @@
 import { ForbiddenException, HttpStatus, StreamableFile } from '@nestjs/common';
+import { UnprocessableEntityException } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { ResumeController } from './resume.controller';
 import { ResumeService } from './resume.service';
@@ -77,6 +78,30 @@ const buildResponse = (): Response => {
   };
   return response as Response;
 };
+
+describe('ResumeController readiness (informational-only)', () => {
+  it('returns 200 readiness payload when service throws UnprocessableEntityException', async () => {
+    const controller = new ResumeController(resumeService as unknown as ResumeService);
+    const request = buildRequest(SubscriptionTier.PRO);
+
+    resumeService.getGenerationReadiness.mockImplementationOnce(async () => {
+      throw new UnprocessableEntityException({
+        error: { code: 'baseline_resume_v2_missing', message: 'Baseline ResumeV2 missing' },
+      });
+    });
+
+    const payload = await controller.getGenerationReadiness(
+      { baselineId: 'base-1', baselineVersionId: 'basev-1', jobId: 'job-1', analysisId: 'analysis-1' } as any,
+      request as any,
+    );
+
+    expect(payload).toMatchObject({
+      status: 'blocked',
+      blocked: true,
+      reasons: [{ code: 'baseline_resume_v2_missing' }],
+    });
+  });
+});
 
 describe('ResumeController tier gating', () => {
   let controller: ResumeController;
