@@ -76,6 +76,14 @@ import {
 } from '../docx-templates/docx-template.types';
 import { resolveBaselineIdentity } from '../baseline/baseline-identity.utils';
 import { resolveBaselineSectionsForGeneration } from '../baseline/baseline-section-source';
+import { BaselineResumeV2BackfillService } from '../baseline/baseline-resume-v2-backfill.service';
+import {
+  buildNormalizedResumeValidationFailures,
+  buildResumePlainText,
+  formatResumeV2InvalidMessage,
+  normalizeNormalizedResumeDocument,
+  validateNormalizedResumeDocument,
+} from '../resume/resume-normalization';
 import {
   extractEvidenceUnitsFromLogicalUnits,
   reconstructLogicalTextUnits,
@@ -230,6 +238,7 @@ export class CoverLettersService {
     private readonly workflowIdempotencyService: WorkflowIdempotencyService,
     private readonly studioArtifactsService: StudioArtifactsService,
     private readonly applicationsService: ApplicationsService,
+    private readonly baselineResumeV2BackfillService: BaselineResumeV2BackfillService,
   ) {
     this.coverLetterRepository = this.dataSource.getRepository(CoverLetter);
     this.baselineRepository = this.dataSource.getRepository(Baseline);
@@ -1267,6 +1276,38 @@ export class CoverLettersService {
       policies,
     );
 
+    // IMPORTANT: Document generation authority boundary.
+    // Studio + generation must be grounded in the persisted ResumeV2 model (BaselineParsed.resumeV2Json),
+    // not raw baseline section concatenations or uploaded resume text.
+    let persisted = (baseline.parsedRecords?.[0] as any)?.resumeV2Json ?? null;
+    if (!persisted || typeof persisted !== 'object') {
+      const backfilled = await this.baselineResumeV2BackfillService.backfillLatestIfMissing({ baselineId: baseline.id });
+      persisted = backfilled?.resumeV2Json ?? null;
+    }
+    if (!persisted || typeof persisted !== 'object') {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'baseline_resume_v2_missing',
+          message:
+            'Baseline is missing a persisted ResumeV2 model. Re-run baseline processing (Fit Review) or re-upload your resume to re-ingest.',
+          details: { expected: ['baseline_parsed.resumeV2Json'] },
+        },
+      });
+    }
+    const normalizedResumeV2 = normalizeNormalizedResumeDocument(persisted as any);
+    const v2Validation = validateNormalizedResumeDocument(normalizedResumeV2 as any);
+    if (!v2Validation.valid) {
+      const failures = buildNormalizedResumeValidationFailures(normalizedResumeV2 as any);
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'baseline_resume_v2_invalid',
+          message: formatResumeV2InvalidMessage({ reasons: v2Validation.reasons, failures }),
+          details: { reasons: v2Validation.reasons, failures },
+        },
+      });
+    }
+    const resumeV2PlainText = buildResumePlainText(normalizedResumeV2 as any);
+
     const closingTemplateKey = await this.resolveClosingTemplateKey(
       userId,
       input.closingTemplateKey,
@@ -1282,7 +1323,18 @@ export class CoverLettersService {
     const evidenceSignals = buildBaselineEvidenceSignals({
       baselineId: baseline.id,
       baselineVersionId: baselineVersion.id,
-      baselineSections: allowedSections as any,
+      baselineSections: [
+        {
+          baselineId: baseline.id,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'ResumeV2',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 0,
+          content: resumeV2PlainText,
+          createdAt: new Date(0),
+          updatedAt: new Date(0),
+        },
+      ] as any,
     });
     const structuredBaseline = evidenceSignals.structuredBaseline;
     const templateReadiness = evaluateBaselineTemplateReadiness(structuredBaseline);
@@ -1291,9 +1343,7 @@ export class CoverLettersService {
     const meaningfulInterpretedEvidenceExists = interpretedEligibility.hasMeaningfulInterpretedEvidence;
     const interpretedEvidenceReadiness = resolveEvidenceReadinessFromSummary(evidenceSignals.interpretedEvidenceSummary);
 
-    const baselineText = allowedSections
-      .map((section) => section.content ?? '')
-      .join('\n');
+    const baselineText = resumeV2PlainText;
     const insufficientBaselineDetails =
       getInsufficientExtractedTextDetails(baselineText);
     if (
@@ -1318,7 +1368,17 @@ export class CoverLettersService {
       }));
     }
 
-    let allowedBlocks = this.mapToAllowedBlocks(allowedSections);
+    // Generation must be driven by ResumeV2-derived content (synthetic blocks), not baseline section concatenations.
+    let allowedBlocks: AllowedBaselineBlock[] = [
+      {
+        id: 'resume_v2_plain_text',
+        title: 'ResumeV2',
+        content: this.normalizeResumeV2BlockContent(resumeV2PlainText),
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: 0,
+        sectionType: BaselineSectionType.EXPERIENCE,
+      },
+    ];
     const interpretedEvidenceIdToItem = new Map<string, EvidenceItem>();
     const enforceTemplateReadiness =
       Boolean(input.jobId?.trim()) && Boolean(input.analysisId?.trim()) && !Boolean(oneTap);
@@ -1876,6 +1936,19 @@ export class CoverLettersService {
       sectionType:
         section.sectionType ?? section.type ?? BaselineSectionType.OTHER,
     }));
+  }
+
+  // ResumeV2-derived synthetic blocks should preserve newlines so evidence extraction can recover
+  // bullet boundaries via reconstructLogicalTextUnits(). Raw uploaded resume text or baseline section
+  // concatenations must never be used as Studio/doc generation authority.
+  private normalizeResumeV2BlockContent(content?: string | null) {
+    if (!content) return '';
+    return String(content)
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .replace(/\t/g, ' ')
+      .replace(/\u00a0/g, ' ')
+      .trim();
   }
 
   private cleanText(content?: string | null) {

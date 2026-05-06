@@ -1602,3 +1602,114 @@ export function validateNormalizedResumeDocument(document: NormalizedResumeDocum
   }
   return { valid: reasons.length === 0, reasons };
 }
+
+export type NormalizedResumeValidationFailure = {
+  path: string;
+  field: string;
+  value: unknown;
+  message: string;
+};
+
+function trimToText(value: unknown): string {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+export function buildNormalizedResumeValidationFailures(
+  document: NormalizedResumeDocument,
+): NormalizedResumeValidationFailure[] {
+  const failures: NormalizedResumeValidationFailure[] = [];
+
+  if (!trimToText(document.heading?.name)) {
+    failures.push({
+      path: 'heading.name',
+      field: 'name',
+      value: document.heading?.name,
+      message: 'Missing heading name.',
+    });
+  }
+
+  const contactTokens = trimToText(document.heading?.contactLine)
+    .split('|')
+    .map((token) => trimToText(token))
+    .filter(Boolean);
+  const dedupeContact = new Set<string>();
+  for (const token of contactTokens) {
+    const phoneDigits = token.replace(/\D/g, '');
+    const key = phoneDigits.length === 10 ? `phone:${phoneDigits}` : `text:${token.toLowerCase()}`;
+    if (dedupeContact.has(key)) {
+      failures.push({
+        path: 'heading.contactLine',
+        field: 'contactLine',
+        value: document.heading?.contactLine,
+        message: 'Duplicate contact token detected.',
+      });
+      break;
+    }
+    dedupeContact.add(key);
+  }
+
+  for (let index = 0; index < (document.experience ?? []).length; index++) {
+    const entry = document.experience[index] as any;
+    const company = trimToText(entry?.company);
+    const roleTitle = trimToText(entry?.roleTitle);
+    const bullets = Array.isArray(entry?.bullets) ? (entry.bullets as unknown[]) : [];
+
+    if (!company) {
+      failures.push({
+        path: `experience[${index}].company`,
+        field: 'company',
+        value: entry?.company,
+        message: 'Missing company.',
+      });
+    }
+
+    if (!roleTitle) {
+      failures.push({
+        path: `experience[${index}].roleTitle`,
+        field: 'roleTitle',
+        value: entry?.roleTitle,
+        message: 'Missing role title.',
+      });
+    }
+
+    if (bullets.length === 0) {
+      failures.push({
+        path: `experience[${index}].bullets`,
+        field: 'bullets',
+        value: entry?.bullets,
+        message: 'Experience entry missing bullets.',
+      });
+    } else {
+      for (let bulletIndex = 0; bulletIndex < bullets.length; bulletIndex++) {
+        const bullet = trimToText(bullets[bulletIndex]);
+        if (!bullet) {
+          failures.push({
+            path: `experience[${index}].bullets[${bulletIndex}]`,
+            field: 'bullet',
+            value: bullets[bulletIndex],
+            message: 'Empty bullet.',
+          });
+          break;
+        }
+      }
+    }
+  }
+
+  return failures;
+}
+
+export function formatResumeV2InvalidMessage(input: {
+  reasons: string[];
+  failures?: NormalizedResumeValidationFailure[] | null;
+  maxFields?: number;
+}): string {
+  const maxFields = typeof input.maxFields === 'number' ? input.maxFields : 8;
+  const paths = (input.failures ?? [])
+    .map((f) => f.path)
+    .filter(Boolean)
+    .slice(0, maxFields);
+  const suffix = paths.length ? ` Invalid fields: ${paths.join(', ')}.` : '';
+  const reasons = (input.reasons ?? []).filter(Boolean);
+  const reasonText = reasons.length ? ` ${reasons.slice(0, 3).join(' ')}` : '';
+  return `Resume V2 produced an invalid normalized resume model.${reasonText}${suffix}`.trim();
+}

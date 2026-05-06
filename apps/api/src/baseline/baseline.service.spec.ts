@@ -9,6 +9,7 @@ import {
 import { Baseline, BaselineStatus } from './baseline.entity';
 import { BaselineBlockPolicy } from './baseline-block-policy.entity';
 import { BaselineParsed } from './baseline-parsed.entity';
+import { validateNormalizedResumeDocument } from '../resume/resume-normalization';
 import { BaselineVersion } from './baseline-version.entity';
 import { BaselineIngestionService } from './baseline-ingestion.service';
 import { BaselineService } from './baseline.service';
@@ -412,6 +413,64 @@ const ingestionResult = {
     expect(result.latestAssessmentSummary.hasCompletedAssessment).toBe(true);
     expect(result.latestAssessmentSummary.latestAssessmentId).toBe('assessment-9');
     expect(result.latestAssessmentSummary.latestFitScore).toBe(91);
+  });
+
+  it('persists a validated ResumeV2 model during baseline ingestion', async () => {
+    const baselineForTest = { ...baseline, id: '00000000-0000-0000-0000-000000000000' };
+    const manager = {
+      create: jest.fn((_entity: any, value: any) => value),
+      save: jest.fn(async (value: any) => value),
+    } as any;
+
+    const ingestion = {
+      rawText: 'Test Resume',
+      parsedSections: [
+        {
+          sectionType: BaselineSectionType.EXPERIENCE,
+          content: 'Acme | Engineer | 2020 - Present\n- Shipped features',
+        },
+      ],
+      canonical: {
+        identity: { full_name: 'Test Person', location: 'Test City', current_title: null, current_company: null, summary: null },
+        summary: null,
+        experience: [
+          {
+            company: 'Acme',
+            role: 'Engineer',
+            start_date: '2020',
+            end_date: 'present',
+            evidence: [
+              { id: 'e1', text: 'Shipped features', metrics: [], tags: ['engineer'] },
+              { id: 'e2', text: 'Improved ticket resolution time by 25%', metrics: [], tags: ['engineer'] },
+            ],
+            company_name: 'Acme',
+            role_title: 'Engineer',
+            scope_summary: 'Shipped features. Improved ticket resolution time by 25%.',
+            details_text: ['Shipped features', 'Improved ticket resolution time by 25%'].join('\n'),
+          },
+        ],
+        education: [],
+        skills: [],
+        people_leadership: { direct_reports: null, managers_led: null, global_teams: null },
+        operational_ownership: { functions_owned: [], process_design: null, process_scaling: null },
+        tooling_and_platforms: { tools: [], ownership_level: 'unknown' },
+        cross_functional_partnership: { product: null, engineering: null, sales_cs: null, executive: null },
+        customer_advocacy: { executive_escalations: null, voice_of_customer: null, post_incident_rca: null },
+        scale_and_scope: { customer_segment: 'unknown', geo_scope: 'unknown', org_stage: 'unknown' },
+        metrics_and_outcomes: { metrics_present: false, metrics: [] },
+        skills_and_tools: { tools: [], methodologies: [], domains: [] },
+        system_generated_read_only: { missing_fields: [], ambiguity_flags: [], low_confidence_extractions: [] },
+      } as any,
+      sourceFormat: 'docx' as const,
+    };
+
+    await (service as any).persistParsedBaseline(manager, baselineForTest, ingestion);
+
+    expect(manager.create).toHaveBeenCalled();
+    const created = manager.create.mock.calls[0][1];
+    expect(created.resumeV2Json).toBeTruthy();
+    const validation = validateNormalizedResumeDocument(created.resumeV2Json);
+    expect(validation.valid).toBe(true);
   });
 
   it('uses distinctOn when loading the latest assessment summary', async () => {

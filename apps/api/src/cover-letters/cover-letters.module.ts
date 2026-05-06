@@ -8,17 +8,19 @@ import { CoverLettersController } from './cover-letters.controller';
 import { CoverLettersService } from './cover-letters.service';
 import { WorkflowIdempotencyModule } from '../common/workflow-idempotency.module';
 import { StudioArtifactsModule } from '../studio-artifacts/studio-artifacts.module';
+import { BaselineParsed } from '../baseline/baseline-parsed.entity';
+import { BaselineResumeV2BackfillService } from '../baseline/baseline-resume-v2-backfill.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([CoverLetter]),
+    TypeOrmModule.forFeature([CoverLetter, BaselineParsed]),
     ComplianceModule,
     ApplicationsModule,
     WorkflowIdempotencyModule,
     StudioArtifactsModule,
   ],
   controllers: [CoverLettersController],
-  providers: [CoverLettersService, GapAnalysisService],
+  providers: [CoverLettersService, GapAnalysisService, BaselineResumeV2BackfillService],
   exports: [CoverLettersService],
 })
 export class CoverLettersModule {}

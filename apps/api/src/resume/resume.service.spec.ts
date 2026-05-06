@@ -225,6 +225,19 @@ const buildService = (options?: {
     markFailure: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<WorkflowIdempotencyService>;
 
+  const baselineResumeV2BackfillService = {
+    backfillLatestIfMissing: jest.fn().mockResolvedValue({
+      resumeV2Json: {
+        heading: { name: 'Alex Candidate', contactLine: 'Test City' },
+        summary: 'Support leader with verified impact.',
+        experience: [
+          { company: 'Acme', roleTitle: 'Director of Support', bullets: ['Improved p95 by 25%'] },
+        ],
+        education: [],
+      },
+    }),
+  } as any;
+
   const service = new ResumeService(
     baselineRepo as Repository<Baseline>,
     versionRepo as Repository<BaselineVersion>,
@@ -238,6 +251,7 @@ const buildService = (options?: {
     criticalFlowTrackerService,
     workflowIdempotencyService,
     studioArtifactsService,
+    baselineResumeV2BackfillService,
   );
 
   return {
@@ -251,6 +265,27 @@ const buildService = (options?: {
 };
 
 describe('ResumeService contract', () => {
+  it('uses persisted ResumeV2 as the only resume generation authority (not baseline section text)', async () => {
+    const { service } = buildService();
+    const poison = 'POISON_BASELINE_SECTION_TEXT_SHOULD_NOT_APPEAR';
+    const originalSections = baseline.sections;
+
+    baseline.sections = [
+      {
+        ...baseSection,
+        content: `${String(baseSection.content ?? '')}\n\n${poison}\n`,
+      } as any,
+    ];
+
+    try {
+      const result = await service.generateResume('user-1', baseRequest as any);
+      expect(result.status).toBe('success');
+      expect(String((result as any).content ?? '')).not.toContain(poison);
+    } finally {
+      baseline.sections = originalSections;
+    }
+  });
+
   it('forces Studio regenerate to persist a fresh V2 artifact when RESUME_GENERATION_V2=true', async () => {
     const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
     process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';

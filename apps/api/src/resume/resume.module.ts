@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { BaselineSection } from '../baseline/baseline-section.entity';
 import { Baseline } from '../baseline/baseline.entity';
+import { BaselineParsed } from '../baseline/baseline-parsed.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { ComplianceModule } from '../compliance/compliance.module';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
@@ -13,6 +14,7 @@ import { OpportunitiesModule } from '../opportunities/opportunities.module';
 import { SupportModule } from '../support/support.module';
 import { WorkflowIdempotencyModule } from '../common/workflow-idempotency.module';
 import { StudioArtifactsModule } from '../studio-artifacts/studio-artifacts.module';
+import { BaselineResumeV2BackfillService } from '../baseline/baseline-resume-v2-backfill.service';
 import { ResumeController } from './resume.controller';
 import { ResumeService } from './resume.service';
 
@@ -20,6 +22,7 @@ import { ResumeService } from './resume.service';
   imports: [
     TypeOrmModule.forFeature([
       Baseline,
+      BaselineParsed,
       BaselineSection,
       BaselineVersion,
       BaselineBlockPolicy,
@@ -34,7 +37,7 @@ import { ResumeService } from './resume.service';
     StudioArtifactsModule,
   ],
   controllers: [ResumeController],
-  providers: [ResumeService, GapAnalysisService],
+  providers: [ResumeService, GapAnalysisService, BaselineResumeV2BackfillService],
   exports: [ResumeService],
 })
 export class ResumeModule {}

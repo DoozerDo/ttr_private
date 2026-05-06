@@ -15,6 +15,7 @@ import { BaselineService } from './baseline.service';
 import { BaselineBlockPolicy } from './baseline-block-policy.entity';
 import { BaselineVersionService } from './baseline-version.service';
 import { BaselineIngestionService } from './baseline-ingestion.service';
+import { BaselineResumeV2BackfillService } from './baseline-resume-v2-backfill.service';
 
 import { BaselineParserService } from './baseline-parser.service';
 import { BaselineTextExtractor } from './baseline-text-extractor.service';
@@ -83,8 +84,9 @@ import { SupportModule } from '../support/support.module';
     BaselineParserService,
     BaselineTextExtractor,
     BaselineIngestionService,
+    BaselineResumeV2BackfillService,
   ],
   controllers: [BaselineController],
-  exports: [BaselineService],
+  exports: [BaselineService, BaselineResumeV2BackfillService],
 })
 export class BaselineModule {}

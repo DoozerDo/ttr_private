@@ -52,6 +52,7 @@ import {
   classifyStrengtheningImpact,
   type StrengtheningImpactResult,
 } from './strengthening-impact';
+import { buildValidatedResumeV2FromParsedBaseline } from './baseline-resume-v2';
 
 export type FileMetadata = {
   originalname: string;
@@ -921,11 +922,14 @@ export class BaselineService {
       sourceFormat: parsedBaseline.source_format,
       ingestedAt: new Date(parsedBaseline.ingested_at),
       parsedJson: parsedBaseline,
+      resumeV2Json: buildValidatedResumeV2FromParsedBaseline(parsedBaseline as any) as any,
       flagsJson: parsedBaseline.system_generated_read_only,
     });
 
     await manager.save(parsedRecord);
   }
+
+  // ResumeV2 normalization/validation is implemented in `baseline-resume-v2.ts` for reuse by backfill paths.
 
   private async buildLatestAssessmentSummaryByBaselineId(
     userId: string,

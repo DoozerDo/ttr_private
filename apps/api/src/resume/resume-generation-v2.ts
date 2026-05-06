@@ -8,7 +8,7 @@ import {
   isAllowedStructuredTemplateExperienceHeader,
   type ResumeTemplateIdentityLike,
 } from './resumeTemplateAssembler';
-import { validateNormalizedResumeDocument } from './resume-normalization';
+import { formatResumeV2InvalidMessage, validateNormalizedResumeDocument } from './resume-normalization';
 import {
   validateResumeArtifactQualityStrict,
   type ArtifactQualityGate,
@@ -661,7 +661,7 @@ export function buildDeterministicResumeV2FromBaseline(input: {
     throw new UnprocessableEntityException({
       error: {
         code: 'resume_v2_normalized_model_invalid',
-        message: 'Resume V2 produced an invalid normalized resume model.',
+        message: formatResumeV2InvalidMessage({ reasons: normalizedValidation.reasons, failures }),
         details: {
           reasons: normalizedValidation.reasons,
           failures,

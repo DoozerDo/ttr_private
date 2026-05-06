@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
 import { Repository } from 'typeorm';
@@ -17,6 +17,14 @@ import {
 } from '../baseline/baselineTemplateReadiness';
 import { interpretEvidenceFromResumeText } from '../evidence/evidence-interpreter';
 import { resolveEvidenceReadinessFromSummary } from '../evidence/readiness-thresholds';
+import {
+  buildNormalizedResumeValidationFailures,
+  buildResumePlainText,
+  formatResumeV2InvalidMessage,
+  normalizeNormalizedResumeDocument,
+  validateNormalizedResumeDocument,
+} from '../resume/resume-normalization';
+import { BaselineResumeV2BackfillService } from '../baseline/baseline-resume-v2-backfill.service';
 
 export type StudioArtifactKind = 'resume' | 'cover_letter';
 
@@ -178,6 +186,7 @@ export class StudioArtifactsService {
     private readonly jobRepository: Repository<Job>,
     @InjectRepository(FitAssessment)
     private readonly fitAssessmentRepository: Repository<FitAssessment>,
+    private readonly baselineResumeV2BackfillService: BaselineResumeV2BackfillService,
   ) {}
 
   getContractVersion() {
@@ -209,7 +218,8 @@ export class StudioArtifactsService {
         : Promise.resolve(null),
       this.baselineRepository.findOne({
         where: { id: input.baselineId, userId: input.userId },
-        relations: { sections: true },
+        relations: { sections: true, parsedRecords: true },
+        order: { parsedRecords: { createdAt: 'DESC' } },
       }),
     ]);
 
@@ -298,10 +308,37 @@ export class StudioArtifactsService {
         : 0;
     const hasUsableExperience = validExperienceCount > 0;
 
-    const baselineTextForInterpretation = (baseline?.sections ?? [])
-      .map((section) => String((section as any)?.content ?? ''))
-      .filter(Boolean)
-      .join('\n');
+    let persisted = (baseline?.parsedRecords?.[0] as any)?.resumeV2Json ?? null;
+    if (!persisted || typeof persisted !== 'object') {
+      const backfilled = await this.baselineResumeV2BackfillService.backfillLatestIfMissing({ baselineId: String(baseline?.id ?? '') });
+      persisted = backfilled?.resumeV2Json ?? null;
+    }
+
+    const baselineTextForInterpretation = (() => {
+      if (!persisted || typeof persisted !== 'object') {
+        throw new UnprocessableEntityException({
+          error: {
+            code: 'baseline_resume_v2_missing',
+            message:
+              'Baseline is missing a persisted ResumeV2 model. Re-run baseline processing (Fit Review) or re-upload your resume to re-ingest.',
+            details: { expected: ['baseline_parsed.resumeV2Json'] },
+          },
+        });
+      }
+      const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
+      const validation = validateNormalizedResumeDocument(normalized);
+      if (!validation.valid) {
+        const failures = buildNormalizedResumeValidationFailures(normalized);
+        throw new UnprocessableEntityException({
+          error: {
+            code: 'baseline_resume_v2_invalid',
+            message: formatResumeV2InvalidMessage({ reasons: validation.reasons, failures }),
+            details: { reasons: validation.reasons, failures },
+          },
+        });
+      }
+      return buildResumePlainText(normalized);
+    })();
     const interpretedEvidence = interpretEvidenceFromResumeText({
       baselineId: String(baseline?.id ?? ''),
       baselineVersionId: String(baselineVersion?.id ?? ''),

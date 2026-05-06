@@ -730,18 +730,30 @@ function buildFailureFromBackendRecord(
   if (!record) return null;
   const status = getBackendArtifactStatus(record);
   if (status !== "failed") return null;
-  const message =
-    trimString(record.failureMessage) ||
-    "The draft could not be completed from the current inputs.";
+  const failureCode = trimString(record.failureCode) || "generation_failed";
+  const detail = trimString(record.failureMessage) || undefined;
+  const isResumeV2StructuralFailure =
+    failureCode === "baseline_resume_v2_missing" || failureCode === "baseline_resume_v2_invalid";
+
+  const baselineReprocessHeadline = "Your baseline needs to be reprocessed before documents can be generated.";
+  const baselineReprocessSupport =
+    "We need to rebuild your structured resume profile from your baseline resume. This keeps generated resumes and cover letters accurate and grounded.";
+  const message = isResumeV2StructuralFailure
+    ? baselineReprocessHeadline
+    : trimString(record.failureMessage) || "The draft could not be completed from the current inputs.";
   return {
     artifactType,
     headline: artifactType === "resume" ? "Resume generation did not complete" : "Cover letter generation did not complete",
-    explanation: message,
-    nextStep: "Retry generation from the current verified inputs.",
-    retryable: true,
-    category: "generation_failed",
-    code: trimString(record.failureCode) || "generation_failed",
-    detail: trimString(record.failureMessage) || undefined,
+    // Do not surface backend failureMessage directly to end users for structural baseline failures;
+    // keep it in `detail` for logs / debug panels.
+    explanation: isResumeV2StructuralFailure ? baselineReprocessHeadline : message,
+    nextStep: isResumeV2StructuralFailure
+      ? baselineReprocessSupport
+      : "Retry generation from the current verified inputs.",
+    retryable: !isResumeV2StructuralFailure,
+    category: isResumeV2StructuralFailure ? "baseline_requires_reprocess" : "generation_failed",
+    code: failureCode,
+    detail,
   };
 }
 
@@ -4552,6 +4564,7 @@ export default function StudioPage() {
 
     // Never retry into a readiness block (e.g., insufficient verified evidence).
     if (coverGating.primaryBlocker === "readiness_block") return false;
+    if (failure.category === "baseline_requires_reprocess") return false;
 
     // Only allow retries for transient/system-ish failures.
     const retryableCategories: StudioArtifactFailurePresentation["category"][] = [
@@ -7568,6 +7581,9 @@ export default function StudioPage() {
           },
           improveExperience: () => {
             void router.push(improveBaselineHref);
+          },
+          reprocessBaseline: () => {
+            void router.push(fitReviewHref);
           },
           analyzeAnotherRole: () => {
             void router.push("/analyze");
@@ -10887,6 +10903,7 @@ export default function StudioPage() {
           {canonicalStudioReadinessMessage}
         </p>
         <div
+          data-testid="studio-generation-ready-shell"
           data-workflow-shell="generation-ready-shell"
           data-workflow-state={workflowOrchestratorCore.authorityState.canonicalState}
           data-workflow-trust-tone={workflowOrchestratorCore.authorityState.trustTone}
@@ -11464,25 +11481,35 @@ export default function StudioPage() {
                 Resolve blockers
               </Link>
             ) : workflowAuthority.primaryAction === "RETRY" ? (
-              <FormButton
-                onClick={() => {
-                  const resumeFailed = Boolean(resumeState.error || resumeState.artifactFailure);
-                  const coverFailed = Boolean(coverState.error || coverState.artifactFailure);
-                  if (resumeFailed) {
-                    void handleResumeDraft();
-                  }
-                  if (coverFailed) {
-                    void handleCoverDraft();
-                  }
-                  if (!resumeFailed && !coverFailed) {
-                    void handleResumeDraft();
-                  }
-                }}
-                disabled={resumeGenerating || coverGenerating}
-                className="bg-indigo-600 text-white hover:bg-indigo-500"
-              >
-                Retry generation
-              </FormButton>
+              topLevelArtifactFailure?.category === "baseline_requires_reprocess" ? (
+                <Link
+                  href={fitReviewHref}
+                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                  data-testid="studio-reprocess-baseline-cta"
+                >
+                  Reprocess baseline
+                </Link>
+              ) : (
+                <FormButton
+                  onClick={() => {
+                    const resumeFailed = Boolean(resumeState.error || resumeState.artifactFailure);
+                    const coverFailed = Boolean(coverState.error || coverState.artifactFailure);
+                    if (resumeFailed) {
+                      void handleResumeDraft();
+                    }
+                    if (coverFailed) {
+                      void handleCoverDraft();
+                    }
+                    if (!resumeFailed && !coverFailed) {
+                      void handleResumeDraft();
+                    }
+                  }}
+                  disabled={resumeGenerating || coverGenerating}
+                  className="bg-indigo-600 text-white hover:bg-indigo-500"
+                >
+                  Retry generation
+                </FormButton>
+              )
             ) : generateNowEligible ? null : !canGenerateDocuments ? (
               <Link
                 href={fitReviewHref}
@@ -12052,25 +12079,50 @@ export default function StudioPage() {
             className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
             data-testid="studio-resume-artifact-issue"
           >
-            <div className="space-y-1">
-              <p className="text-sm font-semibold text-slate-100">We hit an issue generating your resume.</p>
-              <p className="text-sm text-slate-300">
-                Try regenerating it. If the issue continues, report it and we’ll review the artifact.
-              </p>
-            </div>
-            <div className="flex justify-end">
-              <FormButton
-                variant="secondary"
-                onClick={() => {
-                  scrollToStudioTop("smooth");
-                  void handleResumeDraft();
-                }}
-                disabled={resumeGenerating}
-                data-testid="studio-resume-regenerate-cta"
-              >
-                {resumeGenerating ? "Regenerating resume..." : "Regenerate resume"}
-              </FormButton>
-            </div>
+            {resumeState.artifactFailure?.category === "baseline_requires_reprocess" ? (
+              <>
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-slate-100">
+                    Your baseline needs to be reprocessed before documents can be generated.
+                  </p>
+                  <p className="text-sm text-slate-300">
+                    We need to rebuild your structured resume profile from your baseline resume. This keeps generated
+                    resumes and cover letters accurate and grounded.
+                  </p>
+                </div>
+                <div className="flex justify-end">
+                  <Link
+                    href={fitReviewHref}
+                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                    data-testid="studio-resume-reprocess-baseline"
+                  >
+                    Reprocess baseline
+                  </Link>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-slate-100">We hit an issue generating your resume.</p>
+                  <p className="text-sm text-slate-300">
+                    Try regenerating it. If the issue continues, report it and we’ll review the artifact.
+                  </p>
+                </div>
+                <div className="flex justify-end">
+                  <FormButton
+                    variant="secondary"
+                    onClick={() => {
+                      scrollToStudioTop("smooth");
+                      void handleResumeDraft();
+                    }}
+                    disabled={resumeGenerating}
+                    data-testid="studio-resume-regenerate-cta"
+                  >
+                    {resumeGenerating ? "Regenerating resume..." : "Regenerate resume"}
+                  </FormButton>
+                </div>
+              </>
+            )}
           </div>
         ) : null}
 
@@ -12469,25 +12521,50 @@ export default function StudioPage() {
             className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
             data-testid="studio-cover-artifact-issue"
           >
-            <div className="space-y-1">
-              <p className="text-sm font-semibold text-slate-100">We hit an issue generating your cover letter.</p>
-              <p className="text-sm text-slate-300">
-                Try regenerating it. If the issue continues, report it and we’ll review the artifact.
-              </p>
-            </div>
-            <div className="flex justify-end">
-              <FormButton
-                variant="secondary"
-                onClick={() => {
-                  scrollToStudioTop("smooth");
-                  void handleCoverDraft();
-                }}
-                disabled={coverGenerating}
-                data-testid="studio-cover-regenerate-cta"
-              >
-                {coverGenerating ? "Regenerating cover letter..." : "Regenerate cover letter"}
-              </FormButton>
-            </div>
+            {coverState.artifactFailure?.category === "baseline_requires_reprocess" ? (
+              <>
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-slate-100">
+                    Your baseline needs to be reprocessed before documents can be generated.
+                  </p>
+                  <p className="text-sm text-slate-300">
+                    We need to rebuild your structured resume profile from your baseline resume. This keeps generated
+                    resumes and cover letters accurate and grounded.
+                  </p>
+                </div>
+                <div className="flex justify-end">
+                  <Link
+                    href={fitReviewHref}
+                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                    data-testid="studio-cover-reprocess-baseline"
+                  >
+                    Reprocess baseline
+                  </Link>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-slate-100">We hit an issue generating your cover letter.</p>
+                  <p className="text-sm text-slate-300">
+                    Try regenerating it. If the issue continues, report it and we’ll review the artifact.
+                  </p>
+                </div>
+                <div className="flex justify-end">
+                  <FormButton
+                    variant="secondary"
+                    onClick={() => {
+                      scrollToStudioTop("smooth");
+                      void handleCoverDraft();
+                    }}
+                    disabled={coverGenerating}
+                    data-testid="studio-cover-regenerate-cta"
+                  >
+                    {coverGenerating ? "Regenerating cover letter..." : "Regenerate cover letter"}
+                  </FormButton>
+                </div>
+              </>
+            )}
           </div>
         ) : coverPresenter.display &&
         coverQualityPass &&

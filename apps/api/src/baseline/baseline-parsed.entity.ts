@@ -39,6 +39,11 @@ export class BaselineParsed {
   @Column({ type: 'jsonb' })
   parsedJson!: Record<string, unknown>;
 
+  // Canonical ResumeV2 (NormalizedResumeDocument) derived during baseline ingestion.
+  // Studio and generation must not re-parse raw uploaded resume text at runtime.
+  @Column({ type: 'jsonb', nullable: true })
+  resumeV2Json!: Record<string, unknown> | null;
+
   @Column({ type: 'jsonb' })
   flagsJson!: Record<string, unknown>;
 

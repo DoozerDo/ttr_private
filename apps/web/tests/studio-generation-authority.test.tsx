@@ -2069,6 +2069,69 @@ function setupFetchWithResumeFailureButStalePreview() {
   );
 }
 
+function setupFetchWithResumeV2StructuralFailure(code: "baseline_resume_v2_missing" | "baseline_resume_v2_invalid") {
+  setFetchImplementation(
+    vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "failed",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "fp-1",
+            generationContractVersion: "studio-artifacts-v1",
+            resumeResult: null,
+            coverLetterResult: null,
+            resume: {
+              status: "failed",
+              inputsHash: "ih-failed",
+              responseBody: null,
+              content: null,
+              failureCode: code,
+              failureMessage: "Baseline is missing a persisted ResumeV2 model. Re-run baseline processing (Fit Review) or re-upload your resume to re-ingest.",
+              startedAt: null,
+              completedAt: null,
+              failedAt: new Date().toISOString(),
+              metadata: {},
+            },
+            coverLetter: null,
+          }),
+        );
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+            scoring_v2: { score: 94 },
+            verification_coverage: {
+              totalClaims: 3,
+              verifiedClaims: 3,
+              inferredClaims: 0,
+              unverifiedClaims: 0,
+              unverifiedRequirements: [],
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    }),
+  );
+}
+
 function setupExportableResumeFetch() {
   setFetchImplementation(
     vi.fn((input: RequestInfo, init?: RequestInit) => {
@@ -3411,6 +3474,50 @@ describe("Studio resume failure authority", () => {
     await waitFor(() => {
       expect(screen.getByTestId("studio-resume-artifact-issue")).toBeInTheDocument();
     });
+  });
+
+  it("missing persisted ResumeV2 shows reprocess recovery message + CTA (no retry)", async () => {
+    setupFetchWithResumeV2StructuralFailure("baseline_resume_v2_missing");
+    renderStudio();
+
+    fireEvent.click(await screen.findByTestId("studio-generation-ready-secondary"));
+    await screen.findByTestId("studio-resume-artifact-issue");
+    expect(screen.getAllByText(/Your baseline needs to be reprocessed before documents can be generated\./i).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(
+        /We need to rebuild your structured resume profile from your baseline resume\. This keeps generated resumes and cover letters accurate and grounded\./i,
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(await screen.findByTestId("studio-resume-reprocess-baseline")).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-resume-regenerate-cta")).toBeNull();
+
+    const rendered = document.body.textContent ?? "";
+    expect(rendered).not.toMatch(/\bResumeV2\b/i);
+    expect(rendered).not.toMatch(/\bjson\b/i);
+    expect(rendered).not.toMatch(/normalized model/i);
+    expect(rendered).not.toMatch(/persisted model/i);
+  });
+
+  it("invalid persisted ResumeV2 shows reprocess recovery message + CTA (no retry)", async () => {
+    setupFetchWithResumeV2StructuralFailure("baseline_resume_v2_invalid");
+    renderStudio();
+
+    fireEvent.click(await screen.findByTestId("studio-generation-ready-secondary"));
+    await screen.findByTestId("studio-resume-artifact-issue");
+    expect(screen.getAllByText(/Your baseline needs to be reprocessed before documents can be generated\./i).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(
+        /We need to rebuild your structured resume profile from your baseline resume\. This keeps generated resumes and cover letters accurate and grounded\./i,
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(await screen.findByTestId("studio-resume-reprocess-baseline")).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-resume-regenerate-cta")).toBeNull();
+
+    const rendered = document.body.textContent ?? "";
+    expect(rendered).not.toMatch(/\bResumeV2\b/i);
+    expect(rendered).not.toMatch(/\bjson\b/i);
+    expect(rendered).not.toMatch(/normalized model/i);
+    expect(rendered).not.toMatch(/persisted model/i);
   });
 });
 

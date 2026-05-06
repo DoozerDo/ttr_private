@@ -23,6 +23,7 @@ export type StudioNextMoveInput = {
     generateCoverLetter: () => void;
     reviewTopGaps: () => void;
     improveExperience: () => void;
+    reprocessBaseline: () => void;
     analyzeAnotherRole: () => void;
     learnSupportedInputs: () => void;
     retryGeneration: () => void;
@@ -127,10 +128,24 @@ function validationOrGenericFailureMove(
   };
 }
 
+function baselineReprocessMove(input: StudioNextMoveInput, failure: StudioArtifactFailurePresentation): StudioNextMove {
+  return {
+    title: "Your baseline needs attention",
+    description: "Your baseline needs to be reprocessed before documents can be generated.",
+    primaryAction: {
+      label: "Reprocess baseline",
+      action: input.actions.reprocessBaseline,
+    },
+    context: failure.detail ?? scoreContext(input.analysisScore),
+  };
+}
+
 export function resolveStudioNextMove(input: StudioNextMoveInput): StudioNextMove {
   const failure = input.artifactFailure;
   if (failure) {
     switch (failure.category) {
+      case "baseline_requires_reprocess":
+        return baselineReprocessMove(input, failure);
       case "unsupported_input":
         return unsupportedInputMove(input, failure);
       case "trace_failure":

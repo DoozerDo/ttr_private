@@ -27,7 +27,8 @@ export type ArtifactFailureCategory =
   | "insufficient_verified_evidence"
   | "invalid_pair_state"
   | "studio_not_ready"
-  | "artifact_persistence_failed";
+  | "artifact_persistence_failed"
+  | "baseline_requires_reprocess";
 
 export type ArtifactFailurePayload = {
   code: string;
@@ -298,6 +299,8 @@ function mapGenerationFailureCategory(code: string, status?: string): ArtifactFa
   if (lowered === "invalid_pair_state") return "invalid_pair_state";
   if (lowered === "studio_not_ready") return "studio_not_ready";
   if (lowered === "insufficient_verified_evidence") return "insufficient_verified_evidence";
+  if (lowered === "baseline_resume_v2_missing") return "baseline_requires_reprocess";
+  if (lowered === "baseline_resume_v2_invalid") return "baseline_requires_reprocess";
   return null;
 }
 
@@ -337,6 +340,7 @@ export function readArtifactFailurePayload(payload: unknown): ArtifactFailurePay
     "invalid_pair_state",
     "studio_not_ready",
     "artifact_persistence_failed",
+    "baseline_requires_reprocess",
   ];
   if (!message || !category || !validCategories.includes(category)) return null;
 

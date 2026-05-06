@@ -1083,13 +1083,21 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
   }
 
   private cleanText(value?: string | null) {
-    return (value ?? '')
+    const normalized = (value ?? '')
       .replace(/\r\n/g, '\n')
       .replace(/\r/g, '\n')
       .replace(/\t/g, ' ')
       .replace(/\u00a0/g, ' ')
       .replace(/[\u2013\u2014]/g, ' ')
-      .replace(/\s+/g, ' ')
+      .trim();
+
+    // Preserve newlines so evidence extraction can recover bullet boundaries and logical units.
+    // We still normalize intra-line whitespace to avoid noisy tokenization.
+    return normalized
+      .split('\n')
+      .map((line) => line.replace(/\s+/g, ' ').trim())
+      .filter((line, index, arr) => !(line === '' && arr[index - 1] === ''))
+      .join('\n')
       .trim();
   }
 

@@ -59,8 +59,10 @@ import { resolveBaselineSectionsForGeneration } from '../baseline/baseline-secti
 import * as ResumeDraftBullets from './resume-draft-bullets';
 import type { ResumeDraftSection } from './resume-draft-bullets';
 import {
+  buildNormalizedResumeValidationFailures,
   buildNormalizedResumeDocument,
   buildResumePlainText,
+  formatResumeV2InvalidMessage,
   mapNormalizedResumeToDocxModel,
   normalizeNormalizedResumeDocument,
   validateNormalizedResumeDocument,
@@ -99,6 +101,8 @@ import {
   validateResumeArtifactQuality,
   type ArtifactQualityGate,
 } from '../artifacts/artifactQualityValidator';
+import { validateResumeArtifactQualityStrict } from '../artifacts/artifactQualityValidator';
+import { BaselineResumeV2BackfillService } from '../baseline/baseline-resume-v2-backfill.service';
 import { sanitizeResumeForTrailingFragments, trimIncompleteTrailingFragments } from '../artifacts/artifactQualityValidator';
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
 import { sanitizeResumePreviewForStudio } from './resumePreviewSanitizer';
@@ -309,6 +313,7 @@ export class ResumeService {
     private readonly criticalFlowTrackerService: CriticalFlowTrackerService,
     private readonly workflowIdempotencyService: WorkflowIdempotencyService,
     private readonly studioArtifactsService: StudioArtifactsService,
+    private readonly baselineResumeV2BackfillService?: BaselineResumeV2BackfillService,
   ) {}
 
   private async findLatestAssessment(
@@ -1759,7 +1764,18 @@ export class ResumeService {
     const interpretedEvidenceForGate = interpretEvidenceFromResumeText({
       baselineId: baseline.id,
       baselineVersionId: baselineVersion.id,
-      resumeText: (baseline.sections ?? []).map((section) => section.content ?? '').join('\n'),
+      // Authority boundary: in ResumeV2 mode, interpreted evidence must be derived from the persisted ResumeV2 model
+      // (BaselineParsed.resumeV2Json), never from baseline section concatenations.
+      resumeText: isResumeV2
+        ? (() => {
+            const persisted = (baseline.parsedRecords?.[0] as any)?.resumeV2Json ?? null;
+            if (!persisted || typeof persisted !== 'object') return '';
+            const normalized = normalizeNormalizedResumeDocument(persisted as any);
+            const validation = validateNormalizedResumeDocument(normalized as any);
+            if (!validation.valid) return '';
+            return buildResumePlainText(normalized as any);
+          })()
+        : (baseline.sections ?? []).map((section) => section.content ?? '').join('\n'),
     });
     const hasMeaningfulInterpretedEvidenceForGate =
       interpretedEvidenceForGate.items.some((item) => {
@@ -1890,7 +1906,18 @@ export class ResumeService {
     const interpretedEvidenceForBaseline = interpretEvidenceFromResumeText({
       baselineId: baseline.id,
       baselineVersionId: baselineVersion.id,
-      resumeText: allowedSections.map((section) => section.content ?? '').join('\n'),
+      // Authority boundary: in ResumeV2 mode, interpreted evidence must be derived from the persisted ResumeV2 model
+      // (BaselineParsed.resumeV2Json), never from baseline section concatenations.
+      resumeText: isResumeV2
+        ? (() => {
+            const persisted = (baseline.parsedRecords?.[0] as any)?.resumeV2Json ?? null;
+            if (!persisted || typeof persisted !== 'object') return '';
+            const normalized = normalizeNormalizedResumeDocument(persisted as any);
+            const validation = validateNormalizedResumeDocument(normalized as any);
+            if (!validation.valid) return '';
+            return buildResumePlainText(normalized as any);
+          })()
+        : allowedSections.map((section) => section.content ?? '').join('\n'),
     });
     const interpretedEligibility = evaluateInterpretedEvidenceEligibility(interpretedEvidenceForBaseline.items);
     const hasMeaningfulInterpretedEvidence = interpretedEligibility.hasMeaningfulInterpretedEvidence;
@@ -2188,14 +2215,49 @@ export class ResumeService {
     } = { source: 'unknown', experienceCount: 0, headers: [] };
     let v2QualityGate: ArtifactQualityGate | null = null;
 
+    let persistedResumeV2: Record<string, unknown> | null = null;
+    if (isResumeV2) {
+      persistedResumeV2 = (baseline.parsedRecords?.[0] as any)?.resumeV2Json ?? null;
+      if (!persistedResumeV2 || typeof persistedResumeV2 !== 'object') {
+        const backfilled = this.baselineResumeV2BackfillService
+          ? await this.baselineResumeV2BackfillService.backfillLatestIfMissing({ baselineId: baseline.id })
+          : null;
+        persistedResumeV2 = (backfilled?.resumeV2Json as any) ?? null;
+      }
+    }
+
     let normalizedDocument = (() => {
       if (isResumeV2) {
-        const result = buildDeterministicResumeV2FromBaseline({
-          baselineSections: resumeInputSections,
-          identity: resolvedIdentityForTemplate,
-        });
-        v2QualityGate = result.qualityGate;
-        return result.normalized;
+        const persisted = persistedResumeV2;
+        if (!persisted || typeof persisted !== 'object') {
+          throw new UnprocessableEntityException({
+            error: {
+              code: 'baseline_resume_v2_missing',
+              message:
+                'Baseline is missing a persisted ResumeV2 model. Re-run baseline processing (Fit Review) or re-upload your resume to re-ingest.',
+              details: {
+                expected: ['baseline_parsed.resumeV2Json'],
+              },
+            },
+          });
+        }
+        const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
+        const validation = validateNormalizedResumeDocument(normalized);
+        if (!validation.valid) {
+          const failures = buildNormalizedResumeValidationFailures(normalized);
+          throw new UnprocessableEntityException({
+            error: {
+              code: 'baseline_resume_v2_invalid',
+              message: formatResumeV2InvalidMessage({ reasons: validation.reasons, failures }),
+              details: {
+                reasons: validation.reasons,
+                failures,
+              },
+            },
+          });
+        }
+        v2QualityGate = validateResumeArtifactQualityStrict(normalized);
+        return normalized;
       }
       if (forceTemplateRegen) {
         const structured = extractStructuredBaselineFromSections(resumeInputSections);
@@ -3198,7 +3260,11 @@ export class ResumeService {
         const interpretedEvidenceForFailSafe = interpretEvidenceFromResumeText({
           baselineId: baselineForFailSafe.id,
           baselineVersionId: baselineVersionForFailSafe.id,
-          resumeText: (baselineForFailSafe.sections ?? []).map((s: any) => s?.content ?? '').join('\n'),
+          // Authority boundary: in ResumeV2 mode, interpreted evidence must be derived from the persisted ResumeV2 model
+          // (BaselineParsed.resumeV2Json), never from baseline section concatenations.
+          resumeText: isResumeV2
+            ? buildResumePlainText(normalizedDocument as any)
+            : (baselineForFailSafe.sections ?? []).map((s: any) => s?.content ?? '').join('\n'),
         });
         const interpretedEligibilityForFailSafe = evaluateInterpretedEvidenceEligibility(
           interpretedEvidenceForFailSafe.items,

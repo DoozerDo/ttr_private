@@ -2,16 +2,18 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Baseline } from '../baseline/baseline.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
+import { BaselineParsed } from '../baseline/baseline-parsed.entity';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
 import { Job } from '../jobs/job.entity';
 import { StudioArtifact } from './studio-artifact.entity';
 import { StudioArtifactsController } from './studio-artifacts.controller';
 import { StudioArtifactsService } from './studio-artifacts.service';
+import { BaselineResumeV2BackfillService } from '../baseline/baseline-resume-v2-backfill.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([StudioArtifact, Baseline, BaselineVersion, FitAssessment, Job])],
+  imports: [TypeOrmModule.forFeature([StudioArtifact, Baseline, BaselineVersion, BaselineParsed, FitAssessment, Job])],
   controllers: [StudioArtifactsController],
-  providers: [StudioArtifactsService],
+  providers: [StudioArtifactsService, BaselineResumeV2BackfillService],
   exports: [StudioArtifactsService],
 })
 export class StudioArtifactsModule {}
