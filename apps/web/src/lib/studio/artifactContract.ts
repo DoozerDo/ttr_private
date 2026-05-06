@@ -17,6 +17,8 @@ export type StudioArtifactContractInput = {
   coverLetterResponse: unknown;
   canExportDocuments: boolean;
   isPro: boolean;
+  jobTitle?: string | null;
+  companyName?: string | null;
 };
 
 function toRecord(value: unknown): Record<string, unknown> | null {
@@ -130,7 +132,12 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
     : null;
 
   const resumeQuality = validateResumeQuality(resumeModel);
-  const coverLetterQuality = validateCoverLetterQuality(coverParagraphs);
+  const coverLetterQuality = validateCoverLetterQuality({
+    paragraphs: coverParagraphs,
+    jobTitle: input.jobTitle ?? null,
+    companyName: input.companyName ?? null,
+    resumeExportable: resumeQuality.exportable,
+  });
   const hasUsableArtifacts =
     (Boolean(resumeModel) && resumeQuality.exportable) ||
     (Boolean(coverLetterModel) && coverLetterQuality.exportable);
@@ -141,10 +148,14 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
   const resumeExportAvailable =
     input.canExportDocuments &&
     input.isPro &&
+    resumeQuality.exportable &&
+    (resumeResult ? resumeResult.generationState === "generated_usable" : true) &&
     (resumeResult ? resumeResult.actions.canExport : resumePresenter.status === "success" && resumePresenter.hasExportableContent);
   const coverLetterExportAvailable =
     input.canExportDocuments &&
     input.isPro &&
+    coverLetterQuality.exportable &&
+    (coverLetterResult ? coverLetterResult.generationState === "generated_usable" : true) &&
     (coverLetterResult ? coverLetterResult.actions.canExport : coverPresenter.status === "success" && coverPresenter.hasExportableContent);
 
   return {

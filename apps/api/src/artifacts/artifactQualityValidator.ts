@@ -163,6 +163,10 @@ function trimToText(value: unknown): string {
   return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function normalizeForTrailingCheck(value: string): string {
   return value
     .trim()
@@ -486,6 +490,7 @@ export function isMalformedResumeExperienceCompany(value: string): boolean {
 
 export function validateCoverLetterArtifactQuality(
   paragraphs: string[] | null | undefined,
+  context?: { company?: string | null; roleTitle?: string | null; requiredEvidenceSnippets?: string[] | null },
 ): ArtifactQualityGate {
   // Keep legacy env gating for cover letter tracing (unrelated to resume issue),
   // but when enabled only emit a single summary line.
@@ -506,6 +511,23 @@ export function validateCoverLetterArtifactQuality(
   }
 
   const reasons: string[] = [];
+  const company = trimToText(context?.company ?? '');
+  const roleTitle = trimToText(context?.roleTitle ?? '');
+  if (company && !new RegExp(`\\b${escapeRegExp(company)}\\b`, 'i').test(fullText)) {
+    reasons.push('missing_company_reference');
+  }
+  if (roleTitle && !new RegExp(`\\b${escapeRegExp(roleTitle)}\\b`, 'i').test(fullText)) {
+    reasons.push('missing_role_reference');
+  }
+  const requiredEvidence = Array.isArray(context?.requiredEvidenceSnippets)
+    ? context?.requiredEvidenceSnippets.map((s) => trimToText(s)).filter(Boolean)
+    : [];
+  if (requiredEvidence.length > 0) {
+    const hits = requiredEvidence.filter((snippet) => snippet.length >= 8 && fullText.toLowerCase().includes(snippet.toLowerCase()));
+    if (hits.length < Math.min(2, requiredEvidence.length)) {
+      reasons.push('insufficient_specific_evidence');
+    }
+  }
   for (const entry of COVER_BANNED_PHRASES) {
     if (entry.pattern.test(fullText)) {
       reasons.push(entry.label);
@@ -583,10 +605,14 @@ export function validateResumeArtifactQualityStrict(
     }
     if (!summaryText) {
       reasons.push('empty_summary');
+    } else if (summaryText.length < 40) {
+      reasons.push('summary_too_thin');
     }
   }
 
   const experience = Array.isArray(resume.experience) ? resume.experience : [];
+  let experienceWithBullets = 0;
+  let usableBulletCount = 0;
   for (const entry of experience) {
     const company = trimToText((entry as any)?.company);
     const roleTitle = trimToText((entry as any)?.roleTitle);
@@ -599,6 +625,10 @@ export function validateResumeArtifactQualityStrict(
     if ((company || roleTitle) && bullets.length === 0) {
       reasons.push('empty_role');
     }
+    if ((company || roleTitle) && bullets.length > 0) {
+      experienceWithBullets += 1;
+    }
+    usableBulletCount += bullets.filter((b) => b.length >= 20).length;
 
     // Strict header quality: only hard-fail for empties and known garbage placeholders.
     // Do not fail real-world headers simply due to punctuation, length, or contractor context.
@@ -665,6 +695,13 @@ export function validateResumeArtifactQualityStrict(
         });
       }
     }
+  }
+
+  if (experience.length >= 2 && experienceWithBullets < 2) {
+    reasons.push('insufficient_experience_entries');
+  }
+  if (usableBulletCount > 0 && usableBulletCount < 3) {
+    reasons.push('insufficient_experience_bullets');
   }
 
   const unique = Array.from(new Set(reasons));

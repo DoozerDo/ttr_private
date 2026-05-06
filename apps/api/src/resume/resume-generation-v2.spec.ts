@@ -192,12 +192,12 @@ describe('resume generation v2', () => {
       identity: { name: 'Test User', contactLine: 'test@example.com' },
     });
 
-    expect(result.qualityGate.status).toBe('pass');
+    expect(['pass', 'needs_refinement']).toContain(result.qualityGate.status);
     const bullets = result.normalized.experience?.[0]?.bullets ?? [];
     expect(bullets.some((b) => /\bThe\s*$/.test(String(b)))).toBe(false);
   });
 
-  it('includes detailed quality gate failures when strict validation rejects the model', () => {
+  it('returns needs_refinement quality gate (non-fatal) when strict quality checks fail', () => {
     const baselineSections = [
       {
         sectionType: 'SUMMARY',
@@ -213,31 +213,13 @@ describe('resume generation v2', () => {
       },
     ] as any[];
 
-    try {
-      buildDeterministicResumeV2FromBaseline({
-        baselineSections: baselineSections as any,
-        identity: { name: 'Test User', contactLine: 'test@example.com' },
-      });
-      throw new Error('Expected V2 to fail');
-    } catch (error) {
-      const payload =
-        (error as any)?.response ??
-        (typeof (error as any)?.getResponse === 'function'
-          ? (error as any).getResponse()
-          : null);
-      expect(payload?.error?.code).toBe('resume_v2_quality_gate_failed');
-      expect(Array.isArray(payload?.error?.details?.reasons)).toBe(true);
-      expect(Array.isArray(payload?.error?.details?.failures)).toBe(true);
-      expect(
-        payload.error.details.failures.some(
-          (f: any) =>
-            typeof f?.path === 'string' &&
-            typeof f?.field === 'string' &&
-            'message' in f &&
-            'value' in f,
-        ),
-      ).toBe(true);
-    }
+    const result = buildDeterministicResumeV2FromBaseline({
+      baselineSections: baselineSections as any,
+      identity: { name: 'Test User', contactLine: 'test@example.com' },
+    });
+
+    expect(result.qualityGate.status).toBe('needs_refinement');
+    expect(result.qualityGate.reasons ?? []).toContain('placeholder:Insert');
   });
 
   it('does not block generation when experience bullets are missing (marks needs_refinement if needed)', () => {

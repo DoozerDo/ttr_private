@@ -2861,8 +2861,10 @@ export default function StudioPage() {
         })(),
         canExportDocuments,
         isPro,
+        jobTitle: selectedJob?.title ?? null,
+        companyName: selectedJob?.company ?? null,
       }),
-    [canExportDocuments, isPro, studioArtifactsPayload],
+    [canExportDocuments, isPro, selectedJob?.company, selectedJob?.title, studioArtifactsPayload],
   );
   const resumePresenter = artifactContract.presenters.resume;
   useEffect(() => {
@@ -2934,10 +2936,7 @@ export default function StudioPage() {
     };
   }, [resumeQuality.issues, resumeResult?.correctionReasons]);
   const showResumeDownloadActions =
-    resumePresenter.status === "blocked" ||
-    (artifactContract.results.resume
-      ? artifactContract.results.resume.actions.canExport
-      : resumePresenter.status === "success" && hasResumeArtifact && resumeQualityPass);
+    resumePresenter.status === "blocked" || artifactContract.resumeExportAvailable;
   const isResumeDownloadLocked = !isPro;
   // Studio is execution-only. Baseline eligibility is the only gating authority.
   // Template readiness / evidence readiness must not block generation or export in Studio.
@@ -2971,7 +2970,7 @@ export default function StudioPage() {
     selectedBaselineVersionId,
   ]);
 
-  const canExportResume = canGenerate;
+  const canExportResume = artifactContract.resumeExportAvailable;
   const resumePreviewText = useMemo(
     () => formatPreview(artifactContract.normalized.resumeResponse) || readArtifactTextFallback(artifactContract.normalized.resumeResponse),
     [artifactContract.normalized.resumeResponse],
@@ -4159,11 +4158,11 @@ export default function StudioPage() {
       advanceStep("GENERATE");
     }
   }, [advanceStep, isGuidedActive, primaryNextAction.type]);
-  const canExportCover = canGenerate;
+  const canExportCover = artifactContract.coverLetterExportAvailable;
   const showCoverDownloadActions =
     Boolean(coverLetterComplianceBlocked) ||
     coverPresenter.status === "blocked" ||
-    (coverPresenter.status === "success" && hasCoverLetterArtifact);
+    artifactContract.coverLetterExportAvailable;
   const fullBaselineEvidence = useMemo(() => {
     if (typeof analysis?.summary === "string" && analysis.summary.trim().length) {
       return sanitizeRenderedTextValue(analysis.summary, {
@@ -11789,8 +11788,8 @@ export default function StudioPage() {
                 : resumeNeedsRefinement || resumeRequiresCorrectionCopy
                   ? studioEffectiveGenerationState === "generated_unusable"
                     ? studioRetryInProgress
-                      ? "Resume failed quality checks. Regenerating..."
-                      : "Generation failed quality checks. Please edit or regenerate manually."
+                      ? "We generated a draft, but it is not strong enough to use yet. Regenerating..."
+                      : "We generated a draft, but it is not strong enough to use yet."
                     : "Resume needs refinement before export."
                   : renderCardStatus(resumeCardStatus, "Resume")}
             </p>
@@ -11854,6 +11853,18 @@ export default function StudioPage() {
             </FormButton>
           ) : null}
         </div>
+        {studioEffectiveGenerationState === "generated_unusable" && hasResumeDraft ? (
+          <Alert intent="warning" data-testid="studio-resume-generated-unusable">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-slate-100">
+                We generated a draft, but it is not strong enough to use yet.
+              </p>
+              <p className="text-sm text-slate-200">
+                Regenerate or refine the source inputs before exporting.
+              </p>
+            </div>
+          </Alert>
+        ) : null}
         {showResumeDownloadActions && !resumeNeedsRefinement ? (
           <div className="flex flex-wrap gap-2">
             <FormButton
@@ -12238,8 +12249,8 @@ export default function StudioPage() {
                 : coverNeedsRefinement || coverRequiresCorrectionCopy
                   ? studioEffectiveGenerationState === "generated_unusable"
                     ? studioRetryInProgress
-                      ? "Cover letter failed quality checks. Regenerating..."
-                      : "Generation failed quality checks. Please edit or regenerate manually."
+                      ? "We generated a draft, but it is not strong enough to use yet. Regenerating..."
+                      : "We generated a draft, but it is not strong enough to use yet."
                     : "Cover letter needs refinement before export."
                   : renderCardStatus(coverCardStatus, "Cover letter")}
             </p>
@@ -12315,6 +12326,18 @@ export default function StudioPage() {
             ) : null}
           </div>
         </div>
+        {studioEffectiveGenerationState === "generated_unusable" && hasCoverLetterArtifact ? (
+          <Alert intent="warning" data-testid="studio-cover-generated-unusable">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-slate-100">
+                We generated a draft, but it is not strong enough to use yet.
+              </p>
+              <p className="text-sm text-slate-200">
+                Regenerate or refine the source inputs before exporting.
+              </p>
+            </div>
+          </Alert>
+        ) : null}
         {showCoverDownloadActions && !coverNeedsRefinement ? (
           <p className="text-xs text-slate-400">Download: DOCX | PDF</p>
         ) : null}

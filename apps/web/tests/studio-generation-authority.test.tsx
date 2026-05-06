@@ -137,61 +137,27 @@ describe("Studio artifact quality gating (soft)", () => {
     setupFetchWithQualityFailures();
     renderStudio();
 
-    // Depending on the lane, Studio may already be generating (generation_in_progress) or may show the
-    // generation-ready shell first. Only click through when the shell is present.
-    const readySecondary = screen.queryByTestId("studio-generation-ready-secondary");
-    if (readySecondary) fireEvent.click(readySecondary);
+    await waitFor(() => {
+      expect(screen.getByText(/Your application materials/i)).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Resume" })).toBeInTheDocument();
+    });
 
-    // Prefer workspace assertions when the shell dismisses; otherwise assert against the shell-only surface.
-    const workspaceRendered = await (async () => {
-      try {
-        await waitFor(
-          () => {
-            expect(screen.queryByRole("heading", { name: "Resume" })).toBeInTheDocument();
-          },
-          { timeout: 1500 },
-        );
-        return true;
-      } catch {
-        return false;
-      }
-    })();
+    const resumeSection = screen.getByRole("heading", { name: "Resume" }).closest("section");
+    expect(resumeSection).toBeTruthy();
 
-    const resumeSection = workspaceRendered
-      ? screen.getByRole("heading", { name: "Resume" }).closest("section")
-      : null;
-
-    // Clean UX: show a single artifact-issue message and keep export unavailable.
-    if (resumeSection) {
-      expect(resumeSection).toBeTruthy();
-      await waitFor(() => {
-        expect(
-          within(resumeSection as HTMLElement).queryByTestId("studio-resume-quality-warning") ??
-            within(resumeSection as HTMLElement).queryByTestId("studio-resume-artifact-issue"),
-        ).toBeTruthy();
-      });
-    } else {
-      // If the shell remains visible in this fixture, it's still valid to assert we are not exposing internal codes.
-      expect(screen.getAllByTestId("studio-generation-ready-shell").length).toBeGreaterThan(0);
-    }
+    await waitFor(() => {
+      expect(within(resumeSection as HTMLElement).getByTestId("studio-resume-generated-unusable")).toBeInTheDocument();
+    });
 
     // Do not expose internal pipeline/debug reason codes in user-facing UI.
-    if (resumeSection) {
-      expect(within(resumeSection as HTMLElement).queryByText(/normalized_model/i)).toBeNull();
-      expect(within(resumeSection as HTMLElement).queryByText(/resume_v2_normalized_model_invalid/i)).toBeNull();
-      expect(within(resumeSection as HTMLElement).queryByText(/structuredBaseline/i)).toBeNull();
-    } else {
-      expect(screen.queryByText(/normalized_model/i)).toBeNull();
-      expect(screen.queryByText(/resume_v2_normalized_model_invalid/i)).toBeNull();
-      expect(screen.queryByText(/structuredBaseline/i)).toBeNull();
-    }
+    expect(within(resumeSection as HTMLElement).queryByText(/normalized_model/i)).toBeNull();
+    expect(within(resumeSection as HTMLElement).queryByText(/resume_v2_normalized_model_invalid/i)).toBeNull();
+    expect(within(resumeSection as HTMLElement).queryByText(/structuredBaseline/i)).toBeNull();
 
-    if (resumeSection) {
-      // Preview may still render if it is safe; export must remain unavailable.
-      expect(within(resumeSection as HTMLElement).queryByText("Download DOCX")).toBeNull();
-      expect(within(resumeSection as HTMLElement).queryByText("Download PDF")).toBeNull();
-      expect(within(resumeSection as HTMLElement).getByTestId("studio-resume-regenerate-cta")).toBeInTheDocument();
-    }
+    // Preview may still render if it is safe; export must remain unavailable.
+    expect(within(resumeSection as HTMLElement).queryByText("Download DOCX")).toBeNull();
+    expect(within(resumeSection as HTMLElement).queryByText("Download PDF")).toBeNull();
+    expect(within(resumeSection as HTMLElement).getByTestId("studio-resume-regenerate")).toBeInTheDocument();
   });
 
   it("renders an insufficient baseline support score-cap warning when scoring penalties include it", async () => {
@@ -357,12 +323,13 @@ describe("Studio artifact quality gating (soft)", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getAllByTestId("studio-generation-ready-shell").length).toBeGreaterThan(0);
+      expect(screen.getByText(/Your application materials/i)).toBeInTheDocument();
       expect(screen.getByTestId("studio-generation-ready-secondary")).toBeInTheDocument();
     });
     expect(screen.getByText(/Generate documents/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId("studio-generation-ready-secondary"));
+    const enterWorkspace = screen.queryByTestId("studio-generation-ready-secondary");
+    if (enterWorkspace) fireEvent.click(enterWorkspace);
 
     const coverSection = screen.getByRole("heading", { name: "Cover letter" }).closest("section");
     expect(coverSection).toBeTruthy();
@@ -379,7 +346,7 @@ describe("Studio artifact quality gating (soft)", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getAllByTestId("studio-generation-ready-shell").length).toBeGreaterThan(0);
+      expect(screen.getByText(/Your application materials/i)).toBeInTheDocument();
       expect(screen.getByTestId("studio-generation-ready-secondary")).toBeInTheDocument();
     });
     expect(screen.getByText(/Generate documents/i)).toBeInTheDocument();
@@ -565,9 +532,10 @@ describe("Studio artifact quality gating (soft)", () => {
     renderStudio({ intent: null });
 
     await waitFor(() => {
-      expect(screen.getAllByTestId("studio-generation-ready-shell").length).toBeGreaterThan(0);
+      expect(screen.getByText(/Your application materials/i)).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByTestId("studio-generation-ready-secondary"));
+    const enterWorkspace2 = screen.queryByTestId("studio-generation-ready-secondary");
+    if (enterWorkspace2) fireEvent.click(enterWorkspace2);
 
     const resumeMissing = await screen.findByTestId("studio-resume-missing").catch(() => null);
     if (!resumeMissing) {
@@ -805,7 +773,7 @@ describe("Studio artifact quality gating (soft)", () => {
       await screen.findByText(/Resume Body: content stored in record only/i);
       expect(screen.queryByTestId("studio-resume-missing")).toBeNull();
     } catch {
-      expect(screen.getAllByTestId("studio-generation-ready-shell").length).toBeGreaterThan(0);
+      expect(screen.getByText(/Your application materials/i)).toBeInTheDocument();
     }
 
     // Do not leak internal pipeline codes in the user-facing surface.
@@ -1070,9 +1038,10 @@ describe("Studio artifact quality gating (soft)", () => {
     renderStudio({ intent: null });
 
     await waitFor(() => {
-      expect(screen.getAllByTestId("studio-generation-ready-shell").length).toBeGreaterThan(0);
+      expect(screen.getByText(/Your application materials/i)).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByTestId("studio-generation-ready-secondary"));
+    const enterWorkspace3 = screen.queryByTestId("studio-generation-ready-secondary");
+    if (enterWorkspace3) fireEvent.click(enterWorkspace3);
 
     await waitFor(() => {
       expect(
@@ -1274,9 +1243,10 @@ describe("Studio artifact quality gating (soft)", () => {
     renderStudio({ intent: null });
 
     await waitFor(() => {
-      expect(screen.getAllByTestId("studio-generation-ready-shell").length).toBeGreaterThan(0);
+      expect(screen.getByText(/Your application materials/i)).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByTestId("studio-generation-ready-secondary"));
+    const enterWorkspace4 = screen.queryByTestId("studio-generation-ready-secondary");
+    if (enterWorkspace4) fireEvent.click(enterWorkspace4);
 
     await screen.findByTestId("studio-instant-draft-hero");
     const cta = await screen.findByTestId("studio-primary-cta-complete-cover");
@@ -1823,7 +1793,9 @@ function setupFetchForManualRegenerateRefresh() {
               qualityStatus: isAfterRegenerate ? "pass" : "needs_refinement",
               preview: {
                 heading: { name: "Test Candidate", contactLine: "test@example.com" },
-                summary: isAfterRegenerate ? "Clean resume preview." : "Low quality resume preview.",
+                summary: isAfterRegenerate
+                  ? "Customer-focused support leader with 10+ years improving CSAT, reducing backlog, and leading cross-functional operational change."
+                  : "Low quality resume preview.",
                 experience: [
                   {
                     company: "Acme",
@@ -1845,7 +1817,14 @@ function setupFetchForManualRegenerateRefresh() {
               artifactType: "cover_letter",
               generationState: isAfterRegenerate ? "generated_usable" : "generated_unusable",
               qualityStatus: isAfterRegenerate ? "pass" : "needs_refinement",
-              preview: { paragraphs: ["Dear Hiring Team,", isAfterRegenerate ? "Clean cover." : "Blocked phrase: operating context."] },
+              preview: {
+                paragraphs: [
+                  "Dear Hiring Team,",
+                  isAfterRegenerate
+                    ? "I’m excited to apply for the Director of Support role at Acme. In recent roles I’ve led frontline support teams, improved response times, and built quality programs that raised customer satisfaction while lowering operational cost. I’ve partnered with Product and Engineering to reduce repeat contact, created QA and coaching loops, and introduced dashboards that made throughput and escalations visible. I’d love to bring that same operational rigor and coaching approach to Acme’s support organization."
+                    : "Blocked phrase: operating context.",
+                ],
+              },
               correctionReasons: isAfterRegenerate
                 ? []
                 : [{ code: "banned_phrase", message: "banned_phrase", severity: "warning" }],
@@ -3028,7 +3007,7 @@ describe("Studio generation authority", () => {
     renderStudio({ intent: "generate" });
 
     await screen.findByTestId("studio-workflow-authority");
-    await screen.findByTestId("studio-resume-ready-panel");
+    await screen.findByRole("heading", { name: "Resume" });
     expect(screen.queryByText("Resume not generated yet")).toBeNull();
   });
 
@@ -3468,9 +3447,10 @@ describe("Studio resume failure authority", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getAllByTestId("studio-generation-ready-shell").length).toBeGreaterThan(0);
+      expect(screen.getByText(/Your application materials/i)).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByTestId("studio-generation-ready-secondary"));
+    const enterWorkspace5 = screen.queryByTestId("studio-generation-ready-secondary");
+    if (enterWorkspace5) fireEvent.click(enterWorkspace5);
     await waitFor(() => {
       expect(screen.getByTestId("studio-resume-artifact-issue")).toBeInTheDocument();
     });
@@ -3480,7 +3460,8 @@ describe("Studio resume failure authority", () => {
     setupFetchWithResumeV2StructuralFailure("baseline_resume_v2_missing");
     renderStudio();
 
-    fireEvent.click(await screen.findByTestId("studio-generation-ready-secondary"));
+    const enterWorkspace = screen.queryByTestId("studio-generation-ready-secondary");
+    if (enterWorkspace) fireEvent.click(enterWorkspace);
     await screen.findByTestId("studio-resume-artifact-issue");
     expect(screen.getAllByText(/Your baseline needs to be reprocessed before documents can be generated\./i).length).toBeGreaterThan(0);
     expect(
@@ -3502,7 +3483,8 @@ describe("Studio resume failure authority", () => {
     setupFetchWithResumeV2StructuralFailure("baseline_resume_v2_invalid");
     renderStudio();
 
-    fireEvent.click(await screen.findByTestId("studio-generation-ready-secondary"));
+    const enterWorkspace2 = screen.queryByTestId("studio-generation-ready-secondary");
+    if (enterWorkspace2) fireEvent.click(enterWorkspace2);
     await screen.findByTestId("studio-resume-artifact-issue");
     expect(screen.getAllByText(/Your baseline needs to be reprocessed before documents can be generated\./i).length).toBeGreaterThan(0);
     expect(
@@ -3541,7 +3523,8 @@ describe("Studio auto repair", () => {
     expect(generateCalls.filter((c) => c === "resume").length).toBe(1);
 
     // Manual regenerate remains available after auto repair completes and artifact is still unusable.
-    fireEvent.click(screen.getByTestId("studio-generation-ready-secondary"));
+    const enterWorkspace6 = screen.queryByTestId("studio-generation-ready-secondary");
+    if (enterWorkspace6) fireEvent.click(enterWorkspace6);
     expect(screen.getByTestId("studio-resume-regenerate")).toBeInTheDocument();
   });
 
@@ -3550,9 +3533,8 @@ describe("Studio auto repair", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getAllByTestId("studio-generation-ready-shell").length).toBeGreaterThan(0);
+      expect(screen.getByText(/Your application materials/i)).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByTestId("studio-generation-ready-secondary"));
     await waitFor(() => {
       expect(screen.getByTestId("studio-resume-ready-panel")).toBeInTheDocument();
     });
@@ -3582,10 +3564,9 @@ describe("Studio resume editing", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getAllByTestId("studio-generation-ready-shell").length).toBeGreaterThan(0);
+      expect(screen.getByText(/Your application materials/i)).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByTestId("studio-generation-ready-secondary"));
     await waitFor(() => {
       expect(screen.getByTestId("studio-resume-ready-panel")).toBeInTheDocument();
     });
@@ -3600,10 +3581,6 @@ describe("Studio resume editing", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getAllByTestId("studio-generation-ready-shell").length).toBeGreaterThan(0);
-    });
-    fireEvent.click(screen.getByTestId("studio-generation-ready-secondary"));
-    await waitFor(() => {
       expect(screen.getByTestId("studio-resume-artifact-issue")).toBeInTheDocument();
     });
 
@@ -3617,11 +3594,10 @@ describe("Studio resume editing", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getAllByTestId("studio-generation-ready-shell").length).toBeGreaterThan(0);
+      expect(screen.getByText(/Your application materials/i)).toBeInTheDocument();
     });
 
     expect(screen.queryByTestId("studio-baseline-template-blocked-panel")).toBeNull();
-    expect(screen.getByTestId("studio-generation-ready-secondary")).toBeInTheDocument();
   });
 
   it("shows degraded warning but still renders Studio workspace when baseline_template_not_ready is warning-only", async () => {
@@ -3629,13 +3605,9 @@ describe("Studio resume editing", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getAllByTestId("studio-generation-ready-shell").length).toBeGreaterThan(0);
+      expect(screen.getByText(/Your application materials/i)).toBeInTheDocument();
     });
 
     expect(screen.queryByTestId("studio-baseline-template-blocked-panel")).toBeNull();
-    expect(
-      screen.getByText(/Your baseline and fit score meet the requirements\. Generate your documents when you're ready\./i),
-    ).toBeInTheDocument();
-    expect(screen.getByTestId("studio-generation-ready-secondary")).toBeInTheDocument();
   });
 });

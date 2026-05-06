@@ -1555,8 +1555,23 @@ export class CoverLettersService {
     // Soft quality enforcement (server-side self-heal): run shared artifact quality validation.
     // If the first pass fails, attempt one deterministic repair pass. If it still fails, return
     // the artifact but include quality metadata so Studio can surface the safety net.
+    const usedEvidenceIds = Array.isArray((generation as any)?.internalTrace?.usedEvidenceIds)
+      ? ((generation as any).internalTrace.usedEvidenceIds as unknown[]).map((id) => String(id ?? '')).filter(Boolean)
+      : [];
+    const evidenceSnippets = usedEvidenceIds
+      .slice(0, 6)
+      .map((id) => {
+        const found = allowedBlocks.find((b) => String((b as any)?.id ?? '') === id);
+        return found ? String((found as any)?.content ?? '') : '';
+      })
+      .map((text) => text.replace(/\s+/g, ' ').trim())
+      .map((text) => (text.length > 80 ? text.slice(0, 80) : text))
+      .filter(Boolean)
+      .slice(0, 4);
+
     const firstPassArtifactQuality = validateCoverLetterArtifactQuality(
       generation.paragraphs ?? generation.document?.bodyParagraphs ?? [],
+      { company: jobContext.company, roleTitle: jobContext.title, requiredEvidenceSnippets: evidenceSnippets },
     );
     let artifactQuality = firstPassArtifactQuality;
     let repairAttempted = false;
@@ -1572,7 +1587,11 @@ export class CoverLettersService {
             ].filter(Boolean)
           : [];
       const repairedParagraphs = repairCoverLetterForQuality(repairSource, artifactQuality);
-      artifactQuality = validateCoverLetterArtifactQuality(repairedParagraphs);
+      artifactQuality = validateCoverLetterArtifactQuality(repairedParagraphs, {
+        company: jobContext.company,
+        roleTitle: jobContext.title,
+        requiredEvidenceSnippets: evidenceSnippets,
+      });
       if (generation.document) {
         const opening = repairedParagraphs[0] ?? generation.document.opening;
         const closingParagraph = repairedParagraphs.length >= 2 ? repairedParagraphs[repairedParagraphs.length - 1] : generation.document.closingParagraph;

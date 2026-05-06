@@ -258,14 +258,37 @@ export function validateResumeQuality(resumeModel: ResumeModel | null): Artifact
       location: "summary",
     });
   }
+  if (summary && summary.length < 40) {
+    issues.push({
+      code: "summary_too_thin",
+      severity: "blocking",
+      message: "Professional summary is too thin to use as-is.",
+      location: "summary",
+    });
+  }
   issues.push(...detectPlaceholderIssues(summaryRaw, "summary"));
   const summaryTrailing = detectTrailingFragmentIssue(summaryRaw, "summary");
   if (summaryTrailing) issues.push(summaryTrailing);
 
+  let usableBulletCount = 0;
   if (Array.isArray(resumeModel.experience)) {
     for (let index = 0; index < resumeModel.experience.length; index++) {
-      issues.push(...detectResumeExperienceIssues(resumeModel.experience[index], index));
+      const entry = resumeModel.experience[index];
+      issues.push(...detectResumeExperienceIssues(entry, index));
+      const bullets = Array.isArray(entry?.bullets)
+        ? entry.bullets.map((b) => trimToText(b)).filter(Boolean)
+        : [];
+      usableBulletCount += bullets.filter((bullet) => bullet.length >= 20).length;
     }
+  }
+
+  if (usableBulletCount === 0) {
+    issues.push({
+      code: "missing_experience_bullets",
+      severity: "blocking",
+      message: "Resume has no usable experience bullets.",
+      location: "experience",
+    });
   }
 
   const blocking = issues.some((issue) => issue.severity === "blocking");
@@ -290,9 +313,36 @@ function getCoverLetterOpening(paragraphs: string[]): string {
   return trimToText(first);
 }
 
-export function validateCoverLetterQuality(paragraphs: string[]): ArtifactQualityResult {
+function normalizeMatchToken(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function containsTokenMatch(haystack: string, needle: string): boolean {
+  const normalizedHaystack = normalizeMatchToken(haystack);
+  const normalizedNeedle = normalizeMatchToken(needle);
+  if (!normalizedNeedle) return true;
+  if (normalizedNeedle.length < 3) return true;
+  return normalizedHaystack.includes(normalizedNeedle);
+}
+
+const COVER_GENERIC_FILLER_PATTERNS: Array<{ code: string; pattern: RegExp }> = [
+  { code: "generic_filler_passionate", pattern: /\bpassionate about\b/i },
+  { code: "generic_filler_fast_paced", pattern: /\bfast[-\s]?paced environment\b/i },
+  { code: "generic_filler_team_player", pattern: /\bteam player\b/i },
+  { code: "generic_filler_dynamic_team", pattern: /\bdynamic team\b/i },
+  { code: "generic_filler_thank_you", pattern: /\bthank you for your time and consideration\b/i },
+];
+
+export function validateCoverLetterQuality(input: {
+  paragraphs: string[];
+  jobTitle: string | null;
+  companyName: string | null;
+  resumeExportable: boolean;
+}): ArtifactQualityResult {
   const issues: ArtifactQualityIssue[] = [];
-  const normalizedParagraphs = Array.isArray(paragraphs) ? paragraphs.map((p) => String(p ?? "")).filter(Boolean) : [];
+  const normalizedParagraphs = Array.isArray(input.paragraphs)
+    ? input.paragraphs.map((p) => String(p ?? "")).filter(Boolean)
+    : [];
 
   const fullText = normalizedParagraphs.map((p) => trimToText(p)).filter(Boolean).join("\n");
   if (!fullText) {
@@ -303,12 +353,56 @@ export function validateCoverLetterQuality(paragraphs: string[]): ArtifactQualit
     };
   }
 
+  if (!input.resumeExportable) {
+    issues.push({
+      code: "resume_source_unusable",
+      severity: "blocking",
+      message: "Resume source evidence is not usable; cover letter needs regeneration after fixing inputs.",
+    });
+  }
+
+  const wordCount = fullText.split(/\s+/).filter(Boolean).length;
+  if (wordCount < 80) {
+    issues.push({
+      code: "cover_letter_too_thin",
+      severity: "blocking",
+      message: "Cover letter draft is too thin to use as-is.",
+    });
+  }
+
+  const jobTitle = input.jobTitle ? trimToText(input.jobTitle) : "";
+  const companyName = input.companyName ? trimToText(input.companyName) : "";
+  if (jobTitle && !containsTokenMatch(fullText, jobTitle)) {
+    issues.push({
+      code: "missing_role_reference",
+      severity: "blocking",
+      message: "Cover letter does not reference the target role.",
+    });
+  }
+  if (companyName && !containsTokenMatch(fullText, companyName)) {
+    issues.push({
+      code: "missing_company_reference",
+      severity: "blocking",
+      message: "Cover letter does not reference the target company.",
+    });
+  }
+
   for (const entry of COVER_BANNED_PHRASES) {
     if (entry.pattern.test(fullText)) {
       issues.push({
         code: entry.code,
         severity: "blocking",
         message: "Contains a banned phrase.",
+      });
+    }
+  }
+
+  for (const filler of COVER_GENERIC_FILLER_PATTERNS) {
+    if (filler.pattern.test(fullText)) {
+      issues.push({
+        code: filler.code,
+        severity: "warning",
+        message: "Contains generic filler phrasing.",
       });
     }
   }
@@ -378,6 +472,11 @@ export function validateStudioArtifactQuality(input: {
 }): StudioArtifactQualityContract {
   return {
     resume: validateResumeQuality(input.resumeModel),
-    coverLetter: validateCoverLetterQuality(input.coverLetterParagraphs),
+    coverLetter: validateCoverLetterQuality({
+      paragraphs: input.coverLetterParagraphs,
+      jobTitle: null,
+      companyName: null,
+      resumeExportable: Boolean(input.resumeModel),
+    }),
   };
 }
