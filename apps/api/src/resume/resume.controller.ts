@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  HttpCode,
   HttpStatus,
   Logger,
   Param,
@@ -62,6 +63,7 @@ export class ResumeController {
   constructor(private readonly resumeService: ResumeService) {}
 
   @Post('generate')
+  @HttpCode(HttpStatus.OK)
   async generateResume(
     @Body() body: ResumeRequestBody,
     @Req() request: TieredResumeRequest,
@@ -91,6 +93,7 @@ export class ResumeController {
   }
 
   @Post()
+  @HttpCode(HttpStatus.OK)
   async createResumeRequest(
     @Body() body: ResumeRequestBody,
     @Req() request: TieredResumeRequest,

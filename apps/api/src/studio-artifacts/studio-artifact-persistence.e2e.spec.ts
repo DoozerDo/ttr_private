@@ -20,6 +20,8 @@ import {
 import { Job, JobIngestionMethod } from '../jobs/job.entity';
 import { buildDalenDeterministicBaselineSections } from '../resume/__fixtures__/dalen-deterministic-baseline.fixture';
 import { validateNormalizedResumeDocument } from '../resume/resume-normalization';
+import { StudioArtifactsService } from './studio-artifacts.service';
+import { StudioArtifactLifecycleStatus } from './studio-artifact.entity';
 import path from 'node:path';
 
 type RegisterResponse = {
@@ -370,7 +372,7 @@ describe('Studio artifact persistence contract (e2e)', () => {
         jobId: job.id,
         analysisId: assessment.id,
       });
-    expect(resumeGenerate.status).toBe(201);
+    expect(resumeGenerate.status).toBe(200);
     expectObject(resumeGenerate.body);
     const resumePreview = (resumeGenerate.body as any)?.preview?.resume ?? null;
     expect(resumePreview).toBeTruthy();
@@ -571,6 +573,85 @@ describe('Studio artifact persistence contract (e2e)', () => {
           state.coverLetter?.interpretedEvidenceAudit?.evidenceDetailsMap,
       ).toBeTruthy();
     }
+  });
+
+  it('GET /studio/artifacts returns 200 with failed resume artifact state (never 422 for failed generation)', async () => {
+    const baseline = await baselineRepository.save(
+      baselineRepository.create({
+        userId,
+        version: 1,
+        versionNumber: 1,
+        originalFilename: 'resume.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        storagePath: '/tmp/resume.docx',
+        hash: null,
+        isActive: true,
+        archivedAt: null,
+      }),
+    );
+
+    const baselineVersion = await baselineVersionRepository.save(
+      baselineVersionRepository.create({
+        baselineId: baseline.id,
+        versionNumber: 1,
+        fileHash: `file-hash-${Date.now()}`,
+        storagePath: '/tmp/baseline-version-1',
+      }),
+    );
+
+    const job = await jobRepository.save(
+      jobRepository.create({
+        userId,
+        title: 'Backend Engineer',
+        company: 'ExampleCo',
+        rawDescription: 'Build backend services and partner cross-functionally.',
+        normalizedResponsibilities: [],
+        normalizedRequirements: [],
+        jdIngestionMethod: JobIngestionMethod.PASTE,
+        jdParsedAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        archivedAt: null,
+        isArchived: false,
+      } as Partial<Job>),
+    );
+
+    const studioArtifactsService = app.get(StudioArtifactsService);
+    const baselineVersionHash = baselineVersion.hash ?? baselineVersion.id ?? null;
+    const jobFingerprint = studioArtifactsService.computeJobFingerprint(job);
+    const inputsHash = studioArtifactsService.computeResumeInputsHash({
+      baselineVersionHash,
+      jobFingerprint,
+      assessmentInputsHash: null,
+    });
+    await studioArtifactsService.recordResumeFailure({
+      userId,
+      baselineId: baseline.id,
+      jobId: job.id,
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash,
+      jobFingerprint,
+      inputsHash,
+      failureCode: 'resume_v2_invalid',
+      failureMessage: 'Resume V2 produced an invalid normalized resume model.',
+      metadata: { test: true },
+      analysisId: null,
+    });
+
+    const studioState = await request(app.getHttpServer())
+      .get('/studio/artifacts')
+      .set('Authorization', `Bearer ${authToken}`)
+      .query({
+        baselineId: baseline.id,
+        baselineVersionId: baselineVersion.id,
+        jobId: job.id,
+      });
+
+    expect(studioState.status).toBe(200);
+    expectObject(studioState.body);
+    expect((studioState.body as any)?.resume?.status).toBe(StudioArtifactLifecycleStatus.FAILED);
+    expect(String((studioState.body as any)?.resume?.failureCode ?? '')).toBe('resume_v2_invalid');
+    expect(String((studioState.body as any)?.resume?.failureMessage ?? '')).toMatch(/invalid normalized resume model/i);
   });
 
   it('healthy structured baseline artifacts do not emit interpretedEvidenceAudit in GET /studio/artifacts', async () => {

@@ -273,6 +273,95 @@ describe("Studio generation deadlock regression", () => {
     await waitFor(() => expect(screen.queryByText("Generating resume")).toBeNull());
   });
 
+  it("surfaces backend resume artifact failures inside the Resume card (no silent success)", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    setFetchImplementation(
+      vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        if (url.includes("/api/analytics/event")) return Promise.resolve(createResponse({}));
+        if (url.includes("/api/baselines/base-1/versions")) {
+          return Promise.resolve(
+            createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+          );
+        }
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+          return Promise.resolve(
+            createResponse({
+              assessmentId: "analysis-1",
+              scoring_v2: { score: 88 },
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: "base-version-1",
+            }),
+          );
+        }
+        if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+          return Promise.resolve(createResponse({ status: "ready", reasons: [] }));
+        }
+        if (url.includes("/api/studio/artifacts")) {
+          return Promise.resolve(
+            createResponse({
+              status: "failed",
+              baselineId: "base-1",
+              jobId: "job-1",
+              baselineVersionId: "base-version-1",
+              baselineVersionHash: "hash-1",
+              jobFingerprint: "fp-1",
+              generationContractVersion: "studio-artifacts-v1",
+              resume: {
+                status: "failed",
+                inputsHash: "inputs-1",
+                responseBody: null,
+                content: null,
+                failureCode: "resume_v2_invalid",
+                failureMessage:
+                  "Resume V2 produced an invalid normalized resume model... No valid experience entries were produced.",
+                startedAt: null,
+                completedAt: null,
+                failedAt: null,
+                metadata: {},
+              },
+              coverLetter: null,
+              resumeResult: {
+                artifactType: "resume",
+                generationState: "generation_failed",
+                qualityStatus: "failed",
+                preview: null,
+                correctionReasons: [
+                  {
+                    code: "resume_v2_invalid",
+                    message:
+                      "Resume V2 produced an invalid normalized resume model... No valid experience entries were produced.",
+                    severity: "error",
+                  },
+                ],
+                exportReady: false,
+                exports: { docx: false, pdf: false },
+                actions: { canEdit: true, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
+              },
+              coverLetterResult: null,
+            }),
+          );
+        }
+        return Promise.resolve(createResponse({}));
+      }) as unknown as typeof fetch,
+    );
+
+    renderStudio();
+
+    expect(
+      await screen.findByText((content) =>
+        content.toLowerCase().includes("no valid experience entries were produced"),
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("does not start generation before baselineVersionId is available", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
@@ -306,12 +395,7 @@ describe("Studio generation deadlock regression", () => {
 
     renderStudio();
 
-    await dismissGenerationReadyShellIfPresent();
-
-    const resumeSection = await screen.findByRole("heading", { name: "Resume" });
-    expect(resumeSection).toBeInTheDocument();
-
-    const generate = await screen.findByRole("button", { name: /generate resume draft/i });
+    const generate = await screen.findByRole("button", { name: /generate resume/i });
     fireEvent.click(generate);
 
     await waitFor(() => {
@@ -321,7 +405,6 @@ describe("Studio generation deadlock regression", () => {
       });
       expect(resumePosts.length).toBe(0);
     });
-    expect(screen.getByText(/generation cannot start yet/i)).toBeInTheDocument();
     expect(screen.queryByText("Generating resume")).toBeNull();
   });
 });

@@ -3336,58 +3336,103 @@ export class ResumeService {
             : { qualityGate }),
         };
 
+        const failSafeSucceeded = (() => {
+          if (qualityGate.status !== 'pass' || !normalizedDocument) return false;
+          try {
+            const normalized = normalizeNormalizedResumeDocument(normalizedDocument);
+            validateNormalizedResumeDocument(normalized);
+            return true;
+          } catch {
+            return false;
+          }
+        })();
         try {
-          void this.studioArtifactsService.recordResumeSuccess({
-            userId,
-            baselineId: studioArtifactContext.baselineId,
-            jobId: studioArtifactContext.jobId,
-            baselineVersionId: studioArtifactContext.baselineVersionId,
-            baselineVersionHash: studioArtifactContext.baselineVersionHash,
-            jobFingerprint: studioArtifactContext.jobFingerprint,
-            inputsHash: studioArtifactContext.inputsHash,
-            analysisId: studioArtifactContext.analysisId,
-            responseBody: response as unknown as Record<string, unknown>,
-            content: normalizedDocument ? buildResumePlainText(normalizedDocument) : '',
-            metadata: {
-              auditId: minimalAuditId,
-              baselineVersionHash: baselineVersionForFailSafe.hash ?? null,
+          if (failSafeSucceeded) {
+            void this.studioArtifactsService.recordResumeSuccess({
+              userId,
+              baselineId: studioArtifactContext.baselineId,
+              jobId: studioArtifactContext.jobId,
+              baselineVersionId: studioArtifactContext.baselineVersionId,
+              baselineVersionHash: studioArtifactContext.baselineVersionHash,
+              jobFingerprint: studioArtifactContext.jobFingerprint,
+              inputsHash: studioArtifactContext.inputsHash,
               analysisId: studioArtifactContext.analysisId,
-              resumeGenerationMode: 'top_level_fail_safe_minimal',
-              resumeFailSafeMinimalUsed: true,
-              interpretedEvidenceAuditUnavailableReason: 'minimal_fail_safe_no_trace_audit',
-              interpretedEvidenceAvailable,
-              ...(interpretedEvidenceAvailable
-                ? {
-                    interpretedEvidenceSummary: interpretedEvidenceForFailSafe.summary,
-                    interpretedEvidenceReadiness: interpretedEvidenceReadinessForFailSafe,
-                    omittedInterpretedEvidence: {
-                      weak: interpretedEligibilityForFailSafe.omissions.omittedWeakEvidenceIds,
-                      unusable: interpretedEligibilityForFailSafe.omissions.omittedUnusableEvidenceIds,
-                      no_tools_or_metrics: interpretedEligibilityForFailSafe.omissions.omittedNoToolsOrMetricsIds,
-                    },
-                  }
-                : {}),
-            },
-          });
+              responseBody: response as unknown as Record<string, unknown>,
+              content: normalizedDocument ? buildResumePlainText(normalizedDocument) : '',
+              metadata: {
+                auditId: minimalAuditId,
+                baselineVersionHash: baselineVersionForFailSafe.hash ?? null,
+                analysisId: studioArtifactContext.analysisId,
+                resumeGenerationMode: 'top_level_fail_safe_minimal',
+                resumeFailSafeMinimalUsed: true,
+                interpretedEvidenceAuditUnavailableReason: 'minimal_fail_safe_no_trace_audit',
+                interpretedEvidenceAvailable,
+                ...(interpretedEvidenceAvailable
+                  ? {
+                      interpretedEvidenceSummary: interpretedEvidenceForFailSafe.summary,
+                      interpretedEvidenceReadiness: interpretedEvidenceReadinessForFailSafe,
+                      omittedInterpretedEvidence: {
+                        weak: interpretedEligibilityForFailSafe.omissions.omittedWeakEvidenceIds,
+                        unusable: interpretedEligibilityForFailSafe.omissions.omittedUnusableEvidenceIds,
+                        no_tools_or_metrics: interpretedEligibilityForFailSafe.omissions.omittedNoToolsOrMetricsIds,
+                      },
+                    }
+                  : {}),
+              },
+            });
+          } else {
+            void this.studioArtifactsService.recordResumeFailure({
+              userId,
+              baselineId: studioArtifactContext.baselineId,
+              jobId: studioArtifactContext.jobId,
+              baselineVersionId: studioArtifactContext.baselineVersionId,
+              baselineVersionHash: studioArtifactContext.baselineVersionHash,
+              jobFingerprint: studioArtifactContext.jobFingerprint,
+              inputsHash: studioArtifactContext.inputsHash,
+              analysisId: studioArtifactContext.analysisId,
+              failureCode: 'resume_artifact_invalid',
+              failureMessage:
+                'Resume V2 produced an invalid normalized resume model. Please reprocess your baseline resume and try again.',
+              metadata: {
+                analysisId: studioArtifactContext.analysisId,
+                resumeGenerationMode: 'top_level_fail_safe_minimal',
+                resumeFailSafeMinimalUsed: true,
+                qualityGateStatus: qualityGate.status,
+              },
+            });
+          }
         } catch {
           // ignore fail-safe persistence failures
         }
 
         if (dedupeKey && reservationRunId) {
           try {
-            void this.workflowIdempotencyService.complete({
-              userId,
-              operationName: 'generation.resume',
-              dedupeKey,
-              runId: reservationRunId,
-              responseBody: response,
-            });
+            if (failSafeSucceeded) {
+              void this.workflowIdempotencyService.complete({
+                userId,
+                operationName: 'generation.resume',
+                dedupeKey,
+                runId: reservationRunId,
+                responseBody: response,
+              });
+            } else {
+              void this.workflowIdempotencyService.markFailure({
+                userId,
+                operationName: 'generation.resume',
+                dedupeKey,
+                runId: reservationRunId,
+                status: 'FAILED',
+                errorCode: 'resume_artifact_invalid',
+                errorMessage:
+                  'Resume V2 produced an invalid normalized resume model. Please reprocess your baseline resume and try again.',
+              });
+            }
           } catch {
             // ignore fail-safe idempotency completion failures
           }
         }
 
-        recordResumeEvent(true);
+        recordResumeEvent(failSafeSucceeded);
         return response;
       }
 
