@@ -156,9 +156,10 @@ function resolveGenerationState(input: {
   retryableFailure: boolean;
 }): WorkflowGenerationState {
   if (input.artifactsPair === "generated") return "generated";
-  // Readiness is a preflight gate. It must block *new* generation, but it must not invalidate
-  // already-generated artifacts.
-  if (!input.canGenerate || input.readinessBlocked) return "blocked";
+  // Readiness is a preflight gate. However, the `canGenerate` signal already incorporates the product
+  // score contract (e.g. score >= 80 is a "generate now" lane even when readiness is limited).
+  // Do not double-block here, or the UI can enter a contradictory state ("ready to generate" + "not ready yet").
+  if (!input.canGenerate) return "blocked";
   if (input.surfaceCanonicalState === "generation_in_progress" || input.artifactsPair === "generating") return "generating";
   if (input.surfaceCanonicalState === "generation_ready") return "ready";
   if (input.surfaceCanonicalState === "generation_failed" || input.artifactsPair === "failed") {

@@ -77,6 +77,24 @@ function baseInput(overrides: Partial<WorkflowOrchestratorInput> = {}): Workflow
 }
 
 describe("workflow orchestrator contract", () => {
+  it("score >= 80 allows generation even when readiness is limited", () => {
+    const orchestrator = resolveWorkflowOrchestrator(
+      baseInput({
+        score: 80,
+        generationReadiness: readiness("limited", false),
+        workflowAuthority: {
+          workflowState: "READY",
+          primaryAction: "GENERATE",
+          canGenerate: true,
+          suppressFailureMessaging: false,
+        },
+      }),
+    );
+
+    expect(orchestrator.contract.generation.state).toBe("ready");
+    expect(orchestrator.contract.authority.canGenerate).toBe(true);
+  });
+
   it("pair blocked readiness overrides generation-ready and in-progress authorities", () => {
     const blockedOrchestrator = resolveWorkflowOrchestrator(
       baseInput({

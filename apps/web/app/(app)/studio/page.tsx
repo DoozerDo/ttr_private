@@ -11306,7 +11306,9 @@ export default function StudioPage() {
                       : "Strong output: ready to refine in Studio."  
                   : workflowOrchestratorCore.contract.generation.state === "ready"
                     ? "Draft output: ready to generate."
-                    : "Limited output: not ready yet."}
+                    : generateNowEligible
+                      ? "Output may be limited, but you can generate and refine."
+                      : "Limited output: not ready yet."}
               </h2>
               <p className="mt-2 text-sm text-slate-200">  
                 {workflowSurfaceAuthorityHero.canonicalState === "generation_in_progress"
@@ -11321,7 +11323,9 @@ export default function StudioPage() {
                       : "Built from your verified experience and aligned to the role. Review and refine as needed before applying." 
                   : workflowOrchestratorCore.contract.generation.state === "ready"
                     ? "Built from your baseline evidence and ready for generation."
-                    : "Built from your baseline evidence, but a few signals still need strengthening."}
+                    : generateNowEligible
+                      ? "Output may be limited due to gaps in your baseline, but you can still generate and refine."
+                      : "Built from your baseline evidence, but a few signals still need strengthening."}
               </p>
               {hasCompletedGeneration && (showLowQualityRecoveryLane || isMediumQualityDraft) ? ( 
                 <div className="mt-4 space-y-2"> 
