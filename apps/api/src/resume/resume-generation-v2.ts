@@ -5,6 +5,7 @@ import { extractStructuredBaselineFromSections } from '../baseline/structuredBas
 import { evaluateBaselineTemplateReadiness } from '../baseline/baselineTemplateReadiness';
 import {
   assembleResumeFromStructuredBaseline,
+  buildAuthoritativeResumeDraftFromResumeV2,
   isAllowedStructuredTemplateExperienceHeader,
   type ResumeTemplateIdentityLike,
 } from './resumeTemplateAssembler';
@@ -692,6 +693,31 @@ export function buildDeterministicResumeV2FromBaseline(input: {
     throw new Error('V2 failed to produce non-empty summary');
   }
 
+  // Authoritative assembly: ignore any surviving ResumeV2 ordering quirks and re-compose from ranked entries only.
+  // In this deterministic path we don't have a full positioning resolver, but we can still suppress obvious fragments.
+  const experience = Array.isArray((repairedStructure as any).experience) ? (repairedStructure as any).experience : [];
+  const rankedExperienceIds = experience.map((_: unknown, index: number) => `resume_v2_exp_${index}`);
+  const suppressedExperienceIds = experience
+    .map((entry: any, index: number) => {
+      const company = trimToText(entry?.company).toLowerCase();
+      const roleTitle = trimToText(entry?.roleTitle).toLowerCase();
+      const isWeak =
+        /\b(vue|react|deck builder|frontend)\b/i.test(company) ||
+        company.includes('experience entry needs correction') ||
+        (/\bcontractor\b/i.test(roleTitle) && /\b(linux|infrastructure|sysadmin)\b/i.test(roleTitle));
+      return isWeak ? `resume_v2_exp_${index}` : null;
+    })
+    .filter((id): id is string => Boolean(id));
+
+  const authoritative = buildAuthoritativeResumeDraftFromResumeV2({
+    resumeV2: repairedStructure as any,
+    identity: input.identity,
+    rankedExperienceIds,
+    suppressedExperienceIds,
+    professionalIdentity: input.job?.title ? `${trimToText(input.job.title)}` : null,
+    targetNarrative: input.job?.company ? `Targeting ${trimToText(input.job.company)}.` : null,
+  });
+
   const normalizedValidation = validateNormalizedResumeDocument(repairedStructure as any);
   if (!normalizedValidation.valid) {
     const failures = buildNormalizedResumeValidationFailures(repairedStructure as NormalizedResumeDocument);
@@ -707,7 +733,7 @@ export function buildDeterministicResumeV2FromBaseline(input: {
     });
   }
 
-  const qualityGate = validateResumeArtifactQualityStrict(repairedStructure as any);
+  const qualityGate = validateResumeArtifactQualityStrict(authoritative as any);
 
-  return { normalized: repairedStructure as NormalizedResumeDocument, qualityGate };
+  return { normalized: authoritative as NormalizedResumeDocument, qualityGate };
 }
