@@ -813,6 +813,9 @@ export class CoverLettersService {
         metadata: {
           auditId: draft.complianceResult.audit.id,
           closingTemplateKey: draft.closingTemplateKey,
+          selectedEvidenceIds: Array.isArray((response as any)?.internalTrace?.usedEvidenceIds)
+            ? ((response as any).internalTrace.usedEvidenceIds as unknown[]).map((id) => String(id ?? '')).filter(Boolean)
+            : [],
         },
       });
       // eslint-disable-next-line no-console
@@ -1368,17 +1371,21 @@ export class CoverLettersService {
       }));
     }
 
-    // Generation must be driven by ResumeV2-derived content (synthetic blocks), not baseline section concatenations.
-    let allowedBlocks: AllowedBaselineBlock[] = [
-      {
-        id: 'resume_v2_plain_text',
-        title: 'ResumeV2',
-        content: this.normalizeResumeV2BlockContent(resumeV2PlainText),
-        includePolicy: BaselineIncludePolicy.ALWAYS,
-        order: 0,
-        sectionType: BaselineSectionType.EXPERIENCE,
-      },
-    ];
+    // Generation must be driven by ResumeV2-derived content (structured baseline), not baseline section concatenations.
+    // Prefer role-aligned structured experience blocks over a single plain-text dump so evidence selection can
+    // reliably choose the strongest relevant roles.
+    const jobContext = {
+      id: job.id,
+      title: this.cleanText(job.title),
+      company: this.cleanText(job.company),
+      responsibilities: this.sanitizeList(job.normalizedResponsibilities),
+      requirements: this.sanitizeList(job.normalizedRequirements),
+    };
+    let allowedBlocks: AllowedBaselineBlock[] = this.buildAllowedBlocksFromStructuredBaseline({
+      structured: structuredBaseline,
+      resumeV2PlainText,
+      job: jobContext,
+    });
     const interpretedEvidenceIdToItem = new Map<string, EvidenceItem>();
     const enforceTemplateReadiness =
       Boolean(input.jobId?.trim()) && Boolean(input.analysisId?.trim()) && !Boolean(oneTap);
@@ -1402,13 +1409,6 @@ export class CoverLettersService {
         map.forEach((value, key) => interpretedEvidenceIdToItem.set(key, value));
       }
     }
-    const jobContext = {
-      id: job.id,
-      title: this.cleanText(job.title),
-      company: this.cleanText(job.company),
-      responsibilities: this.sanitizeList(job.normalizedResponsibilities),
-      requirements: this.sanitizeList(job.normalizedRequirements),
-    };
     const baselineIdentity = resolveBaselineIdentity(baseline);
     let candidateName = this.cleanText(baselineIdentity?.fullName);
     if (syntheticMetadata?.isSynthetic) {
@@ -2992,6 +2992,86 @@ export class CoverLettersService {
 
   private escapeRegExp(value: string) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  private buildAllowedBlocksFromStructuredBaseline(input: {
+    structured: any;
+    resumeV2PlainText: string;
+    job: { title: string | null; company: string | null; responsibilities: string[]; requirements: string[] };
+  }): AllowedBaselineBlock[] {
+    const structured = input.structured ?? {};
+    const experience = Array.isArray(structured.experience) ? structured.experience : [];
+    const jobText = [input.job.title ?? '', input.job.company ?? '', ...(input.job.responsibilities ?? []), ...(input.job.requirements ?? [])]
+      .join(' ')
+      .toLowerCase();
+    const jobTokens = new Set(jobText.split(/[^a-z0-9]+/g).map((t) => t.trim()).filter((t) => t.length >= 4));
+
+    const scoreExperience = (entry: any) => {
+      const company = String(entry?.company ?? '');
+      const roleTitle = String(entry?.roleTitle ?? '');
+      const dates = String(entry?.dates ?? '');
+      const bullets = Array.isArray(entry?.bullets) ? entry.bullets.map((b: any) => String(b ?? '')) : [];
+      const text = [company, roleTitle, dates, ...bullets].join(' ').toLowerCase();
+      let score = 0;
+      for (const token of jobTokens) {
+        if (text.includes(token)) score += 1;
+      }
+      if (/\b(contractor|freelance|consultant)\b/i.test(roleTitle)) score -= 2;
+      if (/\b(vue|react|deck builder|frontend)\b/i.test(company)) score -= 3;
+      return score;
+    };
+
+    const ranked = [...experience]
+      .map((entry: any, index: number) => ({ entry, index, score: scoreExperience(entry) }))
+      .sort((a, b) => b.score - a.score);
+
+    const blocks: AllowedBaselineBlock[] = [];
+    const summary = typeof structured.summary === 'string' ? structured.summary.trim() : '';
+    if (summary) {
+      blocks.push({
+        id: 'resume_v2_summary',
+        title: 'Summary',
+        content: summary,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: 0,
+        sectionType: BaselineSectionType.SUMMARY,
+      });
+    }
+
+    let order = 1000;
+    for (const rankedEntry of ranked.slice(0, 12)) {
+      const entry = rankedEntry.entry ?? {};
+      const company = String(entry.company ?? '').trim();
+      const roleTitle = String(entry.roleTitle ?? '').trim();
+      const dates = String(entry.dates ?? '').trim();
+      const bullets = Array.isArray(entry.bullets) ? entry.bullets.map((b: any) => String(b ?? '').trim()).filter(Boolean) : [];
+      if (!company || !roleTitle) continue;
+      const header = [company, roleTitle, dates].filter(Boolean).join(' | ');
+      const content = [header, ...bullets.map((b) => `- ${b}`)].join('\n').trim();
+      blocks.push({
+        id: `resume_v2_exp_${rankedEntry.index}`,
+        title: `${company} — ${roleTitle}`,
+        content,
+        includePolicy: BaselineIncludePolicy.OPTIONAL,
+        order,
+        sectionType: BaselineSectionType.EXPERIENCE,
+      });
+      order += 1000;
+    }
+
+    // Fallback: include plain text dump only if we couldn't form any structured blocks.
+    if (blocks.filter((b) => b.sectionType === BaselineSectionType.EXPERIENCE).length === 0) {
+      blocks.push({
+        id: 'resume_v2_plain_text',
+        title: 'ResumeV2',
+        content: this.normalizeResumeV2BlockContent(input.resumeV2PlainText),
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: order,
+        sectionType: BaselineSectionType.EXPERIENCE,
+      });
+    }
+
+    return blocks;
   }
 
   private async evaluateCompliance(

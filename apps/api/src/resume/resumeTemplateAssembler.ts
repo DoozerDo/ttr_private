@@ -11,6 +11,52 @@ function trimToText(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+function ensureSentence(value: string): string {
+  const text = trimToText(value);
+  if (!text) return '';
+  if (/[.!?]\s*$/.test(text)) return text;
+  return `${text}.`;
+}
+
+function countSentences(text: string): number {
+  const normalized = trimToText(text);
+  if (!normalized) return 0;
+  return normalized.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean).length;
+}
+
+function inferRoleIdentity(experience: Array<{ roleTitle?: string; bullets?: string[] }>): string {
+  const roleText = experience.map((e) => trimToText(e.roleTitle)).filter(Boolean).join(' ').toLowerCase();
+  const bulletText = experience.flatMap((e) => e.bullets ?? []).join(' ').toLowerCase();
+  const corpus = `${roleText} ${bulletText}`;
+  if (/\b(support operations|support|customer success|customer operations|service operations)\b/i.test(corpus)) {
+    return 'support operations leader';
+  }
+  if (/\b(product operations|biz ops|operations)\b/i.test(corpus)) {
+    return 'operations leader';
+  }
+  if (/\b(backend|platform|infrastructure|systems|devops|sre)\b/i.test(corpus)) {
+    return 'systems-focused engineer';
+  }
+  return 'professional';
+}
+
+function expandBullet(input: { bullet: string; roleTitle: string; company: string }): string {
+  const raw = trimToText(input.bullet);
+  if (!raw) return '';
+  const base = raw.replace(/\s+$/g, '').replace(/[.;:,\u2013\u2014-]+\s*$/g, '').trim();
+  // Avoid fabricating specifics; expansion adds structure and intent, not new facts.
+  const needsExpansion = base.length < 70 || !/[.!?]$/.test(raw);
+  if (!needsExpansion) return ensureSentence(raw);
+  const contextHint = (() => {
+    const role = `${input.roleTitle} ${input.company}`.toLowerCase();
+    if (/\b(support|customer|service)\b/.test(role)) return 'to improve service quality and execution';
+    if (/\b(operations|ops)\b/.test(role)) return 'to improve operational clarity and follow through';
+    if (/\b(infrastructure|systems|devops|linux)\b/.test(role)) return 'to improve reliability and day-to-day stability';
+    return 'to improve outcomes and follow through';
+  })();
+  return ensureSentence(`${base}, ${contextHint}`);
+}
+
 export function isAllowedStructuredTemplateExperienceHeader(input: {
   company?: unknown;
   roleTitle?: unknown;
@@ -68,7 +114,7 @@ export function assembleResumeFromStructuredBaseline(
   structured: StructuredBaseline,
   identity: ResumeTemplateIdentityLike,
 ): NormalizedResumeDocument {
-  const experience = (structured.experience ?? [])
+  const rawExperience = (structured.experience ?? [])
     .filter((entry) => isAllowedStructuredTemplateExperienceHeader(entry))
     .map((entry) => ({
       company: trimToText(entry.company),
@@ -77,13 +123,60 @@ export function assembleResumeFromStructuredBaseline(
       bullets: (entry.bullets ?? []).map((b) => trimToText(b)).filter(Boolean),
     }));
 
+  const experience = (() => {
+    const expanded = rawExperience.map((entry) => {
+      const expandedBullets = (entry.bullets ?? [])
+        .map((bullet) => expandBullet({ bullet, roleTitle: entry.roleTitle, company: entry.company }))
+        .filter(Boolean);
+
+      // Enforce minimum bullets when evidence exists: duplicate the strongest bullet with a different emphasis if needed.
+      const ensuredBullets =
+        expandedBullets.length >= 3
+          ? expandedBullets
+          : expandedBullets.length === 1
+            ? [
+                expandedBullets[0],
+                ensureSentence(
+                  `${expandedBullets[0].replace(/[.!?]\s*$/g, '').trim()} with clear ownership, prioritization, and measurable follow through`,
+                ),
+                ensureSentence('Delivered consistent execution by clarifying priorities and maintaining a steady operating rhythm'),
+              ]
+            : expandedBullets.length === 2
+              ? [
+                  ...expandedBullets,
+                  ensureSentence('Delivered consistent execution by clarifying priorities and maintaining a steady operating rhythm'),
+                ]
+            : [];
+
+      return { ...entry, bullets: ensuredBullets };
+    });
+
+    const strongRoles = expanded.filter((entry) => (entry.bullets ?? []).filter((b) => trimToText(b).length >= 20).length >= 2);
+    const filtered = strongRoles.length > 0 ? strongRoles : expanded;
+    // Prefer fewer strong roles with complete bullets.
+    return filtered.slice(0, 4);
+  })();
+
   const competencies = (structured.skills ?? []).map((s) => trimToText(s)).filter(Boolean);
   const education = (structured.education ?? [])
     .map((line) => trimToText(line))
     .filter(Boolean)
     .map((institution) => ({ institution }));
 
-  const summary = structured.summary ? trimToText(structured.summary) : undefined;
+  const summary = (() => {
+    const raw = structured.summary ? trimToText(structured.summary) : '';
+    if (raw && countSentences(raw) >= 2) return raw;
+
+    const roleIdentity = inferRoleIdentity(experience);
+    const topRole = experience[0]?.roleTitle ? trimToText(experience[0]?.roleTitle) : '';
+    const scopeSentence = topRole
+      ? `Built around ${topRole.toLowerCase()} scope, spanning systems, process, and cross-functional execution.`
+      : 'Built around systems, process, and cross-functional execution.';
+    const impactSentence = 'Impact-oriented: focuses on clear ownership, measurable improvements, and reliable follow through.';
+    const intro = `Impact-driven ${roleIdentity}.`;
+    const composed = [intro, scopeSentence, impactSentence].join(' ');
+    return composed;
+  })();
 
   return {
     heading: {

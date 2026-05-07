@@ -10,8 +10,62 @@ import {
   supportOperationsFixture,
 } from './__fixtures__/cover-letter-fixtures';
 import { COVER_LETTER_GENERIC_FILLER_PHRASES } from './cover-letter-writing-contract';
+import { BaselineIncludePolicy, BaselineSectionType } from '../../baseline/baseline-section.entity';
 
 describe('TemplateCoverLetterGenerator', () => {
+  it('selects role-aligned evidence blocks over weak technical fragments', () => {
+    const generator = new TemplateCoverLetterGenerator();
+    const result = generator.generate({
+      baselineId: 'base-1',
+      jobId: 'job-1',
+      allowedBaselineBlocks: [
+        {
+          id: 'resume_v2_exp_weak',
+          title: 'Vue 3 contractor fragment',
+          content: [
+            'Vue 3), deck builder frontend | Contractor | 2022 - 2023',
+            '- Built UI components.',
+          ].join('\n'),
+          includePolicy: BaselineIncludePolicy.OPTIONAL,
+          order: 1000,
+          sectionType: BaselineSectionType.EXPERIENCE,
+        } as any,
+        {
+          id: 'resume_v2_exp_strong',
+          title: 'Acme — Director of Support',
+          content: [
+            'Acme | Director of Support | 2020 - 2024',
+            '- Led support operations and improved incident response quality through repeatable playbooks.',
+            '- Partnered cross-functionally to reduce escalation friction and improve stakeholder updates.',
+          ].join('\n'),
+          includePolicy: BaselineIncludePolicy.OPTIONAL,
+          order: 2000,
+          sectionType: BaselineSectionType.EXPERIENCE,
+        } as any,
+      ],
+      job: {
+        id: 'job-1',
+        title: 'Director of Support',
+        company: 'ExampleCo',
+        responsibilities: ['Own support operations', 'Drive incident response'],
+        requirements: ['Cross-functional leadership'],
+      },
+      candidateName: 'Alex Candidate',
+      closingTemplate: null,
+      maxWords: 320,
+      tone: null,
+      safeMode: true,
+      complianceConstraints: null,
+      documentStrategyPlan: undefined,
+      gapAnalysis: { strengths: ['support operations'], criticalGaps: [] },
+    } as any);
+
+    expect(result.content).toContain('Director of Support');
+    expect(result.content).toContain('ExampleCo');
+    expect(result.internalTrace.usedEvidenceIds.some((id) => String(id).startsWith('resume_v2_exp_strong'))).toBe(true);
+    expect(result.internalTrace.usedEvidenceIds.some((id) => String(id).startsWith('resume_v2_exp_weak'))).toBe(false);
+  });
+
   it('rejects underspecified evidence fixtures with a supported-input error', () => {
     const generator = new TemplateCoverLetterGenerator();
 

@@ -528,6 +528,9 @@ export function validateCoverLetterArtifactQuality(
       reasons.push('insufficient_specific_evidence');
     }
   }
+  if (normalizedParagraphs.length < 3) {
+    reasons.push('missing_letter_structure');
+  }
   for (const entry of COVER_BANNED_PHRASES) {
     if (entry.pattern.test(fullText)) {
       reasons.push(entry.label);
@@ -607,6 +610,12 @@ export function validateResumeArtifactQualityStrict(
       reasons.push('empty_summary');
     } else if (summaryText.length < 40) {
       reasons.push('summary_too_thin');
+    }
+    if (summaryText) {
+      const sentenceCount = summaryText.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean).length;
+      if (sentenceCount < 2) {
+        reasons.push('summary_too_few_sentences');
+      }
     }
   }
 
@@ -702,6 +711,13 @@ export function validateResumeArtifactQualityStrict(
   }
   if (usableBulletCount > 0 && usableBulletCount < 3) {
     reasons.push('insufficient_experience_bullets');
+  }
+  if (experience.length > 0) {
+    const first = experience[0] as any;
+    const firstBullets = Array.isArray(first?.bullets) ? first.bullets.map((b: any) => trimToText(b)).filter(Boolean) : [];
+    if (firstBullets.length > 0 && firstBullets.length < 2) {
+      reasons.push('top_role_insufficient_bullets');
+    }
   }
 
   const unique = Array.from(new Set(reasons));

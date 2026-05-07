@@ -2,6 +2,44 @@ import { buildDeterministicResumeV2FromBaseline } from './resume-generation-v2';
 import { sanitizeResumePreviewForStudio } from './resumePreviewSanitizer';
 
 describe('resume generation v2', () => {
+  it('ranks structured baseline experience by job relevance (prefers support leadership over contractor fragments)', () => {
+    const baselineSections = [
+      {
+        sectionType: 'SUMMARY',
+        content: 'Support leader with verified impact across incident response and operations.',
+      },
+      {
+        sectionType: 'EXPERIENCE',
+        content: [
+          'Vue 3), deck builder frontend | Contractor | 2022 - 2023',
+          '- Built UI components.',
+          '',
+          'Acme | Director of Support | 2020 - 2024',
+          '- Led support operations and improved incident response quality through repeatable playbooks.',
+          '- Partnered cross-functionally to reduce escalation friction and improve stakeholder updates.',
+        ].join('\n'),
+      },
+    ] as any[];
+
+    const result = buildDeterministicResumeV2FromBaseline({
+      baselineSections: baselineSections as any,
+      identity: { name: 'Test User', contactLine: 'test@example.com' },
+      job: { title: 'Director of Support', company: 'ExampleCo', description: 'Own support operations and incident response.' },
+    });
+
+    const preview = sanitizeResumePreviewForStudio(result.normalized);
+    const companies = (preview.experience ?? []).map((e) => String((e as any)?.company ?? ''));
+    expect(companies[0]).toBe('Acme');
+    expect(companies.join('|')).not.toContain('Vue 3), deck builder frontend');
+    expect(String((result.normalized as any).summary ?? '').split(/(?<=[.!?])\s+/).filter(Boolean).length).toBeGreaterThanOrEqual(2);
+    const firstRoleBullets = (preview.experience?.[0] as any)?.bullets ?? [];
+    expect(firstRoleBullets.length).toBeGreaterThanOrEqual(2);
+    const totalBullets = (preview.experience ?? []).flatMap((e: any) => e?.bullets ?? []).length;
+    expect(totalBullets).toBeGreaterThanOrEqual(3);
+    // No fragment-only bullets (very short) in the composed draft.
+    expect((preview.experience ?? []).flatMap((e: any) => e?.bullets ?? []).some((b: any) => String(b ?? '').trim().length < 12)).toBe(false);
+  });
+
   it('includes detailed normalized model validation failures when validation rejects the model', () => {
     const baselineSections = [
       {
@@ -22,6 +60,7 @@ describe('resume generation v2', () => {
         baselineSections: baselineSections as any,
         // Duplicate token should trigger normalized validation failure (contactLine dedupe).
         identity: { name: 'Dalen Example', contactLine: 'dalen@example.com | dalen@example.com' },
+        job: null,
       });
       throw new Error('Expected V2 normalized validation to fail');
     } catch (error) {
@@ -69,6 +108,7 @@ describe('resume generation v2', () => {
     const result = buildDeterministicResumeV2FromBaseline({
       baselineSections: baselineSections as any,
       identity: { name: 'Test User', contactLine: 'test@example.com' },
+      job: null,
     });
 
     const preview = sanitizeResumePreviewForStudio(result.normalized);
@@ -103,6 +143,7 @@ describe('resume generation v2', () => {
     const result = buildDeterministicResumeV2FromBaseline({
       baselineSections: baselineSections as any,
       identity: { name: 'Test User', contactLine: 'test@example.com' },
+      job: null,
     });
 
     expect(String((result.normalized as any).summary ?? '').trim().length).toBeGreaterThan(0);
@@ -126,6 +167,7 @@ describe('resume generation v2', () => {
       buildDeterministicResumeV2FromBaseline({
         baselineSections: baselineSections as any,
         identity: { name: 'Test User', contactLine: 'test@example.com' },
+        job: null,
       });
       throw new Error('Expected V2 to reject malformed experience fragments');
     } catch (error) {
@@ -156,6 +198,7 @@ describe('resume generation v2', () => {
       buildDeterministicResumeV2FromBaseline({
         baselineSections: baselineSections as any,
         identity: { name: 'Test User', contactLine: 'test@example.com' },
+        job: null,
       });
       throw new Error('Expected V2 to reject malformed experience fragments');
     } catch (error) {
@@ -190,6 +233,7 @@ describe('resume generation v2', () => {
     const result = buildDeterministicResumeV2FromBaseline({
       baselineSections: baselineSections as any,
       identity: { name: 'Test User', contactLine: 'test@example.com' },
+      job: null,
     });
 
     expect(['pass', 'needs_refinement']).toContain(result.qualityGate.status);
@@ -216,6 +260,7 @@ describe('resume generation v2', () => {
     const result = buildDeterministicResumeV2FromBaseline({
       baselineSections: baselineSections as any,
       identity: { name: 'Test User', contactLine: 'test@example.com' },
+      job: null,
     });
 
     expect(result.qualityGate.status).toBe('needs_refinement');
@@ -247,6 +292,7 @@ describe('resume generation v2', () => {
     const result = buildDeterministicResumeV2FromBaseline({
       baselineSections: baselineSections as any,
       identity: { name: 'Test User', contactLine: 'test@example.com' },
+      job: null,
     });
 
     expect(Array.isArray(result.normalized.experience)).toBe(true);

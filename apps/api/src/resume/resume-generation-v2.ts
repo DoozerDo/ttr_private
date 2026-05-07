@@ -565,6 +565,7 @@ function buildInvalidExperienceReasons(input: {
 export function buildDeterministicResumeV2FromBaseline(input: {
   baselineSections: BaselineSection[];
   identity: ResumeTemplateIdentityLike;
+  job?: { title?: string | null; company?: string | null; description?: string | null } | null;
 }): ResumeGenerationV2Result {
   const rawExperienceText = input.baselineSections
     .filter((section) => String((section as any)?.sectionType ?? '').toUpperCase() === 'EXPERIENCE')
@@ -629,6 +630,37 @@ export function buildDeterministicResumeV2FromBaseline(input: {
   }
 
   structured.experience = allowedExperience;
+
+  const jobTitle = String(input.job?.title ?? '').trim();
+  const jobCompany = String(input.job?.company ?? '').trim();
+  const jobDescription = String(input.job?.description ?? '').trim();
+  const jobContextText = [jobTitle, jobCompany, jobDescription].filter(Boolean).join(' ');
+
+  const jobTokens = new Set(
+    jobContextText
+      .toLowerCase()
+      .split(/[^a-z0-9]+/g)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 4),
+  );
+
+  const scoreExperienceForJob = (entry: any) => {
+    const company = String(entry?.company ?? '');
+    const roleTitle = String(entry?.roleTitle ?? '');
+    const dates = String(entry?.dates ?? '');
+    const bullets = Array.isArray(entry?.bullets) ? entry.bullets.map((b: any) => String(b ?? '')) : [];
+    const text = [company, roleTitle, dates, ...bullets].join(' ').toLowerCase();
+    let score = 0;
+    for (const token of jobTokens) {
+      if (text.includes(token)) score += 1;
+    }
+    // Penalize obvious contractor/project fragments so they cannot dominate when stronger evidence exists.
+    if (/\b(contractor|freelance|consultant)\b/i.test(roleTitle)) score -= 2;
+    if (/\b(vue|react|deck builder|frontend)\b/i.test(company)) score -= 3;
+    return score;
+  };
+
+  structured.experience = [...allowedExperience].sort((a: any, b: any) => scoreExperienceForJob(b) - scoreExperienceForJob(a));
 
   const normalized = assembleResumeFromStructuredBaseline(structured, input.identity);
 

@@ -312,14 +312,14 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       const evidenceSentences = args.evidence.map((entry) =>
         this.ensureSentence(this.compactEvidenceText(entry.normalizedText)),
       );
-      // Keep paragraphs readable: 3-sentence argument with optional proof splice.
-      const supporting = evidenceSentences.slice(0, 1);
+      // Keep paragraphs readable but specific: include up to 2 concrete proof sentences.
+      const supporting = evidenceSentences.slice(0, 2);
       const leadSentencePrefix =
         args.leadIn === 'also' ? 'I have also' : 'In my experience, I have';
       return this.joinSentences([
         this.ensureSentence(`${leadSentencePrefix} ${this.cleanText(args.action).replace(/[.!?]+$/g, '')}.`),
-        this.ensureSentence(args.impact),
         ...supporting,
+        this.ensureSentence(args.impact),
         this.ensureSentence(args.relevance),
         // Reinforce the positioning theme without repeating the theme label as a slogan.
         // This improves cohesion when only one strong theme signal exists in the evidence corpus.
