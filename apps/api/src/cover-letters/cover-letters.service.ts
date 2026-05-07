@@ -125,12 +125,14 @@ import { resolveEvidenceReadinessFromSummary } from '../evidence/readiness-thres
 import { assembleCoverLetterFromStructuredBaseline } from './coverLetterTemplateAssembler';
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
 import { resolveSyntheticCandidateName } from './candidate-name.util';
+import { TargetRolePositioningResolver } from '../positioning/target-role-positioning.resolver';
 
 type CoverLetterDraft = {
   baseline: Baseline;
   baselineVersion: BaselineVersion;
   job: Job;
   allowedBlocks: AllowedBaselineBlock[];
+  positioningMetadata?: unknown;
   interpretedEvidenceIdToItem?: Map<string, EvidenceItem>;
   interpretedEvidenceSummary?: { strongEvidenceCount: number; partialEvidenceCount: number; weakEvidenceCount: number; unusableEvidenceCount: number };
   interpretedEvidenceReadiness?: ReturnType<typeof resolveEvidenceReadinessFromSummary>;
@@ -222,6 +224,7 @@ export type CoverLetterGenerationResponse = {
 
 @Injectable()
 export class CoverLettersService {
+  private readonly positioningResolver = new TargetRolePositioningResolver();
   private readonly logger = new Logger(CoverLettersService.name);
   private readonly coverLetterRepository: Repository<CoverLetter>;
   private readonly baselineRepository: Repository<Baseline>;
@@ -816,6 +819,7 @@ export class CoverLettersService {
           selectedEvidenceIds: Array.isArray((response as any)?.internalTrace?.usedEvidenceIds)
             ? ((response as any).internalTrace.usedEvidenceIds as unknown[]).map((id) => String(id ?? '')).filter(Boolean)
             : [],
+          positioning: draft.positioningMetadata ?? null,
         },
       });
       // eslint-disable-next-line no-console
@@ -1386,6 +1390,26 @@ export class CoverLettersService {
       resumeV2PlainText,
       job: jobContext,
     });
+    const positioningMetadata = (() => {
+      try {
+        const resumeV2Like = {
+          heading: { name: 'Candidate', contactLine: '' },
+          experience: (structuredBaseline?.experience ?? []).map((e: any) => ({
+            company: e.company,
+            roleTitle: e.roleTitle,
+            dateRange: e.dates,
+            bullets: e.bullets,
+          })),
+          summary: typeof (structuredBaseline as any)?.summary === 'string' ? (structuredBaseline as any).summary : '',
+        } as any;
+        return this.positioningResolver.resolve({
+          job: { title: jobContext.title ?? null, company: jobContext.company ?? null, description: job.rawDescription ?? null },
+          resumeV2: resumeV2Like,
+        });
+      } catch {
+        return null;
+      }
+    })();
     const interpretedEvidenceIdToItem = new Map<string, EvidenceItem>();
     const enforceTemplateReadiness =
       Boolean(input.jobId?.trim()) && Boolean(input.analysisId?.trim()) && !Boolean(oneTap);
@@ -1813,6 +1837,7 @@ export class CoverLettersService {
       job,
       analysisAssessment,
       allowedBlocks,
+      positioningMetadata,
       ...(interpretedEvidenceIdToItem.size ? { interpretedEvidenceIdToItem } : {}),
       ...(interpretedEvidenceIdToItem.size
         ? {
@@ -3021,9 +3046,43 @@ export class CoverLettersService {
       return score;
     };
 
+    const positioning = (() => {
+      try {
+        const resumeV2Like = {
+          heading: { name: 'Candidate', contactLine: '' },
+          experience: (experience ?? []).map((e: any) => ({
+            company: e.company,
+            roleTitle: e.roleTitle,
+            dateRange: e.dates,
+            bullets: e.bullets,
+          })),
+          summary: typeof structured.summary === 'string' ? structured.summary : '',
+        } as any;
+        return this.positioningResolver.resolve({
+          job: { title: input.job.title ?? null, company: input.job.company ?? null, description: jobText },
+          resumeV2: resumeV2Like,
+        });
+      } catch {
+        return null;
+      }
+    })();
+
     const ranked = [...experience]
-      .map((entry: any, index: number) => ({ entry, index, score: scoreExperience(entry) }))
-      .sort((a, b) => b.score - a.score);
+      .map((entry: any, index: number) => {
+        const id = `resume_v2_exp_${index}`;
+        const positioningRank = positioning?.prioritizedExperienceIds?.indexOf(id) ?? -1;
+        const suppressed = positioning?.suppressedExperienceIds?.includes(id) ?? false;
+        return { entry, index, score: scoreExperience(entry), positioningRank, suppressed };
+      })
+      .sort((a, b) => {
+        if (a.suppressed !== b.suppressed) return a.suppressed ? 1 : -1;
+        if (a.positioningRank !== b.positioningRank) {
+          if (a.positioningRank === -1) return 1;
+          if (b.positioningRank === -1) return -1;
+          return a.positioningRank - b.positioningRank;
+        }
+        return b.score - a.score;
+      });
 
     const blocks: AllowedBaselineBlock[] = [];
     const summary = typeof structured.summary === 'string' ? structured.summary.trim() : '';

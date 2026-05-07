@@ -106,6 +106,7 @@ import { BaselineResumeV2BackfillService } from '../baseline/baseline-resume-v2-
 import { sanitizeResumeForTrailingFragments, trimIncompleteTrailingFragments } from '../artifacts/artifactQualityValidator';
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
 import { sanitizeResumePreviewForStudio } from './resumePreviewSanitizer';
+import { TargetRolePositioningResolver } from '../positioning/target-role-positioning.resolver';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
 import { evaluateBaselineTemplateReadiness } from '../baseline/baselineTemplateReadiness';
 import { interpretEvidenceFromResumeText } from '../evidence/evidence-interpreter';
@@ -293,6 +294,7 @@ type ResumeExperiencePipelineDiagnostics = {
 
 @Injectable()
 export class ResumeService {
+  private readonly positioningResolver = new TargetRolePositioningResolver();
   private readonly logger = new Logger(ResumeService.name);
 
   constructor(
@@ -2379,6 +2381,39 @@ export class ResumeService {
       );
     })();
 
+    let positioningMetadata: any = null;
+    if (isResumeV2) {
+      try {
+        const jobForPositioning = job
+          ? { title: job.title ?? null, company: job.company ?? null, description: job.rawDescription ?? null }
+          : { title: null, company: null, description: null };
+        const positioning = this.positioningResolver.resolve({
+          job: jobForPositioning,
+          resumeV2: normalizedDocument as any,
+        });
+        positioningMetadata = positioning;
+
+        // Apply positioning to the generated resume draft (without mutating persisted baseline):
+        // reorder experiences so prioritized roles lead, and suppress weak fragments unless nothing else exists.
+        const exp = Array.isArray((normalizedDocument as any).experience) ? (normalizedDocument as any).experience : [];
+        const idToEntry = new Map<string, any>();
+        exp.forEach((entry: any, index: number) => idToEntry.set(`resume_v2_exp_${index}`, entry));
+        const suppressedSet = new Set(positioning.suppressedExperienceIds);
+        const prioritizedIds = positioning.prioritizedExperienceIds.filter((id) => idToEntry.has(id));
+        const prioritizedNonSuppressed = prioritizedIds.filter((id) => !suppressedSet.has(id));
+        const prioritized = (prioritizedNonSuppressed.length ? prioritizedNonSuppressed : prioritizedIds)
+          .map((id) => idToEntry.get(id))
+          .filter(Boolean);
+        const remaining = exp.filter((_: any, index: number) => !prioritizedIds.includes(`resume_v2_exp_${index}`));
+        (normalizedDocument as any).experience = [...prioritized, ...remaining];
+
+        // Force summary to reflect the positioning authority (visible, multi-sentence).
+        (normalizedDocument as any).summary = `${positioning.professionalIdentity}. ${positioning.targetNarrative} Impact-oriented: clear ownership, measurable improvements, and reliable follow through.`;
+      } catch {
+        positioningMetadata = null;
+      }
+    }
+
     if (!isResumeV2) {
       // Deterministic structural repair pass: prevent bullet-like prose from being treated as an
       // experience header field. This is non-fabricating: it clears malformed header fields and
@@ -3115,6 +3150,7 @@ export class ResumeService {
         auditId: audit.id,
         baselineVersionHash: audit.baselineVersionHash,
         analysisId: studioArtifactContext.analysisId,
+        positioning: positioningMetadata,
       },
     });
     // eslint-disable-next-line no-console
