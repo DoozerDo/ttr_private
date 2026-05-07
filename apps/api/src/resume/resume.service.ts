@@ -107,6 +107,7 @@ import { sanitizeResumeForTrailingFragments, trimIncompleteTrailingFragments } f
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
 import { sanitizeResumePreviewForStudio } from './resumePreviewSanitizer';
 import { TargetRolePositioningResolver } from '../positioning/target-role-positioning.resolver';
+import { buildAuthoritativeResumeDraftFromResumeV2 } from './resumeTemplateAssembler';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
 import { evaluateBaselineTemplateReadiness } from '../baseline/baselineTemplateReadiness';
 import { interpretEvidenceFromResumeText } from '../evidence/evidence-interpreter';
@@ -2393,22 +2394,48 @@ export class ResumeService {
         });
         positioningMetadata = positioning;
 
-        // Apply positioning to the generated resume draft (without mutating persisted baseline):
-        // reorder experiences so prioritized roles lead, and suppress weak fragments unless nothing else exists.
-        const exp = Array.isArray((normalizedDocument as any).experience) ? (normalizedDocument as any).experience : [];
-        const idToEntry = new Map<string, any>();
-        exp.forEach((entry: any, index: number) => idToEntry.set(`resume_v2_exp_${index}`, entry));
-        const suppressedSet = new Set(positioning.suppressedExperienceIds);
-        const prioritizedIds = positioning.prioritizedExperienceIds.filter((id) => idToEntry.has(id));
-        const prioritizedNonSuppressed = prioritizedIds.filter((id) => !suppressedSet.has(id));
-        const prioritized = (prioritizedNonSuppressed.length ? prioritizedNonSuppressed : prioritizedIds)
-          .map((id) => idToEntry.get(id))
-          .filter(Boolean);
-        const remaining = exp.filter((_: any, index: number) => !prioritizedIds.includes(`resume_v2_exp_${index}`));
-        (normalizedDocument as any).experience = [...prioritized, ...remaining];
+        const baselineIdentity = resolveBaselineIdentity(baseline);
+        const identityRecord =
+          baselineIdentity && typeof baselineIdentity === 'object'
+            ? (baselineIdentity as unknown as { fullName?: unknown; contactLine?: unknown; links?: unknown })
+            : {};
 
-        // Force summary to reflect the positioning authority (visible, multi-sentence).
-        (normalizedDocument as any).summary = `${positioning.professionalIdentity}. ${positioning.targetNarrative} Impact-oriented: clear ownership, measurable improvements, and reliable follow through.`;
+        // Authoritative assembler: build the final resume ONLY from ranked/selected experiences.
+        // Ignore baseline ResumeV2 ordering completely.
+        // eslint-disable-next-line no-console
+        console.log('[RESUME_POSITIONING]', {
+          baselineId: baseline.id,
+          jobId: job?.id ?? null,
+          professionalIdentity: positioning.professionalIdentity ?? null,
+          prioritizedExperienceIds: positioning.prioritizedExperienceIds ?? [],
+          suppressedExperienceIds: positioning.suppressedExperienceIds ?? [],
+          suppressionReasons: positioning.suppressionReasons ?? {},
+        });
+
+        normalizedDocument = buildAuthoritativeResumeDraftFromResumeV2({
+          resumeV2: normalizedDocument as any,
+          identity: { name: identityRecord.fullName, contactLine: identityRecord.contactLine, links: identityRecord.links },
+          rankedExperienceIds: positioning.prioritizedExperienceIds ?? [],
+          suppressedExperienceIds: positioning.suppressedExperienceIds ?? [],
+          professionalIdentity: positioning.professionalIdentity ?? null,
+          targetNarrative: positioning.targetNarrative ?? null,
+        }) as any;
+
+        // eslint-disable-next-line no-console
+        console.log('[RESUME_ASSEMBLER_OUTPUT]', {
+          baselineId: baseline.id,
+          jobId: job?.id ?? null,
+          renderedExperience: Array.isArray((normalizedDocument as any)?.experience)
+            ? (normalizedDocument as any).experience.slice(0, 5).map((e: any) => ({
+                company: String(e?.company ?? ''),
+                roleTitle: String(e?.roleTitle ?? ''),
+                bulletCount: Array.isArray(e?.bullets) ? e.bullets.length : 0,
+              }))
+            : [],
+          summarySentences: typeof (normalizedDocument as any)?.summary === 'string'
+            ? String((normalizedDocument as any).summary).split(/(?<=[.!?])\s+/).filter(Boolean).length
+            : 0,
+        });
       } catch {
         positioningMetadata = null;
       }

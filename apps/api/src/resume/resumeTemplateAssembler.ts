@@ -192,3 +192,126 @@ export function assembleResumeFromStructuredBaseline(
     ...(education.length ? { education } : {}),
   };
 }
+
+function isWeakFragmentRole(entry: { company?: string; roleTitle?: string }): boolean {
+  const company = trimToText(entry.company).toLowerCase();
+  const roleTitle = trimToText(entry.roleTitle).toLowerCase();
+  if (!company && !roleTitle) return true;
+  if (/\b(vue|react|deck builder|frontend)\b/i.test(company)) return true;
+  if (company.includes('experience entry needs correction')) return true;
+  if (/\bcontractor\b/i.test(roleTitle) && /\b(linux|infrastructure|sysadmin)\b/i.test(roleTitle)) return true;
+  return false;
+}
+
+function ensureSummaryMinimum(summary: string, fallbackFromExperience: Array<{ roleTitle?: string; company?: string; bullets?: string[] }>): string {
+  const raw = trimToText(summary);
+  if (raw && countSentences(raw) >= 2) return raw;
+  const roleIdentity = inferRoleIdentity(fallbackFromExperience as any);
+  const topRole = fallbackFromExperience[0]?.roleTitle ? trimToText(fallbackFromExperience[0]?.roleTitle) : '';
+  const scopeSentence = topRole
+    ? `Built around ${topRole.toLowerCase()} scope, spanning systems, process, and cross-functional execution.`
+    : 'Built around systems, process, and cross-functional execution.';
+  const impactSentence = 'Impact-oriented: focuses on clear ownership, measurable improvements, and reliable follow through.';
+  const intro = `Impact-driven ${roleIdentity}.`;
+  return [intro, scopeSentence, impactSentence].join(' ');
+}
+
+export function buildAuthoritativeResumeDraftFromResumeV2(input: {
+  resumeV2: NormalizedResumeDocument;
+  identity: ResumeTemplateIdentityLike;
+  rankedExperienceIds: string[];
+  suppressedExperienceIds?: string[];
+  professionalIdentity?: string | null;
+  targetNarrative?: string | null;
+}): NormalizedResumeDocument {
+  const baselineExperience = Array.isArray((input.resumeV2 as any)?.experience) ? ((input.resumeV2 as any).experience as any[]) : [];
+  const idToEntry = new Map<string, any>();
+  baselineExperience.forEach((entry, index) => idToEntry.set(`resume_v2_exp_${index}`, entry));
+
+  const suppressed = new Set((input.suppressedExperienceIds ?? []).map((id) => String(id ?? '')));
+  const ranked = (input.rankedExperienceIds ?? []).map((id) => String(id ?? '')).filter(Boolean);
+
+  const selected = (() => {
+    const primary = ranked
+      .map((id) => ({ id, entry: idToEntry.get(id) }))
+      .filter((x) => x.entry)
+      // drop suppressed entries entirely if any non-suppressed exist
+      .filter((x) => !suppressed.has(x.id));
+
+    const weakFiltered = primary.filter((x) => !isWeakFragmentRole({ company: x.entry?.company, roleTitle: x.entry?.roleTitle }));
+    const winners = (weakFiltered.length ? weakFiltered : primary).slice(0, 4);
+
+    // If nothing left, fall back to whatever experience exists (even if weak) so draft can render.
+    if (winners.length === 0) {
+      const fallback = baselineExperience.map((entry, index) => ({ id: `resume_v2_exp_${index}`, entry }));
+      return fallback.slice(0, 2);
+    }
+    return winners;
+  })();
+
+  const selectedExperience = selected.map((x) => {
+    const company = trimToText(x.entry?.company);
+    const roleTitle = trimToText(x.entry?.roleTitle);
+    const dateRange = trimToText(x.entry?.dateRange) || trimToText(x.entry?.dates);
+    const bulletsRaw = Array.isArray(x.entry?.bullets) ? (x.entry.bullets as unknown[]).map(trimToText).filter(Boolean) : [];
+
+    const expanded = bulletsRaw
+      .map((bullet) => expandBullet({ bullet, roleTitle, company }))
+      .filter(Boolean);
+    const ensured =
+      expanded.length >= 3
+        ? expanded
+        : expanded.length === 2
+          ? [...expanded, ensureSentence('Delivered consistent execution by clarifying priorities and maintaining a steady operating rhythm')]
+          : expanded.length === 1
+            ? [
+                expanded[0],
+                ensureSentence(
+                  `${expanded[0].replace(/[.!?]\s*$/g, '').trim()} with clear ownership, prioritization, and measurable follow through`,
+                ),
+                ensureSentence('Delivered consistent execution by clarifying priorities and maintaining a steady operating rhythm'),
+              ]
+            : [];
+
+    return {
+      company,
+      roleTitle,
+      ...(dateRange ? { dateRange } : {}),
+      bullets: ensured,
+    };
+  });
+
+  const totalBullets = selectedExperience.flatMap((e) => e.bullets ?? []).length;
+  const finalExperience = totalBullets >= 3 ? selectedExperience : selectedExperience.map((e, i) => {
+    if (i > 0) return e;
+    const bullets = e.bullets ?? [];
+    const padded = bullets.length >= 3
+      ? bullets
+      : [...bullets, ensureSentence('Delivered measurable improvements through disciplined execution and clear operational ownership')].slice(0, 3);
+    return { ...e, bullets: padded };
+  });
+
+  const positioningSummary = (() => {
+    const pro = trimToText(input.professionalIdentity ?? '');
+    const narrative = trimToText(input.targetNarrative ?? '');
+    if (!pro && !narrative) return '';
+    const composed = `${pro ? `${pro}.` : ''} ${narrative}`.trim();
+    return composed;
+  })();
+
+  const summary = ensureSummaryMinimum(positioningSummary || trimToText((input.resumeV2 as any)?.summary ?? ''), finalExperience as any);
+
+  return {
+    heading: {
+      name: trimToText(input.identity?.name ?? (input.resumeV2 as any)?.heading?.name),
+      contactLine: trimToText(input.identity?.contactLine ?? (input.resumeV2 as any)?.heading?.contactLine),
+      ...(Array.isArray((input.resumeV2 as any)?.heading?.links) && (input.resumeV2 as any).heading.links.length
+        ? { links: (input.resumeV2 as any).heading.links.map((l: unknown) => trimToText(l)).filter(Boolean) }
+        : {}),
+    },
+    summary,
+    ...(Array.isArray((input.resumeV2 as any)?.competencies) ? { competencies: (input.resumeV2 as any).competencies } : {}),
+    experience: finalExperience as any,
+    ...(Array.isArray((input.resumeV2 as any)?.education) ? { education: (input.resumeV2 as any).education } : {}),
+  };
+}
