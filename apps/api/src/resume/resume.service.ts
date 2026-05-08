@@ -2382,63 +2382,65 @@ export class ResumeService {
       );
     })();
 
+    // Positioning authority layer: ALWAYS compute and apply the authoritative assembler when possible.
+    // This prevents raw/legacy ordering (including weak fragment roles) from leaking into preview/persistence,
+    // regardless of whether the generation pipeline is V1 (drafted sections) or V2 (persisted ResumeV2).
     let positioningMetadata: any = null;
-    if (isResumeV2) {
-      try {
-        const jobForPositioning = job
-          ? { title: job.title ?? null, company: job.company ?? null, description: job.rawDescription ?? null }
-          : { title: null, company: null, description: null };
-        const positioning = this.positioningResolver.resolve({
-          job: jobForPositioning,
-          resumeV2: normalizedDocument as any,
-        });
-        positioningMetadata = positioning;
+    try {
+      const jobForPositioning = job
+        ? { title: job.title ?? null, company: job.company ?? null, description: job.rawDescription ?? null }
+        : { title: null, company: null, description: null };
+      const positioning = this.positioningResolver.resolve({
+        job: jobForPositioning,
+        resumeV2: normalizedDocument as any,
+      });
+      positioningMetadata = positioning;
 
-        const baselineIdentity = resolveBaselineIdentity(baseline);
-        const identityRecord =
-          baselineIdentity && typeof baselineIdentity === 'object'
-            ? (baselineIdentity as unknown as { fullName?: unknown; contactLine?: unknown; links?: unknown })
-            : {};
+      const baselineIdentity = resolveBaselineIdentity(baseline);
+      const identityRecord =
+        baselineIdentity && typeof baselineIdentity === 'object'
+          ? (baselineIdentity as unknown as { fullName?: unknown; contactLine?: unknown; links?: unknown })
+          : {};
 
-        // Authoritative assembler: build the final resume ONLY from ranked/selected experiences.
-        // Ignore baseline ResumeV2 ordering completely.
-        // eslint-disable-next-line no-console
-        console.log('[RESUME_POSITIONING]', {
-          baselineId: baseline.id,
-          jobId: job?.id ?? null,
-          professionalIdentity: positioning.professionalIdentity ?? null,
-          prioritizedExperienceIds: positioning.prioritizedExperienceIds ?? [],
-          suppressedExperienceIds: positioning.suppressedExperienceIds ?? [],
-          suppressionReasons: positioning.suppressionReasons ?? {},
-        });
+      // eslint-disable-next-line no-console
+      console.log('[RESUME_POSITIONING]', {
+        baselineId: baseline.id,
+        jobId: job?.id ?? null,
+        pipeline: isResumeV2 ? 'v2' : 'v1',
+        professionalIdentity: positioning.professionalIdentity ?? null,
+        prioritizedExperienceIds: positioning.prioritizedExperienceIds ?? [],
+        suppressedExperienceIds: positioning.suppressedExperienceIds ?? [],
+        suppressionReasons: positioning.suppressionReasons ?? {},
+      });
 
-        normalizedDocument = buildAuthoritativeResumeDraftFromResumeV2({
-          resumeV2: normalizedDocument as any,
-          identity: { name: identityRecord.fullName, contactLine: identityRecord.contactLine, links: identityRecord.links },
-          rankedExperienceIds: positioning.prioritizedExperienceIds ?? [],
-          suppressedExperienceIds: positioning.suppressedExperienceIds ?? [],
-          professionalIdentity: positioning.professionalIdentity ?? null,
-          targetNarrative: positioning.targetNarrative ?? null,
-        }) as any;
+      normalizedDocument = buildAuthoritativeResumeDraftFromResumeV2({
+        resumeV2: normalizedDocument as any,
+        identity: { name: identityRecord.fullName, contactLine: identityRecord.contactLine, links: identityRecord.links },
+        rankedExperienceIds: positioning.prioritizedExperienceIds ?? [],
+        suppressedExperienceIds: positioning.suppressedExperienceIds ?? [],
+        professionalIdentity: positioning.professionalIdentity ?? null,
+        targetNarrative: positioning.targetNarrative ?? null,
+      }) as any;
 
-        // eslint-disable-next-line no-console
-        console.log('[RESUME_ASSEMBLER_OUTPUT]', {
-          baselineId: baseline.id,
-          jobId: job?.id ?? null,
-          renderedExperience: Array.isArray((normalizedDocument as any)?.experience)
-            ? (normalizedDocument as any).experience.slice(0, 5).map((e: any) => ({
-                company: String(e?.company ?? ''),
-                roleTitle: String(e?.roleTitle ?? ''),
-                bulletCount: Array.isArray(e?.bullets) ? e.bullets.length : 0,
-              }))
-            : [],
-          summarySentences: typeof (normalizedDocument as any)?.summary === 'string'
+      // eslint-disable-next-line no-console
+      console.log('[RESUME_ASSEMBLER_OUTPUT]', {
+        baselineId: baseline.id,
+        jobId: job?.id ?? null,
+        pipeline: isResumeV2 ? 'v2' : 'v1',
+        renderedExperience: Array.isArray((normalizedDocument as any)?.experience)
+          ? (normalizedDocument as any).experience.slice(0, 5).map((e: any) => ({
+              company: String(e?.company ?? ''),
+              roleTitle: String(e?.roleTitle ?? ''),
+              bulletCount: Array.isArray(e?.bullets) ? e.bullets.length : 0,
+            }))
+          : [],
+        summarySentences:
+          typeof (normalizedDocument as any)?.summary === 'string'
             ? String((normalizedDocument as any).summary).split(/(?<=[.!?])\s+/).filter(Boolean).length
             : 0,
-        });
-      } catch {
-        positioningMetadata = null;
-      }
+      });
+    } catch {
+      positioningMetadata = null;
     }
 
     if (!isResumeV2) {
@@ -2946,14 +2948,82 @@ export class ResumeService {
           },
         } as ResumeGenerationResponse;
 
-        if (response?.preview?.resume) {
-          response.preview.resume = sanitizeResumePreviewForStudio(response.preview.resume);
-          const resume = response.preview.resume;
-          // eslint-disable-next-line no-console
-          console.log('FINAL_SANITIZED_PREVIEW', {
-            roleTitle: resume.experience?.[0]?.roleTitle,
-            company: resume.experience?.[0]?.company,
+        // IMPORTANT: do not let stale/legacy ordering leak through idempotency reuse.
+        // Even when reusing a completed run, re-compose the final preview/content from the authoritative assembler.
+        try {
+          const jobForPositioning = job
+            ? { title: job.title ?? null, company: job.company ?? null, description: job.rawDescription ?? null }
+            : { title: null, company: null, description: null };
+          const positioning = this.positioningResolver.resolve({
+            job: jobForPositioning,
+            // Use the persisted baseline ResumeV2 model when available; otherwise fall back to the response preview.
+            resumeV2: (persistedResumeV2 as any) ?? (response?.preview?.resume as any) ?? {},
           });
+          const baselineIdentity = resolveBaselineIdentity(baseline);
+          const identityRecord =
+            baselineIdentity && typeof baselineIdentity === 'object'
+              ? (baselineIdentity as unknown as { fullName?: unknown; contactLine?: unknown; links?: unknown })
+              : {};
+          const authoritative = buildAuthoritativeResumeDraftFromResumeV2({
+            resumeV2: (persistedResumeV2 as any) ?? (response?.preview?.resume as any) ?? {},
+            identity: { name: identityRecord.fullName, contactLine: identityRecord.contactLine, links: identityRecord.links },
+            rankedExperienceIds: positioning.prioritizedExperienceIds ?? [],
+            suppressedExperienceIds: positioning.suppressedExperienceIds ?? [],
+            professionalIdentity: positioning.professionalIdentity ?? null,
+            targetNarrative: positioning.targetNarrative ?? null,
+          }) as any;
+          const authoritativePreview = sanitizeResumePreviewForStudio(authoritative);
+          const authoritativeContent = trimIncompleteTrailingFragments(buildResumePlainText(authoritative as any));
+
+          if (!response.preview) (response as any).preview = {};
+          (response.preview as any).resume = authoritativePreview;
+          (response as any).content = authoritativeContent;
+
+          // eslint-disable-next-line no-console
+          console.log('[RESUME_IDEMPOTENCY_RECOMPOSED]', {
+            baselineId: baseline.id,
+            jobId: job?.id ?? null,
+            topRoles: (authoritativePreview as any)?.experience?.slice?.(0, 3)?.map?.((e: any) => ({
+              company: String(e?.company ?? ''),
+              roleTitle: String(e?.roleTitle ?? ''),
+              bulletCount: Array.isArray(e?.bullets) ? e.bullets.length : 0,
+            })) ?? [],
+          });
+
+          // Best-effort: refresh the persisted Studio artifact row so /studio/artifacts renders the same authoritative preview.
+          try {
+            const baselineVersionHash = baselineVersion?.hash ?? baselineVersion?.id ?? null;
+            const studioArtifactsService = this.studioArtifactsService;
+            if (!job) throw new Error('missing_job_context_for_recompose_persist');
+            const jobFingerprint = studioArtifactsService.computeJobFingerprint(job);
+            const inputsHash = studioArtifactsService.computeResumeInputsHash({
+              baselineVersionHash,
+              jobFingerprint,
+              assessmentInputsHash: null,
+            });
+            void studioArtifactsService.recordResumeSuccess({
+              userId,
+              baselineId: baseline.id,
+              jobId: job.id,
+              baselineVersionId: baselineVersion.id,
+              baselineVersionHash,
+              jobFingerprint,
+              inputsHash,
+              analysisId: analysisId ?? null,
+              responseBody: response as any,
+              content: authoritativeContent,
+              metadata: {
+                ...(typeof (reservation.responseBody as any)?.metadata === 'object' ? (reservation.responseBody as any).metadata : {}),
+                recomposedFromAuthoritativeAssembler: true,
+              },
+            });
+          } catch {
+            // ignore best-effort persistence refresh failures
+          }
+        } catch {
+          if (response?.preview?.resume) {
+            response.preview.resume = sanitizeResumePreviewForStudio(response.preview.resume);
+          }
         }
 
         return response;
