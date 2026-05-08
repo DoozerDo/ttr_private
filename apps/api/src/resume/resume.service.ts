@@ -108,6 +108,7 @@ import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTeleme
 import { sanitizeResumePreviewForStudio } from './resumePreviewSanitizer';
 import { TargetRolePositioningResolver } from '../positioning/target-role-positioning.resolver';
 import { buildAuthoritativeResumeDraftFromResumeV2 } from './resumeTemplateAssembler';
+import { validateRealResumeDocument } from '../artifacts/realDocumentValidator';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
 import { evaluateBaselineTemplateReadiness } from '../baseline/baselineTemplateReadiness';
 import { interpretEvidenceFromResumeText } from '../evidence/evidence-interpreter';
@@ -2531,6 +2532,14 @@ export class ResumeService {
     } catch {
       // ignore logging failures
     }
+    const evidenceExists = Array.isArray((normalizedDocument as any)?.experience) && (normalizedDocument as any).experience.length > 0;
+    const realDoc = validateRealResumeDocument({
+      resume: normalizedDocument as any,
+      jobTitle: job?.title ?? null,
+      jobDescription: job?.rawDescription ?? null,
+      evidenceExists,
+    });
+
     const firstPassQualityGate =
       isResumeV2 && v2QualityGate ? v2QualityGate : validateResumeArtifactQuality(normalizedDocument);
     let qualityGate = firstPassQualityGate;
@@ -2541,6 +2550,15 @@ export class ResumeService {
       const repairedGate = validateResumeArtifactQuality(repaired);
       normalizedDocument = repaired;
       qualityGate = repairedGate;
+    }
+
+    // Real-document contract enforcement: never mark exportable unless it passes.
+    // Do not block rendering; preserve preview but classify as unusable.
+    if (realDoc.classification !== 'usable') {
+      qualityGate = {
+        status: 'needs_refinement',
+        reasons: Array.from(new Set([...(qualityGate?.reasons ?? []), ...realDoc.reasonCodes, 'real_document_contract_failed'])),
+      } as any;
     }
     const sanitizedPreviewDocument = sanitizeResumePreviewForStudio(normalizedDocument);
     let experienceDiagnostics = this.buildExperiencePipelineDiagnostics({

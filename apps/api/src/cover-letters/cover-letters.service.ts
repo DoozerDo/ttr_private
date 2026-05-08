@@ -126,6 +126,7 @@ import { assembleCoverLetterFromStructuredBaseline } from './coverLetterTemplate
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
 import { resolveSyntheticCandidateName } from './candidate-name.util';
 import { TargetRolePositioningResolver } from '../positioning/target-role-positioning.resolver';
+import { validateRealCoverLetterDocument } from '../artifacts/realDocumentValidator';
 
 type CoverLetterDraft = {
   baseline: Baseline;
@@ -1638,6 +1639,20 @@ export class CoverLettersService {
           content: repairedParagraphs.join('\n\n'),
         };
       }
+    }
+
+    // Real-document contract enforcement (cover letter): preserve rendering but never mark exportable unless it passes.
+    const realDoc = validateRealCoverLetterDocument({
+      paragraphs: generation.paragraphs ?? [],
+      jobTitle: jobContext.title ?? null,
+      companyName: jobContext.company ?? null,
+      requiredEvidenceSnippets: evidenceSnippets,
+    });
+    if (realDoc.classification !== 'usable') {
+      artifactQuality = {
+        status: 'needs_refinement',
+        reasons: Array.from(new Set([...(artifactQuality?.reasons ?? []), ...realDoc.reasonCodes, 'real_document_contract_failed'])),
+      } as any;
     }
 
     if (

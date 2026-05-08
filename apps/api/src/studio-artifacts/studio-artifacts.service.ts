@@ -690,7 +690,7 @@ export class StudioArtifactsService {
       qualityStatus === 'pass' && previewModel
         ? 'generated_usable'
         : previewModel
-          ? 'generated_needs_correction'
+          ? (correctionReasons.some((r) => String(r.code ?? '').includes('real_document_contract_failed')) ? 'generated_unusable' : 'generated_needs_correction')
           : 'generated_unusable';
 
     return {
