@@ -3338,8 +3338,8 @@ export class ResumeService {
     }
     (response as any).content = persistedContent;
 
-      if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
-        const extractRoles = (doc: any) =>
+    if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
+      const extractRoles = (doc: any) =>
         Array.isArray(doc?.experience)
           ? doc.experience.map((e: any) => ({
               company: String(e?.company ?? ''),
@@ -3357,12 +3357,33 @@ export class ResumeService {
         if (/\bcontractor\b/i.test(header) && /\b(linux|infrastructure|sysadmin)\b/i.test(header)) return false;
         return (r.bulletCount ?? 0) >= 2;
       }).length;
+      const renderedRoles = extractRoles((response as any)?.preview?.resume);
+      const renderedRoleOrder = renderedRoles.map((r: any) => `${r.company} | ${r.roleTitle}`);
+      const rawResumeV2RoleOrder = Array.isArray((persistedResumeV2 as any)?.experience)
+        ? (persistedResumeV2 as any).experience.map((e: any) => `${String(e?.company ?? '')} | ${String(e?.roleTitle ?? '')}`)
+        : Array.isArray((normalizedDocument as any)?.experience)
+          ? ((normalizedDocument as any).experience as any[]).map((e: any) => `${String(e?.company ?? '')} | ${String(e?.roleTitle ?? '')}`)
+          : [];
+      const planRoleOrder = positioningMetadata?.plan?.emphasizeRoleIds ?? [];
+      const leakedSuppressedRoles = (() => {
+        const suppressedIds = new Set([...(positioningMetadata?.suppressedExperienceIds ?? []), ...(positioningMetadata?.plan?.suppressRoleIds ?? [])]);
+        if (suppressedIds.size === 0) return [];
+        const idToHeader = new Map<string, string>();
+        rawResumeV2RoleOrder.forEach((header: string, index: number) => idToHeader.set(`resume_v2_exp_${index}`, header));
+        return [...suppressedIds].map((id) => idToHeader.get(id) ?? id).filter((h) => renderedRoleOrder.includes(h));
+      })();
+
       (response as any).internal = {
         ...((response as any).internal ?? {}),
         diagnostics: {
           parsedJsonExperienceLength: parsedJsonExpLen,
           resumeV2ExperienceLength: resumeV2ExpLen,
           meaningfulResumeV2ExperienceCount: meaningfulPersistedRoleCount,
+          positioningPlanRoleOrder: planRoleOrder,
+          renderedRoleOrder,
+          leakedSuppressedRoles,
+          rawResumeV2RoleOrder,
+          authoritativeSummarySource: positioningMetadata?.plan?.positioningThesis ? 'positioning_plan_thesis' : 'resumeV2_or_positioning_fallback',
           renderedRoleCount: Array.isArray((response as any)?.preview?.resume?.experience)
             ? (response as any).preview.resume.experience.length
             : 0,
@@ -3380,7 +3401,7 @@ export class ResumeService {
                 summaryStrategy: positioningMetadata.plan.summaryStrategy,
               }
             : null,
-          renderedRoles: extractRoles((response as any)?.preview?.resume),
+          renderedRoles,
           persistedRoles,
           responseRoles: extractRoles((response as any)?.preview?.resume),
         },

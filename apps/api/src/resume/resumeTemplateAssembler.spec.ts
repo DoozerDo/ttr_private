@@ -52,5 +52,50 @@ describe('buildAuthoritativeResumeDraftFromResumeV2', () => {
     const totalBullets = (draft.experience ?? []).flatMap((e: any) => e?.bullets ?? []).length;
     expect(totalBullets).toBeGreaterThanOrEqual(3);
   });
-});
 
+  it('renders exclusively from positioningPlan.emphasizeRoleIds (exact order) and never renders suppressed roles', () => {
+    const resumeV2 = {
+      heading: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
+      summary: 'Old summary.',
+      experience: [
+        {
+          company: 'Vue 3), deck builder frontend',
+          roleTitle: 'Contractor',
+          dateRange: '2022 - 2023',
+          bullets: ['Built UI components.'],
+        },
+        {
+          company: 'Acme Corp',
+          roleTitle: 'Customer Operations Manager',
+          dateRange: '2020 - 2022',
+          bullets: ['Owned escalation workflow and incident triage.', 'Improved SLA adherence through routing and playbooks.'],
+        },
+        {
+          company: 'Beta Systems',
+          roleTitle: 'Support Operations Lead',
+          dateRange: '2022 - 2024',
+          bullets: ['Led incident triage and queue management.', 'Built operating reviews and playbooks for stakeholders.'],
+        },
+      ],
+    } as any;
+
+    const draft = buildAuthoritativeResumeDraftFromResumeV2({
+      resumeV2,
+      identity: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
+      rankedExperienceIds: ['resume_v2_exp_0', 'resume_v2_exp_1', 'resume_v2_exp_2'],
+      suppressedExperienceIds: [],
+      positioningPlan: {
+        emphasizeRoleIds: ['resume_v2_exp_2', 'resume_v2_exp_1'],
+        suppressRoleIds: ['resume_v2_exp_0'],
+        positioningThesis: 'Experienced support operations leader focused on escalation management and operational process improvement.',
+        summaryStrategy: 'operations_first',
+        topEvidenceThemes: ['escalation management', 'operational process improvement'],
+      },
+    } as any);
+
+    const companies = (draft.experience ?? []).map((e: any) => String(e?.company ?? ''));
+    expect(companies).toEqual(['Beta Systems', 'Acme Corp']);
+    expect(JSON.stringify(draft.experience ?? [])).not.toContain('Vue 3), deck builder frontend');
+    expect(String(draft.summary ?? '')).toMatch(/support operations|operations leader|escalation/i);
+  });
+});

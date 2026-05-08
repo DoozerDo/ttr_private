@@ -222,6 +222,13 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
   identity: ResumeTemplateIdentityLike;
   rankedExperienceIds: string[];
   suppressedExperienceIds?: string[];
+  positioningPlan?: {
+    emphasizeRoleIds?: string[];
+    suppressRoleIds?: string[];
+    positioningThesis?: string;
+    summaryStrategy?: string;
+    topEvidenceThemes?: string[];
+  } | null;
   professionalIdentity?: string | null;
   targetNarrative?: string | null;
 }): NormalizedResumeDocument {
@@ -230,27 +237,39 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
   baselineExperience.forEach((entry, index) => idToEntry.set(`resume_v2_exp_${index}`, entry));
 
   const suppressed = new Set((input.suppressedExperienceIds ?? []).map((id) => String(id ?? '')));
+  const planSuppressed = new Set((input.positioningPlan?.suppressRoleIds ?? []).map((id) => String(id ?? '')));
   const ranked = (input.rankedExperienceIds ?? []).map((id) => String(id ?? '')).filter(Boolean);
+  const planEmphasize = (input.positioningPlan?.emphasizeRoleIds ?? []).map((id) => String(id ?? '')).filter(Boolean);
+  const strictPlanMode = planEmphasize.length > 0;
 
   const selected = (() => {
+    if (strictPlanMode) {
+      // Single render authority: when a positioning plan provides emphasizeRoleIds,
+      // the preview must render ONLY those roles, in that exact order.
+      const planned = planEmphasize
+        .map((id) => ({ id, entry: idToEntry.get(id) }))
+        .filter((x) => x.entry)
+        .filter((x) => !suppressed.has(x.id))
+        .filter((x) => !planSuppressed.has(x.id));
+
+      const weakInPlan = planned.filter((x) =>
+        isWeakFragmentRole({ company: x.entry?.company, roleTitle: x.entry?.roleTitle }),
+      );
+      const hasNonWeak = planned.some((x) => !isWeakFragmentRole({ company: x.entry?.company, roleTitle: x.entry?.roleTitle }));
+      if (hasNonWeak && weakInPlan.length > 0) {
+        // Drop weak fragment roles entirely when any stronger emphasized roles exist.
+        return planned.filter((x) => !isWeakFragmentRole({ company: x.entry?.company, roleTitle: x.entry?.roleTitle }));
+      }
+      return planned;
+    }
+
     const primary = ranked
       .map((id) => ({ id, entry: idToEntry.get(id) }))
       .filter((x) => x.entry)
-      // drop suppressed entries entirely if any non-suppressed exist
       .filter((x) => !suppressed.has(x.id));
 
     const weakFiltered = primary.filter((x) => !isWeakFragmentRole({ company: x.entry?.company, roleTitle: x.entry?.roleTitle }));
-    const baseWinners = (weakFiltered.length ? weakFiltered : primary).slice(0, 4);
-    const winners = [...baseWinners];
-
-    // Contract guardrail: ensure at least 2 roles render when any additional baseline experience exists.
-    // If we only have one strong role, include the next best non-suppressed role (even if weaker) after it.
-    if (winners.length === 1) {
-      const fallback = primary.find((x) => x.id !== winners[0].id);
-      if (fallback) winners.push(fallback);
-    }
-
-    // If nothing left, fall back to whatever experience exists (even if weak) so draft can render.
+    const winners = (weakFiltered.length ? weakFiltered : primary).slice(0, 4);
     if (winners.length === 0) {
       const fallback = baselineExperience.map((entry, index) => ({ id: `resume_v2_exp_${index}`, entry }));
       return fallback.slice(0, 2);
@@ -303,9 +322,10 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
   const positioningSummary = (() => {
     const pro = trimToText(input.professionalIdentity ?? '');
     const narrative = trimToText(input.targetNarrative ?? '');
+    const thesis = trimToText(input.positioningPlan?.positioningThesis ?? '');
+    if (thesis) return thesis;
     if (!pro && !narrative) return '';
-    const composed = `${pro ? `${pro}.` : ''} ${narrative}`.trim();
-    return composed;
+    return `${pro ? `${pro}.` : ''} ${narrative}`.trim();
   })();
 
   const summary = ensureSummaryMinimum(positioningSummary || trimToText((input.resumeV2 as any)?.summary ?? ''), finalExperience as any);

@@ -156,7 +156,16 @@ export class PositioningPlanService {
     };
 
     const scored = experience.map((entry, index) => ({ id: `resume_v2_exp_${index}`, entry, score: scoreRole(entry) }));
-    const sorted = [...scored].sort((a, b) => b.score - a.score);
+    const allSameCompany =
+      scored.length > 1 &&
+      scored.every(
+        (s) =>
+          trimToText(s.entry?.company).toLowerCase() === trimToText(scored[0]?.entry?.company).toLowerCase(),
+      );
+    const sorted = [...scored].sort((a, b) => {
+      if (allSameCompany) return a.id.localeCompare(b.id);
+      return b.score - a.score;
+    });
     const emphasize = sorted.filter((s) => s.score > -50).slice(0, 4).map((s) => s.id);
     const suppress = scored
       .filter((s) => {
@@ -211,4 +220,3 @@ export class PositioningPlanService {
     };
   }
 }
-

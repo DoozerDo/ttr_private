@@ -987,6 +987,13 @@ describe('ResumeService contract', () => {
       expect(result.ok).toBe(true);
       expect(result.exportReady).toBe(true);
       expect(result.qualityGate?.status).toBe('pass');
+
+      const diagnostics = (result as any)?.internal?.diagnostics ?? {};
+      // Plan must be the render authority: rendered role order should match the plan order when provided.
+      expect(Array.isArray(diagnostics.renderedRoleOrder)).toBe(true);
+      expect(Array.isArray(diagnostics.rawResumeV2RoleOrder)).toBe(true);
+      expect(Array.isArray(diagnostics.leakedSuppressedRoles)).toBe(true);
+      expect((diagnostics.leakedSuppressedRoles ?? []).length).toBe(0);
     } finally {
       baseline.sections = originalSections;
       assessment.overallScore = originalScore;

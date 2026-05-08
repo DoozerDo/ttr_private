@@ -40,6 +40,43 @@ describe('resume generation v2', () => {
     expect((preview.experience ?? []).flatMap((e: any) => e?.bullets ?? []).some((b: any) => String(b ?? '').trim().length < 12)).toBe(false);
   });
 
+  it('enforces PositioningPlan role order as the sole render authority when job indicates support operations', () => {
+    const baselineSections = [
+      {
+        sectionType: 'SUMMARY',
+        content: 'Support leader with verified impact across incident response and operations.',
+      },
+      {
+        sectionType: 'EXPERIENCE',
+        content: [
+          'Vue 3), deck builder frontend | Contractor | 2022 - 2023',
+          '- Built UI components.',
+          '',
+          'Acme | Director of Support | 2020 - 2024',
+          '- Led support operations and improved incident response quality through repeatable playbooks.',
+          '- Partnered cross-functionally to reduce escalation friction and improve stakeholder updates.',
+          '',
+          'Beta Systems | Support Operations Lead | 2018 - 2020',
+          '- Owned escalation workflow and SLA governance across teams.',
+          '- Built operating reviews and queue triage playbooks.',
+        ].join('\n'),
+      },
+    ] as any[];
+
+    const result = buildDeterministicResumeV2FromBaseline({
+      baselineSections: baselineSections as any,
+      identity: { name: 'Test User', contactLine: 'test@example.com' },
+      job: { title: 'Support Operations Manager', company: 'ExampleCo', description: 'Own escalations, SLA governance, and playbooks.' },
+    });
+
+    const preview = sanitizeResumePreviewForStudio(result.normalized);
+    const companies = (preview.experience ?? []).map((e) => String((e as any)?.company ?? ''));
+    // Vue fragment must not render when stronger roles exist.
+    expect(companies.join('|')).not.toContain('Vue 3), deck builder frontend');
+    // Must lead with an ops/support role (Acme or Beta) rather than the fragment.
+    expect(companies[0]).toMatch(/Acme|Beta Systems/);
+  });
+
   it('includes detailed normalized model validation failures when validation rejects the model', () => {
     const baselineSections = [
       {

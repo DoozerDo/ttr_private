@@ -9,6 +9,7 @@ import {
   isAllowedStructuredTemplateExperienceHeader,
   type ResumeTemplateIdentityLike,
 } from './resumeTemplateAssembler';
+import { PositioningPlanService } from '../positioning/positioning-plan.service';
 import { formatResumeV2InvalidMessage, validateNormalizedResumeDocument } from './resume-normalization';
 import {
   validateResumeArtifactQualityStrict,
@@ -693,10 +694,8 @@ export function buildDeterministicResumeV2FromBaseline(input: {
     throw new Error('V2 failed to produce non-empty summary');
   }
 
-  // Authoritative assembly: ignore any surviving ResumeV2 ordering quirks and re-compose from ranked entries only.
-  // In this deterministic path we don't have a full positioning resolver, but we can still suppress obvious fragments.
+  // Authoritative assembly: use PositioningPlan as the single source of truth for render ordering/suppression.
   const experience = Array.isArray((repairedStructure as any).experience) ? (repairedStructure as any).experience : [];
-  const rankedExperienceIds = experience.map((_: unknown, index: number) => `resume_v2_exp_${index}`);
   const suppressedExperienceIds = experience
     .map((entry: any, index: number) => {
       const company = trimToText(entry?.company).toLowerCase();
@@ -709,11 +708,18 @@ export function buildDeterministicResumeV2FromBaseline(input: {
     })
     .filter((id): id is string => Boolean(id));
 
+  const planService = new PositioningPlanService();
+  const plan = planService.buildPlan({
+    job: { title: input.job?.title ?? null, company: input.job?.company ?? null, description: input.job?.description ?? null },
+    resumeV2: repairedStructure as any,
+  });
+
   const authoritative = buildAuthoritativeResumeDraftFromResumeV2({
     resumeV2: repairedStructure as any,
     identity: input.identity,
-    rankedExperienceIds,
-    suppressedExperienceIds,
+    rankedExperienceIds: plan.emphasizeRoleIds ?? [],
+    suppressedExperienceIds: Array.from(new Set([...(suppressedExperienceIds ?? []), ...(plan.suppressRoleIds ?? [])])),
+    positioningPlan: plan,
     professionalIdentity: input.job?.title ? `${trimToText(input.job.title)}` : null,
     targetNarrative: input.job?.company ? `Targeting ${trimToText(input.job.company)}.` : null,
   });
