@@ -90,10 +90,37 @@ export class TargetRolePositioningResolver {
       return { id, index, base, tokenOverlap, supportAffinity, penalty, weakBulletsPenalty, company, roleTitle };
     });
 
-    const prioritized = [...scored].sort((a, b) => b.base - a.base).map((s) => s.id);
+    const allTokenOverlapZero = scored.length > 0 && scored.every((s) => (s.tokenOverlap ?? 0) === 0);
+    const allSameCompany =
+      scored.length > 1 &&
+      scored.every((s) => trimToText(s.company).toLowerCase() === trimToText(scored[0]?.company).toLowerCase());
+
+    // If we have no job context tokens and we're not targeting a support-ops role, preserve the
+    // original baseline order to avoid arbitrary reshuffles (important for chronological roles).
+    const preserveBaselineOrder = (jobTokens.size === 0 || allTokenOverlapZero || allSameCompany) && !supportOpsTarget;
+
+    const prioritizedRaw = [...scored].sort((a, b) => {
+      if (preserveBaselineOrder) return a.index - b.index;
+      if (b.base !== a.base) return b.base - a.base;
+      return a.index - b.index;
+    });
     const suppressed = scored
       .filter((s) => (suppressionReasons[s.id]?.length ?? 0) > 0 && s.base < 3)
       .map((s) => s.id);
+
+    // Contract enforcement: weak fragment roles must never lead when non-weak evidence exists.
+    // We keep them eligible (so the document can still render) but push them behind any
+    // experience entries that are not flagged as weak by the resolver.
+    const isWeakForOrdering = (id: string) => {
+      const reasons = suppressionReasons[id] ?? [];
+      return (
+        reasons.includes('technical_fragment_deprioritized_for_support_ops') ||
+        reasons.includes('contractor_infra_deprioritized_for_support_ops')
+      );
+    };
+    const nonWeak = prioritizedRaw.filter((s) => !isWeakForOrdering(s.id)).map((s) => s.id);
+    const weak = prioritizedRaw.filter((s) => isWeakForOrdering(s.id)).map((s) => s.id);
+    const prioritized = nonWeak.length > 0 ? [...nonWeak, ...weak] : prioritizedRaw.map((s) => s.id);
 
     const professionalIdentity = supportOpsTarget
       ? 'Support Operations / Customer Operations leader'
@@ -123,4 +150,3 @@ export class TargetRolePositioningResolver {
     };
   }
 }
-

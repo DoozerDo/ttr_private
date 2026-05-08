@@ -720,6 +720,18 @@ export class CoverLettersService {
           auditId: draft.complianceResult.audit.id,
           baselineVersionHash: draft.complianceResult.audit.baselineVersionHash,
           complianceFlags: draft.complianceResult.complianceFlags,
+          ...(process.env.DOCGEN_DIAGNOSTICS === 'true'
+            ? {
+                diagnostics: {
+                  selectedEvidenceIds: Array.isArray(draft.generation.debugTrace?.selectedEvidence)
+                    ? (draft.generation.debugTrace.selectedEvidence as unknown[]).map((x) => String(x ?? '')).slice(0, 24)
+                    : [],
+                  unusedEvidenceIds: Array.isArray(draft.generation.debugTrace?.unusedEvidence)
+                    ? (draft.generation.debugTrace.unusedEvidence as unknown[]).map((x) => String(x ?? '')).slice(0, 24)
+                    : [],
+                },
+              }
+            : {}),
           ...(draft.interpretedEvidenceIdToItem
             ? {
                 interpretedEvidenceSummary: draft.interpretedEvidenceSummary,
@@ -3101,19 +3113,24 @@ export class CoverLettersService {
 
     const blocks: AllowedBaselineBlock[] = [];
     const summary = typeof structured.summary === 'string' ? structured.summary.trim() : '';
+    const summarySentenceCount = summary ? summary.split(/(?<=[.!?])\s+/).filter(Boolean).length : 0;
     if (summary) {
       blocks.push({
         id: 'resume_v2_summary',
         title: 'Summary',
         content: summary,
-        includePolicy: BaselineIncludePolicy.ALWAYS,
-        order: 0,
+        // One-sentence summaries are allowed but should not dominate evidence selection.
+        includePolicy: summarySentenceCount >= 2 ? BaselineIncludePolicy.ALWAYS : BaselineIncludePolicy.OPTIONAL,
+        order: summarySentenceCount >= 2 ? 0 : 900000,
         sectionType: BaselineSectionType.SUMMARY,
       });
     }
 
     let order = 1000;
+    const nonSuppressedCount = ranked.filter((r) => !r.suppressed).length;
+    const shouldDropSuppressed = nonSuppressedCount >= 2;
     for (const rankedEntry of ranked.slice(0, 12)) {
+      if (shouldDropSuppressed && rankedEntry.suppressed) continue;
       const entry = rankedEntry.entry ?? {};
       const company = String(entry.company ?? '').trim();
       const roleTitle = String(entry.roleTitle ?? '').trim();

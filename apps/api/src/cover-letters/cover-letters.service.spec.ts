@@ -277,6 +277,64 @@ describe('CoverLettersService contract', () => {
     }
   });
 
+  it('selects strong ResumeV2 evidence blocks for cover letter (drops weak/suppressed fragments when strong roles exist)', async () => {
+    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
+    const { service } = buildService();
+
+    const generatorSpy = jest.spyOn((service as any).generator, 'generate');
+    const original = baseline.sections?.[0]?.content ?? '';
+
+    baseline.sections = [
+      {
+        title: 'Experience',
+        sectionType: 'EXPERIENCE',
+        content: [
+          'Vue 3 deck builder frontend | Contractor | 2022 - 2023',
+          '- Built a deck builder frontend.',
+          '',
+          'Acme Corp | Support Operations Lead | 2023 - 2025',
+          '- Owned escalation workflow and incident triage; improved SLA adherence through clearer routing and playbooks.',
+          '- Partnered cross-functionally to reduce repeat escalations via RCA and weekly operating reviews.',
+          '',
+          'Beta Systems | Customer Operations Manager | 2020 - 2023',
+          '- Built reporting and queue health dashboards; improved response time by aligning staffing and prioritization.',
+          '- Implemented process improvements across support and product to reduce escalations and increase reliability.',
+          '',
+          'Additional verified baseline context '.repeat(60),
+        ].join('\n'),
+      } as any,
+      {
+        title: 'Summary',
+        sectionType: 'SUMMARY',
+        content: 'Support operations leader.',
+      } as any,
+    ];
+
+    try {
+      await service.generateCoverLetter('user-1', request as any).catch(() => null);
+      expect(generatorSpy).toHaveBeenCalled();
+      const input = generatorSpy.mock.calls[0]?.[0] as any;
+      const allowedBlocks = (input?.allowedBaselineBlocks ?? []) as any[];
+      const allowedText = allowedBlocks.map((b) => String(b?.content ?? '')).join('\n');
+      expect(allowedText).not.toMatch(/vue|deck builder/i);
+      // The weak fragment role should not be present as an experience block when strong roles exist.
+      const experienceBlocks = allowedBlocks.filter((b) => String(b?.sectionType ?? '').toUpperCase() === 'EXPERIENCE');
+      expect(experienceBlocks.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      baseline.sections = [
+        {
+          title: 'Experience',
+          sectionType: 'EXPERIENCE',
+          content: original,
+        } as any,
+      ];
+      generatorSpy.mockRestore();
+      if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+      else delete process.env.DOCGEN_DIAGNOSTICS;
+    }
+  });
+
   it('does not invent metrics or inflated scope when generating a cover letter from partial interpreted evidence (tools-only, no explicit metrics)', async () => {
     const { service } = buildService();
     const original = baseline.sections?.[0]?.content ?? '';

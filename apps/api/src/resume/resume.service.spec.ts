@@ -511,7 +511,9 @@ describe('ResumeService contract', () => {
     ];
 
     const result = await service.generateResume('user-1', baseRequest);
-    expect(result.exportReady).toBe(true);
+    // Only one experience entry exists in this fixture; it must be generated_unusable under the real document contract.
+    expect(result.exportReady).toBe(false);
+    expect(result.qualityGate?.reasons ?? []).toEqual(expect.arrayContaining(['baseline_evidence_too_weak']));
     expect(result.internal?.generationMode).toBe('structured_baseline_template');
     expect(result.internal?.templateVersion).toBe('structured-baseline-v1');
 
@@ -575,6 +577,8 @@ describe('ResumeService contract', () => {
 
     const result = await service.generateResume('user-1', baseRequest);
     expect(result.internal?.generationMode).toBe('structured_baseline_template');
+    // This fixture has 2+ meaningful roles (AMS + Biblioso); it should pass the real document contract.
+    expect(result.exportReady).toBe(true);
     expect(result.qualityGate?.status).toBe('pass');
     // Healthy structured baseline path should not inject interpreted evidence audit details.
     expect((result as any).evidenceDetailsMap).toBeUndefined();
@@ -719,6 +723,69 @@ describe('ResumeService contract', () => {
     baseline.sections = [{ ...baseSection, content: original }];
     baseline.parsedRecords = originalParsed;
     assessment.overallScore = originalScore;
+  });
+
+  it('real document contract regression: fixture has only 1 meaningful role -> generated_unusable baseline_evidence_too_weak', async () => {
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
+    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
+    const { service } = buildService();
+
+    const originalSections = baseline.sections;
+    try {
+      baseline.sections = [
+        {
+          ...baseSection,
+          id: 'summary-1',
+          sectionType: BaselineSectionType.SUMMARY as any,
+          title: 'Summary',
+          order: 0,
+          content: 'Support operations leader with experience building escalation and process rhythms.',
+        } as any,
+        {
+          ...baseSection,
+          id: 'experience-1',
+          sectionType: BaselineSectionType.EXPERIENCE as any,
+          title: 'Experience',
+          order: 1,
+          content: [
+            'Vue 3 deck builder frontend',
+            'Contractor',
+            '2022 - 2023',
+            '- Built a deck builder frontend.',
+            '',
+            'Acme Corp',
+            'Support Operations Lead',
+            '2023 - 2025',
+            '- Owned escalation workflow and incident triage; improved SLA adherence through clearer routing and playbooks.',
+            '- Partnered cross-functionally to reduce repeat escalations via RCA and weekly operating reviews.',
+            '',
+            'Beta Systems',
+            'Customer Operations Manager',
+            '2020 - 2023',
+            '- Built reporting and queue health dashboards; improved response time by aligning staffing and prioritization.',
+            '- Implemented process improvements across support and product to reduce escalations and increase reliability.',
+            '',
+            'Additional verified baseline context '.repeat(60),
+          ].join('\n'),
+        } as any,
+      ] as any;
+
+      const result = await service.generateResume('user-1', { ...baseRequest, forceRegenerate: true } as any);
+      expect(result.status).toBe('success');
+
+      // With only one strong experience entry in the fixture, the generator must fail honestly.
+      expect((result as any).exportReady).toBe(false);
+      expect((result as any).qualityGate?.status).toBe('needs_refinement');
+      expect((result as any).qualityGate?.reasons ?? []).toEqual(expect.arrayContaining(['baseline_evidence_too_weak']));
+    } finally {
+      baseline.sections = originalSections;
+      if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+      if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+      else delete process.env.DOCGEN_DIAGNOSTICS;
+    }
   });
 
   it('does not unlock generation when only weak/unusable interpreted evidence exists (malformed baseline)', async () => {
@@ -875,6 +942,57 @@ describe('ResumeService contract', () => {
     baseline.sections = [{ ...baseSection, content: original }];
     baseline.parsedRecords = originalParsed;
     assessment.overallScore = originalScore;
+  });
+
+  it('passes real document contract when baseline has 2+ meaningful roles (2 roles, 4+ bullets, 2+ sentence summary)', async () => {
+    const { service } = buildService();
+    const originalSections = baseline.sections;
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 90;
+    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
+    try {
+      const padding = 'Additional verified baseline context about customer operations leadership. '.repeat(80);
+      baseline.sections = [
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          order: 0,
+          content:
+            'Customer operations leader with experience managing escalations and building cross-functional execution rhythms. ' +
+            'Focused on measurable improvements and reliable operating cadence. ' +
+            padding,
+        } as any,
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          order: 1,
+          content: [
+            'Biblioso | Director, Customer Experience | 2024 - Present',
+            '- Led a cross-functional CX program spanning support and product.',
+            '- Improved escalation handling through clear triage, routing, and operating reviews.',
+            '',
+            'Acme Corp | Customer Operations Manager | 2021 - 2024',
+            '- Built queue health dashboards and reporting to improve response time.',
+            '- Implemented process improvements to reduce repeat escalations and strengthen RCA follow through.',
+            '',
+            padding,
+          ].join('\n'),
+        } as any,
+      ] as any;
+
+      const result = await service.generateResume('user-1', baseRequest);
+      expect(result.ok).toBe(true);
+      expect(result.exportReady).toBe(true);
+      expect(result.qualityGate?.status).toBe('pass');
+    } finally {
+      baseline.sections = originalSections;
+      assessment.overallScore = originalScore;
+      if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+      else delete process.env.DOCGEN_DIAGNOSTICS;
+    }
   });
 
   it('resolves analysisId when omitted (Studio generate) and still persists the resume artifact', async () => {
@@ -1128,7 +1246,10 @@ describe('ResumeService contract', () => {
     ];
 
     const result = await service.generateResume('user-1', baseRequest);
-    expect(result.qualityGate?.status).toBe('pass');
+    // Only one meaningful role exists in this fixture; it must fail the real document contract honestly.
+    expect(result.exportReady).toBe(false);
+    expect(result.qualityGate?.status).toBe('needs_refinement');
+    expect(result.qualityGate?.reasons ?? []).toEqual(expect.arrayContaining(['baseline_evidence_too_weak']));
 
     const reasons = (result.qualityGate?.reasons ?? []) as string[];
     expect(reasons).not.toContain('incomplete_trailing_fragment');
@@ -1483,7 +1604,8 @@ describe('ResumeService contract', () => {
     await expect(service.generateResume('user-1', baseRequest)).resolves.toMatchObject({
       ok: true,
       status: 'success',
-      exportReady: true,
+      // This fixture contains only one role with one bullet; it must fail the real document contract.
+      exportReady: false,
     });
 
     expect(applicationsService.upsertPreparedFromResumeGeneration).not.toHaveBeenCalled();

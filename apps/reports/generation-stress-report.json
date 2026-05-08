@@ -7,63 +7,46 @@
   },
   {
     "testCase": "2. Baseline with messy bullet formatting",
-    "passed": false,
-    "failures": [
-      "cover letter generation failed: Cover letter generation failed validation: insufficient baseline evidence."
-    ],
+    "passed": true,
+    "failures": [],
     "severity": "low"
   },
   {
     "testCase": "3. Baseline with multiple roles at same company",
     "passed": false,
     "failures": [
-      "cover letter generation failed: Cover letter generation failed validation: insufficient baseline evidence."
+      "formatting issues: cover letter word count must be 250-400 words."
     ],
     "severity": "low"
   },
   {
     "testCase": "4. Baseline missing explicit SaaS keywords but implying them",
-    "passed": false,
-    "failures": [
-      "cover letter generation failed: Cover letter generation failed validation: insufficient baseline evidence.",
-      "borderline score case exposed quality issues."
-    ],
-    "severity": "medium"
+    "passed": true,
+    "failures": [],
+    "severity": "low"
   },
   {
     "testCase": "5. Job description with heavy buzzwords and repeated phrases",
-    "passed": false,
-    "failures": [
-      "cover letter generation failed: Cover letter generation failed validation: insufficient baseline evidence.",
-      "high score case failed output quality checks."
-    ],
-    "severity": "medium"
+    "passed": true,
+    "failures": [],
+    "severity": "low"
   },
   {
     "testCase": "6. Job description with ambiguous requirements",
-    "passed": false,
-    "failures": [
-      "cover letter generation failed: Cover letter generation failed validation: insufficient baseline evidence.",
-      "borderline score case exposed quality issues."
-    ],
-    "severity": "medium"
+    "passed": true,
+    "failures": [],
+    "severity": "low"
   },
   {
     "testCase": "7. High score (>=92) case",
-    "passed": false,
-    "failures": [
-      "cover letter generation failed: Cover letter generation failed validation: insufficient baseline evidence.",
-      "high score case failed output quality checks."
-    ],
-    "severity": "medium"
+    "passed": true,
+    "failures": [],
+    "severity": "low"
   },
   {
     "testCase": "8. Borderline score (85-89) case",
-    "passed": false,
-    "failures": [
-      "cover letter generation failed: Cover letter generation failed validation: insufficient baseline evidence.",
-      "borderline score case exposed quality issues."
-    ],
-    "severity": "medium"
+    "passed": true,
+    "failures": [],
+    "severity": "low"
   }
 ]

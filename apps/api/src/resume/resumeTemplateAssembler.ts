@@ -197,7 +197,8 @@ function isWeakFragmentRole(entry: { company?: string; roleTitle?: string }): bo
   const company = trimToText(entry.company).toLowerCase();
   const roleTitle = trimToText(entry.roleTitle).toLowerCase();
   if (!company && !roleTitle) return true;
-  if (/\b(vue|react|deck builder|frontend)\b/i.test(company)) return true;
+  // Weak fragment roles sometimes land in either company or roleTitle depending on upstream parsing.
+  if (/\b(vue|react|deck builder|frontend)\b/i.test(`${company} ${roleTitle}`)) return true;
   if (company.includes('experience entry needs correction')) return true;
   if (/\bcontractor\b/i.test(roleTitle) && /\b(linux|infrastructure|sysadmin)\b/i.test(roleTitle)) return true;
   return false;
@@ -239,7 +240,15 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
       .filter((x) => !suppressed.has(x.id));
 
     const weakFiltered = primary.filter((x) => !isWeakFragmentRole({ company: x.entry?.company, roleTitle: x.entry?.roleTitle }));
-    const winners = (weakFiltered.length ? weakFiltered : primary).slice(0, 4);
+    const baseWinners = (weakFiltered.length ? weakFiltered : primary).slice(0, 4);
+    const winners = [...baseWinners];
+
+    // Contract guardrail: ensure at least 2 roles render when any additional baseline experience exists.
+    // If we only have one strong role, include the next best non-suppressed role (even if weaker) after it.
+    if (winners.length === 1) {
+      const fallback = primary.find((x) => x.id !== winners[0].id);
+      if (fallback) winners.push(fallback);
+    }
 
     // If nothing left, fall back to whatever experience exists (even if weak) so draft can render.
     if (winners.length === 0) {
