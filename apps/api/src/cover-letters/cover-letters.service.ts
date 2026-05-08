@@ -126,6 +126,7 @@ import { assembleCoverLetterFromStructuredBaseline } from './coverLetterTemplate
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
 import { resolveSyntheticCandidateName } from './candidate-name.util';
 import { TargetRolePositioningResolver } from '../positioning/target-role-positioning.resolver';
+import { PositioningPlanService } from '../positioning/positioning-plan.service';
 import { validateRealCoverLetterDocument } from '../artifacts/realDocumentValidator';
 
 type CoverLetterDraft = {
@@ -226,6 +227,7 @@ export type CoverLetterGenerationResponse = {
 @Injectable()
 export class CoverLettersService {
   private readonly positioningResolver = new TargetRolePositioningResolver();
+  private readonly positioningPlanService = new PositioningPlanService();
   private readonly logger = new Logger(CoverLettersService.name);
   private readonly coverLetterRepository: Repository<CoverLetter>;
   private readonly baselineRepository: Repository<Baseline>;
@@ -3085,10 +3087,15 @@ export class CoverLettersService {
           })),
           summary: typeof structured.summary === 'string' ? structured.summary : '',
         } as any;
-        return this.positioningResolver.resolve({
+        const plan = this.positioningPlanService.buildPlan({
           job: { title: input.job.title ?? null, company: input.job.company ?? null, description: jobText },
           resumeV2: resumeV2Like,
         });
+        const positioning = this.positioningResolver.resolve({
+          job: { title: input.job.title ?? null, company: input.job.company ?? null, description: jobText },
+          resumeV2: resumeV2Like,
+        });
+        return { ...positioning, plan };
       } catch {
         return null;
       }
@@ -3099,10 +3106,22 @@ export class CoverLettersService {
         const id = `resume_v2_exp_${index}`;
         const positioningRank = positioning?.prioritizedExperienceIds?.indexOf(id) ?? -1;
         const suppressed = positioning?.suppressedExperienceIds?.includes(id) ?? false;
+        const planSuppressed = positioning?.plan?.suppressRoleIds?.includes?.(id) ?? false;
+        const planEmphasisRank = positioning?.plan?.emphasizeRoleIds?.indexOf?.(id) ?? -1;
         return { entry, index, score: scoreExperience(entry), positioningRank, suppressed };
       })
       .sort((a, b) => {
+        const aPlanSuppressed = positioning?.plan?.suppressRoleIds?.includes?.(`resume_v2_exp_${a.index}`) ?? false;
+        const bPlanSuppressed = positioning?.plan?.suppressRoleIds?.includes?.(`resume_v2_exp_${b.index}`) ?? false;
+        if (aPlanSuppressed !== bPlanSuppressed) return aPlanSuppressed ? 1 : -1;
         if (a.suppressed !== b.suppressed) return a.suppressed ? 1 : -1;
+        const aPlanRank = positioning?.plan?.emphasizeRoleIds?.indexOf?.(`resume_v2_exp_${a.index}`) ?? -1;
+        const bPlanRank = positioning?.plan?.emphasizeRoleIds?.indexOf?.(`resume_v2_exp_${b.index}`) ?? -1;
+        if (aPlanRank !== bPlanRank) {
+          if (aPlanRank === -1) return 1;
+          if (bPlanRank === -1) return -1;
+          return aPlanRank - bPlanRank;
+        }
         if (a.positioningRank !== b.positioningRank) {
           if (a.positioningRank === -1) return 1;
           if (b.positioningRank === -1) return -1;
@@ -3115,10 +3134,12 @@ export class CoverLettersService {
     const summary = typeof structured.summary === 'string' ? structured.summary.trim() : '';
     const summarySentenceCount = summary ? summary.split(/(?<=[.!?])\s+/).filter(Boolean).length : 0;
     if (summary) {
+      const planThesis = typeof positioning?.plan?.positioningThesis === 'string' ? positioning.plan.positioningThesis.trim() : '';
+      const content = planThesis && summarySentenceCount < 2 ? planThesis : summary;
       blocks.push({
         id: 'resume_v2_summary',
         title: 'Summary',
-        content: summary,
+        content,
         // One-sentence summaries are allowed but should not dominate evidence selection.
         includePolicy: summarySentenceCount >= 2 ? BaselineIncludePolicy.ALWAYS : BaselineIncludePolicy.OPTIONAL,
         order: summarySentenceCount >= 2 ? 0 : 900000,

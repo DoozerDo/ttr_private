@@ -107,6 +107,7 @@ import { sanitizeResumeForTrailingFragments, trimIncompleteTrailingFragments } f
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
 import { sanitizeResumePreviewForStudio } from './resumePreviewSanitizer';
 import { TargetRolePositioningResolver } from '../positioning/target-role-positioning.resolver';
+import { PositioningPlanService } from '../positioning/positioning-plan.service';
 import { buildAuthoritativeResumeDraftFromResumeV2 } from './resumeTemplateAssembler';
 import { validateRealResumeDocument } from '../artifacts/realDocumentValidator';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
@@ -304,6 +305,7 @@ type ResumeExperiencePipelineDiagnostics = {
 @Injectable()
 export class ResumeService {
   private readonly positioningResolver = new TargetRolePositioningResolver();
+  private readonly positioningPlanService = new PositioningPlanService();
   private readonly logger = new Logger(ResumeService.name);
 
   constructor(
@@ -2398,11 +2400,15 @@ export class ResumeService {
       const jobForPositioning = job
         ? { title: job.title ?? null, company: job.company ?? null, description: job.rawDescription ?? null }
         : { title: null, company: null, description: null };
+      const plan = this.positioningPlanService.buildPlan({
+        job: jobForPositioning,
+        resumeV2: normalizedDocument as any,
+      });
       const positioning = this.positioningResolver.resolve({
         job: jobForPositioning,
         resumeV2: normalizedDocument as any,
       });
-      positioningMetadata = positioning;
+      positioningMetadata = { ...positioning, plan };
 
       const baselineIdentity = resolveBaselineIdentity(baseline);
       const identityRecord =
@@ -2419,16 +2425,37 @@ export class ResumeService {
         prioritizedExperienceIds: positioning.prioritizedExperienceIds ?? [],
         suppressedExperienceIds: positioning.suppressedExperienceIds ?? [],
         suppressionReasons: positioning.suppressionReasons ?? {},
+        plan: {
+          targetRoleFamily: plan.targetRoleFamily,
+          seniorityLevel: plan.seniorityLevel,
+          topEvidenceThemes: plan.topEvidenceThemes,
+          emphasizeRoleIds: plan.emphasizeRoleIds,
+          suppressRoleIds: plan.suppressRoleIds,
+          summaryStrategy: plan.summaryStrategy,
+        },
       });
+
+      // Strategy-first: prefer the plan’s emphasis/suppression as the source of truth for role selection.
+      const rankedExperienceIds = (plan.emphasizeRoleIds?.length ? plan.emphasizeRoleIds : positioning.prioritizedExperienceIds) ?? [];
+      const suppressedExperienceIds = Array.from(
+        new Set([...(positioning.suppressedExperienceIds ?? []), ...(plan.suppressRoleIds ?? [])]),
+      );
 
       normalizedDocument = buildAuthoritativeResumeDraftFromResumeV2({
         resumeV2: normalizedDocument as any,
         identity: { name: identityRecord.fullName, contactLine: identityRecord.contactLine, links: identityRecord.links },
-        rankedExperienceIds: positioning.prioritizedExperienceIds ?? [],
-        suppressedExperienceIds: positioning.suppressedExperienceIds ?? [],
+        rankedExperienceIds,
+        suppressedExperienceIds,
         professionalIdentity: positioning.professionalIdentity ?? null,
         targetNarrative: positioning.targetNarrative ?? null,
       }) as any;
+
+      // Summary strategy: use the positioning thesis as the summary seed when the extracted summary is weak.
+      // This is internal positioning guidance derived from verified evidence/themes; it is not role fabrication.
+      if (plan?.positioningThesis && typeof (normalizedDocument as any)?.summary === 'string') {
+        const raw = String((normalizedDocument as any).summary ?? '').trim();
+        if (raw.length < 30) (normalizedDocument as any).summary = plan.positioningThesis;
+      }
 
       // eslint-disable-next-line no-console
       console.log('[RESUME_ASSEMBLER_OUTPUT]', {
@@ -3311,8 +3338,8 @@ export class ResumeService {
     }
     (response as any).content = persistedContent;
 
-    if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
-      const extractRoles = (doc: any) =>
+      if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
+        const extractRoles = (doc: any) =>
         Array.isArray(doc?.experience)
           ? doc.experience.map((e: any) => ({
               company: String(e?.company ?? ''),
@@ -3342,6 +3369,17 @@ export class ResumeService {
           realDocumentReasonCodes: (response as any)?.qualityGate?.reasons ?? [],
           rankedExperienceIds: positioningMetadata?.prioritizedExperienceIds ?? [],
           suppressedExperienceIds: positioningMetadata?.suppressedExperienceIds ?? [],
+          positioningPlan: positioningMetadata?.plan
+            ? {
+                targetRoleFamily: positioningMetadata.plan.targetRoleFamily,
+                positioningThesis: positioningMetadata.plan.positioningThesis,
+                seniorityLevel: positioningMetadata.plan.seniorityLevel,
+                topEvidenceThemes: positioningMetadata.plan.topEvidenceThemes,
+                emphasizeRoleIds: positioningMetadata.plan.emphasizeRoleIds,
+                suppressRoleIds: positioningMetadata.plan.suppressRoleIds,
+                summaryStrategy: positioningMetadata.plan.summaryStrategy,
+              }
+            : null,
           renderedRoles: extractRoles((response as any)?.preview?.resume),
           persistedRoles,
           responseRoles: extractRoles((response as any)?.preview?.resume),
