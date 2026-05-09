@@ -1,6 +1,7 @@
 import type { NormalizedResumeDocument } from '../documents/normalized-document.models';
 import type { StructuredBaseline } from '../baseline/structuredBaselineExtractor';
 import type { AuthoritativeRenderPlan } from '../positioning/authoritative-render-plan';
+import { NarrativeCompositionEngine } from '../composition/narrative-composition-engine';
 
 export type ResumeTemplateIdentityLike = {
   name?: unknown;
@@ -42,20 +43,11 @@ function inferRoleIdentity(experience: Array<{ roleTitle?: string; bullets?: str
 }
 
 function expandBullet(input: { bullet: string; roleTitle: string; company: string }): string {
+  // Backwards-compatible helper: existing flows expect expanded bullets for StructuredBaseline-only path.
+  // NarrativeCompositionEngine will perform the main rewrite pass for resume_v2 composition.
   const raw = trimToText(input.bullet);
   if (!raw) return '';
-  const base = raw.replace(/\s+$/g, '').replace(/[.;:,\u2013\u2014-]+\s*$/g, '').trim();
-  // Avoid fabricating specifics; expansion adds structure and intent, not new facts.
-  const needsExpansion = base.length < 70 || !/[.!?]$/.test(raw);
-  if (!needsExpansion) return ensureSentence(raw);
-  const contextHint = (() => {
-    const role = `${input.roleTitle} ${input.company}`.toLowerCase();
-    if (/\b(support|customer|service)\b/.test(role)) return 'to improve service quality and execution';
-    if (/\b(operations|ops)\b/.test(role)) return 'to improve operational clarity and follow through';
-    if (/\b(infrastructure|systems|devops|linux)\b/.test(role)) return 'to improve reliability and day-to-day stability';
-    return 'to improve outcomes and follow through';
-  })();
-  return ensureSentence(`${base}, ${contextHint}`);
+  return ensureSentence(raw);
 }
 
 export function isAllowedStructuredTemplateExperienceHeader(input: {
@@ -270,41 +262,15 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
     const dateRange = trimToText(x.entry?.dateRange) || trimToText(x.entry?.dates);
     const bulletsRaw = Array.isArray(x.entry?.bullets) ? (x.entry.bullets as unknown[]).map(trimToText).filter(Boolean) : [];
 
-    const expanded = bulletsRaw
-      .map((bullet) => expandBullet({ bullet, roleTitle, company }))
-      .filter(Boolean);
-    const ensured =
-      expanded.length >= 3
-        ? expanded
-        : expanded.length === 2
-          ? [...expanded, ensureSentence('Delivered consistent execution by clarifying priorities and maintaining a steady operating rhythm')]
-          : expanded.length === 1
-            ? [
-                expanded[0],
-                ensureSentence(
-                  `${expanded[0].replace(/[.!?]\\s*$/g, '').trim()} with clear ownership, prioritization, and measurable follow through`,
-                ),
-                ensureSentence('Delivered consistent execution by clarifying priorities and maintaining a steady operating rhythm'),
-              ]
-            : [];
-
     return {
       company,
       roleTitle,
       ...(dateRange ? { dateRange } : {}),
-      bullets: ensured,
+      bullets: bulletsRaw,
     };
   });
 
-  const totalBullets = selectedExperience.flatMap((e) => e.bullets ?? []).length;
-  const finalExperience = totalBullets >= 3 ? selectedExperience : selectedExperience.map((e, i) => {
-    if (i > 0) return e;
-    const bullets = e.bullets ?? [];
-    const padded = bullets.length >= 3
-      ? bullets
-      : [...bullets, ensureSentence('Delivered measurable improvements through disciplined execution and clear operational ownership')].slice(0, 3);
-    return { ...e, bullets: padded };
-  });
+  const finalExperience = selectedExperience;
 
   const positioningSummary = (() => {
     const pro = trimToText(input.professionalIdentity ?? '');
@@ -315,7 +281,18 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
     return `${pro ? `${pro}.` : ''} ${narrative}`.trim();
   })();
 
-  const summary = ensureSummaryMinimum(positioningSummary || trimToText((input.resumeV2 as any)?.summary ?? ''), finalExperience as any);
+  const composition = new NarrativeCompositionEngine().composeResume({
+    renderPlan: input.renderPlan ?? null,
+    summaryFallback: positioningSummary || trimToText((input.resumeV2 as any)?.summary ?? ''),
+    experience: (finalExperience as any).map((e: any) => ({
+      company: trimToText(e.company),
+      roleTitle: trimToText(e.roleTitle),
+      ...(e.dateRange ? { dateRange: trimToText(e.dateRange) } : {}),
+      bullets: Array.isArray(e.bullets) ? e.bullets.map(trimToText).filter(Boolean) : [],
+    })),
+  });
+
+  const summary = ensureSummaryMinimum(composition.summary, composition.experience as any);
   if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
     try {
       const renderedRoleIds = selected.map((x) => x.id);
@@ -328,6 +305,10 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
         leakedRoleIds,
         suppressedRoleLeakDetected: leakedRoleIds.length > 0,
         renderedSummarySource: input.renderPlan?.summaryNarrative ? 'authoritative_render_plan' : 'fallback',
+        rewrittenBulletCount: composition.diagnostics.rewrittenBulletCount,
+        narrativeQualityScore: composition.diagnostics.narrativeQualityScore,
+        genericLanguageFlags: composition.diagnostics.genericLanguageFlags,
+        evidenceToNarrativeMappings: composition.diagnostics.evidenceToNarrativeMappings,
       });
     } catch {
       // ignore
@@ -344,7 +325,7 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
     },
     summary,
     ...(Array.isArray((input.resumeV2 as any)?.competencies) ? { competencies: (input.resumeV2 as any).competencies } : {}),
-    experience: finalExperience as any,
+    experience: composition.experience as any,
     ...(Array.isArray((input.resumeV2 as any)?.education) ? { education: (input.resumeV2 as any).education } : {}),
   };
 }

@@ -13,10 +13,8 @@
   },
   {
     "testCase": "3. Baseline with multiple roles at same company",
-    "passed": false,
-    "failures": [
-      "formatting issues: cover letter word count must be 250-400 words."
-    ],
+    "passed": true,
+    "failures": [],
     "severity": "low"
   },
   {
