@@ -7,6 +7,8 @@ import {
 } from "@/src/lib/studio/helpers";
 import { validateCoverLetterQuality, validateResumeQuality } from "@/src/lib/studio/artifactQuality";
 import type { ArtifactGenerationResult } from "@shared/artifactGenerationResult";
+import { isReusableGeneratedArtifact } from "@shared/isReusableGeneratedArtifact";
+import { STUDIO_GENERATION_PIPELINE_VERSION } from "@shared/studioGenerationPipelineVersion";
 
 export type StudioCoverLetterModel = {
   paragraphs: string[];
@@ -17,6 +19,7 @@ export type StudioArtifactContractInput = {
   coverLetterResponse: unknown;
   canExportDocuments: boolean;
   isPro: boolean;
+  persistedPipelineVersion?: string | null;
   jobTitle?: string | null;
   companyName?: string | null;
 };
@@ -138,7 +141,17 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
     companyName: input.companyName ?? null,
     resumeExportable: resumeQuality.exportable,
   });
+  const resumeReusableDecision = isReusableGeneratedArtifact(resumeResult ?? null, {
+    persistedPipelineVersion: input.persistedPipelineVersion ?? null,
+    currentPipelineVersion: STUDIO_GENERATION_PIPELINE_VERSION,
+  });
+  const coverReusableDecision = isReusableGeneratedArtifact(coverLetterResult ?? null, {
+    persistedPipelineVersion: input.persistedPipelineVersion ?? null,
+    currentPipelineVersion: STUDIO_GENERATION_PIPELINE_VERSION,
+  });
+  const hasReusableArtifacts = resumeReusableDecision.reusable || coverReusableDecision.reusable;
   const hasUsableArtifacts =
+    hasReusableArtifacts ||
     (Boolean(resumeModel) && resumeQuality.exportable) ||
     (Boolean(coverLetterModel) && coverLetterQuality.exportable);
 
@@ -158,10 +171,30 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
     (coverLetterResult ? coverLetterResult.generationState === "generated_usable" : true) &&
     (coverLetterResult ? coverLetterResult.actions.canExport : coverPresenter.status === "success" && coverPresenter.hasExportableContent);
 
+  if (process.env.DOCGEN_DIAGNOSTICS === "true") {
+    // eslint-disable-next-line no-console
+    console.log("[DOCGEN][reusableArtifactDecision]", {
+      artifactPipelineVersion: STUDIO_GENERATION_PIPELINE_VERSION,
+      persistedPipelineVersion: input.persistedPipelineVersion ?? null,
+      resume: resumeReusableDecision,
+      coverLetter: coverReusableDecision,
+      regenerationForced: Boolean(resumeReusableDecision.pipelineVersionMismatch || coverReusableDecision.pipelineVersionMismatch),
+      reuseBlockedBy: {
+        resume: resumeReusableDecision.reusable ? null : resumeReusableDecision.reasons,
+        coverLetter: coverReusableDecision.reusable ? null : coverReusableDecision.reasons,
+      },
+    });
+  }
+
   return {
     hasResumeArtifact,
     hasCoverLetterArtifact,
     hasUsableArtifacts,
+    hasReusableArtifacts,
+    reusableDecisions: {
+      resume: resumeReusableDecision,
+      coverLetter: coverReusableDecision,
+    },
     resumeModel,
     coverLetterModel,
     results: {

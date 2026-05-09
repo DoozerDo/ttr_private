@@ -24,6 +24,7 @@ import {
   validateNormalizedResumeDocument,
 } from '../resume/resume-normalization';
 import { BaselineResumeV2BackfillService } from '../baseline/baseline-resume-v2-backfill.service';
+import { STUDIO_GENERATION_PIPELINE_VERSION } from '@shared/studioGenerationPipelineVersion';
 
 export type StudioArtifactKind = 'resume' | 'cover_letter';
 
@@ -107,7 +108,7 @@ type ArtifactPatch = Partial<Pick<
   | 'coverLetterMetadata'
 >>;
 
-const ARTIFACT_CONTRACT_VERSION = 'studio-artifacts-v1';
+const ARTIFACT_CONTRACT_VERSION = STUDIO_GENERATION_PIPELINE_VERSION;
 
 function safeText(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';

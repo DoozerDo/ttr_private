@@ -2861,6 +2861,7 @@ export default function StudioPage() {
         })(),
         canExportDocuments,
         isPro,
+        persistedPipelineVersion: studioArtifactsPayload?.generationContractVersion ?? null,
         jobTitle: selectedJob?.title ?? null,
         companyName: selectedJob?.company ?? null,
       }),
@@ -4514,8 +4515,8 @@ export default function StudioPage() {
   const isHighQualityDraft = hasCompletedGeneration && artifactQuality.confidence === "HIGH"; 
   // Low-confidence is still a signal, but score >= 80 must not block or degrade access to usable artifacts.
   const showLowQualityRecoveryLane = isLowQualityDraft && !generateNowEligible;
-  const hasUsableResume = hasResumeArtifactPersisted;
-  const hasUsableCoverLetter = hasCoverLetterArtifactPersisted;
+  const hasUsableResume = artifactContract.reusableDecisions.resume.reusable;
+  const hasUsableCoverLetter = artifactContract.reusableDecisions.coverLetter.reusable;
   // Canonical READY truth: if we have any usable output, behave as READY. Confidence only modulates tone.
   const isReadySuccessState = hasUsableResume || hasUsableCoverLetter;
   const isApplicationFullyReady = hasUsableResume && hasUsableCoverLetter;
@@ -5875,12 +5876,7 @@ export default function StudioPage() {
     if (opts?.forceRegenerate) {
       console.log("[ARTIFACT_REGENERATE_OVERRIDE]", { artifactType: "resume" });
     }
-    if (
-      !opts?.forceRegenerate &&
-      studioArtifactPresentationStateRef.current === "hydrated" &&
-      hasResumeArtifact &&
-      Boolean(resumeState.response)
-    ) {
+    if (!opts?.forceRegenerate && studioArtifactPresentationStateRef.current === "hydrated" && hasUsableResume) {
       return finish(
         makeStudioAttempt("resume", {
           ok: true,
@@ -5890,7 +5886,7 @@ export default function StudioPage() {
         }),
       );
     }
-    if (!opts?.forceRegenerate && generationLifecycle.phase === "generated" && hasResumeArtifact) {
+    if (!opts?.forceRegenerate && generationLifecycle.phase === "generated" && hasUsableResume) {
       return finish(
         makeStudioAttempt("resume", {
           ok: true,
@@ -5903,7 +5899,7 @@ export default function StudioPage() {
     if (!generationLifecycle.canStartGeneration) {
       // Manual retry must be able to regenerate when the current artifacts are unusable (quality failed).
       // Do not block on the pair lifecycle "generated" state in that case.
-      if (opts?.forceRegenerate && artifactContract.hasUsableArtifacts === false) {
+      if (opts?.forceRegenerate && artifactContract.hasReusableArtifacts === false) {
         // proceed
       } else {
       return finish(
@@ -6741,12 +6737,7 @@ export default function StudioPage() {
           request: { sessionKey: opts?.sessionKey ?? null, requestId: requestId ?? null },
         }),
       );
-    if (
-      !opts?.forceRegenerate &&
-      studioArtifactPresentationStateRef.current === "hydrated" &&
-      hasCoverLetterArtifact &&
-      Boolean(coverState.response)
-    ) {
+    if (!opts?.forceRegenerate && studioArtifactPresentationStateRef.current === "hydrated" && hasUsableCoverLetter) {
       return finish(
         makeStudioAttempt("cover", {
           ok: true,
@@ -6756,7 +6747,7 @@ export default function StudioPage() {
         }),
       );
     }
-    if (!opts?.forceRegenerate && generationLifecycle.phase === "generated" && hasCoverLetterArtifact) {
+    if (!opts?.forceRegenerate && generationLifecycle.phase === "generated" && hasUsableCoverLetter) {
       return finish(
         makeStudioAttempt("cover", {
           ok: true,
@@ -6769,7 +6760,7 @@ export default function StudioPage() {
     if (!generationLifecycle.canStartGeneration) {
       // Manual retry must be able to regenerate when the current artifacts are unusable (quality failed).
       // Do not block on the pair lifecycle "generated" state in that case.
-      if (opts?.forceRegenerate && artifactContract.hasUsableArtifacts === false) {
+      if (opts?.forceRegenerate && artifactContract.hasReusableArtifacts === false) {
         // proceed
       } else {
       return finish(
