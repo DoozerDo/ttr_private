@@ -17,13 +17,13 @@ export function getApiBaseUrl(): string {
       message: configError.message,
       details: configError.details,
     });
-    return "";
+    throw configError;
   }
 }
 
-function cloneHeaders(response: Response) {
+function cloneHeaders(response: { headers?: Headers } | null | undefined) {
   const headers = new Headers();
-  response.headers.forEach((value, key) => headers.set(key, value));
+  response?.headers?.forEach((value, key) => headers.set(key, value));
   return headers;
 }
 
@@ -33,7 +33,7 @@ function isJsonContentType(contentType: string) {
 }
 
 export async function relayApiResponse(response: Response) {
-  const contentType = response.headers.get("content-type") || "";
+  const contentType = response.headers?.get("content-type") || "";
   const headers = cloneHeaders(response);
 
   // Normalize so NextResponse does not accidentally treat upstream encodings weirdly
@@ -63,18 +63,36 @@ export async function relayApiResponse(response: Response) {
   }
 
   // Non JSON responses (files, html, plain text)
+  if (typeof (response as any).arrayBuffer !== "function") {
+    const raw = await (response as any).text?.().catch(() => "");
+    if (typeof raw === "string" && raw.trim()) {
+      try {
+        const json = JSON.parse(raw);
+        return NextResponse.json(json, { status: (response as any).status ?? 200, headers });
+      } catch {
+        return new NextResponse(raw, {
+          status: (response as any).status ?? 200,
+          headers: new Headers({
+            ...Object.fromEntries(headers.entries()),
+            "content-type": "text/plain; charset=utf-8",
+          }),
+        });
+      }
+    }
+
+    const json = await (response as any).json?.().catch(() => null);
+    return NextResponse.json(json, { status: (response as any).status ?? 200, headers });
+  }
+
   const buffer = await response.arrayBuffer();
-  return new NextResponse(buffer, {
-    status: response.status,
-    headers,
-  });
+  return new NextResponse(buffer, { status: response.status, headers });
 }
 
 export async function relayJsonResponse(response: Response) {
   const headers = cloneHeaders(response);
   headers.delete("content-length");
 
-  const contentType = response.headers.get("content-type") || "";
+  const contentType = response.headers?.get("content-type") || "";
   const isJson = isJsonContentType(contentType);
   const raw = await response.text().catch(() => "");
   const snippet = raw.slice(0, 200);

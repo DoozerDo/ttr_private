@@ -44,7 +44,7 @@ function pickRawUpstreamApiBaseUrl(): { key: string; value: string } | null {
 export function getRequiredServerApiBaseUrl(): string {
   const selected = pickRawUpstreamApiBaseUrl();
   const nodeEnv = process.env.NODE_ENV ?? "development";
-  const isProd = nodeEnv === "production";
+  const isProd = nodeEnv === "production" || nodeEnv === "test";
 
   if (!selected) {
     if (!isProd) {

@@ -9,14 +9,51 @@ import { validateCoverLetterQuality, validateResumeQuality } from "@/src/lib/stu
 import type { ArtifactGenerationResult } from "@shared/artifactGenerationResult";
 import { isReusableGeneratedArtifact } from "@shared/isReusableGeneratedArtifact";
 import { STUDIO_GENERATION_PIPELINE_VERSION } from "@shared/studioGenerationPipelineVersion";
+import { resolveDocumentReadinessState } from "@shared/documentReadinessState";
 
 export type StudioCoverLetterModel = {
   paragraphs: string[];
 };
 
+type ReadinessArtifactLike = {
+  exportReady?: unknown;
+  generationState?: unknown;
+  qualityGate?: { status?: unknown; reasons?: unknown } | null;
+  correctionReasons?: Array<{ code?: unknown; message?: unknown }> | null;
+  qualityStatus?: unknown;
+};
+
+function isPresentSingleArtifact(artifact: ReadinessArtifactLike | null): boolean {
+  if (!artifact) return false;
+  const state = String(artifact.generationState ?? "").trim();
+  if (!state) return false;
+  return state !== "not_started" && state !== "generating" && state !== "missing";
+}
+
+function isFailedSingleArtifact(artifact: ReadinessArtifactLike | null): boolean {
+  if (!artifact) return false;
+  const gs = String(artifact.generationState ?? "").trim().toLowerCase();
+  if (gs === "generation_failed" || gs === "failed") return true;
+  const qs = String(artifact.qualityStatus ?? "").trim().toLowerCase();
+  return qs === "failed";
+}
+
+function qualityGatePassSingle(gate: ReadinessArtifactLike["qualityGate"]): boolean {
+  if (!gate || typeof gate !== "object") return false;
+  return String((gate as any).status ?? "").trim() === "pass";
+}
+
+function isExportableSingleArtifact(artifact: ReadinessArtifactLike | null): boolean {
+  if (!isPresentSingleArtifact(artifact)) return false;
+  if (isFailedSingleArtifact(artifact)) return false;
+  if (artifact.exportReady !== true) return false;
+  return qualityGatePassSingle(artifact.qualityGate ?? null);
+}
+
 export type StudioArtifactContractInput = {
   resumeResponse: unknown;
   coverLetterResponse: unknown;
+  critiqueResult?: unknown;
   canExportDocuments: boolean;
   isPro: boolean;
   persistedPipelineVersion?: string | null;
@@ -109,6 +146,28 @@ function hasRenderableCoverLetterContent(payload: unknown, paragraphs: string[])
   return false;
 }
 
+function legacyArtifactToReadinessArtifact(payload: unknown): ReadinessArtifactLike | null {
+  const record = toRecord(payload);
+  if (!record) return null;
+
+  // Studio legacy responses sometimes nest under `payload`.
+  const inner = toRecord(record.payload);
+  const candidate = inner ?? record;
+
+  const generationStatus = String(candidate.generationStatus ?? candidate.status ?? "").toLowerCase();
+  const exportReady = candidate.exportReady === true;
+
+  // Only upgrade legacy payloads that clearly indicate success + export readiness.
+  // This is intentionally strict: missing/blocked artifacts must not become exportable.
+  if (!(generationStatus === "success" && exportReady)) return null;
+
+  return {
+    generationState: "generated_usable",
+    exportReady: true,
+    qualityGate: { status: "pass", reasons: [] },
+  };
+}
+
 export function buildStudioArtifactContract(input: StudioArtifactContractInput) {
   const normalizedResumeResponse = normalizeResumeResponse(input.resumeResponse);
   const normalizedCoverLetterResponse = normalizeCoverLetterResponse(input.coverLetterResponse);
@@ -150,26 +209,35 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
     currentPipelineVersion: STUDIO_GENERATION_PIPELINE_VERSION,
   });
   const hasReusableArtifacts = resumeReusableDecision.reusable || coverReusableDecision.reusable;
-  const hasUsableArtifacts =
-    hasReusableArtifacts ||
-    (Boolean(resumeModel) && resumeQuality.exportable) ||
-    (Boolean(coverLetterModel) && coverLetterQuality.exportable);
+
+  const resumeReadinessArtifact =
+    (resumeResult ?? legacyArtifactToReadinessArtifact(normalizedResumeResponse)) as ReadinessArtifactLike | null;
+  const coverReadinessArtifact =
+    (coverLetterResult ?? legacyArtifactToReadinessArtifact(normalizedCoverLetterResponse)) as ReadinessArtifactLike | null;
+
+  const canonicalReadiness = resolveDocumentReadinessState({
+    resumeArtifact: (resumeReadinessArtifact ?? null) as any,
+    coverLetterArtifact: (coverReadinessArtifact ?? null) as any,
+    critiqueResult: (input.critiqueResult as any) ?? null,
+    qualityGate: null,
+    exportReady: null,
+    generationState: null,
+  });
 
   const hasResumeArtifact = hasRenderableResumeContent(normalizedResumeResponse, resumeModel);
   const hasCoverLetterArtifact = hasRenderableCoverLetterContent(normalizedCoverLetterResponse, coverParagraphs);
 
+  const hasUsableArtifacts =
+    hasReusableArtifacts ||
+    (Boolean(resumeModel) && resumeQuality.exportable) ||
+    (Boolean(coverLetterModel) && coverLetterQuality.exportable) ||
+    hasResumeArtifact ||
+    hasCoverLetterArtifact;
+
   const resumeExportAvailable =
-    input.canExportDocuments &&
-    input.isPro &&
-    resumeQuality.exportable &&
-    (resumeResult ? resumeResult.generationState === "generated_usable" : true) &&
-    (resumeResult ? resumeResult.actions.canExport : resumePresenter.status === "success" && resumePresenter.hasExportableContent);
+    input.canExportDocuments && input.isPro && isExportableSingleArtifact(resumeReadinessArtifact);
   const coverLetterExportAvailable =
-    input.canExportDocuments &&
-    input.isPro &&
-    coverLetterQuality.exportable &&
-    (coverLetterResult ? coverLetterResult.generationState === "generated_usable" : true) &&
-    (coverLetterResult ? coverLetterResult.actions.canExport : coverPresenter.status === "success" && coverPresenter.hasExportableContent);
+    input.canExportDocuments && input.isPro && isExportableSingleArtifact(coverReadinessArtifact);
 
   if (process.env.DOCGEN_DIAGNOSTICS === "true") {
     // eslint-disable-next-line no-console
@@ -184,9 +252,23 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
         coverLetter: coverReusableDecision.reusable ? null : coverReusableDecision.reasons,
       },
     });
+    // eslint-disable-next-line no-console
+    console.log("[DOCGEN][canonical_readiness_state]", {
+      canonicalReadinessState: canonicalReadiness.state,
+      readinessInputs: {
+        resume: resumeResult ?? null,
+        coverLetter: coverLetterResult ?? null,
+        critiqueResult: input.critiqueResult ?? null,
+      },
+      overridden: canonicalReadiness.impossibleStatePrevented,
+      impossibleStatePrevented: canonicalReadiness.impossibleStatePrevented,
+    });
   }
 
   return {
+    canonicalReadinessState: canonicalReadiness.state,
+    canonicalReadinessReasons: canonicalReadiness.reasons,
+    impossibleStatePrevented: canonicalReadiness.impossibleStatePrevented,
     hasResumeArtifact,
     hasCoverLetterArtifact,
     hasUsableArtifacts,

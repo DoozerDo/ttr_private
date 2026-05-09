@@ -18,6 +18,7 @@ import {
 import { interpretEvidenceFromResumeText } from '../evidence/evidence-interpreter';
 import type { InterpretedEvidenceSummary } from '../evidence/evidence-model';
 import { resolveEvidenceReadinessFromSummary } from '../evidence/readiness-thresholds';
+import { resolveDocumentReadinessState } from '@shared/documentReadinessState';
 import {
   buildResumePlainText,
   normalizeNormalizedResumeDocument,
@@ -513,6 +514,38 @@ export class StudioArtifactsService {
 
     const resumeResult = this.buildCanonicalResultFromRecord('resume', resumeRecord);
     const coverLetterResult = this.buildCanonicalResultFromRecord('cover_letter', coverRecord);
+
+    const canonicalReadiness = resolveDocumentReadinessState({
+      resumeArtifact: resumeResult as any,
+      coverLetterArtifact: coverLetterResult as any,
+      critiqueResult: null,
+      qualityGate: null,
+      exportReady: null,
+      generationState: null,
+    });
+
+    if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
+      try {
+        // eslint-disable-next-line no-console
+        console.log('[DOCGEN][canonical_readiness_state]', {
+          canonicalReadinessState: canonicalReadiness.state,
+          readinessInputs: {
+            resumeGenerationState: (resumeResult as any)?.generationState ?? null,
+            resumeExportReady: (resumeResult as any)?.exportReady ?? null,
+            resumeQualityGate: (resumeRecord?.responseBody as any)?.qualityGate ?? null,
+            resumeCorrectionReasons: (resumeResult as any)?.correctionReasons ?? [],
+            coverGenerationState: (coverLetterResult as any)?.generationState ?? null,
+            coverExportReady: (coverLetterResult as any)?.exportReady ?? null,
+            coverQualityGate: (coverRecord?.responseBody as any)?.qualityGate ?? null,
+            coverCorrectionReasons: (coverLetterResult as any)?.correctionReasons ?? [],
+          },
+          overridden: canonicalReadiness.impossibleStatePrevented,
+          impossibleStatePrevented: canonicalReadiness.impossibleStatePrevented,
+        });
+      } catch {
+        // ignore
+      }
+    }
 
     if (resumeResult?.correctionReasons?.length) {
       try {

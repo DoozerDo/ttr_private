@@ -409,6 +409,14 @@ export function resolveWorkflowOrchestrator(input: WorkflowOrchestratorInput): W
     input.coverLetter.status === "generating" ||
     String(input.artifact.pairStatus ?? "").toLowerCase() === "generating" ||
     String(input.artifact.pairStatus ?? "").toLowerCase() === "in_progress";
+  const hasAnyGeneratedOutput = Boolean(input.artifact.hasResume || input.artifact.hasCoverLetter);
+
+  // Contract invariant: a blocked readiness state must never surface as "generation ready" or
+  // "in progress" when there is no prior output to review. This prevents an impossible UI
+  // combination where generation appears to be running while the workflow is blocked.
+  if (!unlockFlowActive && !postUnlockActive && safeReadiness.blocked && !hasAnyGeneratedOutput && artifactGenerating) {
+    authorityState = safeAuthorityFallback("blocked_readiness_overrides_in_progress");
+  }
   const shouldPromoteGenerationInProgress =
     !safeReadiness.blocked &&
     input.workflowAuthority.workflowState !== "BLOCKED" &&

@@ -462,10 +462,10 @@ describe("workflow journey scenarios (synthetic)", () => {
     mountStudio();
 
     await waitFor(() => {
-      expect(screen.getByTestId("studio-generation-ready-shell")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-workflow-authority")).toBeInTheDocument();
     });
     expectSinglePrimaryStudioAuthority();
-    expectAuthorityPanel("studio-generation-ready-shell", "generation_ready", "ready");
+    expectAuthorityPanel("studio-workflow-authority", "generation_ready", "ready");
 
     // Hold generation so we can assert activity + in-progress state.
     server.defer("resume_generate");

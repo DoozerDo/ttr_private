@@ -6,9 +6,11 @@ import type {
   RoleMatchFinalPassPriorityCoverage,
   RoleMatchFinalPassRisk,
 } from "@/lib/roleMatchFinalPass";
+import type { DocumentReadinessState } from "@shared/documentReadinessState";
 
 type Props = {
   finalPass: RoleMatchFinalPass;
+  documentReadinessState: DocumentReadinessState;
   isApplying?: boolean;
   onApplyAdjustment: (adjustment: RoleMatchFinalAdjustment) => void;
   stylePolishNote?: string | null;
@@ -48,8 +50,10 @@ function coverageLabel(entry: RoleMatchFinalPassPriorityCoverage): string {
   return "Missing";
 }
 
-export function StudioRoleMatchPanel({ finalPass, isApplying, onApplyAdjustment, stylePolishNote }: Props) {
-  const copy = readinessCopy(finalPass.overallMatchReadiness);
+export function StudioRoleMatchPanel({ finalPass, documentReadinessState, isApplying, onApplyAdjustment, stylePolishNote }: Props) {
+  const effectiveReadiness =
+    documentReadinessState === "ready" ? finalPass.overallMatchReadiness : "needs_work";
+  const copy = readinessCopy(effectiveReadiness);
   const hasAdjustment = finalPass.recommendedFinalAdjustments.length > 0;
   const primaryAdjustment = finalPass.recommendedFinalAdjustments[0] ?? null;
 
@@ -69,7 +73,7 @@ export function StudioRoleMatchPanel({ finalPass, isApplying, onApplyAdjustment,
         <div className="text-right">
           <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Match readiness</p>
           <p className="text-2xl font-semibold capitalize text-slate-50">
-            {finalPass.overallMatchReadiness.replace("_", " ")}
+            {effectiveReadiness.replace("_", " ")}
           </p>
         </div>
       </div>
@@ -192,9 +196,11 @@ export function StudioRoleMatchPanel({ finalPass, isApplying, onApplyAdjustment,
           ) : null}
         </div>
       ) : (
-        <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4 text-sm text-emerald-50">
-          Ready to export. Your documents strongly reflect the role's top priorities.
-        </div>
+        documentReadinessState === "ready" ? (
+          <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4 text-sm text-emerald-50">
+            Ready to export. Your documents strongly reflect the role's top priorities.
+          </div>
+        ) : null
       )}
     </section>
   );

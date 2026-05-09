@@ -1121,6 +1121,7 @@ export default function StudioPage() {
   const [versionsError, setVersionsError] = useState<string | null>(null);
 
   const [analysis, setAnalysis] = useState<LatestAnalysis | null>(null);
+  const [hydratedAnalysisScore, setHydratedAnalysisScore] = useState<number | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [contextHydrationMessage, setContextHydrationMessage] = useState<string | null>(null);
@@ -1190,6 +1191,10 @@ export default function StudioPage() {
   }, [queryExcludedRequirements]);
 
   const [resumeState, setResumeState] = useState<DocumentState>(() => createDocumentState());
+  const resumeResponseRef = useRef<unknown>(null);
+  useEffect(() => {
+    resumeResponseRef.current = resumeState.response;
+  }, [resumeState.response]);
   const [resumeGenerating, setResumeGenerating] = useState(false);
   const [autoGenerationInFlight, setAutoGenerationInFlight] = useState(false);
   const [resumeExportFormat, setResumeExportFormat] =
@@ -1209,6 +1214,10 @@ export default function StudioPage() {
   const [resumeEditError, setResumeEditError] = useState<string | null>(null);
 
   const [coverState, setCoverState] = useState<DocumentState>(() => createDocumentState());
+  const coverResponseRef = useRef<unknown>(null);
+  useEffect(() => {
+    coverResponseRef.current = coverState.response;
+  }, [coverState.response]);
   const [coverGenerating, setCoverGenerating] = useState(false);
   const [coverExportFormat, setCoverExportFormat] = useState<"docx" | "pdf" | null>(null);
   const [coverCopyStatus, setCoverCopyStatus] = useState<string | null>(null);
@@ -1233,6 +1242,10 @@ export default function StudioPage() {
   } | null>(null);
   const [studioArtifactsHydrated, setStudioArtifactsHydrated] = useState(false);
   const [studioArtifactsPayload, setStudioArtifactsPayload] = useState<BackendStudioArtifactsResponse | null>(null);
+  const studioArtifactsPayloadRef = useRef<BackendStudioArtifactsResponse | null>(null);
+  useEffect(() => {
+    studioArtifactsPayloadRef.current = studioArtifactsPayload;
+  }, [studioArtifactsPayload]);
   const [studioArtifactPairStatus, setStudioArtifactPairStatus] = useState<
     "missing" | "in_progress" | "failed" | "completed"
   >("missing");
@@ -1616,14 +1629,26 @@ export default function StudioPage() {
   }, []);
 
   const analysisScore = useMemo(() => { 
-    const v2 = (analysis as { scoring_v2?: { score?: unknown } | null } | null)?.scoring_v2?.score; 
-    if (typeof v2 === "number") return v2; 
-    const direct = (analysis as { score?: unknown } | null)?.score; 
-    if (typeof direct === "number") return direct; 
-    const overall = (analysis as { overallScore?: unknown } | null)?.overallScore; 
-    if (typeof overall === "number") return overall; 
-    return null; 
-  }, [analysis]); 
+    const coerceScore = (value: unknown): number | null => {
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        const parsed = Number(trimmed);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+      return null;
+    };
+
+    const assessment = analysis;
+    const v2Raw = (assessment as { scoring_v2?: { score?: unknown } | null } | null)?.scoring_v2?.score;
+    const v2 = coerceScore(v2Raw);
+    const directRaw = (assessment as { score?: unknown } | null)?.score;
+    const direct = coerceScore(directRaw);
+    const overallRaw = (assessment as { overallScore?: unknown } | null)?.overallScore;
+    const overall = coerceScore(overallRaw);
+    return v2 ?? direct ?? overall ?? hydratedAnalysisScore ?? null;
+  }, [analysis, hydratedAnalysisScore]); 
   const generateNowEligible = isGenerateNowEligible(analysisScore);
 
   const readGenerationDebug = useCallback(
@@ -1854,9 +1879,27 @@ export default function StudioPage() {
   }, [currentWorkflowScope]);
 
   const applyStudioArtifactsPayload = useCallback((payload: BackendStudioArtifactsResponse) => {
+    const pairStatus = getBackendPairStatus(payload);
+
+    // Do not let a later "missing" reconciliation overwrite already-hydrated/generated presenter state.
+    // This preserves truth: "missing" means the backend has no artifacts right now, but we should not
+    // clear the user's already-visible completed artifacts from this session.
+    const hasHydratedOrGeneratedResponse =
+      studioArtifactPresentationStateRef.current !== "unknown" ||
+      Boolean(resumeResponseRef.current) ||
+      Boolean(coverResponseRef.current);
+
+    const previouslyHydratedPayload = studioArtifactsPayloadRef.current;
+    const previouslyHadArtifacts =
+      Boolean(previouslyHydratedPayload?.resume) || Boolean(previouslyHydratedPayload?.coverLetter);
+
+    if (pairStatus === "missing" && (hasHydratedOrGeneratedResponse || previouslyHadArtifacts)) {
+      return;
+    }
+
     setStudioArtifactsPayload(payload);
-    const resumeResponse = extractResumeResponseFromStudioArtifacts(payload);
-    const coverResponse = extractCoverLetterResponseFromStudioArtifacts(payload);
+    const resumeResponse = normalizeHydratedArtifactResponse(payload.resume?.responseBody ?? null);
+    const coverResponse = normalizeHydratedArtifactResponse(payload.coverLetter?.responseBody ?? null);
 
     // Phase 1: prefer canonical artifact results when present, but keep legacy responseBody alongside it.
     const resumeResult = payload.resumeResult ?? null;
@@ -1911,11 +1954,24 @@ export default function StudioPage() {
       setCoverState((current) => ({ ...current, artifactFailure: coverFailure, error: null }));
     }
 
-    const pairStatus = getBackendPairStatus(payload);
     setStudioArtifactPairStatus(pairStatus);
     // If hydration confirms artifacts are missing, allow auto-generation to proceed afterwards.
     suppressAutoGenerationRef.current = pairStatus !== "missing";
   }, []);
+
+  function normalizeStudioArtifactsBackendPayload(payload: unknown): BackendStudioArtifactsResponse | null {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+    const record = payload as Record<string, unknown>;
+    const resume =
+      (record.resume as BackendStudioArtifactRecord | null | undefined) ??
+      (record.resumeArtifact as BackendStudioArtifactRecord | null | undefined) ??
+      null;
+    const coverLetter =
+      (record.coverLetter as BackendStudioArtifactRecord | null | undefined) ??
+      (record.coverLetterArtifact as BackendStudioArtifactRecord | null | undefined) ??
+      null;
+    return { ...(record as BackendStudioArtifactsResponse), resume, coverLetter };
+  }
 
   // Studio must always reconcile artifact existence from persisted /api/studio/artifacts once IDs are known.
   // Do not run before baselineId + baselineVersionId + jobId exist.
@@ -1947,41 +2003,16 @@ export default function StudioPage() {
         params.set("jobId", jobId);
         if (requestedAnalysisId) params.set("analysisId", requestedAnalysisId);
 
-        console.log("[STUDIO_ARTIFACTS_FETCH]", {
-          attempt: 0,
-          baselineId,
-          baselineVersionId,
-          jobId,
-          analysisId: requestedAnalysisId ?? null,
-        });
-
         const response = await fetch(`/api/studio/artifacts?${params.toString()}`, { cache: "no-store" });
         const payload = await readResponsePayload(response);
         if (cancelled) return;
 
-        console.log("[STUDIO_ARTIFACTS_RESULT]", {
-          attempt: 0,
-          status: response.status,
-          ok: response.ok,
-          payloadType: payload ? typeof payload : "null",
-          hasResume:
-            payload && typeof payload === "object" && !Array.isArray(payload)
-              ? Boolean((payload as BackendStudioArtifactsResponse).resume?.responseBody) ||
-                Boolean((payload as BackendStudioArtifactsResponse).resume?.content) ||
-                Boolean((payload as BackendStudioArtifactsResponse).resumeResult)
-              : false,
-          hasCoverLetter:
-            payload && typeof payload === "object" && !Array.isArray(payload)
-              ? Boolean((payload as BackendStudioArtifactsResponse).coverLetter?.responseBody) ||
-                Boolean((payload as BackendStudioArtifactsResponse).coverLetter?.content) ||
-                Boolean((payload as BackendStudioArtifactsResponse).coverLetterResult)
-              : false,
-        });
-
         if (!response.ok) return;
         if (!payload || typeof payload !== "object" || Array.isArray(payload)) return;
 
-        applyStudioArtifactsPayload(payload as BackendStudioArtifactsResponse);
+        const normalized = normalizeStudioArtifactsBackendPayload(payload);
+        if (!normalized) return;
+        applyStudioArtifactsPayload(normalized);
         setStudioArtifactsHydrated(true);
       } catch (error) {
         if (process.env.NODE_ENV !== "production") {
@@ -2017,23 +2048,16 @@ export default function StudioPage() {
         artifactsParams.set("jobId", jobId);
         if (requestedAnalysisId) artifactsParams.set("analysisId", requestedAnalysisId);
 
-        console.log("[STUDIO_ARTIFACTS_FETCH]", {
-          attempt,
-          baselineId,
-          baselineVersionId,
-          jobId,
-          analysisId: requestedAnalysisId ?? null,
-        });
-
-        const response = await fetch(`/api/studio/artifacts?${artifactsParams.toString()}`, { cache: "no-store" });
+         const response = await fetch(`/api/studio/artifacts?${artifactsParams.toString()}`, { cache: "no-store" });
         const payload = await readResponsePayload(response);
         if (response.ok && payload && typeof payload === "object" && !Array.isArray(payload)) {
-          const backend = payload as BackendStudioArtifactsResponse;
-          applyStudioArtifactsPayload(backend);
+          const normalized = normalizeStudioArtifactsBackendPayload(payload);
+          if (!normalized) continue;
+          applyStudioArtifactsPayload(normalized);
           setStudioArtifactsHydrated(true);
 
-          const resumeData = extractResumeResponseFromStudioArtifacts(backend);
-          const coverData = extractCoverLetterResponseFromStudioArtifacts(backend);
+          const resumeData = extractResumeResponseFromStudioArtifacts(normalized);
+          const coverData = extractCoverLetterResponseFromStudioArtifacts(normalized);
           if (resumeData) {
             setResumeState((current) => ({
               ...current,
@@ -2052,33 +2076,13 @@ export default function StudioPage() {
               artifactFailure: null,
             }));
           }
-          console.log("[STUDIO_STATE_UPDATED]", {
-            hasResume: Boolean(resumeData),
-            hasCover: Boolean(coverData),
-          });
-
-          console.log("[STUDIO_ARTIFACTS_RESULT]", {
-            attempt,
-            status: response.status,
-            ok: response.ok,
-            hasResume: Boolean(backend.resume?.responseBody) || Boolean(backend.resumeResult),
-            hasCoverLetter: Boolean(backend.coverLetter?.responseBody) || Boolean(backend.coverLetterResult),
-          });
-
-          const resumeOk = options.expectedResume ? Boolean(backend.resume?.responseBody) || Boolean(backend.resumeResult) : true;
+          const resumeOk = options.expectedResume
+            ? Boolean(normalized.resume?.responseBody) || Boolean(normalized.resumeResult)
+            : true;
           const coverOk = options.expectedCover
-            ? Boolean(backend.coverLetter?.responseBody) || Boolean(backend.coverLetterResult)
+            ? Boolean(normalized.coverLetter?.responseBody) || Boolean(normalized.coverLetterResult)
             : true;
           if (resumeOk && coverOk) return;
-        } else {
-          console.log("[STUDIO_ARTIFACTS_RESULT]", {
-            attempt,
-            status: response.status,
-            ok: response.ok,
-            hasResume: false,
-            hasCoverLetter: false,
-            bodySummary: summarizeStudioBody(payload),
-          });
         }
 
         if (attempt < 3) {
@@ -2129,21 +2133,41 @@ export default function StudioPage() {
 
     const applyHydratedPayload = (payload: BackendStudioArtifactsResponse | StoredStudioArtifactSnapshot | null) => {
       if (!payload || cancelled) return;
-      if (isBackendStudioArtifactsResponse(payload)) {
-        setStudioArtifactsPayload(payload as BackendStudioArtifactsResponse);
+      const backendPayload = isBackendStudioArtifactsResponse(payload)
+        ? (payload as BackendStudioArtifactsResponse)
+        : null;
+      const normalizedBackendPayload: BackendStudioArtifactsResponse | null = backendPayload
+        ? ({
+            ...backendPayload,
+            resume:
+              backendPayload.resume ??
+              (backendPayload as unknown as { resumeArtifact?: BackendStudioArtifactRecord | null }).resumeArtifact ??
+              null,
+            coverLetter:
+              backendPayload.coverLetter ??
+              (backendPayload as unknown as { cover?: BackendStudioArtifactRecord | null }).cover ??
+              (backendPayload as unknown as { coverLetterArtifact?: BackendStudioArtifactRecord | null }).coverLetterArtifact ??
+              (backendPayload as unknown as { cover_letter?: BackendStudioArtifactRecord | null }).cover_letter ??
+              null,
+          } satisfies BackendStudioArtifactsResponse)
+        : null;
+
+      if (normalizedBackendPayload) {
+        setStudioArtifactsPayload(normalizedBackendPayload);
       }
-      const resumeResponseRaw = isBackendStudioArtifactsResponse(payload)
-        ? payload.resume?.responseBody ?? null
-        : payload.resumeResponse ?? null;
-      const coverResponseRaw = isBackendStudioArtifactsResponse(payload)
-        ? payload.coverLetter?.responseBody ?? null
-        : payload.coverResponse ?? null;
+
+      const resumeResponseRaw = normalizedBackendPayload
+        ? normalizedBackendPayload.resume?.responseBody ?? null
+        : (payload as StoredStudioArtifactSnapshot).resumeResponse ?? null;
+      const coverResponseRaw = normalizedBackendPayload
+        ? normalizedBackendPayload.coverLetter?.responseBody ?? null
+        : (payload as StoredStudioArtifactSnapshot).coverResponse ?? null;
       const resumeResponse = normalizeHydratedArtifactResponse(resumeResponseRaw);
       const coverResponse = normalizeHydratedArtifactResponse(coverResponseRaw);
 
       // Phase 1: prefer canonical artifact results when present, but keep legacy responseBody alongside it.
-      const resumeResult = isBackendStudioArtifactsResponse(payload) ? payload.resumeResult ?? null : null;
-      const coverLetterResult = isBackendStudioArtifactsResponse(payload) ? payload.coverLetterResult ?? null : null;
+      const resumeResult = normalizedBackendPayload ? normalizedBackendPayload.resumeResult ?? null : null;
+      const coverLetterResult = normalizedBackendPayload ? normalizedBackendPayload.coverLetterResult ?? null : null;
       const resumeResponseWithResult =
         resumeResult
           ? (resumeResponse && typeof resumeResponse === "object"
@@ -2156,11 +2180,11 @@ export default function StudioPage() {
               ? ({ ...(coverResponse as Record<string, unknown>), coverLetterResult } as unknown)
               : ({ coverLetterResult } as unknown))
           : coverResponse;
-      const resumeFailure = isBackendStudioArtifactsResponse(payload)
-        ? buildFailureFromBackendRecord("resume", payload.resume)
+      const resumeFailure = normalizedBackendPayload
+        ? buildFailureFromBackendRecord("resume", normalizedBackendPayload.resume)
         : null;
-      const coverFailure = isBackendStudioArtifactsResponse(payload)
-        ? buildFailureFromBackendRecord("cover_letter", payload.coverLetter)
+      const coverFailure = normalizedBackendPayload
+        ? buildFailureFromBackendRecord("cover_letter", normalizedBackendPayload.coverLetter)
         : null;
       if (resumeFailure) {
         setResumeState((current) => ({ ...current, artifactFailure: resumeFailure, error: null, response: null }));
@@ -2808,6 +2832,7 @@ export default function StudioPage() {
         persistedAssessmentId: requestedAnalysisId ?? null,
       }),
     [
+      analysis,
       analysisError,
       analysisScore,
       activeGenerationReadiness,
@@ -5675,6 +5700,20 @@ export default function StudioPage() {
           return;
         }
         setAnalysis(nextAnalysis);
+        // Store the score separately so product readiness can recompute promptly after hydration,
+        // even if other state updates temporarily reset analysis.
+        const v2Score = (nextAnalysis as { scoring_v2?: { score?: unknown } | null } | null)?.scoring_v2?.score;
+        const directScore = (nextAnalysis as { score?: unknown } | null)?.score;
+        const overallScore = (nextAnalysis as { overallScore?: unknown } | null)?.overallScore;
+        const parsedScore =
+          typeof v2Score === "number" && Number.isFinite(v2Score)
+            ? v2Score
+            : typeof directScore === "number" && Number.isFinite(directScore)
+              ? directScore
+              : typeof overallScore === "number" && Number.isFinite(overallScore)
+                ? overallScore
+                : null;
+        setHydratedAnalysisScore(parsedScore);
         setAnalysisError(null);
         console.info("[studio] hydration_succeeded", {
           area: "studio",
@@ -8439,7 +8478,13 @@ export default function StudioPage() {
   // Stale preview suppression must never hide artifacts that are already loaded and renderable.
   // Suppression applies only when artifacts are genuinely missing/unrenderable for this pair.
   const shouldSuppressStalePreview =
-    normalizedArtifacts.shouldSuppressStalePreview && !hasResumeArtifact && !hasCoverLetterArtifact;
+    normalizedArtifacts.shouldSuppressStalePreview &&
+    !hasResumeArtifact &&
+    !hasCoverLetterArtifact &&
+    !resumeState.response &&
+    !coverState.response &&
+    !artifactContract.normalized.resumeResponse &&
+    !artifactContract.normalized.coverLetterResponse;
 
   const normalizedArtifactsTrackedRef = useRef<string | null>(null);
   useEffect(() => {
@@ -8563,7 +8608,7 @@ export default function StudioPage() {
 	        }
 	        afterActions={
 	          <div className="space-y-5">
-	            {isReadySuccessState ? (
+	            {isReadySuccessState || hasGeneratedDocumentPair ? (
 	              <VerifiedGenerationTrustSummary testId="studio-ready-trust-summary" />
 	            ) : null}
 	            {studioFocusPrimary ? (
@@ -11107,7 +11152,7 @@ export default function StudioPage() {
           </>
         ) : (
           <>
-            {!generateNowEligible && !isReadySuccessState ? (
+            {!isReadySuccessState && (!generateNowEligible || isFromUnlock) ? (
 
               <div className="space-y-2" data-testid="studio-ready-secondary-summary">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
@@ -11152,7 +11197,7 @@ export default function StudioPage() {
               </div>
 
               ) : null}
-            {!generateNowEligible && !isReadySuccessState ? (
+            {!isReadySuccessState && (!generateNowEligible || isFromUnlock) ? (
             <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-decision-panel"> 
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Decision + Action</p> 
               {generateNowEligible ? (

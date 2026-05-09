@@ -12,9 +12,11 @@ import {
   type DocumentCritique,
   type DocumentCritiqueIssue,
 } from "@/lib/documentCritique";
+import type { DocumentReadinessState } from "@shared/documentReadinessState";
 
 type Props = {
   critique: DocumentCritique;
+  documentReadinessState: DocumentReadinessState;
   isApplying?: boolean;
   onApplyRecommendation: (
     preset: RefinementPreset,
@@ -34,10 +36,21 @@ function renderIssueSeverity(severity: DocumentCritiqueIssue["severity"]): strin
   return "Lower priority";
 }
 
-export function StudioCritiquePanel({ critique, isApplying, onApplyRecommendation }: Props) {
+function renderAssessmentLabel(critique: DocumentCritique, readiness: DocumentReadinessState): string {
+  if (readiness === "ready") return "ready";
+  if (readiness === "generated_unusable") return "generated_unusable";
+  if (readiness === "failed") return "failed";
+  if (readiness === "missing") return "missing";
+  return critique.overallAssessment;
+}
+
+export function StudioCritiquePanel({ critique, documentReadinessState, isApplying, onApplyRecommendation }: Props) {
   const bestPreset = resolveCritiqueBestNextPreset(critique);
   const hasStrongSignal =
-    critique.overallAssessment === "strong" && critique.topIssues.every((issue) => issue.severity === "low");
+    documentReadinessState === "ready" &&
+    critique.overallAssessment === "strong" &&
+    critique.topIssues.every((issue) => issue.severity === "low");
+  const assessmentLabel = renderAssessmentLabel(critique, documentReadinessState);
 
   return (
     <section
@@ -56,7 +69,7 @@ export function StudioCritiquePanel({ critique, isApplying, onApplyRecommendatio
         </div>
         <div className="text-right">
           <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Assessment</p>
-          <p className="text-2xl font-semibold text-slate-50 capitalize">{critique.overallAssessment}</p>
+          <p className="text-2xl font-semibold text-slate-50 capitalize">{assessmentLabel}</p>
         </div>
       </div>
 

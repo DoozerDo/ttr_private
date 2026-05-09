@@ -303,7 +303,7 @@ describe("target workflow UI", () => {
     render(<WorkspaceRunner baselineId="base-1" jobId="job-1" />);
 
     await screen.findByText("Generation Available");
-    expect(screen.getByRole("link", { name: /Generate/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Open Studio/i })).toBeInTheDocument();
     expect(screen.queryByText(/Document generation is blocked/i)).toBeNull();
     expect(screen.queryByText(/Document generation is not available yet/i)).toBeNull();
     expect(screen.queryByText(/Fit Review Needed/i)).toBeNull();

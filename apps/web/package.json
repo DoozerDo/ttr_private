@@ -19,6 +19,8 @@
     "synthetic:landing": "playwright test --config playwright.config.ts",
     "synthetic:auth": "playwright test --config playwright.config.ts",
     "scan:routes": "node scripts/route-integrity-scan.mjs"
+    ,
+    "test": "node scripts/vitest-test.mjs"
   },
   "dependencies": {
     "framer-motion": "^12.26.2",
