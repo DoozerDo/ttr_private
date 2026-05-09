@@ -127,6 +127,7 @@ import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTeleme
 import { resolveSyntheticCandidateName } from './candidate-name.util';
 import { TargetRolePositioningResolver } from '../positioning/target-role-positioning.resolver';
 import { PositioningPlanService } from '../positioning/positioning-plan.service';
+import { buildAuthoritativeRenderPlan } from '../positioning/authoritative-render-plan';
 import { validateRealCoverLetterDocument } from '../artifacts/realDocumentValidator';
 
 type CoverLetterDraft = {
@@ -1303,7 +1304,9 @@ export class CoverLettersService {
     // not raw baseline section concatenations or uploaded resume text.
     let persisted = (baseline.parsedRecords?.[0] as any)?.resumeV2Json ?? null;
     if (!persisted || typeof persisted !== 'object') {
-      const backfilled = await this.baselineResumeV2BackfillService.backfillLatestIfMissing({ baselineId: baseline.id });
+      const backfilled = this.baselineResumeV2BackfillService
+        ? await this.baselineResumeV2BackfillService.backfillLatestIfMissing({ baselineId: baseline.id })
+        : null;
       persisted = backfilled?.resumeV2Json ?? null;
     }
     if (!persisted || typeof persisted !== 'object') {
@@ -1529,6 +1532,43 @@ export class CoverLettersService {
           traceMap: {},
         };
       } else {
+        const positioningPlan = (() => {
+          try {
+            // When present, use the PositioningPlan as narrative authority for the cover letter renderer.
+            // This must not fabricate evidence: it only constrains which baseline blocks are eligible.
+            const resumeV2Like = {
+              heading: { name: candidateName || 'Candidate', contactLine: '' },
+              experience: (structuredBaseline?.experience ?? []).map((e: any) => ({
+                company: e.company,
+                roleTitle: e.roleTitle,
+                dateRange: e.dates,
+                bullets: e.bullets,
+              })),
+              summary: typeof structuredBaseline?.summary === 'string' ? structuredBaseline.summary : '',
+            } as any;
+            return this.positioningPlanService.buildPlan({
+              job: { title: job?.title ?? null, company: job?.company ?? null, description: job.rawDescription ?? null },
+              resumeV2: resumeV2Like,
+            });
+          } catch {
+            return null;
+          }
+        })();
+        const authoritativeRenderPlan = buildAuthoritativeRenderPlan({
+          positioningPlan,
+          orderedFallbackRoleIds: positioningPlan?.emphasizeRoleIds ?? null,
+          suppressedFallbackRoleIds: positioningPlan?.suppressRoleIds ?? null,
+          allowedEvidenceSnippetIds: allowedBlocks.map((b) => b.id),
+        });
+        if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
+          // eslint-disable-next-line no-console
+          console.log('[DOCGEN][authoritativeRenderPlan]', {
+            orderedRoleIds: authoritativeRenderPlan.orderedRoleIds,
+            suppressedRoleIds: authoritativeRenderPlan.suppressedRoleIds,
+            coverLetterThesis: authoritativeRenderPlan.coverLetterThesis,
+            evidencePriorities: authoritativeRenderPlan.evidencePriorities,
+          });
+        }
         generation = this.generator.generate({
           baselineId: baseline.id,
           jobId: job.id,
@@ -1541,6 +1581,7 @@ export class CoverLettersService {
           safeMode: requestSafeMode,
           complianceConstraints,
           documentStrategyPlan: input.documentStrategyPlan ?? undefined,
+          authoritativeRenderPlan,
           gapAnalysis: {
             strengths: gapInsights.strengths,
             criticalGaps: gapInsights.criticalGaps,
@@ -2372,13 +2413,45 @@ export class CoverLettersService {
     },
     candidateName: string,
   ): CoverLetterQualityResult {
-    const originalText = this.buildNormalizedCoverLetterText(generation);
-    const sanitizedText = this.sanitizeCoverLetterText(originalText);
-    const sanitizedGeneration = this.hydrateGenerationFromText(
-      generation,
-      sanitizedText,
-      candidateName,
-    );
+    const sanitizeParagraph = (value: string) => this.sanitizeCoverLetterText(value);
+    const sanitizedGeneration: CoverLetterGenerationResult = (() => {
+      const document = generation.document;
+      if (!document) {
+        const text = sanitizeParagraph(this.complianceService.normalizeText(generation.content));
+        return this.hydrateGenerationFromText(generation, text, candidateName);
+      }
+      const cleanedDoc = {
+        ...document,
+        salutation: COVER_LETTER_REQUIRED_SALUTATION,
+        opening: sanitizeParagraph(document.opening ?? ''),
+        bodyParagraphs: (document.bodyParagraphs ?? []).map((p) => sanitizeParagraph(String(p ?? ''))).filter(Boolean),
+        closingParagraph: sanitizeParagraph(document.closingParagraph ?? ''),
+        signoff: COVER_LETTER_SIGNOFF,
+        signatureName: this.cleanText(document.signatureName ?? candidateName) || candidateName,
+      };
+      const normalizedContent = [
+        cleanedDoc.salutation,
+        cleanedDoc.opening,
+        ...cleanedDoc.bodyParagraphs,
+        cleanedDoc.closingParagraph,
+        cleanedDoc.signoff,
+        cleanedDoc.signatureName,
+      ]
+        .map((line) => this.cleanText(line))
+        .filter(Boolean)
+        .join('\n\n');
+      return {
+        ...generation,
+        document: cleanedDoc,
+        content: normalizedContent,
+        wordCount: this.countWords(normalizedContent),
+        greeting: COVER_LETTER_REQUIRED_SALUTATION,
+        paragraphs: [cleanedDoc.opening, ...cleanedDoc.bodyParagraphs],
+        closingParagraphs: [cleanedDoc.closingParagraph].filter(Boolean),
+        salutation: COVER_LETTER_REQUIRED_SALUTATION,
+        closing: `${COVER_LETTER_SIGNOFF}\n${cleanedDoc.signatureName}`,
+      };
+    })();
 
     const flags = this.validateCoverLetterQuality(
       sanitizedGeneration,
@@ -2409,12 +2482,8 @@ export class CoverLettersService {
           .map((line) => line.replace(COVER_LETTER_BULLET_PATTERN, '').trim())
           .filter(Boolean)
           .join(' ');
-        if (this.cleanText(current).toLowerCase() !== COVER_LETTER_SIGNOFF.toLowerCase()) {
-          current = current.replace(
-            new RegExp(`\\b${this.escapeRegExp(COVER_LETTER_SIGNOFF)}\\b`, 'gi'),
-            ' ',
-          );
-        }
+        // Always strip signoff tokens from blocks; hydrateGenerationFromText re-inserts a single canonical signoff.
+        current = current.replace(new RegExp(this.escapeRegExp(COVER_LETTER_SIGNOFF), 'gi'), ' ');
         return current;
       })
       .filter(Boolean);
@@ -2455,7 +2524,7 @@ export class CoverLettersService {
 
     const firstLine = paragraphs.shift() ?? COVER_LETTER_REQUIRED_SALUTATION;
     const signoffIndex = paragraphs.findIndex(
-      (line) => line.toLowerCase() === COVER_LETTER_SIGNOFF.toLowerCase(),
+      (line) => this.cleanText(line).toLowerCase() === this.cleanText(COVER_LETTER_SIGNOFF).toLowerCase(),
     );
     let signatureName = candidateName;
     if (signoffIndex >= 0) {
@@ -2470,15 +2539,9 @@ export class CoverLettersService {
     );
     const closingParagraph = paragraphs.pop() ?? generation.document.closingParagraph;
     const bodyParagraphs = paragraphs.slice(0, COVER_LETTER_MAX_BODY_PARAGRAPHS);
-    while (bodyParagraphs.length < COVER_LETTER_MAX_BODY_PARAGRAPHS) {
-      bodyParagraphs.push(
-        this.cleanText(
-          bodyParagraphs.length === 0
-            ? 'That keeps execution aligned with role priorities and measurable outcomes.'
-            : 'Another contribution is practical coordination across teams.',
-        ),
-      );
-    }
+    // Narrative authority: avoid injecting generic filler that dilutes evidence/thesis.
+    // Template generator is responsible for producing fully-populated evidence-grounded paragraphs.
+    // If it fails to do so, quality gates should force regeneration rather than padding.
 
     const document = {
       ...generation.document,

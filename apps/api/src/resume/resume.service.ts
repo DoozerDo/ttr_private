@@ -108,6 +108,7 @@ import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTeleme
 import { sanitizeResumePreviewForStudio } from './resumePreviewSanitizer';
 import { TargetRolePositioningResolver } from '../positioning/target-role-positioning.resolver';
 import { PositioningPlanService } from '../positioning/positioning-plan.service';
+import { buildAuthoritativeRenderPlan } from '../positioning/authoritative-render-plan';
 import { buildAuthoritativeResumeDraftFromResumeV2 } from './resumeTemplateAssembler';
 import { validateRealResumeDocument } from '../artifacts/realDocumentValidator';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
@@ -2440,12 +2441,17 @@ export class ResumeService {
       const suppressedExperienceIds = Array.from(
         new Set([...(positioning.suppressedExperienceIds ?? []), ...(plan.suppressRoleIds ?? [])]),
       );
+      const renderPlan = buildAuthoritativeRenderPlan({
+        positioningPlan: plan,
+        orderedFallbackRoleIds: rankedExperienceIds,
+        suppressedFallbackRoleIds: suppressedExperienceIds,
+        allowedEvidenceSnippetIds: null,
+      });
 
       normalizedDocument = buildAuthoritativeResumeDraftFromResumeV2({
         resumeV2: normalizedDocument as any,
         identity: { name: identityRecord.fullName, contactLine: identityRecord.contactLine, links: identityRecord.links },
-        rankedExperienceIds,
-        suppressedExperienceIds,
+        renderPlan,
         professionalIdentity: positioning.professionalIdentity ?? null,
         targetNarrative: positioning.targetNarrative ?? null,
       }) as any;
@@ -3070,6 +3076,16 @@ export class ResumeService {
             // Use the persisted baseline ResumeV2 model when available; otherwise fall back to the response preview.
             resumeV2: (persistedResumeV2 as any) ?? (response?.preview?.resume as any) ?? {},
           });
+          const plan = (() => {
+            try {
+              return this.positioningPlanService.buildPlan({
+                job: jobForPositioning,
+                resumeV2: (persistedResumeV2 as any) ?? (response?.preview?.resume as any) ?? {},
+              });
+            } catch {
+              return null;
+            }
+          })();
           const baselineIdentity = resolveBaselineIdentity(baseline);
           const identityRecord =
             baselineIdentity && typeof baselineIdentity === 'object'
@@ -3078,8 +3094,12 @@ export class ResumeService {
           const authoritative = buildAuthoritativeResumeDraftFromResumeV2({
             resumeV2: (persistedResumeV2 as any) ?? (response?.preview?.resume as any) ?? {},
             identity: { name: identityRecord.fullName, contactLine: identityRecord.contactLine, links: identityRecord.links },
-            rankedExperienceIds: positioning.prioritizedExperienceIds ?? [],
-            suppressedExperienceIds: positioning.suppressedExperienceIds ?? [],
+            renderPlan: buildAuthoritativeRenderPlan({
+              positioningPlan: plan,
+              orderedFallbackRoleIds: positioning.prioritizedExperienceIds ?? [],
+              suppressedFallbackRoleIds: positioning.suppressedExperienceIds ?? [],
+              allowedEvidenceSnippetIds: null,
+            }),
             professionalIdentity: positioning.professionalIdentity ?? null,
             targetNarrative: positioning.targetNarrative ?? null,
           }) as any;

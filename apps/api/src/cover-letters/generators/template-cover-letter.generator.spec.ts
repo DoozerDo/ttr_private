@@ -11,6 +11,7 @@ import {
 } from './__fixtures__/cover-letter-fixtures';
 import { COVER_LETTER_GENERIC_FILLER_PHRASES } from './cover-letter-writing-contract';
 import { BaselineIncludePolicy, BaselineSectionType } from '../../baseline/baseline-section.entity';
+import { buildAuthoritativeRenderPlan } from '../../positioning/authoritative-render-plan';
 
 describe('TemplateCoverLetterGenerator', () => {
   it('selects role-aligned evidence blocks over weak technical fragments', () => {
@@ -63,6 +64,75 @@ describe('TemplateCoverLetterGenerator', () => {
     expect(result.content).toContain('Director of Support');
     expect(result.content).toContain('ExampleCo');
     expect(result.internalTrace.usedEvidenceIds.some((id) => String(id).startsWith('resume_v2_exp_strong'))).toBe(true);
+    expect(result.internalTrace.usedEvidenceIds.some((id) => String(id).startsWith('resume_v2_exp_weak'))).toBe(false);
+  });
+
+  it('uses AuthoritativeRenderPlan thesis and never leaks suppressed roles', () => {
+    const generator = new TemplateCoverLetterGenerator();
+    const authoritativeRenderPlan = buildAuthoritativeRenderPlan({
+      positioningPlan: {
+        targetRoleFamily: 'support_operations',
+        positioningThesis: 'Service delivery and incident operations leader.',
+        seniorityLevel: 'director',
+        topEvidenceThemes: ['incident response', 'operational process improvement'],
+        emphasizeRoleIds: ['resume_v2_exp_strong'],
+        suppressRoleIds: ['resume_v2_exp_weak'],
+        candidateStrengths: [],
+        candidateRisks: [],
+        summaryStrategy: 'operations_first',
+        resumeStrategy: '',
+        coverLetterStrategy: { openingAngle: 'Service delivery and incident operations leader.', evidenceAlignment: [], riskMitigation: [] },
+        languageTone: 'executive',
+      } as any,
+      orderedFallbackRoleIds: ['resume_v2_exp_strong'],
+      suppressedFallbackRoleIds: ['resume_v2_exp_weak'],
+      allowedEvidenceSnippetIds: ['resume_v2_exp_weak', 'resume_v2_exp_strong'],
+    });
+
+    const result = generator.generate({
+      baselineId: 'base-1',
+      jobId: 'job-1',
+      allowedBaselineBlocks: [
+        {
+          id: 'resume_v2_exp_weak',
+          title: 'Vue 3 contractor fragment',
+          content: ['Vue 3), deck builder frontend | Contractor | 2022 - 2023', '- Built UI components.'].join('\n'),
+          includePolicy: BaselineIncludePolicy.OPTIONAL,
+          order: 1000,
+          sectionType: BaselineSectionType.EXPERIENCE,
+        } as any,
+        {
+          id: 'resume_v2_exp_strong',
+          title: 'Acme â€” Director of Support',
+          content: [
+            'Acme | Director of Support | 2020 - 2024',
+            '- Led support operations and improved incident response quality through repeatable playbooks.',
+            '- Partnered cross-functionally to reduce escalation friction and improve stakeholder updates.',
+          ].join('\n'),
+          includePolicy: BaselineIncludePolicy.OPTIONAL,
+          order: 2000,
+          sectionType: BaselineSectionType.EXPERIENCE,
+        } as any,
+      ],
+      job: {
+        id: 'job-1',
+        title: 'Director of Support',
+        company: 'ExampleCo',
+        responsibilities: ['Own support operations', 'Drive incident response'],
+        requirements: ['Cross-functional leadership'],
+      },
+      candidateName: 'Alex Candidate',
+      closingTemplate: null,
+      maxWords: 320,
+      tone: null,
+      safeMode: true,
+      complianceConstraints: null,
+      documentStrategyPlan: undefined,
+      authoritativeRenderPlan,
+      gapAnalysis: { strengths: ['support operations'], criticalGaps: [] },
+    } as any);
+
+    expect(result.document.opening).toMatch(/Service delivery and incident operations leader/i);
     expect(result.internalTrace.usedEvidenceIds.some((id) => String(id).startsWith('resume_v2_exp_weak'))).toBe(false);
   });
 

@@ -10,6 +10,7 @@ import {
   type ResumeTemplateIdentityLike,
 } from './resumeTemplateAssembler';
 import { PositioningPlanService } from '../positioning/positioning-plan.service';
+import { buildAuthoritativeRenderPlan } from '../positioning/authoritative-render-plan';
 import { formatResumeV2InvalidMessage, validateNormalizedResumeDocument } from './resume-normalization';
 import {
   validateResumeArtifactQualityStrict,
@@ -717,9 +718,12 @@ export function buildDeterministicResumeV2FromBaseline(input: {
   const authoritative = buildAuthoritativeResumeDraftFromResumeV2({
     resumeV2: repairedStructure as any,
     identity: input.identity,
-    rankedExperienceIds: plan.emphasizeRoleIds ?? [],
-    suppressedExperienceIds: Array.from(new Set([...(suppressedExperienceIds ?? []), ...(plan.suppressRoleIds ?? [])])),
-    positioningPlan: plan,
+    renderPlan: buildAuthoritativeRenderPlan({
+      positioningPlan: plan,
+      orderedFallbackRoleIds: plan.emphasizeRoleIds ?? [],
+      suppressedFallbackRoleIds: Array.from(new Set([...(suppressedExperienceIds ?? []), ...(plan.suppressRoleIds ?? [])])),
+      allowedEvidenceSnippetIds: null,
+    }),
     professionalIdentity: input.job?.title ? `${trimToText(input.job.title)}` : null,
     targetNarrative: input.job?.company ? `Targeting ${trimToText(input.job.company)}.` : null,
   });

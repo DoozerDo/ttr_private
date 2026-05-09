@@ -1,5 +1,6 @@
 import type { NormalizedResumeDocument } from '../documents/normalized-document.models';
 import type { StructuredBaseline } from '../baseline/structuredBaselineExtractor';
+import type { AuthoritativeRenderPlan } from '../positioning/authoritative-render-plan';
 
 export type ResumeTemplateIdentityLike = {
   name?: unknown;
@@ -220,15 +221,7 @@ function ensureSummaryMinimum(summary: string, fallbackFromExperience: Array<{ r
 export function buildAuthoritativeResumeDraftFromResumeV2(input: {
   resumeV2: NormalizedResumeDocument;
   identity: ResumeTemplateIdentityLike;
-  rankedExperienceIds: string[];
-  suppressedExperienceIds?: string[];
-  positioningPlan?: {
-    emphasizeRoleIds?: string[];
-    suppressRoleIds?: string[];
-    positioningThesis?: string;
-    summaryStrategy?: string;
-    topEvidenceThemes?: string[];
-  } | null;
+  renderPlan: AuthoritativeRenderPlan;
   professionalIdentity?: string | null;
   targetNarrative?: string | null;
 }): NormalizedResumeDocument {
@@ -236,21 +229,19 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
   const idToEntry = new Map<string, any>();
   baselineExperience.forEach((entry, index) => idToEntry.set(`resume_v2_exp_${index}`, entry));
 
-  const suppressed = new Set((input.suppressedExperienceIds ?? []).map((id) => String(id ?? '')));
-  const planSuppressed = new Set((input.positioningPlan?.suppressRoleIds ?? []).map((id) => String(id ?? '')));
-  const ranked = (input.rankedExperienceIds ?? []).map((id) => String(id ?? '')).filter(Boolean);
-  const planEmphasize = (input.positioningPlan?.emphasizeRoleIds ?? []).map((id) => String(id ?? '')).filter(Boolean);
-  const strictPlanMode = planEmphasize.length > 0;
+  const suppressed = new Set((input.renderPlan?.suppressedRoleIds ?? []).map((id) => String(id ?? '')));
+  const ranked = (input.renderPlan?.orderedRoleIds ?? []).map((id) => String(id ?? '')).filter(Boolean);
+  const strictPlanMode = ranked.length > 0;
 
   const selected = (() => {
     if (strictPlanMode) {
       // Single render authority: when a positioning plan provides emphasizeRoleIds,
       // the preview must render ONLY those roles, in that exact order.
-      const planned = planEmphasize
+      const planned = ranked
         .map((id) => ({ id, entry: idToEntry.get(id) }))
         .filter((x) => x.entry)
         .filter((x) => !suppressed.has(x.id))
-        .filter((x) => !planSuppressed.has(x.id));
+        .filter((x) => !suppressed.has(x.id));
 
       const weakInPlan = planned.filter((x) =>
         isWeakFragmentRole({ company: x.entry?.company, roleTitle: x.entry?.roleTitle }),
@@ -263,18 +254,14 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
       return planned;
     }
 
-    const primary = ranked
-      .map((id) => ({ id, entry: idToEntry.get(id) }))
-      .filter((x) => x.entry)
-      .filter((x) => !suppressed.has(x.id));
-
-    const weakFiltered = primary.filter((x) => !isWeakFragmentRole({ company: x.entry?.company, roleTitle: x.entry?.roleTitle }));
-    const winners = (weakFiltered.length ? weakFiltered : primary).slice(0, 4);
-    if (winners.length === 0) {
-      const fallback = baselineExperience.map((entry, index) => ({ id: `resume_v2_exp_${index}`, entry }));
-      return fallback.slice(0, 2);
-    }
-    return winners;
+    // Fallback: if no explicit role order is available, render a conservative subset of baseline roles
+    // while still enforcing suppression/weak-fragment filtering.
+    const fallback = baselineExperience.map((entry, index) => ({ id: `resume_v2_exp_${index}`, entry }));
+    const allowed = fallback.filter((x) => x.entry).filter((x) => !suppressed.has(x.id));
+    const weakFiltered = allowed.filter(
+      (x) => !isWeakFragmentRole({ company: x.entry?.company, roleTitle: x.entry?.roleTitle }),
+    );
+    return (weakFiltered.length ? weakFiltered : allowed).slice(0, 4);
   })();
 
   const selectedExperience = selected.map((x) => {
@@ -295,7 +282,7 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
             ? [
                 expanded[0],
                 ensureSentence(
-                  `${expanded[0].replace(/[.!?]\s*$/g, '').trim()} with clear ownership, prioritization, and measurable follow through`,
+                  `${expanded[0].replace(/[.!?]\\s*$/g, '').trim()} with clear ownership, prioritization, and measurable follow through`,
                 ),
                 ensureSentence('Delivered consistent execution by clarifying priorities and maintaining a steady operating rhythm'),
               ]
@@ -322,13 +309,30 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
   const positioningSummary = (() => {
     const pro = trimToText(input.professionalIdentity ?? '');
     const narrative = trimToText(input.targetNarrative ?? '');
-    const thesis = trimToText(input.positioningPlan?.positioningThesis ?? '');
+    const thesis = trimToText(input.renderPlan?.summaryNarrative ?? '');
     if (thesis) return thesis;
     if (!pro && !narrative) return '';
     return `${pro ? `${pro}.` : ''} ${narrative}`.trim();
   })();
 
   const summary = ensureSummaryMinimum(positioningSummary || trimToText((input.resumeV2 as any)?.summary ?? ''), finalExperience as any);
+  if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
+    try {
+      const renderedRoleIds = selected.map((x) => x.id);
+      const suppressed = new Set((input.renderPlan?.suppressedRoleIds ?? []).map((id) => String(id ?? '')));
+      const leakedRoleIds = renderedRoleIds.filter((id) => suppressed.has(id));
+      // eslint-disable-next-line no-console
+      console.log('[DOCGEN][resume_render_authority]', {
+        authoritativeRenderPlan: input.renderPlan,
+        renderedRoleIds,
+        leakedRoleIds,
+        suppressedRoleLeakDetected: leakedRoleIds.length > 0,
+        renderedSummarySource: input.renderPlan?.summaryNarrative ? 'authoritative_render_plan' : 'fallback',
+      });
+    } catch {
+      // ignore
+    }
+  }
 
   return {
     heading: {

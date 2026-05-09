@@ -95,7 +95,10 @@ describe('artifactQualityValidator', () => {
 
     const repaired = repairCoverLetterForQuality(paragraphs, gate);
     const repairedGate = validateCoverLetterArtifactQuality(repaired);
-    expect(repairedGate.status).toBe('pass');
+    // Repair should remove the banned phrase, but must not imply overall pass when the document is still
+    // structurally insufficient (e.g., too short / missing required paragraph structure).
+    expect(repairedGate.reasons.some((reason) => reason.includes('operating context'))).toBe(false);
+    expect(repairedGate.status).toBe('needs_refinement');
   });
 
   it('double failure remains flagged', () => {

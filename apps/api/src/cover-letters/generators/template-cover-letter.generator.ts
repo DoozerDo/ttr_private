@@ -169,10 +169,33 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     const baselineBlocks = this.normalizeBlocks(input.allowedBaselineBlocks);
     const candidateName = this.cleanText(input.candidateName) || 'Candidate';
 
-    const allEvidence = this.collectEvidenceUnits(
+    let allEvidence = this.collectEvidenceUnits(
       baselineBlocks,
       input.complianceConstraints,
     );
+    const renderPlan = input.authoritativeRenderPlan ?? null;
+    if (renderPlan?.orderedRoleIds?.length) {
+      const allowedBlockIds = new Set(
+        renderPlan.orderedRoleIds.map((id) => String(id ?? '').trim()).filter(Boolean),
+      );
+      const suppressedBlockIds = new Set(
+        (renderPlan.suppressedRoleIds ?? []).map((id) => String(id ?? '').trim()).filter(Boolean),
+      );
+      const explicitAllowedSnippetBlockIds = new Set(
+        (renderPlan.allowedEvidenceSnippetIds ?? [])
+          .map((id) => String(id ?? '').trim())
+          .filter(Boolean)
+          .map((id) => id.split(':')[0] ?? id),
+      );
+      allEvidence = allEvidence.filter((evidence) => {
+        const id = String((evidence as any)?.id ?? '');
+        const blockId = id.split(':')[0] ?? '';
+        if (!blockId) return true;
+        if (suppressedBlockIds.has(blockId)) return false;
+        if (allowedBlockIds.size === 0) return true;
+        return allowedBlockIds.has(blockId) || explicitAllowedSnippetBlockIds.has(blockId);
+      });
+    }
     const selectedEvidence = this.selectEvidenceUnits(
       allEvidence,
       normalizedJob,
@@ -333,7 +356,11 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     const title = normalizedJob.title ?? roleDescriptor;
     const companyLine = normalizedJob.company ? ` at ${normalizedJob.company}` : '';
     const opening = this.joinSentences([
-      this.ensureSentence(`I am applying for the ${title}${companyLine}.`),
+      this.ensureSentence(
+        renderPlan?.coverLetterThesis
+          ? String(renderPlan.coverLetterThesis)
+          : `I am applying for the ${title}${companyLine}.`,
+      ),
       ...(themeAnchorSentence ? [themeAnchorSentence] : []),
       this.ensureSentence(
         `I have led work where ${roleProblem.variants[0]} and ${roleProblem.variants[1]} determined whether teams could deliver consistent results.`,
@@ -387,6 +414,19 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       signoff: COVER_LETTER_SIGNOFF,
       signatureName: candidateName,
     };
+    if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
+      try {
+        const renderedEvidenceSnippetIds = Array.from(usedEvidenceIds);
+        // eslint-disable-next-line no-console
+        console.log('[DOCGEN][cover_letter_render_authority]', {
+          authoritativeRenderPlan: renderPlan,
+          coverLetterNarrativeSource: renderPlan?.coverLetterThesis ? 'authoritative_render_plan' : 'default_generator',
+          renderedEvidenceSnippetIds,
+        });
+      } catch {
+        // ignore
+      }
+    }
 
     const paragraphEvidenceMetadata: CoverLetterGenerationResult['paragraphEvidence'] = [
       {

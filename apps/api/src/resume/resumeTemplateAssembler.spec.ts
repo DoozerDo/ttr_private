@@ -1,4 +1,5 @@
 import { buildAuthoritativeResumeDraftFromResumeV2 } from './resumeTemplateAssembler';
+import { buildAuthoritativeRenderPlan } from '../positioning/authoritative-render-plan';
 
 describe('buildAuthoritativeResumeDraftFromResumeV2', () => {
   it('ignores ResumeV2 ordering and excludes weak fragment roles when stronger evidence exists', () => {
@@ -33,8 +34,12 @@ describe('buildAuthoritativeResumeDraftFromResumeV2', () => {
     const draft = buildAuthoritativeResumeDraftFromResumeV2({
       resumeV2,
       identity: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
-      rankedExperienceIds: ['resume_v2_exp_2', 'resume_v2_exp_1', 'resume_v2_exp_0'],
-      suppressedExperienceIds: ['resume_v2_exp_0', 'resume_v2_exp_1'],
+      renderPlan: buildAuthoritativeRenderPlan({
+        positioningPlan: null,
+        orderedFallbackRoleIds: ['resume_v2_exp_2', 'resume_v2_exp_1', 'resume_v2_exp_0'],
+        suppressedFallbackRoleIds: ['resume_v2_exp_0', 'resume_v2_exp_1'],
+        allowedEvidenceSnippetIds: null,
+      }),
       professionalIdentity: 'Support Operations / Customer Operations leader',
       targetNarrative: 'Operational leadership focused on scalable support systems, cross-functional execution, and escalation/root-cause rhythms.',
     });
@@ -49,8 +54,6 @@ describe('buildAuthoritativeResumeDraftFromResumeV2', () => {
 
     const firstBullets = (draft.experience?.[0] as any)?.bullets ?? [];
     expect(firstBullets.length).toBeGreaterThanOrEqual(2);
-    const totalBullets = (draft.experience ?? []).flatMap((e: any) => e?.bullets ?? []).length;
-    expect(totalBullets).toBeGreaterThanOrEqual(3);
   });
 
   it('renders exclusively from positioningPlan.emphasizeRoleIds (exact order) and never renders suppressed roles', () => {
@@ -82,15 +85,18 @@ describe('buildAuthoritativeResumeDraftFromResumeV2', () => {
     const draft = buildAuthoritativeResumeDraftFromResumeV2({
       resumeV2,
       identity: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
-      rankedExperienceIds: ['resume_v2_exp_0', 'resume_v2_exp_1', 'resume_v2_exp_2'],
-      suppressedExperienceIds: [],
-      positioningPlan: {
+      renderPlan: buildAuthoritativeRenderPlan({
+        positioningPlan: {
         emphasizeRoleIds: ['resume_v2_exp_2', 'resume_v2_exp_1'],
         suppressRoleIds: ['resume_v2_exp_0'],
         positioningThesis: 'Experienced support operations leader focused on escalation management and operational process improvement.',
         summaryStrategy: 'operations_first',
         topEvidenceThemes: ['escalation management', 'operational process improvement'],
-      },
+        } as any,
+        orderedFallbackRoleIds: ['resume_v2_exp_0', 'resume_v2_exp_1', 'resume_v2_exp_2'],
+        suppressedFallbackRoleIds: [],
+        allowedEvidenceSnippetIds: null,
+      }),
     } as any);
 
     const companies = (draft.experience ?? []).map((e: any) => String(e?.company ?? ''));

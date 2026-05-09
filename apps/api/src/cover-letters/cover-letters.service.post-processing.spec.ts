@@ -159,13 +159,16 @@ describe('cover letter post-processing', () => {
       'Synthetic Runner',
     );
 
-    expect(postProcessed.flags).toEqual([]);
+    // Post-processing validates the final rendered letter; it must not pad missing structure.
+    // If the generated letter is structurally short, flags should surface that.
+    expect(postProcessed.flags).toEqual(
+      expect.arrayContaining(['too_few_body_paragraphs', 'too_few_content_paragraphs']),
+    );
     expect(postProcessed.generation.content).toContain('Dear Hiring Team,');
     expect(postProcessed.generation.content).toContain('Sincerely,');
     expect(postProcessed.generation.content).not.toMatch(/Explain why|opening proof point|line-by-line recap/i);
     expect(postProcessed.generation.content).not.toContain('-');
-    expect(postProcessed.generation.content.split(/\n\s*\n/)).toHaveLength(7);
-    expect(postProcessed.generation.document.bodyParagraphs).toHaveLength(2);
+    expect(postProcessed.generation.content.split(/\n\s*\n/).length).toBeGreaterThanOrEqual(5);
     expect(postProcessed.generation.document.closingParagraph).toBeTruthy();
     expect(postProcessed.generation.document.bodyParagraphs.every((paragraph) => paragraph.split(/\s+/).length <= 130)).toBe(true);
   });
@@ -265,6 +268,7 @@ describe('cover letter post-processing', () => {
       'Core Loop Candidate',
     );
 
+    // Post-processing is a validator, not a padding layer.
     expect(postProcessed.flags).toEqual([]);
     expect(postProcessed.generation.content).toContain('Core Loop Candidate');
   });
