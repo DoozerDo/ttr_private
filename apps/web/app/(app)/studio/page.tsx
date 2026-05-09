@@ -5699,21 +5699,23 @@ export default function StudioPage() {
           });
           return;
         }
-        setAnalysis(nextAnalysis);
         // Store the score separately so product readiness can recompute promptly after hydration,
         // even if other state updates temporarily reset analysis.
+        const coerceScore = (value: unknown): number | null => {
+          if (typeof value === "number" && Number.isFinite(value)) return value;
+          if (typeof value === "string") {
+            const trimmed = value.trim();
+            if (!trimmed) return null;
+            const parsed = Number(trimmed);
+            return Number.isFinite(parsed) ? parsed : null;
+          }
+          return null;
+        };
         const v2Score = (nextAnalysis as { scoring_v2?: { score?: unknown } | null } | null)?.scoring_v2?.score;
         const directScore = (nextAnalysis as { score?: unknown } | null)?.score;
         const overallScore = (nextAnalysis as { overallScore?: unknown } | null)?.overallScore;
-        const parsedScore =
-          typeof v2Score === "number" && Number.isFinite(v2Score)
-            ? v2Score
-            : typeof directScore === "number" && Number.isFinite(directScore)
-              ? directScore
-              : typeof overallScore === "number" && Number.isFinite(overallScore)
-                ? overallScore
-                : null;
-        setHydratedAnalysisScore(parsedScore);
+        setHydratedAnalysisScore(coerceScore(v2Score) ?? coerceScore(directScore) ?? coerceScore(overallScore) ?? null);
+        setAnalysis(nextAnalysis);
         setAnalysisError(null);
         console.info("[studio] hydration_succeeded", {
           area: "studio",
