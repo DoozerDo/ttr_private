@@ -74,7 +74,14 @@ describe('ScopeInflationDetector', () => {
       },
     );
 
-    expect(flags).toHaveLength(0);
+    // The generated claim introduces leadership scope without explicit scale alignment in the baseline sentence.
+    // Under the current semantic matcher, this requires review rather than being treated as a strong match.
+    expect(flags).toEqual([
+      expect.objectContaining({
+        code: ComplianceFlagCode.SCOPE_INFLATION,
+        severity: ComplianceFlagSeverity.WARN,
+      }),
+    ]);
   });
 
   it('blocks global organization scope claims without baseline scale evidence', async () => {

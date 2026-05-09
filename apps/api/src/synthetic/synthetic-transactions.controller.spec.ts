@@ -11,7 +11,7 @@ describe('SyntheticTransactionsController', () => {
     const controller = new SyntheticTransactionsController(runner);
     const result = await controller.runCoreLoopSmoke();
 
-    expect(runner.runCoreLoopSmoke).toHaveBeenCalledWith('manual');
+    expect(runner.runCoreLoopSmoke).toHaveBeenCalledWith('manual', '');
     expect(result).toEqual({ status: 'succeeded' });
   });
 });

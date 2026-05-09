@@ -73,7 +73,11 @@ describe('Opportunities simple engine', () => {
       dateCreated: new Date(),
       updatedAt: new Date(),
       lastStatusChange: new Date(),
+      savedGenerationCompleted: true,
     });
+
+    const ready = await service.updateOpportunity('opp-1', 'user-1', { status: 'ready_to_apply' });
+    expect(ready.status).toBe(OpportunityStatus.SAVED);
 
     const updated = await service.updateOpportunity('opp-1', 'user-1', { status: 'applied' });
     expect(updated.status).toBe(OpportunityStatus.APPLIED);

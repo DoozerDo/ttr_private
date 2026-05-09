@@ -28,9 +28,10 @@ export function buildAuthoritativeRenderPlan(input: {
   const orderedRoleIds = toIds(plan?.emphasizeRoleIds).length
     ? toIds(plan?.emphasizeRoleIds)
     : toIds(input.orderedFallbackRoleIds);
-  const suppressedRoleIds = Array.from(
+  const suppressedRoleIdsRaw = Array.from(
     new Set([...toIds(input.suppressedFallbackRoleIds), ...toIds(plan?.suppressRoleIds)]),
   );
+  const suppressedRoleIds = suppressedRoleIdsRaw.filter((id) => !orderedRoleIds.includes(id));
 
   const summaryNarrative =
     typeof plan?.positioningThesis === 'string' && plan.positioningThesis.trim()
@@ -55,4 +56,3 @@ export function buildAuthoritativeRenderPlan(input: {
     sources: { positioningPlan: Boolean(plan) },
   };
 }
-
