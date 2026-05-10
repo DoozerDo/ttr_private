@@ -7,6 +7,21 @@ import { getCharCount, safeSnippet, sha256 } from '../common/text-metrics';
 import { getCapabilityClusterRegistry } from '../scoring-v2/config/capability-clusters';
 import { extractCapabilityClusters } from '../scoring-v2/extractors/capability-cluster-extractor';
 
+/**
+ * AUTHORITY: Canonical CX Fit scoring implementation (v2).
+ *
+ * - This module owns the deterministic scoring logic and debug bundle shape.
+ * - Runtime scoring MUST flow through orchestration layers (typically `AnalysisService` for
+ *   authenticated requests) so that input normalization, persistence, compliance/audit, and
+ *   logging stay consistent.
+ *
+ * Allowed direct callers (intentional bypasses):
+ * - `PreviewCanonicalFitScoreService` (public preview; constrained inputs; no persistence/audit)
+ * - `RealityCheckService` (special-case; must be reviewed before any additional use)
+ *
+ * If you are about to import `scoreCxFitV2` in a new runtime service/controller, stop and route
+ * through the canonical orchestration path instead.
+ */
 type BaselineSection = { type?: string; content: string };
 
 export type CxFitV2Metadata = {

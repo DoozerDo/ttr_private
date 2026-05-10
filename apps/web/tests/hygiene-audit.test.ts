@@ -13,6 +13,7 @@ describe("hygiene audit", () => {
 
     await fs.writeFile(path.join(repoRoot, "src", "components", "old.copy.tsx"), "export const OldCopy = 1;");
     await fs.writeFile(path.join(repoRoot, "apps", "web", "app", "legacy", "page.tsx"), "export default function Page(){return null;}");
+    // This creates a fixture import path inside the temporary repo (it is not an import in this test file).
     await fs.writeFile(path.join(repoRoot, "src", "index.ts"), "export * from './components/old.copy';");
 
     const now = new Date("2026-04-04T00:00:00.000Z");

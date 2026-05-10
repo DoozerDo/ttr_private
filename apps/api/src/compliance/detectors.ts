@@ -16,6 +16,17 @@ import { ResumeLineType } from './resume-line-classifier';
 import { isOperationalDescriptor, type EntityType } from './claim-units';
 import { isObviouslyInvalidTechnologyToken } from './technology-token-guard';
 
+/**
+ * AUTHORITY: Compliance detector rule source-of-truth.
+ *
+ * All compliance rule implementations must live in this module (and supporting helpers under
+ * `apps/api/src/compliance/*`). Runtime code must not duplicate detector logic elsewhere.
+ *
+ * Execution boundary:
+ * - Detectors are executed via `ComplianceService` (e.g. `validateAndAudit`, `detectScopeInflation`,
+ *   `enforceResumeWritingRules`).
+ * - Controllers/services should depend on `ComplianceService` instead of importing detectors directly.
+ */
 type DetectorPayload = {
   baselineSections?: ComplianceTextSection[] | null;
   generatedSections?: ComplianceTextSection[] | null;

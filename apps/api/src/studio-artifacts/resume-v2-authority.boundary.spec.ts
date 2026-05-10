@@ -21,7 +21,7 @@ function createRepository<T extends object>(initial?: Partial<T> | null) {
   };
 }
 
-describe('Persisted ResumeV2 authority boundary (regression guardrail)', () => {
+describe('Persisted resume generation authority boundary (regression guardrail)', () => {
   const baselineId = 'baseline-1';
   const baselineVersionId = 'baseline-version-1';
   const jobId = 'job-1';

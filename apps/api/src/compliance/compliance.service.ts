@@ -69,6 +69,12 @@ export type ValidateAndAuditResult = {
   };
 };
 
+/**
+ * AUTHORITY: Compliance execution + audit persistence.
+ *
+ * Rule definitions live in `detectors.ts` + `compliance.types.ts`.
+ * All runtime consumers should call `ComplianceService` APIs rather than importing detectors directly.
+ */
 @Injectable()
 export class ComplianceService {
   private readonly scopeInflationDetector = new ScopeInflationDetector();

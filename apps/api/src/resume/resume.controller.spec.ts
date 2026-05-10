@@ -165,6 +165,61 @@ describe('ResumeController tier gating', () => {
     expect(result.debugTrace.selectedEvidence).toEqual(['e1']);
   });
 
+  it('routes POST /resume (alias) through the same generation service handler as POST /resume/generate', async () => {
+    const request = buildRequest(SubscriptionTier.FREE);
+
+    resumeService.generateResume.mockResolvedValueOnce({
+      ok: true,
+      status: 'success',
+      generationStatus: 'success',
+      exportReady: true,
+      blocked: false,
+      baselineId: 'baseline-1',
+      baselineVersionId: 'version-1',
+      jobId: 'job-1',
+      sections: [],
+      compliance_flags: [],
+      compliance_blocked: false,
+      audit_id: 'audit-1',
+      auditId: 'audit-1',
+      baseline_version_hash: 'hash-1',
+      quality: 'draft',
+      traceMap: { opening: ['e1'] },
+      debugTrace: {
+        passed: true,
+        failures: [],
+        traceCoverage: 100,
+        unusedEvidence: [],
+        selectedEvidence: ['e1'],
+      },
+      exports: { docx: false, pdf: false },
+      preview: { resume: null },
+      trackerEntryId: null,
+      trackerStatus: null,
+      opportunityId: null,
+      claimRiskSummary: null,
+      gapAnalysis: null,
+      gapGuidance: null,
+      display: { title: '', description: '', reasons: [], cta: { label: '', href: '' } },
+      safeDisplay: { title: '', description: '', reasons: [], cta: { label: '', href: '' } },
+      internal: {},
+    });
+
+    const result = await controller.createResumeRequest(
+      {
+        baselineId: 'baseline-1',
+        baselineVersionId: 'version-1',
+        jobId: 'job-1',
+        analysisId: 'analysis-1',
+      },
+      request,
+    );
+
+    expect(resumeService.generateResume).toHaveBeenCalledTimes(1);
+    expect(result.traceMap).toEqual({ opening: ['e1'] });
+    expect(result.debugTrace.selectedEvidence).toEqual(['e1']);
+  });
+
   it('blocks FREE tier resume export with TIER_REQUIRED', async () => {
     const request = buildRequest(SubscriptionTier.FREE);
     const res = buildResponse();

@@ -35,17 +35,42 @@ type Metric = { type: 'percentage' | 'currency' | 'count'; value: string };
 export class BaselineIngestionService {
   private readonly logger = new Logger(BaselineIngestionService.name);
 
+  /**
+   * AUTHORITY: Baseline parsing + canonical normalization orchestrator.
+   *
+   * `BaselineParserService` supports multiple strategies (`rules` vs `llm`). Strategy selection
+   * must remain centralized here to prevent competing baseline truth across controllers/services.
+   *
+   * Current behavior: parsing uses the default parser strategy (rules) by calling `parseBaseline(rawText)`
+   * with no strategy override.
+   */
   constructor(
     private readonly baselineParser: BaselineParserService,
     private readonly baselineTextExtractor: BaselineTextExtractor,
     private readonly criticalFlowTrackerService?: CriticalFlowTrackerService,
   ) {}
 
+  /**
+   * Production baseline parsing strategy.
+   *
+   * Current policy is explicitly `rules` to avoid hidden strategy switching in production.
+   * A future, config-owned policy may allow `llm`, but that decision must remain centralized here.
+   */
+  private getBaselineParseStrategy(): 'rules' | 'llm' {
+    return 'rules';
+  }
+
+  private parseBaselineWithPolicy(rawText: string): ParsedSection[] {
+    return this.baselineParser.parseBaseline(rawText, {
+      strategy: this.getBaselineParseStrategy(),
+    });
+  }
+
   async ingest(file: Express.Multer.File): Promise<BaselineIngestionResult> {
     try {
       const sourceFormat = this.detectFormat(file);
       const rawText = await this.baselineTextExtractor.extractText(file);
-      const parsedSections = this.baselineParser.parseBaseline(rawText);
+      const parsedSections = this.parseBaselineWithPolicy(rawText);
       const canonical = this.buildCanonical(rawText, parsedSections);
       this.logger.debug(`Baseline ingested (${sourceFormat})`);
       void this.criticalFlowTrackerService?.recordCriticalFlowEvent({
@@ -81,7 +106,7 @@ export class BaselineIngestionService {
     rawText: string,
     sourceFormat: BaselineSourceFormat,
   ): Promise<BaselineIngestionResult> {
-    const parsedSections = this.baselineParser.parseBaseline(rawText);
+    const parsedSections = this.parseBaselineWithPolicy(rawText);
     const canonical = this.buildCanonical(rawText, parsedSections);
     return { rawText, parsedSections, canonical, sourceFormat };
   }

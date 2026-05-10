@@ -21,6 +21,18 @@ interface HeadingMatch {
 
 @Injectable()
 export class BaselineParserService {
+  /**
+   * AUTHORITY: Baseline parsing implementation.
+   *
+   * This service supports multiple parsing strategies (`rules` vs `llm`) and therefore represents
+   * a baseline-truth authority boundary.
+   *
+   * Orchestration boundary:
+   * - Production callers should route through `BaselineIngestionService`, which owns if/when a
+   *   non-default parse strategy is selected.
+   * - Controllers and unrelated services must not select parse strategy directly, to avoid
+   *   competing baseline truth across the system.
+   */
   parseBaseline(
     rawText: string,
     opts: { strategy?: ParseStrategy } = {},

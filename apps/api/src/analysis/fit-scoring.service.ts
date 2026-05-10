@@ -4,6 +4,12 @@ import {
   FitScoreEngine,
   FitScoreInputError,
 } from '../scoring/fit-score/fit-score.engine';
+import {
+  computeConfidenceScore,
+  scoreCxFitV2,
+  type CxFitV2DebugInfo,
+  type CxFitV2Result,
+} from './cx-fit-scoring-v2';
 import type {
   DimensionWeightOverrides as FitScoreDimensionWeightOverrides,
   FitScoreDimensionScores,
@@ -18,8 +24,24 @@ import {
 } from '../jobs/linkedin-sanitize';
 import { CriticalFlowEventType, CriticalFlowTrackerService } from '../support/critical-flow-tracker.service';
 
+/**
+ * AUTHORITY: Fit scoring orchestration layer (authenticated flows).
+ *
+ * This service exists to provide a single, well-typed entrypoint for scoring that can:
+ * - Normalize inputs (including canonical job text handling)
+ * - Apply consistent weight overrides / additions logic
+ * - Centralize scoring-related compliance flags
+ *
+ * Boundary:
+ * - Public preview scoring intentionally bypasses this service (see `PreviewCanonicalFitScoreService`).
+ * - The canonical CX Fit v2 implementation lives in `cx-fit-scoring-v2.ts`.
+ *
+ * If you need an authenticated score, prefer `AnalysisService` orchestration rather than calling
+ * lower-level scoring implementations directly.
+ */
 export type FitScoringInput = FitScoreInput;
 export type DimensionWeightOverrides = FitScoreDimensionWeightOverrides;
+export type { CxFitV2Result, CxFitV2DebugInfo };
 
 export type FitScoringResult = Omit<FitScoreResult, 'verdict'> & {
   verdict: FitScoreVerdictLabel;
@@ -224,5 +246,27 @@ export class FitScoringService {
     sourceUrl?: string | null,
   ) {
     return this.computeComplianceFlags(jobText, baselineText, sourceUrl);
+  }
+
+  /**
+   * AUTHORITY FACADE: Canonical CX Fit v2 scoring for authenticated flows.
+   *
+   * This method exists so authenticated orchestration layers (e.g. `AnalysisService`) do not import
+   * `scoreCxFitV2` directly. Behavior must remain identical to a direct call to `scoreCxFitV2`.
+   */
+  scoreCxFitV2Authenticated(
+    input: Parameters<typeof scoreCxFitV2>[0],
+    options?: Parameters<typeof scoreCxFitV2>[1],
+  ): CxFitV2Result {
+    return scoreCxFitV2(input, options);
+  }
+
+  /**
+   * AUTHORITY FACADE: Canonical confidence scoring for authenticated flows.
+   *
+   * Wrapper to avoid direct `computeConfidenceScore` imports in orchestration layers.
+   */
+  computeCxFitV2ConfidenceScore(debug: CxFitV2DebugInfo) {
+    return computeConfidenceScore(debug);
   }
 }

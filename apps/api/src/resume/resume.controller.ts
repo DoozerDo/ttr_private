@@ -92,6 +92,17 @@ export class ResumeController {
     );
   }
 
+  /**
+   * ROUTE ALIAS (legacy compatibility):
+   *
+   * `POST /resume` is an alias of `POST /resume/generate`.
+   *
+   * Canonical route: `POST /resume/generate`
+   * Alias route: `POST /resume`
+   *
+   * Keep both routing through the same handler/service to avoid divergent generation authority.
+   * Do not add additional resume generation routes without an explicit deprecation plan.
+   */
   @Post()
   @HttpCode(HttpStatus.OK)
   async createResumeRequest(

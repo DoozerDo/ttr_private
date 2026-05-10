@@ -40,8 +40,15 @@ export class FitAssessment {
   baselineVersion!: number | null;
 
   /**
-   * Canonical overall score. As of scoring_contract_v1 / cx-fit-scoring-v2,
-   * this should represent the final CX Fit Score (0-100).
+   * Canonical overall score (0-100).
+   *
+   * Authority notes:
+   * - Canonical implementation: `apps/api/src/analysis/cx-fit-scoring-v2.ts`
+   * - Contract snapshot: `apps/api/src/scoring/contracts/scoring_contract_v1.json`
+   *
+   * TODO(authority): Clarify contract ownership direction:
+   * - Is `scoring_contract_v1.json` generated-from-code (preferred), or is code expected to follow
+   *   the JSON contract as the source-of-truth? Document and enforce one direction.
    */
   @Column({ type: 'int' })
   overallScore!: number;

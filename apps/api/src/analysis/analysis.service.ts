@@ -1,4 +1,17 @@
 // apps/api/src/analysis/analysis.service.ts
+/**
+ * AUTHORITY: Authenticated scoring + compliance orchestration.
+ *
+ * Canonical chain (authenticated user flows):
+ * `AnalysisController` → `AnalysisService` → (scoring + persistence + audit) → `ComplianceService.validateAndAudit`.
+ *
+ * Notes:
+ * - The canonical CX Fit v2 scoring implementation lives in `cx-fit-scoring-v2.ts`.
+ * - Public preview scoring is an intentional constrained bypass and must not be expanded into an
+ *   authenticated scoring path.
+ * - Some endpoints request a “canonical-truth lane” recompute via `forceFreshRecompute`; this is
+ *   used to guarantee current claim-status truth for Studio consumers.
+ */
 import {
   BadRequestException,
   ConflictException,
@@ -55,17 +68,13 @@ import {
   DimensionWeightOverrides,
   FitScoringService,
 } from './fit-scoring.service';
-import {
-  scoreCxFitV2,
-  computeConfidenceScore,
-} from './cx-fit-scoring-v2';
 import { buildResultsNarrative } from './results-narrative.builder';
 import { selectBaselineTextForScoring } from './baseline-selection';
 import type {
   BaselineCoverageDetails,
-  CxFitV2Result,
   FitScoreDebugBundle,
 } from './cx-fit-scoring-v2';
+import type { CxFitV2Result } from './fit-scoring.service';
 
 import {
   DEFAULT_LEGACY_CALIBRATION_WEIGHTS,
@@ -2190,7 +2199,7 @@ export class AnalysisService {
       dimensionWeights,
     );
 
-      const scoringV2 = scoreCxFitV2(
+      const scoringV2 = this.fitScoringService.scoreCxFitV2Authenticated(
         {
           job: {
             rawDescription: canonicalJobForHash.rawDescription,
@@ -2233,7 +2242,8 @@ export class AnalysisService {
         baselineSelection.originalBaselineChars,
       );
 
-    const confidenceResult = computeConfidenceScore(scoringV2.debug);
+    const confidenceResult =
+      this.fitScoringService.computeCxFitV2ConfidenceScore(scoringV2.debug);
 
     const legacyDimensionScores =
       this.mapCxFitV2ToLegacyDimensionScores(scoringV2);
@@ -2929,7 +2939,7 @@ export class AnalysisService {
           message: PROMPT_LIKE_FLAG_MESSAGE,
         });
       }
-      const scoringV2 = scoreCxFitV2(
+      const scoringV2 = this.fitScoringService.scoreCxFitV2Authenticated(
         {
           job: {
             rawDescription: canonicalJobForHash.rawDescription,
@@ -2981,7 +2991,8 @@ export class AnalysisService {
         baselineSelection.originalBaselineChars,
       );
 
-      const confidenceResult = computeConfidenceScore(scoringV2.debug);
+      const confidenceResult =
+        this.fitScoringService.computeCxFitV2ConfidenceScore(scoringV2.debug);
 
       const legacyDimensionScores =
         this.mapCxFitV2ToLegacyDimensionScores(scoringV2);

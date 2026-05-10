@@ -32,6 +32,16 @@ type RealityCheckContext = {
   missingSkillOptions: string[];
 };
 
+/**
+ * AUTHORITY BYPASS (special-case): Reality check scoring.
+ *
+ * This service directly calls `scoreCxFitV2` to power the reality-check flow. This is currently
+ * an intentional exception, but it is also a potential competing scoring entrypoint.
+ *
+ * TODO(authority): Consider routing this through the canonical authenticated scoring orchestration
+ * (`AnalysisService` / `FitScoringService`) or establishing an explicit shared scoring facade so that
+ * scoring versioning, compliance, and logging semantics cannot drift.
+ */
 @Injectable()
 export class RealityCheckService {
   private readonly multiSelectLimit = 8;

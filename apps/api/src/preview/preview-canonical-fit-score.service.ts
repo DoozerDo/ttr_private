@@ -3,6 +3,20 @@ import { scoreCxFitV2 } from '../analysis/cx-fit-scoring-v2';
 import { normalizeJobDescription } from '../analysis/job-normalizer';
 import { GapAnalysisService } from '../analysis/gap-analysis.service';
 
+/**
+ * AUTHORITY BYPASS (intentional): Public canonical-fit-score preview.
+ *
+ * This endpoint is intentionally constrained:
+ * - Uses raw resume text + raw job description text (no baseline selection, no persistence).
+ * - Does NOT run compliance/audit flows (those are part of authenticated orchestration).
+ *
+ * Rationale:
+ * - Public marketing/landing flow needs a fast, stateless score estimate.
+ *
+ * Guardrail:
+ * - Do not expand this into an authenticated scoring path. Authenticated scoring must flow through
+ *   `AnalysisController` → `AnalysisService` so scoring/audit semantics remain canonical.
+ */
 export type CanonicalFitScoreResponse = {
   score: number;
   scoreBand: 'TOP' | 'MID' | 'LOW';
@@ -76,4 +90,3 @@ export class PreviewCanonicalFitScoreService {
     };
   }
 }
-

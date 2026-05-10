@@ -6,10 +6,8 @@ import type { Express } from 'express';
 
 describe('BaselineIngestionService', () => {
   const fixturesDir = path.join(__dirname, '..', '..', 'test', 'fixtures');
-  const service = new BaselineIngestionService(
-    new BaselineParserService(),
-    new BaselineTextExtractor(),
-  );
+  const parser = new BaselineParserService();
+  const service = new BaselineIngestionService(parser, new BaselineTextExtractor());
 
   const createFixtureFile = (
     filename: string,
@@ -23,6 +21,7 @@ describe('BaselineIngestionService', () => {
   };
 
   it('parses the DOCX fixture into canonical schema', async () => {
+    const parseSpy = jest.spyOn(parser, 'parseBaseline');
     const result = await service.ingest(
       createFixtureFile(
         'baseline-sample.docx',
@@ -30,6 +29,7 @@ describe('BaselineIngestionService', () => {
       ),
     );
 
+      expect(parseSpy).toHaveBeenCalledWith(expect.any(String), { strategy: 'rules' });
       expect(result.sourceFormat).toBe('docx');
       expect(result.canonical.identity.full_name).toBeTruthy();
       expect(result.canonical.experience.length).toBeGreaterThanOrEqual(0);
@@ -37,10 +37,12 @@ describe('BaselineIngestionService', () => {
   });
 
   it('parses the PDF fixture into canonical schema', async () => {
+    const parseSpy = jest.spyOn(parser, 'parseBaseline');
     const result = await service.ingest(
       createFixtureFile('baseline-sample.pdf', 'application/pdf'),
     );
 
+    expect(parseSpy).toHaveBeenCalledWith(expect.any(String), { strategy: 'rules' });
     expect(result.sourceFormat).toBe('pdf');
     expect(result.canonical.identity.full_name).toBeTruthy();
     expect(result.canonical.tooling_and_platforms.ownership_level).toBe(
