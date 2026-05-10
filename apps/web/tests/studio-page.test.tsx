@@ -451,20 +451,18 @@ describe("Studio page UX", () => {
   });
 
   it("hydrates completed artifacts from the backend and makes them usable immediately", async () => {
-    vi.spyOn(generationProductReadiness, "buildGenerationProductReadiness").mockReturnValue({
-      generation_readiness: { canGenerate: true, canExport: true, reasonsBlocked: [] },
-      state: "ALLOWED",
-      confidence: "LOW",
-      needsVerification: false,
-      tier: "generation_allowed",
-      canOpenStudio: true,
-      generationMode: "verified",
-    });
-
     const fetchMock = installCompletedArtifactFetches();
 
     renderStudio();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.anything(), expect.anything()));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    await waitFor(() => {
+      const urls = fetchMock.mock.calls.map(([input]) => rawFetchUrl(input));
+      expect(urls.some((url) => url.includes("fit-assessments/analysis-1") || url.includes("analysis/job/job-1/latest"))).toBe(true);
+      expect(urls.some((url) => url.includes("studio/artifacts"))).toBe(true);
+    });
+
+    await openStudioWorkspaceFromReadyShell();
 
     // The Studio authority layer may surface a generation-ready shell during hydration depending on trust gate inputs.
     // Shell presence is not sufficient to proceed; explicitly wait for the completed artifact controls.
