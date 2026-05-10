@@ -1881,13 +1881,13 @@ export default function StudioPage() {
   const applyStudioArtifactsPayload = useCallback((payload: BackendStudioArtifactsResponse) => {
     const pairStatus = getBackendPairStatus(payload);
 
+    const hasExistingPresenterResponses =
+      Boolean(resumeResponseRef.current) || Boolean(coverResponseRef.current);
+
     // Do not let a later "missing" reconciliation overwrite already-hydrated/generated presenter state.
-    // This preserves truth: "missing" means the backend has no artifacts right now, but we should not
-    // clear the user's already-visible completed artifacts from this session.
+    // "missing" means the backend currently has no artifacts; it must not clear artifacts the user can already see.
     const hasHydratedOrGeneratedResponse =
-      studioArtifactPresentationStateRef.current !== "unknown" ||
-      Boolean(resumeResponseRef.current) ||
-      Boolean(coverResponseRef.current);
+      studioArtifactPresentationStateRef.current !== "unknown" || hasExistingPresenterResponses;
 
     const previouslyHydratedPayload = studioArtifactsPayloadRef.current;
     const previouslyHadArtifacts =
@@ -1898,8 +1898,36 @@ export default function StudioPage() {
     }
 
     setStudioArtifactsPayload(payload);
-    const resumeResponse = normalizeHydratedArtifactResponse(payload.resume?.responseBody ?? null);
-    const coverResponse = normalizeHydratedArtifactResponse(payload.coverLetter?.responseBody ?? null);
+    const resumeRecord = payload.resume ?? null;
+    const coverRecord = payload.coverLetter ?? null;
+
+    // Strict legacy hydration: when the backend record is completed and includes a responseBody,
+    // hydrate the presenter state directly from that responseBody. Do not infer export readiness here.
+    if (resumeRecord?.status === "COMPLETED" && resumeRecord.responseBody) {
+      setResumeState((current) => ({
+        ...current,
+        response: resumeRecord.responseBody,
+        error: null,
+        tierGateError: null,
+        artifactFailure: null,
+      }));
+      setHasGeneratedOnce(true);
+      studioArtifactPresentationStateRef.current = "hydrated";
+    }
+    if (coverRecord?.status === "COMPLETED" && coverRecord.responseBody) {
+      setCoverState((current) => ({
+        ...current,
+        response: coverRecord.responseBody,
+        error: null,
+        tierGateError: null,
+        artifactFailure: null,
+      }));
+      setHasGeneratedOnce(true);
+      studioArtifactPresentationStateRef.current = "hydrated";
+    }
+
+    const resumeResponse = normalizeHydratedArtifactResponse(resumeRecord?.responseBody ?? null);
+    const coverResponse = normalizeHydratedArtifactResponse(coverRecord?.responseBody ?? null);
 
     // Phase 1: prefer canonical artifact results when present, but keep legacy responseBody alongside it.
     const resumeResult = payload.resumeResult ?? null;
@@ -1917,8 +1945,8 @@ export default function StudioPage() {
             : ({ coverLetterResult } as unknown))
         : coverResponse;
 
-    const resumeFailure = buildFailureFromBackendRecord("resume", payload.resume);
-    const coverFailure = buildFailureFromBackendRecord("cover_letter", payload.coverLetter);
+    const resumeFailure = buildFailureFromBackendRecord("resume", resumeRecord);
+    const coverFailure = buildFailureFromBackendRecord("cover_letter", coverRecord);
 
     if (resumeResponseWithResult) {
       setResumeState((current) => ({
@@ -1954,7 +1982,9 @@ export default function StudioPage() {
       setCoverState((current) => ({ ...current, artifactFailure: coverFailure, error: null }));
     }
 
-    setStudioArtifactPairStatus(pairStatus);
+    if (pairStatus !== "missing" || !hasExistingPresenterResponses) {
+      setStudioArtifactPairStatus(pairStatus);
+    }
     // If hydration confirms artifacts are missing, allow auto-generation to proceed afterwards.
     suppressAutoGenerationRef.current = pairStatus !== "missing";
   }, []);
@@ -2162,8 +2192,19 @@ export default function StudioPage() {
       const coverResponseRaw = normalizedBackendPayload
         ? normalizedBackendPayload.coverLetter?.responseBody ?? null
         : (payload as StoredStudioArtifactSnapshot).coverResponse ?? null;
-      const resumeResponse = normalizeHydratedArtifactResponse(resumeResponseRaw);
-      const coverResponse = normalizeHydratedArtifactResponse(coverResponseRaw);
+      const resumeResponseNormalized = normalizeHydratedArtifactResponse(resumeResponseRaw);
+      const coverResponseNormalized = normalizeHydratedArtifactResponse(coverResponseRaw);
+
+      // Legacy fallback: `studio-artifacts-v1` responseBody may not match the normalizer's accepted shapes.
+      // When the backend record is completed, prefer the raw responseBody as a truthful presenter fallback.
+      const resumeResponse =
+        resumeResponseNormalized ??
+        (normalizedBackendPayload?.resume?.status === "COMPLETED" ? normalizedBackendPayload.resume?.responseBody ?? null : null);
+      const coverResponse =
+        coverResponseNormalized ??
+        (normalizedBackendPayload?.coverLetter?.status === "COMPLETED"
+          ? normalizedBackendPayload.coverLetter?.responseBody ?? null
+          : null);
 
       // Phase 1: prefer canonical artifact results when present, but keep legacy responseBody alongside it.
       const resumeResult = normalizedBackendPayload ? normalizedBackendPayload.resumeResult ?? null : null;
@@ -2187,7 +2228,12 @@ export default function StudioPage() {
         ? buildFailureFromBackendRecord("cover_letter", normalizedBackendPayload.coverLetter)
         : null;
       if (resumeFailure) {
-        setResumeState((current) => ({ ...current, artifactFailure: resumeFailure, error: null, response: null }));
+        setResumeState((current) => ({
+          ...current,
+          artifactFailure: resumeFailure,
+          error: null,
+          response: current.response ?? null,
+        }));
       } else if (resumeResponseWithResult) {
         setResumeState((current) => ({
           ...current,
@@ -2203,7 +2249,12 @@ export default function StudioPage() {
         studioArtifactPresentationStateRef.current = "hydrated";
       }
       if (coverFailure) {
-        setCoverState((current) => ({ ...current, artifactFailure: coverFailure, error: null, response: null }));
+        setCoverState((current) => ({
+          ...current,
+          artifactFailure: coverFailure,
+          error: null,
+          response: current.response ?? null,
+        }));
       } else if (coverResponseWithResult) {
         setCoverState((current) => ({
           ...current,
@@ -2226,7 +2277,11 @@ export default function StudioPage() {
               : (resumeFailure || coverFailure)
                 ? "failed"
                 : "missing");
-      setStudioArtifactPairStatus(pairStatus);
+      const hasExistingPresenterResponses =
+        Boolean(resumeResponseRef.current) || Boolean(coverResponseRef.current);
+      if (pairStatus !== "missing" || !hasExistingPresenterResponses) {
+        setStudioArtifactPairStatus(pairStatus);
+      }
       // If hydration confirms artifacts are missing, allow auto-generation to proceed afterwards.
       suppressAutoGenerationRef.current = pairStatus !== "missing";
     };
