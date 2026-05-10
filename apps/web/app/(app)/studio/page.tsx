@@ -155,6 +155,7 @@ import {
   type RecentIntentState,
 } from "@/src/lib/recentIntent";
 import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
+import { resolveDocumentReadinessState } from "@shared/documentReadinessState";
 
 function LockIcon(props: { className?: string; "aria-hidden"?: boolean }) {
   const className = props.className ?? "h-5 w-5";
@@ -3316,6 +3317,15 @@ export default function StudioPage() {
         coverLetterParagraphs,
       }),
     [coverLetterParagraphs, documentStrategyPlan, generatedResumeModel],
+  );
+  const documentReadinessState = useMemo(
+    () =>
+      resolveDocumentReadinessState({
+        resumeArtifact: resumeResult,
+        coverLetterArtifact: coverLetterResult,
+        critiqueResult: documentCritique ? { readiness: documentCritique.overallAssessment } : null,
+      }).state,
+    [coverLetterResult, documentCritique, resumeResult],
   );
   const roleMatchFinalPass = useMemo(
     () =>
@@ -11315,6 +11325,7 @@ export default function StudioPage() {
                 {documentCritique ? (
                   <StudioCritiquePanel
                     critique={documentCritique}
+                    documentReadinessState={documentReadinessState}
                     isApplying={refinementApplying}
                     onApplyRecommendation={applyCritiqueRecommendation}
                   />
@@ -11331,6 +11342,7 @@ export default function StudioPage() {
                 {hasGeneratedDocumentPair ? (
                   <StudioRoleMatchPanel
                     finalPass={roleMatchFinalPass}
+                    documentReadinessState={documentReadinessState}
                     isApplying={refinementApplying}
                     stylePolishNote={
                       languageStylePass.transformationsApplied.length > 0
@@ -11348,6 +11360,7 @@ export default function StudioPage() {
               {documentCritique ? (
                 <StudioCritiquePanel
                   critique={documentCritique}
+                  documentReadinessState={documentReadinessState}
                   isApplying={refinementApplying}
                   onApplyRecommendation={applyCritiqueRecommendation}
                 />
@@ -11364,6 +11377,7 @@ export default function StudioPage() {
               {hasGeneratedDocumentPair ? (
                 <StudioRoleMatchPanel
                   finalPass={roleMatchFinalPass}
+                  documentReadinessState={documentReadinessState}
                   isApplying={refinementApplying}
                   stylePolishNote={
                     languageStylePass.transformationsApplied.length > 0
