@@ -10028,7 +10028,9 @@ export default function StudioPage() {
       }
 
       const responses = await Promise.all(tasks);
-      const bodies = await Promise.all(responses.map((res) => readResponsePayload(res.clone())));
+      const bodies = await Promise.all(
+        responses.map((res) => readResponsePayload(typeof (res as any)?.clone === "function" ? (res as any).clone() : res)),
+      );
 
       const resumeResponse = input.resume ? responses.shift() ?? null : null;
       const coverResponse = input.coverLetter ? responses.pop() ?? null : null;
@@ -12072,7 +12074,7 @@ export default function StudioPage() {
           </Alert>
         ) : null}
 
-        {resumeState.artifactFailure || (!resumeQualityPass && hasRenderableResumeContent) ? (
+        {resumeState.artifactFailure ? (
           <div
             className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
             data-testid="studio-resume-artifact-issue"
@@ -12537,7 +12539,7 @@ export default function StudioPage() {
         ) : null}
         {/* Opportunities handoff is rendered below the resume preview for post-review flow. */}
 
-        {coverState.artifactFailure || (!coverQualityPass && hasRenderableCoverLetterContent) ? (
+        {coverState.artifactFailure ? (
           <div
             className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
             data-testid="studio-cover-artifact-issue"

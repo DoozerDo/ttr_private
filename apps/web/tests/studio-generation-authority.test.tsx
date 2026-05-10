@@ -2472,6 +2472,94 @@ function setupNeedsRefinementResumeWithVueFetch() {
   );
 }
 
+function setupNeedsRefinementCoverLetterWithRenderableContentFetch() {
+  setFetchImplementation(
+    vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(createResponse(createFitAssessment(82)));
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "generated",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "fp-1",
+            generationContractVersion: "studio-artifacts-v1",
+            artifactReadiness: "ready",
+            artifactReadinessReasons: [],
+            resumeResult: {
+              artifactType: "resume",
+              generationState: "generated_usable",
+              qualityStatus: "pass",
+              preview: { resume: { heading: { name: "Test Candidate", contactLine: "test@example.com" }, summary: "Ok", experience: [] } },
+              correctionReasons: [],
+              exportReady: true,
+              exports: { docx: true, pdf: true },
+              actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: true },
+            },
+            coverLetterResult: {
+              artifactType: "cover_letter",
+              generationState: "generated_usable",
+              qualityStatus: "needs_refinement",
+              preview: { coverLetter: { paragraphs: ["Dear Hiring Team,", "Thanks for your time."] } },
+              correctionReasons: [{ code: "cover_letter_quality_gate_failed" }],
+              exportReady: false,
+              exports: { docx: false, pdf: false },
+              actions: { canEdit: false, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
+            },
+            resume: {
+              status: "COMPLETED",
+              responseBody: {
+                status: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: { resume: { heading: { name: "Test Candidate", contactLine: "test@example.com" }, summary: "Ok", experience: [] } },
+              },
+              content: null,
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: null,
+              failedAt: null,
+              metadata: {},
+            },
+            coverLetter: {
+              status: "COMPLETED",
+              responseBody: {
+                status: "success",
+                exportReady: false,
+                exports: { docx: false, pdf: false },
+                preview: { coverLetter: { paragraphs: ["Dear Hiring Team,", "Thanks for your time."] } },
+                qualityGate: { status: "needs_refinement" },
+              },
+              content: null,
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: null,
+              failedAt: null,
+              metadata: {},
+            },
+          }),
+        );
+      }
+
+      return Promise.resolve(createResponse({}));
+    }),
+  );
+}
+
 function setupBaselineTemplateNotReadyFetch(options?: { validExperience?: number; score?: number }) {
   const validExperience = typeof options?.validExperience === "number" ? options.validExperience : 0;
   const score = typeof options?.score === "number" ? options.score : 94;
@@ -3500,6 +3588,38 @@ describe("Studio resume failure authority", () => {
     expect(rendered).not.toMatch(/\bjson\b/i);
     expect(rendered).not.toMatch(/normalized model/i);
     expect(rendered).not.toMatch(/persisted model/i);
+  });
+});
+
+describe("Studio artifact authority boundary", () => {
+  it("resume: quality fail + renderable content shows correction panel (no artifact issue panel)", async () => {
+    setupNeedsRefinementResumeWithVueFetch();
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-resume-correction-panel")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("studio-resume-artifact-issue")).toBeNull();
+  });
+
+  it("cover letter: quality fail + renderable content shows correction panel (no artifact issue panel)", async () => {
+    setupNeedsRefinementCoverLetterWithRenderableContentFetch();
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-cover-correction-panel")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("studio-cover-artifact-issue")).toBeNull();
+  });
+
+  it("artifactFailure still renders the artifact issue panel", async () => {
+    setupFetchWithResumeV2StructuralFailure("baseline_resume_v2_invalid");
+    renderStudio();
+
+    const enterWorkspace = screen.queryByTestId("studio-generation-ready-secondary");
+    if (enterWorkspace) fireEvent.click(enterWorkspace);
+
+    await screen.findByTestId("studio-resume-artifact-issue");
   });
 });
 
