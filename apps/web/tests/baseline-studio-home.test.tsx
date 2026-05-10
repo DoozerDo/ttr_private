@@ -18,6 +18,12 @@ function createBaseline(
   latestBaselineScore: number | null = null,
   isActive = false,
 ) {
+  const readinessScore =
+    typeof latestBaselineScore === "number" ? latestBaselineScore : null;
+  const accepted = readinessScore !== null;
+  const targetReady = accepted && readinessScore >= 70;
+  const highConfidence = accepted && readinessScore >= 90;
+
   return {
     id,
     userId: "user-1",
@@ -31,6 +37,20 @@ function createBaseline(
     status: "ACTIVE" as const,
     archivedAt: null,
     latestBaselineScore,
+    capability: readinessScore === null
+      ? undefined
+      : {
+          readinessScore,
+          accepted,
+          targetReady,
+          studioReady: false,
+          highConfidence,
+          details: {
+            hasParsedRecord: accepted,
+            hasJobAssessment: false,
+            templateReadiness: null,
+          },
+        },
     latestAssessmentSummary,
     createdAt,
     updatedAt: createdAt,
@@ -46,6 +66,18 @@ function createAnalyzedBaseline(
   return {
     ...createBaseline(id, "2026-01-01T00:00:00.000Z", filename, undefined, 79, isActive),
     latestBaselineScore: 79,
+    capability: {
+      readinessScore: 79,
+      accepted: true,
+      targetReady: true,
+      studioReady: false,
+      highConfidence: false,
+      details: {
+        hasParsedRecord: true,
+        hasJobAssessment: false,
+        templateReadiness: null,
+      },
+    },
     latestAssessmentSummary: {
       latestAssessmentId: `assessment-${id}`,
       latestAssessmentCreatedAt: "2026-03-20T12:00:00.000Z",
@@ -108,7 +140,22 @@ describe("BaselineStudioHome", () => {
         return createJsonResponse([]);
       }
       if (url.includes("/api/baselines/base-1")) {
-        return createJsonResponse(createAnalyzedBaseline("base-1", "resume-1.pdf"));
+        return createJsonResponse({
+          ...createAnalyzedBaseline("base-1", "resume-1.pdf"),
+          latestBaselineScore: 60,
+          capability: {
+            readinessScore: 60,
+            accepted: true,
+            targetReady: false,
+            studioReady: false,
+            highConfidence: false,
+            details: {
+              hasParsedRecord: true,
+              hasJobAssessment: false,
+              templateReadiness: null,
+            },
+          },
+        });
       }
       throw new Error(`Unexpected fetch: ${url}`);
     });

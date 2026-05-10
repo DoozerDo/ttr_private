@@ -5602,20 +5602,23 @@ export default function StudioPage() {
         if (canceled) return;
         setBaselines(fetched);
         setBaselinesError(null);
-        const activeRequestedBaseline =
+        const requestedBaseline =
           requestedBaselineId &&
-          fetched.find((baseline) => baseline.id === requestedBaselineId && baseline.status !== "ARCHIVED");
-        if (requestedBaselineId && !activeRequestedBaseline) {
+          fetched.find((baseline) => baseline.id === requestedBaselineId);
+        if (requestedBaselineId && !requestedBaseline) {
           setSelectedBaselineId("");
-          setBaselinesError("This resume is archived or unavailable. Select an active resume to continue.");
+          setBaselinesError("This resume is unavailable. Select a resume to continue.");
           return;
         }
-        if (activeRequestedBaseline) {
-          setSelectedBaselineId(activeRequestedBaseline.id);
+        if (requestedBaseline) {
+          setSelectedBaselineId(requestedBaseline.id);
+          if (requestedBaseline.capability?.studioReady === false) {
+            setBaselinesError("This resume is not Studio-ready yet. Choose a Studio-ready resume or strengthen this one.");
+          }
           return;
         }
         setSelectedBaselineId("");
-        setBaselinesError("Select an active resume to continue.");
+        setBaselinesError("Select a resume to continue.");
       } catch (error) {
         if (canceled) return;
         const message =

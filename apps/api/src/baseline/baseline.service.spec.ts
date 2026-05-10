@@ -22,6 +22,7 @@ describe('BaselineService - block policies', () => {
   let baselineVersionRepository: any;
   let baselineSectionRepository: any;
   let baselineBlockPolicyRepository: any;
+  let baselineParsedRepository: any;
   let fitAssessmentRepository: any;
 
   const sections: BaselineSection[] = [
@@ -220,6 +221,10 @@ const ingestionResult = {
       find: jest.fn().mockResolvedValue([]),
     };
 
+    baselineParsedRepository = {
+      findOne: jest.fn().mockResolvedValue(null),
+    };
+
     const module = await Test.createTestingModule({
       providers: [
         BaselineService,
@@ -238,9 +243,7 @@ const ingestionResult = {
         },
         {
           provide: getRepositoryToken(BaselineParsed),
-          useValue: {
-            findOne: jest.fn().mockResolvedValue(null),
-          },
+          useValue: baselineParsedRepository,
         },
         {
           provide: getRepositoryToken(FitAssessment),
@@ -413,6 +416,68 @@ const ingestionResult = {
     expect(result.latestAssessmentSummary.hasCompletedAssessment).toBe(true);
     expect(result.latestAssessmentSummary.latestAssessmentId).toBe('assessment-9');
     expect(result.latestAssessmentSummary.latestFitScore).toBe(91);
+  });
+
+  it('derives baseline capability from persisted readiness score and parsed/template qualifiers (independent of archived/current)', async () => {
+    const archivedBaseline = { ...baseline, id: 'b-arch', status: BaselineStatus.ARCHIVED, archivedAt: new Date() } as any;
+    const activeBaseline = { ...baseline, id: 'b-act', status: BaselineStatus.ACTIVE, archivedAt: null } as any;
+    activeBaseline.latestBaselineScore = 90;
+    archivedBaseline.latestBaselineScore = 90;
+
+    baselineRepository.find = jest.fn().mockResolvedValue([activeBaseline, archivedBaseline]);
+
+    baselineSectionRepository.find = jest.fn().mockResolvedValue([
+      ...sections.map((s) => ({ ...s, baselineId: activeBaseline.id })),
+      ...sections.map((s) => ({ ...s, baselineId: archivedBaseline.id })),
+    ]);
+
+    const parsedQb = {
+      distinctOn: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([
+        { id: 'p1', baselineId: activeBaseline.id, createdAt: new Date() },
+        { id: 'p2', baselineId: archivedBaseline.id, createdAt: new Date() },
+      ]),
+    };
+    const jobAssessQb = {
+      distinctOn: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([{ baselineId: activeBaseline.id }, { baselineId: archivedBaseline.id }]),
+    };
+    const summaryQb = {
+      distinctOn: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([]),
+    };
+
+    // createQueryBuilder is used for:
+    // 1) latest assessment summary
+    // 2) job assessment existence
+    fitAssessmentRepository.createQueryBuilder.mockImplementationOnce(() => summaryQb);
+    fitAssessmentRepository.createQueryBuilder.mockImplementationOnce(() => jobAssessQb);
+    baselineParsedRepository.createQueryBuilder = jest.fn().mockReturnValue(parsedQb);
+
+    const result = await service.listBaselinesForUser('user-1', true);
+    expect(result).toHaveLength(2);
+    result.forEach((row) => {
+      expect(row.capability?.accepted).toBe(true);
+      expect(row.capability?.targetReady).toBe(true);
+      expect(row.capability?.highConfidence).toBe(true);
+      // Studio readiness is a composite qualifier (readiness + template readiness + job assessment).
+      // This test asserts archived/current independence for baseline readiness capability, not Studio gating.
+      expect(typeof row.capability?.studioReady).toBe('boolean');
+    });
   });
 
   it('persists a validated ResumeV2 model during baseline ingestion', async () => {

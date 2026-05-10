@@ -8,16 +8,17 @@ export type BaselineCardActionFlags = {
 export function getBaselineCardActionFlags({
   isCurrentBaseline,
   isEditable,
-  isReady,
+  targetReady,
   isArchived,
 }: {
   isCurrentBaseline: boolean;
   isEditable: boolean;
-  isReady: boolean;
+  targetReady: boolean;
   isArchived: boolean;
 }): BaselineCardActionFlags {
   const showViewDetails = true;
-  const showTargetRole = isReady && !isArchived;
+  // Capability eligibility is independent of archived/current organizational state.
+  const showTargetRole = targetReady;
   const showSetCurrent = !isCurrentBaseline && isEditable && !isArchived;
 
   return {
@@ -27,4 +28,3 @@ export function getBaselineCardActionFlags({
     showViewDetails,
   };
 }
-

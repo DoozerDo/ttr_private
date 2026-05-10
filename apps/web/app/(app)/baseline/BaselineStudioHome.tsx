@@ -1590,21 +1590,26 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             >
               <ResumeWithBaselineStatus
                 filename={primaryBaseline.originalFilename}
-                isReadyForTargeting={primaryBaselineReadiness.readinessState === "READY"}
+                isReadyForTargeting={primaryBaseline.capability?.targetReady === true}
                 isActiveBaseline
-                showNeedsReviewBadge={primaryBaselineReadiness.readinessState !== "READY"}
+                showNeedsReviewBadge={primaryBaseline.capability?.targetReady !== true}
+                readinessScore={primaryBaseline.capability?.readinessScore ?? primaryBaseline.latestBaselineScore ?? null}
+                accepted={primaryBaseline.capability?.accepted ?? false}
+                targetReady={primaryBaseline.capability?.targetReady ?? false}
+                studioReady={primaryBaseline.capability?.studioReady ?? false}
+                highConfidence={primaryBaseline.capability?.highConfidence ?? false}
               />
                 <p className="mt-1 text-xs text-slate-400">{activeBaselineVersionLabel}</p>
                 <p className="mt-1 text-xs text-slate-500">
                   Created from: {primaryBaseline.originalFilename}
                 </p>
-                {primaryBaselineReadiness.readinessState !== "READY" ? (
+                {primaryBaseline.capability?.targetReady !== true ? (
                   <p className="mt-3 text-sm text-slate-300">
                     {BASELINE_NEEDS_REVIEW_EXPLANATION}
                   </p>
                 ) : null}
                 <div className="mt-4 flex flex-wrap gap-2">
-                  {primaryBaselineReadiness.readinessState === "READY" ? (
+                  {primaryBaseline.capability?.targetReady === true ? (
                     <Link
                       href={targetRoleHref}
                       className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold uppercase text-cyan-50 transition hover:bg-cyan-400/15"
@@ -1687,13 +1692,15 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 });
                 const isLoading = loadingBaselineId === baseline.id;
                 const readinessState = baselineReadiness.readinessState;
-                const canTargetJob = readinessState === "READY";
+                const canTargetJob = baseline.capability?.targetReady === true;
                 const setActiveDisabled = isLoading || isArchived || !isHydrated;
-                const isReadyBaseline = readinessState === "READY" && !isArchived;
+                // Capability eligibility is baseline-owned authority and is independent of archived/current.
+                // Fail-safe: if capability is missing, treat as not ready.
+                const isReadyBaseline = baseline.capability?.targetReady === true;
                 const actionFlags = getBaselineCardActionFlags({
                   isCurrentBaseline,
                   isEditable: isEditableLibrary,
-                  isReady: isReadyBaseline,
+                  targetReady: baseline.capability?.targetReady === true,
                   isArchived,
                 });
                 const baselineTargetRoleHref = `/target?baselineId=${encodeURIComponent(baseline.id)}`;
@@ -1714,6 +1721,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                       filename={baseline.originalFilename}
                       isReadyForTargeting={isReadyBaseline}
                       showNeedsReviewBadge={!isReadyBaseline}
+                      readinessScore={baseline.capability?.readinessScore ?? baseline.latestBaselineScore ?? null}
+                      accepted={baseline.capability?.accepted ?? false}
+                      targetReady={baseline.capability?.targetReady ?? false}
+                      studioReady={baseline.capability?.studioReady ?? false}
+                      highConfidence={baseline.capability?.highConfidence ?? false}
                     />
                     <p className="mt-1 text-xs text-slate-500">Created from: {baseline.originalFilename}</p>
                     <p className="mt-2 text-xs text-slate-400">Uploaded {formatDateTime(baseline.createdAt)}</p>

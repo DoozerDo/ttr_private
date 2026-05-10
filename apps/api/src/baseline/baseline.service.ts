@@ -8,7 +8,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, In, Not, Repository } from 'typeorm';
 import type { Express } from 'express';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -37,6 +37,8 @@ import {
   GeneratedTextSourceType,
   type ComplianceTextSection,
 } from '../compliance/compliance.types';
+import { extractStructuredBaselineFromSections } from './structuredBaselineExtractor';
+import { evaluateBaselineTemplateReadiness } from './baselineTemplateReadiness';
 import {
   getInsufficientExtractedTextDetails,
   INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
@@ -106,6 +108,12 @@ export type BaselineCreationResult = {
 export const BASELINE_LIBRARY_CAP = 3;
 export const BASELINE_LIBRARY_CAP_ERROR_CODE = 'BASELINE_LIBRARY_CAP_REACHED';
 
+const BASELINE_CAPABILITY_THRESHOLDS = {
+  targetReadyMinReadinessScore: 70,
+  studioReadyMinReadinessScore: 80,
+  highConfidenceMinReadinessScore: 90,
+} as const;
+
 export type BaselineAssessmentSummary = {
   latestAssessmentId: string | null;
   latestAssessmentCreatedAt: Date | null;
@@ -113,8 +121,26 @@ export type BaselineAssessmentSummary = {
   hasCompletedAssessment: boolean;
 };
 
+export type BaselineCapabilityState = {
+  readinessScore: number | null;
+  accepted: boolean;
+  targetReady: boolean;
+  studioReady: boolean;
+  highConfidence: boolean;
+  details: {
+    hasParsedRecord: boolean;
+    hasJobAssessment: boolean;
+    templateReadiness: null | {
+      canGenerateResume: boolean;
+      evidenceThreshold: 'insufficient' | 'usable' | 'strong';
+      degraded: boolean;
+    };
+  };
+};
+
 export type BaselineWithAssessmentSummary = Baseline & {
   latestAssessmentSummary: BaselineAssessmentSummary;
+  capability?: BaselineCapabilityState;
 };
 
 export type BaselineAssessmentDebugState = {
@@ -206,6 +232,54 @@ export class BaselineService {
     private readonly embeddingService: EmbeddingService,
     private readonly baselineIngestionService: BaselineIngestionService,
   ) {}
+
+  private deriveCapabilityState(input: {
+    baseline: Baseline;
+    readinessScore: number | null;
+    hasParsedRecord: boolean;
+    hasJobAssessment: boolean;
+    templateReadiness: BaselineCapabilityState['details']['templateReadiness'];
+  }): BaselineCapabilityState {
+    const readinessScore = input.readinessScore;
+    const accepted = input.hasParsedRecord;
+
+    const targetReady =
+      accepted &&
+      typeof readinessScore === 'number' &&
+      readinessScore >= BASELINE_CAPABILITY_THRESHOLDS.targetReadyMinReadinessScore;
+
+    const highConfidence =
+      accepted &&
+      typeof readinessScore === 'number' &&
+      readinessScore >= BASELINE_CAPABILITY_THRESHOLDS.highConfidenceMinReadinessScore;
+
+    // Composite rule:
+    // - baseline readiness is primary baseline-owned authority (latestBaselineScore)
+    // - template readiness + completed analysis are additional Studio qualifiers
+    const studioReadinessThresholdMet =
+      accepted &&
+      typeof readinessScore === 'number' &&
+      readinessScore >= BASELINE_CAPABILITY_THRESHOLDS.studioReadyMinReadinessScore;
+
+    const templateEligible =
+      input.templateReadiness?.canGenerateResume === true;
+
+    const studioReady =
+      studioReadinessThresholdMet && templateEligible && input.hasJobAssessment;
+
+    return {
+      readinessScore,
+      accepted,
+      targetReady,
+      studioReady,
+      highConfidence,
+      details: {
+        hasParsedRecord: input.hasParsedRecord,
+        hasJobAssessment: input.hasJobAssessment,
+        templateReadiness: input.templateReadiness,
+      },
+    };
+  }
 
   private async enforceBaselineLimit(manager: EntityManager, userId: string) {
     const baselineCount = await manager.count(Baseline, {
@@ -1065,13 +1139,108 @@ export class BaselineService {
       );
     }
 
-    const rows = baselines.map((baseline) => ({
-      ...baseline,
-      latestAssessmentSummary:
+    const baselineIds = baselines.map((baseline) => baseline.id);
+
+    const latestParsedByBaselineId = new Map<string, BaselineParsed>();
+    if (
+      baselineIds.length &&
+      typeof this.baselineParsedRepository?.createQueryBuilder === 'function'
+    ) {
+      const parsedRows = await this.baselineParsedRepository
+        .createQueryBuilder('parsed')
+        .distinctOn(['parsed."baselineId"'])
+        .where('parsed."baselineId" IN (:...baselineIds)', { baselineIds })
+        .orderBy('parsed."baselineId"', 'ASC')
+        .addOrderBy('parsed."createdAt"', 'DESC')
+        .addOrderBy('parsed.id', 'DESC')
+        .getMany();
+      parsedRows.forEach((row) =>
+        latestParsedByBaselineId.set(row.baselineId, row),
+      );
+    }
+
+    const sectionsByBaselineId = new Map<string, BaselineSection[]>();
+    if (baselineIds.length) {
+      const sections = await this.baselineSectionRepository.find({
+        where: { baselineId: In(baselineIds) },
+        order: { order: 'ASC' },
+      });
+      for (const section of sections) {
+        const existing = sectionsByBaselineId.get(section.baselineId) ?? [];
+        existing.push(section);
+        sectionsByBaselineId.set(section.baselineId, existing);
+      }
+    }
+
+    // Studio qualifier: require at least one non-readiness job assessment for this baseline.
+    const hasJobAssessmentByBaselineId = new Map<string, boolean>();
+    if (
+      baselineIds.length &&
+      typeof this.fitAssessmentRepository?.createQueryBuilder === 'function'
+    ) {
+      try {
+        const jobAssessments = await this.fitAssessmentRepository
+          .createQueryBuilder('assessment')
+          .distinctOn(['assessment."baselineId"'])
+          .select('assessment."baselineId"', 'baselineId')
+          .where('assessment."userId" = :userId', { userId })
+          .andWhere('assessment."baselineId" IN (:...baselineIds)', { baselineIds })
+          .andWhere('assessment."jobId" <> assessment."baselineId"')
+          .orderBy('assessment."baselineId"', 'ASC')
+          .addOrderBy('assessment."createdAt"', 'DESC')
+          .addOrderBy('assessment.id', 'DESC')
+          .getRawMany<{ baselineId: string }>();
+        jobAssessments.forEach((row) =>
+          hasJobAssessmentByBaselineId.set(row.baselineId, true),
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const stack = error instanceof Error ? error.stack : undefined;
+        this.logger.error(
+          `Failed to load job assessment presence for baselines userId=${userId}; returning baselines with hasJobAssessment=false. message=${message}`,
+          stack,
+        );
+      }
+    }
+
+    const rows = baselines.map((baseline) => {
+      const latestAssessmentSummary =
         summaries.get(baseline.id)?.hasCompletedAssessment
           ? (summaries.get(baseline.id) as BaselineAssessmentSummary)
-          : this.toBaselineReadinessSummary(baseline),
-    }));
+          : this.toBaselineReadinessSummary(baseline);
+
+      const hasParsedRecord = latestParsedByBaselineId.has(baseline.id);
+      const sections = sectionsByBaselineId.get(baseline.id) ?? [];
+      const structured = sections.length
+        ? extractStructuredBaselineFromSections(sections as any)
+        : null;
+      const templateReadiness = structured
+        ? evaluateBaselineTemplateReadiness(structured as any)
+        : null;
+
+      const capability = this.deriveCapabilityState({
+        baseline,
+        readinessScore:
+          typeof baseline.latestBaselineScore === 'number'
+            ? baseline.latestBaselineScore
+            : null,
+        hasParsedRecord,
+        hasJobAssessment: hasJobAssessmentByBaselineId.get(baseline.id) === true,
+        templateReadiness: templateReadiness
+          ? {
+              canGenerateResume: templateReadiness.canGenerateResume,
+              evidenceThreshold: templateReadiness.evidence.threshold,
+              degraded: templateReadiness.evidence.degraded,
+            }
+          : null,
+      });
+
+      return {
+        ...baseline,
+        latestAssessmentSummary,
+        capability,
+      };
+    });
 
     this.logger.debug(
       `listBaselinesForUser userId=${userId} mappedRows=${rows.length}`,
@@ -1341,12 +1510,51 @@ export class BaselineService {
       );
     }
 
+    const readinessScore =
+      typeof baseline.latestBaselineScore === 'number'
+        ? baseline.latestBaselineScore
+        : null;
+
+    const structured = (baseline.sections ?? []).length
+      ? extractStructuredBaselineFromSections(baseline.sections as any)
+      : null;
+    const templateReadinessEvaluation = structured
+      ? evaluateBaselineTemplateReadiness(structured as any)
+      : null;
+
+    const [latestParsed, jobAssessment] = await Promise.all([
+      this.getLatestParsedBaseline(baseline.id),
+      typeof this.fitAssessmentRepository?.findOne === 'function'
+        ? this.fitAssessmentRepository.findOne({
+            where: {
+              userId,
+              baselineId: baseline.id,
+              jobId: Not(baseline.id),
+            } as any,
+            order: { createdAt: 'DESC', id: 'DESC' },
+          })
+        : Promise.resolve(null),
+    ]);
+
     return {
       ...baseline,
       latestAssessmentSummary:
         summary?.hasCompletedAssessment
           ? summary
           : this.toBaselineReadinessSummary(baseline),
+      capability: this.deriveCapabilityState({
+        baseline,
+        readinessScore,
+        hasParsedRecord: Boolean(latestParsed),
+        hasJobAssessment: Boolean(jobAssessment),
+        templateReadiness: templateReadinessEvaluation
+          ? {
+              canGenerateResume: templateReadinessEvaluation.canGenerateResume,
+              evidenceThreshold: templateReadinessEvaluation.evidence.threshold,
+              degraded: templateReadinessEvaluation.evidence.degraded,
+            }
+          : null,
+      }),
     };
   }
 

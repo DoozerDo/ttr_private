@@ -586,7 +586,7 @@ export function BaselineDashboard({
             const actionFlags = getBaselineCardActionFlags({
               isCurrentBaseline: isSelected,
               isEditable: true,
-              isReady: true,
+              targetReady: baseline.capability?.targetReady === true,
               isArchived: baseline.status === "ARCHIVED",
             });
             const cardClasses = [
@@ -616,6 +616,30 @@ export function BaselineDashboard({
                   </div>
 
                   <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {typeof baseline.capability?.readinessScore === "number" ? (
+                      <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] uppercase tracking-[0.24em] text-slate-100">
+                        Readiness {Math.round(baseline.capability.readinessScore)}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center rounded-full border border-amber-300/20 bg-amber-400/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.24em] text-amber-100">
+                        Readiness unavailable
+                      </span>
+                    )}
+                    {baseline.capability?.targetReady ? (
+                      <span className="inline-flex items-center rounded-full border border-emerald-300/20 bg-emerald-400/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.24em] text-emerald-100">
+                        Target ready
+                      </span>
+                    ) : null}
+                    {baseline.capability?.studioReady ? (
+                      <span className="inline-flex items-center rounded-full border border-emerald-300/20 bg-emerald-400/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.24em] text-emerald-100">
+                        Studio ready
+                      </span>
+                    ) : null}
+                    {baseline.capability?.highConfidence ? (
+                      <span className="inline-flex items-center rounded-full border border-indigo-300/20 bg-indigo-400/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.24em] text-indigo-100">
+                        High confidence
+                      </span>
+                    ) : null}
                     <SecondaryActionLink href={getBaselineDetailsHref(baseline.id)}>
                       View details
                     </SecondaryActionLink>

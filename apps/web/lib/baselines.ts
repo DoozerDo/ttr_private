@@ -42,6 +42,23 @@ export interface BaselineAssessmentSummaryDto {
   hasCompletedAssessment: boolean;
 }
 
+export interface BaselineCapabilityDto {
+  readinessScore: number | null;
+  accepted: boolean;
+  targetReady: boolean;
+  studioReady: boolean;
+  highConfidence: boolean;
+  details?: {
+    hasParsedRecord?: boolean;
+    hasJobAssessment?: boolean;
+    templateReadiness?: null | {
+      canGenerateResume: boolean;
+      evidenceThreshold: "insufficient" | "usable" | "strong";
+      degraded: boolean;
+    };
+  };
+}
+
 export function isBaselineAnalyzedFromSummary(
   summary?: BaselineAssessmentSummaryDto | null,
 ): boolean {
@@ -73,6 +90,7 @@ export interface BaselineDto {
   firstAnalyzedAt?: string | null;
   lastAnalyzedAt?: string | null;
   latestAssessmentSummary?: BaselineAssessmentSummaryDto;
+  capability?: BaselineCapabilityDto;
   createdAt: string;
   updatedAt: string;
   sections?: BaselineSectionDto[];
