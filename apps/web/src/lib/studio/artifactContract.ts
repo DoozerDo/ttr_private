@@ -23,7 +23,9 @@ type ReadinessArtifactLike = {
   qualityStatus?: unknown;
 };
 
-function isPresentSingleArtifact(artifact: ReadinessArtifactLike | null): boolean {
+type PresentReadinessArtifact = ReadinessArtifactLike & { generationState: unknown };
+
+function isPresentSingleArtifact(artifact: ReadinessArtifactLike | null): artifact is PresentReadinessArtifact {
   if (!artifact) return false;
   const state = String(artifact.generationState ?? "").trim();
   if (!state) return false;

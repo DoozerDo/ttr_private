@@ -16,12 +16,21 @@ type Props = {
   stylePolishNote?: string | null;
 };
 
-function readinessCopy(readiness: RoleMatchFinalPass["overallMatchReadiness"]) {
+type EffectiveReadiness = RoleMatchFinalPass["overallMatchReadiness"] | "needs_work";
+
+function readinessCopy(readiness: EffectiveReadiness) {
   if (readiness === "ready") {
     return {
       title: "Ready to export",
       body: "Your documents strongly reflect the role's top priorities.",
       tone: "border-emerald-300/25 bg-emerald-500/10 text-emerald-50",
+    };
+  }
+  if (readiness === "needs_work") {
+    return {
+      title: "Finish your document draft first",
+      body: "Complete the document readiness steps, then we’ll run the final role check with your latest draft.",
+      tone: "border-slate-200/10 bg-slate-900/40 text-slate-100",
     };
   }
   if (readiness === "needs_tightening") {
