@@ -28,7 +28,7 @@ function readinessCopy(readiness: EffectiveReadiness) {
   }
   if (readiness === "needs_work") {
     return {
-      title: "Finish your document draft first",
+      title: "Draft review recommended",
       body: "Complete the document readiness steps, then we’ll run the final role check with your latest draft.",
       tone: "border-slate-200/10 bg-slate-900/40 text-slate-100",
     };
@@ -41,8 +41,8 @@ function readinessCopy(readiness: EffectiveReadiness) {
     };
   }
   return {
-    title: "Final role alignment still needs work",
-    body: "The draft is not yet clearly tuned to this specific job.",
+    title: "Role alignment can improve",
+    body: "A role-specific adjustment will make the fit read faster.",
     tone: "border-rose-300/25 bg-rose-500/10 text-rose-50",
   };
 }
@@ -65,6 +65,10 @@ export function StudioRoleMatchPanel({ finalPass, documentReadinessState, isAppl
   const copy = readinessCopy(effectiveReadiness);
   const hasAdjustment = finalPass.recommendedFinalAdjustments.length > 0;
   const primaryAdjustment = finalPass.recommendedFinalAdjustments[0] ?? null;
+  const readinessLabel =
+    effectiveReadiness === "needs_work"
+      ? "draft review recommended"
+      : effectiveReadiness.replaceAll("_", " ");
 
   return (
     <section
@@ -80,9 +84,9 @@ export function StudioRoleMatchPanel({ finalPass, documentReadinessState, isAppl
           <p className="text-sm text-slate-300">{copy.body}</p>
         </div>
         <div className="text-right">
-          <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Match readiness</p>
+          <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Role alignment</p>
           <p className="text-2xl font-semibold capitalize text-slate-50">
-            {effectiveReadiness.replace("_", " ")}
+            {readinessLabel}
           </p>
         </div>
       </div>
@@ -92,72 +96,6 @@ export function StudioRoleMatchPanel({ finalPass, documentReadinessState, isAppl
           {stylePolishNote}
         </div>
       ) : null}
-
-      <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
-        <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Priority coverage</p>
-        <div className="mt-3 space-y-2">
-          {finalPass.priorityCoverage.slice(0, 3).map((priority) => (
-            <div
-              key={priority.priority}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2"
-            >
-              <div>
-                <p className="text-sm font-medium text-slate-50">{priority.priority}</p>
-                <p className="text-xs text-slate-400">
-                  Evidence source: {priority.evidenceSource ?? "not yet visible"}
-                </p>
-              </div>
-              <span className="rounded-full border border-white/10 bg-slate-950/40 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">
-                {coverageLabel(priority)}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {finalPass.recruiterScanRisks.length ? (
-        <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-4">
-          <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Recruiter scan risks</p>
-          <ul className="mt-3 space-y-2">
-            {finalPass.recruiterScanRisks.slice(0, 3).map((risk) => (
-              <li key={risk.type} className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <p className="text-sm font-medium text-slate-50">{risk.explanation}</p>
-                  <span className="rounded-full border border-white/10 bg-slate-950/40 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">
-                    {severityLabel(risk.severity)}
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-
-      <div className="grid gap-3 rounded-2xl border border-white/10 bg-slate-950/35 p-4 md:grid-cols-3">
-        <div>
-          <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Keyword alignment</p>
-          <p className="mt-1 text-sm text-slate-200">
-            {finalPass.keywordAlignment.strongMatches.length} strong,{" "}
-            {finalPass.keywordAlignment.partialMatches.length} partial
-          </p>
-        </div>
-        <div>
-          <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Missing concepts</p>
-          <p className="mt-1 text-sm text-slate-200">
-            {finalPass.keywordAlignment.missingButImportant.length > 0
-              ? finalPass.keywordAlignment.missingButImportant.slice(0, 2).join(", ")
-              : "None that need immediate attention"}
-          </p>
-        </div>
-        <div>
-          <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Stuffing check</p>
-          <p className="mt-1 text-sm text-slate-200">
-            {finalPass.keywordAlignment.stuffedOrExcessive.length > 0
-              ? "Potential stuffing detected"
-              : "No keyword stuffing signal"}
-          </p>
-        </div>
-      </div>
 
       {hasAdjustment ? (
         <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
@@ -211,6 +149,79 @@ export function StudioRoleMatchPanel({ finalPass, documentReadinessState, isAppl
           </div>
         ) : null
       )}
+
+      <details className="rounded-2xl border border-white/10 bg-slate-950/35 p-4" data-testid="studio-role-match-advanced-details">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+          Advanced review
+        </summary>
+        <div className="mt-4 space-y-4">
+          <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+            <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Priority coverage</p>
+            <div className="mt-3 space-y-2">
+              {finalPass.priorityCoverage.slice(0, 3).map((priority) => (
+                <div
+                  key={priority.priority}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-slate-50">{priority.priority}</p>
+                    <p className="text-xs text-slate-400">
+                      Evidence source: {priority.evidenceSource ?? "not yet visible"}
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-white/10 bg-slate-950/40 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">
+                    {coverageLabel(priority)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {finalPass.recruiterScanRisks.length ? (
+            <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-4">
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Scan considerations</p>
+              <ul className="mt-3 space-y-2">
+                {finalPass.recruiterScanRisks.slice(0, 3).map((risk) => (
+                  <li key={risk.type} className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <p className="text-sm font-medium text-slate-50">{risk.explanation}</p>
+                      <span className="rounded-full border border-white/10 bg-slate-950/40 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">
+                        {severityLabel(risk.severity)}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          <div className="grid gap-3 rounded-2xl border border-white/10 bg-slate-950/35 p-4 md:grid-cols-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Keyword alignment</p>
+              <p className="mt-1 text-sm text-slate-200">
+                {finalPass.keywordAlignment.strongMatches.length} strong,{" "}
+                {finalPass.keywordAlignment.partialMatches.length} partial
+              </p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Concepts to add</p>
+              <p className="mt-1 text-sm text-slate-200">
+                {finalPass.keywordAlignment.missingButImportant.length > 0
+                  ? finalPass.keywordAlignment.missingButImportant.slice(0, 2).join(", ")
+                  : "None that need immediate attention"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Keyword balance</p>
+              <p className="mt-1 text-sm text-slate-200">
+                {finalPass.keywordAlignment.stuffedOrExcessive.length > 0
+                  ? "Potential stuffing detected"
+                  : "No keyword stuffing signal"}
+              </p>
+            </div>
+          </div>
+        </div>
+      </details>
     </section>
   );
 }

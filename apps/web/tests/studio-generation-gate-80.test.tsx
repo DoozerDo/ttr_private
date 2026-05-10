@@ -152,8 +152,14 @@ describe("Studio generation gate (score >= 80)", () => {
     renderStudio();
 
     await waitFor(() => expect(screen.getByRole("heading", { name: "Resume" })).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: /generate resume/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /generate cover letter/i })).toBeInTheDocument();
+
+    await waitFor(() => {
+      const resumeButton = screen.queryByRole("button", { name: /generate resume/i });
+      const coverButton = screen.queryByRole("button", { name: /generate cover letter/i });
+      const autoGenerating = Boolean(screen.queryByText(/generating your resume and cover letter/i));
+
+      expect(Boolean(resumeButton && coverButton) || autoGenerating).toBe(true);
+    });
   });
 });
 

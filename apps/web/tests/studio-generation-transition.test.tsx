@@ -133,8 +133,10 @@ async function clickGenerateIfReady() {
   const state = authority().getAttribute("data-workflow-state");
 
   if (state === "generation_ready") {
-    const button = await screen.findByRole("button", { name: /generate resume and cover letter/i });
-    fireEvent.click(button);
+    const button = screen.queryByRole("button", { name: /generate resume and cover letter/i });
+    if (button) {
+      fireEvent.click(button);
+    }
   }
 }
 

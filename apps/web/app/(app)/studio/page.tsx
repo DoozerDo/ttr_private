@@ -11369,52 +11369,15 @@ export default function StudioPage() {
             ) : null}
           </> 
         )} 
-        {hasCompletedGeneration ? (
-          isReadySuccessState ? (
-            artifactQuality.confidence === "LOW" ? (
-            <details
-              className="rounded-2xl border border-white/10 bg-slate-950/35 p-4"
-              data-testid="studio-refinement-details"
-            >
-              <summary className="cursor-pointer text-sm font-semibold text-slate-100">
-                Improve this draft (optional)
-              </summary>
-              <div className="mt-4 space-y-4">
-                {documentCritique ? (
-                  <StudioCritiquePanel
-                    critique={documentCritique}
-                    documentReadinessState={documentReadinessState}
-                    isApplying={refinementApplying}
-                    onApplyRecommendation={applyCritiqueRecommendation}
-                  />
-                ) : null}
-                <StudioRefinementPanel
-                  plan={documentStrategyPlan}
-                  refinementCount={refinementInstructions.length}
-                  statusMessage={refinementStatusMessage}
-                  isApplying={refinementApplying}
-                  onApplyRefinement={queueRefinement}
-                  onUndo={undoLastRefinement}
-                  onReset={revertToOriginalRefinement}
-                />
-                {hasGeneratedDocumentPair ? (
-                  <StudioRoleMatchPanel
-                    finalPass={roleMatchFinalPass}
-                    documentReadinessState={documentReadinessState}
-                    isApplying={refinementApplying}
-                    stylePolishNote={
-                      languageStylePass.transformationsApplied.length > 0
-                        ? "Language polished for clarity and readability."
-                        : null
-                    }
-                    onApplyAdjustment={applyFinalRoleAdjustment}
-                  />
-                ) : null}
-              </div>
-            </details>
-            ) : null
-          ) : (
-            <>
+        {hasCompletedGeneration && isReadySuccessState ? (
+          <details
+            className="rounded-2xl border border-white/10 bg-slate-950/35 p-4"
+            data-testid="studio-refinement-details"
+          >
+            <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+              Improve further (optional)
+            </summary>
+            <div className="mt-4 space-y-4">
               {documentCritique ? (
                 <StudioCritiquePanel
                   critique={documentCritique}
@@ -11445,8 +11408,41 @@ export default function StudioPage() {
                   onApplyAdjustment={applyFinalRoleAdjustment}
                 />
               ) : null}
-            </>
-          )
+            </div>
+          </details>
+        ) : hasCompletedGeneration ? (
+          <>
+            {documentCritique ? (
+              <StudioCritiquePanel
+                critique={documentCritique}
+                documentReadinessState={documentReadinessState}
+                isApplying={refinementApplying}
+                onApplyRecommendation={applyCritiqueRecommendation}
+              />
+            ) : null}
+            <StudioRefinementPanel
+              plan={documentStrategyPlan}
+              refinementCount={refinementInstructions.length}
+              statusMessage={refinementStatusMessage}
+              isApplying={refinementApplying}
+              onApplyRefinement={queueRefinement}
+              onUndo={undoLastRefinement}
+              onReset={revertToOriginalRefinement}
+            />
+            {hasGeneratedDocumentPair ? (
+              <StudioRoleMatchPanel
+                finalPass={roleMatchFinalPass}
+                documentReadinessState={documentReadinessState}
+                isApplying={refinementApplying}
+                stylePolishNote={
+                  languageStylePass.transformationsApplied.length > 0
+                    ? "Language polished for clarity and readability."
+                    : null
+                }
+                onApplyAdjustment={applyFinalRoleAdjustment}
+              />
+            ) : null}
+          </>
         ) : null}
         {!isReadySuccessState ? (
           <div className="flex flex-wrap items-center gap-3">
