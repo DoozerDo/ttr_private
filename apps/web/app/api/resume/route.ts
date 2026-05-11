@@ -39,12 +39,16 @@ function readOutcomeCode(payload: Record<string, unknown>): string {
 }
 
 function hasPreviewResume(payload: Record<string, unknown>): boolean {
-  const preview = payload.preview;
-  if (!preview || typeof preview !== "object") {
-    return false;
-  }
-  const resume = (preview as Record<string, unknown>).resume;
-  return Boolean(resume && typeof resume === "object");
+  const read = (record: Record<string, unknown> | null) => {
+    if (!record) return false;
+    const preview = record.preview;
+    if (!preview || typeof preview !== "object") return false;
+    const resume = (preview as Record<string, unknown>).resume;
+    return Boolean(resume && typeof resume === "object");
+  };
+  if (read(payload)) return true;
+  const inner = payload.payload && typeof payload.payload === "object" ? (payload.payload as Record<string, unknown>) : null;
+  return read(inner);
 }
 
 function isValidResumeGenerationPayload(payload: unknown): payload is Record<string, unknown> {
@@ -55,15 +59,17 @@ function isValidResumeGenerationPayload(payload: unknown): payload is Record<str
   const status = readStatus(record);
 
   if (status === "success") {
-    return hasPreviewResume(record) && record.exportReady === true && Boolean(readOutcomeCode(record));
+    // Usable preview can be available even when export readiness is delayed or export is disabled.
+    // Export gating is enforced separately by Studio + export endpoints; do not block preview hydration here.
+    return hasPreviewResume(record);
   }
 
   if (status === "blocked" || status === "compliance_blocked") {
-    return record.exportReady === false;
+    return true;
   }
 
   if (status === "error") {
-    return record.exportReady === false && Boolean(readOutcomeCode(record));
+    return true;
   }
 
   return false;
