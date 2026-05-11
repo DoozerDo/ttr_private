@@ -3052,7 +3052,7 @@ export default function StudioPage() {
   const resumeQualityPass = resumeResult
     ? resumeResult.qualityStatus === "pass" && resumeResult.generationState === "generated_usable"
     : resumeQuality.status === "pass" && !resumeHasValidationFindings;
-  const resumeNeedsRefinement = resumeResult
+  const resumeNeedsRefinement = hasResumeDraft && resumeResult
     ? resumeResult.qualityStatus !== "pass"
     : Boolean(generatedResumeModel) && resumeQuality.status === "needs_refinement";
   const resumeRequiresCorrectionCopy = hasResumeDraft && !resumeQualityPass;
@@ -3215,7 +3215,7 @@ export default function StudioPage() {
   const coverQualityPass = coverLetterResult
     ? coverLetterResult.qualityStatus === "pass" && coverLetterResult.generationState === "generated_usable"
     : coverLetterQuality.status === "pass" && !coverHasValidationFindings;
-  const coverNeedsRefinement = coverLetterResult
+  const coverNeedsRefinement = hasCoverLetterDraft && coverLetterResult
     ? coverLetterResult.qualityStatus !== "pass"
     : coverLetterParagraphs.length > 0 && coverLetterQuality.status === "needs_refinement";
   const coverRequiresCorrectionCopy = hasCoverLetterDraft && !coverQualityPass;
