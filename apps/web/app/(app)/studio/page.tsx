@@ -2402,7 +2402,7 @@ export default function StudioPage() {
         const workspaceIdentity = {
       baselineId: effectiveBaselineId || null,
       jobId: effectiveJobId || null,
-      baselineVersionId: resolvedBaselineVersionId || null,
+      baselineVersionId: effectiveBaselineVersionId || null,
       analysisId: requestedAnalysisId ?? null,
     };
 
