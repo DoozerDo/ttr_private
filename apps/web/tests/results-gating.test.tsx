@@ -52,6 +52,9 @@ function installFetch(input: {
 
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    if (url.includes("/api/baselines")) {
+      return jsonResponse([{ id: "base-1", status: "ACTIVE", isActive: true }]);
+    }
     if (url.includes("/api/analysis/fit-assessments/analysis-current")) {
       return jsonResponse({
         assessmentId: "analysis-current",
@@ -198,7 +201,7 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
+      expect(screen.getByTestId("results-hero-primary-cta")).toBeInTheDocument();
     });
   });
 
@@ -216,7 +219,7 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
+      expect(screen.getByTestId("results-hero-primary-cta")).toBeInTheDocument();
     });
   });
 
@@ -242,6 +245,41 @@ describe("results gating", () => {
 
     // Results UI should not render for score >= 80.
     expect(screen.queryByTestId("results-hero-primary-cta")).toBeNull();
+  });
+
+  it("blocks results when deep-linked baselineId does not match the server current baseline", async () => {
+    overrideSearchParams({
+      assessmentId: "analysis-current",
+      jobId: "job-1",
+      baselineId: "base-other",
+      baselineVersionId: "base-version-1",
+    });
+
+    setFetchImplementation(
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/baselines")) {
+          return jsonResponse([
+            { id: "base-1", status: "ACTIVE", isActive: true },
+            { id: "base-other", status: "ACTIVE", isActive: false },
+          ]);
+        }
+        if (url.includes("/api/analysis/fit-assessments/analysis-current")) {
+          return jsonResponse({ assessmentId: "analysis-current", jobId: "job-1", baselineId: "base-other" });
+        }
+        if (url.includes("/api/analysis/job/job-1/baseline/base-other/latest")) {
+          return jsonResponse({ assessmentId: "analysis-current", jobId: "job-1", baselineId: "base-other" });
+        }
+        return jsonResponse({});
+      }),
+    );
+
+    render(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Baseline selection needs review/i)).toBeInTheDocument();
+    });
+    expect(mockRouterReplace).not.toHaveBeenCalled();
   });
 
   // Primary workflow UI assertions live in pair-workflow-state.test.ts and the CTA label tests above.
@@ -270,7 +308,7 @@ describe("results gating", () => {
     render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
+      expect(screen.getByTestId("results-hero-primary-cta")).toBeInTheDocument();
     });
     expect(screen.queryByTestId("results-blocked-evidence-panel")).toBeNull();
   });
@@ -388,7 +426,8 @@ describe("results gating", () => {
     const { rerender } = render(<ResultsPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Generate Documents" })).toBeInTheDocument();
+      // Wait until Results has rendered its decision CTA surface (copy varies by authority state).
+      expect(screen.getByTestId("results-hero-primary-cta")).toBeInTheDocument();
     });
 
     rerender(<ResultsPage />);

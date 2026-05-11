@@ -2017,6 +2017,8 @@ function normalizeDimensionScores(data?: LatestAnalysis | null): FitDimensionSco
 
 export default function ResultsPage() {
   const [baselineId, setBaselineId] = useState<string>("");
+  const [activeBaselineId, setActiveBaselineId] = useState<string | null>(null);
+  const [baselineIdentityError, setBaselineIdentityError] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string>("");
   const [latest, setLatest] = useState<LatestAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -2079,6 +2081,67 @@ export default function ResultsPage() {
       searchParams?.get("analysisId") ??
       searchParams?.get("fitScoreId");
     return candidate?.trim() ?? null;
+  }, [searchParams]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const hydrateBaselineIdentity = async () => {
+      setBaselineIdentityError(null);
+      try {
+        const response = await fetch("/api/baselines", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = (await response.json()) as unknown;
+        if (cancelled) return;
+        if (!Array.isArray(payload)) return;
+
+        const baselines = payload.filter(
+          (entry): entry is { id: string; status?: string; isActive?: boolean } =>
+            Boolean(entry) &&
+            typeof entry === "object" &&
+            typeof (entry as { id?: unknown }).id === "string",
+        );
+        const active =
+          baselines.find((b) => b.status !== "ARCHIVED" && b.isActive === true)?.id ?? null;
+        setActiveBaselineId(active);
+
+        const requested = searchParams?.get("baselineId")?.trim() ?? "";
+        if (!requested) {
+          // Results can derive baseline identity from the assessment payload; avoid overriding it when
+          // the page was deep-linked by assessmentId/analysisId alone.
+          const hasAssessmentParam = Boolean(
+            (searchParams?.get("assessmentId") ?? searchParams?.get("analysisId") ?? "").trim(),
+          );
+          if (!hasAssessmentParam && active) setBaselineId(active);
+          return;
+        }
+
+        const requestedRecord = baselines.find((b) => b.id === requested) ?? null;
+        if (!requestedRecord) {
+          setBaselineId("");
+          setBaselineIdentityError("That baseline is unavailable. Go to Baseline to select your current baseline.");
+          return;
+        }
+        if (requestedRecord.status === "ARCHIVED") {
+          setBaselineId("");
+          setBaselineIdentityError("That baseline is archived and can’t be used. Go to Baseline to restore or switch your current baseline.");
+          return;
+        }
+        if (active && requested !== active) {
+          setBaselineId("");
+          setBaselineIdentityError("This link points to a baseline that isn’t your current baseline. Go to Baseline to switch your current baseline.");
+          return;
+        }
+
+        setBaselineId(requested);
+      } catch (error) {
+        console.error("Failed to hydrate baseline identity", error);
+      }
+    };
+
+    void hydrateBaselineIdentity();
+    return () => {
+      cancelled = true;
+    };
   }, [searchParams]);
 
   const persistLastAssessmentId = useCallback(async (assessmentId: string | null) => {
@@ -5220,6 +5283,24 @@ export default function ResultsPage() {
     // Results is not a stopping point for score >= 80.
     // We still run effects (including analytics + router.replace), but render no Results UI.
     return null;
+  }
+
+  if (baselineIdentityError) {
+    return (
+      <PageShell className="results-page-theme">
+        <div className="mx-auto max-w-4xl py-10">
+          <Alert intent="warning" title="Baseline selection needs review">
+            <p className="text-sm">{baselineIdentityError}</p>
+            <Link
+              href="/baseline"
+              className="mt-3 inline-flex items-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+            >
+              GO TO BASELINE
+            </Link>
+          </Alert>
+        </div>
+      </PageShell>
+    );
   }
 
   return (

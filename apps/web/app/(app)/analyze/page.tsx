@@ -8,6 +8,7 @@ import { FormButton, SecondaryActionLink } from "@/components/FormButton";
 import { PageShell } from "@/components/PageShell";
 import { ScoreGauge } from "@/components/ScoreGauge";
 import type { BaselineDto } from "@/lib/baselines";
+import { setCurrentBaseline } from "@/lib/baselines";
 import type { JobDto } from "@/lib/jobs";
 import type { AnalysisResult, JobSourceType, StoredAnalysisRecord } from "../lib/session";
 import {
@@ -562,15 +563,43 @@ export default function AnalyzePage() {
         if (cancelled) return;
 
         setBaselines(data);
-        if (data.length > 0) {
-          setBaselineId((prev) => {
-            if (prev && data.some((baseline) => baseline.id === prev)) return prev;
-            return data[0].id;
-          });
+
+        const activeBaselineId =
+          data.find((baseline) => baseline.status !== "ARCHIVED" && baseline.isActive === true)?.id ?? "";
+        const requestedBaselineId = searchParams?.get("baselineId")?.trim() ?? "";
+        const requestedBaseline = requestedBaselineId
+          ? data.find((baseline) => baseline.id === requestedBaselineId) ?? null
+          : null;
+
+        if (data.length === 0) {
+          setBaselineId("");
           return;
         }
 
-        setBaselineId("");
+        if (!activeBaselineId) {
+          setBaselineId("");
+          setBaselineError("Select a baseline to continue.");
+          return;
+        }
+
+        if (requestedBaseline) {
+          if (requestedBaseline.status === "ARCHIVED") {
+            setBaselineId("");
+            setBaselineError("That baseline is archived. Go to Baseline to restore or select your current baseline.");
+            return;
+          }
+          if (requestedBaseline.id !== activeBaselineId) {
+            setBaselineId("");
+            setBaselineError("This link points to a baseline that isn’t your current baseline. Go to Baseline to switch your current baseline.");
+            return;
+          }
+        } else if (requestedBaselineId) {
+          setBaselineId("");
+          setBaselineError("That baseline is unavailable. Go to Baseline to select your current baseline.");
+          return;
+        }
+
+        setBaselineId(activeBaselineId);
       } catch (loadError) {
         if (cancelled) return;
         setBaselineError(loadError instanceof Error ? loadError.message : "Unable to load baselines.");
@@ -585,7 +614,7 @@ export default function AnalyzePage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [searchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -635,12 +664,7 @@ export default function AnalyzePage() {
     setBaselineVersionId(latestVersionId(selected));
   }, [baselineId, baselines]);
 
-  useEffect(() => {
-    const requestedBaselineId = searchParams?.get("baselineId")?.trim() ?? "";
-    if (!requestedBaselineId) return;
-    if (!baselines.some((baseline) => baseline.id === requestedBaselineId)) return;
-    setBaselineId(requestedBaselineId);
-  }, [baselines, searchParams]);
+  // Baseline identity is canonical and server-backed (isActive). Do not allow deep links to silently override it.
 
   useEffect(() => {
     const requestedJobId = searchParams?.get("jobId")?.trim() ?? "";
@@ -675,15 +699,7 @@ export default function AnalyzePage() {
     setResult(stored.analysis);
       setRestoredAt(stored.savedAt);
 
-      if (stored.baselineId) {
-        const restoredBaselineId = stored.baselineId;
-        setBaselineId((current) => {
-          if (current && current.length > 0) {
-            return current;
-          }
-          return restoredBaselineId;
-        });
-      }
+      // Do not restore baseline identity from session storage (canonical baseline is server-backed isActive).
 
       if (stored.jobId) {
         const restoredJobId = stored.jobId;
@@ -847,6 +863,20 @@ export default function AnalyzePage() {
     router,
   ]);
 
+  const handleBaselineChange = useCallback(
+    async (nextBaselineId: string) => {
+      setBaselineError(null);
+      setBaselineId("");
+      try {
+        await setCurrentBaseline(nextBaselineId);
+        setBaselineId(nextBaselineId);
+      } catch (error) {
+        setBaselineError(error instanceof Error ? error.message : "Unable to set current baseline.");
+      }
+    },
+    [],
+  );
+
   const handleGenerateResume = useCallback(() => {
     router.push(studioHref);
   }, [router, studioHref]);
@@ -870,7 +900,7 @@ export default function AnalyzePage() {
           baselineLoading={baselineLoading}
           baselineError={baselineError}
           selectedBaseline={selectedBaseline}
-          onBaselineChange={setBaselineId}
+          onBaselineChange={handleBaselineChange}
           jobs={jobs}
           jobsLoading={jobsLoading}
           jobsError={jobsError}
