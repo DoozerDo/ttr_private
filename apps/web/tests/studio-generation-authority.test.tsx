@@ -17,11 +17,15 @@ const resolveStudioNextMoveMock = vi.hoisted(() => vi.fn());
 const getCanonicalNextActionMock = vi.hoisted(() => vi.fn());
 const buildGenerationProductReadinessMock = vi.hoisted(() => vi.fn());
 const evaluateStudioTrustGateMock = vi.hoisted(() => vi.fn());
+const resolveWorkflowAuthorityMock = vi.hoisted(() => vi.fn());
 var actualGetCanonicalNextAction: typeof import("@/lib/nextAction").getCanonicalNextAction | null = null;
 var actualBuildGenerationProductReadiness:
   | typeof import("@/lib/generationProductReadiness").buildGenerationProductReadiness
   | null = null;
 var actualEvaluateStudioTrustGate: typeof import("@/lib/studioTrustGate").evaluateStudioTrustGate | null = null;
+var actualResolveWorkflowAuthority:
+  | typeof import("@/lib/resolveWorkflowAuthority").resolveWorkflowAuthority
+  | null = null;
 vi.mock("@/src/lib/analytics", () => ({
   trackEvent: (...args: unknown[]) => trackEventMock(...args),
 }));
@@ -64,6 +68,17 @@ vi.mock("@/lib/studioTrustGate", async () => {
   return {
     ...actual,
     evaluateStudioTrustGate: evaluateStudioTrustGateMock,
+  };
+});
+vi.mock("@/lib/resolveWorkflowAuthority", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/resolveWorkflowAuthority")>(
+    "@/lib/resolveWorkflowAuthority",
+  );
+  actualResolveWorkflowAuthority = actual.resolveWorkflowAuthority;
+  resolveWorkflowAuthorityMock.mockImplementation(actual.resolveWorkflowAuthority);
+  return {
+    ...actual,
+    resolveWorkflowAuthority: resolveWorkflowAuthorityMock,
   };
 });
 vi.mock("@/app/(app)/studio/BaselineBlockPolicyPanel", () => ({
@@ -392,7 +407,18 @@ describe("Studio artifact quality gating (soft)", () => {
           return Promise.resolve(createResponse({ status: "ok" }));
         }
         if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
-          return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+          return Promise.resolve(
+            createResponse({
+              status: "ready",
+              blocked: false,
+              reasonCodes: [],
+              reasons: [],
+              badgeLabel: "READY",
+              summary: "Ready",
+              verificationIssues: [],
+              compliance_flags: [],
+            }),
+          );
         }
         return Promise.resolve(createResponse({}));
       }),
@@ -523,7 +549,18 @@ describe("Studio artifact quality gating (soft)", () => {
           return Promise.resolve(createResponse({ status: "success", generationStatus: "success" }));
         }
         if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
-          return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+          return Promise.resolve(
+            createResponse({
+              status: "ready",
+              blocked: false,
+              reasonCodes: [],
+              reasons: [],
+              badgeLabel: "READY",
+              summary: "Ready",
+              verificationIssues: [],
+              compliance_flags: [],
+            }),
+          );
         }
         return Promise.resolve(createResponse({}));
       }),
@@ -639,7 +676,18 @@ describe("Studio artifact quality gating (soft)", () => {
           return Promise.resolve(createResponse({ status: "ok" }));
         }
         if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
-          return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+          return Promise.resolve(
+            createResponse({
+              status: "ready",
+              blocked: false,
+              reasonCodes: [],
+              reasons: [],
+              badgeLabel: "READY",
+              summary: "Ready",
+              verificationIssues: [],
+              compliance_flags: [],
+            }),
+          );
         }
         return Promise.resolve(createResponse({}));
       }),
@@ -2778,7 +2826,7 @@ function setupBaselineTemplateDegradedMissingArtifactsFetch() {
 }
 
 describe("Studio generation authority", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     clearRecentIntentSignals();
     try {
       const storage = window.localStorage;
@@ -2815,6 +2863,14 @@ describe("Studio generation authority", () => {
       evaluateStudioTrustGateMock.mockReset();
       evaluateStudioTrustGateMock.mockImplementation(actualEvaluateStudioTrustGate);
     }
+    resolveWorkflowAuthorityMock.mockReset();
+    if (!actualResolveWorkflowAuthority) {
+      const actual = await vi.importActual<typeof import("@/lib/resolveWorkflowAuthority")>(
+        "@/lib/resolveWorkflowAuthority",
+      );
+      actualResolveWorkflowAuthority = actual.resolveWorkflowAuthority;
+    }
+    resolveWorkflowAuthorityMock.mockImplementation(actualResolveWorkflowAuthority);
     trackEventMock.mockClear();
     resolveStudioNextMoveMock.mockClear();
     mockRouterReplace.mockClear();
@@ -3020,6 +3076,18 @@ describe("Studio generation authority", () => {
     setFetchImplementation(
       vi.fn((input: RequestInfo) => {
         const url = typeof input === "string" ? input : input?.url ?? "";
+        if (url.includes("/api/workflow/authority")) {
+          return Promise.resolve(
+            createResponse({
+              workflowState: "READY",
+              primaryAction: "GENERATE",
+              canGenerate: true,
+              suppressFailureMessaging: false,
+              headline: "Ready to generate",
+              body: "Ready",
+            }),
+          );
+        }
         if (url.includes("/api/baselines/base-1/versions")) {
           return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
         }
@@ -3103,6 +3171,18 @@ describe("Studio generation authority", () => {
     setFetchImplementation(
       vi.fn((input: RequestInfo) => {
         const url = typeof input === "string" ? input : input?.url ?? "";
+        if (url.includes("/api/workflow/authority")) {
+          return Promise.resolve(
+            createResponse({
+              workflowState: "READY",
+              primaryAction: "GENERATE",
+              canGenerate: true,
+              suppressFailureMessaging: false,
+              headline: "Ready to generate",
+              body: "Ready",
+            }),
+          );
+        }
         if (url.includes("/api/baselines/base-1/versions")) {
           return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
         }
@@ -3184,6 +3264,18 @@ describe("Studio generation authority", () => {
     setFetchImplementation(
       vi.fn((input: RequestInfo) => {
         const url = typeof input === "string" ? input : input?.url ?? "";
+        if (url.includes("/api/workflow/authority")) {
+          return Promise.resolve(
+            createResponse({
+              workflowState: "READY",
+              primaryAction: "GENERATE",
+              canGenerate: true,
+              suppressFailureMessaging: false,
+              headline: "Ready to generate",
+              body: "Ready",
+            }),
+          );
+        }
         if (url.includes("/api/baselines/base-1/versions")) {
           return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
         }
@@ -3361,6 +3453,331 @@ describe("Studio generation authority", () => {
       expect(calls.some((c) => c.includes("/api/studio/artifacts"))).toBe(true);
     });
   });
+
+  it("hydrates cached artifact snapshot when workspace identity matches (v2 cache contract)", async () => {
+    resolveWorkflowAuthorityMock.mockReturnValue({
+      workflowState: "READY",
+      canGenerate: true,
+      suppressFailureMessaging: false,
+      primaryAction: "REVIEW",
+      headline: "Your application is ready",
+      body: "Review your generated materials and use the next step that fits this role.",
+      nextStepHint: "Review and refine your fit before continuing.",
+    });
+
+    const originalStorage = window.localStorage;
+    const memoryStorage = (() => {
+      const store = new Map<string, string>();
+      return {
+        get length() {
+          return store.size;
+        },
+        key: (index: number) => Array.from(store.keys())[index] ?? null,
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          store.set(key, value);
+        },
+        removeItem: (key: string) => {
+          store.delete(key);
+        },
+        clear: () => {
+          store.clear();
+        },
+      } satisfies Storage;
+    })();
+
+    Object.defineProperty(window, "localStorage", { configurable: true, value: memoryStorage });
+
+    window.localStorage.setItem(
+      "ttr:studio-artifacts:v2:job-1:base-1:analysis-1",
+      JSON.stringify({
+        version: 2,
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        analysisId: "analysis-1",
+        updatedAt: new Date().toISOString(),
+        resumeResponse: {
+          status: "success",
+          generationStatus: "success",
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          display: {
+            title: "Resume generated",
+            description: "Verified baseline evidence was assembled into a draft.",
+            reasons: ["Review the draft and export DOCX or PDF."],
+          },
+          preview: {
+            resume: {
+              heading: { name: "Cached Candidate", contactLine: "cached@example.com" },
+              summary: "Cached summary",
+              experience: [{ company: "Acme", roleTitle: "Director", bullets: ["Cached bullet"] }],
+            },
+          },
+        },
+      }),
+    );
+
+    setFetchImplementation(
+      vi.fn((input: RequestInfo) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        if (url.includes("/api/baselines/base-1/versions")) {
+          return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+        }
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+          return Promise.resolve(
+            createResponse({
+              assessmentId: "analysis-1",
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: "base-version-1",
+              scoring_v2: { score: 92 },
+              verification_coverage: {
+                totalClaims: 3,
+                verifiedClaims: 3,
+                inferredClaims: 0,
+                unverifiedClaims: 0,
+                unverifiedRequirements: [],
+              },
+            }),
+          );
+        }
+        if (url.includes("/api/studio/artifacts")) {
+          return Promise.resolve(createResponse({ message: "not found" }, false, 404));
+        }
+        if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+          return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        }
+        return Promise.resolve(createResponse({}));
+      }),
+    );
+
+    try {
+      renderStudio({ intent: "generate" });
+
+      await waitFor(() => {
+        expect(screen.getByText(/Your application materials/i)).toBeInTheDocument();
+      });
+
+      const enterWorkspace = screen.queryByTestId("studio-generation-ready-secondary");
+      if (enterWorkspace) fireEvent.click(enterWorkspace);
+
+      // Cache hydration must apply (i.e. not fall back to "missing" artifacts when backend fetch 404s).
+      await waitFor(() => {
+        expect(screen.queryByTestId("studio-resume-missing")).toBeNull();
+        expect(screen.getByTestId("studio-resume-artifact-issue")).toBeInTheDocument();
+      }, { timeout: 6000 });
+    } finally {
+      Object.defineProperty(window, "localStorage", { configurable: true, value: originalStorage });
+    }
+  }, 15000);
+
+  it("ignores cached artifact snapshot when analysisId mismatches (v2 cache contract)", async () => {
+    resolveWorkflowAuthorityMock.mockReturnValue({
+      workflowState: "READY",
+      canGenerate: true,
+      suppressFailureMessaging: false,
+      primaryAction: "REVIEW",
+      headline: "Your application is ready",
+      body: "Review your generated materials and use the next step that fits this role.",
+      nextStepHint: "Review and refine your fit before continuing.",
+    });
+
+    const originalStorage = window.localStorage;
+    const memoryStorage = (() => {
+      const store = new Map<string, string>();
+      return {
+        get length() {
+          return store.size;
+        },
+        key: (index: number) => Array.from(store.keys())[index] ?? null,
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          store.set(key, value);
+        },
+        removeItem: (key: string) => {
+          store.delete(key);
+        },
+        clear: () => {
+          store.clear();
+        },
+      } satisfies Storage;
+    })();
+
+    Object.defineProperty(window, "localStorage", { configurable: true, value: memoryStorage });
+
+    // Workspace is analysis-1; cache is for analysis-old.
+    window.localStorage.setItem(
+      "ttr:studio-artifacts:v2:job-1:base-1:analysis-1",
+      JSON.stringify({
+        version: 2,
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        analysisId: "analysis-old",
+        updatedAt: new Date().toISOString(),
+        resumeResponse: {
+          status: "success",
+          generationStatus: "success",
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          preview: { resume: { heading: { name: "Stale Candidate" } } },
+        },
+      }),
+    );
+
+    setFetchImplementation(
+      vi.fn((input: RequestInfo) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        if (url.includes("/api/baselines/base-1/versions")) {
+          return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+        }
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+          return Promise.resolve(
+            createResponse({
+              assessmentId: "analysis-1",
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: "base-version-1",
+              scoring_v2: { score: 92 },
+              verification_coverage: {
+                totalClaims: 3,
+                verifiedClaims: 3,
+                inferredClaims: 0,
+                unverifiedClaims: 0,
+                unverifiedRequirements: [],
+              },
+            }),
+          );
+        }
+        if (url.includes("/api/studio/artifacts")) {
+          return Promise.resolve(createResponse({ message: "not found" }, false, 404));
+        }
+        if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+          return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        }
+        return Promise.resolve(createResponse({}));
+      }),
+    );
+
+    try {
+      renderStudio({ intent: "generate" });
+
+      await waitFor(() => {
+        expect(screen.getByText(/Your application materials/i)).toBeInTheDocument();
+      });
+
+      const enterWorkspace = screen.queryByTestId("studio-generation-ready-secondary");
+      if (enterWorkspace) fireEvent.click(enterWorkspace);
+
+      // Must not masquerade as current artifacts.
+      expect(screen.queryByText("Stale Candidate")).toBeNull();
+      await screen.findByTestId("studio-resume-missing");
+    } finally {
+      Object.defineProperty(window, "localStorage", { configurable: true, value: originalStorage });
+    }
+  }, 15000);
+
+  it("treats cached artifact snapshot missing identity metadata as stale (v2 cache contract)", async () => {
+    resolveWorkflowAuthorityMock.mockReturnValue({
+      workflowState: "READY",
+      canGenerate: true,
+      suppressFailureMessaging: false,
+      primaryAction: "REVIEW",
+      headline: "Your application is ready",
+      body: "Review your generated materials and use the next step that fits this role.",
+      nextStepHint: "Review and refine your fit before continuing.",
+    });
+
+    const originalStorage = window.localStorage;
+    const memoryStorage = (() => {
+      const store = new Map<string, string>();
+      return {
+        get length() {
+          return store.size;
+        },
+        key: (index: number) => Array.from(store.keys())[index] ?? null,
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          store.set(key, value);
+        },
+        removeItem: (key: string) => {
+          store.delete(key);
+        },
+        clear: () => {
+          store.clear();
+        },
+      } satisfies Storage;
+    })();
+
+    Object.defineProperty(window, "localStorage", { configurable: true, value: memoryStorage });
+
+    // v2 key but missing baselineId/jobId/analysisId metadata in the payload should be ignored.
+    window.localStorage.setItem(
+      "ttr:studio-artifacts:v2:job-1:base-1:analysis-1",
+      JSON.stringify({
+        version: 2,
+        updatedAt: new Date().toISOString(),
+        resumeResponse: {
+          status: "success",
+          generationStatus: "success",
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          preview: { resume: { heading: { name: "Metadata Missing" } } },
+        },
+      }),
+    );
+
+    setFetchImplementation(
+      vi.fn((input: RequestInfo) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        if (url.includes("/api/baselines/base-1/versions")) {
+          return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+        }
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+          return Promise.resolve(
+            createResponse({
+              assessmentId: "analysis-1",
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: "base-version-1",
+              scoring_v2: { score: 92 },
+              verification_coverage: {
+                totalClaims: 3,
+                verifiedClaims: 3,
+                inferredClaims: 0,
+                unverifiedClaims: 0,
+                unverifiedRequirements: [],
+              },
+            }),
+          );
+        }
+        if (url.includes("/api/studio/artifacts")) {
+          return Promise.resolve(createResponse({ message: "not found" }, false, 404));
+        }
+        if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+          return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        }
+        return Promise.resolve(createResponse({}));
+      }),
+    );
+
+    try {
+      renderStudio({ intent: "generate" });
+
+      await waitFor(() => {
+        expect(screen.getByText(/Your application materials/i)).toBeInTheDocument();
+      });
+
+      const enterWorkspace = screen.queryByTestId("studio-generation-ready-secondary");
+      if (enterWorkspace) fireEvent.click(enterWorkspace);
+
+      expect(screen.queryByText("Metadata Missing")).toBeNull();
+      await screen.findByTestId("studio-resume-missing");
+    } finally {
+      Object.defineProperty(window, "localStorage", { configurable: true, value: originalStorage });
+    }
+  }, 15000);
 
   it("does not show lifecycle failure language once usable output exists (resume succeeds, cover fails)", async () => {
     buildGenerationProductReadinessMock.mockReturnValue({
@@ -3701,10 +4118,10 @@ describe("Studio resume editing", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByTestId("studio-resume-artifact-issue")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-resume-correction-panel")).toBeInTheDocument();
     });
 
-    expect(screen.getAllByTestId("studio-resume-artifact-issue").length).toBe(1);
+    expect(screen.queryByTestId("studio-resume-artifact-issue")).toBeNull();
     expect(screen.queryByText(/resume_v2_normalized_model_invalid/i)).toBeNull();
     expect(screen.queryByText(/structuredBaselineExperienceCount/i)).toBeNull();
   });

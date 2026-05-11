@@ -281,9 +281,15 @@ type StudioApplicationArtifactRecord = {
 };
 
 type StoredStudioArtifactSnapshot = {
+  baselineId?: string;
+  jobId?: string;
+  baselineVersionId?: string | null;
+  baselineVersionHash?: string | null;
+  analysisId?: string | null;
   resumeResponse?: unknown;
   coverResponse?: unknown;
   updatedAt?: string;
+  version?: 2;
 };
 
 type BackendStudioArtifactRecord = {
@@ -583,11 +589,16 @@ function isInsufficientBaselineEvidenceMessage(message: string | null): boolean 
   );
 }
 
-function getStudioArtifactStorageKey(jobId?: string | null, baselineId?: string | null): string | null {
+function getStudioArtifactStorageKey(
+  jobId?: string | null,
+  baselineId?: string | null,
+  analysisId?: string | null,
+): string | null {
   const safeJobId = trimString(jobId);
   const safeBaselineId = trimString(baselineId);
   if (!safeJobId || !safeBaselineId) return null;
-  return `ttr:studio-artifacts:${safeJobId}:${safeBaselineId}`;
+  const safeAnalysisId = trimString(analysisId) || "_";
+  return `ttr:studio-artifacts:v2:${safeJobId}:${safeBaselineId}:${safeAnalysisId}`;
 }
 
 function readStoredStudioArtifacts(key: string): StoredStudioArtifactSnapshot | null {
@@ -603,10 +614,33 @@ function readStoredStudioArtifacts(key: string): StoredStudioArtifactSnapshot | 
   }
 }
 
+function isStoredSnapshotForWorkspace(
+  snapshot: StoredStudioArtifactSnapshot | null,
+  workspace: {
+    baselineId: string | null;
+    jobId: string | null;
+    baselineVersionId: string | null;
+    analysisId: string | null;
+  },
+): boolean {
+  if (!snapshot) return false;
+  const baselineId = trimString(snapshot.baselineId) || null;
+  const jobId = trimString(snapshot.jobId) || null;
+  const baselineVersionId = trimString(snapshot.baselineVersionId) || null;
+  const analysisId = trimString(snapshot.analysisId) || null;
+
+  return (
+    baselineId === workspace.baselineId &&
+    jobId === workspace.jobId &&
+    analysisId === workspace.analysisId &&
+    (!workspace.baselineVersionId || baselineVersionId === workspace.baselineVersionId)
+  );
+}
+
 function writeStoredStudioArtifacts(key: string, snapshot: StoredStudioArtifactSnapshot) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(key, JSON.stringify(snapshot));
+    window.localStorage.setItem(key, JSON.stringify({ ...snapshot, version: 2 }));
   } catch {
     // Best effort only.
   }
@@ -1818,8 +1852,13 @@ export default function StudioPage() {
     [effectiveBaselineId, effectiveJobId, requestedAnalysisId],
   );
   const studioArtifactStorageKey = useMemo(
-    () => getStudioArtifactStorageKey(effectiveJobId, effectiveBaselineId),
-    [effectiveBaselineId, effectiveJobId],
+    () =>
+      getStudioArtifactStorageKey(
+        effectiveJobId,
+        effectiveBaselineId,
+        effectiveRequestedAnalysisId ?? null,
+      ),
+    [effectiveBaselineId, effectiveJobId, effectiveRequestedAnalysisId],
   );
   const [studioArtifactsRefreshNonce, setStudioArtifactsRefreshNonce] = useState(0);
   const studioArtifactHydrationSignature = useMemo(
@@ -2360,6 +2399,33 @@ export default function StudioPage() {
       const snapshot = readStoredStudioArtifacts(studioArtifactStorageKey);
       if (cancelled) return;
       if (snapshot) {
+        const workspaceIdentity = {
+      baselineId: effectiveBaselineId || null,
+      jobId: effectiveJobId || null,
+      baselineVersionId: resolvedBaselineVersionId || null,
+      analysisId: requestedAnalysisId ?? null,
+    };
+
+        if (!isStoredSnapshotForWorkspace(snapshot, workspaceIdentity)) {
+          if (process.env.NODE_ENV !== "production") {
+            console.warn("[studio] artifact_hydration_snapshot_mismatch", {
+              storageKey: studioArtifactStorageKey,
+              expected: workspaceIdentity,
+              received: {
+                baselineId: trimString(snapshot.baselineId) || null,
+                jobId: trimString(snapshot.jobId) || null,
+                baselineVersionId: trimString(snapshot.baselineVersionId) || null,
+                analysisId: trimString(snapshot.analysisId) || null,
+                version: snapshot.version ?? null,
+              },
+            });
+          }
+          setStudioArtifactPairStatus("missing");
+          suppressAutoGenerationRef.current = false;
+          setStudioArtifactsHydrated(true);
+          return;
+        }
+
         if (process.env.NODE_ENV === "development") {
           console.info("[studio] artifact_hydration_fallback_local_storage", {
             area: "studio",
@@ -3557,6 +3623,12 @@ export default function StudioPage() {
     if (typeof window === "undefined") return;
 
     const nextSnapshot: StoredStudioArtifactSnapshot = {
+      version: 2,
+      baselineId: effectiveBaselineId ?? undefined,
+      jobId: effectiveJobId ?? undefined,
+      baselineVersionId: effectiveBaselineVersionId ?? null,
+      baselineVersionHash: null,
+      analysisId: requestedAnalysisId ?? null,
       updatedAt: new Date().toISOString(),
       ...(resumePresenter.status === "success" && hasResumeDraft && resumeState.response
         ? { resumeResponse: resumeState.response }
