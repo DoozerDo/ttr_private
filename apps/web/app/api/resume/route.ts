@@ -4,7 +4,21 @@ import { getApiBaseUrl, requireAuthToken } from "../baselines/helpers";
 export const runtime = "nodejs";
 
 function shouldBypassTier() {
-  return process.env.NODE_ENV !== "production" || process.env.TTR_BETA_BYPASS === "true";
+  const nodeEnv = process.env.NODE_ENV;
+  const bypass = nodeEnv !== "production" || process.env.TTR_BETA_BYPASS === "true";
+  if (nodeEnv === "production" && process.env.TTR_BETA_BYPASS === "true") {
+    const globalKey = "__ttr_beta_bypass_warned__";
+    const globalRecord = globalThis as unknown as Record<string, unknown>;
+    if (!globalRecord[globalKey]) {
+      globalRecord[globalKey] = true;
+      console.warn("[TTR_BETA_BYPASS][production] Tier bypass active", {
+        TTR_BETA_BYPASS: process.env.TTR_BETA_BYPASS,
+        production: true,
+        context: "apps/web/app/api/resume/route.ts",
+      });
+    }
+  }
+  return bypass;
 }
 
 function shouldDebugDocgen() {

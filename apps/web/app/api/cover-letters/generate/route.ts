@@ -5,7 +5,21 @@ import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../baselin
 export const runtime = "nodejs";
 
 function shouldBypassTier() {
-  return process.env.NODE_ENV !== "production" || process.env.TTR_BETA_BYPASS === "true";
+  const nodeEnv = process.env.NODE_ENV;
+  const bypass = nodeEnv !== "production" || process.env.TTR_BETA_BYPASS === "true";
+  if (nodeEnv === "production" && process.env.TTR_BETA_BYPASS === "true") {
+    const globalKey = "__ttr_beta_bypass_warned__";
+    const globalRecord = globalThis as unknown as Record<string, unknown>;
+    if (!globalRecord[globalKey]) {
+      globalRecord[globalKey] = true;
+      console.warn("[TTR_BETA_BYPASS][production] Tier bypass active", {
+        TTR_BETA_BYPASS: process.env.TTR_BETA_BYPASS,
+        production: true,
+        context: "apps/web/app/api/cover-letters/generate/route.ts",
+      });
+    }
+  }
+  return bypass;
 }
 
 export async function POST(req: NextRequest) {
@@ -37,4 +51,3 @@ export async function POST(req: NextRequest) {
 
   return relayApiResponse(response);
 }
-

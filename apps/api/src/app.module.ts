@@ -47,16 +47,31 @@ import { BugReportsModule } from './bug-reports/bug-reports.module';
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
+      useFactory: (configService: ConfigService) => {
+        const nodeEnv =
+          configService.get<string>('NODE_ENV') ?? process.env.NODE_ENV ?? 'development';
+        const isProd = nodeEnv === 'production';
+        const rawDatabaseUrl =
+          configService.get<string>('DATABASE_URL') ?? process.env.DATABASE_URL ?? '';
+        const databaseUrl = typeof rawDatabaseUrl === 'string' ? rawDatabaseUrl.trim() : '';
+
+        if (isProd && !databaseUrl) {
+          throw new Error(
+            'Missing DATABASE_URL environment variable for production startup.',
+          );
+        }
+
+        return {
         type: 'postgres',
         url:
-          configService.get<string>('DATABASE_URL') ??
+          databaseUrl ||
           'postgresql://postgres:postgres@db:5432/targetthisrole',
         entities: [User],
         synchronize:
           configService.get<string>('TYPEORM_SYNCHRONIZE') === 'true',
         autoLoadEntities: true,
-      }),
+        };
+      },
     }),
     AdminUsersModule,
     AccessCodesModule,
