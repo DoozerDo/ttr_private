@@ -2784,7 +2784,9 @@ export default function StudioPage() {
         sourceType: "job_required",
         status: "UNVERIFIED" as const,
         evidenceRefs: [] as string[],
-        generationBlocking: true,
+        // Unsupported JD requirements are advisory gaps, not generation blockers.
+        // They should influence tailoring + fit score, but must not suppress Studio generation.
+        generationBlocking: false,
         scoreWeight: 0,
       }));
     return buildVerificationIssuesFromCanonicalClaims(syntheticClaims);
