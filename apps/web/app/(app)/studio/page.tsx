@@ -4392,7 +4392,9 @@ export default function StudioPage() {
     setRecentIntent(readRecentIntentState()); 
   }, [requestedAnalysisId, effectiveJobId, effectiveBaselineId]); 
   const canProceedWithStudioDrafts =
-    qualifiedForGeneration && activeGenerationReadiness.status === "ready"; 
+    // Studio should aggressively move qualified users into artifacts. Treat any non-blocked readiness
+    // state as eligible for draft orchestration; hard blocking is enforced separately.
+    qualifiedForGeneration && !activeGenerationReadiness.blocked; 
   const isInstantDraftExperience = canProceedWithStudioDrafts; 
   const resumeSingleFlightInFlight = useMemo(
     () =>
@@ -10814,6 +10816,35 @@ export default function StudioPage() {
     effectiveBaselineVersionId,
     effectiveJobId,
     effectiveRequestedAnalysisId,
+  ]);
+
+  useEffect(() => {
+    // Fallback orchestration: if a user is qualified + unblocked but the contract never enters READY
+    // (e.g. hydration ordering or legacy contract drift), still auto-start generation once per scope.
+    if (!needsAutoGeneration) return;
+    if (!autoGenerationSignature) return;
+    if (suppressAutoGenerationRef.current) return;
+    if (autoGenerationInFlight || resumeGenerating || coverGenerating) return;
+    if (hasResumeArtifact || hasCoverLetterArtifact) return;
+    if (resumeState.artifactFailure || coverState.artifactFailure) return;
+    if (activeGenerationReadiness.blocked) return;
+
+    if (autoGenerationSignatureRef.current === autoGenerationSignature) return;
+    autoGenerationSignatureRef.current = autoGenerationSignature;
+
+    void startGenerationFromReadyShell("shell_auto");
+  }, [
+    activeGenerationReadiness.blocked,
+    autoGenerationInFlight,
+    autoGenerationSignature,
+    coverGenerating,
+    coverState.artifactFailure,
+    hasCoverLetterArtifact,
+    hasResumeArtifact,
+    needsAutoGeneration,
+    resumeGenerating,
+    resumeState.artifactFailure,
+    startGenerationFromReadyShell,
   ]);
 
   useEffect(() => {
