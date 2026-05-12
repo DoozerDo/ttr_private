@@ -14,6 +14,25 @@ export class NarrativeCompositionEngine {
   private roleShaper = new RoleNarrativeShaper();
   private evaluator = new NarrativeQualityEvaluator();
 
+  private determineTargetAngle(input: ResumeCompositionInput): string {
+    const thesis = String(input.renderPlan?.summaryNarrative ?? '').trim();
+    if (thesis) return thesis;
+    const roleCorpus = input.experience.map((r) => `${r.roleTitle} ${r.company}`).join(' ');
+    const evidence = (input.renderPlan?.evidencePriorities ?? []).join(' ');
+    // Keep this heuristic small: it only produces a concise angle label to anchor the summary.
+    const lowered = `${roleCorpus} ${evidence}`.toLowerCase();
+    if (/\b(customer operations|customer success|support operations)\b/.test(lowered)) {
+      return 'Customer Operations / Support Strategy leader';
+    }
+    if (/\b(incident|escalation|sla|service delivery)\b/.test(lowered)) {
+      return 'Technical support operations leader with SaaS escalation depth';
+    }
+    if (/\b(program|operating rhythm|process|workflow)\b/.test(lowered)) {
+      return 'Program-oriented CX operations leader';
+    }
+    return '';
+  }
+
   composeResume(input: ResumeCompositionInput): {
     summary: string;
     experience: ResumeCompositionInput['experience'];
@@ -23,10 +42,12 @@ export class NarrativeCompositionEngine {
       narrativeQualityScore: unknown;
       summaryCompositionSource: string;
       evidenceToNarrativeMappings: Array<{ role: string; bulletIndex: number }>;
+      targetAngle: string;
     };
   } {
     const renderPlan = input.renderPlan;
     const evidencePriorities = renderPlan?.evidencePriorities ?? [];
+    const targetAngle = this.determineTargetAngle(input);
     let rewrittenBulletCount = 0;
     const genericLanguageFlags: unknown[] = [];
     const evidenceToNarrativeMappings: Array<{ role: string; bulletIndex: number }> = [];
@@ -46,7 +67,7 @@ export class NarrativeCompositionEngine {
     });
 
     const summaryResult = this.summaryComposer.compose({
-      positioningThesis: renderPlan?.summaryNarrative ?? null,
+      positioningThesis: renderPlan?.summaryNarrative ?? (targetAngle ? `${targetAngle}.` : null),
       experienceSnippets: shapedExperience.flatMap((r) => [r.roleTitle, ...(r.bullets ?? []).slice(0, 2)]),
       evidencePriorities,
     });
@@ -67,8 +88,8 @@ export class NarrativeCompositionEngine {
         narrativeQualityScore: quality.score,
         summaryCompositionSource: summaryResult.source,
         evidenceToNarrativeMappings,
+        targetAngle,
       },
     };
   }
 }
-
