@@ -941,11 +941,25 @@ export default function StudioPage() {
   const isNonProduction = process.env.NODE_ENV !== "production";
   const readCanonicalResumePreviewPayload = (value: unknown): unknown | null => {
     if (!value || typeof value !== "object") return null;
-    const preview = (value as Record<string, unknown>).preview;
-    if (!preview || typeof preview !== "object") return null;
-    const resume = (preview as Record<string, unknown>).resume;
-    if (!resume || typeof resume !== "object") return null;
-    return resume;
+    const record = value as Record<string, unknown>;
+
+    // v2 canonical persisted artifacts can arrive as:
+    // - { preview: { resume: ResumeModel } }
+    // - { resumeResult: { preview: ResumeModel } }
+    // Keep this extraction narrow: only accept object-shaped ResumeModel payloads.
+    const preview = record.preview;
+    if (preview && typeof preview === "object") {
+      const resume = (preview as Record<string, unknown>).resume;
+      if (resume && typeof resume === "object") return resume;
+    }
+
+    const resumeResult = record.resumeResult;
+    if (resumeResult && typeof resumeResult === "object") {
+      const innerPreview = (resumeResult as Record<string, unknown>).preview;
+      if (innerPreview && typeof innerPreview === "object") return innerPreview;
+    }
+
+    return null;
   };
   const { isGuidedActive, currentStep: guidedStep, advanceStep, completeGuidedMode } = useGuidedMode();
   const searchParams = useSearchParams();
