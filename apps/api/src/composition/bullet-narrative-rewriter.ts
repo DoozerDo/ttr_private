@@ -21,6 +21,25 @@ function softenBuzzwords(text: string): string {
     .replace(/\bsynerg(?:y|ize)\b/gi, 'coordinate');
 }
 
+function reframeImplementationScale(text: string): string {
+  const normalized = trimToText(text);
+  if (!normalized) return '';
+
+  // Avoid leading with "lines of code" / raw implementation-scale metrics; keep the metric as supporting detail.
+  // This preserves the verified number without inventing outcomes or leadership scope.
+  const match = normalized.match(
+    /^(?:Built|Wrote|Developed|Delivered)\s+([\d,]+(?:\.\d+)?\+?)\s*(?:lines of code|lines of)\s+([^,.;]+?)(?:(?:\s+across|\s+for|\s+to)\b|[,.]|$)(.*)$/i,
+  );
+  if (!match) return normalized;
+
+  const count = match[1] ?? '';
+  const subject = trimToText(match[2] ?? '');
+  const rest = trimToText(match[3] ?? '').replace(/^[,.;:\s]+/, '');
+
+  const suffix = rest ? ` ${rest}` : '';
+  return `Delivered substantial ${subject} delivery${suffix} (${count} lines)`.replace(/\s{2,}/g, ' ').trim();
+}
+
 export class BulletNarrativeRewriter {
   private detector = new GenericLanguageDetector();
 
@@ -35,6 +54,14 @@ export class BulletNarrativeRewriter {
 
     const originalHasDigits = hasDigits(raw);
     let text = softenBuzzwords(raw);
+
+    // Reduce inventory-style phrasing without changing the underlying claim.
+    text = text
+      .replace(/^\s*(?:Responsible for|Tasked with)\s+/i, 'Owned ')
+      .replace(/\bservices include\b/gi, 'including');
+
+    // Prefer outcome/ownership framing before implementation-scale metrics.
+    text = reframeImplementationScale(text);
 
     // Upgrade weak verb openings without inventing outcomes.
     text = text
@@ -75,4 +102,3 @@ export class BulletNarrativeRewriter {
     return { rewritten, changed, genericLanguageFlags: flags };
   }
 }
-
