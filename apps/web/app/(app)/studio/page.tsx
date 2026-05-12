@@ -4396,6 +4396,14 @@ export default function StudioPage() {
     // state as eligible for draft orchestration; hard blocking is enforced separately.
     qualifiedForGeneration && !activeGenerationReadiness.blocked; 
   const isInstantDraftExperience = canProceedWithStudioDrafts; 
+  const qualifiedForStudioOrchestration = Boolean(
+    qualifiedForGeneration &&
+      !activeGenerationReadiness.blocked &&
+      effectiveBaselineId &&
+      effectiveBaselineVersionId &&
+      effectiveJobId &&
+      effectiveRequestedAnalysisId,
+  );
   const resumeSingleFlightInFlight = useMemo(
     () =>
       isStudioArtifactSingleFlightInFlight({
@@ -4419,9 +4427,10 @@ export default function StudioPage() {
   const needsAutoGeneration =
     generateNowEligible &&
     isInstantDraftExperience &&
-    Boolean(effectiveBaselineVersionId) &&
+    qualifiedForStudioOrchestration &&
     !hasCompletedGeneration &&
-    studioArtifactPairStatus === "missing" &&
+    !hasAnyArtifactPersisted &&
+    studioArtifactPairStatus !== "in_progress" &&
     !resumeState.response &&
     !coverState.response &&
     !resumeState.artifactFailure &&
@@ -11980,7 +11989,7 @@ export default function StudioPage() {
           {jobsError}
         </Alert>
       ) : null}
-      {baselinesError ? (
+      {baselinesError && !qualifiedForStudioOrchestration ? (
         <Alert intent="warning" title="Baseline source unavailable">
           {baselinesError}
         </Alert>
@@ -11995,7 +12004,7 @@ export default function StudioPage() {
           {analysisError}
         </Alert>
       ) : null}
-      {versionsError ? (
+      {versionsError && !qualifiedForStudioOrchestration ? (
         <Alert intent="warning" title="Resume snapshot unavailable">
           {versionsError}
         </Alert>
