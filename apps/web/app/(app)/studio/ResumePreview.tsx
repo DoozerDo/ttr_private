@@ -181,9 +181,9 @@ export function ResumePreview({
   // Studio must render resume preview from API-sanitized `response.preview.resume` only.
   // Do not merge/override with any other data source.
   const model = useMemo(() => readResumeModel(payload), [payload]);
-  const [expandedExperienceIndex, setExpandedExperienceIndex] = useState<number | null>(null);
+  const [expandedExperienceIndices, setExpandedExperienceIndices] = useState<Set<number>>(() => new Set([0, 1]));
   const [showFullResume, setShowFullResume] = useState(false);
-  const [summaryExpanded, setSummaryExpanded] = useState(false);
+  const [summaryExpanded, setSummaryExpanded] = useState(true);
 
   const summary = model ? toText(model.summary) : "";
   const competenciesSource = model
@@ -424,8 +424,8 @@ export function ResumePreview({
             ) : null}
           </div>
           <div className="space-y-6" data-testid="studio-resume-experience-accordion">
-            {visibleExperiences.map(({ entry, index: experienceIndex }) => {
-              const expanded = expandedExperienceIndex === experienceIndex;
+              {visibleExperiences.map(({ entry, index: experienceIndex }) => {
+              const expanded = isEditing || expandedExperienceIndices.has(experienceIndex);
               const headerId = `studio-resume-experience-role-header-${experienceIndex}`;
               const bodyId = `studio-resume-experience-role-body-${experienceIndex}`;
               const safeHeader = deriveHeader({ company: entry.company, roleTitle: entry.roleTitle });
@@ -506,10 +506,16 @@ export function ResumePreview({
                       type="button"
                       aria-expanded={expanded}
                       aria-controls={bodyId}
-                      onClick={() =>
-                        setExpandedExperienceIndex((current) =>
-                          current === experienceIndex ? null : experienceIndex,
-                        )
+                       onClick={() =>
+                        setExpandedExperienceIndices((current) => {
+                          const next = new Set(current);
+                          if (next.has(experienceIndex)) {
+                            next.delete(experienceIndex);
+                          } else {
+                            next.add(experienceIndex);
+                          }
+                          return next;
+                        })
                       }
                       className={`flex w-full items-start justify-between gap-3 px-6 py-5 text-left transition hover:bg-white/[0.03] ${
                         expanded ? "border-b border-white/10" : ""

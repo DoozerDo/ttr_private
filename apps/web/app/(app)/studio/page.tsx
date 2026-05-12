@@ -11433,13 +11433,33 @@ export default function StudioPage() {
             </div> 
             ) : null}
             {!generateNowEligible ? (
-              <StudioArtifactQualityPanel
-                model={artifactQuality}
-                confidence={artifactQuality.confidence}
-                onVerifyClaim={verifyClaim}
-                onEditClaim={openClaimEditModal}
-                onDismissClaim={dismissClaim}
-              />
+              hasRenderableResumeContent || hasRenderableCoverLetterContent ? (
+                <details
+                  className="rounded-2xl border border-white/10 bg-slate-950/35 p-4"
+                  data-testid="studio-artifact-quality-details"
+                >
+                  <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+                    Review & improve (optional)
+                  </summary>
+                  <div className="mt-4">
+                    <StudioArtifactQualityPanel
+                      model={artifactQuality}
+                      confidence={artifactQuality.confidence}
+                      onVerifyClaim={verifyClaim}
+                      onEditClaim={openClaimEditModal}
+                      onDismissClaim={dismissClaim}
+                    />
+                  </div>
+                </details>
+              ) : (
+                <StudioArtifactQualityPanel
+                  model={artifactQuality}
+                  confidence={artifactQuality.confidence}
+                  onVerifyClaim={verifyClaim}
+                  onEditClaim={openClaimEditModal}
+                  onDismissClaim={dismissClaim}
+                />
+              )
             ) : null}
           </> 
         )} 
@@ -12148,7 +12168,7 @@ export default function StudioPage() {
           </Alert>
         ) : null}
 
-        {resumeState.artifactFailure ? (
+        {resumeState.artifactFailure && !hasRenderableResumeContent ? (
           <div
             className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
             data-testid="studio-resume-artifact-issue"
@@ -12257,14 +12277,7 @@ export default function StudioPage() {
                   ? "Resume ready. Cover letter still needs attention."
                   : "Resume ready."}
               </p>
-            ) : (
-              <div className="space-y-1" data-testid="studio-resume-export-blocked-message">
-                <p className="text-sm font-semibold text-slate-100">We hit an issue generating your resume.</p>
-                <p className="text-sm text-slate-300">
-                  Try regenerating it. If the issue continues, report it and we’ll review the artifact.
-                </p>
-              </div>
-            )}
+            ) : null}
             <div className="space-y-4 rounded-xl border border-white/10 bg-slate-950/30 p-3">
               {showLowQualityRecoveryLane && !showFullLowQualityResume && !studioIsGeneratedUnusable ? ( 
                 <div className="space-y-3" data-testid="studio-low-quality-resume-preview-main"> 
