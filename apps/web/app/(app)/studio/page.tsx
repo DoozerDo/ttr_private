@@ -3152,6 +3152,9 @@ export default function StudioPage() {
   );
 
   const resumeHardRenderBlocked = useMemo(() => {
+    // Never suppress a renderable persisted artifact. Hosted beta can produce a usable draft even when
+    // readiness-derived gating signals are degraded; Studio must still show the preview when present.
+    if (hasResumeArtifact) return { blocked: false, reason: "hasArtifact" as const };
     if (canGenerate) return { blocked: false, reason: "ok" as const };
     const qualityStatus = String(resumeResult?.qualityStatus ?? "");
     if (qualityStatus && qualityStatus !== "pass") return { blocked: true, reason: "qualityStatus_not_pass" as const };
@@ -3171,6 +3174,7 @@ export default function StudioPage() {
     return { blocked: false, reason: "ok" as const };
   }, [
     canGenerate,
+    hasResumeArtifact,
     resumeResult?.correctionReasons,
     resumeResult?.qualityStatus,
     resumeState.artifactFailure,
@@ -4946,6 +4950,7 @@ export default function StudioPage() {
     if (resumePresenter.status === "blocked") return "blocked_by_compliance";
     if (needsMoreBaselineDetail) return "needs_more_baseline_detail";
     if (resumeState.error) return "failed_due_to_system_error";
+    if (resumeState.artifactFailure && !hasRenderableResumeContent) return "failed_due_to_system_error";
     if (resumePresenter.status === "success" && hasResumeArtifact) {
       // Never claim success if we cannot render/export a usable preview (e.g. missing normalized model).
       if (!hasResumeDraft) return "needs_correction";
@@ -4956,9 +4961,11 @@ export default function StudioPage() {
     canGenerateDocuments,
     activeGenerationReadiness.blocked,
     hasResumeArtifact,
+    hasRenderableResumeContent,
     resumeGenerating,
     resumePresenter.status,
     resumeState.error,
+    resumeState.artifactFailure,
     resumeQualityPass,
   ]);
   const resumeNeedsBaselineDetail = isInsufficientBaselineEvidenceMessage(resumeState.error);
