@@ -8822,7 +8822,7 @@ export default function StudioPage() {
           <p className="text-sm font-medium text-slate-200" data-testid="studio-ready-materials-copy">
             {normalizedArtifacts.artifactDisplayState === "both_ready_high_confidence" ||
             normalizedArtifacts.artifactDisplayState === "both_ready_mixed_confidence"
-              ? "Your documents are ready. Download or refine below."
+              ? "Your documents are ready."
               : normalizedArtifacts.artifactDisplayState === "resume_only_ready"
                 ? "Your resume is ready. Your cover letter still needs attention."
                 : normalizedArtifacts.artifactDisplayState === "cover_only_ready"
@@ -11929,8 +11929,10 @@ export default function StudioPage() {
         </Alert>
       ) : null} 
  
-      {!generateNowEligible && !isReadySuccessState ? <StudioNextMove move={studioNextMove} /> : null} 
-      {!generateNowEligible && !isReadySuccessState ? (
+      {!hasResumeArtifact && !hasCoverLetterArtifact && !generateNowEligible && !isReadySuccessState ? (
+        <StudioNextMove move={studioNextMove} />
+      ) : null}
+      {!hasResumeArtifact && !hasCoverLetterArtifact && !generateNowEligible && !isReadySuccessState ? (
         <details className="rounded-2xl border border-white/10 bg-white/[0.03] p-4" data-testid="studio-document-strategy-details">
           <summary className="cursor-pointer text-sm font-semibold text-slate-200">
             Document strategy
@@ -11965,12 +11967,12 @@ export default function StudioPage() {
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
               {resumeAutoRepairing
                 ? "Repairing resume…"
-                : resumeNeedsRefinement || resumeRequiresCorrectionCopy
+                : (hasResumeDraft && (resumeNeedsRefinement || resumeRequiresCorrectionCopy))
                   ? studioEffectiveGenerationState === "generated_unusable"
                     ? studioRetryInProgress
                       ? "We generated a draft, but it is not strong enough to use yet. Regenerating..."
                       : "We generated a draft, but it is not strong enough to use yet."
-                    : "Resume needs refinement before export."
+                    : "Resume draft needs edits."
                   : renderCardStatus(resumeCardStatus, "Resume")}
             </p>
             {debugStudioMetadataEnabled
@@ -12252,8 +12254,8 @@ export default function StudioPage() {
                 {normalizedArtifacts.artifactDisplayState === "resume_only_ready" ||
                 normalizedArtifacts.artifactDisplayState === "partial_failure_retryable" ||
                 normalizedArtifacts.artifactDisplayState === "partial_failure_non_retryable"
-                  ? "Your resume is ready. Your cover letter still needs attention."
-                  : "Your resume is ready. Download or refine below."}
+                  ? "Resume ready. Cover letter still needs attention."
+                  : "Resume ready."}
               </p>
             ) : (
               <div className="space-y-1" data-testid="studio-resume-export-blocked-message">
@@ -12426,12 +12428,12 @@ export default function StudioPage() {
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
               {coverAutoRepairing
                 ? "Repairing cover letter…"
-                : coverNeedsRefinement || coverRequiresCorrectionCopy
+                : (hasCoverLetterDraft && (coverNeedsRefinement || coverRequiresCorrectionCopy))
                   ? studioEffectiveGenerationState === "generated_unusable"
                     ? studioRetryInProgress
                       ? "We generated a draft, but it is not strong enough to use yet. Regenerating..."
                       : "We generated a draft, but it is not strong enough to use yet."
-                    : "Cover letter needs refinement before export."
+                    : "Cover letter draft needs edits."
                   : renderCardStatus(coverCardStatus, "Cover letter")}
             </p>
             {debugStudioMetadataEnabled
