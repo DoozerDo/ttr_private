@@ -1851,9 +1851,9 @@ export default function StudioPage() {
       baselineId: effectiveBaselineId || null,
       jobId: effectiveJobId || null,
       baselineVersionId: effectiveBaselineVersionId || null,
-      analysisId: requestedAnalysisId || null,
+      analysisId: effectiveRequestedAnalysisId ?? null,
     }),
-    [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, requestedAnalysisId],
+    [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, effectiveRequestedAnalysisId],
   );
   const generationWorkflowScope = useMemo<WorkflowRequestScope>(
     () => ({
@@ -1861,9 +1861,9 @@ export default function StudioPage() {
       jobId: effectiveJobId || null,
       // Generation identity must not churn when baselineVersionId is resolved/changes.
       baselineVersionId: null,
-      analysisId: requestedAnalysisId || null,
+      analysisId: effectiveRequestedAnalysisId ?? null,
     }),
-    [effectiveBaselineId, effectiveJobId, requestedAnalysisId],
+    [effectiveBaselineId, effectiveJobId, effectiveRequestedAnalysisId],
   );
   const studioArtifactStorageKey = useMemo(
     () =>
@@ -1880,10 +1880,10 @@ export default function StudioPage() {
       [
         studioArtifactStorageKey ?? "none",
         effectiveBaselineVersionId ?? "none",
-        requestedAnalysisId ?? "none",
+        effectiveRequestedAnalysisId ?? "none",
         String(studioArtifactsRefreshNonce),
       ].join("|"),
-    [effectiveBaselineVersionId, requestedAnalysisId, studioArtifactStorageKey, studioArtifactsRefreshNonce],
+    [effectiveBaselineVersionId, effectiveRequestedAnalysisId, studioArtifactStorageKey, studioArtifactsRefreshNonce],
   );
 
   useEffect(() => {
@@ -2130,7 +2130,7 @@ export default function StudioPage() {
         artifactsParams.set("baselineId", baselineId);
         artifactsParams.set("baselineVersionId", baselineVersionId);
         artifactsParams.set("jobId", jobId);
-        if (requestedAnalysisId) artifactsParams.set("analysisId", requestedAnalysisId);
+        if (effectiveRequestedAnalysisId) artifactsParams.set("analysisId", effectiveRequestedAnalysisId);
 
          const response = await fetch(`/api/studio/artifacts?${artifactsParams.toString()}`, { cache: "no-store" });
         const payload = await readResponsePayload(response);
@@ -2357,8 +2357,8 @@ export default function StudioPage() {
         artifactsParams.set("jobId", effectiveJobId);
         // Keep resume + cover hydration aligned to the same artifact identity. Some backends scope
         // drafts by analysisId, so include it when available.
-        if (requestedAnalysisId) {
-          artifactsParams.set("analysisId", requestedAnalysisId);
+        if (effectiveRequestedAnalysisId) {
+          artifactsParams.set("analysisId", effectiveRequestedAnalysisId);
         }
         const artifactsUrl = `/api/studio/artifacts?${artifactsParams.toString()}`;
         if (process.env.NODE_ENV === "development") {
@@ -4409,20 +4409,20 @@ export default function StudioPage() {
       isStudioArtifactSingleFlightInFlight({
         baselineId: effectiveBaselineId ?? null,
         jobId: effectiveJobId ?? null,
-        analysisId: requestedAnalysisId ?? null,
+        analysisId: effectiveRequestedAnalysisId ?? null,
         artifactType: "resume",
       }),
-    [effectiveBaselineId, effectiveJobId, requestedAnalysisId],
+    [effectiveBaselineId, effectiveJobId, effectiveRequestedAnalysisId],
   );
   const coverSingleFlightInFlight = useMemo(
     () =>
       isStudioArtifactSingleFlightInFlight({
         baselineId: effectiveBaselineId ?? null,
         jobId: effectiveJobId ?? null,
-        analysisId: requestedAnalysisId ?? null,
+        analysisId: effectiveRequestedAnalysisId ?? null,
         artifactType: "cover_letter",
       }),
-    [effectiveBaselineId, effectiveJobId, requestedAnalysisId],
+    [effectiveBaselineId, effectiveJobId, effectiveRequestedAnalysisId],
   );
   const needsAutoGeneration =
     generateNowEligible &&
