@@ -314,6 +314,24 @@ function tightenBulletForSeniority(bullet: string): string {
     .replace(/\bimplemented\b/gi, 'delivered')
     .replace(/\bdeveloped\b/gi, 'built');
 
+  // Avoid leading with "lines of code" / raw implementation-scale metrics; keep them as supporting detail.
+  tightened = tightened.replace(
+    /^(?:Built|Wrote|Developed|Delivered)\s+([\d,]+(?:\.\d+)?\+?)\s*(?:lines of code|lines of)\s+([^,.;]+?)(?:(?:\s+across|\s+for|\s+to)\b|[,.]|$)(.*)$/i,
+    (_match, count, subject, rest) => {
+      const safeSubject = normalizeLine(String(subject ?? '')).replace(/\s+/g, ' ').trim();
+      const safeRest = normalizeLine(String(rest ?? '')).replace(/^[,.;:\s]+/, '').trim();
+      const suffix = safeRest ? ` ${safeRest}` : '';
+      // "Delivered substantial <subject> delivery ..." stays recruiter-facing without inventing outcomes.
+      return `Delivered substantial ${safeSubject} delivery${suffix} (${count} lines).`.replace(/\s{2,}/g, ' ').trim();
+    },
+  );
+
+  // Reduce repetitive "Designed/Implemented/Built ..." openings when they are purely mechanical.
+  tightened = tightened.replace(
+    /^(?:Built|Delivered)\s+(a|an|the)\s+/i,
+    'Delivered ',
+  );
+
   tightened = tightened.replace(/\busing\s+((?:[^.]+,){3,}[^.]+)\.?$/i, '');
 
   tightened = tightened
