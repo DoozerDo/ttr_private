@@ -307,6 +307,16 @@ function tightenBulletForSeniority(bullet: string): string {
   }
 
   tightened = tightened
+    .replace(/^(?:Responsible for|Tasked with)\b\s*/i, '')
+    .replace(/\bservices include\b/gi, 'including')
+    .replace(/\bdesigned and implemented\b/gi, 'delivered')
+    .replace(/\bbuilt and maintained\b/gi, 'owned')
+    .replace(/\bimplemented\b/gi, 'delivered')
+    .replace(/\bdeveloped\b/gi, 'built');
+
+  tightened = tightened.replace(/\busing\s+((?:[^.]+,){3,}[^.]+)\.?$/i, '');
+
+  tightened = tightened
     .replace(/\b(?:extensive|systematic|engaging|sophisticated|exceptional)\b\s*/gi, '')
     .replace(/\s{2,}/g, ' ')
     .replace(/\s+([,.;:!?])/g, '$1')
@@ -341,15 +351,12 @@ function buildStrategicResumeSummary(
 
   const openingThemes = topAxes.slice(0, 2).join(', ');
   const evidencePhrase = evidenceThemes.slice(0, 2).join(', ');
-  const firstLine = openingThemes
-    ? `${position} focused on ${openingThemes}.`
-    : `${position} focused on role-relevant execution.`;
+  const firstLine = openingThemes ? `${position} with strength in ${openingThemes}.` : `${position} focused on execution.`;
   const secondLine = evidencePhrase
-    ? `Strongest evidence centers on ${evidencePhrase}.`
-    : 'Strongest evidence stays centered on the highest-priority baseline signals.';
-  const thirdLine = 'Lower-relevance background stays out of the opening story.';
+    ? `Known for ${evidencePhrase} and shipping role-aligned outcomes from verified experience.`
+    : 'Known for shipping role-aligned outcomes from verified experience.';
 
-  const summary = [firstLine, secondLine, thirdLine].join(' ');
+  const summary = [firstLine, secondLine].join(' ');
   if (containsAnyPhrase(summary, GENERIC_SUMMARY_PHRASES)) {
     return existingSummary;
   }
