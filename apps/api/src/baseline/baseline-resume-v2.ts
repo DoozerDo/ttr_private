@@ -13,11 +13,12 @@ export function buildValidatedResumeV2FromParsedBaseline(
   parsedBaseline: Record<string, unknown>,
 ): NormalizedResumeDocument {
   const shouldLog = process.env.RESUME_V2_INGEST_DEBUG === 'true';
+  const baselineId = String(parsedBaseline['baseline_id'] ?? '');
   if (shouldLog) {
     try {
       // eslint-disable-next-line no-console
       console.log('[RESUME_V2_INGEST][ADAPTER_EXEC]', {
-        baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+        baselineId,
         schemaVersion: String(parsedBaseline['schema_version'] ?? ''),
         sourceFormat: String(parsedBaseline['source_format'] ?? ''),
         parsedExperienceIsArray: Array.isArray(parsedBaseline['experience']),
@@ -40,7 +41,7 @@ export function buildValidatedResumeV2FromParsedBaseline(
   const sections = [
     {
       id: 'ingestion-experience',
-      baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+      baselineId,
       sectionType: BaselineSectionType.EXPERIENCE,
       title: 'Experience',
       content: '',
@@ -55,18 +56,78 @@ export function buildValidatedResumeV2FromParsedBaseline(
     | Array<Record<string, unknown>>
     | undefined;
   if (Array.isArray(experience) && experience.length) {
+    const rejectionReasons = new Map<string, { count: number; sampleKeys: string[] }>();
+    const recordRejection = (reason: string, entry: unknown) => {
+      if (!shouldLog) return;
+      const keys =
+        entry && typeof entry === 'object' && !Array.isArray(entry)
+          ? Object.keys(entry as Record<string, unknown>)
+          : [];
+      const sampleKeys = keys.slice(0, 12);
+      const existing = rejectionReasons.get(reason);
+      if (existing) {
+        existing.count += 1;
+        return;
+      }
+      rejectionReasons.set(reason, { count: 1, sampleKeys });
+    };
+
+    const readString = (...candidates: unknown[]) => {
+      for (const value of candidates) {
+        if (typeof value === 'string' && value.trim()) return value.trim();
+      }
+      return '';
+    };
+
+    const readDetailsLines = (entry: Record<string, unknown>) => {
+      const directText = readString(
+        entry['details_text'],
+        entry['detailsText'],
+        entry['responsibilities_text'],
+        entry['responsibilitiesText'],
+        entry['description'],
+        entry['summary'],
+      );
+      if (directText) {
+        return directText
+          .replace(/\r\n/g, '\n')
+          .replace(/\r/g, '\n')
+          .split('\n')
+          .map((line) => String(line ?? '').trim())
+          .filter(Boolean)
+          // Keep the replacement narrow; this is ingestion-only and must not rewrite meaning.
+          .map((line) => `- ${line.replace(/^[-*â€¢]\s*/, '')}`);
+      }
+
+      const arrayCandidate =
+        (Array.isArray(entry['bullets']) && entry['bullets']) ||
+        (Array.isArray(entry['highlights']) && entry['highlights']) ||
+        (Array.isArray(entry['responsibilities']) && entry['responsibilities']) ||
+        (Array.isArray(entry['details']) && entry['details']) ||
+        null;
+      if (arrayCandidate) {
+        return arrayCandidate
+          .map((line) => (typeof line === 'string' ? line.trim() : ''))
+          .filter(Boolean)
+          // Keep the replacement narrow; this is ingestion-only and must not rewrite meaning.
+          .map((line) => `- ${line.replace(/^[-*â€¢]\s*/, '')}`);
+      }
+
+      return [] as string[];
+    };
+
     if (shouldLog) {
       // eslint-disable-next-line no-console
       console.log(
         parsedBaseline['experience'] ? '[RESUME_V2_INGEST][USING_EXPERIENCE_ARRAY]' : '[RESUME_V2_INGEST][USING_WORK_HISTORY_FALLBACK]',
         {
-          baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+          baselineId,
           selectedCount: experience.length,
         },
       );
       // eslint-disable-next-line no-console
       console.log('[RESUME_V2_INGEST][PARSED_BASELINE]', {
-        baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+        baselineId,
         schemaVersion: String(parsedBaseline['schema_version'] ?? ''),
         sourceFormat: String(parsedBaseline['source_format'] ?? ''),
         identityPresent: Boolean(identity && typeof identity === 'object'),
@@ -77,22 +138,51 @@ export function buildValidatedResumeV2FromParsedBaseline(
 
     let mappedCount = 0;
     let droppedEmptyCount = 0;
+    let rejectedMissingHeaderCount = 0;
+    let rejectedMissingDetailsCount = 0;
     const blocks = experience
       .map((entry, index) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+          droppedEmptyCount += 1;
+          recordRejection('non_object_entry', entry);
+          return '';
+        }
         const company =
           (typeof entry['company_name'] === 'string' && entry['company_name']) ||
+          (typeof entry['companyName'] === 'string' && entry['companyName']) ||
           (typeof entry['company'] === 'string' && entry['company']) ||
+          (typeof entry['employer'] === 'string' && entry['employer']) ||
           (typeof entry['organization'] === 'string' && entry['organization']) ||
+          (typeof entry['org'] === 'string' && entry['org']) ||
           '';
         const role =
           (typeof entry['role_title'] === 'string' && entry['role_title']) ||
+          (typeof entry['roleTitle'] === 'string' && entry['roleTitle']) ||
           (typeof entry['title'] === 'string' && entry['title']) ||
           (typeof entry['position'] === 'string' && entry['position']) ||
+          (typeof entry['position_title'] === 'string' && entry['position_title']) ||
+          (typeof entry['positionTitle'] === 'string' && entry['positionTitle']) ||
+          (typeof entry['job_title'] === 'string' && entry['job_title']) ||
+          (typeof entry['jobTitle'] === 'string' && entry['jobTitle']) ||
           (typeof entry['role'] === 'string' && entry['role']) ||
           '';
-        const start = typeof entry['start_date'] === 'string' ? entry['start_date'] : '';
-        const end = typeof entry['end_date'] === 'string' ? entry['end_date'] : 'Present';
-        const scopeSummary = typeof entry['scope_summary'] === 'string' ? entry['scope_summary'] : '';
+        const start =
+          (typeof entry['start_date'] === 'string' && entry['start_date']) ||
+          (typeof entry['startDate'] === 'string' && entry['startDate']) ||
+          (typeof entry['start'] === 'string' && entry['start']) ||
+          (typeof entry['from'] === 'string' && entry['from']) ||
+          '';
+        const end =
+          (typeof entry['end_date'] === 'string' && entry['end_date']) ||
+          (typeof entry['endDate'] === 'string' && entry['endDate']) ||
+          (typeof entry['end'] === 'string' && entry['end']) ||
+          (typeof entry['to'] === 'string' && entry['to']) ||
+          'Present';
+        const scopeSummary =
+          (typeof entry['scope_summary'] === 'string' && entry['scope_summary']) ||
+          (typeof entry['scopeSummary'] === 'string' && entry['scopeSummary']) ||
+          (typeof entry['scope'] === 'string' && entry['scope']) ||
+          '';
 
         // `structuredBaselineExtractor.parseExperienceHeaderLine` expects: "Company | Role Title | Dates".
         // This ordering matters; reversing it can cause experience entries to be rejected as unsafe/not-company-like.
@@ -108,13 +198,19 @@ export function buildValidatedResumeV2FromParsedBaseline(
           // Keep the replacement narrow; this is ingestion-only and must not rewrite meaning.
           .map((line) => `- ${line.replace(/^[-*•]\s*/, '')}`);
 
-        const detailLines = details.length ? details : scopeSummary ? [`- ${String(scopeSummary).trim()}`] : [];
+        const fallbackDetails = details.length ? details : readDetailsLines(entry);
+        const detailLines = fallbackDetails.length
+          ? fallbackDetails
+          : scopeSummary
+            ? [`- ${String(scopeSummary).trim()}`]
+            : [];
         if (!header && detailLines.length === 0) {
           droppedEmptyCount += 1;
+          recordRejection('empty_header_and_details', entry);
           if (shouldLog) {
             // eslint-disable-next-line no-console
             console.warn('[RESUME_V2_INGEST][ENTRY_DROPPED_EMPTY]', {
-              baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+              baselineId,
               index,
               entryKeysSample: Object.keys(entry ?? {}).slice(0, 12),
             });
@@ -122,11 +218,20 @@ export function buildValidatedResumeV2FromParsedBaseline(
           return '';
         }
 
+        if (!header) {
+          rejectedMissingHeaderCount += 1;
+          recordRejection('missing_header_company_or_role', entry);
+        }
+        if (detailLines.length === 0) {
+          rejectedMissingDetailsCount += 1;
+          recordRejection('missing_details_bullets', entry);
+        }
+
         mappedCount += 1;
         if (shouldLog) {
           // eslint-disable-next-line no-console
           console.log('[RESUME_V2_INGEST][ENTRY_MAPPED]', {
-            baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+            baselineId,
             index,
             companyPresent: Boolean(String(company ?? '').trim()),
             rolePresent: Boolean(String(role ?? '').trim()),
@@ -142,19 +247,32 @@ export function buildValidatedResumeV2FromParsedBaseline(
     if (shouldLog) {
       // eslint-disable-next-line no-console
       console.log('[RESUME_V2_INGEST][MAP_COUNTS]', {
-        baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+        baselineId,
         selectedEntries: experience.length,
         mappedEntries: mappedCount,
         droppedEmptyEntries: droppedEmptyCount,
+        entriesMissingHeader: rejectedMissingHeaderCount,
+        entriesMissingDetails: rejectedMissingDetailsCount,
         survivingBlocks: blocks.length,
       });
+      if (rejectionReasons.size) {
+        // eslint-disable-next-line no-console
+        console.warn('[RESUME_V2_INGEST][REJECTION_REASONS]', {
+          baselineId,
+          reasons: Array.from(rejectionReasons.entries()).map(([reason, payload]) => ({
+            reason,
+            count: payload.count,
+            sampleKeys: payload.sampleKeys,
+          })),
+        });
+      }
     }
 
     sections[0].content = blocks.join('\n\n');
     if (shouldLog) {
       // eslint-disable-next-line no-console
       console.log('[RESUME_V2_INGEST][SECTION_BUILD]', {
-        baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+        baselineId,
         headerBlockCount: blocks.length,
         sectionChars: sections[0].content.length,
         firstBlockPreview: blocks[0]?.slice(0, 180) ?? null,
@@ -166,11 +284,11 @@ export function buildValidatedResumeV2FromParsedBaseline(
     if (shouldLog) {
       // eslint-disable-next-line no-console
       console.warn('[RESUME_V2_INGEST][FINAL_SECTION_EMPTY]', {
-        baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+        baselineId,
       });
       // eslint-disable-next-line no-console
       console.warn('[RESUME_V2_INGEST][FAILED_NO_USABLE_EXPERIENCE]', {
-        baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+        baselineId,
         parsedExperiencePresent: Array.isArray(experience),
         parsedExperienceCount: Array.isArray(experience) ? experience.length : null,
         identityFullNamePresent: Boolean(fullName && String(fullName).trim()),
@@ -184,6 +302,8 @@ export function buildValidatedResumeV2FromParsedBaseline(
           'Baseline ingestion did not produce any usable experience entries for Resume V2. Please re-upload or reprocess your baseline resume.',
         details: {
           missing: ['experience'],
+          hint:
+            'No experience entries survived mapping. This often means the parsed baseline schema uses different field names for company/title/bullets, or the resume parser returned empty work history.',
         },
       },
     });
@@ -206,20 +326,34 @@ export function buildValidatedResumeV2FromParsedBaseline(
         : 0;
       // eslint-disable-next-line no-console
       console.log('[RESUME_V2_INGEST][NORMALIZED_COUNTS]', {
-        baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+        baselineId,
         experienceCount,
         bulletCount,
       });
       if (experienceCount === 0) {
         // eslint-disable-next-line no-console
         console.warn('[RESUME_V2_INGEST][VALIDATION_STRIPPED_CONTENT]', {
-          baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+          baselineId,
           stage: 'post_normalize',
         });
       }
     } catch {
       // ignore
     }
+  }
+
+  const normalizedExperienceCount = Array.isArray((normalized as any)?.experience) ? (normalized as any).experience.length : 0;
+  if (normalizedExperienceCount === 0) {
+    throw new UnprocessableEntityException({
+      error: {
+        code: 'baseline_resume_v2_invalid',
+        message:
+          'Resume V2 produced an invalid normalized resume model. No valid experience entries were produced. Please re-upload or reprocess your baseline resume.',
+        details: {
+          reasons: ['experience_empty_after_normalize'],
+        },
+      },
+    });
   }
 
   const validation = validateNormalizedResumeDocument(normalized);

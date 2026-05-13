@@ -4676,13 +4676,7 @@ export default function StudioPage() {
     const orchestrationDecision = (() => {
       if (studioReadinessBlocksGeneration === true) return "blocked";
       if (hasAnyArtifactPersisted) return "hydrate_existing_artifacts";
-      if (
-        qualifiedForStudioOrchestration &&
-        !hasAnyArtifactPersisted &&
-        !autoGenerationInFlight &&
-        !resumeGenerating &&
-        !coverGenerating
-      ) {
+      if (needsAutoGeneration) {
         return "should_auto_generate";
       }
       return "passive_empty_state";
