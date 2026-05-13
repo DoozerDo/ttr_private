@@ -938,6 +938,20 @@ export default function StudioPage() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
+  const [studioOrchestrationDebugEnabled, setStudioOrchestrationDebugEnabled] = useState(false);
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production") {
+      setStudioOrchestrationDebugEnabled(true);
+      return;
+    }
+    try {
+      const raw = typeof window !== "undefined" ? window.localStorage?.getItem("studio_debug") : null;
+      setStudioOrchestrationDebugEnabled(raw === "true");
+    } catch {
+      setStudioOrchestrationDebugEnabled(false);
+    }
+  }, []);
+
   const isNonProduction = process.env.NODE_ENV !== "production";
   const readCanonicalResumePreviewPayload = (value: unknown): unknown | null => {
     if (!value || typeof value !== "object") return null;
@@ -4505,6 +4519,74 @@ export default function StudioPage() {
     hasCompletedGeneration,
     isInstantDraftExperience,
     requestedAnalysisId,
+  ]);
+
+  const orchestrationDebugSnapshot = useMemo(() => {
+    const orchestrationDecision = (() => {
+      if (activeGenerationReadiness.blocked === true) return "blocked";
+      if (hasAnyArtifactPersisted) return "hydrate_existing_artifacts";
+      if (
+        qualifiedForStudioOrchestration &&
+        !hasAnyArtifactPersisted &&
+        !autoGenerationInFlight &&
+        !resumeGenerating &&
+        !coverGenerating
+      ) {
+        return "should_auto_generate";
+      }
+      return "passive_empty_state";
+    })();
+
+    return {
+      qualifiedForGeneration,
+      qualifiedForStudioOrchestration,
+      activeGenerationReadiness,
+      canProceedWithStudioDrafts,
+      needsAutoGeneration,
+      autoGenerationInFlight,
+      resumeGenerating,
+      coverGenerating,
+      hasResumeArtifact,
+      hasCoverLetterArtifact,
+      hasAnyArtifactPersisted,
+      studioArtifactPairStatus,
+      effectiveBaselineId,
+      effectiveBaselineVersionId,
+      effectiveJobId,
+      requestedAnalysisId,
+      effectiveRequestedAnalysisId,
+      baselinesError,
+      versionsError,
+      analysisScore,
+      resumeState,
+      coverLetterState: coverState,
+      hydrationSignature: studioArtifactHydrationSignature,
+      orchestrationDecision,
+    };
+  }, [
+    activeGenerationReadiness,
+    analysisScore,
+    autoGenerationInFlight,
+    baselinesError,
+    canProceedWithStudioDrafts,
+    coverGenerating,
+    coverState,
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    effectiveRequestedAnalysisId,
+    hasAnyArtifactPersisted,
+    hasCoverLetterArtifact,
+    hasResumeArtifact,
+    needsAutoGeneration,
+    qualifiedForGeneration,
+    qualifiedForStudioOrchestration,
+    requestedAnalysisId,
+    resumeGenerating,
+    resumeState,
+    studioArtifactPairStatus,
+    studioArtifactHydrationSignature,
+    versionsError,
   ]);
 
   useEffect(() => {
@@ -13253,6 +13335,17 @@ export default function StudioPage() {
           onPoliciesSaved={refreshBlockPolicyList}
         />
       </details>
+      ) : null}
+
+      {studioOrchestrationDebugEnabled ? (
+        <details className="rounded-2xl border border-white/10 bg-slate-950/30 p-4" data-testid="studio-orchestration-debug">
+          <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+            Studio orchestration debug
+          </summary>
+          <pre className="mt-3 max-h-[520px] overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-3 text-xs leading-5 text-slate-200">
+            {JSON.stringify(orchestrationDebugSnapshot, null, 2)}
+          </pre>
+        </details>
       ) : null}
 
     </PageShell>
