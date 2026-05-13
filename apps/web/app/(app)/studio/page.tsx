@@ -4561,10 +4561,106 @@ export default function StudioPage() {
       return "passive_empty_state";
     })();
 
+    const usedForQualifiedForStudioOrchestration = {
+      result: Boolean(
+        qualifiedForGeneration &&
+          !studioReadinessBlocksGeneration &&
+          effectiveBaselineId &&
+          effectiveBaselineVersionId &&
+          effectiveJobId &&
+          effectiveRequestedAnalysisId,
+      ),
+      inputs: {
+        qualifiedForGeneration: Boolean(qualifiedForGeneration),
+        studioReadinessBlocksGeneration: Boolean(studioReadinessBlocksGeneration),
+        effectiveBaselineId: Boolean(effectiveBaselineId),
+        effectiveBaselineVersionId: Boolean(effectiveBaselineVersionId),
+        effectiveJobId: Boolean(effectiveJobId),
+        effectiveRequestedAnalysisId: Boolean(effectiveRequestedAnalysisId),
+      },
+    };
+
+    const usedForCanProceedWithStudioDrafts = {
+      result: Boolean(qualifiedForGeneration && !studioReadinessBlocksGeneration),
+      inputs: {
+        qualifiedForGeneration: Boolean(qualifiedForGeneration),
+        studioReadinessBlocksGeneration: Boolean(studioReadinessBlocksGeneration),
+      },
+    };
+
+    const usedForNeedsAutoGeneration = {
+      result: Boolean(
+        generateNowEligible &&
+          isInstantDraftExperience &&
+          qualifiedForStudioOrchestration &&
+          !hasCompletedGeneration &&
+          !hasAnyArtifactPersisted &&
+          studioArtifactPairStatus !== "in_progress" &&
+          !resumeState.response &&
+          !coverState.response &&
+          !resumeState.artifactFailure &&
+          !coverState.artifactFailure &&
+          !resumeSingleFlightInFlight &&
+          !coverSingleFlightInFlight,
+      ),
+      inputs: {
+        generateNowEligible: Boolean(generateNowEligible),
+        isInstantDraftExperience: Boolean(isInstantDraftExperience),
+        qualifiedForStudioOrchestration: Boolean(qualifiedForStudioOrchestration),
+        hasCompletedGeneration: Boolean(hasCompletedGeneration),
+        hasAnyArtifactPersisted: Boolean(hasAnyArtifactPersisted),
+        studioArtifactPairStatus,
+        hasResumeResponse: Boolean(resumeState.response),
+        hasCoverResponse: Boolean(coverState.response),
+        hasResumeArtifactFailure: Boolean(resumeState.artifactFailure),
+        hasCoverArtifactFailure: Boolean(coverState.artifactFailure),
+        resumeSingleFlightInFlight: Boolean(resumeSingleFlightInFlight),
+        coverSingleFlightInFlight: Boolean(coverSingleFlightInFlight),
+      },
+    };
+
+    const usedForOrchestrationDecision = {
+      result: orchestrationDecision,
+      inputs: {
+        studioReadinessBlocksGeneration: Boolean(studioReadinessBlocksGeneration),
+        hasAnyArtifactPersisted: Boolean(hasAnyArtifactPersisted),
+        qualifiedForStudioOrchestration: Boolean(qualifiedForStudioOrchestration),
+        autoGenerationInFlight: Boolean(autoGenerationInFlight),
+        resumeGenerating: Boolean(resumeGenerating),
+        coverGenerating: Boolean(coverGenerating),
+      },
+    };
+
+    const usedForGenerateGuard = {
+      result: !studioReadinessBlocksGeneration,
+      inputs: {
+        studioReadinessBlocksGeneration: Boolean(studioReadinessBlocksGeneration),
+      },
+    };
+
+    const usedForAutoStartGuard = {
+      result: !studioReadinessBlocksGeneration,
+      inputs: {
+        studioReadinessBlocksGeneration: Boolean(studioReadinessBlocksGeneration),
+      },
+    };
+
     return {
       qualifiedForGeneration,
       qualifiedForStudioOrchestration,
       activeGenerationReadiness,
+      resumeV2FallbackAttemptable,
+      studioReadinessBlocksGeneration,
+      rawReadinessBlocked: activeGenerationReadiness.blocked,
+      readinessReasonCodes: activeGenerationReadiness.reasonCodes,
+      blockerEvaluationTrace: {
+        usedForQualifiedForStudioOrchestration,
+        usedForCanProceedWithStudioDrafts,
+        usedForNeedsAutoGeneration,
+        usedForOrchestrationDecision,
+        usedForGenerateGuard,
+        usedForAutoStartGuard,
+      },
       canProceedWithStudioDrafts,
       needsAutoGeneration,
       autoGenerationInFlight,
@@ -4595,21 +4691,28 @@ export default function StudioPage() {
     canProceedWithStudioDrafts,
     coverGenerating,
     coverState,
+    coverSingleFlightInFlight,
     effectiveBaselineId,
     effectiveBaselineVersionId,
     effectiveJobId,
     effectiveRequestedAnalysisId,
+    generateNowEligible,
+    hasCompletedGeneration,
     hasAnyArtifactPersisted,
     hasCoverLetterArtifact,
     hasResumeArtifact,
+    isInstantDraftExperience,
     needsAutoGeneration,
     qualifiedForGeneration,
     qualifiedForStudioOrchestration,
     requestedAnalysisId,
+    resumeSingleFlightInFlight,
     resumeGenerating,
     resumeState,
+    resumeV2FallbackAttemptable,
     studioArtifactPairStatus,
     studioArtifactHydrationSignature,
+    studioReadinessBlocksGeneration,
     versionsError,
   ]);
 
