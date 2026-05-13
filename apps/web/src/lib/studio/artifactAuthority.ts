@@ -17,14 +17,21 @@ function hasNonEmptyText(value: unknown): boolean {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+function hasNonEmptyPayload(value: unknown): boolean {
+  if (value == null) return false;
+  if (typeof value !== "object") return true;
+  if (Array.isArray(value)) return value.length > 0;
+  return Object.keys(value as Record<string, unknown>).length > 0;
+}
+
 export function getArtifactExistence(normalizedArtifacts: StudioArtifactsPayloadLike): PersistedArtifactExistence {
   const resume = normalizedArtifacts?.resume ?? null;
   const coverLetter = normalizedArtifacts?.coverLetter ?? null;
 
   const hasResumeArtifactPersisted =
-    Boolean(resume?.responseBody) || hasNonEmptyText(resume?.content);
+    hasNonEmptyPayload(resume?.responseBody) || hasNonEmptyText(resume?.content);
   const hasCoverLetterArtifactPersisted =
-    Boolean(coverLetter?.responseBody) || hasNonEmptyText(coverLetter?.content);
+    hasNonEmptyPayload(coverLetter?.responseBody) || hasNonEmptyText(coverLetter?.content);
 
   return { hasResumeArtifactPersisted, hasCoverLetterArtifactPersisted };
 }
