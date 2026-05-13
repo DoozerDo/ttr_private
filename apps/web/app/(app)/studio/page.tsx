@@ -3002,27 +3002,49 @@ export default function StudioPage() {
   const productReadiness = productDecisionState.productReadiness; 
   const qualifiedForGeneration = shouldGenerateDocuments(analysisScore); 
 
-  const resumeV2FallbackAttemptable = useMemo(() => {
+  const resumeV2FallbackEvaluation = useMemo(() => {
     const codes = new Set<string>();
-    for (const reason of activeGenerationReadiness.reasons ?? []) {
-      const code = String((reason as any)?.code ?? "").trim();
+
+    // Authoritative runtime source (observed in production debug): `reasonCodes`.
+    const reasonCodes = Array.isArray(activeGenerationReadiness.reasonCodes)
+      ? activeGenerationReadiness.reasonCodes
+      : [];
+    for (const item of reasonCodes) {
+      const code = String(item ?? "").trim();
       if (code) codes.add(code);
     }
-    for (const issue of activeGenerationReadiness.verificationIssues ?? []) {
-      const code = String((issue as any)?.code ?? "").trim();
-      if (code) codes.add(code);
+
+    // Back-compat: some readiness shapes attach detailed reasons/issues instead of reasonCodes.
+    if (!codes.size) {
+      for (const reason of activeGenerationReadiness.reasons ?? []) {
+        const code = String((reason as any)?.code ?? "").trim();
+        if (code) codes.add(code);
+      }
+      for (const issue of activeGenerationReadiness.verificationIssues ?? []) {
+        const code = String((issue as any)?.code ?? "").trim();
+        if (code) codes.add(code);
+      }
     }
-    if (!codes.size) return false;
-    for (const code of codes) {
+
+    const resolvedCodes = Array.from(codes);
+    if (!resolvedCodes.length) return { attemptable: false, codes: resolvedCodes };
+    for (const code of resolvedCodes) {
       if (code !== "baseline_template_not_ready" && code !== "readiness_error") {
-        return false;
+        return { attemptable: false, codes: resolvedCodes };
       }
     }
 
     // Only treat this as attemptable when the user otherwise qualifies for generation.
     // This allows Studio to call the API, which can safely fall back to section-based generation.
-    return qualifiedForGeneration;
-  }, [activeGenerationReadiness.reasons, activeGenerationReadiness.verificationIssues, qualifiedForGeneration]);
+    return { attemptable: qualifiedForGeneration, codes: resolvedCodes };
+  }, [
+    activeGenerationReadiness.reasonCodes,
+    activeGenerationReadiness.reasons,
+    activeGenerationReadiness.verificationIssues,
+    qualifiedForGeneration,
+  ]);
+
+  const resumeV2FallbackAttemptable = resumeV2FallbackEvaluation.attemptable;
 
   const studioReadinessBlocksGeneration = Boolean(activeGenerationReadiness.blocked && !resumeV2FallbackAttemptable);
   const studioDraftMode = 
@@ -4650,6 +4672,7 @@ export default function StudioPage() {
       qualifiedForStudioOrchestration,
       activeGenerationReadiness,
       resumeV2FallbackAttemptable,
+      resolvedReadinessCodesForFallbackEligibility: resumeV2FallbackEvaluation.codes,
       studioReadinessBlocksGeneration,
       rawReadinessBlocked: activeGenerationReadiness.blocked,
       readinessReasonCodes: activeGenerationReadiness.reasonCodes,
@@ -4709,6 +4732,7 @@ export default function StudioPage() {
     resumeSingleFlightInFlight,
     resumeGenerating,
     resumeState,
+    resumeV2FallbackEvaluation.codes,
     resumeV2FallbackAttemptable,
     studioArtifactPairStatus,
     studioArtifactHydrationSignature,

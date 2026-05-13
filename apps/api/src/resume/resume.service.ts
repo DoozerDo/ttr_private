@@ -2243,6 +2243,7 @@ export class ResumeService {
     let normalizedDocument = (() => {
       if (isResumeV2) {
         try {
+          const shouldLogV2 = process.env.RESUME_V2_INGEST_DEBUG === 'true';
           const persisted = persistedResumeV2;
           if (!persisted || typeof persisted !== 'object') {
             throw new UnprocessableEntityException({
@@ -2272,6 +2273,22 @@ export class ResumeService {
             });
           }
           v2QualityGate = validateResumeArtifactQualityStrict(normalized);
+          if (shouldLogV2) {
+            try {
+              const experienceSection = (normalized?.sections ?? []).find((s: any) => s?.type === 'experience');
+              const experienceContent = String((experienceSection as any)?.content ?? '');
+              // eslint-disable-next-line no-console
+              console.log('[RESUME_V2_INGEST][PERSISTED_V2_OK]', {
+                baselineId: String((baseline as any)?.id ?? ''),
+                baselineRecordId: String((baseline.parsedRecords?.[0] as any)?.id ?? ''),
+                baselineVersionId: String((baseline.parsedRecords?.[0] as any)?.baselineVersionId ?? ''),
+                experienceChars: experienceContent.length,
+                hasExperienceContent: Boolean(experienceContent.trim()),
+              });
+            } catch {
+              // ignore
+            }
+          }
           return normalized;
         } catch (error) {
           const response = (error as any)?.response as any;
@@ -2280,6 +2297,20 @@ export class ResumeService {
           // fall back to section-based structured extraction so qualified users can still generate a
           // truthful draft from their baseline text.
           if (code === 'baseline_resume_v2_missing' || code === 'baseline_resume_v2_invalid' || code === 'baseline_resume_v2_ingestion_failed') {
+            if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
+              try {
+                // eslint-disable-next-line no-console
+                console.warn('[RESUME_V2_INGEST][PERSISTED_V2_FALLBACK]', {
+                  baselineId: String((baseline as any)?.id ?? ''),
+                  baselineRecordId: String((baseline.parsedRecords?.[0] as any)?.id ?? ''),
+                  baselineVersionId: String((baseline.parsedRecords?.[0] as any)?.baselineVersionId ?? ''),
+                  failureCode: code,
+                  hasPersistedResumeV2: Boolean(persistedResumeV2 && typeof persistedResumeV2 === 'object'),
+                });
+              } catch {
+                // ignore
+              }
+            }
             isResumeV2 = false;
           } else {
             throw error;
@@ -2288,6 +2319,25 @@ export class ResumeService {
       }
       if (forceTemplateRegen) {
         const structured = extractStructuredBaselineFromSections(resumeInputSections);
+        if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
+          try {
+            // eslint-disable-next-line no-console
+            console.log('[RESUME_V2_INGEST][STRUCTURED_FROM_SECTIONS]', {
+              baselineId: String((baseline as any)?.id ?? ''),
+              baselineRecordId: String((baseline.parsedRecords?.[0] as any)?.id ?? ''),
+              baselineVersionId: String((baseline.parsedRecords?.[0] as any)?.baselineVersionId ?? ''),
+              experienceCount: Array.isArray((structured as any)?.experience) ? (structured as any).experience.length : 0,
+              workHistoryCount: Array.isArray((structured as any)?.experience)
+                ? (structured as any).experience.filter((e: any) => Boolean(String(e?.company ?? '').trim() || String(e?.roleTitle ?? '').trim())).length
+                : 0,
+              missingEvidenceReasonCount: Array.isArray((structured as any)?.missingEvidenceReasons)
+                ? (structured as any).missingEvidenceReasons.length
+                : 0,
+            });
+          } catch {
+            // ignore
+          }
+        }
         if (process.env.TEMPLATE_FILTER_TRACE === 'true') {
           try {
             // eslint-disable-next-line no-console
@@ -2311,11 +2361,41 @@ export class ResumeService {
         structured.experience = (structured.experience ?? []).filter((entry) =>
           isAllowedStructuredTemplateExperienceHeader(entry),
         );
+        if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
+          try {
+            // eslint-disable-next-line no-console
+            console.log('[RESUME_V2_INGEST][STRUCTURED_TEMPLATE_SAFE]', {
+              baselineId: String((baseline as any)?.id ?? ''),
+              baselineRecordId: String((baseline.parsedRecords?.[0] as any)?.id ?? ''),
+              baselineVersionId: String((baseline.parsedRecords?.[0] as any)?.baselineVersionId ?? ''),
+              templateSafeExperienceCount: Array.isArray((structured as any)?.experience) ? (structured as any).experience.length : 0,
+            });
+          } catch {
+            // ignore
+          }
+        }
         if (
           Boolean(request.analysisId?.trim()) &&
           Boolean(jobId) &&
           (structured.experience ?? []).length === 0
         ) {
+          if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
+            try {
+              // eslint-disable-next-line no-console
+              console.warn('[RESUME_V2_INGEST][BASELINE_TEMPLATE_NOT_READY_THROW]', {
+                baselineId: String((baseline as any)?.id ?? ''),
+                baselineRecordId: String((baseline.parsedRecords?.[0] as any)?.id ?? ''),
+                baselineVersionId: String((baseline.parsedRecords?.[0] as any)?.baselineVersionId ?? ''),
+                analysisIdPresent: Boolean(String(request.analysisId ?? '').trim()),
+                jobIdPresent: Boolean(jobId),
+                missingEvidenceReasonCount: Array.isArray((structured as any)?.missingEvidenceReasons)
+                  ? (structured as any).missingEvidenceReasons.length
+                  : 0,
+              });
+            } catch {
+              // ignore
+            }
+          }
           // Studio contract: if analysis/scoring context exists and the template lane is selected,
           // the baseline must already be template-safe. Do not emit a "successful" minimal fallback.
           throw new UnprocessableEntityException({

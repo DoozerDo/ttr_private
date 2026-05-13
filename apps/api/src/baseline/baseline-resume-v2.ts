@@ -10,6 +10,7 @@ import {
 import { BaselineIncludePolicy, BaselineSectionType } from './baseline-section.entity';
 
 export function buildValidatedResumeV2FromParsedBaseline(parsedBaseline: Record<string, unknown>): NormalizedResumeDocument {
+  const shouldLog = process.env.RESUME_V2_INGEST_DEBUG === 'true';
   const identity = parsedBaseline['identity'] as Record<string, unknown> | undefined;
   const fullName = typeof identity?.['full_name'] === 'string' ? identity['full_name'] : null;
   const location = typeof identity?.['location'] === 'string' ? identity['location'] : null;
@@ -30,6 +31,17 @@ export function buildValidatedResumeV2FromParsedBaseline(parsedBaseline: Record<
 
   const experience = parsedBaseline['experience'] as Array<Record<string, unknown>> | undefined;
   if (Array.isArray(experience) && experience.length) {
+    if (shouldLog) {
+      // eslint-disable-next-line no-console
+      console.log('[RESUME_V2_INGEST][PARSED_BASELINE]', {
+        baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+        schemaVersion: String(parsedBaseline['schema_version'] ?? ''),
+        sourceFormat: String(parsedBaseline['source_format'] ?? ''),
+        identityPresent: Boolean(identity && typeof identity === 'object'),
+        experienceCount: experience.length,
+        experienceKeysSample: Object.keys(experience[0] ?? {}).slice(0, 12),
+      });
+    }
     const blocks = experience
       .map((entry) => {
         const company =
@@ -57,9 +69,28 @@ export function buildValidatedResumeV2FromParsedBaseline(parsedBaseline: Record<
       })
       .filter(Boolean);
     sections[0].content = blocks.join('\n\n');
+    if (shouldLog) {
+      // eslint-disable-next-line no-console
+      console.log('[RESUME_V2_INGEST][SECTION_BUILD]', {
+        baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+        headerBlockCount: blocks.length,
+        sectionChars: sections[0].content.length,
+        firstBlockPreview: blocks[0]?.slice(0, 180) ?? null,
+      });
+    }
   }
 
   if (!sections[0].content.trim()) {
+    if (shouldLog) {
+      // eslint-disable-next-line no-console
+      console.warn('[RESUME_V2_INGEST][FAILED_NO_USABLE_EXPERIENCE]', {
+        baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+        parsedExperiencePresent: Array.isArray(experience),
+        parsedExperienceCount: Array.isArray(experience) ? experience.length : null,
+        identityFullNamePresent: Boolean(fullName && String(fullName).trim()),
+        identityLocationPresent: Boolean(location && String(location).trim()),
+      });
+    }
     throw new UnprocessableEntityException({
       error: {
         code: 'baseline_resume_v2_ingestion_failed',
