@@ -70,8 +70,51 @@ export class BaselineIngestionService {
     try {
       const sourceFormat = this.detectFormat(file);
       const rawText = await this.baselineTextExtractor.extractText(file);
+      if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
+        try {
+          // eslint-disable-next-line no-console
+          console.log('[BASELINE_INGEST][RAW_TEXT_EXTRACTED]', {
+            sourceFormat,
+            rawTextLength: rawText.length,
+            rawLineCount: String(rawText).split(/\r?\n/).filter(Boolean).length,
+            preview: String(rawText).slice(0, 240),
+          });
+        } catch {
+          // ignore
+        }
+      }
       const parsedSections = this.parseBaselineWithPolicy(rawText);
       const canonical = this.buildCanonical(rawText, parsedSections);
+      if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
+        try {
+          const byType = parsedSections.reduce<Record<string, number>>((acc, section) => {
+            const key = String(section.sectionType ?? 'UNKNOWN');
+            acc[key] = (acc[key] ?? 0) + 1;
+            return acc;
+          }, {});
+          const headings = parsedSections
+            .map((s) => String(s.title ?? '').trim())
+            .filter(Boolean)
+            .slice(0, 20);
+          const experienceContent = parsedSections
+            .filter((s) => s.sectionType === BaselineSectionType.EXPERIENCE)
+            .map((s) => s.content)
+            .join('\n');
+          // eslint-disable-next-line no-console
+          console.log('[BASELINE_INGEST][PARSE_SUMMARY]', {
+            sourceFormat,
+            rawTextLength: rawText.length,
+            rawLineCount: String(rawText).split(/\r?\n/).filter(Boolean).length,
+            parsedSectionCount: parsedSections.length,
+            sectionTypeCounts: byType,
+            detectedHeadings: headings,
+            experienceSectionChars: experienceContent.length,
+            canonicalExperienceCount: Array.isArray((canonical as any)?.experience) ? (canonical as any).experience.length : null,
+          });
+        } catch {
+          // ignore
+        }
+      }
       this.logger.debug(`Baseline ingested (${sourceFormat})`);
       void this.criticalFlowTrackerService?.recordCriticalFlowEvent({
         flow: CriticalFlowEventType.BASELINE_PARSED_SUCCESS,
@@ -197,10 +240,38 @@ export class BaselineIngestionService {
       .map((section) => section.content)
       .join('\n');
     if (!content.trim()) {
+      if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
+        try {
+          const titles = parsedSections
+            .map((s) => String(s.title ?? '').trim())
+            .filter(Boolean)
+            .slice(0, 20);
+          // eslint-disable-next-line no-console
+          console.warn('[BASELINE_INGEST][EXPERIENCE_EMPTY_AFTER_PARSE]', {
+            parsedSectionCount: parsedSections.length,
+            parsedExperienceSectionCount: parsedSections.filter((s) => s.sectionType === BaselineSectionType.EXPERIENCE).length,
+            detectedHeadings: titles,
+          });
+        } catch {
+          // ignore
+        }
+      }
       context.missingFields.push('experience');
       return [];
     }
     const blocks = content.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
+    if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
+      try {
+        // eslint-disable-next-line no-console
+        console.log('[BASELINE_INGEST][EXPERIENCE_BLOCKS]', {
+          experienceChars: content.length,
+          blockCount: blocks.length,
+          firstBlockPreview: blocks[0]?.slice(0, 160) ?? null,
+        });
+      } catch {
+        // ignore
+      }
+    }
     const experience = blocks.flatMap((block) => this.parseExperienceBlock(block, context));
     return experience;
   }

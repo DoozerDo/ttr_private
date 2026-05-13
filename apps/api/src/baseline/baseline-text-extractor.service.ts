@@ -55,6 +55,17 @@ export class BaselineTextExtractor {
       if (!isRawTextResult(result)) {
         throw new Error('Unexpected docx extraction result');
       }
+      if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
+        try {
+          // eslint-disable-next-line no-console
+          console.log('[BASELINE_DOCX_PARSE][MAMMOTH_OK]', {
+            textLength: result.value.length,
+            lineCount: String(result.value).split(/\r?\n/).filter(Boolean).length,
+          });
+        } catch {
+          // ignore
+        }
+      }
       return result.value;
     } catch (error) {
       // Mammoth can throw on certain rich/invalid OOXML structures (relationships, symbols, etc.).
@@ -62,6 +73,16 @@ export class BaselineTextExtractor {
       this.logger.warn(
         `mammoth docx extraction failed; attempting fallback: ${this.describeError(error)}`,
       );
+      if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
+        try {
+          // eslint-disable-next-line no-console
+          console.warn('[BASELINE_DOCX_PARSE][MAMMOTH_FAILED_FALLBACK]', {
+            reason: this.describeError(error),
+          });
+        } catch {
+          // ignore
+        }
+      }
       return this.extractDocxFallback(buffer);
     }
   }
@@ -75,7 +96,20 @@ export class BaselineTextExtractor {
         throw new Error('DOCX document.xml missing');
       }
 
-      return extractTextFromDocxXml(xml);
+      const text = extractTextFromDocxXml(xml);
+      if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
+        try {
+          // eslint-disable-next-line no-console
+          console.log('[BASELINE_DOCX_PARSE][FALLBACK_OK]', {
+            textLength: text.length,
+            lineCount: String(text).split(/\r?\n/).filter(Boolean).length,
+            xmlLength: xml.length,
+          });
+        } catch {
+          // ignore
+        }
+      }
+      return text;
     } catch (error) {
       // At this point, we could not interpret the DOCX container.
       // Return a typed 4xx so clients can message "invalid document" clearly.
@@ -94,6 +128,19 @@ export class BaselineTextExtractor {
     const result: unknown = await parsePdf(buffer);
     if (!isExtractResult(result)) {
       throw new Error('Unexpected pdf extraction result');
+    }
+    if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
+      try {
+        const text = String((result as any).text ?? '');
+        // eslint-disable-next-line no-console
+        console.log('[BASELINE_PDF_PARSE][PDF_PARSE_OK]', {
+          textLength: text.length,
+          lineCount: text.split(/\r?\n/).filter(Boolean).length,
+          preview: text.slice(0, 240),
+        });
+      } catch {
+        // ignore
+      }
     }
     return result.text;
   }

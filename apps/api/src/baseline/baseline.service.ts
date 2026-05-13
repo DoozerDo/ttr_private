@@ -989,6 +989,64 @@ export class BaselineService {
       user_verified: false,
     });
 
+    if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
+      try {
+        const experienceCount = Array.isArray((parsedBaseline as any)?.experience) ? (parsedBaseline as any).experience.length : null;
+        const sectionSummary = Array.isArray((ingestion.parsedSections ?? []))
+          ? (ingestion.parsedSections ?? []).map((s) => ({
+              type: String((s as any)?.sectionType ?? ''),
+              title: String((s as any)?.title ?? ''),
+              chars: typeof (s as any)?.content === 'string' ? (s as any).content.length : 0,
+            })).slice(0, 12)
+          : [];
+        // eslint-disable-next-line no-console
+        console.log('[BASELINE_PERSIST][PARSED_JSON_SUMMARY]', {
+          baselineId: baseline.id,
+          sourceFormat: ingestion.sourceFormat,
+          rawTextLength: ingestion.rawText?.length ?? 0,
+          parsedSectionCount: ingestion.parsedSections?.length ?? 0,
+          parsedSectionPreview: sectionSummary,
+          canonicalExperienceCount: experienceCount,
+        });
+      } catch {
+        // ignore
+      }
+    }
+
+    let resumeV2Json: Record<string, unknown> | null = null;
+    try {
+      if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
+        try {
+          // eslint-disable-next-line no-console
+          console.log('[BASELINE_PERSIST][RESUME_V2_BUILD_START]', {
+            baselineId: baseline.id,
+            sourceFormat: ingestion.sourceFormat,
+            canonicalExperienceCount: Array.isArray((parsedBaseline as any)?.experience) ? (parsedBaseline as any).experience.length : null,
+          });
+        } catch {
+          // ignore
+        }
+      }
+      resumeV2Json = buildValidatedResumeV2FromParsedBaseline(parsedBaseline as any) as any;
+    } catch (error) {
+      if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
+        try {
+          const response = (error as any)?.response as any;
+          // eslint-disable-next-line no-console
+          console.warn('[BASELINE_PERSIST][RESUME_V2_BUILD_FAILED]', {
+            baselineId: baseline.id,
+            sourceFormat: ingestion.sourceFormat,
+            errorCode: String(response?.error?.code ?? ''),
+            parsedExperienceCount: Array.isArray((parsedBaseline as any)?.experience) ? (parsedBaseline as any).experience.length : null,
+            parsedWorkHistoryPresent: Boolean((parsedBaseline as any)?.work_history),
+          });
+        } catch {
+          // ignore
+        }
+      }
+      throw error;
+    }
+
     const parsedRecord = manager.create(BaselineParsed, {
       baselineId: baseline.id,
       sourceFileId: baseline.id,
@@ -996,7 +1054,7 @@ export class BaselineService {
       sourceFormat: parsedBaseline.source_format,
       ingestedAt: new Date(parsedBaseline.ingested_at),
       parsedJson: parsedBaseline,
-      resumeV2Json: buildValidatedResumeV2FromParsedBaseline(parsedBaseline as any) as any,
+      resumeV2Json,
       flagsJson: parsedBaseline.system_generated_read_only,
     });
 

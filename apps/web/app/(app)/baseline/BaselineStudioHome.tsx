@@ -449,6 +449,14 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   const libraryBaselines = baselinePartition.libraryBaselines;
   const uploadLimitReached = activeBaselines.length >= BETA_BASELINE_UPLOAD_LIMIT;
   const isEditableLibrary = libraryMode === "editable";
+  const baselineDebugEnabled = useMemo(() => {
+    if (process.env.NODE_ENV !== "production") return true;
+    try {
+      return window.localStorage.getItem("baseline_debug") === "true";
+    } catch {
+      return false;
+    }
+  }, []);
 
   useEffect(() => {
     setIsHydrated(true);
@@ -1088,7 +1096,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
       if (isUploading || (!canReplaceActiveBaseline && uploadLimitReached)) return;
       const shouldPromoteToCurrent = !primaryBaselineId;
 
-      if (process.env.NODE_ENV !== "production") {
+      if (baselineDebugEnabled) {
         console.debug("[BaselineStudioHome] upload handler entered", {
           filename: file.name,
           size: file.size,
@@ -1109,10 +1117,17 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
       setPostUploadCtaBaselineId(null);
 
       try {
+        if (baselineDebugEnabled) {
+          console.debug("[BaselineStudioHome] upload file accepted", {
+            filename: file.name,
+            size: file.size,
+            type: file.type,
+          });
+        }
         const formData = new FormData();
         formData.append("file", file);
 
-        if (process.env.NODE_ENV !== "production") {
+        if (baselineDebugEnabled) {
           console.log("[UPLOAD][REQUEST]", { filename: file.name, size: file.size });
         }
 
@@ -1123,7 +1138,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         });
         const payload = await readResponsePayload(response);
 
-        if (process.env.NODE_ENV !== "production") {
+        if (baselineDebugEnabled) {
           console.log("[UPLOAD][RESPONSE]", { status: response.status, ok: response.ok });
         }
 
@@ -1182,7 +1197,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           return;
         }
 
-        if (process.env.NODE_ENV !== "production") {
+        if (baselineDebugEnabled) {
           console.debug("[BaselineStudioHome] upload persisted", {
             uploadedBaselineId: baselineRecord.id,
             originalFilename: baselineRecord.originalFilename,
@@ -1198,7 +1213,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         setHighlightedBaselineId(baselineRecord.id);
         setPostUploadCtaBaselineId(baselineRecord.id);
 
-        if (process.env.NODE_ENV !== "production") {
+        if (baselineDebugEnabled) {
           console.debug("[BaselineStudioHome] upload baseline ready for analysis", {
             uploadedBaselineId: baselineRecord.id,
             status: baselineRecord.status,
@@ -1214,7 +1229,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           body: JSON.stringify({ baselineId: baselineRecord.id }),
         });
 
-        if (process.env.NODE_ENV !== "production") {
+        if (baselineDebugEnabled) {
           console.debug("[BaselineStudioHome] upload analyze request issued", {
             uploadedBaselineId: baselineRecord.id,
             requestPath: "/api/baselines/analyze",
@@ -1224,7 +1239,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         try {
           const analysisPayload = (await readResponsePayload(analysisResponse)) as ErrorPayload | null;
           if (!analysisResponse.ok) {
-            if (process.env.NODE_ENV !== "production") {
+            if (baselineDebugEnabled) {
               console.debug("[BaselineStudioHome] upload analyze failed", {
                 uploadedBaselineId: baselineRecord.id,
                 status: analysisResponse.status,
@@ -1269,7 +1284,15 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         }
       }
     },
-    [canReplaceActiveBaseline, fetchBaselineDetails, isUploading, primaryBaselineId, refreshBaselineLibrary, uploadLimitReached],
+    [
+      baselineDebugEnabled,
+      canReplaceActiveBaseline,
+      fetchBaselineDetails,
+      isUploading,
+      primaryBaselineId,
+      refreshBaselineLibrary,
+      uploadLimitReached,
+    ],
   );
 
   const handleSetCurrentBaseline = useCallback(
@@ -1390,8 +1413,22 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   const triggerUploadClick = useCallback(() => {
     if (isUploading || !isEditableLibrary) return;
     if (!canReplaceActiveBaseline && uploadLimitReached) return;
+    if (baselineDebugEnabled) {
+      console.debug("[BaselineStudioHome] upload CTA clicked", {
+        isUploading,
+        isEditableLibrary,
+        uploadLimitReached,
+        canReplaceActiveBaseline,
+      });
+    }
     fileInputRef.current?.click();
-  }, [canReplaceActiveBaseline, isEditableLibrary, isUploading, uploadLimitReached]);
+  }, [
+    baselineDebugEnabled,
+    canReplaceActiveBaseline,
+    isEditableLibrary,
+    isUploading,
+    uploadLimitReached,
+  ]);
 
   const onDrop = useCallback(
     async (event: DragEvent<HTMLDivElement>) => {
@@ -1399,18 +1436,33 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
       if ((!canReplaceActiveBaseline && uploadLimitReached) || isUploading) return;
       const file = event.dataTransfer.files?.[0];
       if (!file) return;
+      if (baselineDebugEnabled) {
+        console.debug("[BaselineStudioHome] upload surface drop", {
+          filename: file.name,
+          size: file.size,
+          type: file.type,
+        });
+      }
       await handleUpload(file);
     },
-    [canReplaceActiveBaseline, handleUpload, isUploading, uploadLimitReached],
+    [baselineDebugEnabled, canReplaceActiveBaseline, handleUpload, isUploading, uploadLimitReached],
   );
 
   const onFileChange = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
+      if (baselineDebugEnabled) {
+        console.debug("[BaselineStudioHome] upload file input changed", {
+          hasFile: Boolean(file),
+          filename: file?.name ?? null,
+          size: file?.size ?? null,
+          type: file?.type ?? null,
+        });
+      }
       if (!file) return;
       await handleUpload(file);
     },
-    [handleUpload],
+    [baselineDebugEnabled, handleUpload],
   );
 
   useEffect(() => {
