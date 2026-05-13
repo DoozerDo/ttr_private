@@ -5956,6 +5956,21 @@ export default function StudioPage() {
           }
           return;
         }
+        // No baseline was pinned via URL. Prefer the server-side "current" baseline to avoid
+        // rehydrating stale lineage after the user updates their current baseline.
+        const currentBaseline =
+          fetched.find((baseline) => baseline.isActive === true && baseline.status !== "ARCHIVED") ??
+          fetched.find((baseline) => baseline.status !== "ARCHIVED") ??
+          null;
+        if (currentBaseline) {
+          setSelectedBaselineId(currentBaseline.id);
+          if (currentBaseline.capability?.studioReady === false) {
+            setBaselinesError("This resume is not Studio-ready yet. Choose a Studio-ready resume or strengthen this one.");
+          } else {
+            setBaselinesError(null);
+          }
+          return;
+        }
         setSelectedBaselineId("");
         setBaselinesError("Select a resume to continue.");
       } catch (error) {
@@ -6175,6 +6190,48 @@ export default function StudioPage() {
       canceled = true;
     };
   }, [requestedAnalysisId]);
+
+  useEffect(() => {
+    if (!requestedAnalysisId) return;
+    if (!analysis) return;
+    if (baselinesLoading) return;
+    // If the user updated their current baseline but is returning to Studio via a stale pinned
+    // analysisId (e.g. old results link), do not keep hydrating Studio against the old lineage
+    // unless the URL explicitly pins a baselineId.
+    if (requestedBaselineId) return;
+    const currentBaseline =
+      baselines.find((baseline) => baseline.isActive === true && baseline.status !== "ARCHIVED") ??
+      baselines.find((baseline) => baseline.status !== "ARCHIVED") ??
+      null;
+    if (!currentBaseline?.id) return;
+    const analysisBaselineId = trimId((analysis as { baselineId?: unknown } | null)?.baselineId);
+    if (!analysisBaselineId) return;
+    if (analysisBaselineId === currentBaseline.id) return;
+
+    if (process.env.NODE_ENV !== "production" || window.localStorage.getItem("studio_debug") === "true") {
+      console.warn("[studio][stale_analysis_lineage_redirect]", {
+        requestedAnalysisId,
+        analysisBaselineId,
+        currentBaselineId: currentBaseline.id,
+      });
+    }
+
+    const params = new URLSearchParams(searchParamValue);
+    params.delete("analysisId");
+    params.delete("assessmentId");
+    params.delete("baselineId");
+    params.delete("baselineVersionId");
+    const next = params.toString();
+    void router.replace(next ? `/studio?${next}` : "/studio");
+  }, [
+    analysis,
+    baselines,
+    baselinesLoading,
+    requestedAnalysisId,
+    requestedBaselineId,
+    router,
+    searchParamValue,
+  ]);
 
   useEffect(() => {
     if (!requestedAnalysisId) {
