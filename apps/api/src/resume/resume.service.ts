@@ -2275,15 +2275,20 @@ export class ResumeService {
           v2QualityGate = validateResumeArtifactQualityStrict(normalized);
           if (shouldLogV2) {
             try {
-              const experienceSection = (normalized?.sections ?? []).find((s: any) => s?.type === 'experience');
-              const experienceContent = String((experienceSection as any)?.content ?? '');
+              const experienceCount = Array.isArray((normalized as any)?.experience) ? (normalized as any).experience.length : 0;
+              const bulletCount = Array.isArray((normalized as any)?.experience)
+                ? (normalized as any).experience.reduce(
+                    (sum: number, entry: any) => sum + (Array.isArray(entry?.bullets) ? entry.bullets.length : 0),
+                    0,
+                  )
+                : 0;
               // eslint-disable-next-line no-console
               console.log('[RESUME_V2_INGEST][PERSISTED_V2_OK]', {
                 baselineId: String((baseline as any)?.id ?? ''),
                 baselineRecordId: String((baseline.parsedRecords?.[0] as any)?.id ?? ''),
                 baselineVersionId: String((baseline.parsedRecords?.[0] as any)?.baselineVersionId ?? ''),
-                experienceChars: experienceContent.length,
-                hasExperienceContent: Boolean(experienceContent.trim()),
+                experienceCount,
+                bulletCount,
               });
             } catch {
               // ignore
