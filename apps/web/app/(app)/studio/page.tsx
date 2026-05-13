@@ -3003,14 +3003,6 @@ export default function StudioPage() {
   const qualifiedForGeneration = shouldGenerateDocuments(analysisScore); 
 
   const resumeV2FallbackAttemptable = useMemo(() => {
-    const failureCode = String(resumeState.artifactFailure?.code ?? "").trim();
-    const isResumeV2IngestionFailure =
-      failureCode === "baseline_resume_v2_missing" ||
-      failureCode === "baseline_resume_v2_invalid" ||
-      failureCode === "baseline_resume_v2_ingestion_failed";
-
-    if (!isResumeV2IngestionFailure) return false;
-
     const codes = new Set<string>();
     for (const reason of activeGenerationReadiness.reasons ?? []) {
       const code = String((reason as any)?.code ?? "").trim();
@@ -3026,8 +3018,11 @@ export default function StudioPage() {
         return false;
       }
     }
-    return true;
-  }, [activeGenerationReadiness.reasons, activeGenerationReadiness.verificationIssues, resumeState.artifactFailure?.code]);
+
+    // Only treat this as attemptable when the user otherwise qualifies for generation.
+    // This allows Studio to call the API, which can safely fall back to section-based generation.
+    return qualifiedForGeneration;
+  }, [activeGenerationReadiness.reasons, activeGenerationReadiness.verificationIssues, qualifiedForGeneration]);
 
   const studioReadinessBlocksGeneration = Boolean(activeGenerationReadiness.blocked && !resumeV2FallbackAttemptable);
   const studioDraftMode = 
