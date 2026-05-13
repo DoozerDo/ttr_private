@@ -13,6 +13,26 @@ export function buildValidatedResumeV2FromParsedBaseline(
   parsedBaseline: Record<string, unknown>,
 ): NormalizedResumeDocument {
   const shouldLog = process.env.RESUME_V2_INGEST_DEBUG === 'true';
+  if (shouldLog) {
+    try {
+      // eslint-disable-next-line no-console
+      console.log('[RESUME_V2_INGEST][ADAPTER_EXEC]', {
+        baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+        schemaVersion: String(parsedBaseline['schema_version'] ?? ''),
+        sourceFormat: String(parsedBaseline['source_format'] ?? ''),
+        parsedExperienceIsArray: Array.isArray(parsedBaseline['experience']),
+        parsedWorkHistoryIsArray: Array.isArray(parsedBaseline['work_history']),
+        parsedExperienceCount: Array.isArray(parsedBaseline['experience'])
+          ? (parsedBaseline['experience'] as any[]).length
+          : null,
+        parsedWorkHistoryCount: Array.isArray(parsedBaseline['work_history'])
+          ? (parsedBaseline['work_history'] as any[]).length
+          : null,
+      });
+    } catch {
+      // ignore
+    }
+  }
   const identity = parsedBaseline['identity'] as Record<string, unknown> | undefined;
   const fullName = typeof identity?.['full_name'] === 'string' ? identity['full_name'] : null;
   const location = typeof identity?.['location'] === 'string' ? identity['location'] : null;
@@ -37,6 +57,14 @@ export function buildValidatedResumeV2FromParsedBaseline(
   if (Array.isArray(experience) && experience.length) {
     if (shouldLog) {
       // eslint-disable-next-line no-console
+      console.log(
+        parsedBaseline['experience'] ? '[RESUME_V2_INGEST][USING_EXPERIENCE_ARRAY]' : '[RESUME_V2_INGEST][USING_WORK_HISTORY_FALLBACK]',
+        {
+          baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+          selectedCount: experience.length,
+        },
+      );
+      // eslint-disable-next-line no-console
       console.log('[RESUME_V2_INGEST][PARSED_BASELINE]', {
         baselineId: String(parsedBaseline['baseline_id'] ?? ''),
         schemaVersion: String(parsedBaseline['schema_version'] ?? ''),
@@ -47,6 +75,8 @@ export function buildValidatedResumeV2FromParsedBaseline(
       });
     }
 
+    let mappedCount = 0;
+    let droppedEmptyCount = 0;
     const blocks = experience
       .map((entry, index) => {
         const company =
@@ -80,6 +110,7 @@ export function buildValidatedResumeV2FromParsedBaseline(
 
         const detailLines = details.length ? details : scopeSummary ? [`- ${String(scopeSummary).trim()}`] : [];
         if (!header && detailLines.length === 0) {
+          droppedEmptyCount += 1;
           if (shouldLog) {
             // eslint-disable-next-line no-console
             console.warn('[RESUME_V2_INGEST][ENTRY_DROPPED_EMPTY]', {
@@ -91,6 +122,7 @@ export function buildValidatedResumeV2FromParsedBaseline(
           return '';
         }
 
+        mappedCount += 1;
         if (shouldLog) {
           // eslint-disable-next-line no-console
           console.log('[RESUME_V2_INGEST][ENTRY_MAPPED]', {
@@ -107,6 +139,17 @@ export function buildValidatedResumeV2FromParsedBaseline(
       })
       .filter(Boolean);
 
+    if (shouldLog) {
+      // eslint-disable-next-line no-console
+      console.log('[RESUME_V2_INGEST][MAP_COUNTS]', {
+        baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+        selectedEntries: experience.length,
+        mappedEntries: mappedCount,
+        droppedEmptyEntries: droppedEmptyCount,
+        survivingBlocks: blocks.length,
+      });
+    }
+
     sections[0].content = blocks.join('\n\n');
     if (shouldLog) {
       // eslint-disable-next-line no-console
@@ -121,6 +164,10 @@ export function buildValidatedResumeV2FromParsedBaseline(
 
   if (!sections[0].content.trim()) {
     if (shouldLog) {
+      // eslint-disable-next-line no-console
+      console.warn('[RESUME_V2_INGEST][FINAL_SECTION_EMPTY]', {
+        baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+      });
       // eslint-disable-next-line no-console
       console.warn('[RESUME_V2_INGEST][FAILED_NO_USABLE_EXPERIENCE]', {
         baselineId: String(parsedBaseline['baseline_id'] ?? ''),
@@ -147,6 +194,33 @@ export function buildValidatedResumeV2FromParsedBaseline(
     identity: { name: fullName ?? 'Candidate', contactLine: location ?? '', links: [] },
   });
   const normalized = normalizeNormalizedResumeDocument(result.normalized as NormalizedResumeDocument);
+
+  if (shouldLog) {
+    try {
+      const experienceCount = Array.isArray((normalized as any)?.experience) ? (normalized as any).experience.length : 0;
+      const bulletCount = Array.isArray((normalized as any)?.experience)
+        ? (normalized as any).experience.reduce(
+            (sum: number, entry: any) => sum + (Array.isArray(entry?.bullets) ? entry.bullets.length : 0),
+            0,
+          )
+        : 0;
+      // eslint-disable-next-line no-console
+      console.log('[RESUME_V2_INGEST][NORMALIZED_COUNTS]', {
+        baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+        experienceCount,
+        bulletCount,
+      });
+      if (experienceCount === 0) {
+        // eslint-disable-next-line no-console
+        console.warn('[RESUME_V2_INGEST][VALIDATION_STRIPPED_CONTENT]', {
+          baselineId: String(parsedBaseline['baseline_id'] ?? ''),
+          stage: 'post_normalize',
+        });
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   const validation = validateNormalizedResumeDocument(normalized);
   if (!validation.valid) {

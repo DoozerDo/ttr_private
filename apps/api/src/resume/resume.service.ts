@@ -2283,6 +2283,12 @@ export class ResumeService {
                   )
                 : 0;
               // eslint-disable-next-line no-console
+              console.log('[RESUME_V2_INGEST][PERSISTED_DOCUMENT_REUSED]', {
+                baselineId: String((baseline as any)?.id ?? ''),
+                baselineRecordId: String((baseline.parsedRecords?.[0] as any)?.id ?? ''),
+                baselineVersionId: String((baseline.parsedRecords?.[0] as any)?.baselineVersionId ?? ''),
+              });
+              // eslint-disable-next-line no-console
               console.log('[RESUME_V2_INGEST][PERSISTED_V2_OK]', {
                 baselineId: String((baseline as any)?.id ?? ''),
                 baselineRecordId: String((baseline.parsedRecords?.[0] as any)?.id ?? ''),

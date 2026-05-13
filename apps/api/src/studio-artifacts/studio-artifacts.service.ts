@@ -206,6 +206,7 @@ export class StudioArtifactsService {
     analysisId?: string | null;
   }): Promise<StudioArtifactsState> {
     const errors: NonNullable<StudioArtifactsState['errors']> = [];
+    const shouldLogIngest = process.env.RESUME_V2_INGEST_DEBUG === 'true';
     if (process.env.DEBUG_STUDIO_ARTIFACT_QUALITY === 'true') {
       // eslint-disable-next-line no-console
       console.log('[ARTIFACT_QUALITY_READ]', `baselineId=${input.baselineId} jobId=${input.jobId} baselineVersionId=${input.baselineVersionId} analysisId=${input.analysisId ?? null}`);
@@ -255,6 +256,40 @@ export class StudioArtifactsService {
         jobId: input.jobId,
       },
     });
+
+    if (shouldLogIngest) {
+      try {
+        // eslint-disable-next-line no-console
+        console.log('[RESUME_V2_INGEST][STUDIO_ARTIFACT_ROW_READ]', {
+          userId: input.userId,
+          baselineId: input.baselineId,
+          jobId: input.jobId,
+          baselineVersionId: input.baselineVersionId,
+          analysisId: input.analysisId ?? null,
+          expected: {
+            resumeInputsHash,
+            coverLetterInputsHash,
+          },
+          stored: record
+            ? {
+                artifactId: String((record as any)?.id ?? ''),
+                resumeStatus: record.resumeStatus,
+                resumeFailureCode: record.resumeFailureCode ?? null,
+                resumeInputsHash: record.resumeInputsHash,
+                resumeHasResponseBody: Boolean(record.resumeResponseBody),
+                resumeContentLength: record.resumeContent?.length ?? 0,
+                coverStatus: record.coverLetterStatus,
+                coverFailureCode: record.coverLetterFailureCode ?? null,
+                coverInputsHash: record.coverLetterInputsHash,
+                coverHasResponseBody: Boolean(record.coverLetterResponseBody),
+                coverContentLength: record.coverLetterContent?.length ?? 0,
+              }
+            : null,
+        });
+      } catch {
+        // ignore
+      }
+    }
 
     if (process.env.DEBUG_STUDIO_ARTIFACTS_READSTATE === 'true') {
       // eslint-disable-next-line no-console
@@ -515,6 +550,31 @@ export class StudioArtifactsService {
     const resumeResult = this.buildCanonicalResultFromRecord('resume', resumeRecord);
     const coverLetterResult = this.buildCanonicalResultFromRecord('cover_letter', coverRecord);
 
+    if (shouldLogIngest) {
+      try {
+        const correctionReasonCodes = Array.isArray((resumeResult as any)?.correctionReasons)
+          ? (resumeResult as any).correctionReasons
+              .map((r: any) => String(r?.code ?? ''))
+              .filter(Boolean)
+              .slice(0, 12)
+          : [];
+        // eslint-disable-next-line no-console
+        console.log('[RESUME_V2_INGEST][STUDIO_READSTATE_DECISION]', {
+          artifactId: String((record as any)?.id ?? ''),
+          resumeGenerationState: (resumeResult as any)?.generationState ?? null,
+          resumeFailureCode: (record as any)?.resumeFailureCode ?? null,
+          correctionReasonCodes,
+          shouldTreatAsRegeneratableFailure: Boolean(
+            String((record as any)?.resumeFailureCode ?? '').includes('baseline_resume_v2_') ||
+              correctionReasonCodes.includes('baseline_resume_v2_ingestion_failed'),
+          ),
+          inputsHashMatches: Boolean(record && record.resumeInputsHash === resumeInputsHash),
+        });
+      } catch {
+        // ignore
+      }
+    }
+
     const canonicalReadiness = resolveDocumentReadinessState({
       resumeArtifact: resumeResult as any,
       coverLetterArtifact: coverLetterResult as any,
@@ -758,6 +818,20 @@ export class StudioArtifactsService {
     metadata?: Record<string, unknown>;
     analysisId?: string | null;
   }): Promise<string> {
+    if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
+      try {
+        // eslint-disable-next-line no-console
+        console.log('[RESUME_V2_INGEST][RESUME_RECORD_IN_PROGRESS]', {
+          baselineId: input.baselineId,
+          jobId: input.jobId,
+          baselineVersionId: input.baselineVersionId,
+          inputsHash: input.inputsHash,
+          analysisId: input.analysisId ?? null,
+        });
+      } catch {
+        // ignore
+      }
+    }
     return this.upsertArtifactRow(input.userId, input.baselineId, input.jobId, {
       baselineVersionId: input.baselineVersionId,
       baselineVersionHash: input.baselineVersionHash,
@@ -790,6 +864,20 @@ export class StudioArtifactsService {
       console.log(
         `[ARTIFACT_WRITE] type=resume baselineVersionId=${input.baselineVersionId} jobId=${input.jobId} inputsHash=${input.inputsHash} analysisId=${input.analysisId ?? null}`,
       );
+    }
+    if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
+      try {
+        // eslint-disable-next-line no-console
+        console.log('[RESUME_V2_INGEST][RESUME_RECORD_SUCCESS]', {
+          baselineId: input.baselineId,
+          jobId: input.jobId,
+          baselineVersionId: input.baselineVersionId,
+          inputsHash: input.inputsHash,
+          analysisId: input.analysisId ?? null,
+        });
+      } catch {
+        // ignore
+      }
     }
     if (process.env.DEBUG_STUDIO_ARTIFACT_QUALITY === 'true') {
       const gate = (input.responseBody as any)?.qualityGate;
@@ -831,6 +919,21 @@ export class StudioArtifactsService {
     metadata?: Record<string, unknown>;
     analysisId?: string | null;
   }): Promise<string> {
+    if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
+      try {
+        // eslint-disable-next-line no-console
+        console.warn('[RESUME_V2_INGEST][RESUME_RECORD_FAILURE]', {
+          baselineId: input.baselineId,
+          jobId: input.jobId,
+          baselineVersionId: input.baselineVersionId,
+          inputsHash: input.inputsHash,
+          analysisId: input.analysisId ?? null,
+          failureCode: input.failureCode,
+        });
+      } catch {
+        // ignore
+      }
+    }
     return this.upsertArtifactRow(input.userId, input.baselineId, input.jobId, {
       baselineVersionId: input.baselineVersionId,
       baselineVersionHash: input.baselineVersionHash,
