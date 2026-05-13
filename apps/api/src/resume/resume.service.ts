@@ -2242,36 +2242,49 @@ export class ResumeService {
 
     let normalizedDocument = (() => {
       if (isResumeV2) {
-        const persisted = persistedResumeV2;
-        if (!persisted || typeof persisted !== 'object') {
-          throw new UnprocessableEntityException({
-            error: {
-              code: 'baseline_resume_v2_missing',
-              message:
-                'Baseline is missing a persisted ResumeV2 model. Re-run baseline processing (Fit Review) or re-upload your resume to re-ingest.',
-              details: {
-                expected: ['baseline_parsed.resumeV2Json'],
+        try {
+          const persisted = persistedResumeV2;
+          if (!persisted || typeof persisted !== 'object') {
+            throw new UnprocessableEntityException({
+              error: {
+                code: 'baseline_resume_v2_missing',
+                message:
+                  'Baseline is missing a persisted ResumeV2 model. Re-run baseline processing (Fit Review) or re-upload your resume to re-ingest.',
+                details: {
+                  expected: ['baseline_parsed.resumeV2Json'],
+                },
               },
-            },
-          });
-        }
-        const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
-        const validation = validateNormalizedResumeDocument(normalized);
-        if (!validation.valid) {
-          const failures = buildNormalizedResumeValidationFailures(normalized);
-          throw new UnprocessableEntityException({
-            error: {
-              code: 'baseline_resume_v2_invalid',
-              message: formatResumeV2InvalidMessage({ reasons: validation.reasons, failures }),
-              details: {
-                reasons: validation.reasons,
-                failures,
+            });
+          }
+          const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
+          const validation = validateNormalizedResumeDocument(normalized);
+          if (!validation.valid) {
+            const failures = buildNormalizedResumeValidationFailures(normalized);
+            throw new UnprocessableEntityException({
+              error: {
+                code: 'baseline_resume_v2_invalid',
+                message: formatResumeV2InvalidMessage({ reasons: validation.reasons, failures }),
+                details: {
+                  reasons: validation.reasons,
+                  failures,
+                },
               },
-            },
-          });
+            });
+          }
+          v2QualityGate = validateResumeArtifactQualityStrict(normalized);
+          return normalized;
+        } catch (error) {
+          const response = (error as any)?.response as any;
+          const code = String(response?.error?.code ?? '');
+          // Deterministic fallback: if ResumeV2 ingestion/validation is missing/failed for this baseline,
+          // fall back to section-based structured extraction so qualified users can still generate a
+          // truthful draft from their baseline text.
+          if (code === 'baseline_resume_v2_missing' || code === 'baseline_resume_v2_invalid' || code === 'baseline_resume_v2_ingestion_failed') {
+            isResumeV2 = false;
+          } else {
+            throw error;
+          }
         }
-        v2QualityGate = validateResumeArtifactQualityStrict(normalized);
-        return normalized;
       }
       if (forceTemplateRegen) {
         const structured = extractStructuredBaselineFromSections(resumeInputSections);
