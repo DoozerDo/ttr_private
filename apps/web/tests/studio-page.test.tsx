@@ -1634,6 +1634,8 @@ describe("Studio page UX", () => {
     expect(screen.getByRole("button", { name: "Remove unsupported requirements and continue" })).toBeInTheDocument();
   }, 15000);
 
+
+
   it("generates a resume and exposes downloads after success", async () => {
     // Studio now prefers hydrated persisted artifacts over a manual "ready shell" generation step.
     // This test asserts the post-generation experience (downloads visible) by starting with the

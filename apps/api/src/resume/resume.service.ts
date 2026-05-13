@@ -138,6 +138,8 @@ export type GenerateResumeRequest = {
   baselineVersionId?: string | null;
   jobId?: string | null;
   analysisId?: string;
+  opportunityId?: string | null;
+  excludedRequirements?: string[];
   oneTap?: boolean;
   forceRegenerate?: boolean;
   editedResume?: NormalizedResumeDocument;

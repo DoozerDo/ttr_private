@@ -11,6 +11,7 @@ export type StudioCardStatus =
   | "not_generated_yet"
   | "ready_to_generate"
   | "generating"
+  | "syncing_persisted_artifact"
   | "generated_successfully"
   | "needs_correction"
   | "blocked_by_compliance"

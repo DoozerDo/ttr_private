@@ -40,6 +40,9 @@ interface ResumeRequestBody {
   baselineVersionId?: string;
   jobId?: string;
   analysisId?: string;
+  opportunityId?: string | null;
+  excludedRequirements?: string[];
+  documentStrategyPlan?: unknown;
   format?: ResumeExportFormat;
   oneTap?: boolean;
   forceRegenerate?: boolean;
@@ -202,6 +205,15 @@ export class ResumeController {
     const jobId = body.jobId?.trim();
     const analysisId = body.analysisId?.trim();
     const oneTap = Boolean(body.oneTap);
+    const opportunityId =
+      typeof body.opportunityId === 'string' && body.opportunityId.trim().length
+        ? body.opportunityId.trim()
+        : null;
+    const excludedRequirements = Array.isArray(body.excludedRequirements)
+      ? body.excludedRequirements
+          .map((value) => String(value ?? '').trim())
+          .filter((value) => value.length > 0)
+      : undefined;
 
     if (!baselineId) {
       throw new UnprocessableEntityException({
@@ -227,6 +239,9 @@ export class ResumeController {
       oneTap,
       forceRegenerate: Boolean(body.forceRegenerate),
       editedResume: body.editedResume,
+      opportunityId,
+      excludedRequirements,
+      documentStrategyPlan: body.documentStrategyPlan as any,
     };
   }
 

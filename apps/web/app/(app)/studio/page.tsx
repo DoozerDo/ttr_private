@@ -1195,6 +1195,13 @@ export default function StudioPage() {
     cover: ArtifactReadinessContractState;
   }>({ resume: "unknown", cover: "unknown" });
   const [excludedTargetingLabels, setExcludedTargetingLabels] = useState<Set<string>>(new Set());
+  const excludedTargetingLabelsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    excludedTargetingLabelsRef.current = excludedTargetingLabels;
+  }, [excludedTargetingLabels]);
+
+  const [resumePersistedArtifactSyncPending, setResumePersistedArtifactSyncPending] = useState(false);
+  const [coverPersistedArtifactSyncPending, setCoverPersistedArtifactSyncPending] = useState(false);
   const [targetingAdjustmentFeedback, setTargetingAdjustmentFeedback] = useState<string | null>(null);
   const [targetingAdjustmentStatus, setTargetingAdjustmentStatus] = useState<"success" | "warning" | null>(null);
   const [lastRemovedTargetingLabels, setLastRemovedTargetingLabels] = useState<string[]>([]);
@@ -2138,6 +2145,26 @@ export default function StudioPage() {
       const jobId = effectiveJobId ?? null;
       if (!baselineId || !baselineVersionId || !jobId) return;
 
+      if (options.expectedResume) {
+        setResumePersistedArtifactSyncPending(true);
+      }
+      if (options.expectedCover) {
+        setCoverPersistedArtifactSyncPending(true);
+      }
+
+      console.info("[studio][artifacts][poll_started]", {
+        area: "studio",
+        operation: "hydrate_artifacts_after_generate",
+        status: "info",
+        code: "artifact_poll_started",
+        expectedResume: Boolean(options.expectedResume),
+        expectedCover: Boolean(options.expectedCover),
+        baselineId,
+        baselineVersionId,
+        jobId,
+        analysisId: effectiveRequestedAnalysisId ?? null,
+      });
+
       // Generation persistence can lag the generate endpoint response; poll briefly for the persisted artifact.
       for (let attempt = 0; attempt < 4; attempt += 1) {
         const artifactsParams = new URLSearchParams();
@@ -2164,6 +2191,7 @@ export default function StudioPage() {
               tierGateError: null,
               artifactFailure: null,
             }));
+            setResumePersistedArtifactSyncPending(false);
           }
           if (coverData) {
             setCoverState((current) => ({
@@ -2173,6 +2201,7 @@ export default function StudioPage() {
               tierGateError: null,
               artifactFailure: null,
             }));
+            setCoverPersistedArtifactSyncPending(false);
           }
           const resumeOk = options.expectedResume
             ? Boolean(normalized.resume?.responseBody) || Boolean(normalized.resumeResult)
@@ -2180,15 +2209,91 @@ export default function StudioPage() {
           const coverOk = options.expectedCover
             ? Boolean(normalized.coverLetter?.responseBody) || Boolean(normalized.coverLetterResult)
             : true;
-          if (resumeOk && coverOk) return;
+          if (resumeOk && coverOk) {
+            console.info("[studio][artifacts][poll_succeeded]", {
+              area: "studio",
+              operation: "hydrate_artifacts_after_generate",
+              status: "info",
+              code: "artifact_poll_succeeded",
+              attempt,
+              resumeOk,
+              coverOk,
+            });
+            return;
+          }
         }
 
         if (attempt < 3) {
           await new Promise((resolve) => setTimeout(resolve, 250));
         }
       }
+
+      console.warn("[studio][artifacts][poll_exhausted]", {
+        area: "studio",
+        operation: "hydrate_artifacts_after_generate",
+        status: "warn",
+        code: "artifact_poll_exhausted",
+        expectedResume: Boolean(options.expectedResume),
+        expectedCover: Boolean(options.expectedCover),
+      });
+
+      const exhaustedMessage =
+        "Generation completed, but the saved document could not be loaded. Retry refresh or regenerate.";
+
+      if (options.expectedResume) {
+        setResumePersistedArtifactSyncPending(false);
+        console.warn("[studio][generation][transition]", {
+          area: "studio",
+          operation: "generation_lifecycle",
+          status: "warn",
+          code: "resume_sync_exhausted_retryable_failure",
+        });
+        setResumeState((current) => ({
+          ...current,
+          error: current.error ?? exhaustedMessage,
+          artifactFailure: current.artifactFailure ?? {
+            artifactType: "resume",
+            headline: "Saved document unavailable",
+            explanation: exhaustedMessage,
+            nextStep: "Retry refresh or regenerate the document.",
+            retryable: true,
+            category: "artifact_persistence_failed",
+            code: "artifact_sync_exhausted",
+          },
+        }));
+      }
+
+      if (options.expectedCover) {
+        setCoverPersistedArtifactSyncPending(false);
+        console.warn("[studio][generation][transition]", {
+          area: "studio",
+          operation: "generation_lifecycle",
+          status: "warn",
+          code: "cover_sync_exhausted_retryable_failure",
+        });
+        setCoverState((current) => ({
+          ...current,
+          error: current.error ?? exhaustedMessage,
+          artifactFailure: current.artifactFailure ?? {
+            artifactType: "cover_letter",
+            headline: "Saved document unavailable",
+            explanation: exhaustedMessage,
+            nextStep: "Retry refresh or regenerate the document.",
+            retryable: true,
+            category: "artifact_persistence_failed",
+            code: "artifact_sync_exhausted",
+          },
+        }));
+      }
     },
-    [applyStudioArtifactsPayload, effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, requestedAnalysisId],
+    [
+      applyStudioArtifactsPayload,
+      effectiveBaselineId,
+      effectiveBaselineVersionId,
+      effectiveJobId,
+      effectiveRequestedAnalysisId,
+      requestedAnalysisId,
+    ],
   );
   useEffect(() => {
     studioArtifactStorageKeyRef.current = studioArtifactStorageKey;
@@ -4764,6 +4869,67 @@ export default function StudioPage() {
     studioArtifactsHydrated,
   ]);
 
+  const studioEligibilityLogKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const signature = [
+      effectiveBaselineId ?? "none",
+      effectiveBaselineVersionId ?? "none",
+      effectiveJobId ?? "none",
+      effectiveRequestedAnalysisId ?? "none",
+      String(Math.round(analysisScore ?? 0)),
+      String(activeGenerationReadiness.status ?? "unknown"),
+      String(activeGenerationReadiness.blocked ?? false),
+      String(canProceedWithStudioDrafts),
+      String(qualifiedForStudioOrchestration),
+      Array.isArray(activeGenerationReadiness.reasonCodes) ? activeGenerationReadiness.reasonCodes.join("|") : "no_reason_codes",
+      activeGenerationReadiness.verificationIssues?.map((issue) => issue.code).join("|") ?? "no_verification_issues",
+      Array.from(excludedTargetingLabels).sort().join("|") || "no_exclusions",
+    ].join("::");
+    if (studioEligibilityLogKeyRef.current === signature) return;
+    studioEligibilityLogKeyRef.current = signature;
+
+    console.info("[studio][generation][eligibility_evaluated]", {
+      area: "studio",
+      operation: "generation_eligibility",
+      status: "info",
+      code: "eligibility_evaluated",
+      ids: {
+        baselineId: effectiveBaselineId ?? null,
+        baselineVersionId: effectiveBaselineVersionId ?? null,
+        jobId: effectiveJobId ?? null,
+        analysisId: effectiveRequestedAnalysisId ?? null,
+      },
+      thresholds: {
+        qualifiedForGeneration: Boolean(qualifiedForGeneration),
+        canProceedWithStudioDrafts: Boolean(canProceedWithStudioDrafts),
+        qualifiedForStudioOrchestration: Boolean(qualifiedForStudioOrchestration),
+      },
+      readiness: {
+        status: activeGenerationReadiness.status,
+        blocked: Boolean(activeGenerationReadiness.blocked),
+        reasonCodes: Array.isArray(activeGenerationReadiness.reasonCodes) ? activeGenerationReadiness.reasonCodes : null,
+        verificationIssueCodes: Array.isArray(activeGenerationReadiness.verificationIssues)
+          ? activeGenerationReadiness.verificationIssues.map((issue) => issue.code)
+          : null,
+      },
+      excludedRequirements: Array.from(excludedTargetingLabels),
+    });
+  }, [
+    activeGenerationReadiness.blocked,
+    activeGenerationReadiness.reasonCodes,
+    activeGenerationReadiness.status,
+    activeGenerationReadiness.verificationIssues,
+    analysisScore,
+    canProceedWithStudioDrafts,
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    effectiveRequestedAnalysisId,
+    excludedTargetingLabels,
+    qualifiedForGeneration,
+    qualifiedForStudioOrchestration,
+  ]);
+
   useEffect(() => {
     if (!hasCompletedGeneration || !isInstantDraftExperience || !isApplicationApplied || !applicationContext) {
       return;
@@ -5194,6 +5360,7 @@ export default function StudioPage() {
     if (resumeGenerating) return "generating";
     if (!canGenerateDocuments && activeGenerationReadiness.blocked) return "blocked_by_compliance";
     if (resumePresenter.status === "blocked") return "blocked_by_compliance";
+    if (resumePersistedArtifactSyncPending && !hasResumeArtifact) return "syncing_persisted_artifact";
     if (needsMoreBaselineDetail) return "needs_more_baseline_detail";
     if (resumeState.error) return "failed_due_to_system_error";
     if (resumeState.artifactFailure && !hasRenderableResumeContent) return "failed_due_to_system_error";
@@ -5208,6 +5375,7 @@ export default function StudioPage() {
     activeGenerationReadiness.blocked,
     hasResumeArtifact,
     hasRenderableResumeContent,
+    resumePersistedArtifactSyncPending,
     resumeGenerating,
     resumePresenter.status,
     resumeState.error,
@@ -5222,6 +5390,7 @@ export default function StudioPage() {
     if (coverLetterComplianceBlocked || coverPresenter.status === "blocked") {
       return "blocked_by_compliance";
     }
+    if (coverPersistedArtifactSyncPending && !hasCoverLetterArtifact) return "syncing_persisted_artifact";
     if (coverState.error) return "failed_due_to_system_error";
     if (coverPresenter.status === "success" && hasCoverLetterArtifact) {
       // Never claim success if we cannot render/export a usable preview (e.g. sanitized/blocked output).
@@ -5237,10 +5406,12 @@ export default function StudioPage() {
     coverPresenter.status,
     coverState.error,
     hasCoverLetterArtifact,
+    coverPersistedArtifactSyncPending,
     coverQualityPass,
   ]);
 
   function buildCoverLetterPayload(oneTap: boolean): CoverLetterPayload {
+    const opportunityId = trackerEntryId ?? applicationContext?.id ?? null;
     return buildExportPayload({
       documentType: "cover_letter",
       oneTap,
@@ -5249,6 +5420,7 @@ export default function StudioPage() {
       baselineVersionId: effectiveBaselineVersionId,
       analysisId: requestedAnalysisId,
       extra: {
+        ...(opportunityId ? { opportunityId } : {}),
         documentStrategyPlan,
         closingTemplateKey: defaultClosingTemplateKey,
         ...(coverLetterJobContext ? { jobContext: coverLetterJobContext } : {}),
@@ -5260,6 +5432,7 @@ export default function StudioPage() {
   }
 
   function buildResumePayload(oneTap: boolean) {
+    const opportunityId = trackerEntryId ?? applicationContext?.id ?? null;
     return buildExportPayload({
       documentType: "resume",
       oneTap,
@@ -5268,6 +5441,7 @@ export default function StudioPage() {
       baselineVersionId: effectiveBaselineVersionId,
       analysisId: requestedAnalysisId,
       extra: {
+        ...(opportunityId ? { opportunityId } : {}),
         documentStrategyPlan,
         ...(resumeFocus !== "Auto (recommended)" ? { resumeFocus } : {}),
         ...(savedEditedResumeModel ? { editedResume: savedEditedResumeModel } : {}),
@@ -5450,23 +5624,53 @@ export default function StudioPage() {
   }, [coverState.response, effectiveBaselineId, effectiveJobId, refinementInstructions.length, resumeState.response]);
 
   const applyTargetingAdjustment = useCallback((labels: string[]) => {
-    const normalizedLabels = labels
-      .map((label) =>
-        normalizeUserFacingRequirementLabel(label, {
+    const rawLabels = labels
+      .map((label) => String(label ?? "").trim())
+      .filter((label) => label.length > 0);
+
+    const normalizedLabels = rawLabels
+      .map((label) => {
+        const normalized = normalizeUserFacingRequirementLabel(label, {
           sourceContext: null,
           issueCode: "unsupported_technology_claim",
-        }),
-      )
-      .filter((label): label is string => typeof label === "string" && label.length > 0);
-    if (!normalizedLabels.length) {
+        });
+        return normalized ?? label;
+      })
+      .filter((label): label is string => typeof label === "string" && label.trim().length > 0);
+
+    // Always include raw lowercased labels so UI filters remain consistent even when normalization expands labels.
+    const canonical = Array.from(
+      new Set([
+        ...normalizedLabels.map((label) => label.trim()),
+        ...rawLabels.map((label) => label.trim()),
+      ]),
+    ).filter((label) => label.length > 0);
+
+    if (!canonical.length) {
       setTargetingAdjustmentFeedback("No unsupported requirements were found to remove from targeting.");
       setTargetingAdjustmentStatus("warning");
       return;
     }
-    setLastRemovedTargetingLabels(Array.from(new Set(normalizedLabels)));
+
+    console.info("[studio][unsupported_requirements][removal_requested]", {
+      area: "studio",
+      operation: "unsupported_requirements_removal",
+      status: "info",
+      code: "unsupported_requirements_removal_requested",
+      raw: rawLabels,
+      normalized: normalizedLabels,
+      canonical,
+    });
+
+    setLastRemovedTargetingLabels(canonical);
     setExcludedTargetingLabels((current) => {
       const next = new Set(current);
-      normalizedLabels.forEach((label) => next.add(label.toLowerCase()));
+      canonical.forEach((label) => {
+        // Preserve both raw + normalized labels for persistence while still supporting
+        // case-insensitive filtering throughout Studio.
+        next.add(label);
+        next.add(label.toLowerCase());
+      });
       return next;
     });
   }, []);
@@ -5810,9 +6014,23 @@ export default function StudioPage() {
     runAnalysisRefreshAfterExpansion,
   ]);
 
+  const dispatchGenerationAfterTargetingAdjustmentRef = useRef<null | (() => Promise<void>)>(null);
+  const targetingAdjustmentDispatchSignatureRef = useRef<string | null>(null);
+
   const handleAutoAdjustTargeting = useCallback(() => {
     applyTargetingAdjustment(canonicalUnverifiedRequirements);
-  }, [applyTargetingAdjustment, canonicalUnverifiedRequirements]);
+
+    // If the user is already eligible, treat this CTA as an immediate "continue" action:
+    // - persist updated opportunity targeting (best-effort)
+    // - trigger generation right away (after state flush) so we never show "ready" without jobs
+    void dispatchGenerationAfterTargetingAdjustmentRef.current?.();
+  }, [
+    analysis,
+    analysisScore,
+    applyTargetingAdjustment,
+    canonicalUnverifiedRequirements,
+    selectedJob,
+  ]);
 
   const handleRemoveIssueFromTargeting = useCallback(
     (issue: GenerationReadiness["verificationIssues"][number]) => {
@@ -6588,6 +6806,7 @@ export default function StudioPage() {
     let activityOutcome: "success" | "failure" = "failure";
     let requestFinalStatus: "completed" | "timeout" = "completed";
     setResumeGenerating(true);
+    setResumePersistedArtifactSyncPending(false);
     startWorkflowActivity("generation_running");
     const shouldShowUnlockConfirmation = isFirstGenerationAfterUnlock;
     trackEvent("resume_generation_attempted", {
@@ -6829,6 +7048,7 @@ export default function StudioPage() {
       }));
       setStudioArtifactPairStatus("completed");
       studioArtifactPresentationStateRef.current = "generated";
+      setResumePersistedArtifactSyncPending(true);
       trackEvent("resume_generation_succeeded", {
         source: "studio",
         analysisId: requestedAnalysisId || undefined,
@@ -6850,7 +7070,15 @@ export default function StudioPage() {
         artifactType: "resume",
         requestId: request.requestId,
       });
+      console.info("[studio][generation][transition]", {
+        area: "studio",
+        operation: "generation_lifecycle",
+        status: "info",
+        code: "resume_generation_success_response_received",
+        requestId: request.requestId,
+      });
       activityOutcome = "success";
+      await refreshStudioArtifactsAfterGenerate({ expectedResume: true });
       return true;
     } catch (error) {
       if (timeoutId !== null) window.clearTimeout(timeoutId);
@@ -7413,6 +7641,7 @@ export default function StudioPage() {
     let activityOutcome: "success" | "failure" = "failure";
     let requestFinalStatus: "completed" | "timeout" = "completed";
     setCoverGenerating(true);
+    setCoverPersistedArtifactSyncPending(false);
     startWorkflowActivity("generation_running");
     const shouldShowUnlockConfirmation = isFirstGenerationAfterUnlock;
     trackEvent("cover_letter_generation_attempted", {
@@ -7714,7 +7943,16 @@ export default function StudioPage() {
         artifactType: "cover_letter",
         requestId: request.requestId,
       });
+      setCoverPersistedArtifactSyncPending(true);
+      console.info("[studio][generation][transition]", {
+        area: "studio",
+        operation: "generation_lifecycle",
+        status: "info",
+        code: "cover_letter_generation_success_response_received",
+        requestId: request.requestId,
+      });
       activityOutcome = "success";
+      await refreshStudioArtifactsAfterGenerate({ expectedCover: true });
       return true;
     } catch (error) {
       if (timeoutId !== null) window.clearTimeout(timeoutId);
@@ -8519,9 +8757,11 @@ export default function StudioPage() {
       case "not_generated_yet":
         return `${documentName} not generated yet`;
       case "ready_to_generate":
-        return `Ready to review ${documentName.toLowerCase()}`;
+        return `Ready to generate ${documentName.toLowerCase()}`;
       case "generating":
         return `Generating ${documentName.toLowerCase()}`;
+      case "syncing_persisted_artifact":
+        return `Syncing generated ${documentName.toLowerCase()}...`;
       case "generated_successfully":
         return `${documentName} generated successfully`;
       case "needs_correction":
@@ -10177,6 +10417,207 @@ export default function StudioPage() {
       trackEvent,
     ],
   );
+
+  useEffect(() => {
+    dispatchGenerationAfterTargetingAdjustmentRef.current = async () => {
+      try {
+        if (!qualifiedForStudioOrchestration) return;
+        if (studioReadinessBlocksGeneration) return;
+        if (hasResumeArtifact || hasCoverLetterArtifact) return;
+        if (
+          resumeGenerating ||
+          coverGenerating ||
+          autoGenerationInFlight ||
+          studioArtifactPairStatus === "in_progress"
+        ) {
+          return;
+        }
+
+        // Prevent duplicate dispatch (CTA + auto-generation effects) for the same pair/scope.
+        const dispatchSignature = [
+          effectiveBaselineId ?? "none",
+          effectiveBaselineVersionId ?? "none",
+          effectiveJobId ?? "none",
+          effectiveRequestedAnalysisId ?? "none",
+        ].join(":");
+        if (targetingAdjustmentDispatchSignatureRef.current === dispatchSignature) {
+          console.info("[studio][generation][dispatch_after_targeting_adjustment_skipped]", {
+            area: "studio",
+            operation: "generate",
+            status: "info",
+            code: "generation_dispatch_after_targeting_adjustment_skipped",
+            reason: "duplicate_dispatch_signature",
+            dispatchSignature,
+          });
+          return;
+        }
+        targetingAdjustmentDispatchSignatureRef.current = dispatchSignature;
+
+        // Suppress any other auto-generation lane while we process this CTA.
+        suppressAutoGenerationRef.current = true;
+        if (autoGenerationSignature) {
+          autoGenerationSignatureRef.current = autoGenerationSignature;
+        }
+
+        await new Promise<void>((resolve) =>
+          typeof window !== "undefined" ? window.setTimeout(() => resolve(), 0) : resolve(),
+        );
+
+        const exclusions = Array.from(excludedTargetingLabelsRef.current);
+        console.info("[studio][unsupported_requirements][removal_committed]", {
+          area: "studio",
+          operation: "unsupported_requirements_removal",
+          status: "info",
+          code: "unsupported_requirements_removal_committed",
+          exclusions,
+          analysisId: effectiveRequestedAnalysisId ?? null,
+          jobId: effectiveJobId ?? null,
+          baselineId: effectiveBaselineId ?? null,
+          baselineVersionId: effectiveBaselineVersionId ?? null,
+        });
+
+        try {
+          const response = await fetch("/api/opportunities", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              jobId: effectiveJobId,
+              analysisId: effectiveRequestedAnalysisId,
+              baselineId: effectiveBaselineId,
+              baselineVersionId: effectiveBaselineVersionId,
+              score: Math.round(analysisScore ?? 0),
+              company: selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company",
+              roleTitle: selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Untitled role",
+              generationCompleted: Boolean(hasCompletedGeneration),
+              savedEvidenceSummary: evidenceSummaryBullets.slice(0, 3),
+              excludedRequirements: exclusions,
+              targetingAdjustedAt: new Date().toISOString(),
+            }),
+          });
+          const payload = await response.json().catch(() => null);
+          console.info("[studio][opportunity][targeting_persisted]", {
+            area: "studio",
+            operation: "opportunity_targeting_persist",
+            status: response.ok ? "info" : "warn",
+            code: response.ok ? "opportunity_targeting_persisted" : "opportunity_targeting_persist_failed",
+            responseStatus: response.status,
+            responseSummary: summarizeStudioGenerationResponse(payload),
+          });
+        } catch (error) {
+          console.warn("[studio][opportunity][targeting_persist_failed]", {
+            area: "studio",
+            operation: "opportunity_targeting_persist",
+            status: "warn",
+            code: "opportunity_targeting_persist_failed",
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+
+        console.info("[studio][generation][dispatch_after_targeting_adjustment]", {
+          area: "studio",
+          operation: "generate",
+          status: "info",
+          code: "generation_dispatch_after_targeting_adjustment",
+          dispatchSignature,
+          exclusions,
+        });
+        try {
+          const dispatchResult = await startGenerationFromReadyShell("shell_auto");
+
+          console.info("[studio][artifacts][refresh_after_targeting_adjustment_started]", {
+            area: "studio",
+            operation: "hydrate_artifacts_after_generate",
+            status: "info",
+            code: "artifact_refresh_started_after_targeting_adjustment",
+            dispatchSignature,
+            dispatchOk: dispatchResult.ok,
+            expectedResume: true,
+            expectedCover: true,
+          });
+
+          try {
+            await refreshStudioArtifactsAfterGenerate({ expectedResume: true, expectedCover: true });
+            console.info("[studio][artifacts][refresh_after_targeting_adjustment_completed]", {
+              area: "studio",
+              operation: "hydrate_artifacts_after_generate",
+              status: "info",
+              code: "artifact_refresh_completed_after_targeting_adjustment",
+              dispatchSignature,
+            });
+          } catch (refreshError) {
+            console.warn("[studio][artifacts][refresh_after_targeting_adjustment_failed]", {
+              area: "studio",
+              operation: "hydrate_artifacts_after_generate",
+              status: "warn",
+              code: "artifact_refresh_failed_after_targeting_adjustment",
+              dispatchSignature,
+              error: refreshError instanceof Error ? refreshError.message : String(refreshError),
+            });
+            const message =
+              refreshError instanceof Error
+                ? refreshError.message
+                : "Generated documents are still syncing. Please wait a moment and refresh.";
+            setResumeState((current) => ({ ...current, error: current.error ?? message }));
+            setCoverState((current) => ({ ...current, error: current.error ?? message }));
+          }
+        } finally {
+          // Re-enable auto-generation evaluation after dispatch completes; the core orchestration
+          // will remain blocked by in-flight flags and hydration state until artifacts settle.
+          suppressAutoGenerationRef.current = false;
+        }
+      } catch (error) {
+        console.error("[studio][generation][dispatch_after_targeting_adjustment_failed]", {
+          area: "studio",
+          operation: "generate",
+          status: "error",
+          code: "generation_dispatch_after_targeting_adjustment_failed",
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Allow the user to retry the CTA if something failed before a stable generation attempt began.
+        const currentSignature = [
+          effectiveBaselineId ?? "none",
+          effectiveBaselineVersionId ?? "none",
+          effectiveJobId ?? "none",
+          effectiveRequestedAnalysisId ?? "none",
+        ].join(":");
+        if (targetingAdjustmentDispatchSignatureRef.current === currentSignature) {
+          targetingAdjustmentDispatchSignatureRef.current = null;
+        }
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Generation could not be started after adjusting targeting.";
+        setResumeState((current) => ({ ...current, error: current.error ?? message }));
+        setCoverState((current) => ({ ...current, error: current.error ?? message }));
+        suppressAutoGenerationRef.current = false;
+      }
+    };
+
+    return () => {
+      dispatchGenerationAfterTargetingAdjustmentRef.current = null;
+    };
+  }, [
+    analysis,
+    analysisScore,
+    autoGenerationInFlight,
+    autoGenerationSignature,
+    coverGenerating,
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    effectiveRequestedAnalysisId,
+    evidenceSummaryBullets,
+    hasCompletedGeneration,
+    hasCoverLetterArtifact,
+    hasResumeArtifact,
+    qualifiedForStudioOrchestration,
+    resumeGenerating,
+    refreshStudioArtifactsAfterGenerate,
+    selectedJob,
+    startGenerationFromReadyShell,
+    studioArtifactPairStatus,
+    studioReadinessBlocksGeneration,
+  ]);
 
   const [debugAutoGenerationEnabled, setDebugAutoGenerationEnabled] = useState(
     process.env.NODE_ENV !== "production",
@@ -12752,10 +13193,16 @@ export default function StudioPage() {
         ) : !hasRenderableResumeContent ? (
               <EmptyState
                 testId="studio-resume-missing"
-                title="Resume not generated yet"
+                title={
+                  resumePersistedArtifactSyncPending
+                    ? "Syncing generated resume..."
+                    : "Resume not generated yet"
+                }
                 body={
                   !canGenerateDocuments
                     ? "Improve your baseline to generate materials."
+                    : resumePersistedArtifactSyncPending
+                      ? "Generation completed. Loading the saved document..."
                     : resumeState.error
                       ? resumeState.error
                       : "Generate your resume to preview and refine your application."
@@ -13213,14 +13660,18 @@ export default function StudioPage() {
                   coverAutoGenerating || coverGenerateNowPending ? "studio-cover-generating" : "studio-cover-missing"
                 }
                 title={
-                  coverAutoGenerating || coverGenerateNowPending
-                    ? "Generating your cover letter..."
-                    : "Cover letter not generated yet"
+                  coverPersistedArtifactSyncPending
+                    ? "Syncing generated cover letter..."
+                    : coverAutoGenerating || coverGenerateNowPending
+                      ? "Generating your cover letter..."
+                      : "Cover letter not generated yet"
                 }
                 body={
-                  coverAutoGenerating || coverGenerateNowPending
-                    ? "This usually finishes in a moment."
-                    : "Generate your cover letter to create a tailored introduction."
+                  coverPersistedArtifactSyncPending
+                    ? "Generation completed. Loading the saved document..."
+                    : coverAutoGenerating || coverGenerateNowPending
+                      ? "This usually finishes in a moment."
+                      : "Generate your cover letter to create a tailored introduction."
                 }
                 cta={
                   coverAutoGenerating || coverGenerateNowPending ? null : (

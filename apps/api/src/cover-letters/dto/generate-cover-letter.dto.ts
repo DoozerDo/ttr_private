@@ -11,6 +11,10 @@ export class GenerateCoverLetterDto {
 
   analysisId!: string;
 
+  opportunityId?: string | null;
+
+  excludedRequirements?: string[];
+
   jobContext?: JobApplicationContext;
 
   documentType?: DocumentType;
