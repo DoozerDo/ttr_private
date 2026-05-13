@@ -3001,6 +3001,35 @@ export default function StudioPage() {
   ); 
   const productReadiness = productDecisionState.productReadiness; 
   const qualifiedForGeneration = shouldGenerateDocuments(analysisScore); 
+
+  const resumeV2FallbackAttemptable = useMemo(() => {
+    const failureCode = String(resumeState.artifactFailure?.code ?? "").trim();
+    const isResumeV2IngestionFailure =
+      failureCode === "baseline_resume_v2_missing" ||
+      failureCode === "baseline_resume_v2_invalid" ||
+      failureCode === "baseline_resume_v2_ingestion_failed";
+
+    if (!isResumeV2IngestionFailure) return false;
+
+    const codes = new Set<string>();
+    for (const reason of activeGenerationReadiness.reasons ?? []) {
+      const code = String((reason as any)?.code ?? "").trim();
+      if (code) codes.add(code);
+    }
+    for (const issue of activeGenerationReadiness.verificationIssues ?? []) {
+      const code = String((issue as any)?.code ?? "").trim();
+      if (code) codes.add(code);
+    }
+    if (!codes.size) return false;
+    for (const code of codes) {
+      if (code !== "baseline_template_not_ready" && code !== "readiness_error") {
+        return false;
+      }
+    }
+    return true;
+  }, [activeGenerationReadiness.reasons, activeGenerationReadiness.verificationIssues, resumeState.artifactFailure?.code]);
+
+  const studioReadinessBlocksGeneration = Boolean(activeGenerationReadiness.blocked && !resumeV2FallbackAttemptable);
   const studioDraftMode = 
     resolveDocumentGenerationMode(analysisScore) === "draft" && isFromUnlock && !hasGeneratedOnce; 
   const improveBaselineHref = useMemo(() => {
@@ -3275,7 +3304,7 @@ export default function StudioPage() {
         (baselineTemplateReadinessSignal.hasReason && !baselineTemplateReadinessSignal.hardBlocked),
     );
     const hasDegradedReadiness = String(studioArtifactsPayload?.artifactReadiness ?? "") === "degraded";
-    const blockedBySignals = Boolean(activeGenerationReadiness.blocked || baselineTemplateReadinessSignal.hardBlocked);
+    const blockedBySignals = Boolean(studioReadinessBlocksGeneration || baselineTemplateReadinessSignal.hardBlocked);
     const degradedBySignals =
       !blockedBySignals &&
       Boolean(
@@ -3305,7 +3334,7 @@ export default function StudioPage() {
       hasArtifactRefinementRequired,
     };
   }, [
-    activeGenerationReadiness.blocked,
+    studioReadinessBlocksGeneration,
     analysis,
     canGenerate,
     baselineTemplateReadinessSignal.degraded,
@@ -4410,11 +4439,11 @@ export default function StudioPage() {
   const canProceedWithStudioDrafts =
     // Studio should aggressively move qualified users into artifacts. Treat any non-blocked readiness
     // state as eligible for draft orchestration; hard blocking is enforced separately.
-    qualifiedForGeneration && !activeGenerationReadiness.blocked; 
+    qualifiedForGeneration && !studioReadinessBlocksGeneration; 
   const isInstantDraftExperience = canProceedWithStudioDrafts; 
   const qualifiedForStudioOrchestration = Boolean(
     qualifiedForGeneration &&
-      !activeGenerationReadiness.blocked &&
+      !studioReadinessBlocksGeneration &&
       effectiveBaselineId &&
       effectiveBaselineVersionId &&
       effectiveJobId &&
@@ -4459,7 +4488,7 @@ export default function StudioPage() {
   }, [generationWorkflowScope, needsAutoGeneration]);
   const resumeAutoGenerating =
   generateNowEligible &&
-  !activeGenerationReadiness.blocked &&
+  !studioReadinessBlocksGeneration &&
   !hasResumeArtifact &&
   !resumeState.artifactFailure &&
   (resumeGenerating ||
@@ -4468,7 +4497,7 @@ export default function StudioPage() {
     studioArtifactPairStatus === "in_progress");
   const coverAutoGenerating =
   generateNowEligible &&
-  !activeGenerationReadiness.blocked &&
+  !studioReadinessBlocksGeneration &&
   !hasCoverLetterArtifact &&
   !coverState.artifactFailure &&
   (coverGenerating ||
@@ -4478,7 +4507,7 @@ export default function StudioPage() {
   // Pending state reflects an explicit generation start, not auto-generation eligibility alone.
   const resumeGenerateNowPending =
   generateNowEligible &&
-  !activeGenerationReadiness.blocked &&
+  !studioReadinessBlocksGeneration &&
   Boolean(effectiveBaselineVersionId) &&
   !hasResumeArtifact &&
   !resumeState.response &&
@@ -4488,7 +4517,7 @@ export default function StudioPage() {
 
   const coverGenerateNowPending =
   generateNowEligible &&
-  !activeGenerationReadiness.blocked &&
+  !studioReadinessBlocksGeneration &&
   Boolean(effectiveBaselineVersionId) &&
   !hasCoverLetterArtifact &&
   !coverState.response &&
@@ -4523,7 +4552,7 @@ export default function StudioPage() {
 
   const orchestrationDebugSnapshot = useMemo(() => {
     const orchestrationDecision = (() => {
-      if (activeGenerationReadiness.blocked === true) return "blocked";
+      if (studioReadinessBlocksGeneration === true) return "blocked";
       if (hasAnyArtifactPersisted) return "hydrate_existing_artifacts";
       if (
         qualifiedForStudioOrchestration &&
@@ -4890,7 +4919,7 @@ export default function StudioPage() {
         });
         return false;
       }
-      if (activeGenerationReadiness.blocked) {
+      if (studioReadinessBlocksGeneration) {
         if (opts?.allowVerifiedOnlyFallback && shouldGenerateDocuments(analysisScore)) {
           return true;
         }
@@ -4906,7 +4935,7 @@ export default function StudioPage() {
     },
     [
       analysisScore,
-      activeGenerationReadiness.blocked,
+      studioReadinessBlocksGeneration,
       effectiveBaselineId,
       effectiveBaselineVersionId,
       effectiveJobId,
@@ -10920,14 +10949,14 @@ export default function StudioPage() {
     if (autoGenerationInFlight || resumeGenerating || coverGenerating) return;
     if (hasResumeArtifact || hasCoverLetterArtifact) return;
     if (resumeState.artifactFailure || coverState.artifactFailure) return;
-    if (activeGenerationReadiness.blocked) return;
+    if (studioReadinessBlocksGeneration) return;
 
     if (autoGenerationSignatureRef.current === autoGenerationSignature) return;
     autoGenerationSignatureRef.current = autoGenerationSignature;
 
     void startGenerationFromReadyShell("shell_auto");
   }, [
-    activeGenerationReadiness.blocked,
+    studioReadinessBlocksGeneration,
     autoGenerationInFlight,
     autoGenerationSignature,
     coverGenerating,
