@@ -31,6 +31,9 @@ export type StudioArtifactKind = 'resume' | 'cover_letter';
 export type StudioArtifactRecord = {
   status: StudioArtifactLifecycleStatus;
   inputsHash: string | null;
+  inputsHashMatches: boolean;
+  artifactCurrent: boolean;
+  retryAllowed: boolean;
   responseBody: Record<string, unknown> | null;
   content: string | null;
   failureCode: string | null;
@@ -492,33 +495,14 @@ export class StudioArtifactsService {
       );
     };
 
-    const isTemplateNotReadyBlocked =
-      Boolean(templateReadiness) &&
-      (!templateReadiness!.canGenerateResume || !templateReadiness!.canGenerateCoverLetter) &&
-      (templateReadiness?.hardBlockReasons ?? []).some((r) => safeText(r.code) === 'baseline_template_not_ready');
-
-    const stripArtifactPayload = (artifact: StudioArtifactRecord | null): StudioArtifactRecord | null => {
-      if (!artifact) return artifact;
-      return { ...artifact, responseBody: null, content: null };
-    };
-
-    // Default: never drop persisted artifacts from readState; legacy/stale output should be signaled via metadata.
-    // Exception: baseline_template_not_ready means Studio must not receive stale/legacy preview payloads.
-    const resumeRecord = isTemplateNotReadyBlocked
-      ? stripArtifactPayload(resumeRecordRaw)
-      : artifactReadiness && resumeRecordRaw && !isStructuredTemplateResult(resumeRecordRaw.responseBody)
-        ? {
-            ...resumeRecordRaw,
-            metadata: { ...(resumeRecordRaw.metadata ?? {}), staleLegacy: true },
-          }
+    // Never drop persisted artifacts from readState; currentness/staleness must be indicated via metadata flags.
+    const resumeRecord =
+      artifactReadiness && resumeRecordRaw && !isStructuredTemplateResult(resumeRecordRaw.responseBody)
+        ? { ...resumeRecordRaw, metadata: { ...(resumeRecordRaw.metadata ?? {}), staleLegacy: true } }
         : resumeRecordRaw;
-    const coverRecord = isTemplateNotReadyBlocked
-      ? stripArtifactPayload(coverRecordRaw)
-      : artifactReadiness && coverRecordRaw && !isStructuredTemplateResult(coverRecordRaw.responseBody)
-        ? {
-            ...coverRecordRaw,
-            metadata: { ...(coverRecordRaw.metadata ?? {}), staleLegacy: true },
-          }
+    const coverRecord =
+      artifactReadiness && coverRecordRaw && !isStructuredTemplateResult(coverRecordRaw.responseBody)
+        ? { ...coverRecordRaw, metadata: { ...(coverRecordRaw.metadata ?? {}), staleLegacy: true } }
         : coverRecordRaw;
 
     if (process.env.DEBUG_STUDIO_ARTIFACT_QUALITY === 'true') {
@@ -1128,7 +1112,9 @@ export class StudioArtifactsService {
     const inputsHash =
       artifact === 'resume' ? record.resumeInputsHash : record.coverLetterInputsHash;
     if (status === StudioArtifactLifecycleStatus.MISSING) return null;
-    if (inputsHash && inputsHash !== expectedInputsHash) return null;
+    const inputsHashMatches = Boolean(inputsHash && inputsHash === expectedInputsHash);
+    const artifactCurrent = inputsHashMatches;
+    const retryAllowed = status !== StudioArtifactLifecycleStatus.IN_PROGRESS;
     const rawResponseBody =
       artifact === 'resume'
         ? sanitizeStoredResumeResponseBody(normalizeRecord(record.resumeResponseBody))
@@ -1164,6 +1150,9 @@ export class StudioArtifactsService {
     return {
       status,
       inputsHash,
+      inputsHashMatches,
+      artifactCurrent,
+      retryAllowed,
       responseBody,
       content,
       failureCode,
@@ -1185,21 +1174,23 @@ export class StudioArtifactsService {
     if (!record) return StudioArtifactLifecycleStatus.MISSING;
     const resumeRecord = this.buildArtifactRecord(record, 'resume', resumeInputsHash);
     const coverRecord = this.buildArtifactRecord(record, 'cover_letter', coverLetterInputsHash);
+    const resumeCurrent = Boolean(resumeRecord?.artifactCurrent);
+    const coverCurrent = Boolean(coverRecord?.artifactCurrent);
     if (
-      resumeRecord?.status === StudioArtifactLifecycleStatus.COMPLETED ||
-      coverRecord?.status === StudioArtifactLifecycleStatus.COMPLETED
+      (resumeCurrent && resumeRecord?.status === StudioArtifactLifecycleStatus.COMPLETED) ||
+      (coverCurrent && coverRecord?.status === StudioArtifactLifecycleStatus.COMPLETED)
     ) {
       return StudioArtifactLifecycleStatus.COMPLETED;
     }
     if (
-      resumeRecord?.status === StudioArtifactLifecycleStatus.IN_PROGRESS ||
-      coverRecord?.status === StudioArtifactLifecycleStatus.IN_PROGRESS
+      (resumeCurrent && resumeRecord?.status === StudioArtifactLifecycleStatus.IN_PROGRESS) ||
+      (coverCurrent && coverRecord?.status === StudioArtifactLifecycleStatus.IN_PROGRESS)
     ) {
       return StudioArtifactLifecycleStatus.IN_PROGRESS;
     }
     if (
-      resumeRecord?.status === StudioArtifactLifecycleStatus.FAILED ||
-      coverRecord?.status === StudioArtifactLifecycleStatus.FAILED
+      (resumeCurrent && resumeRecord?.status === StudioArtifactLifecycleStatus.FAILED) ||
+      (coverCurrent && coverRecord?.status === StudioArtifactLifecycleStatus.FAILED)
     ) {
       return StudioArtifactLifecycleStatus.FAILED;
     }

@@ -182,34 +182,64 @@ const request = {
 };
 
 describe('CoverLettersService contract', () => {
-  it('uses persisted ResumeV2 as the only cover letter generation authority (not baseline section text)', async () => {
+
+  it('does not block cover letter generation when Resume V2 is missing if verified baseline evidence is sufficient (omits unsupported requirements with warnings)', async () => {
     const { service } = buildService();
-    const poison = 'POISON_BASELINE_SECTION_TEXT_SHOULD_NOT_APPEAR';
+    // Force backfill to fail so ResumeV2 is missing.
+    (service as any).baselineResumeV2BackfillService.backfillLatestIfMissing = jest.fn().mockResolvedValue(null);
+
     const original = baseline.sections?.[0]?.content ?? '';
+    const originalParsed = baseline.parsedRecords;
     baseline.sections = [
       {
-        id: 'section-poison',
+        id: 'summary-1',
+        title: 'Summary',
+        sectionType: BaselineSectionType.SUMMARY,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: 0,
+        content:
+          'Operations leader focused on measurable improvements and reliable execution. ' +
+          'Built cross-functional programs across support and product. ' +
+          'Additional verified baseline context. '.repeat(60),
+      } as any,
+      {
+        id: 'experience-1',
         title: 'Experience',
         sectionType: BaselineSectionType.EXPERIENCE,
         includePolicy: BaselineIncludePolicy.ALWAYS,
-        order: 0,
-        content: `Some baseline content. ${poison}. More content.`,
+        order: 1,
+        content: [
+          'Biblioso | Director, Customer Experience | 2024 - Present',
+          '- Led a cross-functional CX program spanning support and product.',
+          '- Improved escalation handling through triage, routing, and operating reviews.',
+          '',
+          'Acme Corp | Customer Operations Manager | 2021 - 2024',
+          '- Built queue health dashboards and reporting to improve response time.',
+          '- Implemented process improvements to reduce repeat escalations and strengthen RCA follow through.',
+          '',
+          'Additional verified baseline context. '.repeat(40),
+        ].join('\n'),
       } as any,
-    ];
-
-    const generatorSpy = jest.spyOn((service as any).generator, 'generate');
+    ] as any;
 
     try {
-      // We don't require the full generation to succeed in this guardrail test; we only require that
-      // any attempted generation passes ResumeV2-derived inputs to the generator (never baseline sections).
-      await service.generateCoverLetter('user-1', request as any).catch(() => null);
-
-      expect(generatorSpy).toHaveBeenCalled();
-      const input = generatorSpy.mock.calls[0]?.[0] as any;
-      const authorityText = String(input?.allowedBaselineBlocks?.map((b: any) => b.content).join('\n') ?? '');
-      expect(authorityText).not.toContain(poison);
-      expect(authorityText).toMatch(/Alex Candidate/i);
+      (baseline as any).parsedRecords = [
+        { createdAt: new Date('2026-05-01T00:00:00.000Z'), parsedJson: { identity: { full_name: 'Jordan Lee' } } } as any,
+      ];
+      const result = await service.generateCoverLetter('user-1', {
+        ...request,
+        excludedRequirements: ['Python', 'Snowflake'],
+      } as any);
+      expect(result.status).toBe('success');
+      expect(result.exportReady).toBe(true);
+      expect(String((result as any).content ?? '')).toMatch(/\S+/);
+      const content = String((result as any).content ?? '').toLowerCase();
+      expect(content).not.toContain('python');
+      expect(content).not.toContain('snowflake');
+      const reasonCodes = ((result as any).display?.reasons ?? []).map((r: any) => String(r?.code ?? ''));
+      expect(reasonCodes).toContain('unsupported_target_requirements');
     } finally {
+      (baseline as any).parsedRecords = originalParsed;
       baseline.sections = [
         {
           id: 'section-1',
@@ -220,23 +250,79 @@ describe('CoverLettersService contract', () => {
           sectionType: BaselineSectionType.EXPERIENCE,
         } as any,
       ];
-      generatorSpy.mockRestore();
     }
   });
 
-  it('refuses to generate cover letters without persisted ResumeV2 even when baseline sections exist', async () => {
+  it('does not block cover letter generation when Resume V2 is invalid if verified baseline evidence is sufficient (omits unsupported requirements with warnings)', async () => {
     const { service } = buildService();
-    // Force backfill to fail so ResumeV2 is missing.
-    (service as any).baselineResumeV2BackfillService.backfillLatestIfMissing = jest.fn().mockResolvedValue(null);
+    const original = baseline.sections?.[0]?.content ?? '';
+    const originalParsed = baseline.parsedRecords;
 
-    await expect(
-      service.generateCoverLetter('user-1', {
+    (baseline as any).parsedRecords = [
+      {
+        createdAt: new Date('2026-05-01T00:00:00.000Z'),
+        resumeV2Json: { heading: { name: '' }, experience: [{ company: '', roleTitle: '', bullets: [] }] },
+        parsedJson: { identity: { full_name: 'Jordan Lee' } },
+      } as any,
+    ];
+    baseline.sections = [
+      {
+        id: 'summary-1',
+        title: 'Summary',
+        sectionType: BaselineSectionType.SUMMARY,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: 0,
+        content:
+          'Operations leader focused on measurable improvements and reliable execution. ' +
+          'Built cross-functional programs across support and product. ' +
+          'Additional verified baseline context. '.repeat(60),
+      } as any,
+      {
+        id: 'experience-1',
+        title: 'Experience',
+        sectionType: BaselineSectionType.EXPERIENCE,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: 1,
+        content: [
+          'Biblioso | Director, Customer Experience | 2024 - Present',
+          '- Led a cross-functional CX program spanning support and product.',
+          '- Improved escalation handling through triage, routing, and operating reviews.',
+          '',
+          'Acme Corp | Customer Operations Manager | 2021 - 2024',
+          '- Built queue health dashboards and reporting to improve response time.',
+          '- Implemented process improvements to reduce repeat escalations and strengthen RCA follow through.',
+          '',
+          'Additional verified baseline context. '.repeat(40),
+        ].join('\n'),
+      } as any,
+    ] as any;
+
+    try {
+      const result = await service.generateCoverLetter('user-1', {
         ...request,
-        baselineId: 'baseline-1',
-      } as any),
-    ).rejects.toMatchObject({
-      response: { error: { code: 'baseline_resume_v2_missing' } },
-    });
+        excludedRequirements: ['Python', 'Snowflake'],
+      } as any);
+      expect(result.status).toBe('success');
+      expect(result.exportReady).toBe(true);
+      expect(String((result as any).content ?? '')).toMatch(/\S+/);
+      const content = String((result as any).content ?? '').toLowerCase();
+      expect(content).not.toContain('python');
+      expect(content).not.toContain('snowflake');
+      const reasonCodes = ((result as any).display?.reasons ?? []).map((r: any) => String(r?.code ?? ''));
+      expect(reasonCodes).toContain('unsupported_target_requirements');
+    } finally {
+      (baseline as any).parsedRecords = originalParsed;
+      baseline.sections = [
+        {
+          id: 'section-1',
+          title: 'Experience',
+          content: original,
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 0,
+          sectionType: BaselineSectionType.EXPERIENCE,
+        } as any,
+      ];
+    }
   });
   it('does not block cover letter generation with baseline_template_not_ready when interpreted evidence is meaningful', async () => {
     const { service, studioArtifactsService } = buildService();

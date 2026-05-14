@@ -793,8 +793,125 @@ describe('StudioArtifactsService', () => {
       analysisId: 'analysis-1',
     });
 
-    expect(staleState.resume).toBeNull();
+    expect(staleState.resume).toEqual(expect.objectContaining({
+      status: StudioArtifactLifecycleStatus.COMPLETED,
+      inputsHashMatches: false,
+      artifactCurrent: false,
+      retryAllowed: true,
+    }));
+    // Stale artifacts must not count as current lifecycle status.
     expect(staleState.status).toBe(StudioArtifactLifecycleStatus.MISSING);
+  });
+
+  it('hydrates failed artifacts for the matching context with retryAllowed=true', async () => {
+    const studioArtifactRepository = createRepository<any>();
+    const baselineRepository = { findOne: jest.fn(async () => baseline) };
+    const baselineVersionRepository = { findOne: jest.fn(async () => baselineVersion) };
+    const jobRepository = { findOne: jest.fn(async () => job) };
+    const assessmentRepository = { findOne: jest.fn(async () => assessment) };
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository as any,
+      baselineRepository as any,
+      baselineVersionRepository as any,
+      jobRepository as any,
+      assessmentRepository as any,
+      backfillService as any,
+    );
+
+    const jobFingerprint = service.computeJobFingerprint(job as any);
+    const inputsHash = service.computeResumeInputsHash({
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint,
+      assessmentInputsHash: assessment.inputsHash,
+    });
+
+    await service.recordResumeFailure({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint,
+      inputsHash,
+      failureCode: 'generation_failed',
+      failureMessage: 'Resume generation failed.',
+      metadata: { auditId: 'audit-1' },
+    });
+
+    const state = await service.readState({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      analysisId: 'analysis-1',
+    });
+
+    expect(state.status).toBe(StudioArtifactLifecycleStatus.FAILED);
+    expect(state.resume).toEqual(
+      expect.objectContaining({
+        status: StudioArtifactLifecycleStatus.FAILED,
+        inputsHashMatches: true,
+        artifactCurrent: true,
+        retryAllowed: true,
+      }),
+    );
+  });
+
+  it('does not treat stale failed artifacts as current lifecycle status', async () => {
+    const studioArtifactRepository = createRepository<any>();
+    const baselineRepository = { findOne: jest.fn(async () => baseline) };
+    const baselineVersionRepository = { findOne: jest.fn(async () => baselineVersion) };
+    const jobRepository = { findOne: jest.fn(async () => job) };
+    const assessmentRepository = { findOne: jest.fn(async () => assessment) };
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository as any,
+      baselineRepository as any,
+      baselineVersionRepository as any,
+      jobRepository as any,
+      assessmentRepository as any,
+      backfillService as any,
+    );
+
+    const jobFingerprint = service.computeJobFingerprint(job as any);
+    const inputsHash = service.computeResumeInputsHash({
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint,
+      assessmentInputsHash: assessment.inputsHash,
+    });
+
+    await service.recordResumeFailure({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint,
+      inputsHash,
+      failureCode: 'generation_failed',
+      failureMessage: 'Resume generation failed.',
+      metadata: {},
+    });
+
+    assessmentRepository.findOne = jest.fn(async () => ({ ...assessment, inputsHash: 'assessment-hash-2' }));
+    const state = await service.readState({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      analysisId: 'analysis-1',
+    });
+
+    expect(state.resume).toEqual(
+      expect.objectContaining({
+        status: StudioArtifactLifecycleStatus.FAILED,
+        inputsHashMatches: false,
+        artifactCurrent: false,
+        retryAllowed: true,
+      }),
+    );
+    expect(state.status).toBe(StudioArtifactLifecycleStatus.MISSING);
   });
 
   it('signals persisted legacy artifacts as stale when template readiness is resolved', async () => {

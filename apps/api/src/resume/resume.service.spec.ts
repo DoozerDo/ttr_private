@@ -1002,6 +1002,131 @@ describe('ResumeService contract', () => {
     }
   });
 
+  it('generates a real exportReady resume when Resume V2 is missing and baseline work history is verified (omits unsupported requirements with warnings)', async () => {
+    const { service } = buildService();
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 90;
+
+    try {
+      baseline.parsedRecords = [];
+      baseline.sections = [
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          order: 0,
+          content:
+            'Customer operations leader focused on measurable improvements and reliable operating cadence. ' +
+            'Built cross-functional execution rhythms across support and product. ' +
+            'Additional verified baseline context. '.repeat(60),
+        } as any,
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          order: 1,
+          content: [
+            'Biblioso | Director, Customer Experience | 2024 - Present',
+            '- Led a cross-functional CX program spanning support and product.',
+            '- Improved escalation handling through triage, routing, and operating reviews.',
+            '',
+            'Acme Corp | Customer Operations Manager | 2021 - 2024',
+            '- Built queue health dashboards and reporting to improve response time.',
+            '- Implemented process improvements to reduce repeat escalations and strengthen RCA follow through.',
+            '',
+            'Additional verified baseline context. '.repeat(40),
+          ].join('\n'),
+        } as any,
+      ] as any;
+
+      const result = await service.generateResume('user-1', {
+        ...baseRequest,
+        excludedRequirements: ['Python', 'Snowflake'],
+      } as any);
+      expect(result.ok).toBe(true);
+      expect(result.exportReady).toBe(true);
+      expect(String(result.content ?? '')).toMatch(/\S+/);
+
+      const content = String(result.content ?? '').toLowerCase();
+      expect(content).not.toContain('python');
+      expect(content).not.toContain('snowflake');
+
+      const reasonCodes = ((result.display?.reasons ?? []) as any[]).map((r) => String(r?.code ?? ''));
+      expect(reasonCodes).toContain('unsupported_target_requirements');
+    } finally {
+      baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsed;
+      assessment.overallScore = originalScore;
+    }
+  });
+
+  it('generates a real exportReady resume when Resume V2 is invalid and baseline work history is verified (omits unsupported requirements with warnings)', async () => {
+    const { service } = buildService();
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 90;
+
+    try {
+      baseline.parsedRecords = [
+        {
+          createdAt: new Date('2026-05-01T00:00:00.000Z'),
+          resumeV2Json: { heading: { name: '' }, experience: [{ company: '', roleTitle: '', bullets: [] }] },
+        } as any,
+      ];
+      baseline.sections = [
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          order: 0,
+          content:
+            'Customer operations leader focused on measurable improvements and reliable operating cadence. ' +
+            'Built cross-functional execution rhythms across support and product. ' +
+            'Additional verified baseline context. '.repeat(60),
+        } as any,
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          order: 1,
+          content: [
+            'Biblioso | Director, Customer Experience | 2024 - Present',
+            '- Led a cross-functional CX program spanning support and product.',
+            '- Improved escalation handling through triage, routing, and operating reviews.',
+            '',
+            'Acme Corp | Customer Operations Manager | 2021 - 2024',
+            '- Built queue health dashboards and reporting to improve response time.',
+            '- Implemented process improvements to reduce repeat escalations and strengthen RCA follow through.',
+            '',
+            'Additional verified baseline context. '.repeat(40),
+          ].join('\n'),
+        } as any,
+      ] as any;
+
+      const result = await service.generateResume('user-1', {
+        ...baseRequest,
+        excludedRequirements: ['Python', 'Snowflake'],
+      } as any);
+      expect(result.ok).toBe(true);
+      expect(result.exportReady).toBe(true);
+      expect(String(result.content ?? '')).toMatch(/\S+/);
+
+      const content = String(result.content ?? '').toLowerCase();
+      expect(content).not.toContain('python');
+      expect(content).not.toContain('snowflake');
+
+      const reasonCodes = ((result.display?.reasons ?? []) as any[]).map((r) => String(r?.code ?? ''));
+      expect(reasonCodes).toContain('unsupported_target_requirements');
+    } finally {
+      baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsed;
+      assessment.overallScore = originalScore;
+    }
+  });
+
   it('resolves analysisId when omitted (Studio generate) and still persists the resume artifact', async () => {
     const { service, studioArtifactsService } = buildService();
 

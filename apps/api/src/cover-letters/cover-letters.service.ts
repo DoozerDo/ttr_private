@@ -129,6 +129,8 @@ import { TargetRolePositioningResolver } from '../positioning/target-role-positi
 import { PositioningPlanService } from '../positioning/positioning-plan.service';
 import { buildAuthoritativeRenderPlan } from '../positioning/authoritative-render-plan';
 import { validateRealCoverLetterDocument } from '../artifacts/realDocumentValidator';
+import { resolveGenerationEvidence } from '../generation/generation-evidence-resolver';
+import { decideGenerationEligibility } from '../generation/generation-eligibility';
 
 type CoverLetterDraft = {
   baseline: Baseline;
@@ -676,7 +678,20 @@ export class CoverLettersService {
         }
       }
 
-      const display = this.buildSuccessDisplayPayload();
+      const eligibilityWarnings = decideGenerationEligibility({
+        baseline: draft.baseline as any,
+        baselineVersion: draft.baselineVersion as any,
+        job: draft.job as any,
+        readinessScore: null,
+        assessment: draft.analysisAssessment as any,
+        complianceBlocked: false,
+        evidence: resolveGenerationEvidence({
+          baseline: draft.baseline as any,
+          baselineVersionId: draft.baselineVersion.id,
+        }),
+        targetRequirements: ((input as any)?.excludedRequirements ?? []) as any,
+      }).warnings as any;
+      const display = this.buildSuccessDisplayPayload(eligibilityWarnings);
       const exports: DocumentGenerationExports = { docx: true, pdf: true };
       const response = {
         status: 'success',
@@ -1055,6 +1070,36 @@ export class CoverLettersService {
       ); 
       const readiness = this.buildReadinessFromFlags(flags); 
       if (!draft.templateReadiness.canGenerateCoverLetter) {
+        const evidence = resolveGenerationEvidence({
+          baseline: draft.baseline as any,
+          baselineVersionId: draft.baselineVersion?.id ?? null,
+        });
+        const eligibility = decideGenerationEligibility({
+          baseline: draft.baseline as any,
+          baselineVersion: draft.baselineVersion as any,
+          job: draft.job as any,
+          readinessScore: null,
+          assessment: draft.analysisAssessment as any,
+          complianceBlocked: false,
+          evidence,
+          warningCodes: ['baseline_template_not_ready'],
+        });
+        if (eligibility.eligible) {
+          return {
+            status: 'limited',
+            blocked: false,
+            compliance_flags: flags,
+            reasons: [
+              ...(draft.templateReadiness.hardBlockReasons ?? []),
+              {
+                code: 'baseline_template_not_ready',
+                message:
+                  'Baseline template readiness warning; verified evidence fallback is available.',
+              },
+            ],
+            canGenerateCoverLetter: true,
+          } as const;
+        }
         return {
           status: 'blocked',
           blocked: true,
@@ -1299,39 +1344,14 @@ export class CoverLettersService {
       policies,
     );
 
-    // IMPORTANT: Document generation authority boundary.
-    // Studio + generation must be grounded in the persisted ResumeV2 model (BaselineParsed.resumeV2Json),
-    // not raw baseline section concatenations or uploaded resume text.
-    let persisted = (baseline.parsedRecords?.[0] as any)?.resumeV2Json ?? null;
-    if (!persisted || typeof persisted !== 'object') {
-      const backfilled = this.baselineResumeV2BackfillService
-        ? await this.baselineResumeV2BackfillService.backfillLatestIfMissing({ baselineId: baseline.id })
-        : null;
-      persisted = backfilled?.resumeV2Json ?? null;
-    }
-    if (!persisted || typeof persisted !== 'object') {
-      throw new UnprocessableEntityException({
-        error: {
-          code: 'baseline_resume_v2_missing',
-          message:
-            'Baseline is missing a persisted ResumeV2 model. Re-run baseline processing (Fit Review) or re-upload your resume to re-ingest.',
-          details: { expected: ['baseline_parsed.resumeV2Json'] },
-        },
-      });
-    }
-    const normalizedResumeV2 = normalizeNormalizedResumeDocument(persisted as any);
-    const v2Validation = validateNormalizedResumeDocument(normalizedResumeV2 as any);
-    if (!v2Validation.valid) {
-      const failures = buildNormalizedResumeValidationFailures(normalizedResumeV2 as any);
-      throw new UnprocessableEntityException({
-        error: {
-          code: 'baseline_resume_v2_invalid',
-          message: formatResumeV2InvalidMessage({ reasons: v2Validation.reasons, failures }),
-          details: { reasons: v2Validation.reasons, failures },
-        },
-      });
-    }
-    const resumeV2PlainText = buildResumePlainText(normalizedResumeV2 as any);
+    const evidenceBundle = resolveGenerationEvidence({
+      baseline: baseline as any,
+      baselineVersionId: baselineVersion.id,
+    });
+
+    // Resume V2 is preferred evidence, not the only permissible evidence source.
+    // Fall back to verified baseline sections / raw extraction when Resume V2 is missing or invalid.
+    const resumeV2PlainText = evidenceBundle.resumePlainText;
 
     const closingTemplateKey = await this.resolveClosingTemplateKey(
       userId,
@@ -2007,11 +2027,11 @@ export class CoverLettersService {
     };
   }
 
-  private buildSuccessDisplayPayload(): UserSafeDisplayPayload {
+  private buildSuccessDisplayPayload(reasons?: UserSafeDisplayPayload['reasons']): UserSafeDisplayPayload {
     return {
       title: 'Cover letter generated successfully',
       description: 'Your cover letter draft is ready for preview and export.',
-      reasons: [],
+      reasons: reasons ?? [],
       cta: {
         label: 'Review results',
         href: '/results',

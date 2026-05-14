@@ -116,6 +116,8 @@ import { evaluateBaselineTemplateReadiness } from '../baseline/baselineTemplateR
 import { interpretEvidenceFromResumeText } from '../evidence/evidence-interpreter';
 import { resolveEvidenceReadinessFromSummary } from '../evidence/readiness-thresholds';
 import type { EvidenceItem } from '../evidence/evidence-model';
+import { resolveGenerationEvidence } from '../generation/generation-evidence-resolver';
+import { decideGenerationEligibility } from '../generation/generation-eligibility';
 import {
   assembleResumeFromStructuredBaseline,
   isAllowedStructuredTemplateExperienceHeader,
@@ -555,11 +557,11 @@ export class ResumeService {
     };
   }
 
-  private buildSuccessDisplayPayload(): UserSafeDisplayPayload {
+  private buildSuccessDisplayPayload(reasons?: UserSafeDisplayPayload['reasons']): UserSafeDisplayPayload {
     return {
       title: 'Resume generated successfully',
       description: 'Your resume draft is ready for preview and export.',
-      reasons: [],
+      reasons: reasons ?? [],
       cta: {
         label: 'Review results',
         href: '/results',
@@ -3339,7 +3341,20 @@ export class ResumeService {
           ? 'optimized'
           : 'draft';
 
-    const display = this.buildSuccessDisplayPayload();
+    const eligibilityWarnings = decideGenerationEligibility({
+      baseline: baseline as any,
+      baselineVersion: baselineVersion as any,
+      job: job as any,
+      readinessScore: null,
+      assessment: latestAssessment as any,
+      complianceBlocked: false,
+      evidence: resolveGenerationEvidence({
+        baseline: baseline as any,
+        baselineVersionId: baselineVersion.id,
+      }),
+      targetRequirements: request.excludedRequirements ?? [],
+    }).warnings as any;
+    const display = this.buildSuccessDisplayPayload(eligibilityWarnings);
     const exports: DocumentGenerationExports = { docx: true, pdf: true };
     recordResumeEvent(true);
     emitArtifactQualityTelemetry(this.logger, {
@@ -4220,6 +4235,32 @@ export class ResumeService {
         const structuredBaseline = extractStructuredBaselineFromSections(sourceSections as any);
         const templateReadiness = evaluateBaselineTemplateReadiness(structuredBaseline);
         if (!templateReadiness.canGenerateResume) {
+          const evidence = resolveGenerationEvidence({
+            baseline: baseline as any,
+            baselineVersionId: request.baselineVersionId ?? null,
+          });
+          const eligibility = decideGenerationEligibility({
+            baseline: baseline as any,
+            baselineVersion: request.baselineVersionId ? ({ id: request.baselineVersionId } as any) : null,
+            job: request.jobId ? ({ id: request.jobId } as any) : null,
+            readinessScore: null,
+            assessment: null,
+            complianceBlocked: false,
+            evidence,
+            warningCodes: ['baseline_template_not_ready'],
+          });
+          if (eligibility.eligible) {
+            return {
+              status: 'limited' as const,
+              blocked: false,
+              compliance_flags: [],
+              reasons: [
+                ...(templateReadiness.hardBlockReasons as any),
+                { code: 'baseline_template_not_ready', message: 'Baseline template readiness warning; verified evidence fallback is available.' },
+              ] as any,
+              canGenerateResume: true,
+            };
+          }
           return {
             status: 'blocked' as const,
             blocked: true,
