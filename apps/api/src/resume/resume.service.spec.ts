@@ -1545,6 +1545,67 @@ describe('ResumeService contract', () => {
 
     baseline.sections = originalSections;
   }); 
+
+  it('does not fail readiness when persisted ResumeV2 was produced from alternate parser experience field shapes', async () => {
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
+
+    const { service } = buildService();
+
+    // Keep baseline template-safe so readiness does not return baseline_template_not_ready.
+    const originalSections = baseline.sections;
+    baseline.sections = [
+      {
+        ...baseSection,
+        sectionType: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        order: 0,
+        content: [
+          'AMS DataSerfs',
+          'Senior Systems Engineer',
+          '2019 - 2021',
+          '- Built and maintained infrastructure automation.',
+        ].join('\n'),
+      },
+    ];
+
+    const originalParsedRecords = baseline.parsedRecords;
+    baseline.parsedRecords = [
+      {
+        id: 'parsed-1',
+        createdAt: new Date(),
+        // Resume V2 canonical shape, with extra alternate parser fields present.
+        resumeV2Json: {
+          heading: { name: 'Alex Candidate', contactLine: 'Test City' },
+          summary: 'Impact-driven support leader.',
+          experience: [
+            {
+              company: 'Acme',
+              roleTitle: 'Director of Support',
+              bullets: ['Improved p95 by 25% by rebuilding escalation flows.'],
+              // Alternate parser shapes (ignored by ingestion, but must not break readiness).
+              companyName: 'Acme',
+              jobTitle: 'Director of Support',
+              highlights: ['Improved p95 by 25% by rebuilding escalation flows.'],
+            },
+          ],
+          education: [],
+        },
+      } as any,
+    ];
+
+    try {
+      const readiness = await service.getGenerationReadiness('user-1', { ...baseRequest, oneTap: true } as any);
+      const reasonCodes = (readiness as any)?.reasons?.map?.((r: any) => r?.code) ?? [];
+      expect(reasonCodes).not.toContain('baseline_template_not_ready');
+      expect(reasonCodes).not.toContain('readiness_error');
+      expect(reasonCodes).not.toContain('baseline_resume_v2_ingestion_failed');
+    } finally {
+      baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsedRecords;
+      process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+    }
+  });
  
   it('does not return readiness BLOCKED for score >= 80 when verification gaps exist (verified-only lane)', async () => { 
     const { service } = buildService(); 
