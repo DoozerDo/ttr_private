@@ -3672,6 +3672,8 @@ export class ResumeService {
               : 0,
             crossRoleAttributionBlocks: crossCompanyEvidenceBlockedCount,
             evidencePartitionStage: evidence.primarySource,
+            employerScopedRankingEnabled: Boolean((normalizedDocument as any)?.__compositionDiagnostics?.employerScopedRankingEnabled ?? true),
+            crossEmployerRankingBlocks: Number((normalizedDocument as any)?.__compositionDiagnostics?.crossEmployerRankingBlocks ?? 0),
             generationEligibilityDecision: {
               eligible: eligibility.eligible,
               hardBlockerCode: eligibility.hardBlocker?.code ?? null,

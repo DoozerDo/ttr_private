@@ -25,6 +25,7 @@ import { buildDalenDeterministicBaselineSections } from './__fixtures__/dalen-de
 import { CoverLettersService } from '../cover-letters/cover-letters.service';
 import { DataSource } from 'typeorm';
 import { NarrativeCompositionEngine } from '../composition/narrative-composition-engine';
+import * as ResumeAssembler from './resumeTemplateAssembler';
 
 type MockRepo<T> = Partial<Record<keyof Repository<T>, jest.Mock>> & {
   findOne: jest.Mock;
@@ -1415,6 +1416,250 @@ describe('ResumeService contract', () => {
       );
       expect(productionValidation.employerRoleGroupCount).toBeGreaterThanOrEqual(3);
     } finally {
+      baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsed;
+      assessment.overallScore = originalScore;
+      if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+      else delete process.env.DOCGEN_DIAGNOSTICS;
+    }
+  });
+
+  it('ranking occurs only within employer-role scope (global evidence themes do not boost cross-domain bullets in another role)', async () => {
+    const { service } = buildService();
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+    const originalScore = assessment.overallScore;
+    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
+    assessment.overallScore = 90;
+
+    try {
+      baseline.parsedRecords = [];
+      baseline.sections = [
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          order: 0,
+          content: 'Verified baseline summary. '.repeat(80),
+        } as any,
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          order: 1,
+          content: [
+            'SentinelOne | Support Operations Lead | 2022 - 2024',
+            '- Led incident triage and escalation management across support operations.',
+            '- Built playbooks and operating reviews to reduce escalations.',
+            '- Improved response time and throughput with reporting dashboards.',
+            '',
+            'CenturyLink | Billing Operations Analyst | 2019 - 2022',
+            '- Improved invoice accuracy and dispute handling through reconciliation controls.',
+            '- Reduced billing exceptions by automating metering and reporting checks.',
+            '- Partnered with finance stakeholders to close discrepancies.',
+            '',
+            'Acme Corp | Customer Operations Manager | 2017 - 2019',
+            '- Managed support queues and improved SLA attainment through process changes.',
+            '- Implemented escalation playbooks and weekly operational reviews.',
+            '- Built KPI reporting to track backlog, response time, and quality trends.',
+            '',
+            'Additional verified baseline context. '.repeat(40),
+          ].join('\n'),
+        } as any,
+      ] as any;
+
+      const result = await service.generateResume('user-1', {
+        ...baseRequest,
+      } as any);
+
+      expect(result.ok).toBe(true);
+      expect(result.exportReady).toBe(true);
+
+      const pv = (result as any)?.internal?.productionValidation ?? null;
+      expect(pv).toEqual(
+        expect.objectContaining({
+          employerScopedRankingEnabled: true,
+          crossEmployerRankingBlocks: expect.any(Number),
+        }),
+      );
+
+      // Regression-style safety: SentinelOne experience should not pick up billing-domain bullets.
+      const previewExp = ((result as any)?.preview?.resume?.experience ?? []) as any[];
+      const sentinel = previewExp.find((e) => String(e?.company ?? '') === 'SentinelOne');
+      expect(sentinel).toBeTruthy();
+      const sentinelBullets = Array.isArray(sentinel?.bullets) ? sentinel.bullets.map((b: any) => String(b ?? '').toLowerCase()) : [];
+      expect(sentinelBullets.join(' ')).not.toMatch(/\b(invoice|billing|dispute|credit|metering|reconciliation)\b/);
+    } finally {
+      baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsed;
+      assessment.overallScore = originalScore;
+      if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+      else delete process.env.DOCGEN_DIAGNOSTICS;
+    }
+  });
+
+  it('explicit mismatched provenance ranking candidate is blocked (increments crossEmployerRankingBlocks)', async () => {
+    const { service } = buildService();
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+    const originalScore = assessment.overallScore;
+    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
+    assessment.overallScore = 90;
+
+    const originalAssemble = (ResumeAssembler as any).buildAuthoritativeResumeDraftFromResumeV2;
+    const assembleSpy = jest.spyOn(ResumeAssembler as any, 'buildAuthoritativeResumeDraftFromResumeV2');
+    assembleSpy.mockImplementation((input: any) => {
+      const renderPlan = input?.renderPlan ? { ...input.renderPlan } : null;
+      if (renderPlan) {
+        renderPlan.evidencePriorities = [
+          { theme: 'billing reconciliation', sourceEmployerRoleKey: 'CenturyLink::Billing Operations Analyst' },
+          { theme: 'incident response', sourceEmployerRoleKey: 'SentinelOne::Support Operations Lead' },
+        ];
+      }
+      return originalAssemble.call(ResumeAssembler, { ...input, renderPlan });
+    });
+
+    try {
+      baseline.parsedRecords = [];
+      baseline.sections = [
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          order: 0,
+          content: 'Verified baseline summary. '.repeat(80),
+        } as any,
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          order: 1,
+          content: [
+            'SentinelOne | Support Operations Lead | 2022 - 2024',
+            '- Led incident triage and escalation management across support operations.',
+            '- Built playbooks and operating reviews to reduce escalations.',
+            '- Improved response time and throughput with reporting dashboards.',
+            '',
+            'CenturyLink | Billing Operations Analyst | 2019 - 2022',
+            '- Improved invoice accuracy and dispute handling through reconciliation controls.',
+            '- Reduced billing exceptions by automating metering and reporting checks.',
+            '- Partnered with finance stakeholders to close discrepancies.',
+            '',
+            'Acme Corp | Customer Operations Manager | 2017 - 2019',
+            '- Managed support queues and improved SLA attainment through process changes.',
+            '- Implemented escalation playbooks and weekly operational reviews.',
+            '- Built KPI reporting to track backlog, response time, and quality trends.',
+            '',
+            'Additional verified baseline context. '.repeat(40),
+          ].join('\n'),
+        } as any,
+      ] as any;
+
+      const result = await service.generateResume('user-1', {
+        ...baseRequest,
+      } as any);
+
+      expect(result.ok).toBe(true);
+      expect(result.exportReady).toBe(true);
+
+      const pv = (result as any)?.internal?.productionValidation ?? null;
+      expect(pv.crossEmployerRankingBlocks).toBeGreaterThan(0);
+
+      const previewExp = ((result as any)?.preview?.resume?.experience ?? []) as any[];
+      const sentinel = previewExp.find((e) => String(e?.company ?? '') === 'SentinelOne');
+      const sentinelBullets = Array.isArray(sentinel?.bullets) ? sentinel.bullets.map((b: any) => String(b ?? '').toLowerCase()) : [];
+      expect(sentinelBullets.join(' ')).not.toMatch(/\b(invoice|billing|dispute|credit|metering|reconciliation)\b/);
+
+      expect(JSON.stringify(pv)).not.toMatch(/resumeText|baselineText|generated|bullet/i);
+    } finally {
+      assembleSpy.mockRestore();
+      baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsed;
+      assessment.overallScore = originalScore;
+      if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+      else delete process.env.DOCGEN_DIAGNOSTICS;
+    }
+  });
+
+  it('matching provenance ranking candidate is allowed, while mismatched is blocked', async () => {
+    const { service } = buildService();
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+    const originalScore = assessment.overallScore;
+    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
+    assessment.overallScore = 90;
+
+    const originalAssemble = (ResumeAssembler as any).buildAuthoritativeResumeDraftFromResumeV2;
+    const assembleSpy = jest.spyOn(ResumeAssembler as any, 'buildAuthoritativeResumeDraftFromResumeV2');
+    assembleSpy.mockImplementation((input: any) => {
+      const renderPlan = input?.renderPlan ? { ...input.renderPlan } : null;
+      if (renderPlan) {
+        renderPlan.evidencePriorities = [
+          { theme: 'billing reconciliation', sourceEmployerRoleKey: 'CenturyLink::Billing Operations Analyst' },
+          { theme: 'incident response', sourceEmployerRoleKey: 'SentinelOne::Support Operations Lead' },
+          { theme: 'escalation management', derivedFromRoleKey: 'SentinelOne::Support Operations Lead' },
+        ];
+      }
+      return originalAssemble.call(ResumeAssembler, { ...input, renderPlan });
+    });
+
+    try {
+      baseline.parsedRecords = [];
+      baseline.sections = [
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          order: 0,
+          content: 'Verified baseline summary. '.repeat(80),
+        } as any,
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          order: 1,
+          content: [
+            'SentinelOne | Support Operations Lead | 2022 - 2024',
+            '- Led incident triage and escalation management across support operations.',
+            '- Built playbooks and operating reviews to reduce escalations.',
+            '- Improved response time and throughput with reporting dashboards.',
+            '',
+            'CenturyLink | Billing Operations Analyst | 2019 - 2022',
+            '- Improved invoice accuracy and dispute handling through reconciliation controls.',
+            '- Reduced billing exceptions by automating metering and reporting checks.',
+            '- Partnered with finance stakeholders to close discrepancies.',
+            '',
+            'Acme Corp | Customer Operations Manager | 2017 - 2019',
+            '- Managed support queues and improved SLA attainment through process changes.',
+            '- Implemented escalation playbooks and weekly operational reviews.',
+            '- Built KPI reporting to track backlog, response time, and quality trends.',
+            '',
+            'Additional verified baseline context. '.repeat(40),
+          ].join('\n'),
+        } as any,
+      ] as any;
+
+      const result = await service.generateResume('user-1', {
+        ...baseRequest,
+      } as any);
+
+      expect(result.ok).toBe(true);
+      expect(result.exportReady).toBe(true);
+
+      const pv = (result as any)?.internal?.productionValidation ?? null;
+      expect(pv.crossEmployerRankingBlocks).toBeGreaterThan(0);
+
+      const previewExp = ((result as any)?.preview?.resume?.experience ?? []) as any[];
+      const sentinel = previewExp.find((e) => String(e?.company ?? '') === 'SentinelOne');
+      expect(sentinel).toBeTruthy();
+      const sentinelBullets = Array.isArray(sentinel?.bullets) ? sentinel.bullets.map((b: any) => String(b ?? '').toLowerCase()) : [];
+      // Candidate is allowed (incident/escalation themes) and billing terms still absent.
+      expect(sentinelBullets.join(' ')).not.toMatch(/\b(invoice|billing|dispute|credit|metering|reconciliation)\b/);
+    } finally {
+      assembleSpy.mockRestore();
       baseline.sections = originalSections;
       baseline.parsedRecords = originalParsed;
       assessment.overallScore = originalScore;

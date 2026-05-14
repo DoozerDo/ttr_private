@@ -336,5 +336,6 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
     ...(Array.isArray((input.resumeV2 as any)?.competencies) ? { competencies: (input.resumeV2 as any).competencies } : {}),
     experience: composition.experience as any,
     ...(Array.isArray((input.resumeV2 as any)?.education) ? { education: (input.resumeV2 as any).education } : {}),
-  };
+    __compositionDiagnostics: composition.diagnostics as any,
+  } as any;
 }
