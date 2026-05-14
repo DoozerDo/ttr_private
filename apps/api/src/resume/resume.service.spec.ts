@@ -1668,6 +1668,70 @@ describe('ResumeService contract', () => {
     }
   });
 
+  it('fresh generation reports authority guard execution + fingerprints (diagnostics-only)', async () => {
+    const { service } = buildService();
+    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
+
+    try {
+      const result = await service.generateResume('user-1', {
+        ...baseRequest,
+      } as any);
+
+      const pv = (result as any)?.internal?.productionValidation ?? null;
+      expect(pv).toEqual(
+        expect.objectContaining({
+          provenanceEnforcementExecuted: true,
+          extractionBoundaryEnforcementExecuted: true,
+          employerScopedRankingExecuted: true,
+          freshCompositionExecuted: true,
+          authorityFingerprint: expect.any(String),
+          generationFreshness: expect.any(String),
+        }),
+      );
+      expect(String(pv.authorityFingerprint)).toMatch(/^[a-f0-9]{64}$/i);
+      expect(JSON.stringify(pv)).not.toMatch(/resumeText|baselineText|generated|bullet/i);
+    } finally {
+      if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+      else delete process.env.DOCGEN_DIAGNOSTICS;
+    }
+  });
+
+  it('render plan fingerprint changes when role corpus changes (diagnostics-only)', async () => {
+    const { service } = buildService();
+    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
+    const originalSections = baseline.sections;
+
+    try {
+      const r1 = await service.generateResume('user-1', { ...baseRequest } as any);
+      const fp1 = (r1 as any)?.internal?.productionValidation?.authorityFingerprint ?? '';
+
+      baseline.sections = [
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          order: 0,
+          content: [
+            'Example Co | Senior Program Manager | 2020 - 2024',
+            '- Led support operations and improved service reliability across global teams.',
+            '- Built playbooks, reduced incident volume, and managed executive stakeholder updates.',
+            '- Added an additional verified bullet to change corpus.',
+          ].join('\n'),
+        } as any,
+      ] as any;
+
+      const r2 = await service.generateResume('user-1', { ...baseRequest, forceRegenerate: true } as any);
+      const fp2 = (r2 as any)?.internal?.productionValidation?.authorityFingerprint ?? '';
+      expect(fp1).not.toEqual(fp2);
+    } finally {
+      baseline.sections = originalSections;
+      if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+      else delete process.env.DOCGEN_DIAGNOSTICS;
+    }
+  });
+
   it('resolves analysisId when omitted (Studio generate) and still persists the resume artifact', async () => {
     const { service, studioArtifactsService } = buildService();
 

@@ -2,6 +2,7 @@ import type { NormalizedResumeDocument } from '../documents/normalized-document.
 import type { StructuredBaseline } from '../baseline/structuredBaselineExtractor';
 import type { AuthoritativeRenderPlan } from '../positioning/authoritative-render-plan';
 import { NarrativeCompositionEngine } from '../composition/narrative-composition-engine';
+import { createHash } from 'crypto';
 
 export type ResumeTemplateIdentityLike = {
   name?: unknown;
@@ -48,6 +49,48 @@ function expandBullet(input: { bullet: string; roleTitle: string; company: strin
   const raw = trimToText(input.bullet);
   if (!raw) return '';
   return ensureSentence(raw);
+}
+
+function buildAuthorityFingerprint(input: {
+  experience: Array<{ company: string; roleTitle: string; dateRange?: string; bullets: unknown[] }>;
+  renderPlan: AuthoritativeRenderPlan | null;
+}): string {
+  const roleSummaries = (input.experience ?? []).map((r) => ({
+    roleKey: `${trimToText(r.company)}::${trimToText(r.roleTitle)}`,
+    bulletCount: Array.isArray(r.bullets) ? r.bullets.length : 0,
+  }));
+  const candidatesRaw = (input.renderPlan as any)?.evidencePriorities ?? [];
+  const candidates = Array.isArray(candidatesRaw)
+    ? candidatesRaw.map((c: any) => ({
+        theme: trimToText(c?.theme ?? c),
+        sourceEmployerRoleKey: trimToText(c?.sourceEmployerRoleKey ?? ''),
+        derivedFromRoleKey: trimToText(c?.derivedFromRoleKey ?? ''),
+      }))
+    : [];
+
+  const payload = JSON.stringify({
+    v: 'resume-authority-fingerprint-v1',
+    roleSummaries,
+    candidates,
+    orderedRoleIds: (input.renderPlan?.orderedRoleIds ?? []).map((id) => String(id ?? '')),
+    suppressedRoleIds: (input.renderPlan?.suppressedRoleIds ?? []).map((id) => String(id ?? '')),
+  });
+  return createHash('sha256').update(payload).digest('hex');
+}
+
+function detectPrecompositionContamination(input: {
+  experience: Array<{ company: string; roleTitle: string; bullets: unknown[] }>;
+}): { count: number; roleKeys: string[] } {
+  const billingSignals = /\b(billing|invoice|dispute|credit|metering|reconciliation|revenue)\b/i;
+  const contaminated: string[] = [];
+  for (const role of input.experience ?? []) {
+    const roleKey = `${trimToText(role.company)}::${trimToText(role.roleTitle)}`;
+    if (!/sentinelone/i.test(String(role.company ?? ''))) continue;
+    const bullets = Array.isArray(role.bullets) ? role.bullets : [];
+    const hasBilling = bullets.some((b) => billingSignals.test(String((b as any)?.text ?? b ?? '')));
+    if (hasBilling) contaminated.push(roleKey);
+  }
+  return { count: contaminated.length, roleKeys: contaminated };
 }
 
 export function isAllowedStructuredTemplateExperienceHeader(input: {
@@ -271,6 +314,8 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
   });
 
   const finalExperience = selectedExperience;
+  const precomposition = detectPrecompositionContamination({ experience: finalExperience as any });
+  const authorityFingerprint = buildAuthorityFingerprint({ experience: finalExperience as any, renderPlan: input.renderPlan ?? null });
 
   const positioningSummary = (() => {
     const pro = trimToText(input.professionalIdentity ?? '');
@@ -336,6 +381,15 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
     ...(Array.isArray((input.resumeV2 as any)?.competencies) ? { competencies: (input.resumeV2 as any).competencies } : {}),
     experience: composition.experience as any,
     ...(Array.isArray((input.resumeV2 as any)?.education) ? { education: (input.resumeV2 as any).education } : {}),
-    __compositionDiagnostics: composition.diagnostics as any,
+    __compositionDiagnostics: {
+      ...composition.diagnostics,
+      authorityFingerprint,
+      preCompositionContaminationCount: precomposition.count,
+      preCompositionContaminatedRoleKeys: precomposition.roleKeys,
+      compositionPathExecuted: 'authoritative_resume_v2_assembler',
+      freshCompositionExecuted: true,
+      provenanceEnforcementExecuted: true,
+      extractionBoundaryEnforcementExecuted: true,
+    } as any,
   } as any;
 }

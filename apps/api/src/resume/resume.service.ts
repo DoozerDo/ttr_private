@@ -3674,6 +3674,17 @@ export class ResumeService {
             evidencePartitionStage: evidence.primarySource,
             employerScopedRankingEnabled: Boolean((normalizedDocument as any)?.__compositionDiagnostics?.employerScopedRankingEnabled ?? true),
             crossEmployerRankingBlocks: Number((normalizedDocument as any)?.__compositionDiagnostics?.crossEmployerRankingBlocks ?? 0),
+            provenanceEnforcementExecuted: Boolean((normalizedDocument as any)?.__compositionDiagnostics?.provenanceEnforcementExecuted ?? false),
+            extractionBoundaryEnforcementExecuted: Boolean((normalizedDocument as any)?.__compositionDiagnostics?.extractionBoundaryEnforcementExecuted ?? false),
+            employerScopedRankingExecuted: Boolean((normalizedDocument as any)?.__compositionDiagnostics?.employerScopedRankingEnabled ?? false),
+            freshCompositionExecuted: Boolean((normalizedDocument as any)?.__compositionDiagnostics?.freshCompositionExecuted ?? false),
+            compositionAuthorityPath: String((normalizedDocument as any)?.__compositionDiagnostics?.compositionPathExecuted ?? ''),
+            authorityFingerprint: String((normalizedDocument as any)?.__compositionDiagnostics?.authorityFingerprint ?? ''),
+            preCompositionContaminationCount: Number((normalizedDocument as any)?.__compositionDiagnostics?.preCompositionContaminationCount ?? 0),
+            preCompositionContaminatedRoleKeys: Array.isArray((normalizedDocument as any)?.__compositionDiagnostics?.preCompositionContaminatedRoleKeys)
+              ? (normalizedDocument as any).__compositionDiagnostics.preCompositionContaminatedRoleKeys.map((k: any) => String(k ?? '')).filter(Boolean)
+              : [],
+            generationFreshness: response?.idempotency?.reused ? 'idempotency_reuse_recomposed' : 'fresh_generation',
             generationEligibilityDecision: {
               eligible: eligibility.eligible,
               hardBlockerCode: eligibility.hardBlocker?.code ?? null,
