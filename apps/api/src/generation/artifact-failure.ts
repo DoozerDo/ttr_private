@@ -20,6 +20,16 @@ export type ArtifactFailurePayload = {
     unsupportedEnvelope?: string;
     traceCoverage?: number;
     missingRequirements?: string[];
+
+    // Prompt 14 diagnostics (safe metadata only; no raw text).
+    artifactReadiness?: 'blocked' | 'ready' | 'unknown';
+    authoritativeExtractionSucceeded?: boolean;
+    authoritativeExperienceGroupCount?: number;
+    fallbackGenerationPrevented?: boolean;
+    legacyFallbackAttemptBlocked?: boolean;
+    generationTerminationStage?: string;
+    structuredBaselineExperienceCount?: number;
+    structuredBaselineMissingEvidenceReasons?: string[];
   };
 };
 

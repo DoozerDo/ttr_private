@@ -1825,8 +1825,7 @@ export class ResumeService {
       });
     }
 
-    // eslint-disable-next-line no-console
-    console.log('[RESUME_GENERATE_START]', { baselineId: baseline.id, baselineVersionId: baselineVersion.id, jobId });
+    // Note: avoid logging raw resume content. Request-scoped diagnostics are surfaced via gated response metadata.
 
     const analysisAssessment = await validateAnalysisContext({
       analysisRepository: this.fitAssessmentRepository,
@@ -1895,6 +1894,29 @@ export class ResumeService {
           !request.oneTap &&
           !hasMeaningfulInterpretedEvidenceForGate
         ) {
+          const details = (templateNotReadyReason?.details as any) ?? {};
+          const totalExperience = Number(details?.totalExperience ?? 0);
+          const validExperience = Number(details?.validExperience ?? 0);
+          // Prompt 14: Fail closed when no authoritative experience groups exist.
+          // Never fall back to legacy minimal resume synthesis to construct employer-role structure from raw text.
+          if (totalExperience === 0 && validExperience === 0) {
+            throw new UnprocessableEntityException(buildArtifactFailurePayload({
+              code: 'generation_blocked',
+              category: 'generation_blocked',
+              message: 'Resume generation is blocked because employer-role experience extraction failed.',
+              detail:
+                'No valid structured experience groups (company + role title + bullets) were found. Reprocess the baseline resume or re-upload with clearer experience headers.',
+              retryable: true,
+              diagnostics: {
+                artifactReadiness: 'blocked',
+                authoritativeExtractionSucceeded: false,
+                authoritativeExperienceGroupCount: 0,
+                fallbackGenerationPrevented: true,
+                legacyFallbackAttemptBlocked: true,
+                generationTerminationStage: 'authoritative_extraction_gate',
+              },
+            }));
+          }
           throw new UnprocessableEntityException({
             code: 'baseline_template_not_ready',
             reasons:
@@ -1986,8 +2008,9 @@ export class ResumeService {
     let resumeInputSections =
       this.promoteExperienceLikeSections(allowedSections);
 
+    const structuredBaselineForAuthorityGate = extractStructuredBaselineFromSections(resumeInputSections as any);
     const templateReadinessForBaseline = evaluateBaselineTemplateReadiness(
-      extractStructuredBaselineFromSections(resumeInputSections as any),
+      structuredBaselineForAuthorityGate as any,
     );
 
     const enforceTemplateReadiness =
@@ -2043,6 +2066,32 @@ export class ResumeService {
     }
 
     if (enforceTemplateReadiness && !templateReadinessForBaseline.canGenerateResume && !hasMeaningfulInterpretedEvidence) {
+      // Prompt 14: If structured extraction yields zero valid experience groups, fail closed rather than
+      // allowing legacy minimal fallback synthesis to construct employer-role structure from raw text.
+      const readinessDetailsAny = templateReadinessForBaseline as any;
+      if (Number(readinessDetailsAny?.totalExperience ?? 0) === 0 && Number(readinessDetailsAny?.validExperience ?? 0) === 0) {
+        throw new UnprocessableEntityException(buildArtifactFailurePayload({
+          code: 'generation_blocked',
+          category: 'generation_blocked',
+          message: 'Resume generation is blocked because employer-role experience extraction failed.',
+          detail:
+            'No valid structured experience groups (company + role title + bullets) were found. Reprocess the baseline resume or re-upload with clearer experience headers.',
+          retryable: true,
+          diagnostics: {
+            artifactReadiness: 'blocked',
+            authoritativeExtractionSucceeded: false,
+            authoritativeExperienceGroupCount: 0,
+            fallbackGenerationPrevented: true,
+            legacyFallbackAttemptBlocked: true,
+            generationTerminationStage: 'authoritative_extraction_gate',
+            structuredBaselineExperienceCount: Number(readinessDetailsAny?.totalExperience ?? 0),
+            structuredBaselineMissingEvidenceReasons: Array.isArray(readinessDetailsAny?.missingEvidenceReasons)
+              ? readinessDetailsAny.missingEvidenceReasons.map((r: any) => String(r ?? '')).filter(Boolean)
+              : [],
+          },
+        }));
+      }
+
       throw new UnprocessableEntityException({
         code: 'baseline_template_not_ready',
         reasons: templateReadinessForBaseline.hardBlockReasons,
@@ -3849,6 +3898,35 @@ export class ResumeService {
           analysisId: analysisIdForFailSafe,
           reason: error instanceof Error ? error.message : String(error),
         });
+
+        // Prompt 14: Never synthesize employer-role structure from unstructured text blobs.
+        // If we cannot extract any valid structured experience groups, fail closed instead of returning a minimal fallback resume.
+        try {
+          const structured = extractStructuredBaselineFromSections(
+            (resolveBaselineSectionsForGeneration(baselineForFailSafe) as any) ?? (baselineForFailSafe.sections as any),
+          ) as any;
+          const expCount = Array.isArray(structured?.experience) ? structured.experience.length : 0;
+          if (expCount === 0) {
+            throw new UnprocessableEntityException(buildArtifactFailurePayload({
+              code: 'generation_blocked',
+              category: 'generation_blocked',
+              message: 'Resume generation is blocked because employer-role experience extraction failed.',
+              detail:
+                'No valid structured experience groups (company + role title + bullets) were found. Reprocess the baseline resume or re-upload with clearer experience headers.',
+              retryable: true,
+              diagnostics: {
+                artifactReadiness: 'blocked',
+                authoritativeExtractionSucceeded: false,
+                authoritativeExperienceGroupCount: 0,
+                fallbackGenerationPrevented: true,
+                legacyFallbackAttemptBlocked: true,
+                generationTerminationStage: 'top_level_fail_safe_minimal_blocked',
+              },
+            }));
+          }
+        } catch (guardErr) {
+          if (guardErr instanceof UnprocessableEntityException) throw guardErr;
+        }
 
         const identity = resolveBaselineIdentity(baselineForFailSafe);
         let normalizedDocument: NormalizedResumeDocument | null = null;
