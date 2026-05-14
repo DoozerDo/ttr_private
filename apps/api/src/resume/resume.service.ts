@@ -3667,6 +3667,11 @@ export class ResumeService {
           ...((response as any).internal ?? {}),
           productionValidation: {
             evidenceSourceUsed: evidence.primarySource,
+            employerRoleGroupCount: Array.isArray((normalizedDocument as any)?.experience)
+              ? (normalizedDocument as any).experience.length
+              : 0,
+            crossRoleAttributionBlocks: crossCompanyEvidenceBlockedCount,
+            evidencePartitionStage: evidence.primarySource,
             generationEligibilityDecision: {
               eligible: eligibility.eligible,
               hardBlockerCode: eligibility.hardBlocker?.code ?? null,

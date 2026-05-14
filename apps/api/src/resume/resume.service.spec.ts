@@ -1339,6 +1339,90 @@ describe('ResumeService contract', () => {
     }
   });
 
+  it('prevents upstream cross-role contamination before provenance tagging when an experience header line is bullet-prefixed (structured baseline partitioning)', async () => {
+    const { service } = buildService();
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+    const originalScore = assessment.overallScore;
+    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
+    assessment.overallScore = 90;
+
+    try {
+      baseline.parsedRecords = [];
+      baseline.sections = [
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          order: 0,
+          content: 'Verified baseline summary. '.repeat(80),
+        } as any,
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          order: 1,
+          content: [
+            'SentinelOne | Support Operations Lead | 2022 - 2024',
+            '- Led incident triage, support operations, and escalation management.',
+            '- Built support playbooks and operating reviews to reduce escalations.',
+            '- Built reporting dashboards to improve response time and throughput.',
+            '',
+            // Bullet-prefixed header line that must still be treated as a new role header.
+            '- CenturyLink | Billing Operations Analyst | 2019 - 2022',
+            // Note: no "CenturyLink" token in bullets; upstream partitioning must still keep these under CenturyLink.
+            '- Reconciled billing and revenue across systems to improve close accuracy.',
+            '- Reduced reconciliation cycle time by automating reporting and exception handling.',
+            '- Partnered with finance stakeholders to close discrepancies and improve controls.',
+            '',
+            'Acme Corp | Customer Operations Manager | 2017 - 2019',
+            '- Managed support queues and improved SLA attainment through process changes.',
+            '- Implemented escalation playbooks and weekly operational reviews.',
+            '- Built KPI reporting to track backlog, response time, and quality trends.',
+            '',
+            'Additional verified baseline context. '.repeat(40),
+          ].join('\n'),
+        } as any,
+      ] as any;
+
+      const result = await service.generateResume('user-1', {
+        ...baseRequest,
+        excludedRequirements: ['Python', 'Snowflake'],
+      } as any);
+
+      expect(result.ok).toBe(true);
+      expect(result.exportReady).toBe(true);
+
+      const previewExp = ((result as any)?.preview?.resume?.experience ?? []) as any[];
+      const sentinel = previewExp.find((e) => String(e?.company ?? '') === 'SentinelOne');
+      expect(sentinel).toBeTruthy();
+      const sentinelBullets = Array.isArray(sentinel?.bullets) ? sentinel.bullets.map((b: any) => String(b ?? '').toLowerCase()) : [];
+      expect(sentinelBullets.join(' ')).not.toContain('reconciled billing and revenue');
+
+      const century = previewExp.find((e) => String(e?.company ?? '') === 'CenturyLink');
+      expect(century).toBeTruthy();
+      const centuryBullets = Array.isArray(century?.bullets) ? century.bullets.map((b: any) => String(b ?? '').toLowerCase()) : [];
+      expect(centuryBullets.join(' ')).toContain('reconciled billing and revenue');
+
+      // Provenance should originate upstream (role partitioning produces separate employer-role groups).
+      const productionValidation = (result as any)?.internal?.productionValidation ?? null;
+      expect(productionValidation).toEqual(
+        expect.objectContaining({
+          employerRoleGroupCount: expect.any(Number),
+          evidencePartitionStage: expect.any(String),
+        }),
+      );
+      expect(productionValidation.employerRoleGroupCount).toBeGreaterThanOrEqual(3);
+    } finally {
+      baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsed;
+      assessment.overallScore = originalScore;
+      if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+      else delete process.env.DOCGEN_DIAGNOSTICS;
+    }
+  });
+
   it('resolves analysisId when omitted (Studio generate) and still persists the resume artifact', async () => {
     const { service, studioArtifactsService } = buildService();
 

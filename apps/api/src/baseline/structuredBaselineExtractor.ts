@@ -275,24 +275,38 @@ function isImplicitBulletCandidate(line: string): boolean {
   return true;
 }
 
+function isBulletPrefixedExperienceHeader(line: string): boolean {
+  const raw = trimToText(line);
+  if (!raw || !isBulletLine(raw)) return false;
+  const candidate = stripBulletPrefix(raw);
+  if (!candidate) return false;
+  const parsed = parseExperienceHeaderLine(candidate) ?? parseRoleAtCompany(candidate);
+  return Boolean(parsed && parsed.company && parsed.roleTitle);
+}
+
 function readExperienceHeaderAt(
   lines: string[],
   startIndex: number,
 ): { header: { company: string; roleTitle: string; dates?: string }; consumed: number } | null {
   const line0 = trimToText(lines[startIndex] ?? '');
-  if (!line0 || isBulletLine(line0)) return null;
+  if (!line0) return null;
 
-  const single = parseExperienceHeaderLine(line0) ?? parseRoleAtCompany(line0);
+  // Some baselines (PDF/DOCX conversions) represent experience headers as bullet-prefixed lines.
+  // Treat "- Company | Role | Dates" as a header candidate, not an experience bullet.
+  const headerCandidate0 = isBulletLine(line0) ? stripBulletPrefix(line0) : line0;
+  if (!headerCandidate0) return null;
+
+  const single = parseExperienceHeaderLine(headerCandidate0) ?? parseRoleAtCompany(headerCandidate0);
   if (single) return { header: single, consumed: 1 };
 
   // Prevent bullet-like prose from being misclassified as a multi-line header's company line.
-  if (startsWithActionVerb(line0) || looksLikeSentence(line0)) {
+  if (startsWithActionVerb(headerCandidate0) || looksLikeSentence(headerCandidate0)) {
     return null;
   }
 
   const line1 = trimToText(lines[startIndex + 1] ?? '');
   if (line1 && !isBulletLine(line1)) {
-    const inlineDates = parseCompanyWithInlineDates(line0);
+    const inlineDates = parseCompanyWithInlineDates(headerCandidate0);
     if (inlineDates) {
       return {
         header: { company: inlineDates.company, roleTitle: line1, dates: inlineDates.dates },
@@ -308,7 +322,7 @@ function readExperienceHeaderAt(
     //   "Senior Program Manager"
     // where company/date were incorrectly treated as company/roleTitle.
     if (looksLikeDatesLine(line1) || monthYearOnly.test(line1)) {
-      const trailingStart = parseCompanyWithTrailingStartDate(line0);
+      const trailingStart = parseCompanyWithTrailingStartDate(headerCandidate0);
       const line2 = trimToText(lines[startIndex + 2] ?? '');
       if (trailingStart && line2 && !isBulletLine(line2) && !looksLikeDatesLine(line2)) {
         return {
@@ -322,7 +336,7 @@ function readExperienceHeaderAt(
       }
     }
 
-    const companyWithDates = parseCompanyWithDates(line0);
+    const companyWithDates = parseCompanyWithDates(headerCandidate0);
     if (companyWithDates) {
       return {
         header: { company: companyWithDates.company, roleTitle: line1, ...(companyWithDates.dates ? { dates: companyWithDates.dates } : {}) },
@@ -338,17 +352,17 @@ function readExperienceHeaderAt(
     //   "Technical Architect & Full-Stack Engineer"
     //   "Of Fates Games LLC"
     //   "May 2021 – Present"
-    const line0LooksLikeCompany = isLikelyCompanyName(line0);
+    const line0LooksLikeCompany = isLikelyCompanyName(headerCandidate0);
     const line1LooksLikeCompany = isLikelyCompanyName(line1);
-    const line0LooksLikeRole = looksLikeRoleTitle(line0);
+    const line0LooksLikeRole = looksLikeRoleTitle(headerCandidate0);
     if ((!line0LooksLikeCompany || line0LooksLikeRole) && line1LooksLikeCompany) {
       return {
-        header: { company: line1, roleTitle: line0, ...(maybeDates ? { dates: maybeDates } : {}) },
+        header: { company: line1, roleTitle: headerCandidate0, ...(maybeDates ? { dates: maybeDates } : {}) },
         consumed: maybeDates ? 3 : 2,
       };
     }
 
-    const company = line0;
+    const company = headerCandidate0;
     const roleTitle = line1;
     return {
       header: { company, roleTitle, ...(maybeDates ? { dates: maybeDates } : {}) },
@@ -447,7 +461,7 @@ export function extractStructuredBaselineFromSections(
           continue;
         }
         // Stop bullets when we see the next header-looking line.
-        if (!isBulletLine(nextLine) && readExperienceHeaderAt(lines, idx)) break;
+        if ((!isBulletLine(nextLine) && readExperienceHeaderAt(lines, idx)) || isBulletPrefixedExperienceHeader(nextLine)) break;
         if (isBulletLine(nextLine)) {
           const bullet = stripBulletPrefix(nextLine);
           if (bullet) bullets.push(bullet);
