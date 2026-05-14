@@ -1600,6 +1600,13 @@ describe('ResumeService contract', () => {
       expect(reasonCodes).not.toContain('baseline_template_not_ready');
       expect(reasonCodes).not.toContain('readiness_error');
       expect(reasonCodes).not.toContain('baseline_resume_v2_ingestion_failed');
+
+      // Regression proof: generation preparation must not collapse back into baseline_template_not_ready
+      // when a persisted ResumeV2 contains a usable experience entry.
+      await expect(service.generateResume('user-1', { ...baseRequest, oneTap: true } as any)).resolves.toMatchObject({
+        ok: true,
+        status: 'success',
+      });
     } finally {
       baseline.sections = originalSections;
       baseline.parsedRecords = originalParsedRecords;
