@@ -13,10 +13,22 @@ export type StructuredBaseline = {
   education: string[];
   skills: string[];
   missingEvidenceReasons: string[];
+  diagnostics?: {
+    structuredExtractionStage: string;
+    structuredBaselineExperienceCount: number;
+    detectedExperienceHeaders: Array<{ company: string; roleTitle: string; dates?: string }>;
+    rejectedExperienceHeaders: Array<{ company: string; roleTitle: string; dates?: string; reason: string }>;
+    headerNormalizationFailures: string[];
+    parsedEmployerRoleKeys: string[];
+  };
 };
 
 function trimToText(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function safeText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : trimToText(value);
 }
 
 function splitLines(value: string): string[] {
@@ -104,8 +116,18 @@ function isLikelyCompanyName(value: string): boolean {
   const text = trimToText(value);
   if (!text) return false;
 
+  // Reject common role/position tokens (prevents role titles like "Senior Program Manager" being treated as employers).
+  if (
+    /\b(?:program\s+manager|project\s+manager|product\s+manager|support\s+operations|operations|customer\s+experience|customer\s+success|engineer|architect|administrator|sysadmin|developer|technician|specialist|founder|co-?founder|webmaster|assistant|manager|director|analyst|contractor|consultant)\b/i.test(
+      text,
+    ) &&
+    !/\b(?:inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corp\.|ltd|ltd\.|pllc|pllc\.)\b/i.test(text)
+  ) {
+    return false;
+  }
+
   // Reject obvious section labels / headings.
-  if (/\b(?:professional\s+experience|experience|projects|skills|education|summary)\b/i.test(text)) {
+  if (/\b(?:professional\s+experience|experience|project|projects|skills|education|summary)\b/i.test(text)) {
     return false;
   }
 
@@ -117,6 +139,19 @@ function isLikelyCompanyName(value: string): boolean {
 
   // Reject malformed fragments with unmatched punctuation (common in truncated bullets like "Vue 3), ...").
   if (hasUnmatchedCompanyPunctuation(text)) return false;
+
+  // Reject location-only tokens (prevents "Seattle" / "Seattle, WA" being treated as an employer).
+  // Keep the list intentionally small and conservative; this is an ingestion safety guard, not a geo parser.
+  const stateSuffixMatch = text.match(
+    /^(?:[A-Za-z][A-Za-z .'-]+),\s*(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b\.?$/i,
+  );
+  const locationLike =
+    // Only treat "City, ST" as location (comma required) to avoid rejecting real company suffixes like "Example Co".
+    Boolean(stateSuffixMatch) ||
+    /^(?:Seattle|San Francisco|New York|Los Angeles|Austin|Chicago|Boston|Denver|Portland|Miami|Dallas|Houston|Phoenix|San Diego|San Jose)\b/i.test(
+      text,
+    );
+  if (locationLike && text.split(/\s+/).length <= 4) return false;
 
   return true;
 }
@@ -140,13 +175,26 @@ function parseExperienceHeaderLine(line: string): { company: string; roleTitle: 
   if (raw.includes('|')) {
     const parts = raw.split('|').map((p) => trimToText(p)).filter(Boolean);
     if (parts.length < 2) return null;
-    const [company, roleTitle, dates] = parts;
+    let [company, roleTitle, dates] = parts;
+    if (!company || !roleTitle) return null;
+
+    // Support role-first pipe ordering observed in some baselines:
+    // "Senior Program Manager | Example Co | 2020 - 2024"
+    const companyLooksWrong = !isLikelyCompanyName(company) && isLikelyCompanyName(roleTitle);
+    const roleFirstOrdering = looksLikeRoleTitle(company) && isLikelyCompanyName(roleTitle);
+    if (companyLooksWrong || roleFirstOrdering) {
+      const swappedCompany = roleTitle;
+      const swappedRole = company;
+      company = swappedCompany;
+      roleTitle = swappedRole;
+    }
+
     if (!company || !roleTitle) return null;
     return { company, roleTitle, ...(dates ? { dates } : {}) };
   }
 
   // Support "Company — Role Title — dates" and "Company - Role Title - dates"
-  const dashParts = raw.split(/\s[—-]\s/).map((p) => trimToText(p)).filter(Boolean);
+  const dashParts = raw.split(/\s[—–-]\s/).map((p) => trimToText(p)).filter(Boolean);
   if (dashParts.length >= 2) {
     // Avoid misclassifying "Company <Month YYYY> - <Month YYYY|Present>" as a header with company+roleTitle.
     if (dashParts.length === 2 && looksLikeDatesLine(dashParts[1])) return null;
@@ -160,7 +208,19 @@ function parseExperienceHeaderLine(line: string): { company: string; roleTitle: 
       if (leftHasMonthYear && leftEndsWithMonthYear && rightIsEnd) return null;
     }
 
-    const [company, roleTitle, dates] = dashParts;
+    let [company, roleTitle, dates] = dashParts;
+    if (!company || !roleTitle) return null;
+
+    // Support role-first dash headers observed in production:
+    // "Senior Manager, Customer Operations – SentinelOne"
+    // "Director, Cloud Development and Support – CenturyLink Business for Enterprise"
+    if (!isLikelyCompanyName(company) && isLikelyCompanyName(roleTitle)) {
+      const swappedCompany = roleTitle;
+      const swappedRole = company;
+      company = swappedCompany;
+      roleTitle = swappedRole;
+    }
+
     if (!company || !roleTitle) return null;
     return { company, roleTitle, ...(dates ? { dates } : {}) };
   }
@@ -189,8 +249,25 @@ function normalizeDateRangeSeparators(text: string): string {
   );
 }
 
+function stripLeadingLocationFromDatesLine(value: string): string {
+  const raw = trimToText(value);
+  if (!raw) return '';
+
+  // Accept "Remote Dec 2022 – Aug 2025", "Seattle, WA Dec 2018 – Oct 2019", "United States 2006 – 2013"
+  // by stripping a leading location token(s) when followed by a recognizable date start.
+  const normalized = normalizeDateRangeSeparators(raw);
+  const monthYearStart = new RegExp(`^(${MONTH_YEAR_TOKEN})\\b`, 'i');
+  const yearStart = /^(19|20)\d{2}\b/;
+  const tokens = normalized.split(' ').filter(Boolean);
+  for (let i = 0; i < Math.min(tokens.length, 6); i += 1) {
+    const candidate = tokens.slice(i).join(' ');
+    if (monthYearStart.test(candidate) || yearStart.test(candidate)) return candidate;
+  }
+  return normalized;
+}
+
 function canonicalizeDateRange(text: string): string {
-  const normalized = normalizeDateRangeSeparators(text);
+  const normalized = normalizeDateRangeSeparators(stripLeadingLocationFromDatesLine(text));
   const parts = normalized.split(' - ').map((p) => trimToText(p)).filter(Boolean);
   if (parts.length < 2) return normalized;
   const start = parts[0];
@@ -202,7 +279,7 @@ function canonicalizeDateRange(text: string): string {
 function looksLikeDatesLine(line: string): boolean {
   const raw = trimToText(line);
   if (!raw) return false;
-  const normalized = normalizeDateRangeSeparators(raw);
+  const normalized = normalizeDateRangeSeparators(stripLeadingLocationFromDatesLine(raw));
   const hasYear = /\b(19|20)\d{2}\b/.test(normalized);
   const looksLikeMonthYear = MONTH_YEAR_RE.test(normalized);
   const looksLikeRange =
@@ -297,7 +374,16 @@ function readExperienceHeaderAt(
   if (!headerCandidate0) return null;
 
   const single = parseExperienceHeaderLine(headerCandidate0) ?? parseRoleAtCompany(headerCandidate0);
-  if (single) return { header: single, consumed: 1 };
+  if (single) {
+    const line1 = trimToText(lines[startIndex + 1] ?? '');
+    if (line1 && !isBulletLine(line1) && looksLikeDatesLine(line1)) {
+      return {
+        header: { ...single, dates: canonicalizeDateRange(line1) },
+        consumed: 2,
+      };
+    }
+    return { header: single, consumed: 1 };
+  }
 
   // Prevent bullet-like prose from being misclassified as a multi-line header's company line.
   if (startsWithActionVerb(headerCandidate0) || looksLikeSentence(headerCandidate0)) {
@@ -345,7 +431,7 @@ function readExperienceHeaderAt(
     }
 
     const line2 = trimToText(lines[startIndex + 2] ?? '');
-    const maybeDates = line2 && !isBulletLine(line2) && looksLikeDatesLine(line2) ? line2 : undefined;
+    const maybeDates = line2 && !isBulletLine(line2) && looksLikeDatesLine(line2) ? canonicalizeDateRange(line2) : undefined;
 
     // Common PDF-derived ordering: role title first, company second, optional dates third.
     // Example:
@@ -381,6 +467,12 @@ export function extractStructuredBaselineFromSections(
   baselineSections: BaselineSection[],
 ): StructuredBaseline {
   const missingEvidenceReasons: string[] = [];
+  const diagnosticsEnabled = process.env.DOCGEN_DIAGNOSTICS === 'true';
+  const detectedExperienceHeaders: Array<{ company: string; roleTitle: string; dates?: string }> = [];
+  const rejectedExperienceHeaders: Array<{ company: string; roleTitle: string; dates?: string; reason: string }> = [];
+  const headerNormalizationFailures: string[] = [];
+  const parsedEmployerRoleKeys: string[] = [];
+  const structuredExtractionStage = 'structured_baseline_extractor_v2';
 
   const summarySection = extractSectionByType(baselineSections, 'SUMMARY')[0];
   const summary = summarySection ? trimToText((summarySection as any).content) : undefined;
@@ -443,6 +535,13 @@ export function extractStructuredBaselineFromSections(
       }
       const header = headerRead.header;
       idx += headerRead.consumed;
+      if (diagnosticsEnabled) {
+        detectedExperienceHeaders.push({
+          company: safeText(header.company).slice(0, 120),
+          roleTitle: safeText(header.roleTitle).slice(0, 120),
+          ...(header.dates ? { dates: safeText(header.dates).slice(0, 120) } : {}),
+        });
+      }
 
       if (
         isUnsafeHeaderCandidate(header.company) ||
@@ -450,6 +549,14 @@ export function extractStructuredBaselineFromSections(
         !isLikelyCompanyName(header.company)
       ) {
         missingEvidenceReasons.push('Skipped experience entry with malformed company/role title header.');
+        if (diagnosticsEnabled) {
+          rejectedExperienceHeaders.push({
+            company: safeText(header.company).slice(0, 120),
+            roleTitle: safeText(header.roleTitle).slice(0, 120),
+            ...(header.dates ? { dates: safeText(header.dates).slice(0, 120) } : {}),
+            reason: !isLikelyCompanyName(header.company) ? 'company_not_likely' : 'unsafe_header_candidate',
+          });
+        }
         continue;
       }
 
@@ -478,6 +585,9 @@ export function extractStructuredBaselineFromSections(
         bullets,
         source: 'baseline',
       });
+      if (diagnosticsEnabled) {
+        parsedEmployerRoleKeys.push(`${safeText(header.company)}::${safeText(header.roleTitle)}`.slice(0, 200));
+      }
     }
   }
 
@@ -492,6 +602,17 @@ export function extractStructuredBaselineFromSections(
     skills,
     missingEvidenceReasons,
   };
+
+  if (diagnosticsEnabled) {
+    structured.diagnostics = {
+      structuredExtractionStage,
+      structuredBaselineExperienceCount: experience.length,
+      detectedExperienceHeaders,
+      rejectedExperienceHeaders,
+      headerNormalizationFailures,
+      parsedEmployerRoleKeys,
+    };
+  }
 
   return structured;
 }

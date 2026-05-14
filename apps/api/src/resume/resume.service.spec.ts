@@ -2202,7 +2202,7 @@ describe('ResumeService contract', () => {
     expect(extracted.experience.length).toBe(1);
     expect(extracted.experience[0].company).toBe('Example Co');
     expect(extracted.experience[0].roleTitle).toBe('Senior Program Manager');
-    expect(extracted.experience[0].dates).toBe('2020 - 2024');
+    expect(extracted.experience[0].dates).toBe('2020 – 2024');
     expect(extracted.experience[0].bullets.length).toBeGreaterThan(0);
     expect(extracted.experience[0].bullets[0]).toMatch(/Led global support operations/i);
   });

@@ -1,6 +1,197 @@
 ﻿import { extractStructuredBaselineFromSections } from './structuredBaselineExtractor';
 
 describe('structuredBaselineExtractor', () => {
+  it('does not treat location-only lines like \"Seattle\" as employers (prevents city->company corruption)', () => {
+    const original = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
+    try {
+      const sections: any[] = [
+        {
+          sectionType: 'EXPERIENCE',
+          content: [
+            'Seattle',
+            '- Reconciled billing and revenue across systems to improve close accuracy.',
+            '- Reduced billing exceptions by automating metering and reporting checks.',
+          ].join('\n'),
+        },
+      ];
+      const structured = extractStructuredBaselineFromSections(sections as any);
+      expect(structured.experience.length).toBe(0);
+      expect(structured.missingEvidenceReasons.join(' ')).toMatch(/No safely structured experience entries found/i);
+      expect(structured.diagnostics?.detectedExperienceHeaders ?? []).toEqual([]);
+    } finally {
+      if (typeof original === 'string') process.env.DOCGEN_DIAGNOSTICS = original;
+      else delete process.env.DOCGEN_DIAGNOSTICS;
+    }
+  });
+
+  it('captures diagnostics for rejected headers (DOCGEN_DIAGNOSTICS=true) without including bullets', () => {
+    const original = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
+    try {
+      const sections: any[] = [
+        {
+          sectionType: 'EXPERIENCE',
+          content: [
+            'Seattle, WA | Support Operations Lead | 2022 - 2024',
+            '- Led incident triage.',
+          ].join('\n'),
+        },
+      ];
+      const structured = extractStructuredBaselineFromSections(sections as any);
+      expect(structured.experience.length).toBe(0);
+      expect((structured.diagnostics?.detectedExperienceHeaders ?? []).length).toBeGreaterThan(0);
+      expect((structured.diagnostics?.rejectedExperienceHeaders ?? []).length).toBeGreaterThan(0);
+      // Safe-only: diagnostics must not contain bullet text.
+      expect(JSON.stringify(structured.diagnostics ?? {})).not.toMatch(/incident triage/i);
+    } finally {
+      if (typeof original === 'string') process.env.DOCGEN_DIAGNOSTICS = original;
+      else delete process.env.DOCGEN_DIAGNOSTICS;
+    }
+  });
+
+  it('parses role-company dash headers with following location/date lines', () => {
+    const sections: any[] = [
+      {
+        sectionType: 'EXPERIENCE',
+        content: [
+          'Senior Manager, Customer Operations – SentinelOne',
+          'Remote Dec 2022 – Aug 2025',
+          '- Led incident triage and escalation management across support operations.',
+          '',
+          'Director, Cloud Development and Support – CenturyLink Business for Enterprise',
+          'Seattle, WA Dec 2018 – Oct 2019',
+          '- Reconciled billing and revenue across systems to improve close accuracy.',
+          '',
+          'Support Engineer – Microsoft',
+          'United States 2006 – 2013',
+          '- Supported enterprise customers and improved ticket response quality.',
+        ].join('\n'),
+      },
+    ];
+
+    const structured = extractStructuredBaselineFromSections(sections as any);
+    const keys = structured.experience.map((e) => `${e.company}::${e.roleTitle}`);
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        'SentinelOne::Senior Manager, Customer Operations',
+        'CenturyLink Business for Enterprise::Director, Cloud Development and Support',
+        'Microsoft::Support Engineer',
+      ]),
+    );
+
+    const sentinel = structured.experience.find((e) => e.company === 'SentinelOne');
+    expect(sentinel?.dates).toBe('Dec 2022 – Aug 2025');
+
+    const centurylink = structured.experience.find((e) => e.company === 'CenturyLink Business for Enterprise');
+    expect(centurylink?.dates).toBe('Dec 2018 – Oct 2019');
+
+    const ms = structured.experience.find((e) => e.company === 'Microsoft');
+    expect(ms?.dates).toBe('2006 – 2013');
+  });
+
+  it('production-style resume extracts multiple authoritative experience groups', () => {
+    const sections: any[] = [
+      {
+        sectionType: 'EXPERIENCE',
+        content: [
+          'Senior Manager, Customer Operations – SentinelOne',
+          'Remote Dec 2022 – Aug 2025',
+          '- Led incident triage and escalation management across support operations.',
+          '- Built support playbooks and operating reviews to reduce escalations.',
+          '',
+          'Customer Operations Lead – Starbucks',
+          'Seattle, WA 2020 – 2022',
+          '- Led customer operations workflows and improved service reliability.',
+          '',
+          'Support Operations Manager – iStreamPlanet',
+          'Seattle, WA 2019 – 2020',
+          '- Improved queue health reporting and response time visibility.',
+          '',
+          'Director, Cloud Development and Support – CenturyLink Business for Enterprise',
+          'Seattle, WA Dec 2018 – Oct 2019',
+          '- Reconciled billing and revenue across systems to improve close accuracy.',
+          '- Reduced billing exceptions by automating metering and reporting checks.',
+          '- Partnered with finance stakeholders to close discrepancies and improve controls.',
+          '',
+          'Support Engineer – Microsoft',
+          'United States 2006 – 2013',
+          '- Supported enterprise customers and improved ticket response quality.',
+        ].join('\n'),
+      },
+    ];
+
+    const structured = extractStructuredBaselineFromSections(sections as any);
+    const companies = structured.experience.map((e) => e.company);
+    expect(structured.experience.length).toBeGreaterThan(4);
+    expect(companies).toEqual(
+      expect.arrayContaining([
+        'SentinelOne',
+        'Starbucks',
+        'iStreamPlanet',
+        'CenturyLink Business for Enterprise',
+        'Microsoft',
+      ]),
+    );
+  });
+
+  it('keeps billing operations bullets under centurylink not sentinelone', () => {
+    const sections: any[] = [
+      {
+        sectionType: 'EXPERIENCE',
+        content: [
+          'Senior Manager, Customer Operations – SentinelOne',
+          'Remote Dec 2022 – Aug 2025',
+          '- Led incident triage and escalation management across support operations.',
+          '- Built support playbooks and operating reviews to reduce escalations.',
+          '',
+          'Director, Cloud Development and Support – CenturyLink Business for Enterprise',
+          'Seattle, WA Dec 2018 – Oct 2019',
+          '- Reconciled billing and revenue across systems to improve close accuracy.',
+          '- Handled invoice disputes and credit workflows to improve billing reliability.',
+        ].join('\n'),
+      },
+    ];
+
+    const structured = extractStructuredBaselineFromSections(sections as any);
+    expect(structured.experience.length).toBe(2);
+    const sentinel = structured.experience.find((e) => e.company === 'SentinelOne');
+    const centurylink = structured.experience.find((e) => e.company === 'CenturyLink Business for Enterprise');
+    expect(sentinel).toBeTruthy();
+    expect(centurylink).toBeTruthy();
+
+    const sentinelText = (sentinel?.bullets ?? []).join(' ').toLowerCase();
+    expect(sentinelText).not.toMatch(/\b(billing|invoice|dispute|credit|metering|reconciliation)\b/);
+
+    const centText = (centurylink?.bullets ?? []).join(' ').toLowerCase();
+    expect(centText).toMatch(/\b(billing|invoice|dispute|credit|metering|reconciliation)\b/);
+  });
+
+  it('diagnostics include detected headers without raw bullets (production-style fixture)', () => {
+    const original = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
+    try {
+      const sections: any[] = [
+        {
+          sectionType: 'EXPERIENCE',
+          content: [
+            'Senior Manager, Customer Operations – SentinelOne',
+            'Remote Dec 2022 – Aug 2025',
+            '- Led incident triage and escalation management across support operations.',
+          ].join('\n'),
+        },
+      ];
+
+      const structured = extractStructuredBaselineFromSections(sections as any);
+      expect(structured.diagnostics?.structuredBaselineExperienceCount).toBeGreaterThan(0);
+      expect((structured.diagnostics?.detectedExperienceHeaders ?? []).length).toBeGreaterThan(0);
+      const serialized = JSON.stringify(structured.diagnostics ?? {});
+      expect(serialized).not.toMatch(/incident triage/i);
+    } finally {
+      if (typeof original === 'string') process.env.DOCGEN_DIAGNOSTICS = original;
+      else delete process.env.DOCGEN_DIAGNOSTICS;
+    }
+  });
   it('parses company + inline date range on same line, with role title on next line', () => {
     const sections: any[] = [
       {
