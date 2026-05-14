@@ -185,6 +185,8 @@ describe('CoverLettersService contract', () => {
 
   it('does not block cover letter generation when Resume V2 is missing if verified baseline evidence is sufficient (omits unsupported requirements with warnings)', async () => {
     const { service } = buildService();
+    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
     // Force backfill to fail so ResumeV2 is missing.
     (service as any).baselineResumeV2BackfillService.backfillLatestIfMissing = jest.fn().mockResolvedValue(null);
 
@@ -233,6 +235,18 @@ describe('CoverLettersService contract', () => {
       expect(result.status).toBe('success');
       expect(result.exportReady).toBe(true);
       expect(String((result as any).content ?? '')).toMatch(/\S+/);
+      const productionValidation = (result as any)?.internal?.productionValidation ?? null;
+      expect(productionValidation).toEqual(
+        expect.objectContaining({
+          evidenceSourceUsed: expect.any(String),
+          generationEligibilityDecision: expect.objectContaining({ eligible: expect.any(Boolean) }),
+          fallbackWarnings: expect.any(Array),
+          omittedUnsupportedRequirements: expect.any(Array),
+          artifactPersistenceStatus: expect.any(Object),
+          finalDocumentStatus: expect.any(Object),
+        }),
+      );
+      expect(JSON.stringify(productionValidation)).not.toMatch(/resumeText|baselineText|generated/i);
       const content = String((result as any).content ?? '').toLowerCase();
       expect(content).not.toContain('python');
       expect(content).not.toContain('snowflake');
@@ -250,6 +264,8 @@ describe('CoverLettersService contract', () => {
           sectionType: BaselineSectionType.EXPERIENCE,
         } as any,
       ];
+      if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+      else delete process.env.DOCGEN_DIAGNOSTICS;
     }
   });
 

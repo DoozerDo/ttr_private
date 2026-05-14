@@ -855,6 +855,46 @@ export class CoverLettersService {
       });
       // eslint-disable-next-line no-console
       console.log('[COVER_LETTER_GENERATE_PERSISTED]', { artifactId });
+
+      if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
+        // Prompt 8: temporary production validation fields (diagnostics-only, no raw text).
+        // Removal plan: delete `productionValidation` once Studio high-fit flow is stable in production.
+        try {
+          const evidence = resolveGenerationEvidence({
+            baseline: draft.baseline as any,
+            baselineVersionId: draft.baselineVersion.id,
+          });
+          const eligibility = decideGenerationEligibility({
+            baseline: draft.baseline as any,
+            baselineVersion: draft.baselineVersion as any,
+            job: draft.job as any,
+            readinessScore: null,
+            assessment: draft.analysisAssessment as any,
+            complianceBlocked: false,
+            evidence,
+            targetRequirements: ((input as any)?.excludedRequirements ?? []) as any,
+          });
+          (response as any).internal = {
+            ...((response as any).internal ?? {}),
+            productionValidation: {
+              evidenceSourceUsed: evidence.primarySource,
+              generationEligibilityDecision: {
+                eligible: eligibility.eligible,
+                hardBlockerCode: eligibility.hardBlocker?.code ?? null,
+              },
+              fallbackWarnings: (evidence.warnings ?? []).map((w) => w.code),
+              omittedUnsupportedRequirements: eligibility.omittedUnsupportedRequirements ?? [],
+              artifactPersistenceStatus: { status: 'persisted', artifactId },
+              finalDocumentStatus: {
+                exportReady: Boolean((response as any)?.exportReady),
+                qualityGateStatus: String((response as any)?.quality?.status ?? ''),
+              },
+            },
+          };
+        } catch {
+          // ignore diagnostics failures
+        }
+      }
       await this.applicationsService.upsertApplicationForPair({
         userId,
         baselineId: studioArtifactContext.baselineId,

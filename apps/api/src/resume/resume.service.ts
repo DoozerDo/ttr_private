@@ -3547,6 +3547,43 @@ export class ResumeService {
           responseRoles: extractRoles((response as any)?.preview?.resume),
         },
       };
+
+      // Prompt 8: temporary production validation fields (diagnostics-only, no raw text).
+      // Removal plan: delete `productionValidation` once Studio high-fit flow is stable in production.
+      try {
+        const evidence = resolveGenerationEvidence({
+          baseline: baseline as any,
+          baselineVersionId: baselineVersion.id,
+        });
+        const eligibility = decideGenerationEligibility({
+          baseline: baseline as any,
+          baselineVersion: baselineVersion as any,
+          job: job as any,
+          readinessScore: null,
+          assessment: latestAssessment as any,
+          complianceBlocked: false,
+          evidence,
+          targetRequirements: request.excludedRequirements ?? [],
+        });
+        (response as any).internal = {
+          ...((response as any).internal ?? {}),
+          productionValidation: {
+            evidenceSourceUsed: evidence.primarySource,
+            generationEligibilityDecision: {
+              eligible: eligibility.eligible,
+              hardBlockerCode: eligibility.hardBlocker?.code ?? null,
+            },
+            fallbackWarnings: (evidence.warnings ?? []).map((w) => w.code),
+            omittedUnsupportedRequirements: eligibility.omittedUnsupportedRequirements ?? [],
+            finalDocumentStatus: {
+              exportReady: Boolean((response as any)?.exportReady),
+              qualityGateStatus: String((response as any)?.qualityGate?.status ?? ''),
+            },
+          },
+        };
+      } catch {
+        // ignore diagnostics failures
+      }
     }
     // eslint-disable-next-line no-console
     console.log('[RESUME_GENERATE_OUTPUT]', {
@@ -3575,6 +3612,19 @@ export class ResumeService {
     });
     // eslint-disable-next-line no-console
     console.log('[RESUME_GENERATE_PERSISTED]', { artifactId });
+
+    if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
+      (response as any).internal = {
+        ...((response as any).internal ?? {}),
+        productionValidation: {
+          ...(((response as any).internal ?? {}).productionValidation ?? {}),
+          artifactPersistenceStatus: {
+            status: 'persisted',
+            artifactId,
+          },
+        },
+      };
+    }
     try {
       const qualityGate = (response as any)?.qualityGate;
       const gateStatus =

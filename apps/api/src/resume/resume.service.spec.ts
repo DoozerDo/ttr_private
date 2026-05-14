@@ -1006,6 +1006,8 @@ describe('ResumeService contract', () => {
 
   it('generates a real exportReady resume when Resume V2 is missing and baseline work history is verified (omits unsupported requirements with warnings)', async () => {
     const { service } = buildService();
+    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
     const originalSections = baseline.sections;
     const originalParsed = baseline.parsedRecords;
     const originalScore = assessment.overallScore;
@@ -1051,6 +1053,19 @@ describe('ResumeService contract', () => {
       expect(result.exportReady).toBe(true);
       expect(String(result.content ?? '')).toMatch(/\S+/);
 
+      const productionValidation = (result as any)?.internal?.productionValidation ?? null;
+      expect(productionValidation).toEqual(
+        expect.objectContaining({
+          evidenceSourceUsed: expect.any(String),
+          generationEligibilityDecision: expect.objectContaining({ eligible: expect.any(Boolean) }),
+          fallbackWarnings: expect.any(Array),
+          omittedUnsupportedRequirements: expect.any(Array),
+          artifactPersistenceStatus: expect.any(Object),
+          finalDocumentStatus: expect.any(Object),
+        }),
+      );
+      expect(JSON.stringify(productionValidation)).not.toMatch(/resumeText|baselineText|generated/i);
+
       const content = String(result.content ?? '').toLowerCase();
       expect(content).not.toContain('python');
       expect(content).not.toContain('snowflake');
@@ -1061,6 +1076,8 @@ describe('ResumeService contract', () => {
       baseline.sections = originalSections;
       baseline.parsedRecords = originalParsed;
       assessment.overallScore = originalScore;
+      if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+      else delete process.env.DOCGEN_DIAGNOSTICS;
     }
   });
 
