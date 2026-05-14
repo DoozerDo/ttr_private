@@ -24,6 +24,7 @@ import * as ResumeDraftBullets from './resume-draft-bullets';
 import { buildDalenDeterministicBaselineSections } from './__fixtures__/dalen-deterministic-baseline.fixture';
 import { CoverLettersService } from '../cover-letters/cover-letters.service';
 import { DataSource } from 'typeorm';
+import { NarrativeCompositionEngine } from '../composition/narrative-composition-engine';
 
 type MockRepo<T> = Partial<Record<keyof Repository<T>, jest.Mock>> & {
   findOne: jest.Mock;
@@ -1143,6 +1144,198 @@ describe('ResumeService contract', () => {
       baseline.sections = originalSections;
       baseline.parsedRecords = originalParsed;
       assessment.overallScore = originalScore;
+    }
+  });
+
+  it('prevents cross-company contamination when similar bullets exist (blocks other-company bullets instead of attaching them to the wrong employer)', async () => {
+    const { service } = buildService();
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+    const originalScore = assessment.overallScore;
+    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
+    assessment.overallScore = 90;
+
+    try {
+      baseline.parsedRecords = [];
+      baseline.sections = [
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          order: 0,
+          content: 'Verified baseline summary. '.repeat(80),
+        } as any,
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          order: 1,
+          content: [
+            'SentinelOne | Support Operations Lead | 2022 - 2024',
+            '- Led incident triage, support operations, and escalation management.',
+            '- Built support playbooks and operating reviews to reduce escalations.',
+            '- Built reporting dashboards to improve response time and throughput.',
+            '- CenturyLink: reconciled billing and revenue to improve reporting accuracy.',
+            '',
+            'CenturyLink | Billing Operations Analyst | 2019 - 2022',
+            '- Reconciled billing and revenue across systems to improve close accuracy.',
+            '- Reduced reconciliation cycle time by automating reporting and exception handling.',
+            '- Partnered with finance stakeholders to close discrepancies and improve controls.',
+            '',
+            'Acme Corp | Customer Operations Manager | 2017 - 2019',
+            '- Managed support queues and improved SLA attainment through process changes.',
+            '- Implemented escalation playbooks and weekly operational reviews.',
+            '- Built KPI reporting to track backlog, response time, and quality trends.',
+            '',
+            'Additional verified baseline context. '.repeat(40),
+          ].join('\n'),
+        } as any,
+      ] as any;
+
+      const result = await service.generateResume('user-1', {
+        ...baseRequest,
+        excludedRequirements: ['Python', 'Snowflake'],
+      } as any);
+
+      expect(result.ok).toBe(true);
+      expect(result.exportReady).toBe(true);
+
+      const content = String(result.content ?? '').toLowerCase();
+      expect(content).toContain('sentinelone');
+      // The CenturyLink billing bullet must not appear under SentinelOne.
+      expect(content).not.toContain('centurylink: reconciled billing');
+
+      const productionValidation = (result as any)?.internal?.productionValidation ?? null;
+      expect(productionValidation).toEqual(
+        expect.objectContaining({
+          crossCompanyEvidenceBlockedCount: expect.any(Number),
+          fallbackWarnings: expect.any(Array),
+        }),
+      );
+      expect(productionValidation.crossCompanyEvidenceBlockedCount).toBeGreaterThan(0);
+      expect(productionValidation.fallbackWarnings).toContain('cross_company_evidence_blocked');
+
+      // Diagnostics metadata must never expose raw text fields.
+      expect(JSON.stringify(productionValidation)).not.toMatch(/resumeText|baselineText|generated|bullet/i);
+    } finally {
+      baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsed;
+      assessment.overallScore = originalScore;
+      if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+      else delete process.env.DOCGEN_DIAGNOSTICS;
+    }
+  });
+
+  it('blocks and warns on cross-company migration attempt even when the bullet text does not contain the other employer name (provenance-enforced)', async () => {
+    const { service } = buildService();
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+    const originalScore = assessment.overallScore;
+    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
+    assessment.overallScore = 90;
+
+    const originalCompose = (NarrativeCompositionEngine.prototype as any).composeResume;
+    const composeSpy = jest.spyOn(NarrativeCompositionEngine.prototype as any, 'composeResume');
+    composeSpy.mockImplementation((input: any) => originalCompose.call(new NarrativeCompositionEngine(), input));
+
+    try {
+      baseline.parsedRecords = [];
+      baseline.sections = [
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          order: 0,
+          content: 'Verified baseline summary. '.repeat(80),
+        } as any,
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          order: 1,
+          content: [
+            'SentinelOne | Support Operations Lead | 2022 - 2024',
+            '- Led incident triage, support operations, and escalation management.',
+            '- Built support playbooks and operating reviews to reduce escalations.',
+            '- Built reporting dashboards to improve response time and throughput.',
+            '',
+            'CenturyLink | Billing Operations Analyst | 2019 - 2022',
+            '- Reconciled billing and revenue across systems to improve close accuracy.',
+            '- Reduced reconciliation cycle time by automating reporting and exception handling.',
+            '- Partnered with finance stakeholders to close discrepancies and improve controls.',
+            '',
+            'Acme Corp | Customer Operations Manager | 2017 - 2019',
+            '- Managed support queues and improved SLA attainment through process changes.',
+            '- Implemented escalation playbooks and weekly operational reviews.',
+            '- Built KPI reporting to track backlog, response time, and quality trends.',
+            '',
+            'Additional verified baseline context. '.repeat(40),
+          ].join('\n'),
+        } as any,
+      ] as any;
+
+      // Simulate a migration attempt: the SentinelOne section receives a CenturyLink-origin bullet,
+      // but without mentioning "CenturyLink" in text. Provenance must still block it.
+      composeSpy.mockImplementationOnce((input: any) => {
+        const experience = (input.experience ?? []).map((r: any) => ({
+          ...r,
+          bullets: Array.isArray(r.bullets) ? r.bullets.map((b: any) => (typeof b === 'string' ? b : b.text)) : [],
+          bulletSourceRoleKeys: Array.isArray(r.bullets)
+            ? r.bullets.map((b: any) => (typeof b === 'string' ? `${r.company}::${r.roleTitle}` : b.sourceRoleKey))
+            : [],
+        }));
+        const sentinel = experience.find((e: any) => String(e.company) === 'SentinelOne');
+        if (sentinel) {
+          sentinel.bullets = [...(sentinel.bullets ?? []), 'Reconciled billing and revenue across systems to improve close accuracy.'];
+          sentinel.bulletSourceRoleKeys = [...(sentinel.bulletSourceRoleKeys ?? []), 'CenturyLink::Billing Operations Analyst'];
+        }
+        return {
+          summary: input.summaryFallback,
+          experience,
+          diagnostics: {
+            rewrittenBulletCount: 0,
+            genericLanguageFlags: [],
+            narrativeQualityScore: {},
+            summaryCompositionSource: 'test',
+            evidenceToNarrativeMappings: [],
+            targetAngle: '',
+          },
+        };
+      });
+
+      const result = await service.generateResume('user-1', {
+        ...baseRequest,
+        excludedRequirements: ['Python', 'Snowflake'],
+      } as any);
+
+      expect(result.ok).toBe(true);
+      expect(result.exportReady).toBe(true);
+
+      const previewExp = ((result as any)?.preview?.resume?.experience ?? []) as any[];
+      const sentinel = previewExp.find((e) => String(e?.company ?? '') === 'SentinelOne');
+      expect(sentinel).toBeTruthy();
+      const sentinelBullets = Array.isArray(sentinel?.bullets) ? sentinel.bullets.map((b: any) => String(b ?? '').toLowerCase()) : [];
+      // Migrated CenturyLink-origin billing bullet must not appear under SentinelOne (no company token required).
+      expect(sentinelBullets.join(' ')).not.toContain('reconciled billing and revenue');
+
+      const century = previewExp.find((e) => String(e?.company ?? '') === 'CenturyLink');
+      expect(century).toBeTruthy();
+      const centuryBullets = Array.isArray(century?.bullets) ? century.bullets.map((b: any) => String(b ?? '').toLowerCase()) : [];
+      expect(centuryBullets.join(' ')).toContain('reconciled billing and revenue');
+
+      const productionValidation = (result as any)?.internal?.productionValidation ?? null;
+      expect(productionValidation.crossCompanyEvidenceBlockedCount).toBeGreaterThan(0);
+      expect(productionValidation.fallbackWarnings).toContain('cross_company_evidence_blocked');
+      expect(JSON.stringify(productionValidation)).not.toMatch(/resumeText|baselineText|generated|bullet/i);
+    } finally {
+      composeSpy.mockRestore();
+      baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsed;
+      assessment.overallScore = originalScore;
+      if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+      else delete process.env.DOCGEN_DIAGNOSTICS;
     }
   });
 

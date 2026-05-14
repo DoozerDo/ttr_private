@@ -216,6 +216,80 @@ function reorderCommaSeparatedPhrasesByKeywordOverlap(text: string, keywordSet: 
   return scored.map((entry) => entry.part).join(', ');
 }
 
+function stripCrossCompanyBullets(input: {
+  experience: Array<Record<string, unknown>>;
+}): { experience: Array<Record<string, unknown>>; blockedCount: number } {
+  const experience = Array.isArray(input.experience) ? input.experience : [];
+  const companies = experience
+    .map((e) => normalizeMinimalLine(String((e as any)?.company ?? '')))
+    .filter((c) => c.length >= 3);
+  const companyNeedles = companies
+    .map((c) => c.toLowerCase())
+    // Avoid accidental substring matches on short tokens (e.g., "Inc").
+    .filter((c) => c.length >= 4);
+
+  let blockedCount = 0;
+  const sanitized = experience.map((entry) => {
+    const company = normalizeMinimalLine(String((entry as any)?.company ?? ''));
+    const roleTitle = normalizeMinimalLine(String((entry as any)?.roleTitle ?? ''));
+    const bulletsRaw = Array.isArray((entry as any)?.bullets) ? ((entry as any).bullets as unknown[]) : [];
+    const bullets: string[] = [];
+
+    const ownNeedle = company.toLowerCase();
+    for (const bulletValue of bulletsRaw) {
+      const bullet = normalizeMinimalLine(String(bulletValue ?? ''));
+      if (!bullet) continue;
+      const lowered = bullet.toLowerCase();
+      const mentionsOtherCompany = companyNeedles.some((needle) => needle !== ownNeedle && lowered.includes(needle));
+      if (mentionsOtherCompany) {
+        blockedCount += 1;
+        continue;
+      }
+      bullets.push(bullet);
+    }
+    return { ...(entry as any), company, roleTitle, bullets };
+  });
+
+  return { experience: sanitized, blockedCount };
+}
+
+function enforceEmployerRoleBulletProvenance(input: {
+  experience: Array<Record<string, unknown>>;
+}): { experience: Array<Record<string, unknown>>; blockedCount: number } {
+  const experience = Array.isArray(input.experience) ? input.experience : [];
+  let blockedCount = 0;
+
+  const sanitized = experience.map((entry) => {
+    if (!entry || typeof entry !== 'object') return entry;
+    const company = normalizeMinimalLine(String((entry as any)?.company ?? ''));
+    const roleTitle = normalizeMinimalLine(String((entry as any)?.roleTitle ?? ''));
+    const expectedRoleKey = `${company}::${roleTitle}`;
+
+    const bullets = Array.isArray((entry as any)?.bullets) ? ((entry as any).bullets as unknown[]) : [];
+    const sourceKeys = Array.isArray((entry as any)?.bulletSourceRoleKeys)
+      ? ((entry as any).bulletSourceRoleKeys as unknown[]).map((k) => String(k ?? ''))
+      : null;
+
+    if (!sourceKeys || sourceKeys.length !== bullets.length) return entry;
+
+    const keptBullets: unknown[] = [];
+    const keptKeys: string[] = [];
+    for (let i = 0; i < bullets.length; i += 1) {
+      const key = sourceKeys[i] ?? '';
+      if (key && key !== expectedRoleKey) {
+        blockedCount += 1;
+        continue;
+      }
+      keptBullets.push(bullets[i]);
+      keptKeys.push(key);
+    }
+
+    return { ...(entry as any), company, roleTitle, bullets: keptBullets, bulletSourceRoleKeys: keptKeys };
+  });
+
+  return { experience: sanitized, blockedCount };
+}
+
 export type GenerateResumeOptions = {
   enforceOneTap?: boolean;
   preflightOnly?: boolean;
@@ -2232,6 +2306,7 @@ export class ResumeService {
       headers: Array<{ company: string; roleTitle: string; dates: string | null; bulletCount: number }>;
     } = { source: 'unknown', experienceCount: 0, headers: [] };
     let v2QualityGate: ArtifactQualityGate | null = null;
+    let crossCompanyEvidenceBlockedCount = 0;
 
     let persistedResumeV2: Record<string, unknown> | null = null;
     if (isResumeV2) {
@@ -2275,6 +2350,15 @@ export class ResumeService {
                 },
               },
             });
+          }
+          if (Array.isArray((normalized as any).experience)) {
+            const enforced = enforceEmployerRoleBulletProvenance({ experience: (normalized as any).experience });
+            (normalized as any).experience = enforced.experience as any;
+            crossCompanyEvidenceBlockedCount += enforced.blockedCount;
+
+            const stripped = stripCrossCompanyBullets({ experience: (normalized as any).experience });
+            (normalized as any).experience = stripped.experience as any;
+            crossCompanyEvidenceBlockedCount += stripped.blockedCount;
           }
           v2QualityGate = validateResumeArtifactQualityStrict(normalized);
           if (shouldLogV2) {
@@ -2500,6 +2584,16 @@ export class ResumeService {
         { documentStrategyPlan: request.documentStrategyPlan ?? undefined },
       );
     })();
+
+    if (!isResumeV2 && Array.isArray((normalizedDocument as any)?.experience)) {
+      const enforced = enforceEmployerRoleBulletProvenance({ experience: (normalizedDocument as any).experience });
+      (normalizedDocument as any).experience = enforced.experience as any;
+      crossCompanyEvidenceBlockedCount += enforced.blockedCount;
+
+      const stripped = stripCrossCompanyBullets({ experience: (normalizedDocument as any).experience });
+      (normalizedDocument as any).experience = stripped.experience as any;
+      crossCompanyEvidenceBlockedCount += stripped.blockedCount;
+    }
 
     // Positioning authority layer: ALWAYS compute and apply the authoritative assembler when possible.
     // This prevents raw/legacy ordering (including weak fragment roles) from leaking into preview/persistence,
@@ -3446,12 +3540,6 @@ export class ResumeService {
     // Final safety: ensure the exact preview payload returned to Studio is sanitized.
     if (response?.preview?.resume) {
       response.preview.resume = sanitizeResumePreviewForStudio(response.preview.resume);
-      const resume = response.preview.resume;
-      // eslint-disable-next-line no-console
-      console.log('FINAL_SANITIZED_PREVIEW', {
-        roleTitle: resume.experience?.[0]?.roleTitle,
-        company: resume.experience?.[0]?.company,
-      });
     }
     if (typeof normalizedDocument.summary === 'string') {
       normalizedDocument.summary = trimIncompleteTrailingFragments(normalizedDocument.summary);
@@ -3466,6 +3554,16 @@ export class ResumeService {
           .filter((b: string) => b.length >= 10);
         return { ...entry, bullets: cleanedBullets };
       });
+    }
+
+    if (response?.preview?.resume && Array.isArray((response.preview.resume as any).experience)) {
+      const previewEnforced = enforceEmployerRoleBulletProvenance({ experience: (response.preview.resume as any).experience });
+      (response.preview.resume as any).experience = previewEnforced.experience as any;
+      crossCompanyEvidenceBlockedCount += previewEnforced.blockedCount;
+
+      const previewStripped = stripCrossCompanyBullets({ experience: (response.preview.resume as any).experience });
+      (response.preview.resume as any).experience = previewStripped.experience as any;
+      crossCompanyEvidenceBlockedCount += previewStripped.blockedCount;
     }
 
     const persistedContent = trimIncompleteTrailingFragments(buildResumePlainText(normalizedDocument));
@@ -3573,8 +3671,12 @@ export class ResumeService {
               eligible: eligibility.eligible,
               hardBlockerCode: eligibility.hardBlocker?.code ?? null,
             },
-            fallbackWarnings: (evidence.warnings ?? []).map((w) => w.code),
+            fallbackWarnings: [
+              ...(evidence.warnings ?? []).map((w) => w.code),
+              ...(crossCompanyEvidenceBlockedCount > 0 ? ['cross_company_evidence_blocked'] : []),
+            ],
             omittedUnsupportedRequirements: eligibility.omittedUnsupportedRequirements ?? [],
+            crossCompanyEvidenceBlockedCount: crossCompanyEvidenceBlockedCount,
             finalDocumentStatus: {
               exportReady: Boolean((response as any)?.exportReady),
               qualityGateStatus: String((response as any)?.qualityGate?.status ?? ''),

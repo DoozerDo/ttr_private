@@ -4,7 +4,7 @@ export type RoleNarrativeShapeInput = {
   company: string;
   roleTitle: string;
   dateRange?: string;
-  bullets: string[];
+  bullets: Array<string | { text: string; sourceRoleKey: string; id?: string }>;
   evidencePriorities?: string[] | null;
 };
 
@@ -48,6 +48,7 @@ export class RoleNarrativeShaper {
     roleTitle: string;
     dateRange?: string;
     bullets: string[];
+    bulletSourceRoleKeys: string[];
     rewrittenBulletCount: number;
     genericLanguageFlags: Array<{ role: string; flags: ReturnType<BulletNarrativeRewriter['rewrite']>['genericLanguageFlags'] }>;
   } {
@@ -55,8 +56,16 @@ export class RoleNarrativeShaper {
     const genericLanguageFlags: Array<{ role: string; flags: ReturnType<BulletNarrativeRewriter['rewrite']>['genericLanguageFlags'] }> =
       [];
 
-    const bullets = (input.bullets ?? [])
-      .map((bullet) => {
+    const bulletsWithProvenance = (input.bullets ?? [])
+      .map((bulletValue) => {
+        const bullet =
+          typeof bulletValue === 'string'
+            ? bulletValue
+            : String((bulletValue as any)?.text ?? '');
+        const sourceRoleKey =
+          typeof bulletValue === 'string'
+            ? `${input.company}::${input.roleTitle}`
+            : String((bulletValue as any)?.sourceRoleKey ?? `${input.company}::${input.roleTitle}`);
         const result = this.rewriter.rewrite({
           bullet,
           roleTitle: input.roleTitle,
@@ -70,6 +79,7 @@ export class RoleNarrativeShaper {
         const rewritten = result.rewritten;
         return {
           rewritten,
+          sourceRoleKey,
           score: this.scoreBullet({
             bullet: rewritten,
             roleTitle: input.roleTitle,
@@ -81,13 +91,17 @@ export class RoleNarrativeShaper {
       .filter((item) => Boolean(item.rewritten))
       // Prioritize recruiter-facing proof points first; keep all verified bullets, just reorder prominence.
       .sort((a, b) => b.score - a.score)
-      .map((item) => item.rewritten);
+      ;
+
+    const bullets = bulletsWithProvenance.map((item) => item.rewritten);
+    const bulletSourceRoleKeys = bulletsWithProvenance.map((item) => item.sourceRoleKey);
 
     return {
       company: input.company,
       roleTitle: input.roleTitle,
       ...(input.dateRange ? { dateRange: input.dateRange } : {}),
       bullets,
+      bulletSourceRoleKeys,
       rewrittenBulletCount,
       genericLanguageFlags,
     };

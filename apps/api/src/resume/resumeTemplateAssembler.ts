@@ -288,7 +288,16 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
       company: trimToText(e.company),
       roleTitle: trimToText(e.roleTitle),
       ...(e.dateRange ? { dateRange: trimToText(e.dateRange) } : {}),
-      bullets: Array.isArray(e.bullets) ? e.bullets.map(trimToText).filter(Boolean) : [],
+      bullets: Array.isArray(e.bullets)
+        ? e.bullets
+            .map(trimToText)
+            .filter(Boolean)
+            .map((text: string, idx: number) => ({
+              text,
+              id: `exp_${trimToText(e.company)}_${trimToText(e.roleTitle)}_${idx}`,
+              sourceRoleKey: `${trimToText(e.company)}::${trimToText(e.roleTitle)}`,
+            }))
+        : [],
     })),
   });
 

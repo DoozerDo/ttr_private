@@ -6,7 +6,12 @@ import { NarrativeQualityEvaluator } from './narrative-quality-evaluator';
 export type ResumeCompositionInput = {
   renderPlan: AuthoritativeRenderPlan | null;
   summaryFallback: string;
-  experience: Array<{ company: string; roleTitle: string; dateRange?: string; bullets: string[] }>;
+  experience: Array<{
+    company: string;
+    roleTitle: string;
+    dateRange?: string;
+    bullets: Array<string | { text: string; sourceRoleKey: string; id?: string }>;
+  }>;
 };
 
 export class NarrativeCompositionEngine {
@@ -63,7 +68,13 @@ export class NarrativeCompositionEngine {
       rewrittenBulletCount += shaped.rewrittenBulletCount;
       if (shaped.genericLanguageFlags.length) genericLanguageFlags.push(...shaped.genericLanguageFlags);
       shaped.bullets.forEach((_, idx) => evidenceToNarrativeMappings.push({ role: `${role.company}::${role.roleTitle}`, bulletIndex: idx }));
-      return { company: shaped.company, roleTitle: shaped.roleTitle, ...(shaped.dateRange ? { dateRange: shaped.dateRange } : {}), bullets: shaped.bullets };
+      return {
+        company: shaped.company,
+        roleTitle: shaped.roleTitle,
+        ...(shaped.dateRange ? { dateRange: shaped.dateRange } : {}),
+        bullets: shaped.bullets as any,
+        bulletSourceRoleKeys: shaped.bulletSourceRoleKeys,
+      } as any;
     });
 
     const summaryResult = this.summaryComposer.compose({
