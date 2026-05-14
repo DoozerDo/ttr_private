@@ -286,7 +286,9 @@ describe('StudioArtifactsService', () => {
       responseBody: {
         status: 'success',
         preview: { resume: { heading: { name: 'Alex' } } },
+        exportReady: true,
         qualityGate: { status: 'needs_refinement', reasons: ['incomplete_trailing_fragment'] },
+        internal: { generationMode: 'structured_baseline_template', templateVersion: 'structured-baseline-v1' },
       },
       content: 'resume-content',
       metadata: { auditId: 'audit-1' },
@@ -303,7 +305,9 @@ describe('StudioArtifactsService', () => {
       responseBody: {
         status: 'success',
         preview: { resume: { heading: { name: 'Alex' } } },
+        exportReady: true,
         qualityGate: { status: 'pass', reasons: [] },
+        internal: { generationMode: 'structured_baseline_template', templateVersion: 'structured-baseline-v1' },
       },
       content: 'resume-content-updated',
       metadata: { auditId: 'audit-2' },
@@ -915,6 +919,8 @@ describe('StudioArtifactsService', () => {
   });
 
   it('signals persisted legacy artifacts as stale when template readiness is resolved', async () => {
+    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
     const studioArtifactRepository = createRepository<any>();
     const baselineRepository = {
       findOne: jest.fn(async () => baseline),
@@ -952,7 +958,7 @@ describe('StudioArtifactsService', () => {
       baselineVersionHash: baselineVersion.hash,
       jobFingerprint: service.computeJobFingerprint(job as any),
       inputsHash,
-      responseBody: { status: 'success', preview: { resume: { heading: { name: 'Alex' } } }, internal: {} },
+      responseBody: { status: 'success', exportReady: true, preview: { resume: { heading: { name: 'Alex' } } }, internal: {} },
       content: 'resume-content',
       metadata: {},
     });
@@ -977,7 +983,14 @@ describe('StudioArtifactsService', () => {
         metadata: expect.objectContaining({ staleLegacy: true }),
       }),
     );
-    expect(state.resumeResult?.generationState).toBe('generated_needs_correction');
+    // Prompt 15: stale legacy artifacts must never surface as the active preview/result.
+    expect(state.resumeResult?.preview).toBeNull();
+    expect(state.resumeResult?.generationState).toBe('generated_unusable');
+    expect((state as any).diagnostics?.staleArtifactRejected).toBe(true);
+    expect((state as any).diagnostics?.staleArtifactReasonCodes ?? []).toEqual(expect.arrayContaining(['stale_legacy']));
+
+    if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+    else delete process.env.DOCGEN_DIAGNOSTICS;
   });
 
   it('marks baseline_template_not_ready as degraded (not blocked) when validExperience>0', async () => {
@@ -1273,5 +1286,89 @@ describe('StudioArtifactsService', () => {
     });
 
     expect(state.status).toBeTruthy();
+  });
+
+  it('fail-closed: blocked authoritative state rejects stale legacy/minimal resume artifacts (no preview/content surfaced)', async () => {
+    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
+
+    const studioArtifactRepository = createRepository<any>();
+    const baselineVersionRepository = { findOne: jest.fn(async () => baselineVersion) };
+    const jobRepository = { findOne: jest.fn(async () => job) };
+    const assessmentRepository = { findOne: jest.fn(async () => ({ ...assessment, overallScore: 90 })) };
+    const baselineRepository = {
+      findOne: jest.fn(async () => ({
+        ...baseline,
+        // Malformed "experience" that yields zero structured experience groups -> readiness blocked.
+        sections: [
+          {
+            title: 'Experience',
+            content: ['Seattle', '- Reconciled billing and revenue across systems.'].join('\n'),
+            sectionType: 'EXPERIENCE',
+          },
+        ],
+        parsedRecords: [],
+      })),
+    };
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository as any,
+      baselineRepository as any,
+      baselineVersionRepository as any,
+      jobRepository as any,
+      assessmentRepository as any,
+      backfillService as any,
+    );
+
+    const inputsHash = service.computeResumeInputsHash({
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: service.computeJobFingerprint(job as any),
+      assessmentInputsHash: assessment.inputsHash,
+    });
+
+    // Persist a "successful" but legacy/minimal artifact (must never be surfaced when authoritative state is blocked).
+    await service.recordResumeSuccess({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: service.computeJobFingerprint(job as any),
+      inputsHash,
+      responseBody: {
+        status: 'success',
+        exportReady: true,
+        qualityGate: { status: 'pass', reasons: [] },
+        internal: { minimalFallback: true, staleLegacy: true },
+        preview: { resume: { heading: { name: 'Alex' }, summary: 'Should not surface', experience: [] } },
+      },
+      content: 'resume-content',
+      metadata: { auditId: 'audit-legacy-1', staleLegacy: true },
+    });
+
+    const state = await service.readState({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      analysisId: assessment.id,
+    } as any);
+
+    // Record remains present, but canonical result must not surface preview/content.
+    expect(state.resume?.status).toBe(StudioArtifactLifecycleStatus.COMPLETED);
+    expect(state.resume?.responseBody).toBeTruthy();
+
+    expect(state.resumeResult?.preview).toBeNull();
+    expect(state.resumeResult?.exportReady).toBe(false);
+    expect(state.resumeResult?.exports).toEqual({ docx: false, pdf: false });
+
+    expect((state as any).diagnostics?.staleArtifactRejected).toBe(true);
+    expect((state as any).diagnostics?.staleArtifactReasonCodes ?? []).toEqual(
+      expect.arrayContaining(['minimal_fallback']),
+    );
+    expect((state as any).diagnostics?.retrievalDecisionPath).toBe('reject_preview_fail_closed');
+
+    if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+    else delete process.env.DOCGEN_DIAGNOSTICS;
   });
 });

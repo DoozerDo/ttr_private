@@ -81,6 +81,14 @@ export type StudioArtifactsState = {
   coverLetter: StudioArtifactRecord | null;
   resumeResult?: ArtifactGenerationResult<unknown>;
   coverLetterResult?: ArtifactGenerationResult<unknown>;
+  diagnostics?: {
+    staleArtifactRejected?: boolean;
+    staleArtifactReasonCodes?: string[];
+    hydrationSource?: string;
+    authoritativeArtifactId?: string | null;
+    rejectedArtifactIds?: string[];
+    retrievalDecisionPath?: string;
+  };
 };
 
 type ArtifactPatch = Partial<Pick<
@@ -177,6 +185,16 @@ function extractInterpretedEvidenceAuditFromResponseBody(
       ? { bypassedTemplateHardBlockWithInterpretedEvidence }
       : {}),
   };
+}
+
+function isTrue(value: unknown): boolean {
+  return value === true || String(value ?? '').toLowerCase() === 'true';
+}
+
+function getResponseInternalBool(responseBody: Record<string, unknown> | null, key: string): boolean {
+  if (!responseBody) return false;
+  const internal = normalizeRecord((responseBody as any).internal);
+  return isTrue(internal?.[key]);
 }
 
 const shouldTraceArtifactIdentity = process.env.ARTIFACT_IDENTITY_TRACE === 'true';
@@ -505,6 +523,60 @@ export class StudioArtifactsService {
         ? { ...coverRecordRaw, metadata: { ...(coverRecordRaw.metadata ?? {}), staleLegacy: true } }
         : coverRecordRaw;
 
+    // Prompt 15: Fail-closed retrieval/hydration. Never surface stale legacy/minimal artifacts as the active preview
+    // when the authoritative current generation state is blocked/failed/not-exportable.
+    const authoritativeArtifactId = record ? String((record as any)?.id ?? '') : null;
+    const rejectedArtifactIds: string[] = [];
+    const staleArtifactReasonCodes: string[] = [];
+
+    const resumePreviewAllowed = (() => {
+      if (!resumeRecord) return false;
+      if (!resumeRecord.artifactCurrent || !resumeRecord.inputsHashMatches) {
+        staleArtifactReasonCodes.push('inputs_hash_mismatch');
+        return false;
+      }
+      if (resumeRecord.status !== StudioArtifactLifecycleStatus.COMPLETED) {
+        staleArtifactReasonCodes.push('not_completed');
+        return false;
+      }
+      const internal = normalizeRecord((resumeRecord.responseBody as any)?.internal);
+      const minimalFallback = isTrue(internal?.minimalFallback);
+      if (minimalFallback) {
+        staleArtifactReasonCodes.push('minimal_fallback');
+        return false;
+      }
+      const staleLegacy = isTrue((resumeRecord.metadata as any)?.staleLegacy) || isTrue(internal?.staleLegacy);
+      if (staleLegacy) {
+        staleArtifactReasonCodes.push('stale_legacy');
+        return false;
+      }
+      const exportReady = isTrue((resumeRecord.responseBody as any)?.exportReady);
+      if (!exportReady) {
+        staleArtifactReasonCodes.push('export_ready_false');
+        return false;
+      }
+      const gate = (resumeRecord.responseBody as any)?.qualityGate;
+      const gateStatus = gate && typeof gate === 'object' ? String((gate as any).status ?? '') : '';
+      if (gateStatus === 'failed' || gateStatus === 'blocked') {
+        staleArtifactReasonCodes.push('quality_not_pass');
+        return false;
+      }
+      return true;
+    })();
+
+    const resumeRecordForResult =
+      resumeRecord && !resumePreviewAllowed
+        ? {
+            ...resumeRecord,
+            responseBody: null,
+            content: null,
+          }
+        : resumeRecord;
+
+    if (resumeRecord && !resumePreviewAllowed) {
+      rejectedArtifactIds.push(authoritativeArtifactId ?? 'unknown');
+    }
+
     if (process.env.DEBUG_STUDIO_ARTIFACT_QUALITY === 'true') {
       try {
         const resumeGate = (resumeRecord?.responseBody as any)?.qualityGate;
@@ -531,7 +603,7 @@ export class StudioArtifactsService {
       }
     }
 
-    const resumeResult = this.buildCanonicalResultFromRecord('resume', resumeRecord);
+    const resumeResult = this.buildCanonicalResultFromRecord('resume', resumeRecordForResult);
     const coverLetterResult = this.buildCanonicalResultFromRecord('cover_letter', coverRecord);
 
     if (shouldLogIngest) {
@@ -652,6 +724,18 @@ export class StudioArtifactsService {
       coverLetter: coverRecord,
       resumeResult,
       coverLetterResult,
+      ...(process.env.DOCGEN_DIAGNOSTICS === 'true'
+        ? {
+            diagnostics: {
+              staleArtifactRejected: Boolean(rejectedArtifactIds.length),
+              staleArtifactReasonCodes: [...new Set(staleArtifactReasonCodes)].slice(0, 12),
+              hydrationSource: resumePreviewAllowed ? 'authoritative_current_artifact' : 'blocked',
+              authoritativeArtifactId,
+              rejectedArtifactIds: rejectedArtifactIds.slice(0, 8),
+              retrievalDecisionPath: resumePreviewAllowed ? 'use_current_completed' : 'reject_preview_fail_closed',
+            },
+          }
+        : {}),
     };
   }
 
