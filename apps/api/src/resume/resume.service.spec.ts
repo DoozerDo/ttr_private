@@ -22,6 +22,8 @@ import { extractStructuredBaselineFromSections } from '../baseline/structuredBas
 import { extractEvidenceUnitsFromLogicalUnits, reconstructLogicalTextUnits } from './resume-draft-bullets';
 import * as ResumeDraftBullets from './resume-draft-bullets';
 import { buildDalenDeterministicBaselineSections } from './__fixtures__/dalen-deterministic-baseline.fixture';
+import { CoverLettersService } from '../cover-letters/cover-letters.service';
+import { DataSource } from 'typeorm';
 
 type MockRepo<T> = Partial<Record<keyof Repository<T>, jest.Mock>> & {
   findOne: jest.Mock;
@@ -2149,5 +2151,169 @@ describe('ResumeService contract', () => {
     const second = (service as any).buildResumeTraceAudit(input, [baselineSection]);
     expect(second.traceMap).toEqual(first.traceMap);
     expect(second.debugTrace).toEqual(first.debugTrace);
+  });
+
+  it('paired high-fit contract: generates both resume and cover letter from verified baseline evidence when Resume V2 is missing, omitting unsupported requirements and persisting both artifacts under the same context', async () => {
+    const { service: resumeService, studioArtifactsService } = buildService();
+    (studioArtifactsService as any).computeCoverLetterInputsHash =
+      (studioArtifactsService as any).computeCoverLetterInputsHash ?? jest.fn().mockReturnValue('cover-letter-inputs-hash-1');
+    (studioArtifactsService as any).recordCoverLetterInProgress =
+      (studioArtifactsService as any).recordCoverLetterInProgress ?? jest.fn().mockResolvedValue('studio-artifact-1');
+    (studioArtifactsService as any).recordCoverLetterSuccess =
+      (studioArtifactsService as any).recordCoverLetterSuccess ?? jest.fn().mockResolvedValue('studio-artifact-1');
+    (studioArtifactsService as any).recordCoverLetterFailure =
+      (studioArtifactsService as any).recordCoverLetterFailure ?? jest.fn().mockResolvedValue('studio-artifact-1');
+
+    const coverRepo: any = {
+      findOne: jest.fn().mockResolvedValue(null),
+      find: jest.fn().mockResolvedValue([]),
+      create: jest.fn((payload: any) => payload),
+      save: jest.fn(async (payload: any) => ({ ...payload, id: 'saved-1' })),
+      remove: jest.fn(async (payload: any) => payload),
+    };
+    const baselineRepo = buildRepo(baseline);
+    const versionRepo = buildRepo(baselineVersion);
+    const policyRepo = buildRepo([]);
+    const jobRepo = buildRepo(job);
+    const fitRepo = buildRepo(assessment);
+
+    const complianceService = {
+      normalizeText: jest.fn((value: string) => value),
+      enforceResumeWritingRules: jest.fn().mockReturnValue([]),
+      detectScopeInflation: jest.fn().mockResolvedValue([]),
+      validateAndAudit: jest.fn().mockResolvedValue({
+        complianceFlags: [],
+        blocked: false,
+        audit: {
+          id: 'audit-1',
+          baselineVersionHash: 'hash-1',
+          action: ComplianceAction.COVER_LETTER_GENERATION,
+        },
+      }),
+      normalizeSectionsForOutput: jest.fn().mockImplementation((sections: any) => sections),
+    };
+
+    const dataSource = {
+      getRepository: jest.fn((entity: any) => {
+        switch (entity?.name) {
+          case 'CoverLetter':
+            return coverRepo;
+          case 'Baseline':
+            return baselineRepo;
+          case 'BaselineVersion':
+            return versionRepo;
+          case 'BaselineBlockPolicy':
+            return policyRepo;
+          case 'Job':
+            return jobRepo;
+          case 'FitAssessment':
+            return fitRepo;
+          default:
+            throw new Error(`Unexpected repository request: ${entity?.name}`);
+        }
+      }),
+    } as unknown as DataSource;
+
+    const coverLettersService = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+      ({ analyze: jest.fn().mockReturnValue({ strengths: [], criticalGaps: [] }) } as unknown as GapAnalysisService),
+      ({ reserve: jest.fn().mockResolvedValue({ status: 'accepted_new', runId: 'run-1', responseBody: null }), complete: jest.fn(), markFailure: jest.fn() } as any),
+      studioArtifactsService as any,
+      ({ upsertPreparedFromCoverLetterGeneration: jest.fn().mockResolvedValue(null), upsertApplicationForPair: jest.fn().mockResolvedValue(null) } as any),
+      ({ backfillLatestIfMissing: jest.fn().mockResolvedValue(null) } as any),
+    );
+
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 90;
+    baseline.parsedRecords = [
+      { createdAt: new Date('2026-05-01T00:00:00.000Z'), parsedJson: { identity: { full_name: 'Jordan Lee' } } } as any,
+    ]; // missing Resume V2, but has identity context for generators
+    baseline.sections = [
+      {
+        ...baseSection,
+        sectionType: BaselineSectionType.SUMMARY,
+        title: 'Summary',
+        order: 0,
+        content:
+          'Customer operations leader focused on measurable improvements and reliable operating cadence. ' +
+          'Built cross-functional execution rhythms across support and product. ' +
+          'Additional verified baseline context. '.repeat(60),
+      } as any,
+      {
+        ...baseSection,
+        sectionType: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        order: 1,
+        content: [
+          'Biblioso | Director, Customer Experience | 2024 - Present',
+          '- Led a cross-functional CX program spanning support and product.',
+          '- Improved escalation handling through triage, routing, and operating reviews.',
+          '',
+          'Acme Corp | Customer Operations Manager | 2021 - 2024',
+          '- Built queue health dashboards and reporting to improve response time.',
+          '- Implemented process improvements to reduce repeat escalations and strengthen RCA follow through.',
+          '',
+          'Additional verified baseline context. '.repeat(40),
+        ].join('\n'),
+      } as any,
+    ] as any;
+
+    try {
+      const excluded = ['Python', 'Snowflake'];
+
+      const resumeResult = await resumeService.generateResume('user-1', {
+        ...baseRequest,
+        excludedRequirements: excluded,
+      } as any);
+      expect(resumeResult.ok).toBe(true);
+      expect(resumeResult.exportReady).toBe(true);
+      expect(String((resumeResult as any).content ?? '')).toMatch(/\S+/);
+      const resumeContent = String((resumeResult as any).content ?? '').toLowerCase();
+      expect(resumeContent).not.toContain('python');
+      expect(resumeContent).not.toContain('snowflake');
+      const resumeReasonCodes = ((resumeResult as any).display?.reasons ?? []).map((r: any) => String(r?.code ?? ''));
+      expect(resumeReasonCodes).toContain('unsupported_target_requirements');
+
+      const coverResult = await coverLettersService.generateCoverLetter('user-1', {
+        baselineId: baseline.id,
+        baselineVersionId: baselineVersion.id,
+        jobId: job.id,
+        analysisId: assessment.id,
+        excludedRequirements: excluded,
+      } as any);
+      expect((coverResult as any).status).toBe('success');
+      expect((coverResult as any).exportReady).toBe(true);
+      expect(String((coverResult as any).content ?? '')).toMatch(/\S+/);
+      const coverContent = String((coverResult as any).content ?? '').toLowerCase();
+      expect(coverContent).not.toContain('python');
+      expect(coverContent).not.toContain('snowflake');
+      const coverReasonCodes = ((coverResult as any).display?.reasons ?? []).map((r: any) => String(r?.code ?? ''));
+      expect(coverReasonCodes).toContain('unsupported_target_requirements');
+
+      // Persistence through StudioArtifactsService under the same resolved context.
+      expect((studioArtifactsService as any).recordResumeSuccess).toHaveBeenCalledWith(
+        expect.objectContaining({
+          baselineId: baseline.id,
+          baselineVersionId: baselineVersion.id,
+          jobId: job.id,
+          analysisId: assessment.id,
+        }),
+      );
+      expect((studioArtifactsService as any).recordCoverLetterSuccess).toHaveBeenCalledWith(
+        expect.objectContaining({
+          baselineId: baseline.id,
+          baselineVersionId: baselineVersion.id,
+          jobId: job.id,
+          analysisId: assessment.id,
+        }),
+      );
+    } finally {
+      baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsed;
+      assessment.overallScore = originalScore;
+    }
   });
 });
