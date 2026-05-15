@@ -3672,8 +3672,7 @@ export class ResumeService {
             : 'No authoritative experience groups were extracted from baseline sections.',
           retryable: true,
           diagnostics: {
-            authoritativeExperienceCount: authoritativeExperienceCountForGuard,
-            rejectedMinimalArtifact: Boolean(isMinimalFallbackRuntime),
+            authoritativeExperienceGroupCount: authoritativeExperienceCountForGuard,
           },
         }),
       );

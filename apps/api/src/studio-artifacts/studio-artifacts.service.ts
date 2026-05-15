@@ -88,6 +88,9 @@ export type StudioArtifactsState = {
     authoritativeArtifactId?: string | null;
     rejectedArtifactIds?: string[];
     retrievalDecisionPath?: string;
+    hydrationRejected?: boolean;
+    rejectedMinimalArtifact?: boolean;
+    rejectedMinimalArtifactReason?: string | null;
   };
 };
 
