@@ -32,7 +32,27 @@ describe('Persisted resume generation authority boundary (regression guardrail)'
     process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
 
     const resumeV2Json = buildCandidateSafeResumeV2Fixture();
-    const poisonedSections = buildPoisonedBaselineSections();
+    const poisonedSections = [
+      // Provide extractable experience identity so ResumeV2 generation can satisfy the authoritative experience gate,
+      // while still ensuring baseline sections are not used as resumeText authority material in ResumeV2 mode.
+      {
+        id: 'section-exp',
+        title: 'Experience',
+        sectionType: 'EXPERIENCE',
+        content: [
+          'Director of Support – Acme',
+          'Remote 2020 - 2024',
+          '- Led support operations and improved incident response quality through repeatable playbooks.',
+        ].join('\n'),
+      },
+      // Poison a non-experience section with the marker; it must never appear in interpreted resumeText authority.
+      {
+        id: 'section-poison',
+        title: 'Summary',
+        sectionType: 'SUMMARY',
+        content: `This baseline section is poisoned: ${RESUME_V2_AUTHORITY_IMPOSSIBLE_MARKER}`,
+      },
+    ];
 
     const baseline = {
       id: baselineId,

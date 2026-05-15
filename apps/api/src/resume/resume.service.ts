@@ -2707,6 +2707,7 @@ export class ResumeService {
         renderPlan,
         professionalIdentity: positioning.professionalIdentity ?? null,
         targetNarrative: positioning.targetNarrative ?? null,
+        structuredBaselineForIdentity: structuredBaselineForAuthorityGate as any,
       }) as any;
 
       // Summary strategy: use the positioning thesis as the summary seed when the extracted summary is weak.
@@ -3344,6 +3345,14 @@ export class ResumeService {
             baselineIdentity && typeof baselineIdentity === 'object'
               ? (baselineIdentity as unknown as { fullName?: unknown; contactLine?: unknown; links?: unknown })
               : {};
+          const structuredBaselineForIdentity = (() => {
+            try {
+              const source = resolveBaselineSectionsForGeneration(baseline);
+              return extractStructuredBaselineFromSections((source as any) ?? (baseline.sections as any));
+            } catch {
+              return null;
+            }
+          })();
           const authoritative = buildAuthoritativeResumeDraftFromResumeV2({
             resumeV2: (persistedResumeV2 as any) ?? (response?.preview?.resume as any) ?? {},
             identity: { name: identityRecord.fullName, contactLine: identityRecord.contactLine, links: identityRecord.links },
@@ -3355,6 +3364,7 @@ export class ResumeService {
             }),
             professionalIdentity: positioning.professionalIdentity ?? null,
             targetNarrative: positioning.targetNarrative ?? null,
+            structuredBaselineForIdentity: structuredBaselineForIdentity as any,
           }) as any;
           const authoritativePreview = sanitizeResumePreviewForStudio(authoritative);
           const authoritativeContent = trimIncompleteTrailingFragments(buildResumePlainText(authoritative as any));

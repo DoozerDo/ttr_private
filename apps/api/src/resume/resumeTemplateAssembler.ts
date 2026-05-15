@@ -14,6 +14,76 @@ function trimToText(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+function normalizeDashRoleHeader(value: string): { roleTitle: string; companyHint: string } {
+  const raw = trimToText(value);
+  if (!raw) return { roleTitle: '', companyHint: '' };
+  const parts = raw.split(/\s*[–—-]\s*/).map((p) => trimToText(p)).filter(Boolean);
+  if (parts.length < 2) return { roleTitle: raw, companyHint: '' };
+  const companyHint = parts[parts.length - 1];
+  const roleTitle = parts.slice(0, -1).join(' - ').trim();
+  return { roleTitle, companyHint };
+}
+
+function buildRoleKey(company: string, roleTitle: string): string {
+  const c = trimToText(company).toLowerCase();
+  const r = trimToText(roleTitle).toLowerCase();
+  return `${c}::${r}`;
+}
+
+function coerceResumeV2ExperienceFromStructuredBaseline(input: {
+  resumeV2: NormalizedResumeDocument;
+  structuredBaseline: StructuredBaseline | null;
+}): NormalizedResumeDocument {
+  const structured = input.structuredBaseline;
+  const structuredExperience = Array.isArray((structured as any)?.experience) ? ((structured as any).experience as any[]) : [];
+  if (!structuredExperience.length) return input.resumeV2;
+
+  const v2Experience = Array.isArray((input.resumeV2 as any)?.experience) ? (((input.resumeV2 as any).experience as any[]) ?? []) : [];
+
+  const bulletsByRoleKey = new Map<string, string[]>();
+  for (const entry of v2Experience) {
+    const companyRaw = trimToText((entry as any)?.company);
+    const roleRaw = trimToText((entry as any)?.roleTitle);
+    const bulletsRaw = Array.isArray((entry as any)?.bullets)
+      ? (((entry as any).bullets as unknown[]) ?? []).map((b) => trimToText(b)).filter(Boolean)
+      : [];
+    if (!bulletsRaw.length) continue;
+
+    bulletsByRoleKey.set(buildRoleKey(companyRaw, roleRaw), bulletsRaw);
+
+    const dashParsed = normalizeDashRoleHeader(roleRaw);
+    if (dashParsed.roleTitle && dashParsed.companyHint) {
+      bulletsByRoleKey.set(buildRoleKey(dashParsed.companyHint, dashParsed.roleTitle), bulletsRaw);
+    }
+  }
+
+  const canonicalExperience = structuredExperience
+    .filter((entry) => isAllowedStructuredTemplateExperienceHeader(entry))
+    .map((entry) => {
+      const company = trimToText((entry as any)?.company);
+      const roleTitle = trimToText((entry as any)?.roleTitle);
+      const dates = trimToText((entry as any)?.dates ?? '');
+      const key = buildRoleKey(company, roleTitle);
+      const bullets =
+        bulletsByRoleKey.get(key) ??
+        (Array.isArray((entry as any)?.bullets) ? ((entry as any).bullets as unknown[]).map((b) => trimToText(b)).filter(Boolean) : []);
+      return {
+        company,
+        roleTitle,
+        ...(dates ? { dateRange: dates } : {}),
+        bullets,
+      };
+    })
+    .filter((entry) => entry.company && entry.roleTitle);
+
+  if (!canonicalExperience.length) return input.resumeV2;
+
+  return {
+    ...(input.resumeV2 as any),
+    experience: canonicalExperience,
+  } as any;
+}
+
 function ensureSentence(value: string): string {
   const text = trimToText(value);
   if (!text) return '';
@@ -259,8 +329,16 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
   renderPlan: AuthoritativeRenderPlan;
   professionalIdentity?: string | null;
   targetNarrative?: string | null;
+  structuredBaselineForIdentity?: StructuredBaseline | null;
 }): NormalizedResumeDocument {
-  const baselineExperience = Array.isArray((input.resumeV2 as any)?.experience) ? ((input.resumeV2 as any).experience as any[]) : [];
+  const resumeV2ForAuthority = coerceResumeV2ExperienceFromStructuredBaseline({
+    resumeV2: input.resumeV2,
+    structuredBaseline: input.structuredBaselineForIdentity ?? null,
+  });
+
+  const baselineExperience = Array.isArray((resumeV2ForAuthority as any)?.experience)
+    ? (((resumeV2ForAuthority as any).experience as any[]) ?? [])
+    : [];
   const idToEntry = new Map<string, any>();
   baselineExperience.forEach((entry, index) => idToEntry.set(`resume_v2_exp_${index}`, entry));
 
@@ -328,7 +406,7 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
 
   const composition = new NarrativeCompositionEngine().composeResume({
     renderPlan: input.renderPlan ?? null,
-    summaryFallback: positioningSummary || trimToText((input.resumeV2 as any)?.summary ?? ''),
+    summaryFallback: positioningSummary || trimToText((resumeV2ForAuthority as any)?.summary ?? ''),
     experience: (finalExperience as any).map((e: any) => ({
       company: trimToText(e.company),
       roleTitle: trimToText(e.roleTitle),
@@ -371,16 +449,16 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
 
   return {
     heading: {
-      name: trimToText(input.identity?.name ?? (input.resumeV2 as any)?.heading?.name),
-      contactLine: trimToText(input.identity?.contactLine ?? (input.resumeV2 as any)?.heading?.contactLine),
-      ...(Array.isArray((input.resumeV2 as any)?.heading?.links) && (input.resumeV2 as any).heading.links.length
-        ? { links: (input.resumeV2 as any).heading.links.map((l: unknown) => trimToText(l)).filter(Boolean) }
+      name: trimToText(input.identity?.name ?? (resumeV2ForAuthority as any)?.heading?.name),
+      contactLine: trimToText(input.identity?.contactLine ?? (resumeV2ForAuthority as any)?.heading?.contactLine),
+      ...(Array.isArray((resumeV2ForAuthority as any)?.heading?.links) && (resumeV2ForAuthority as any).heading.links.length
+        ? { links: (resumeV2ForAuthority as any).heading.links.map((l: unknown) => trimToText(l)).filter(Boolean) }
         : {}),
     },
     summary,
-    ...(Array.isArray((input.resumeV2 as any)?.competencies) ? { competencies: (input.resumeV2 as any).competencies } : {}),
+    ...(Array.isArray((resumeV2ForAuthority as any)?.competencies) ? { competencies: (resumeV2ForAuthority as any).competencies } : {}),
     experience: composition.experience as any,
-    ...(Array.isArray((input.resumeV2 as any)?.education) ? { education: (input.resumeV2 as any).education } : {}),
+    ...(Array.isArray((resumeV2ForAuthority as any)?.education) ? { education: (resumeV2ForAuthority as any).education } : {}),
     __compositionDiagnostics: {
       ...composition.diagnostics,
       authorityFingerprint,

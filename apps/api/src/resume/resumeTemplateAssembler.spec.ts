@@ -104,4 +104,68 @@ describe('buildAuthoritativeResumeDraftFromResumeV2', () => {
     expect(JSON.stringify(draft.experience ?? [])).not.toContain('Vue 3), deck builder frontend');
     expect(String(draft.summary ?? '')).toMatch(/support operations|operations leader|escalation/i);
   });
+
+  it('prefers canonical structured baseline experience identity over malformed ResumeV2 parser-derived headers when available', () => {
+    const resumeV2 = {
+      heading: { name: 'Prod Person', contactLine: 'prod@example.com' },
+      summary: 'Old summary.',
+      experience: [
+        {
+          // Malformed identity coming from parser-derived fields.
+          company: 'Seattle',
+          roleTitle: 'Senior Manager, Customer Operations – SentinelOne',
+          dateRange: 'Dec 2018 – Oct 2019',
+          bullets: ['Owned incident operations and escalation handling.'],
+        },
+        {
+          company: 'iStreamPlanet',
+          roleTitle: 'Director, Customer Success',
+          dateRange: 'United States 2006 – 2013',
+          bullets: ['Led customer success programs.'],
+        },
+      ],
+    } as any;
+
+    const structuredBaselineForIdentity = {
+      experience: [
+        {
+          company: 'SentinelOne',
+          roleTitle: 'Senior Manager, Customer Operations',
+          dates: 'Remote Dec 2022 – Aug 2025',
+          bullets: ['Owned incident operations and escalation handling.'],
+        },
+        {
+          company: 'iStreamPlanet (Warner Bros. Discovery)',
+          roleTitle: 'Director, Customer Success',
+          dates: 'United States 2006 – 2013',
+          bullets: ['Led customer success programs.'],
+        },
+      ],
+    } as any;
+
+    const draft = buildAuthoritativeResumeDraftFromResumeV2({
+      resumeV2,
+      identity: { name: 'Prod Person', contactLine: 'prod@example.com' },
+      renderPlan: buildAuthoritativeRenderPlan({
+        positioningPlan: null,
+        orderedFallbackRoleIds: [],
+        suppressedFallbackRoleIds: [],
+        allowedEvidenceSnippetIds: null,
+      }),
+      structuredBaselineForIdentity,
+    });
+
+    const top = (draft.experience ?? [])[0] as any;
+    expect(String(top.company)).toBe('SentinelOne');
+    expect(String(top.roleTitle)).toBe('Senior Manager, Customer Operations');
+    expect(String(top.dateRange ?? '')).toMatch(/Dec 2022/i);
+    // Explicit cross-role date contamination guard: SentinelOne must not inherit iStreamPlanet's date range.
+    expect(String(top.dateRange ?? '')).not.toMatch(/2006/i);
+    expect(String(top.dateRange ?? '')).not.toMatch(/2013/i);
+    expect(JSON.stringify(draft.experience ?? [])).not.toContain('"Seattle"');
+
+    const iStream = (draft.experience ?? []).find((e: any) => String(e?.company ?? '').includes('iStreamPlanet')) as any;
+    expect(String(iStream?.dateRange ?? '')).toMatch(/2006/i);
+    expect(String(iStream?.dateRange ?? '')).toMatch(/2013/i);
+  });
 });
