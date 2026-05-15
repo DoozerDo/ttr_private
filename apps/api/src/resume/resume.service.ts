@@ -2648,6 +2648,7 @@ export class ResumeService {
     // This prevents raw/legacy ordering (including weak fragment roles) from leaking into preview/persistence,
     // regardless of whether the generation pipeline is V1 (drafted sections) or V2 (persisted ResumeV2).
     let positioningMetadata: any = null;
+    let renderPlanForDiagnostics: any = null;
     try {
       const jobForPositioning = job
         ? { title: job.title ?? null, company: job.company ?? null, description: job.rawDescription ?? null }
@@ -2698,6 +2699,7 @@ export class ResumeService {
         suppressedFallbackRoleIds: suppressedExperienceIds,
         allowedEvidenceSnippetIds: null,
       });
+      renderPlanForDiagnostics = renderPlan;
 
       normalizedDocument = buildAuthoritativeResumeDraftFromResumeV2({
         resumeV2: normalizedDocument as any,
@@ -3635,6 +3637,91 @@ export class ResumeService {
               bulletCount: Array.isArray(e?.bullets) ? e.bullets.length : 0,
             }))
           : [];
+
+      const normalizeToken = (value: unknown): string =>
+        String(value ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+      const buildRoleKey = (company: unknown, roleTitle: unknown): string =>
+        `${String(company ?? '').trim()}::${String(roleTitle ?? '').trim()}`;
+      const billingSignalsForText = (text: unknown): string[] => {
+        const lowered = normalizeToken(text);
+        const signals: string[] = [];
+        if (!lowered) return signals;
+        if (/billing/.test(lowered)) signals.push('billing_domain');
+        if (/invoice/.test(lowered)) signals.push('invoice_domain');
+        if (/dispute/.test(lowered)) signals.push('dispute_domain');
+        if (/credit/.test(lowered)) signals.push('credit_domain');
+        if (/metering/.test(lowered) || /usage metering/.test(lowered)) signals.push('metering_domain');
+        if (/reconciliation/.test(lowered) || /reconcile/.test(lowered)) signals.push('reconciliation_domain');
+        if (/revenue/.test(lowered) || /revenue-impact/.test(lowered)) signals.push('revenue_domain');
+        if (/knowledge base/.test(lowered) || /kbase/.test(lowered)) signals.push('billing_kb_domain');
+        return Array.from(new Set(signals));
+      };
+      const roleSignalsFromExperience = (experience: any[]): Record<string, string[]> => {
+        const out: Record<string, string[]> = {};
+        for (const role of experience ?? []) {
+          const roleKey = buildRoleKey(role?.company, role?.roleTitle);
+          const bullets = Array.isArray(role?.bullets) ? role.bullets : [];
+          const signals = new Set<string>();
+          billingSignalsForText(`${String(role?.company ?? '')} ${String(role?.roleTitle ?? '')} ${String(role?.dateRange ?? role?.dates ?? '')}`).forEach((s) =>
+            signals.add(s),
+          );
+          for (const bullet of bullets) {
+            billingSignalsForText(typeof bullet === 'string' ? bullet : (bullet as any)?.text).forEach((s) => signals.add(s));
+          }
+          out[roleKey] = Array.from(signals);
+        }
+        return out;
+      };
+      const roleSignalsFromRenderPlan = (renderPlan: any): Record<string, string[]> => {
+        const out: Record<string, string[]> = {};
+        const candidatesRaw = (renderPlan as any)?.evidencePriorities ?? [];
+        const candidates = Array.isArray(candidatesRaw) ? candidatesRaw : [];
+        for (const candidate of candidates) {
+          const theme = typeof candidate === 'string' ? candidate : (candidate as any)?.theme;
+          const signals = billingSignalsForText(theme);
+          if (!signals.length) continue;
+          const sourceEmployerRoleKey = typeof (candidate as any)?.sourceEmployerRoleKey === 'string' ? String((candidate as any).sourceEmployerRoleKey) : null;
+          const derivedFromRoleKey = typeof (candidate as any)?.derivedFromRoleKey === 'string' ? String((candidate as any).derivedFromRoleKey) : null;
+          const targetKey = sourceEmployerRoleKey || derivedFromRoleKey;
+          if (!targetKey) continue;
+          out[targetKey] = Array.from(new Set([...(out[targetKey] ?? []), ...signals]));
+        }
+        return out;
+      };
+      const sentinelRoleKeysFrom = (roleKeys: string[]): string[] =>
+        (roleKeys ?? []).filter((k) => /\bsentinelone\b/i.test(k));
+      const getFirstContaminationStage = (payload: {
+        authoritative: Record<string, string[]>;
+        persistedV2: Record<string, string[]>;
+        renderPlan: Record<string, string[]>;
+        narrative: Record<string, string[]>;
+      }): { stage: string; signals: string[] } => {
+        const sentinelKeys = Array.from(
+          new Set([
+            ...sentinelRoleKeysFrom(Object.keys(payload.authoritative)),
+            ...sentinelRoleKeysFrom(Object.keys(payload.persistedV2)),
+            ...sentinelRoleKeysFrom(Object.keys(payload.renderPlan)),
+            ...sentinelRoleKeysFrom(Object.keys(payload.narrative)),
+          ]),
+        );
+        const stageOrder: Array<{ name: string; map: Record<string, string[]> }> = [
+          { name: 'authoritative_extraction', map: payload.authoritative },
+          { name: 'persisted_resume_v2', map: payload.persistedV2 },
+          { name: 'render_plan', map: payload.renderPlan },
+          { name: 'narrative_rewrite', map: payload.narrative },
+        ];
+        let prior = new Set<string>();
+        for (const stage of stageOrder) {
+          const stageSignals = new Set<string>();
+          for (const k of sentinelKeys) {
+            (stage.map[k] ?? []).forEach((s) => stageSignals.add(s));
+          }
+          const delta = Array.from(stageSignals).filter((s) => !prior.has(s));
+          if (delta.length) return { stage: stage.name, signals: delta.slice(0, 8) };
+          prior = new Set([...prior, ...stageSignals]);
+        }
+        return { stage: '', signals: [] };
+      };
       const parsedJson = (baseline.parsedRecords?.[0] as any)?.parsedJson ?? null;
       const parsedJsonExpLen = Array.isArray(parsedJson?.experience) ? parsedJson.experience.length : null;
       const resumeV2ExpLen = Array.isArray((persistedResumeV2 as any)?.experience) ? (persistedResumeV2 as any).experience.length : null;
@@ -3698,6 +3785,97 @@ export class ResumeService {
       // Prompt 8: temporary production validation fields (diagnostics-only, no raw text).
       // Removal plan: delete `productionValidation` once Studio high-fit flow is stable in production.
       try {
+        let structuredForDiagnostics: any = null;
+        let authoritativeRoleKeys: string[] = [];
+        let persistedResumeV2RoleKeys: string[] = [];
+        let renderPlanRoleKeys: string[] = [];
+        let renderPlanRankingCandidateOrigins: Array<{ themeHash: string; sourceEmployerRoleKey: string | null; derivedFromRoleKey: string | null }> = [];
+        let narrativeRewriteRoleKeys: string[] = [];
+        let first: { stage: string; signals: string[] } = { stage: '', signals: [] };
+
+        try {
+          structuredForDiagnostics = extractStructuredBaselineFromSections(resumeInputSections as any);
+          authoritativeRoleKeys = Array.isArray(structuredForDiagnostics?.diagnostics?.parsedEmployerRoleKeys)
+            ? structuredForDiagnostics.diagnostics.parsedEmployerRoleKeys.map((k: any) => String(k ?? '')).filter(Boolean)
+            : Array.isArray(structuredForDiagnostics?.experience)
+              ? structuredForDiagnostics.experience.map((e: any) => buildRoleKey(e?.company, e?.roleTitle)).filter(Boolean)
+              : [];
+        } catch {
+          authoritativeRoleKeys = [];
+        }
+
+        try {
+          persistedResumeV2RoleKeys = Array.isArray((persistedResumeV2 as any)?.experience)
+            ? (persistedResumeV2 as any).experience.map((e: any) => buildRoleKey(e?.company, e?.roleTitle)).filter(Boolean)
+            : Array.isArray((normalizedDocument as any)?.experience)
+              ? (normalizedDocument as any).experience.map((e: any) => buildRoleKey(e?.company, e?.roleTitle)).filter(Boolean)
+              : [];
+        } catch {
+          persistedResumeV2RoleKeys = [];
+        }
+
+        try {
+          renderPlanRoleKeys =
+            renderPlanForDiagnostics && typeof renderPlanForDiagnostics === 'object'
+              ? Array.from(
+                  new Set([
+                    ...(((renderPlanForDiagnostics as any).orderedRoleIds ?? []) as any[]).map((id) => String(id ?? '')).filter(Boolean),
+                    ...(((renderPlanForDiagnostics as any).suppressedRoleIds ?? []) as any[]).map((id) => String(id ?? '')).filter(Boolean),
+                  ]),
+                )
+              : [];
+        } catch {
+          renderPlanRoleKeys = [];
+        }
+
+        try {
+          const { createHash } = require('crypto');
+          const candidatesRaw = (renderPlanForDiagnostics as any)?.evidencePriorities ?? [];
+          const candidates = Array.isArray(candidatesRaw) ? candidatesRaw : [];
+          renderPlanRankingCandidateOrigins = candidates
+            .map((c: any) => {
+              const theme = typeof c === 'string' ? String(c ?? '').trim() : String(c?.theme ?? '').trim();
+              if (!theme) return null;
+              const sourceEmployerRoleKey = typeof c?.sourceEmployerRoleKey === 'string' ? String(c.sourceEmployerRoleKey) : null;
+              const derivedFromRoleKey = typeof c?.derivedFromRoleKey === 'string' ? String(c.derivedFromRoleKey) : null;
+              const themeHash = createHash('sha256').update(theme).digest('hex');
+              return { themeHash, sourceEmployerRoleKey, derivedFromRoleKey };
+            })
+            .filter(Boolean)
+            .slice(0, 40) as any;
+        } catch {
+          renderPlanRankingCandidateOrigins = [];
+        }
+
+        try {
+          narrativeRewriteRoleKeys = Array.isArray((normalizedDocument as any)?.experience)
+            ? (normalizedDocument as any).experience.map((e: any) => buildRoleKey(e?.company, e?.roleTitle)).filter(Boolean)
+            : [];
+        } catch {
+          narrativeRewriteRoleKeys = [];
+        }
+
+        try {
+          const authoritativeSignals = roleSignalsFromExperience(Array.isArray(structuredForDiagnostics?.experience) ? structuredForDiagnostics.experience : []);
+          const persistedV2Signals = roleSignalsFromExperience(Array.isArray((persistedResumeV2 as any)?.experience) ? (persistedResumeV2 as any).experience : []);
+          const renderPlanSignals = roleSignalsFromRenderPlan(renderPlanForDiagnostics);
+          const narrativeSignals = roleSignalsFromExperience(
+            Array.isArray((response as any)?.preview?.resume?.experience)
+              ? ((response as any).preview.resume.experience as any[])
+              : Array.isArray((normalizedDocument as any)?.experience)
+                ? ((normalizedDocument as any).experience as any[])
+                : [],
+          );
+          first = getFirstContaminationStage({
+            authoritative: authoritativeSignals,
+            persistedV2: persistedV2Signals,
+            renderPlan: renderPlanSignals,
+            narrative: narrativeSignals,
+          });
+        } catch {
+          first = { stage: '', signals: [] };
+        }
+
         const evidence = resolveGenerationEvidence({
           baseline: baseline as any,
           baselineVersionId: baselineVersion.id,
@@ -3715,6 +3893,16 @@ export class ResumeService {
         (response as any).internal = {
           ...((response as any).internal ?? {}),
           productionValidation: {
+            authoritativeExperienceRoleKeys: authoritativeRoleKeys.slice(0, 40),
+            persistedResumeV2RoleKeys: persistedResumeV2RoleKeys.slice(0, 40),
+            renderPlanRoleKeys: renderPlanRoleKeys.slice(0, 80),
+            renderPlanRankingCandidateOrigins,
+            narrativeRewriteRoleKeys: narrativeRewriteRoleKeys.slice(0, 40),
+            hydratedArtifactSource: response?.idempotency?.reused ? 'idempotency_reuse' : 'fresh_generation',
+            artifactReuseDetected: Boolean(response?.idempotency?.reused),
+            reusedArtifactId: response?.idempotency?.reused ? String((response as any)?.idempotency?.artifactId ?? '') || null : null,
+            contaminationStage: first.stage || null,
+            contaminationSignals: first.signals,
             evidenceSourceUsed: evidence.primarySource,
             employerRoleGroupCount: Array.isArray((normalizedDocument as any)?.experience)
               ? (normalizedDocument as any).experience.length

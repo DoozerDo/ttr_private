@@ -26,6 +26,7 @@ import { CoverLettersService } from '../cover-letters/cover-letters.service';
 import { DataSource } from 'typeorm';
 import { NarrativeCompositionEngine } from '../composition/narrative-composition-engine';
 import * as ResumeAssembler from './resumeTemplateAssembler';
+import * as AuthoritativeRenderPlan from '../positioning/authoritative-render-plan';
 
 type MockRepo<T> = Partial<Record<keyof Repository<T>, jest.Mock>> & {
   findOne: jest.Mock;
@@ -1087,6 +1088,238 @@ describe('ResumeService contract', () => {
       baseline.sections = originalSections;
       baseline.parsedRecords = originalParsed;
       assessment.overallScore = originalScore;
+      if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+      else delete process.env.DOCGEN_DIAGNOSTICS;
+    }
+  });
+
+  it('diagnostics identify persisted Resume V2 as the first contamination stage when authoritative extraction is clean but Resume V2 is contaminated', async () => {
+    const { service } = buildService();
+    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 90;
+
+    try {
+      baseline.sections = [
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          order: 1,
+          content: [
+            'Senior Manager, Customer Operations – SentinelOne',
+            'Remote Dec 2022 – Aug 2025',
+            '- Led incident response operations and escalation handling across teams.',
+            '- Built support workflows and improved service reliability.',
+            '',
+            'Director, Cloud Development and Support – CenturyLink Business for Enterprise',
+            'Seattle, WA Dec 2018 – Oct 2019',
+            '- Improved invoice dispute workflows and revenue reconciliation accuracy.',
+            '- Reduced billing-related escalations through knowledge base and process improvements.',
+          ].join('\n'),
+        } as any,
+      ] as any;
+
+      baseline.parsedRecords = [
+        {
+          createdAt: new Date('2026-05-01T00:00:00.000Z'),
+          resumeV2Json: {
+            heading: { name: 'Test User' },
+            experience: [
+              {
+                company: 'SentinelOne',
+                roleTitle: 'Senior Manager, Customer Operations (Invoice Operations)',
+                dateRange: 'Dec 2022 – Aug 2025',
+                bullets: [
+                  'Owned incident operations and escalation readiness across support teams.',
+                  // Contamination: billing-domain bullet placed under SentinelOne without mentioning CenturyLink.
+                  'Improved invoice accuracy and dispute handling by tightening reconciliation workflows.',
+                ],
+              },
+              {
+                company: 'CenturyLink Business for Enterprise',
+                roleTitle: 'Director, Cloud Development and Support',
+                dateRange: 'Dec 2018 – Oct 2019',
+                bullets: [
+                  'Led billing support operations and reduced invoice disputes through better triage.',
+                  'Improved revenue reconciliation reporting and credit handling workflows.',
+                ],
+              },
+            ],
+          },
+        } as any,
+      ];
+
+      const result = await service.generateResume('user-1', { ...baseRequest } as any);
+      expect(result.ok).toBe(true);
+      expect(result.exportReady).toBe(true);
+
+      const pv = (result as any)?.internal?.productionValidation ?? null;
+      expect(pv).toEqual(
+        expect.objectContaining({
+          authoritativeExperienceRoleKeys: expect.any(Array),
+          persistedResumeV2RoleKeys: expect.any(Array),
+          contaminationStage: 'persisted_resume_v2',
+          contaminationSignals: expect.any(Array),
+        }),
+      );
+      expect(JSON.stringify(pv)).not.toMatch(/resumeText|baselineText|generated|bullet/i);
+
+      // Proof final SentinelOne output is contaminated (content assertion; diagnostics remain safe-only).
+      expect(String(result.content ?? '').toLowerCase()).toContain('invoice');
+    } finally {
+      baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsed;
+      assessment.overallScore = originalScore;
+      if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+      if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+      else delete process.env.DOCGEN_DIAGNOSTICS;
+    }
+  });
+
+  it('diagnostics identify render_plan as the first contamination stage when authoritative extraction and Resume V2 are clean but render plan candidates are contaminated', async () => {
+    const { service } = buildService();
+    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 90;
+
+    const originalBuildAuthoritativeRenderPlan = AuthoritativeRenderPlan.buildAuthoritativeRenderPlan;
+    const renderPlanSpy = jest.spyOn(AuthoritativeRenderPlan, 'buildAuthoritativeRenderPlan');
+    const composeSpy = jest.spyOn(NarrativeCompositionEngine.prototype, 'composeResume');
+
+    try {
+      baseline.sections = [
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          order: 1,
+          content: [
+            'Senior Manager, Customer Operations – SentinelOne',
+            'Remote Dec 2022 – Aug 2025',
+            '- Led incident response operations and escalation handling across teams.',
+            '- Built support workflows and improved service reliability.',
+            '',
+            'Director, Cloud Development and Support – CenturyLink Business for Enterprise',
+            'Seattle, WA Dec 2018 – Oct 2019',
+            '- Improved billing dispute workflows and reconciliation accuracy.',
+            '- Reduced invoice escalations through knowledge base improvements.',
+          ].join('\n'),
+        } as any,
+      ] as any;
+
+      baseline.parsedRecords = [
+        {
+          createdAt: new Date('2026-05-01T00:00:00.000Z'),
+          resumeV2Json: {
+            heading: { name: 'Test User' },
+            experience: [
+              {
+                company: 'SentinelOne',
+                roleTitle: 'Senior Manager, Customer Operations',
+                dateRange: 'Dec 2022 – Aug 2025',
+                bullets: ['Owned incident response operations across support teams.', 'Improved escalation workflows.'],
+              },
+              {
+                company: 'CenturyLink Business for Enterprise',
+                roleTitle: 'Director, Cloud Development and Support',
+                dateRange: 'Dec 2018 – Oct 2019',
+                bullets: ['Improved invoice dispute workflows and revenue reconciliation accuracy.', 'Reduced billing escalations.'],
+              },
+            ],
+          },
+        } as any,
+      ];
+
+      // Inject contaminated render-plan candidate scoped to the SentinelOne role key.
+      renderPlanSpy.mockImplementation((input: any) => {
+        const basePlan = (originalBuildAuthoritativeRenderPlan as any)(input) ?? {
+          orderedRoleIds: [],
+          suppressedRoleIds: [],
+          evidencePriorities: [],
+        };
+        return {
+          ...basePlan,
+          evidencePriorities: [
+            ...(Array.isArray((basePlan as any).evidencePriorities) ? (basePlan as any).evidencePriorities : []),
+            {
+              theme: 'Invoice accuracy and dispute handling',
+              sourceEmployerRoleKey: 'SentinelOne::Senior Manager, Customer Operations',
+            },
+          ],
+        } as any;
+      });
+
+      // Force a deterministic contaminated narrative output when the render plan contains billing-domain candidate.
+      composeSpy.mockImplementation((input: any) => {
+        const experience = Array.isArray(input?.experience) ? input.experience : [];
+        const shaped = experience.map((role: any) => {
+          if (String(role.company ?? '').toLowerCase().includes('sentinelone')) {
+            return {
+              ...role,
+              bullets: [
+                'Owned incident operations across support teams.',
+                'Improved invoice accuracy and dispute handling through workflow alignment.',
+              ],
+            };
+          }
+          return {
+            ...role,
+            bullets: Array.isArray(role?.bullets) ? role.bullets.map((b: any) => (typeof b === 'string' ? b : String(b?.text ?? ''))).filter(Boolean) : [],
+          };
+        });
+        return {
+          summary: 'Summary.',
+          experience: shaped,
+          diagnostics: {
+            rewrittenBulletCount: 0,
+            genericLanguageFlags: [],
+            narrativeQualityScore: null,
+            summaryCompositionSource: 'test',
+            evidenceToNarrativeMappings: [],
+            targetAngle: '',
+            employerScopedRankingEnabled: true,
+            crossEmployerRankingBlocks: 0,
+          },
+        } as any;
+      });
+
+      const result = await service.generateResume('user-1', { ...baseRequest } as any);
+      expect(result.ok).toBe(true);
+      expect(result.exportReady).toBe(true);
+
+      const pv = (result as any)?.internal?.productionValidation ?? null;
+      expect(pv).toEqual(
+        expect.objectContaining({
+          authoritativeExperienceRoleKeys: expect.any(Array),
+          persistedResumeV2RoleKeys: expect.any(Array),
+          renderPlanRankingCandidateOrigins: expect.any(Array),
+          contaminationStage: 'render_plan',
+          contaminationSignals: expect.any(Array),
+        }),
+      );
+      expect(JSON.stringify(pv)).not.toMatch(/resumeText|baselineText|generated|bullet/i);
+
+      expect(String(result.content ?? '').toLowerCase()).toContain('invoice');
+    } finally {
+      renderPlanSpy.mockRestore();
+      composeSpy.mockRestore();
+      baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsed;
+      assessment.overallScore = originalScore;
+      if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
       if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
       else delete process.env.DOCGEN_DIAGNOSTICS;
     }
