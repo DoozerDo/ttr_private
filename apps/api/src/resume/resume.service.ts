@@ -3628,6 +3628,57 @@ export class ResumeService {
     }
     (response as any).content = persistedContent;
 
+    const authoritativeExperienceCountForGuard = (() => {
+      try {
+        const structured = extractStructuredBaselineFromSections(resumeInputSections as any);
+        if (Array.isArray((structured as any)?.experience)) return (structured as any).experience.length;
+        return 0;
+      } catch {
+        return 0;
+      }
+    })();
+    const hasMinimalSummarySection = (() => {
+      try {
+        const sections = (response as any)?.preview?.resume?.sections;
+        if (!Array.isArray(sections)) return false;
+        return sections.some((s: any) => String(s?.type ?? '').toLowerCase() === 'minimal-summary');
+      } catch {
+        return false;
+      }
+    })();
+    const isMinimalFallbackRuntime = Boolean((response as any)?.internal?.minimalFallback) || hasMinimalSummarySection;
+    if (isMinimalFallbackRuntime || authoritativeExperienceCountForGuard === 0) {
+      if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
+        (response as any).internal = {
+          ...((response as any).internal ?? {}),
+          productionValidation: {
+            ...(((response as any).internal ?? {}).productionValidation ?? {}),
+            rejectedMinimalArtifact: Boolean(isMinimalFallbackRuntime),
+            rejectedMinimalArtifactReason: isMinimalFallbackRuntime
+              ? 'minimal_fallback_detected'
+              : 'authoritative_experience_zero',
+            authoritativeExperienceCount: authoritativeExperienceCountForGuard,
+            persistencePrevented: true,
+          },
+        };
+      }
+      throw new UnprocessableEntityException(
+        buildArtifactFailurePayload({
+          code: 'generation_blocked',
+          category: 'generation_blocked',
+          message: 'Resume generation is blocked because authoritative experience extraction is required.',
+          detail: isMinimalFallbackRuntime
+            ? 'Minimal fallback resume output is not eligible for Studio artifact persistence.'
+            : 'No authoritative experience groups were extracted from baseline sections.',
+          retryable: true,
+          diagnostics: {
+            authoritativeExperienceCount: authoritativeExperienceCountForGuard,
+            rejectedMinimalArtifact: Boolean(isMinimalFallbackRuntime),
+          },
+        }),
+      );
+    }
+
     if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
       const extractRoles = (doc: any) =>
         Array.isArray(doc?.experience)

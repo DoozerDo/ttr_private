@@ -197,6 +197,45 @@ function getResponseInternalBool(responseBody: Record<string, unknown> | null, k
   return isTrue(internal?.[key]);
 }
 
+function detectMinimalResumeArtifact(responseBody: Record<string, unknown> | null): {
+  minimal: boolean;
+  reasons: string[];
+  authoritativeExperienceCount: number | null;
+} {
+  if (!responseBody) return { minimal: false, reasons: [], authoritativeExperienceCount: null };
+  const reasons: string[] = [];
+  const internal = normalizeRecord((responseBody as any).internal);
+  const minimalFallback = isTrue(internal?.minimalFallback);
+  if (minimalFallback) reasons.push('internal.minimalFallback');
+
+  const resumeSections = (responseBody as any)?.preview?.resume?.sections;
+  const hasMinimalSummary =
+    Array.isArray(resumeSections) &&
+    resumeSections.some((s: any) => String(s?.type ?? '').trim().toLowerCase() === 'minimal-summary');
+  if (hasMinimalSummary) reasons.push('sections.minimal-summary');
+
+  const pv = normalizeRecord((internal as any)?.productionValidation);
+  const authoritativeRoleKeys = (pv as any)?.authoritativeExperienceRoleKeys;
+  if (Array.isArray(authoritativeRoleKeys) && authoritativeRoleKeys.length === 0) {
+    reasons.push('productionValidation.authoritativeExperienceRoleKeys.empty');
+  }
+  const authoritativeExperienceCountRaw = (pv as any)?.authoritativeExperienceCount;
+  const authoritativeExperienceCount =
+    typeof authoritativeExperienceCountRaw === 'number'
+      ? authoritativeExperienceCountRaw
+      : typeof authoritativeExperienceCountRaw === 'string' && authoritativeExperienceCountRaw.trim()
+        ? Number(authoritativeExperienceCountRaw)
+        : null;
+  if (typeof authoritativeExperienceCount === 'number' && Number.isFinite(authoritativeExperienceCount) && authoritativeExperienceCount <= 0) {
+    reasons.push('productionValidation.authoritativeExperienceCount.zero');
+  }
+  if (isTrue((pv as any)?.persistencePrevented)) {
+    reasons.push('productionValidation.persistencePrevented');
+  }
+
+  return { minimal: reasons.length > 0, reasons, authoritativeExperienceCount };
+}
+
 const shouldTraceArtifactIdentity = process.env.ARTIFACT_IDENTITY_TRACE === 'true';
 
 @Injectable()
@@ -531,8 +570,19 @@ export class StudioArtifactsService {
 
     const resumePreviewAllowed = (() => {
       if (!resumeRecord) return false;
-      if (!resumeRecord.artifactCurrent || !resumeRecord.inputsHashMatches) {
+      // Prompt 18: minimal artifacts must be rejected deterministically (not reported as inputs mismatch).
+      const minimalDetection = detectMinimalResumeArtifact(resumeRecord.responseBody);
+      if (minimalDetection.minimal) {
+        staleArtifactReasonCodes.push('minimal_artifact_rejected');
+        staleArtifactReasonCodes.push(...minimalDetection.reasons.map((r) => `minimal:${r}`));
+        return false;
+      }
+      if (!resumeRecord.inputsHashMatches) {
         staleArtifactReasonCodes.push('inputs_hash_mismatch');
+        return false;
+      }
+      if (!resumeRecord.artifactCurrent) {
+        staleArtifactReasonCodes.push('not_current');
         return false;
       }
       if (resumeRecord.status !== StudioArtifactLifecycleStatus.COMPLETED) {
@@ -540,11 +590,6 @@ export class StudioArtifactsService {
         return false;
       }
       const internal = normalizeRecord((resumeRecord.responseBody as any)?.internal);
-      const minimalFallback = isTrue(internal?.minimalFallback);
-      if (minimalFallback) {
-        staleArtifactReasonCodes.push('minimal_fallback');
-        return false;
-      }
       const staleLegacy = isTrue((resumeRecord.metadata as any)?.staleLegacy) || isTrue(internal?.staleLegacy);
       if (staleLegacy) {
         staleArtifactReasonCodes.push('stale_legacy');
@@ -733,6 +778,9 @@ export class StudioArtifactsService {
               authoritativeArtifactId,
               rejectedArtifactIds: rejectedArtifactIds.slice(0, 8),
               retrievalDecisionPath: resumePreviewAllowed ? 'use_current_completed' : 'reject_preview_fail_closed',
+              hydrationRejected: Boolean(resumeRecord && !resumePreviewAllowed),
+              rejectedMinimalArtifact: Boolean(staleArtifactReasonCodes.some((c) => c === 'minimal_artifact_rejected' || String(c).startsWith('minimal:'))),
+              rejectedMinimalArtifactReason: staleArtifactReasonCodes.find((c) => String(c).startsWith('minimal:')) ?? null,
             },
           }
         : {}),
@@ -1197,7 +1245,6 @@ export class StudioArtifactsService {
       artifact === 'resume' ? record.resumeInputsHash : record.coverLetterInputsHash;
     if (status === StudioArtifactLifecycleStatus.MISSING) return null;
     const inputsHashMatches = Boolean(inputsHash && inputsHash === expectedInputsHash);
-    const artifactCurrent = inputsHashMatches;
     const retryAllowed = status !== StudioArtifactLifecycleStatus.IN_PROGRESS;
     const rawResponseBody =
       artifact === 'resume'
@@ -1230,6 +1277,8 @@ export class StudioArtifactsService {
     const metadata =
       artifact === 'resume' ? record.resumeMetadata : record.coverLetterMetadata;
     const interpretedEvidenceAudit = extractInterpretedEvidenceAuditFromResponseBody(responseBody);
+    const minimalResume = artifact === 'resume' ? detectMinimalResumeArtifact(responseBody) : null;
+    const artifactCurrent = inputsHashMatches && !(minimalResume?.minimal ?? false);
 
     return {
       status,

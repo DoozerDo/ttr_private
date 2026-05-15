@@ -1339,8 +1339,19 @@ describe('StudioArtifactsService', () => {
         status: 'success',
         exportReady: true,
         qualityGate: { status: 'pass', reasons: [] },
-        internal: { minimalFallback: true, staleLegacy: true },
-        preview: { resume: { heading: { name: 'Alex' }, summary: 'Should not surface', experience: [] } },
+        internal: {
+          minimalFallback: true,
+          staleLegacy: true,
+          productionValidation: { authoritativeExperienceRoleKeys: [], authoritativeExperienceCount: 0, persistencePrevented: true },
+        },
+        preview: {
+          resume: {
+            heading: { name: 'Alex' },
+            summary: 'Should not surface',
+            sections: [{ type: 'minimal-summary', content: 'Should not surface' }],
+            experience: [],
+          },
+        },
       },
       content: 'resume-content',
       metadata: { auditId: 'audit-legacy-1', staleLegacy: true },
@@ -1354,8 +1365,10 @@ describe('StudioArtifactsService', () => {
       analysisId: assessment.id,
     } as any);
 
-    // Record remains present, but canonical result must not surface preview/content.
+    // Record remains present, but must not be treated as current/reusable and must not surface preview/content.
     expect(state.resume?.status).toBe(StudioArtifactLifecycleStatus.COMPLETED);
+    expect(state.resume?.artifactCurrent).toBe(false);
+    expect(state.resume?.inputsHashMatches).toBe(true);
     expect(state.resume?.responseBody).toBeTruthy();
 
     expect(state.resumeResult?.preview).toBeNull();
@@ -1363,9 +1376,9 @@ describe('StudioArtifactsService', () => {
     expect(state.resumeResult?.exports).toEqual({ docx: false, pdf: false });
 
     expect((state as any).diagnostics?.staleArtifactRejected).toBe(true);
-    expect((state as any).diagnostics?.staleArtifactReasonCodes ?? []).toEqual(
-      expect.arrayContaining(['minimal_fallback']),
-    );
+    expect((state as any).diagnostics?.staleArtifactReasonCodes ?? []).toEqual(expect.arrayContaining(['minimal_artifact_rejected']));
+    expect((state as any).diagnostics?.hydrationRejected).toBe(true);
+    expect((state as any).diagnostics?.rejectedMinimalArtifact).toBe(true);
     expect((state as any).diagnostics?.retrievalDecisionPath).toBe('reject_preview_fail_closed');
 
     if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;

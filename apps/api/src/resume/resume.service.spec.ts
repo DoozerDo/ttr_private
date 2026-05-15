@@ -1325,6 +1325,47 @@ describe('ResumeService contract', () => {
     }
   });
 
+  it('does not persist a resume artifact when minimal fallback output is detected (generation_blocked before recordResumeSuccess)', async () => {
+    const { service, studioArtifactsService } = buildService();
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+    const originalScore = assessment.overallScore;
+    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
+    assessment.overallScore = 90;
+
+    try {
+      // Force authoritative structured extraction to return zero experience groups by providing a malformed "Experience" section.
+      baseline.parsedRecords = [];
+      baseline.sections = [
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          order: 1,
+          content: ['Seattle', '- Reconciled billing and revenue across systems.'].join('\n'),
+        } as any,
+      ] as any;
+
+      await expect(service.generateResume('user-1', baseRequest as any)).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'generation_blocked' }),
+      } as any);
+
+      expect(studioArtifactsService.recordResumeSuccess).not.toHaveBeenCalled();
+    } finally {
+      baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsed;
+      assessment.overallScore = originalScore;
+      if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+      if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+      else delete process.env.DOCGEN_DIAGNOSTICS;
+    }
+  });
+
   it('generates a real exportReady resume when Resume V2 is invalid and baseline work history is verified (omits unsupported requirements with warnings)', async () => {
     const { service } = buildService();
     const originalSections = baseline.sections;
