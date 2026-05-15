@@ -8,9 +8,11 @@ import {
   validateNormalizedResumeDocument,
 } from '../resume/resume-normalization';
 import { BaselineIncludePolicy, BaselineSectionType } from './baseline-section.entity';
+import { extractStructuredBaselineFromSections } from './structuredBaselineExtractor';
 
 export function buildValidatedResumeV2FromParsedBaseline(
   parsedBaseline: Record<string, unknown>,
+  baselineSections?: Array<Record<string, unknown>> | null,
 ): NormalizedResumeDocument {
   const shouldLog = process.env.RESUME_V2_INGEST_DEBUG === 'true';
   const baselineId = String(parsedBaseline['baseline_id'] ?? '');
@@ -52,10 +54,41 @@ export function buildValidatedResumeV2FromParsedBaseline(
     },
   ] as any[];
 
+  // Prefer authoritative structured baseline sections when available.
+  // This prevents parser-specific malformed header mappings (e.g. location-as-company) from becoming ResumeV2 truth
+  // when we already have canonical extracted company/role identity from baseline sections.
+  const structuredExperienceBlocks = (() => {
+    if (!Array.isArray(baselineSections) || baselineSections.length === 0) return null;
+    try {
+      const structured = extractStructuredBaselineFromSections(baselineSections as any);
+      const experience = Array.isArray((structured as any)?.experience) ? ((structured as any).experience as any[]) : [];
+      if (experience.length === 0) return null;
+      const blocks = experience
+        .map((entry) => {
+          const company = typeof entry?.company === 'string' ? entry.company.trim() : '';
+          const roleTitle = typeof entry?.roleTitle === 'string' ? entry.roleTitle.trim() : '';
+          const dates = typeof entry?.dates === 'string' ? entry.dates.trim() : '';
+          if (!company || !roleTitle) return '';
+          const header = [company, roleTitle, dates].filter(Boolean).join(' | ');
+          const bullets = Array.isArray(entry?.bullets) ? (entry.bullets as unknown[]).map((b) => String(b ?? '').trim()).filter(Boolean) : [];
+          const bulletLines = bullets.map((b) => `- ${b.replace(/^[-*Ã¢â‚¬Â¢]\s*/, '')}`);
+          return [header, ...bulletLines].join('\n').trim();
+        })
+        .filter(Boolean);
+      return blocks.length ? blocks : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  if (structuredExperienceBlocks?.length) {
+    sections[0].content = structuredExperienceBlocks.join('\n\n');
+  }
+
   const experience = (parsedBaseline['experience'] ?? parsedBaseline['work_history']) as
     | Array<Record<string, unknown>>
     | undefined;
-  if (Array.isArray(experience) && experience.length) {
+  if (!sections[0].content.trim() && Array.isArray(experience) && experience.length) {
     const rejectionReasons = new Map<string, { count: number; sampleKeys: string[] }>();
     const recordRejection = (reason: string, entry: unknown) => {
       if (!shouldLog) return;

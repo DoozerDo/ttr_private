@@ -1027,7 +1027,7 @@ export class BaselineService {
           // ignore
         }
       }
-      resumeV2Json = buildValidatedResumeV2FromParsedBaseline(parsedBaseline as any) as any;
+      resumeV2Json = buildValidatedResumeV2FromParsedBaseline(parsedBaseline as any, ingestion.parsedSections as any) as any;
     } catch (error) {
       if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
         try {

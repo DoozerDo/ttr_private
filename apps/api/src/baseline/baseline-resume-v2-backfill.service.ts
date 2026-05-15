@@ -24,7 +24,7 @@ export class BaselineResumeV2BackfillService {
     const parsed = record.parsedJson;
     if (!parsed || typeof parsed !== 'object') return null;
 
-    const normalized = buildValidatedResumeV2FromParsedBaseline(parsed as any);
+    const normalized = buildValidatedResumeV2FromParsedBaseline(parsed as any, null);
     record.resumeV2Json = normalized as any;
     try {
       return await this.baselineParsedRepository.save(record);
@@ -42,4 +42,3 @@ export class BaselineResumeV2BackfillService {
     }
   }
 }
-

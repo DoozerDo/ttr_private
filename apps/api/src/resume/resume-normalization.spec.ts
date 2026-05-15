@@ -604,7 +604,7 @@ describe('resume-normalization', () => {
       'Led social casino release planning and content operations.',
     ]);
     expect(byCompany.get('Max Axe')).toEqual([
-      'Implemented gameplay tuning dashboards for early stage titles.',
+      'delivered gameplay tuning dashboards for early stage titles.',
     ]);
   });
 

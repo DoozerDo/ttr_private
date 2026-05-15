@@ -50,6 +50,62 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
     expect(validateNormalizedResumeDocument(resumeV2 as any).valid).toBe(true);
   });
 
+  it('does not fail with baseline_resume_v2_ingestion_failed when baseline sections contain usable structured experience identities even if parsed experience headers are malformed', () => {
+    const parsedBaseline: Record<string, unknown> = {
+      baseline_id: 'baseline-prod-1',
+      identity: { full_name: 'Prod Person', location: 'Seattle, WA' },
+      experience: [
+        // Malformed parser mapping: location collapsed into company; roleTitle contains "Role – Company".
+        {
+          company: 'Seattle',
+          role_title: 'Senior Manager, Customer Operations – SentinelOne',
+          start_date: 'Dec 2022',
+          end_date: 'Aug 2025',
+          details_text: 'Owned incident operations',
+        },
+      ],
+    };
+
+    const baselineSections: any[] = [
+      {
+        id: 'exp',
+        baselineId: 'baseline-prod-1',
+        sectionType: 'EXPERIENCE',
+        title: 'Experience',
+        order: 0,
+        includePolicy: 'ALWAYS',
+        content: [
+          'Senior Manager, Customer Operations – SentinelOne',
+          'Remote Dec 2022 – Aug 2025',
+          '- Owned incident operations and escalation handling.',
+          '',
+          'Senior Manager, Technology Operations Excellence – Starbucks',
+          'Seattle, WA Dec 2018 – Oct 2019',
+          '- Improved operational workflows and reliability.',
+          '',
+          'Director, Customer Success – iStreamPlanet (Warner Bros. Discovery)',
+          'United States 2006 – 2013',
+          '- Led customer success programs and cross-functional execution.',
+          '',
+          'Director, Cloud Development and Support – CenturyLink Business for Enterprise',
+          'Seattle, WA Dec 2014 – Oct 2018',
+          '- Improved invoice dispute handling and revenue reconciliation accuracy.',
+        ].join('\n'),
+      },
+    ];
+
+    const resumeV2 = buildValidatedResumeV2FromParsedBaseline(parsedBaseline, baselineSections);
+    expect(Array.isArray((resumeV2 as any).experience)).toBe(true);
+    const companies = ((resumeV2 as any).experience as any[]).map((e) => String(e?.company ?? '')).join(' | ');
+    expect(companies).toMatch(/SentinelOne/);
+    expect(companies).toMatch(/Starbucks/);
+    expect(companies).toMatch(/iStreamPlanet/);
+    expect(companies).toMatch(/CenturyLink Business for Enterprise/);
+    // Guard: location must not become the company when structured entries exist (the string "Seattle, WA" may appear in date ranges).
+    expect(((resumeV2 as any).experience as any[]).map((e) => String(e?.company ?? '')).join(' | ')).not.toContain('Seattle');
+    expect(validateNormalizedResumeDocument(resumeV2 as any).valid).toBe(true);
+  });
+
   it('throws a clear ingestion failure when experience is missing/empty', () => {
     const parsedBaseline: Record<string, unknown> = {
       baseline_id: 'baseline-1',
@@ -88,5 +144,41 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
       expect(String(body?.error?.message ?? '')).toMatch(/did not produce any usable experience entries/i);
       expect(String(body?.error?.details?.hint ?? '')).toMatch(/resume parser returned empty work history/i);
     }
+  });
+
+  it('does not fail Resume V2 ingestion when some structured experience entries have weak/empty bullet evidence (uses surviving structured identities)', () => {
+    const parsedBaseline: Record<string, unknown> = {
+      baseline_id: 'baseline-bullets-empty-1',
+      identity: { full_name: 'Empty Bullets', location: 'Remote' },
+      experience: [{ company: 'Seattle', role_title: 'Role – Company', details_text: '' }],
+    };
+
+    const baselineSections: any[] = [
+      {
+        id: 'exp',
+        baselineId: 'baseline-bullets-empty-1',
+        sectionType: 'EXPERIENCE',
+        title: 'Experience',
+        order: 0,
+        includePolicy: 'ALWAYS',
+        content: [
+          // SentinelOne identity present but weak bullet corpus.
+          'Senior Manager, Customer Operations – SentinelOne',
+          'Remote Dec 2022 – Aug 2025',
+          '',
+          // CenturyLink has verified bullet evidence so ingestion remains valid.
+          'Director, Cloud Development and Support – CenturyLink Business for Enterprise',
+          'Seattle, WA Dec 2018 – Oct 2019',
+          '- Improved invoice dispute handling through workflow alignment.',
+        ].join('\n'),
+      },
+    ];
+
+    const resumeV2 = buildValidatedResumeV2FromParsedBaseline(parsedBaseline, baselineSections);
+    expect(Array.isArray((resumeV2 as any).experience)).toBe(true);
+    expect(((resumeV2 as any).experience as any[]).length).toBeGreaterThan(0);
+    expect(((resumeV2 as any).experience as any[]).map((e) => String(e?.company ?? ''))).toEqual(
+      expect.arrayContaining(['CenturyLink Business for Enterprise']),
+    );
   });
 });
