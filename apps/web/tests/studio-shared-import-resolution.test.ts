@@ -1,9 +1,11 @@
 import { readFileSync } from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 
 import { describe, expect, it } from "vitest";
 
-const repoRoot = path.resolve(process.cwd(), "..", "..");
+const here = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(here, "..", "..", "..");
 
 const studioDependencyFiles = [
   "apps/web/app/(app)/studio/page.tsx",

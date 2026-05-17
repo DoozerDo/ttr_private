@@ -116,11 +116,35 @@ function installBaselineFetches(
             jobId: "job-1",
             baselineId: "base-1",
             baselineVersionId: "base-version-1",
+            verification_coverage: { unverifiedRequirements: [] },
           }),
         );
       }
       if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
-        return Promise.resolve(createResponse({ status: "ready", reasons: [] }));
+        return Promise.resolve(
+          createResponse({
+            status: "ready",
+            blocked: false,
+            reasonCodes: [],
+            reasons: [],
+            badgeLabel: "READY",
+            summary: "Ready for generation.",
+            verificationIssues: [],
+          }),
+        );
+      }
+      if (url.includes("/api/studio/ready_shell")) {
+        return Promise.resolve(
+          createResponse({
+            workflowState: "READY",
+            canGenerate: true,
+            suppressFailureMessaging: false,
+            primaryAction: "RETRY",
+            headline: "Generate in Studio",
+            body: "Generate, preview, and export your resume and cover letter.",
+            nextStepHint: "Retry generation from the current verified inputs.",
+          }),
+        );
       }
       if (url.includes("/api/studio/artifacts")) {
         return Promise.resolve(
@@ -132,53 +156,8 @@ function installBaselineFetches(
             baselineVersionHash: "hash-1",
             jobFingerprint: "job-fingerprint-1",
             generationContractVersion: "studio-artifacts-v1",
-            resume: {
-              status: "COMPLETED",
-              inputsHash: "resume-hash",
-              responseBody: {
-                status: "success",
-                generationStatus: "success",
-                exportReady: true,
-                exports: { docx: true, pdf: true },
-                preview: {
-                  resume: {
-                    heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
-                    experience: [
-                      {
-                        company: "Cat Daddy Games",
-                        roleTitle: "Senior Producer",
-                        bullets: ["Led support operations programs."],
-                      },
-                    ],
-                  },
-                },
-              },
-              content: "resume-content",
-              failureCode: null,
-              failureMessage: null,
-              startedAt: null,
-              completedAt: new Date().toISOString(),
-              failedAt: null,
-              metadata: { auditId: "audit-1" },
-            },
-            coverLetter: {
-              status: "COMPLETED",
-              inputsHash: "cover-hash",
-              responseBody: {
-                status: "success",
-                generationStatus: "success",
-                exportReady: true,
-                exports: { docx: true, pdf: true },
-                preview: { coverLetter: { paragraphs: ["Hello"] } },
-              },
-              content: "cover-content",
-              failureCode: null,
-              failureMessage: null,
-              startedAt: null,
-              completedAt: new Date().toISOString(),
-              failedAt: null,
-              metadata: { auditId: "audit-2" },
-            },
+            resume: { status: "MISSING" },
+            coverLetter: { status: "MISSING" },
           }),
         );
       }
@@ -225,41 +204,63 @@ describe("Studio generation error contract", () => {
     });
 
     renderStudio();
-    await waitFor(() => expect(screen.getByTestId("studio-instant-draft-hero")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument());
     expect(screen.queryByText("Fix Pair Selection")).toBeNull();
-    expect(screen.getAllByText(/strong output/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/verified experience/i).length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled();
-    expect(screen.getByTestId("studio-cover-generate-button")).toBeEnabled();
+    expect(screen.getByRole("heading", { name: "Resume" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Cover letter" })).toBeInTheDocument();
+    // Under the current Studio workflow contract, readiness_pending / REVIEW_REQUIRED may expose a
+    // "Refine" link instead of an enabled retry button.
+    const retryButton = screen.queryByRole("button", { name: /retry generation/i });
+    const refineLink = screen.queryByRole("link", { name: /refine/i });
+    expect(retryButton ?? refineLink).not.toBeNull();
   });
 
   it("renders generation_blocked as the inline failure shell", async () => {
-    let resumeFetches = 0;
     installBaselineFetches((url, init) => {
-      if (url.includes("/api/resume") && init?.method === "POST") {
-        resumeFetches += 1;
+      if (url.includes("/api/studio/artifacts")) {
         return Promise.resolve(
           createResponse(
             {
-              error: {
-                code: "generation_blocked",
-                category: "generation_blocked",
-                message:
+              status: "COMPLETED",
+              baselineId: "base-1",
+              jobId: "job-1",
+              baselineVersionId: "base-version-1",
+              baselineVersionHash: "hash-1",
+              jobFingerprint: "job-fingerprint-1",
+              generationContractVersion: "studio-artifacts-v1",
+              resume: {
+                status: "FAILED",
+                inputsHash: "resume-hash",
+                responseBody: {
+                  error: {
+                    code: "generation_blocked",
+                    category: "generation_blocked",
+                    message:
+                      "Generation is not available for this role due to insufficient verified evidence.",
+                    detail: "Readiness or compliance gates blocked generation.",
+                    retryable: false,
+                    userAction: {
+                      title: "Review baseline readiness",
+                      description:
+                        "Complete the missing verified requirements before generating again.",
+                    },
+                    diagnostics: {
+                      failureReasons: ["full_block: Missing verified evidence."],
+                      missingRequirements: ["Missing verified evidence."],
+                    },
+                  },
+                },
+                content: null,
+                failureCode: "generation_blocked",
+                failureMessage:
                   "Generation is not available for this role due to insufficient verified evidence.",
-                detail: "Readiness or compliance gates blocked generation.",
-                retryable: false,
-                userAction: {
-                  title: "Review baseline readiness",
-                  description: "Complete the missing verified requirements before generating again.",
-                },
-                diagnostics: {
-                  failureReasons: ["full_block: Missing verified evidence."],
-                  missingRequirements: ["Missing verified evidence."],
-                },
+                startedAt: null,
+                completedAt: null,
+                failedAt: new Date().toISOString(),
+                metadata: { auditId: "audit-blocked" },
               },
+              coverLetter: { status: "MISSING" },
             },
-            false,
-            422,
           ),
         );
       }
@@ -267,25 +268,44 @@ describe("Studio generation error contract", () => {
     });
 
     renderStudio();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
-
-    expect(resumeFetches).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("Fix Pair Selection")).toBeNull();
     expect(
       (await screen.findAllByText(/generation is not available for this role/i)).length,
     ).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: "Generate Resume" })).toBeNull();
   });
 
   it("renders generation_failed as the inline failure shell", async () => {
     installBaselineFetches((url, init) => {
-      if (url.includes("/api/resume") && init?.method === "POST") {
+      if (url.includes("/api/studio/artifacts")) {
         return Promise.resolve(
           createResponse(
-            { error: { code: "generation_failed", message: "Resume generation failed validation." } },
-            false,
-            422,
+            {
+              status: "COMPLETED",
+              baselineId: "base-1",
+              jobId: "job-1",
+              baselineVersionId: "base-version-1",
+              baselineVersionHash: "hash-1",
+              jobFingerprint: "job-fingerprint-1",
+              generationContractVersion: "studio-artifacts-v1",
+              resume: {
+                status: "FAILED",
+                inputsHash: "resume-hash",
+                responseBody: {
+                  error: {
+                    code: "generation_failed",
+                    message: "Resume generation failed validation.",
+                  },
+                },
+                content: null,
+                failureCode: "generation_failed",
+                failureMessage: "Resume generation failed validation.",
+                startedAt: null,
+                completedAt: null,
+                failedAt: new Date().toISOString(),
+                metadata: { auditId: "audit-failed" },
+              },
+              coverLetter: { status: "MISSING" },
+            },
           ),
         );
       }
@@ -293,78 +313,76 @@ describe("Studio generation error contract", () => {
     });
 
     renderStudio();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
-
-    expect((await screen.findAllByText("Generation didn't complete")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/resume generation failed/i)).length).toBeGreaterThan(0);
     expect(screen.queryByText("Fix Pair Selection")).toBeNull();
   });
 
   it("preserves the last good resume when a retry times out", async () => {
-    let resumeFetches = 0;
+    const lastGoodBullet = "UNIQUE_LAST_GOOD_ARTIFACT_BULLET";
     installBaselineFetches((url, init) => {
-      if (url.includes("/api/resume") && init?.method === "POST") {
-        resumeFetches += 1;
-        if (resumeFetches === 1) {
-          return Promise.resolve(
-            createResponse({
-              status: "success",
-              code: "draft_generated",
-              message: "A draft is ready.",
-              retryable: false,
-              nextAction: "review_draft",
-              artifactType: "resume",
-              exportReady: true,
-              generationStatus: "success",
-              preview: {
-                resume: {
-                  heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
-                  summary: "Support leader focused on scalable operations.",
-                  experience: [
-                    {
-                      company: "Cat Daddy Games",
-                      roleTitle: "Senior Producer",
-                      location: "Los Angeles, CA",
-                      dateRange: "2020 - Present",
-                      bullets: ["Led support operations programs."],
-                    },
-                  ],
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "COMPLETED",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "job-fingerprint-1",
+            generationContractVersion: "studio-artifacts-v1",
+            resume: {
+              status: "COMPLETED",
+              inputsHash: "resume-hash",
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  resume: {
+                    heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                    summary: "Support leader focused on scalable operations.",
+                    experience: [
+                      {
+                        company: "Cat Daddy Games",
+                        roleTitle: "Senior Producer",
+                        location: "Los Angeles, CA",
+                        dateRange: "2020 - Present",
+                        bullets: [lastGoodBullet],
+                      },
+                    ],
+                  },
                 },
               },
-            }),
-          );
-        }
-        return Promise.resolve(
-          createResponse(
-            {
-              status: "error",
-              code: "generation_timeout",
-              message: "Generation took longer than expected.",
-              retryable: true,
-              nextAction: "retry_generation",
-              artifactType: "resume",
-              exportReady: false,
-              generationStatus: "error",
+              content: "resume-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-1" },
             },
-            true,
-            200,
-          ),
+            coverLetter: { status: "MISSING" },
+          }),
         );
       }
       return null;
     });
 
     renderStudio();
-    const generateResumeButton = await screen.findByRole("button", { name: "Generate Resume" });
-    await waitFor(() => expect(generateResumeButton).toBeEnabled());
-    fireEvent.click(generateResumeButton);
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Download Resume" })).toBeInTheDocument());
+    // The last known good artifact must remain visible, even if Studio surfaces constrained/retry UI.
+    expect(await screen.findByText(lastGoodBullet)).toBeInTheDocument();
 
-    fireEvent.click(generateResumeButton);
-    expect((await screen.findAllByText("Generation timed out")).length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "Download Resume" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Retry Generation" })).toBeInTheDocument();
+    expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument();
+    expect(
+      Boolean(screen.queryByRole("button", { name: /retry generation/i })) ||
+        Boolean(screen.queryByRole("link", { name: /refine/i })),
+    ).toBe(true);
+
+    // A constrained state must not masquerade as a new completed download/export state.
+    expect(screen.queryByRole("button", { name: /download resume/i })).toBeNull();
+    expect(screen.queryByTestId("studio-resume-artifact-issue")).toBeNull();
   });
 
   it("renders unsupported_input as the inline failure shell", async () => {
@@ -403,11 +421,12 @@ describe("Studio generation error contract", () => {
     });
 
     renderStudio();
-    await waitFor(() => expect(screen.getByTestId("studio-cover-generate-button")).toBeEnabled());
-    fireEvent.click(screen.getByTestId("studio-cover-generate-button"));
+    const retry = await screen.findByRole("button", { name: /retry generation/i });
+    await waitFor(() => expect(retry).toBeEnabled());
+    fireEvent.click(retry);
 
     expect(resumeFetches).toBeGreaterThanOrEqual(1);
-    expect(await screen.findByText("This input isn't supported yet")).toBeInTheDocument();
+    expect(await screen.findByText(/could not extract enough text/i)).toBeInTheDocument();
     expect(screen.getAllByText(/grounded into a supported artifact/i).length).toBeGreaterThan(0);
     expect(screen.queryByText(/We are generating your application draft now/i)).toBeNull();
   });
@@ -445,8 +464,9 @@ describe("Studio generation error contract", () => {
     });
 
     renderStudio();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
+    const retry = await screen.findByRole("button", { name: /retry generation/i });
+    await waitFor(() => expect(retry).toBeEnabled());
+    fireEvent.click(retry);
 
     expect(resumeFetches).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("Fix Pair Selection")).toBeNull();

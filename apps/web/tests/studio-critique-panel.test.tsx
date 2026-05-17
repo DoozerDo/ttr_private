@@ -40,8 +40,8 @@ describe("StudioCritiquePanel", () => {
       />,
     );
 
-    expect(screen.getByTestId("studio-critique-panel")).toHaveTextContent("What to improve next");
-    expect(screen.getByTestId("studio-critique-panel")).toHaveTextContent("Best next move");
+    expect(screen.getByTestId("studio-critique-panel")).toHaveTextContent("Improve further (optional)");
+    expect(screen.getByTestId("studio-critique-panel")).toHaveTextContent("Primary recommendation");
     expect(screen.getByTestId("critique-issue-summary_generic")).toHaveTextContent("Tighten the summary");
     expect(screen.getByTestId("critique-issue-cover_letter_redundant")).toHaveTextContent(
       "Reduce cover letter repetition",

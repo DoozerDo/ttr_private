@@ -127,8 +127,7 @@ const defaultFetch = vi.fn((input: RequestInfo) => {
 });
 
 function setDefaultFetch() {
-  (globalThis.fetch as typeof globalThis.fetch) =
-    defaultFetch as unknown as typeof globalThis.fetch;
+  vi.stubGlobal("fetch", defaultFetch as unknown as typeof globalThis.fetch);
   if (typeof window !== "undefined") {
     (window.fetch as typeof window.fetch) = globalThis.fetch as unknown as typeof window.fetch;
   }
@@ -186,8 +185,7 @@ export function resetSearchParams() {
 }
 
 export function setFetchImplementation(custom: typeof defaultFetch) {
-  (globalThis.fetch as typeof globalThis.fetch) =
-    custom as unknown as typeof globalThis.fetch;
+  vi.stubGlobal("fetch", custom as unknown as typeof globalThis.fetch);
   if (typeof window !== "undefined") {
     (window.fetch as typeof window.fetch) = globalThis.fetch as unknown as typeof window.fetch;
   }

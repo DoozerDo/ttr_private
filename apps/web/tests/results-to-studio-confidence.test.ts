@@ -14,7 +14,7 @@ describe("results to studio confidence", () => {
     });
 
     expect(decision.primaryCta).toBe("OPEN_STUDIO");
-    expect(decision.state).toBe("DRAFT");
+    expect(decision.state).toBe("READY");
     expect(decision.headline).toBe("Strong match. Generation is ready.");
     expect(decision.subtext).toBe(
       "Your materials are ready to generate now. Review them in Studio before applying.",

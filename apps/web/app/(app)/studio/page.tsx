@@ -664,6 +664,33 @@ function normalizeHydratedArtifactResponse(value: unknown): unknown | null {
   return value;
 }
 
+function isMinimalResumeArtifactPayload(value: unknown): boolean {
+  try {
+    const normalized = normalizeHydratedArtifactResponse(value);
+    if (!normalized || typeof normalized !== "object") return false;
+    const record = normalized as Record<string, any>;
+    const internal = record.internal && typeof record.internal === "object" ? (record.internal as Record<string, any>) : null;
+    if (internal && internal.minimalFallback === true) return true;
+    const auditId = typeof record.audit_id === "string" ? record.audit_id : typeof record.auditId === "string" ? record.auditId : "";
+    if (auditId && auditId.startsWith("minimal:")) return true;
+    const sections = record.preview?.resume?.sections;
+    if (Array.isArray(sections)) {
+      const hasMinimalSummary = sections.some(
+        (section) =>
+          section &&
+          typeof section === "object" &&
+          String((section as any).type ?? "")
+            .trim()
+            .toLowerCase() === "minimal-summary",
+      );
+      if (hasMinimalSummary) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 function extractResumeResponseFromStudioArtifacts(payload: BackendStudioArtifactsResponse): unknown | null {
   const responseBody = payload.resume?.responseBody ?? null;
   const normalized = normalizeHydratedArtifactResponse(responseBody);
@@ -2568,6 +2595,18 @@ export default function StudioPage() {
             storageKey: studioArtifactStorageKey,
           });
         }
+        // Fail-closed: never hydrate minimal fallback resume artifacts from local storage snapshots.
+        if (snapshot.resumeResponse && isMinimalResumeArtifactPayload(snapshot.resumeResponse)) {
+          try {
+            window.localStorage.removeItem(studioArtifactStorageKey);
+          } catch {
+            // Best effort only.
+          }
+          setStudioArtifactPairStatus("missing");
+          suppressAutoGenerationRef.current = false;
+          setStudioArtifactsHydrated(true);
+          return;
+        }
         applyHydratedPayload(snapshot);
         setStudioArtifactsHydrated(true);
         return;
@@ -3816,7 +3855,9 @@ export default function StudioPage() {
       analysisId: requestedAnalysisId ?? null,
       updatedAt: new Date().toISOString(),
       ...(resumePresenter.status === "success" && hasResumeDraft && resumeState.response
-        ? { resumeResponse: resumeState.response }
+        ? isMinimalResumeArtifactPayload(resumeState.response)
+          ? {}
+          : { resumeResponse: resumeState.response }
         : {}),
       ...(coverPresenter.status === "success" && hasCoverLetterDraft && coverState.response
         ? { coverResponse: coverState.response }

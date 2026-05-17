@@ -92,11 +92,15 @@ describe("Studio execution surface", () => {
       }
       if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
         return createResponse({
+          assessmentId: "analysis-1",
           score: 88,
           scoring_v2: { score: 88 },
+          scoringV2: { score: 88 },
           jobId: "job-1",
           baselineId: "base-1",
           baselineVersionId: "base-version-1",
+          company: "Acme",
+          title: "Director of Support",
           supportingSignals: ["Owned support operations cadence"],
           baselineEvidence: "Reduced escalations by 22% through workflow redesign.",
         });
@@ -112,10 +116,10 @@ describe("Studio execution surface", () => {
     await waitFor(() => {
       expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument();
     });
-
-    expect(screen.getByText("Generation blocked")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
-    expect(screen.getAllByText(/fit score unavailable/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Your application materials/i)).toBeInTheDocument();
+    expect(screen.getByTestId("studio-workflow-authority")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^resume$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^cover letter$/i })).toBeInTheDocument();
   });
 
   it("renders BLOCKED hero with remediation-first action", async () => {
@@ -125,7 +129,16 @@ describe("Studio execution surface", () => {
         return createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]);
       }
       if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
-        return createResponse({ score: 91, jobId: "job-1", baselineId: "base-1", baselineVersionId: "base-version-1" });
+        return createResponse({
+          assessmentId: "analysis-1",
+          score: 91,
+          scoring_v2: { score: 91 },
+          jobId: "job-1",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          company: "Acme",
+          title: "Director of Support",
+        });
       }
       if (url.includes("/api/resume/readiness")) {
         return createResponse({ status: "blocked", reasons: [{ code: "full_block", message: "blocked" }] });
@@ -139,24 +152,53 @@ describe("Studio execution surface", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Generation blocked")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument();
     });
 
-    expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
+    // Blocked readiness should not surface export-ready materials; user should see the constrained generation shell.
+    expect(screen.getByTestId("studio-resume-missing")).toBeInTheDocument();
+    expect(screen.getByTestId("studio-cover-missing")).toBeInTheDocument();
     expect(screen.queryByTestId("studio-evidence-allowed-panel")).toBeNull();
   });
 
   it("suppresses generation surfaces when fit is below threshold and routes to Resolve Gaps", async () => {
+    vi.spyOn(generationProductReadiness, "buildGenerationProductReadiness").mockReturnValue({
+      generation_readiness: { canGenerate: false, canExport: false, reasonsBlocked: ["compatibility_score_below_80"] },
+      state: "BLOCKED",
+      confidence: "LOW",
+      needsVerification: false,
+      tier: "generation_blocked",
+      canOpenStudio: true,
+      generationMode: "verified",
+    });
+
     setFetchImplementation(async (input: RequestInfo) => {
       const url = typeof input === "string" ? input : input.url;
       if (url.includes("/api/baselines/base-1/versions")) {
         return createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]);
       }
       if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
-        return createResponse({ score: 62, jobId: "job-1", baselineId: "base-1", baselineVersionId: "base-version-1" });
+        return createResponse({
+          assessmentId: "analysis-1",
+          score: 79,
+          scoring_v2: { score: 79 },
+          jobId: "job-1",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          company: "Acme",
+          title: "Director of Support",
+          readinessStatus: "limited",
+        });
       }
       if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
-        return createResponse({ status: "ready", reasons: [] });
+        // Low fit score should not be paired with a fully-ready generation readiness in the canonical decision model.
+        return createResponse({
+          status: "limited",
+          blocked: false,
+          reasonCodes: ["compatibility_score_below_80"],
+          reasons: [],
+          compliance_flags: [],
+        });
       }
       return createResponse({});
     });
@@ -164,12 +206,13 @@ describe("Studio execution surface", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
+      expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument();
     });
 
     expect(screen.queryByText("Your application materials")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Generate Resume" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^resume$/i })).not.toBeInTheDocument();
     expect(screen.queryByTestId("studio-evidence-allowed-panel")).toBeNull();
+    expect(screen.getAllByText(/Review fit gaps/i).length).toBeGreaterThan(0);
   });
 
   it("demotes advanced controls with optional labels", async () => {
@@ -179,7 +222,16 @@ describe("Studio execution surface", () => {
         return createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]);
       }
       if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
-        return createResponse({ score: 82, jobId: "job-1", baselineId: "base-1", baselineVersionId: "base-version-1" });
+        return createResponse({
+          assessmentId: "analysis-1",
+          score: 82,
+          scoring_v2: { score: 82 },
+          jobId: "job-1",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          company: "Acme",
+          title: "Director of Support",
+        });
       }
       if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
         return createResponse({ status: "ready", reasons: [] });

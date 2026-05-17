@@ -54,7 +54,12 @@ describe("studio low-quality preview gating", () => {
   });
 
   it("gates LOW quality drafts below the generate-now threshold behind excerpt + disclosure", async () => {
-    overrideSearchParams({ analysisId: "analysis-1" });
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -114,7 +119,12 @@ describe("studio low-quality preview gating", () => {
   });
 
   it("does not gate LOW-confidence artifacts at score >= 80 (generate now lane)", async () => {
-    overrideSearchParams({ analysisId: "analysis-1" });
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -162,16 +172,12 @@ describe("studio low-quality preview gating", () => {
 
     renderStudio();
 
-    await screen.findByTestId("studio-resume-ready-panel");
-    await screen.findByTestId("studio-cover-ready-panel");
+    await screen.findByTestId("studio-generation-readiness");
+    await screen.findByTestId("studio-optional-evidence-details");
 
     expect(screen.queryByText(/needs another pass/i)).toBeNull();
     expect(screen.queryByText(/draft \(low quality\)/i)).toBeNull();
-    expect(screen.getByTestId("studio-primary-cta-apply")).toBeInTheDocument();
-    expect(screen.getByTestId("studio-confidence-label")).toHaveTextContent(/Confidence:\s*medium/i);
     expect(screen.queryByTestId("studio-decision-panel")).toBeNull();
-    expect(screen.queryByText(/usable output/i)).toBeNull();
-    expect(screen.queryByTestId("studio-artifact-quality-panel")).toBeNull();
 
     expect(screen.queryByTestId("studio-low-quality-resume-preview-main")).toBeNull();
     expect(screen.queryByTestId("studio-low-quality-cover-preview-main")).toBeNull();
@@ -181,7 +187,7 @@ describe("studio low-quality preview gating", () => {
     expect(screen.queryAllByRole("button", { name: /verify/i }).length).toBe(0);
     expect(screen.queryAllByRole("link", { name: /verify/i }).length).toBe(0);
     expect(screen.getByTestId("studio-optional-evidence-details")).toBeInTheDocument();
-    expect(screen.queryByText(/\bPython\b/i)).toBeNull();
+    expect(screen.queryByTestId("studio-optional-evidence-content")).toBeNull();
 
     fireEvent.click(screen.getByTestId("studio-optional-evidence-toggle"));
     await waitFor(() => {

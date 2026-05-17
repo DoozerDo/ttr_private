@@ -422,6 +422,8 @@ describe("Studio pair readiness blocking", () => {
     await screen.findByTestId("studio-generation-readiness");
     expect(screen.queryByTestId("studio-generation-ready-shell")).toBeNull();
     expect(screen.queryByTestId("studio-instant-draft-hero")).toBeNull();
-    await screen.findByTestId("studio-blocked-message");
+    const blockedSummary = await screen.findByTestId("studio-ready-secondary-summary");
+    expect(screen.getByRole("heading", { name: "Generation is blocked" })).toBeInTheDocument();
+    expect(blockedSummary).toHaveTextContent("Resolve blockers");
   });
 });

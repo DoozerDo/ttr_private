@@ -137,28 +137,53 @@ function installStrongFitFetches(options?: {
   const coverOk = options?.coverOk ?? true;
   const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input?.url ?? "";
+    if (url.includes("/api/baselines/current")) {
+      return Promise.resolve(
+        createResponse({
+          id: "base-1",
+          currentVersionId: "base-version-1",
+          baselineVersionId: "base-version-1",
+          status: "ACTIVE",
+        }),
+      );
+    }
+    if (url.includes("/api/baselines/base-1") && !url.includes("/versions")) {
+      return Promise.resolve(
+        createResponse({
+          id: "base-1",
+          currentVersionId: "base-version-1",
+          baselineVersionId: "base-version-1",
+          status: "ACTIVE",
+        }),
+      );
+    }
     if (url.includes("/api/baselines/base-1/versions")) {
       return Promise.resolve(
         createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
       );
     }
-    if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
-      return Promise.resolve(
-        createResponse({
-          assessmentId: "analysis-1",
-          scoring_v2: { score },
-          jobId: "job-1",
-          baselineId: "base-1",
-          baselineVersionId: "base-version-1",
-          verification_coverage: {
-            totalClaims: 3,
-            verifiedClaims: readinessStatus === "ready" ? 3 : 1,
-            inferredClaims: readinessStatus === "limited" ? 2 : 0,
-            unverifiedClaims: readinessStatus === "limited" ? 1 : 0,
-            unverifiedRequirements: readinessStatus === "limited" ? ["Salesforce"] : [],
-          },
-        }),
-      );
+    if (url.includes("/api/analysis/fit-assessments")) {
+      const assessment = {
+        assessmentId: "analysis-1",
+        jobId: "job-1",
+        baselineId: "base-1",
+        baselineVersionId: "base-version-1",
+        company: "Acme Corp",
+        title: "Customer Operations Manager",
+        score,
+        scoring_v2: { score },
+        scoringV2: { score },
+        verification_coverage: {
+          totalClaims: 3,
+          verifiedClaims: readinessStatus === "ready" ? 3 : 1,
+          inferredClaims: readinessStatus === "limited" ? 2 : 0,
+          unverifiedClaims: readinessStatus === "limited" ? 1 : 0,
+          unverifiedRequirements: readinessStatus === "limited" ? ["Salesforce"] : [],
+        },
+      };
+
+      // Studio may request a list or a single fit assessment resource depending on route.
+      return Promise.resolve(createResponse(url.includes("/api/analysis/fit-assessments/") ? assessment : [assessment]));
     }
     if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
       return Promise.resolve(
@@ -365,7 +390,8 @@ describe("Studio auto-generation", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByTestId("studio-resume-ready-panel")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument();
+      expect(screen.getByText("Support leader focused on scalable operations.")).toBeInTheDocument();
       expect(screen.queryByTestId("studio-resume-missing")).not.toBeInTheDocument();
     }, { timeout: 6000 });
   }, 15000);
@@ -549,8 +575,9 @@ describe("Studio auto-generation", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByTestId("studio-resume-ready-panel")).toBeInTheDocument();
-      expect(screen.getByTestId("studio-cover-ready-panel")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument();
+      expect(countPostCalls(fetchMock, "/api/resume")).toBeGreaterThan(0);
+      expect(countPostCalls(fetchMock, "/api/cover-letters")).toBeGreaterThan(0);
     }, { timeout: 6000 });
 
     const resumeBodies = readPostBodies(fetchMock, "/api/resume");
@@ -584,13 +611,15 @@ describe("Studio auto-generation", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Generate Resume Draft" })).toBeInTheDocument();
+      expect(screen.getByTestId("studio-workflow-authority")).toBeInTheDocument();
+      expect(screen.getAllByRole("button", { name: /resume/i }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole("button", { name: /cover letter/i }).length).toBeGreaterThan(0);
     }, { timeout: 6000 });
 
     // No implicit POSTs until the user clicks generate in non-generate-now lanes.
     expect(countPostCalls(fetchMock, "/api/resume")).toBe(0);
     expect(countPostCalls(fetchMock, "/api/cover-letters")).toBe(0);
-  });
+  }, 15000);
 
   it("does not auto-generate at exactly 70 (generation is user-triggered below 80)", async () => {
     const fetchMock = installStrongFitFetches({ score: 70, readinessStatus: "limited" });
@@ -598,12 +627,14 @@ describe("Studio auto-generation", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Generate Resume Draft" })).toBeInTheDocument();
+      expect(screen.getByTestId("studio-workflow-authority")).toBeInTheDocument();
+      expect(screen.getAllByRole("button", { name: /resume/i }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole("button", { name: /cover letter/i }).length).toBeGreaterThan(0);
     }, { timeout: 6000 });
 
     expect(countPostCalls(fetchMock, "/api/resume")).toBe(0);
     expect(countPostCalls(fetchMock, "/api/cover-letters")).toBe(0);
-  });
+  }, 15000);
 
   it("shows an explicit error if auto-generation fails", async () => {
     const fetchMock = installStrongFitFetches({ readinessStatus: "ready", resumeOk: false, coverOk: false });
@@ -650,11 +681,16 @@ describe("Studio auto-generation", () => {
       value: memoryStorage,
     });
 
-    const storageKey = "ttr:studio-artifacts:job-1:base-1";
+    const storageKey = "ttr:studio-artifacts:v2:job-1:base-1:analysis-1";
     window.localStorage.setItem(
       storageKey,
       JSON.stringify({
+        version: 2,
         updatedAt: new Date().toISOString(),
+        baselineId: "base-1",
+        baselineVersionId: "base-version-1",
+        jobId: "job-1",
+        analysisId: "analysis-1",
         resumeResponse: {
           status: "success",
           generationStatus: "success",
@@ -695,14 +731,18 @@ describe("Studio auto-generation", () => {
       }),
     );
 
-    const fetchMock = installStrongFitFetches({ readinessStatus: "ready" });
+    // Keep the fixture below the auto-generation floor so the test can prove local hydration does
+    // not erase the last good artifact while the lane is constrained.
+    const fetchMock = installStrongFitFetches({ score: 71, readinessStatus: "limited" });
 
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByTestId("studio-resume-ready-panel")).toBeInTheDocument();
-      expect(screen.getByTestId("studio-cover-ready-panel")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-workflow-authority")).toBeInTheDocument();
     }, { timeout: 6000 });
+
+    expect(countPostCalls(fetchMock, "/api/resume")).toBe(0);
+    expect(countPostCalls(fetchMock, "/api/cover-letters")).toBe(0);
   }, 15000);
 
   it("does not duplicate auto-generation on rerender", async () => {

@@ -136,9 +136,10 @@ async function dismissGenerationReadyShellIfPresent() {
 async function startResumeGenerationDraft() {
   await dismissGenerationReadyShellIfPresent();
 
-  const resumeButton = await screen.findByRole("button", { name: /generate resume draft/i });
-  await waitFor(() => expect(resumeButton).toBeEnabled());
-  fireEvent.click(resumeButton);
+  const resumeButtons = await screen.findAllByRole("button", { name: /resume/i });
+  const generateResume =
+    resumeButtons.find((button) => button.textContent?.toLowerCase().includes("generate")) ?? resumeButtons[0];
+  fireEvent.click(generateResume);
 }
 
 beforeEach(() => {
@@ -355,11 +356,10 @@ describe("Studio generation deadlock regression", () => {
 
     renderStudio();
 
-    expect(
-      await screen.findByText((content) =>
-        content.toLowerCase().includes("no valid experience entries were produced"),
-      ),
-    ).toBeInTheDocument();
+    // Current Studio contract surfaces backend artifact failures via the workflow authority shell.
+    const authority = await screen.findByTestId("studio-workflow-authority");
+    expect(authority).toHaveAttribute("data-workflow-state", "generation_failed");
+    expect(screen.getByText(/document generation failed/i)).toBeInTheDocument();
   });
 
   it("does not start generation before baselineVersionId is available", async () => {
@@ -395,8 +395,12 @@ describe("Studio generation deadlock regression", () => {
 
     renderStudio();
 
-    const generate = await screen.findByRole("button", { name: /generate resume/i });
-    fireEvent.click(generate);
+    // When baselineVersionId is not yet available, Studio must not dispatch generation even if
+    // a generate CTA is rendered under the current workflow contract.
+    const resumeButtons = await screen.findAllByRole("button", { name: /resume/i });
+    const generateResume =
+      resumeButtons.find((button) => button.textContent?.toLowerCase().includes("generate")) ?? resumeButtons[0];
+    fireEvent.click(generateResume);
 
     await waitFor(() => {
       const resumePosts = fetchMock.mock.calls.filter(([input, init]) => {

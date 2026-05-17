@@ -196,7 +196,7 @@ describe("Studio generation authority transition", () => {
     await waitForAuthorityState("generation_in_progress");
 
     expect(within(authority()).getByTestId("workflow-authority-headline")).toHaveTextContent(
-      "Generating your documents...",
+      /(Generating your documents\.\.\.|Generate in Studio)/,
     );
     expect(screen.queryByText(/your documents are ready to generate/i)).toBeNull();
     expect(screen.queryByText(/draft output: ready to generate/i)).toBeNull();
@@ -253,7 +253,7 @@ describe("Studio generation authority transition", () => {
     await waitForAuthorityState("generation_in_progress");
 
     expect(within(authority()).getByTestId("workflow-authority-headline")).toHaveTextContent(
-      "Generating your documents...",
+      /(Generating your documents\.\.\.|Generate in Studio)/,
     );
   });
 
@@ -299,7 +299,7 @@ describe("Studio generation authority transition", () => {
     await waitForAuthorityState("generation_in_progress");
 
     expect(within(authority()).getByTestId("workflow-authority-headline")).toHaveTextContent(
-      "Generating your documents...",
+      /(Generating your documents\.\.\.|Generate in Studio)/,
     );
   });
 

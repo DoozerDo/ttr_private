@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, vi } from "vitest";
 
 import StudioPage from "@/app/(app)/studio/page";
@@ -227,14 +227,14 @@ describe("Studio state messaging", () => {
     const fetchMock = installBaselineFetches("blocked", 88);
     renderStudio();
 
-    await waitFor(() => expect(screen.getByTestId("studio-blocked-message")).toBeInTheDocument());
-    expect(screen.getByTestId("studio-blocked-message")).toHaveTextContent(
-      "We need clearer, verified examples of your experience",
-    );
-    expect(screen.getByRole("link", { name: "Resolve blockers" })).toBeInTheDocument();
+    const blockedSummary = await screen.findByTestId("studio-ready-secondary-summary");
+    expect(within(blockedSummary).getByRole("heading", { name: "Generation is blocked" })).toBeInTheDocument();
+    expect(within(blockedSummary).getByText("Resolve the current blockers before continuing.")).toBeInTheDocument();
 
-    expect(screen.queryByText("Why generation is blocked")).toBeNull();
-    expect(screen.queryByText("Limited output: not ready yet.")).toBeNull();
+    // Clear next action is visible.
+    expect(within(blockedSummary).getByText("Resolve blockers")).toBeInTheDocument();
+
+    // Blocked UX should not show "reliable result" failure copy (that belongs to generation failures, not gating).
     expect(screen.queryByText("We couldn't generate a reliable result")).toBeNull();
   });
 
@@ -242,7 +242,9 @@ describe("Studio state messaging", () => {
     installBaselineFetches("blocked", 65);
     renderStudio();
 
-    await waitFor(() => expect(screen.getByTestId("studio-blocked-message")).toBeInTheDocument());
+    const blockedSummary = await screen.findByTestId("studio-ready-secondary-summary");
+    expect(within(blockedSummary).getByRole("heading", { name: "Generation is blocked" })).toBeInTheDocument();
+    expect(within(blockedSummary).getByText(/Fit score 65/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Generate draft anyway" })).toBeNull();
   });
 
@@ -250,16 +252,21 @@ describe("Studio state messaging", () => {
     installBaselineFetches("limited", 78);
     renderStudio();
 
-    await waitFor(() => expect(screen.getByTestId("studio-blocked-primary-action")).toBeInTheDocument());
-    expect(screen.getAllByTestId("studio-blocked-message")).toHaveLength(1);
-    expect(screen.getByTestId("studio-blocked-message")).toHaveTextContent(
-      "We need clearer, verified examples of your experience",
+    const authority = await screen.findByTestId("studio-workflow-authority");
+    expect(authority.getAttribute("data-workflow-state")).toBe("unlock_required");
+    expect(authority.getAttribute("data-workflow-trust-tone")).toBe("recovery");
+
+    // Visible, action-first next step guidance (current workflow authority contract).
+    expect(within(authority).getByTestId("workflow-authority-eyebrow")).toHaveTextContent("Action required");
+    expect(within(authority).getByTestId("workflow-authority-headline")).toHaveTextContent(
+      "One focused update is required.",
     );
-    expect(screen.getByRole("link", { name: "Strengthen my experience" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View fit review" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Generate draft anyway" })).toBeInTheDocument();
-    expect(screen.queryByText("Why generation is blocked")).toBeNull();
-    expect(screen.queryByText("Limited output: not ready yet.")).toBeNull();
-    expect(screen.queryByText("We couldn't generate a reliable result")).toBeNull();
+    expect(within(authority).getByTestId("workflow-authority-body")).toHaveTextContent(
+      "Add one specific, verified example to unlock document generation.",
+    );
+
+    expect(within(authority).queryByText("Why generation is blocked")).toBeNull();
+    expect(within(authority).queryByText("Limited output: not ready yet.")).toBeNull();
+    expect(within(authority).queryByText("We couldn't generate a reliable result")).toBeNull();
   });
 });

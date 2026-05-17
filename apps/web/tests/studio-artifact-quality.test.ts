@@ -94,12 +94,20 @@ describe("Studio artifact quality", () => {
     });
 
     it("passes a normal concise paragraph", () => {
-      const result = validateCoverLetterQuality([
-        "I have shipped production systems for high-traffic workflows and can translate ambiguous requirements into reliable delivery.",
-      ]);
+      const result = validateCoverLetterQuality({
+        paragraphs: [
+          "Dear Hiring Team,",
+          "I’m excited to apply for the Customer Operations Manager role at Acme. I’ve led support operations programs end to end: defining clear intake, partnering with Engineering on root-cause fixes, and building reporting that helps leaders make decisions quickly. I bring a bias toward measurable outcomes and repeatable systems, and I’m comfortable translating ambiguous requirements into reliable delivery.",
+          "In prior roles I improved time-to-resolution, reduced escalations through better triage, and created playbooks that help new teammates ramp quickly. I also partner closely with Product, Success, and Sales so customer feedback is integrated into roadmap decisions and incident reviews. I’d welcome the chance to bring that operating rhythm to Acme and help the team scale with quality.",
+          "Sincerely,",
+          "Test Person",
+        ],
+        jobTitle: "Customer Operations Manager",
+        companyName: "Acme",
+        resumeExportable: true,
+      });
       expect(result.status).toBe("pass");
       expect(result.exportable).toBe(true);
     });
   });
 });
-

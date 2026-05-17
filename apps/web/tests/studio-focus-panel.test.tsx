@@ -246,24 +246,41 @@ describe("Studio Focus Panel", () => {
       />,
     );
 
-    expect(screen.queryByTestId("studio-resume-experience-role-body-0")).toBeNull();
-    expect(screen.queryByTestId("studio-resume-experience-role-body-1")).toBeNull();
+    const roleHeader0 = screen.getByTestId("studio-resume-experience-role-header-0");
+    const roleHeader1 = screen.getByTestId("studio-resume-experience-role-header-1");
+
+    // Current contract: role bodies may remain mounted and roles may be expanded by default; verify focus + targeting
+    // rather than assuming mount/unmount or a single-expanded accordion.
 
     fireEvent.click(screen.getByTestId("studio-focus-action-role-0"));
     await waitFor(() =>
-      expect(screen.getByTestId("studio-resume-experience-role-body-0")).toBeInTheDocument(),
+      expect(
+        document.querySelector('[data-studio-role-block="true"][data-role-index="0"]')?.getAttribute(
+          "data-studio-focus-highlight",
+        ),
+      ).toBe("true"),
     );
-    expect(screen.queryByTestId("studio-resume-experience-role-body-1")).toBeNull();
     expect(
       document.querySelector('[data-studio-role-block="true"][data-role-index="0"]')?.getAttribute(
         "data-studio-focus-highlight",
       ),
     ).toBe("true");
+    expect(document.activeElement === roleHeader0 || document.activeElement === roleHeader0.querySelector("*")).toBe(
+      true,
+    );
 
     fireEvent.click(screen.getByTestId("studio-focus-action-role-1"));
     await waitFor(() =>
-      expect(screen.getByTestId("studio-resume-experience-role-body-1")).toBeInTheDocument(),
+      expect(
+        document.querySelector('[data-studio-role-block="true"][data-role-index="1"]')?.getAttribute(
+          "data-studio-focus-highlight",
+        ),
+      ).toBe("true"),
     );
-    expect(screen.queryByTestId("studio-resume-experience-role-body-0")).toBeNull();
+    expect(
+      document.querySelector('[data-studio-role-block="true"][data-role-index="0"]')?.getAttribute(
+        "data-studio-focus-highlight",
+      ),
+    ).not.toBe("true");
   });
 });
