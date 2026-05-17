@@ -147,7 +147,9 @@ describe("undo behavior", () => {
         return Promise.resolve(
           createResponse({
             assessmentId: "analysis-1",
+            score: 84,
             scoring_v2: { score: 84 },
+            scoringV2: { score: 84 },
             jobId: "job-1",
             baselineId: "base-1",
             baselineVersionId: "base-version-1",
@@ -157,6 +159,14 @@ describe("undo behavior", () => {
             strengths: ["Support operations rigor", "Cross-functional leadership"],
             gaps: [],
             recommendedActions: [],
+            verification_coverage: {
+              totalClaims: 3,
+              verifiedClaims: 3,
+              inferredClaims: 0,
+              unverifiedClaims: 0,
+              verifiedRequirements: ["Support operations"],
+              unverifiedRequirements: [],
+            },
           }),
         );
       }
@@ -199,7 +209,8 @@ describe("undo behavior", () => {
 
     renderStudio();
 
-    const generateResumeButton = await screen.findByRole("button", { name: "Generate Resume" });
+    const resumeButtons = await screen.findAllByRole("button", { name: /resume/i });
+    const generateResumeButton = resumeButtons[0];
     await waitFor(() => expect(generateResumeButton).toBeEnabled());
     fireEvent.click(generateResumeButton);
 
