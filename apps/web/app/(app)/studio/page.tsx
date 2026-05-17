@@ -6655,20 +6655,20 @@ export default function StudioPage() {
       );
     }
     if (!generationLifecycle.canStartGeneration) {
-      // Manual retry must be able to regenerate when the current artifacts are unusable (quality failed).
-      // Do not block on the pair lifecycle "generated" state in that case.
-      if (opts?.forceRegenerate && artifactContract.hasReusableArtifacts === false) {
+      // Regeneration flows (guided refinement, manual retry) must be allowed to run even when the
+      // pair lifecycle has already reached the "generated" phase.
+      if (opts?.forceRegenerate) {
         // proceed
       } else {
-      return finish(
-        makeStudioAttempt("resume", {
-          ok: false,
-          status: "failed",
-          errorCode: "generation_not_allowed",
-          errorMessage: "Generation cannot start in the current lifecycle phase.",
-          request: { sessionKey: opts?.sessionKey ?? null, requestId: null },
-        }),
-      );
+        return finish(
+          makeStudioAttempt("resume", {
+            ok: false,
+            status: "failed",
+            errorCode: "generation_not_allowed",
+            errorMessage: "Generation cannot start in the current lifecycle phase.",
+            request: { sessionKey: opts?.sessionKey ?? null, requestId: null },
+          }),
+        );
       }
     }
 
@@ -7526,20 +7526,20 @@ export default function StudioPage() {
       );
     }
     if (!generationLifecycle.canStartGeneration) {
-      // Manual retry must be able to regenerate when the current artifacts are unusable (quality failed).
-      // Do not block on the pair lifecycle "generated" state in that case.
-      if (opts?.forceRegenerate && artifactContract.hasReusableArtifacts === false) {
+      // Regeneration flows (guided refinement, manual retry) must be allowed to run even when the
+      // pair lifecycle has already reached the "generated" phase.
+      if (opts?.forceRegenerate) {
         // proceed
       } else {
-      return finish(
-        makeStudioAttempt("cover", {
-          ok: false,
-          status: "failed",
-          errorCode: "generation_not_allowed",
-          errorMessage: "Generation cannot start in the current lifecycle phase.",
-          request: { sessionKey: opts?.sessionKey ?? null, requestId: null },
-        }),
-      );
+        return finish(
+          makeStudioAttempt("cover", {
+            ok: false,
+            status: "failed",
+            errorCode: "generation_not_allowed",
+            errorMessage: "Generation cannot start in the current lifecycle phase.",
+            request: { sessionKey: opts?.sessionKey ?? null, requestId: null },
+          }),
+        );
       }
     }
 
@@ -8054,10 +8054,10 @@ export default function StudioPage() {
       setRefinementApplying(true);
       try {
         if (pendingRefinementAction.targets.includes("resume")) {
-          await handleResumeDraft();
+          await handleResumeDraft({ forceRegenerate: true, regenerationSource: "shell" });
         }
         if (pendingRefinementAction.targets.includes("cover_letter")) {
-          await handleCoverDraft();
+          await handleCoverDraft({ forceRegenerate: true, regenerationSource: "shell" });
         }
         if (!cancelled) {
           setRefinementStatusMessage(pendingRefinementAction.summary);
@@ -9055,8 +9055,10 @@ export default function StudioPage() {
       generationReadiness: activeGenerationReadiness,
       workflowAuthority,
       artifact: {
-        hasResume: hasUsableResume,
-        hasCoverLetter: hasUsableCoverLetter,
+        // Authority surface output presence should track the same "ready" statuses used by the artifact cards.
+        // This preserves failure/blocked lanes while avoiding unlock fallbacks during refinement/regeneration.
+        hasResume: resumeStatus === "ready",
+        hasCoverLetter: coverStatus === "ready",
         pairStatus: studioArtifactPairStatus ?? null,
         generating:
           !suppressPairGeneratingPresentation &&
