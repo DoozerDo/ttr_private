@@ -82,7 +82,7 @@ function renderStudio() {
 
 function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   const text = typeof body === "string" ? body : JSON.stringify(body ?? {});
-  return {
+  const response = {
     ok,
     status,
     headers: {
@@ -92,6 +92,13 @@ function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
     json: () => Promise.resolve(body),
     text: () => Promise.resolve(text),
     blob: () => Promise.resolve(new Blob([text], { type: "application/json" })),
+  };
+
+  // Studio generation normalization reads the payload multiple times via `Response.clone()`.
+  // Our tests run with a lightweight Response-like mock, so we must provide `clone()`.
+  return {
+    ...response,
+    clone: () => createResponse(body, ok, status),
   };
 }
 
@@ -391,6 +398,20 @@ describe("Studio generation error contract", () => {
       if (url.includes("/api/studio/artifacts")) {
         return Promise.resolve(createResponse({}));
       }
+      if (url.includes("/api/resume") && init?.method === "POST") {
+        // Some Studio flows issue paired generation; keep resume successful so the test isolates the cover-letter error.
+        return Promise.resolve(
+          createResponse({
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: {
+              resume: { heading: { name: "Alex Candidate", contactLine: "alex@example.com" }, experience: [] },
+            },
+          }),
+        );
+      }
       if (url.includes("/api/cover-letters") && init?.method === "POST") {
         resumeFetches += 1;
         return Promise.resolve(
@@ -421,13 +442,18 @@ describe("Studio generation error contract", () => {
     });
 
     renderStudio();
-    const retry = await screen.findByRole("button", { name: /retry generation/i });
-    await waitFor(() => expect(retry).toBeEnabled());
-    fireEvent.click(retry);
+    // Trigger generation through the existing Studio action (no special retry wiring assumptions).
+    fireEvent.click(await screen.findByTestId("studio-generate-cover-button"));
 
     expect(resumeFetches).toBeGreaterThanOrEqual(1);
-    expect(await screen.findByText(/could not extract enough text/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/grounded into a supported artifact/i).length).toBeGreaterThan(0);
+    // Customer-facing contract: actionable + specific error, no fake generation-in-progress copy.
+    // With no persisted cover letter, Studio must surface the failure inline (not hidden in collapsed guidance).
+    expect(
+      await screen.findByText(/Cover letter generation is currently limited for this role/i),
+    ).toBeInTheDocument();
+    expect((await screen.findByTestId("studio-cover-error-message")).textContent?.toLowerCase()).toContain(
+      "extract enough text",
+    );
     expect(screen.queryByText(/We are generating your application draft now/i)).toBeNull();
   });
 
@@ -464,12 +490,11 @@ describe("Studio generation error contract", () => {
     });
 
     renderStudio();
-    const retry = await screen.findByRole("button", { name: /retry generation/i });
-    await waitFor(() => expect(retry).toBeEnabled());
-    fireEvent.click(retry);
+    fireEvent.click(await screen.findByTestId("studio-generate-resume-button"));
 
     expect(resumeFetches).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("Fix Pair Selection")).toBeNull();
+    expect(await screen.findByText(/Document generation needs attention/i)).toBeInTheDocument();
     expect((await screen.findAllByText(/Resume generation failed validation/i)).length).toBeGreaterThan(0);
     expect(screen.queryByText(/we couldn.?t generate a reliable result/i)).toBeNull();
     expect(screen.queryByText(/We are generating your application draft now/i)).toBeNull();

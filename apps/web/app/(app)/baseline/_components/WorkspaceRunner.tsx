@@ -2302,6 +2302,7 @@ const showInterruptionState =
                 </button>
                 <a
                   href={targetCta.href}
+                  onClick={handleGenerateClick}
                   className="inline-flex items-center justify-center whitespace-nowrap rounded-2xl border border-white/10 bg-white/5 px-6 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
                 >
                   Start Fit Review

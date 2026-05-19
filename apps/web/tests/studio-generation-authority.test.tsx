@@ -344,14 +344,13 @@ describe("Studio artifact quality gating (soft)", () => {
     const enterWorkspace = screen.queryByTestId("studio-generation-ready-secondary");
     if (enterWorkspace) fireEvent.click(enterWorkspace);
 
-    const coverSection = screen.getByRole("heading", { name: "Cover letter" }).closest("section");
-    expect(coverSection).toBeTruthy();
-    expect(within(coverSection as HTMLElement).queryByTestId("studio-cover-missing")).toBeNull();
+    const coverSection = await screen.findByTestId("studio-cover-letter-details");
+    expect(within(coverSection).queryByTestId("studio-cover-missing")).toBeNull();
     // Clean UX: user-facing warning + export disabled. (Implementation can render either a per-artifact issue
     // panel or a constrained-generation banner depending on authority lane.)
-    expect(within(coverSection as HTMLElement).queryByText(/normalized_model/i)).toBeNull();
-    expect(within(coverSection as HTMLElement).queryByText("Download DOCX")).toBeNull();
-    expect(within(coverSection as HTMLElement).queryByText("Download PDF")).toBeNull();
+    expect(within(coverSection).queryByText(/normalized_model/i)).toBeNull();
+    expect(within(coverSection).queryByText("Download DOCX")).toBeNull();
+    expect(within(coverSection).queryByText("Download PDF")).toBeNull();
     // Recovery action may live in the workflow authority surface rather than inside the per-artifact card.
     expect(
       screen.queryByRole("button", { name: /regenerate cover letter/i }) ??
@@ -2978,8 +2977,12 @@ describe("Studio generation authority", () => {
       /^(generation_ready|unlock_required)$/,
     );
     expect(screen.queryByTestId("studio-decision-panel")).toBeNull();
-    // Advanced improvement tooling is gated behind low confidence.
-    expect(screen.queryByTestId("studio-refinement-details")).toBeNull();
+    // Advanced improvement tooling may render as collapsed secondary guidance under the new hierarchy.
+    const refinementDetails = screen.queryByTestId("studio-refinement-details");
+    if (refinementDetails) {
+      expect(refinementDetails).toBeInTheDocument();
+      expect(refinementDetails).not.toHaveAttribute("open");
+    }
     expect(screen.queryByRole("button", { name: /generate resume/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /generate cover letter/i })).toBeNull();
   });

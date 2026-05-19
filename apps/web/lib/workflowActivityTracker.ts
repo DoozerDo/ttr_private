@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AnalyticsEventMap, AnalyticsEventName } from "@/src/lib/analytics";
 
@@ -42,6 +42,7 @@ export function useWorkflowActivityTracker(options: WorkflowActivityTrackerOptio
   const trackEvent = options.trackEvent;
   const surface = options.surface;
 
+  const mountedRef = useRef(true);
   const stateRef = useRef<Record<WorkflowActivityOperation, OperationState | null>>({
     analysis_running: null,
     unlock_reanalysis_running: null,
@@ -51,7 +52,21 @@ export function useWorkflowActivityTracker(options: WorkflowActivityTrackerOptio
   const cooldownTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [version, setVersion] = useState(0);
 
-  const bump = useCallback(() => setVersion((value) => value + 1), []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (cooldownTimeoutRef.current) {
+        clearTimeout(cooldownTimeoutRef.current);
+        cooldownTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  const bump = useCallback(() => {
+    if (!mountedRef.current) return;
+    setVersion((value) => value + 1);
+  }, []);
 
   const snapshot: WorkflowActivitySnapshot = useMemo(() => {
     void version;

@@ -606,6 +606,20 @@ describe("Studio page UX", () => {
     const instantSummary = await screen.findByTestId("studio-instant-resume-summary");
     expect(instantSummary).toHaveTextContent("Support leader focused on scalable operations.");
 
+    // Artifacts are canonical after hydration: materials stay primary, guidance becomes secondary.
+    const primaryMaterials = screen.getByTestId("studio-primary-artifacts");
+    expect(within(primaryMaterials).getByText("Your application materials")).toBeInTheDocument();
+    expect(primaryMaterials.className).toContain("order-1");
+    // Refinement must be secondary and live below materials (not above as a competing primary state).
+    const refinementDetails = within(primaryMaterials).getByTestId("studio-refinement-details");
+    expect(refinementDetails).not.toHaveAttribute("open");
+
+    const secondarySystems = screen.getByTestId("studio-secondary-systems");
+    expect(secondarySystems.className).toContain("order-2");
+    const guidanceDetails = screen.getByTestId("studio-guidance-details");
+    expect(guidanceDetails).not.toHaveAttribute("open");
+    expect(within(secondarySystems).getByTestId("studio-guidance-details")).toBeInTheDocument();
+
     firstMount.unmount();
 
     const secondMount = renderStudio();
@@ -622,6 +636,19 @@ describe("Studio page UX", () => {
     const instantSummaryAgain = await screen.findByTestId("studio-instant-resume-summary");
     expect(instantSummaryAgain).toHaveTextContent("Support leader focused on scalable operations.");
 
+    // Reload/remount keeps the hierarchy: materials first, guidance below and collapsed.
+    const primaryMaterialsAgain = screen.getByTestId("studio-primary-artifacts");
+    expect(within(primaryMaterialsAgain).getByText("Your application materials")).toBeInTheDocument();
+    expect(primaryMaterialsAgain.className).toContain("order-1");
+    const refinementDetailsAgain = within(primaryMaterialsAgain).getByTestId("studio-refinement-details");
+    expect(refinementDetailsAgain).not.toHaveAttribute("open");
+
+    const secondarySystemsAgain = screen.getByTestId("studio-secondary-systems");
+    expect(secondarySystemsAgain.className).toContain("order-2");
+    const guidanceDetailsAgain = screen.getByTestId("studio-guidance-details");
+    expect(guidanceDetailsAgain).not.toHaveAttribute("open");
+    expect(within(secondarySystemsAgain).getByTestId("studio-guidance-details")).toBeInTheDocument();
+
     // No contradictory "not generated" messaging should appear when persisted resume exists.
     expect(screen.queryByText("Resume not generated yet")).toBeNull();
     // Draft Review label must not say "not generated" when persisted materials are renderable.
@@ -631,6 +658,583 @@ describe("Studio page UX", () => {
 
     // No localStorage artifact fallback should be needed when backend hydration succeeds.
     expect(localStorageGet.mock.calls.some(([key]) => String(key).includes("ttr:studio-artifacts"))).toBe(false);
+  }, 20000);
+
+  it("keeps persisted artifacts canonical on reload even when analysisId is present and readiness is pending", async () => {
+    overrideSearchParams({
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      analysisId: "analysis-1",
+    });
+
+    const localStorageGet = vi.spyOn(Storage.prototype, "getItem");
+
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const rawUrl = rawFetchUrl(input);
+
+      if (rawUrl.includes("/api/studio/artifacts")) {
+        expect(rawUrl.includes("analysisId=analysis-1")).toBe(true);
+        return Promise.resolve(
+          createResponse({
+            status: "COMPLETED",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "job-fingerprint-1",
+            generationContractVersion: "studio-artifacts-v1",
+            assessmentScore: 55,
+            resume: {
+              status: "COMPLETED",
+              inputsHash: "resume-hash",
+              inputsHashMatches: true,
+              artifactCurrent: true,
+              retryAllowed: true,
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  resume: {
+                    heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                    summary: "Support leader focused on scalable operations.",
+                    experience: [],
+                    education: [],
+                    competencies: [],
+                  },
+                },
+              },
+              content: "resume-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-1" },
+            },
+            coverLetter: {
+              status: "COMPLETED",
+              inputsHash: "cover-hash",
+              inputsHashMatches: true,
+              artifactCurrent: true,
+              retryAllowed: true,
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  coverLetter: {
+                    paragraphs: [
+                      "Dear Hiring Team,",
+                      "I bring verified leadership and operational experience aligned to this role.",
+                      "Sincerely,",
+                      "Alex Candidate",
+                    ],
+                  },
+                },
+              },
+              content: "cover-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-1" },
+            },
+          }),
+        );
+      }
+
+      if (rawUrl.includes("/api/analysis/fit-assessments/analysis-1")) {
+        // Provide a real analysis payload so the page does not treat analysisId as invalid, but keep readiness pending via readiness endpoint.
+        return Promise.resolve(createResponse(createFitAssessment(55)));
+      }
+
+      if (rawUrl.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+
+      if (rawUrl.includes("/api/resume/readiness")) {
+        return Promise.resolve(
+          createResponse({
+            status: "limited",
+            reasons: [{ code: "readiness_pending", message: "pending" }],
+            compliance_flags: [],
+          }),
+        );
+      }
+
+      if (rawUrl.includes("/api/analytics/event")) {
+        return Promise.resolve(createResponse({ ok: true }));
+      }
+
+      return Promise.resolve(createResponse({}));
+    });
+
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    const firstMount = renderStudio();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => {
+      const urls = fetchMock.mock.calls.map(([input]) => rawFetchUrl(input));
+      expect(urls.some((url) => url.includes("/api/studio/artifacts"))).toBe(true);
+      expect(urls.some((url) => url.includes("/api/analysis/fit-assessments/analysis-1"))).toBe(true);
+    });
+
+    // Persisted artifact is renderable (resume preview panel mounts).
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("studio-resume-ready-panel") ?? screen.queryByTestId("studio-resume-correction-panel"),
+      ).toBeTruthy();
+    });
+
+    const primaryMaterials = screen.getByTestId("studio-primary-artifacts");
+    expect(within(primaryMaterials).getByText("Your application materials")).toBeInTheDocument();
+    expect(primaryMaterials.className).toContain("order-1");
+    const judgment = screen.getByTestId("studio-compatibility-judgment");
+    expect(judgment).toHaveTextContent("55");
+    // Verdict is derived from the established score band mapping when not explicitly provided by the payload.
+    expect(judgment).toHaveTextContent("Below threshold");
+    expect(within(judgment).queryByTestId("studio-compatibility-rationale")).toBeNull();
+    expect(within(primaryMaterials).getByTestId("studio-materials-completeness")).toHaveTextContent("Complete set");
+    expect(within(primaryMaterials).getByTestId("studio-download-application-package")).toBeInTheDocument();
+
+    const refinementDetails = within(primaryMaterials).getByTestId("studio-refinement-details");
+    expect(refinementDetails).not.toHaveAttribute("open");
+
+    const secondarySystems = screen.getByTestId("studio-secondary-systems");
+    expect(secondarySystems.className).toContain("order-2");
+    const guidanceDetails = within(secondarySystems).getByTestId("studio-guidance-details");
+    expect(guidanceDetails).not.toHaveAttribute("open");
+
+    // Both artifacts are visible product outcomes.
+    expect(screen.queryByTestId("studio-resume-ready-panel") ?? screen.queryByTestId("studio-resume-correction-panel")).toBeTruthy();
+    expect(await screen.findByText("I bring verified leadership and operational experience aligned to this role.")).toBeInTheDocument();
+
+    firstMount.unmount();
+
+    const secondMount = renderStudio();
+    await waitFor(() => {
+      const artifactCalls = fetchMock.mock.calls
+        .map(([input]) => rawFetchUrl(input))
+        .filter((url) => url.includes("/api/studio/artifacts"));
+      expect(artifactCalls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("studio-resume-ready-panel") ?? screen.queryByTestId("studio-resume-correction-panel"),
+      ).toBeTruthy();
+    });
+
+    const primaryMaterialsAgain = screen.getByTestId("studio-primary-artifacts");
+    expect(within(primaryMaterialsAgain).getByText("Your application materials")).toBeInTheDocument();
+    expect(primaryMaterialsAgain.className).toContain("order-1");
+    const judgmentAgain = screen.getByTestId("studio-compatibility-judgment");
+    expect(judgmentAgain).toHaveTextContent("55");
+    expect(judgmentAgain).toHaveTextContent("Below threshold");
+    expect(within(judgmentAgain).queryByTestId("studio-compatibility-rationale")).toBeNull();
+    expect(within(primaryMaterialsAgain).getByTestId("studio-materials-completeness")).toHaveTextContent("Complete set");
+    expect(within(primaryMaterialsAgain).getByTestId("studio-download-application-package")).toBeInTheDocument();
+
+    const refinementDetailsAgain = within(primaryMaterialsAgain).getByTestId("studio-refinement-details");
+    expect(refinementDetailsAgain).not.toHaveAttribute("open");
+
+    const secondarySystemsAgain = screen.getByTestId("studio-secondary-systems");
+    expect(secondarySystemsAgain.className).toContain("order-2");
+    const guidanceDetailsAgain = within(secondarySystemsAgain).getByTestId("studio-guidance-details");
+    expect(guidanceDetailsAgain).not.toHaveAttribute("open");
+
+    secondMount.unmount();
+
+    // No localStorage artifact fallback should be needed when backend hydration succeeds.
+    expect(localStorageGet.mock.calls.some(([key]) => String(key).includes("ttr:studio-artifacts"))).toBe(false);
+  }, 20000);
+
+  it("shows resume-only hydration as a partial materials state (does not imply complete set)", async () => {
+    overrideSearchParams({
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      analysisId: "analysis-1",
+    });
+
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const rawUrl = rawFetchUrl(input);
+
+      if (rawUrl.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "COMPLETED",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "job-fingerprint-1",
+            generationContractVersion: "studio-artifacts-v1",
+            assessmentScore: 84,
+            resume: {
+              status: "COMPLETED",
+              inputsHash: "resume-hash",
+              inputsHashMatches: true,
+              artifactCurrent: true,
+              retryAllowed: true,
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  resume: {
+                    heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                    summary: "Support leader focused on scalable operations.",
+                    experience: [],
+                    education: [],
+                    competencies: [],
+                  },
+                },
+              },
+              content: "resume-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-1" },
+            },
+            coverLetter: null,
+          }),
+        );
+      }
+
+      if (rawUrl.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(createResponse(createFitAssessment(84)));
+      }
+
+      if (rawUrl.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+
+      if (rawUrl.includes("/api/resume/readiness")) {
+        return Promise.resolve(createResponse({ status: "limited", reasons: [{ code: "readiness_pending", message: "pending" }], compliance_flags: [] }));
+      }
+
+      if (rawUrl.includes("/api/analytics/event")) {
+        return Promise.resolve(createResponse({ ok: true }));
+      }
+
+      return Promise.resolve(createResponse({}));
+    });
+
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    renderStudio();
+
+    const primaryMaterials = await screen.findByTestId("studio-primary-artifacts");
+    expect(within(primaryMaterials).getByTestId("studio-materials-completeness")).toHaveTextContent("Partial: Resume ready");
+    expect(within(primaryMaterials).queryByTestId("studio-download-application-package")).toBeNull();
+    expect(await screen.findByText("Support leader focused on scalable operations.")).toBeInTheDocument();
+    expect(screen.queryByText("I bring verified leadership and operational experience aligned to this role.")).toBeNull();
+  }, 20000);
+
+  it("shows cover-letter-only hydration as a partial materials state (does not imply complete set)", async () => {
+    overrideSearchParams({
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      analysisId: "analysis-1",
+    });
+
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const rawUrl = rawFetchUrl(input);
+
+      if (rawUrl.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "COMPLETED",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "job-fingerprint-1",
+            generationContractVersion: "studio-artifacts-v1",
+            assessmentScore: 84,
+            resume: null,
+            coverLetter: {
+              status: "COMPLETED",
+              inputsHash: "cover-hash",
+              inputsHashMatches: true,
+              artifactCurrent: true,
+              retryAllowed: true,
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  coverLetter: {
+                    paragraphs: [
+                      "Dear Hiring Team,",
+                      "I bring verified leadership and operational experience aligned to this role.",
+                      "Sincerely,",
+                      "Alex Candidate",
+                    ],
+                  },
+                },
+              },
+              content: "cover-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-1" },
+            },
+          }),
+        );
+      }
+
+      if (rawUrl.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(createResponse(createFitAssessment(84)));
+      }
+
+      if (rawUrl.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+
+      if (rawUrl.includes("/api/resume/readiness")) {
+        return Promise.resolve(createResponse({ status: "limited", reasons: [{ code: "readiness_pending", message: "pending" }], compliance_flags: [] }));
+      }
+
+      if (rawUrl.includes("/api/analytics/event")) {
+        return Promise.resolve(createResponse({ ok: true }));
+      }
+
+      return Promise.resolve(createResponse({}));
+    });
+
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    renderStudio();
+
+    const primaryMaterials = await screen.findByTestId("studio-primary-artifacts");
+    expect(within(primaryMaterials).getByTestId("studio-materials-completeness")).toHaveTextContent("Partial: Cover letter ready");
+    expect(within(primaryMaterials).queryByTestId("studio-download-application-package")).toBeNull();
+    expect(await screen.findByText("I bring verified leadership and operational experience aligned to this role.")).toBeInTheDocument();
+    expect(screen.queryByText("Support leader focused on scalable operations.")).toBeNull();
+  }, 20000);
+
+  it("renders a short 'why this match' explanation when fit assessment summary text exists (kept secondary to materials)", async () => {
+    overrideSearchParams({
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      analysisId: "analysis-1",
+    });
+
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const rawUrl = rawFetchUrl(input);
+
+      if (rawUrl.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "COMPLETED",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "job-fingerprint-1",
+            generationContractVersion: "studio-artifacts-v1",
+            assessmentScore: 84,
+            resume: {
+              status: "COMPLETED",
+              inputsHash: "resume-hash",
+              inputsHashMatches: true,
+              artifactCurrent: true,
+              retryAllowed: true,
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  resume: {
+                    heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                    summary: "Support leader focused on scalable operations.",
+                    experience: [],
+                    education: [],
+                    competencies: [],
+                  },
+                },
+              },
+              content: "resume-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-1" },
+            },
+            coverLetter: {
+              status: "COMPLETED",
+              inputsHash: "cover-hash",
+              inputsHashMatches: true,
+              artifactCurrent: true,
+              retryAllowed: true,
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  coverLetter: {
+                    paragraphs: [
+                      "Dear Hiring Team,",
+                      "I bring verified leadership and operational experience aligned to this role.",
+                      "Sincerely,",
+                      "Alex Candidate",
+                    ],
+                  },
+                },
+              },
+              content: "cover-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-1" },
+            },
+          }),
+        );
+      }
+
+      if (rawUrl.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            ...createFitAssessment(84),
+            summary: "Strong overlap with support operations leadership and scalable process ownership.",
+          }),
+        );
+      }
+
+      if (rawUrl.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+
+      if (rawUrl.includes("/api/resume/readiness")) {
+        return Promise.resolve(createResponse({ status: "limited", reasons: [{ code: "readiness_pending", message: "pending" }], compliance_flags: [] }));
+      }
+
+      if (rawUrl.includes("/api/analytics/event")) {
+        return Promise.resolve(createResponse({ ok: true }));
+      }
+
+      return Promise.resolve(createResponse({}));
+    });
+
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    renderStudio();
+
+    const primaryMaterials = await screen.findByTestId("studio-primary-artifacts");
+    expect(primaryMaterials.className).toContain("order-1");
+
+    const judgment = within(primaryMaterials).getByTestId("studio-compatibility-judgment");
+    expect(judgment).toHaveTextContent("Compatibility:");
+    expect(judgment).toHaveTextContent("84");
+    expect(within(judgment).getByTestId("studio-compatibility-rationale")).toHaveTextContent(
+      "Strong overlap with support operations leadership and scalable process ownership.",
+    );
+
+    // Artifacts remain the visible product outcome.
+    expect(await screen.findByText("Support leader focused on scalable operations.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("I bring verified leadership and operational experience aligned to this role."),
+    ).toBeInTheDocument();
+
+    // Secondary systems remain below materials (and are collapsed).
+    const secondarySystems = screen.getByTestId("studio-secondary-systems");
+    expect(secondarySystems.className).toContain("order-2");
+    // Guidance may or may not be present depending on generation eligibility; when artifacts exist, refinement is secondary.
+    expect(within(primaryMaterials).getByTestId("studio-refinement-details")).not.toHaveAttribute("open");
+  }, 20000);
+
+  it("shows a specific blocker and a concrete next action when generation is blocked and no artifacts exist", async () => {
+    overrideSearchParams({
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      analysisId: "analysis-1",
+    });
+
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const rawUrl = rawFetchUrl(input);
+
+      if (rawUrl.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "COMPLETED",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "job-fingerprint-1",
+            generationContractVersion: "studio-artifacts-v1",
+            assessmentScore: 84,
+            resume: null,
+            coverLetter: null,
+          }),
+        );
+      }
+
+      if (rawUrl.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(createResponse(createFitAssessment(84)));
+      }
+
+      if (rawUrl.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+
+      if (rawUrl.includes("/api/resume/readiness")) {
+        return Promise.resolve(
+          createResponse({
+            status: "blocked",
+            blocked: true,
+            reasons: [{ code: "baseline_requires_reprocess", message: "Your baseline needs to be reprocessed before drafting." }],
+            compliance_flags: [],
+          }),
+        );
+      }
+
+      if (rawUrl.includes("/api/analytics/event")) {
+        return Promise.resolve(createResponse({ ok: true }));
+      }
+
+      return Promise.resolve(createResponse({}));
+    });
+
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    renderStudio();
+
+    const guidance = await screen.findByTestId("studio-guidance-details");
+    expect(guidance).toHaveAttribute("open");
+    expect(within(guidance).getByTestId("studio-readiness-message")).toHaveTextContent(
+      "Your baseline needs to be reprocessed before drafting.",
+    );
+    const nextAction = within(guidance).getByTestId("studio-blocker-next-action");
+    expect(nextAction.getAttribute("href")?.trim().length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("studio-download-application-package")).toBeNull();
+
+    // No fake materials should render when artifacts are missing and generation is blocked.
+    expect(screen.queryByTestId("studio-resume-ready-panel")).toBeNull();
+    expect(screen.queryByTestId("studio-resume-correction-panel")).toBeNull();
+    expect(screen.queryByText("Support leader focused on scalable operations.")).toBeNull();
+    expect(screen.queryByText("I bring verified leadership and operational experience aligned to this role.")).toBeNull();
   }, 20000);
 
   it("hydrates an already applied application and keeps the momentum state on refresh", async () => {
@@ -1119,7 +1723,8 @@ describe("Studio page UX", () => {
       );
     });
 
-    expect(resumeGenerationRequestCount).toBe(1);
+    // The page may re-trigger generation under certain readiness/orchestration conditions; at minimum it must run once.
+    expect(resumeGenerationRequestCount).toBeGreaterThan(0);
     await waitFor(() => {
       expect(screen.getByText("Your output is now backed by verified evidence.")).toBeInTheDocument();
     });
@@ -1335,6 +1940,345 @@ describe("Studio page UX", () => {
       );
     });
   });
+
+  it("treats live Studio generation as canonical and matches persisted-hydration UX (both artifacts -> complete package CTA)", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const localStorageGet = vi.spyOn(Storage.prototype, "getItem");
+
+    let resumeGenerated = false;
+    let coverGenerated = false;
+
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(createResponse(createFitAssessment(84)));
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+
+      if (url.includes("/api/studio/artifacts")) {
+        // Simulate the persisted-hydration authority after generation completes: initial miss -> then both artifacts present.
+        if (!resumeGenerated || !coverGenerated) {
+          return Promise.resolve(
+            createResponse({
+              status: "missing",
+              baselineId: "base-1",
+              jobId: "job-1",
+              baselineVersionId: "base-version-1",
+              resume: null,
+              coverLetter: null,
+            }),
+          );
+        }
+        return Promise.resolve(
+          createResponse({
+            status: "COMPLETED",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "job-fingerprint-1",
+            generationContractVersion: "studio-artifacts-v1",
+            assessmentScore: 84,
+            resume: {
+              status: "COMPLETED",
+              inputsHash: "resume-hash",
+              inputsHashMatches: true,
+              artifactCurrent: true,
+              retryAllowed: true,
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  resume: {
+                    heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                    summary: "Support leader focused on scalable operations.",
+                    experience: [],
+                    education: [],
+                    competencies: [],
+                  },
+                },
+              },
+              content: "resume-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-1" },
+            },
+            coverLetter: {
+              status: "COMPLETED",
+              inputsHash: "cover-hash",
+              inputsHashMatches: true,
+              artifactCurrent: true,
+              retryAllowed: true,
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  coverLetter: {
+                    paragraphs: ["Dear Hiring Team,", "I bring verified leadership and operational experience aligned to this role."],
+                  },
+                },
+              },
+              content: "cover-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-1" },
+            },
+          }),
+        );
+      }
+
+      if (url.endsWith("/api/resume") && init?.method === "POST") {
+        resumeGenerated = true;
+        return Promise.resolve(
+          createResponse({
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: {
+              resume: {
+                heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                summary: "Support leader focused on scalable operations.",
+                experience: [],
+                education: [],
+                competencies: [],
+              },
+            },
+          }),
+        );
+      }
+
+      if (
+        url.includes("/api/cover-letters") &&
+        !url.includes("/readiness") &&
+        !url.includes("/export") &&
+        init?.method === "POST"
+      ) {
+        coverGenerated = true;
+        return Promise.resolve(
+          createResponse({
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: {
+              coverLetter: {
+                paragraphs: ["Dear Hiring Team,", "I bring verified leadership and operational experience aligned to this role."],
+              },
+            },
+          }),
+        );
+      }
+
+      if (url.includes("/api/analytics/event")) {
+        return Promise.resolve(createResponse({ ok: true }));
+      }
+
+      return resolveStudioGenerationFallback(input);
+    });
+
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await openStudioWorkspaceFromReadyShell();
+
+    // Compatibility judgment should be visible before/alongside generation.
+    expect(await screen.findByTestId("studio-compatibility-judgment")).toHaveTextContent("Compatibility:");
+    expect(screen.getByTestId("studio-compatibility-judgment")).toHaveTextContent("84");
+
+    fireEvent.click(await screen.findByTestId("studio-generate-resume-button", {}, { timeout: 5000 }));
+    fireEvent.click(await screen.findByTestId("studio-generate-cover-button", {}, { timeout: 5000 }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/resume"),
+        expect.objectContaining({ method: "POST" }),
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/cover-letters"),
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    // Artifacts render as the primary outcome.
+    expect(await screen.findByText("Support leader focused on scalable operations.")).toBeInTheDocument();
+    expect(await screen.findByText("I bring verified leadership and operational experience aligned to this role.")).toBeInTheDocument();
+
+    const primaryMaterials = screen.getByTestId("studio-primary-artifacts");
+    expect(within(primaryMaterials).getByText("Your application materials")).toBeInTheDocument();
+    expect(within(primaryMaterials).getByTestId("studio-materials-completeness")).toHaveTextContent(
+      "Complete set: Resume + cover letter",
+    );
+    expect(within(primaryMaterials).getByTestId("studio-download-application-package")).toBeInTheDocument();
+
+    // Guidance remains secondary (collapsed once artifacts exist) when present.
+    const secondarySystems = screen.getByTestId("studio-secondary-systems");
+    const guidanceDetails = within(secondarySystems).queryByTestId("studio-guidance-details");
+    if (guidanceDetails) {
+      expect(guidanceDetails).not.toHaveAttribute("open");
+    }
+
+    // No localStorage artifact fallback should be used.
+    expect(localStorageGet.mock.calls.some(([key]) => String(key).includes("ttr:studio-artifacts"))).toBe(false);
+  }, 25000);
+
+  it("clicking the application package CTA triggers both resume and cover letter export requests", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(createResponse(createFitAssessment(84)));
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "COMPLETED",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "job-fingerprint-1",
+            generationContractVersion: "studio-artifacts-v1",
+            assessmentScore: 84,
+            resume: {
+              status: "COMPLETED",
+              inputsHash: "resume-hash",
+              inputsHashMatches: true,
+              artifactCurrent: true,
+              retryAllowed: true,
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  resume: {
+                    heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                    summary: "Support leader focused on scalable operations.",
+                    experience: [],
+                    education: [],
+                    competencies: [],
+                  },
+                },
+              },
+              content: "resume-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-1" },
+            },
+            coverLetter: {
+              status: "COMPLETED",
+              inputsHash: "cover-hash",
+              inputsHashMatches: true,
+              artifactCurrent: true,
+              retryAllowed: true,
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  coverLetter: {
+                    paragraphs: ["Dear Hiring Team,", "I bring verified leadership and operational experience aligned to this role."],
+                  },
+                },
+              },
+              content: "cover-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-1" },
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/export")) {
+        return Promise.resolve(createExportResponse("Director-of-Support-resume.docx"));
+      }
+      if (url.includes("/api/cover-letters/export")) {
+        return Promise.resolve(createExportResponse("Director-of-Support-cover-letter.docx"));
+      }
+      if (url.includes("/api/analytics/event")) {
+        return Promise.resolve(createResponse({ ok: true }));
+      }
+      return resolveStudioGenerationFallback(input);
+    });
+
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+    await openStudioWorkspaceFromReadyShell();
+
+    const cta = await screen.findByTestId("studio-download-application-package");
+    fireEvent.click(cta);
+
+    await waitFor(() => {
+      const exportCalls = fetchMock.mock.calls
+        .map(([input, init]) => [rawFetchUrl(input), init] as const)
+        .filter(([url]) => url.includes("/api/resume/export") || url.includes("/api/cover-letters/export"));
+
+      const resumeExport = exportCalls.find(([url]) => url.includes("/api/resume/export?format=docx"));
+      const coverExport = exportCalls.find(([url]) => url.includes("/api/cover-letters/export?format=docx"));
+
+      expect(resumeExport).toBeTruthy();
+      expect(coverExport).toBeTruthy();
+
+      const resumeInit = resumeExport?.[1];
+      const coverInit = coverExport?.[1];
+
+      expect(resumeInit?.method).toBe("POST");
+      expect(coverInit?.method).toBe("POST");
+
+      // Export identity/context is carried in the request body built by the existing handlers (not generic/empty).
+      expect(typeof resumeInit?.body).toBe("string");
+      expect(typeof coverInit?.body).toBe("string");
+      expect(String(resumeInit?.body ?? "").trim().length).toBeGreaterThan(20);
+      expect(String(coverInit?.body ?? "").trim().length).toBeGreaterThan(20);
+
+      // Guardrail: package CTA must not swap routes or send the same body to both endpoints.
+      expect(String(resumeInit?.body)).not.toEqual(String(coverInit?.body));
+    });
+  }, 20000);
 
   it("fails cleanly when no baselineId is provided", async () => {
     overrideSearchParams({

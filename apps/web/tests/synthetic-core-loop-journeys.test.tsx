@@ -1870,7 +1870,10 @@ describe("[trust:route-continuity][trust:cta-consistency] synthetic core-loop jo
         const resultsCta = screen.getByTestId("results-hero-primary-cta");
         expect(resultsCta).toHaveAttribute("href", scenario.resultsStage.expected.ctaHref);
         expect(resultsCta).toHaveTextContent(scenario.resultsStage.expected.ctaLabel);
-        fireEvent.click(resultsCta);
+        fireEvent.click(resultsCta, {
+          preventDefault: () => {},
+          stopPropagation: () => {},
+        } as unknown as MouseEvent);
         if (scenario.resultsStage.expected.analyticsEvent) {
           expectAnalyticsEvent(
             scenario.resultsStage.expected.analyticsEvent,

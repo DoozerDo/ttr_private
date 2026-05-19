@@ -363,6 +363,13 @@ describe("Studio generation deadlock regression", () => {
   });
 
   it("does not start generation before baselineVersionId is available", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      // baselineVersionId intentionally missing
+    });
+
     const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       if (url.includes("/api/analytics/event")) return Promise.resolve(createResponse({}));
@@ -395,12 +402,11 @@ describe("Studio generation deadlock regression", () => {
 
     renderStudio();
 
-    // When baselineVersionId is not yet available, Studio must not dispatch generation even if
-    // a generate CTA is rendered under the current workflow contract.
-    const resumeButtons = await screen.findAllByRole("button", { name: /resume/i });
-    const generateResume =
-      resumeButtons.find((button) => button.textContent?.toLowerCase().includes("generate")) ?? resumeButtons[0];
-    fireEvent.click(generateResume);
+    // Customer-facing contract: when Studio can't safely identify the baseline version yet,
+    // it must surface an actionable blocker instead of dispatching generation.
+    expect(await screen.findByTestId("studio-invalid-state-fallback")).toBeInTheDocument();
+    expect(screen.getByText(/Run Analyze again/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-generate-resume-button")).toBeNull();
 
     await waitFor(() => {
       const resumePosts = fetchMock.mock.calls.filter(([input, init]) => {

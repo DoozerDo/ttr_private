@@ -3864,6 +3864,7 @@ export default function StudioPage() {
     resumePresenter.status === "success" &&
     coverPresenter.status === "success" &&
     Boolean(resumeState.response && coverState.response);
+  const shouldShowRefinementAboveMaterials = !hasRenderableResumeContent && !hasRenderableCoverLetterContent;
   useEffect(() => {
     if (!studioArtifactStorageKey) return;
     if (typeof window === "undefined") return;
@@ -8763,6 +8764,15 @@ export default function StudioPage() {
     }
   };
 
+  const exportApplicationPackage = useCallback(
+    async (format: "docx" | "pdf") => {
+      // Reuse existing export endpoints. This is not a new export system; it's a convenience wrapper.
+      await exportResume(format);
+      await exportCoverLetter(format);
+    },
+    [exportCoverLetter, exportResume],
+  );
+
   const handleCopyCoverLetter = useCallback(async () => {
     if (!hasCoverLetterArtifact || !coverState.response) {
       setCoverState((current) => ({ ...current, error: "Generate Cover Letter before copying." }));
@@ -11933,7 +11943,7 @@ export default function StudioPage() {
       <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
       <div className="flex flex-col gap-4">
         <div className="order-2 space-y-4" data-testid="studio-secondary-systems">
-      {!generateNowEligible ? (
+      {!generateNowEligible || activeGenerationReadiness.blocked || !canGenerateDocuments ? (
         <details
           className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
           data-testid="studio-guidance-details"
@@ -11942,8 +11952,24 @@ export default function StudioPage() {
           <summary className="cursor-pointer text-sm font-semibold text-slate-200">Guidance</summary>
           <div className="mt-3 space-y-3">
             <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
-              {canonicalStudioReadinessMessage}
+              {activeGenerationReadiness.reasons[0]?.message ||
+                activeGenerationReadiness.reasons[0]?.code ||
+                canonicalStudioReadinessMessage}
             </p>
+            {!hasRenderableResumeContent &&
+            !hasRenderableCoverLetterContent &&
+            (activeGenerationReadiness.blocked || !canGenerateDocuments) &&
+            studioCanonicalDecision.primaryAction.destination ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  href={studioCanonicalDecision.primaryAction.destination}
+                  className="text-sm font-semibold text-slate-100 underline decoration-slate-400/70 underline-offset-4 transition hover:decoration-slate-200"
+                  data-testid="studio-blocker-next-action"
+                >
+                  {primaryNextAction.label}
+                </Link>
+              </div>
+            ) : null}
             {(() => {
         const generationState = studioGenerationStateInfo.state;
         const bannerIntent = generationState === "ready" ? "info" : "warning";
@@ -12374,7 +12400,7 @@ export default function StudioPage() {
             ) : null}
           </> 
         )} 
-        {hasCompletedGeneration && isReadySuccessState ? (
+        {shouldShowRefinementAboveMaterials && hasCompletedGeneration && isReadySuccessState ? (
           <details
             className="rounded-2xl border border-white/10 bg-slate-950/35 p-4"
             data-testid="studio-refinement-details"
@@ -12415,7 +12441,7 @@ export default function StudioPage() {
               ) : null}
             </div>
           </details>
-        ) : hasCompletedGeneration ? (
+        ) : shouldShowRefinementAboveMaterials && hasCompletedGeneration ? (
           <>
             {documentCritique ? (
               <StudioCritiquePanel
@@ -12877,10 +12903,84 @@ export default function StudioPage() {
         <div className="order-1 space-y-4" data-testid="studio-primary-artifacts">
       {showArtifactMaterials ? ( 
       <> 
-      <section className="space-y-1 px-1"> 
+      <section className="space-y-1 px-1">
         <h2 className="text-xl font-semibold text-slate-100">
-          {hasRenderableResumeContent ? "Resume workspace" : "Your application materials"}
+          Your application materials
         </h2>
+        {hasRenderableResumeContent || hasRenderableCoverLetterContent ? (
+          <p className="text-xs text-slate-400" data-testid="studio-materials-completeness">
+            {hasRenderableResumeContent && hasRenderableCoverLetterContent
+              ? "Complete set: Resume + cover letter"
+              : hasRenderableResumeContent
+                ? "Partial: Resume ready. Cover letter not generated yet."
+                : "Partial: Cover letter ready. Resume not generated yet."}
+          </p>
+        ) : null}
+        {hasRenderableResumeContent &&
+        hasRenderableCoverLetterContent &&
+        resumePresenter.hasExportableContent &&
+        coverPresenter.hasExportableContent &&
+        !isResumeDownloadLocked ? (
+          <div className="pt-1">
+            <FormButton
+              variant="secondary"
+              className="text-xs"
+              onClick={() => void exportApplicationPackage("docx")}
+              disabled={resumeExportFormat === "docx" || coverExportFormat === "docx"}
+              data-testid="studio-download-application-package"
+            >
+              Download application package
+            </FormButton>
+          </div>
+        ) : null}
+        {typeof analysisScore === "number" ? (
+          <div data-testid="studio-compatibility-judgment" className="space-y-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+              {(() => {
+                const score = Math.round(analysisScore);
+                const sourcedVerdict =
+                  typeof (analysis as LatestAnalysis | null)?.verdict === "string"
+                    ? (analysis as LatestAnalysis).verdict?.trim()
+                    : null;
+                const verdict =
+                  sourcedVerdict && sourcedVerdict.length
+                    ? sourcedVerdict
+                    : (() => {
+                        const band = getScoreBand(score);
+                        if (band === ScoreBand.TOP) return "Strong match";
+                        if (band === ScoreBand.MID) return "Competitive match";
+                        return "Below threshold";
+                      })();
+                return `Compatibility: ${verdict} (${score})`;
+              })()}
+            </p>
+            {(() => {
+              const candidate =
+                typeof (analysis as LatestAnalysis | null)?.summary === "string" && (analysis as LatestAnalysis).summary?.trim()
+                  ? (analysis as LatestAnalysis).summary!.trim()
+                  : Array.isArray((analysis as LatestAnalysis | null)?.strengths) &&
+                      (analysis as LatestAnalysis).strengths?.[0] &&
+                      String((analysis as LatestAnalysis).strengths?.[0]).trim()
+                    ? String((analysis as LatestAnalysis).strengths?.[0]).trim()
+                    : Array.isArray((analysis as LatestAnalysis | null)?.gaps) &&
+                        (analysis as LatestAnalysis).gaps?.[0] &&
+                        String((analysis as LatestAnalysis).gaps?.[0]).trim()
+                      ? String((analysis as LatestAnalysis).gaps?.[0]).trim()
+                      : null;
+              if (!candidate) return null;
+              const sanitized = sanitizeRenderedTextValue(candidate, {
+                endpoint: "studio-page",
+                field: "analysis.compatibilityRationale",
+              });
+              const clipped = sanitized.length > 160 ? `${sanitized.slice(0, 157).trimEnd()}…` : sanitized;
+              return (
+                <p className="text-xs text-slate-400" data-testid="studio-compatibility-rationale">
+                  {clipped}
+                </p>
+              );
+            })()}
+          </div>
+        ) : null}
         {!hasRenderableResumeContent ? (
           <p className="text-sm text-slate-300">
             Generate, preview, and export your resume and cover letter.
@@ -13608,6 +13708,11 @@ export default function StudioPage() {
               <>
                 <div className="space-y-1">
                   <p className="text-sm font-semibold text-slate-100">We hit an issue generating your cover letter.</p>
+                  {coverState.artifactFailure?.explanation ? (
+                    <p className="text-sm text-slate-200">
+                      {toConstraintMessage(coverState.artifactFailure.explanation)}
+                    </p>
+                  ) : null}
                   <p className="text-sm text-slate-300">
                     Try regenerating it. If the issue continues, report it and we’ll review the artifact.
                   </p>
@@ -13631,7 +13736,8 @@ export default function StudioPage() {
         ) : coverPresenter.display &&
         coverQualityPass &&
         !coverLetterComplianceBlocked &&
-        coverPresenter.status !== "blocked" ? (
+        coverPresenter.status !== "blocked" &&
+        !coverState.error ? (
           <div className="space-y-2 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
             <p className="text-sm font-semibold text-slate-100">{coverPresenter.display.title}</p>
             <p className="text-sm text-slate-300">{coverPresenter.display.description}</p>
@@ -13789,7 +13895,9 @@ export default function StudioPage() {
                   <p className="text-sm font-semibold text-slate-100">
                     Cover letter generation is currently limited for this role
                   </p>
-                  <p className="text-sm text-slate-200">{toConstraintMessage(coverState.error)}</p>
+                  <p className="text-sm text-slate-200" data-testid="studio-cover-error-message">
+                    {coverState.error}
+                  </p>
                   <div className="flex justify-end">
                     {canRetryGeneration ? (
                       <FormButton onClick={() => void handleCoverDraft()} disabled={coverGenerating}>
@@ -13850,39 +13958,81 @@ export default function StudioPage() {
           )
         ) : null}
         </div>
-      </details> 
+      </details>
       </>
+
+      {!shouldShowRefinementAboveMaterials && hasCompletedGeneration ? (
+        <details className="rounded-2xl border border-white/10 bg-slate-950/35 p-4" data-testid="studio-refinement-details">
+          <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+            Review & refine (optional)
+          </summary>
+          <div className="mt-4 space-y-4">
+            {documentCritique ? (
+              <StudioCritiquePanel
+                critique={documentCritique}
+                documentReadinessState={documentReadinessState}
+                isApplying={refinementApplying}
+                onApplyRecommendation={applyCritiqueRecommendation}
+              />
+            ) : null}
+            <StudioRefinementPanel
+              plan={documentStrategyPlan}
+              refinementCount={refinementInstructions.length}
+              statusMessage={refinementStatusMessage}
+              isApplying={refinementApplying}
+              onApplyRefinement={queueRefinement}
+              onUndo={undoLastRefinement}
+              onReset={revertToOriginalRefinement}
+            />
+            {hasGeneratedDocumentPair ? (
+              <StudioRoleMatchPanel
+                finalPass={roleMatchFinalPass}
+                documentReadinessState={documentReadinessState}
+                isApplying={refinementApplying}
+                stylePolishNote={
+                  languageStylePass.transformationsApplied.length > 0
+                    ? "Language polished for clarity and readability."
+                    : null
+                }
+                onApplyAdjustment={applyFinalRoleAdjustment}
+              />
+            ) : null}
+          </div>
+        </details>
+      ) : null}
       {isReadySuccessState && artifactQuality.confidence === "LOW" ? (
-        <section
+        <details
           className="rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4"
           data-testid="studio-low-confidence-improvement-tools"
         >
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-200">
-            Low-confidence improvements
-          </p>
-          <p className="mt-1 text-sm text-slate-200">
-            Your materials are usable, but they will be stronger after another generation pass backed by verified
-            evidence.
-          </p>
-          {canRetryGeneration ? (
-            <div className="mt-3 flex justify-end">
-              <FormButton
-                variant="secondary"
-                onClick={() => {
-                  const sessionKey = `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:retry_both:${Date.now()}`;
-                  void handleResumeDraft({ sessionKey });
-                  void handleCoverDraft({ sessionKey });
-                }}
-                disabled={autoGenerationInFlight || resumeGenerating || coverGenerating}
-              >
-                Retry generation
-              </FormButton>
-            </div>
-          ) : null}
-        </section>
+          <summary className="cursor-pointer text-sm font-semibold text-amber-100">
+            Low-confidence improvements (optional)
+          </summary>
+          <div className="mt-3">
+            <p className="text-sm text-slate-200">
+              Your materials are usable, but they will be stronger after another generation pass backed by verified
+              evidence.
+            </p>
+            {canRetryGeneration ? (
+              <div className="mt-3 flex justify-end">
+                <FormButton
+                  variant="secondary"
+                  onClick={() => {
+                    const sessionKey = `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:retry_both:${Date.now()}`;
+                    void handleResumeDraft({ sessionKey });
+                    void handleCoverDraft({ sessionKey });
+                  }}
+                  disabled={autoGenerationInFlight || resumeGenerating || coverGenerating}
+                >
+                  Retry generation
+                </FormButton>
+              </div>
+            ) : null}
+          </div>
+        </details>
       ) : null}
-      </> 
-      ) : null} 
+      </>
+      ) : null}
         </div>
       </div>
 

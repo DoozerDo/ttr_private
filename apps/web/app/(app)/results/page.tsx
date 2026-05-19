@@ -1291,7 +1291,28 @@ export function OpportunityMapSection({
                   <a
                     data-testid="results-hero-primary-cta"
                     href={primaryCta.href}
-                    onClick={primaryCta.onClick}
+                    onClick={(event) => {
+                      primaryCta.onClick?.();
+                      // Ensure funnel continuity even when a legacy CTA payload omits `onClick`.
+                      // Do not double-count: only emit the canonical event when the CTA didn't supply its own handler.
+                      if (primaryCta.onClick) return;
+                      try {
+                        const analyticsAction = mapResultsAnalyticsActionType(canonicalResultsDecision.primaryAction.type);
+                        const isMomentum = isStrongFitScore;
+                        trackEvent("results_primary_cta_clicked", {
+                          source: "results",
+                          intentState: recentIntent ?? "none",
+                          action: analyticsAction,
+                          scoreBucket: resultsScoreBucket ?? null,
+                          readinessStatus: mapResultsAnalyticsReadinessStatus(canonicalResultsDecision.readinessState),
+                          accessMode: isMomentum ? "momentum" : "recovery",
+                        });
+                      } catch {
+                        // ignore analytics failures
+                      }
+                      // tests may provide preventDefault; production navigation remains unchanged.
+                      void event;
+                    }}
                     className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500 md:min-w-[320px]"
                   >
                     {primaryCta.label}
@@ -5378,7 +5399,12 @@ export default function ResultsPage() {
                 };
               }
               if (action.destination === "fit_review") {
-                return { label: action.label, href: fitReviewPath, testId: "results-hero-primary-cta" };
+                return {
+                  label: action.label,
+                  href: fitReviewPath,
+                  onClick: oneClickResultsCta?.onClick,
+                  testId: "results-hero-primary-cta",
+                };
               }
               if (action.destination === "studio_workspace") {
                 return {
