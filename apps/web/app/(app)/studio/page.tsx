@@ -3410,9 +3410,10 @@ export default function StudioPage() {
   }, [canonicalResumePreviewPayload, effectiveResumeModel, hasSavedResumeEdits, isResumeEditMode]);
   const hasRenderableResumeContent = useMemo(() => {
     if (resumeHardRenderBlocked.blocked) return false;
+    if (resumePresenter.status === "success" && resumeState.response) return true;
     if (resumePreviewPayloadForRender) return true;
     return typeof resumePreviewText === "string" && resumePreviewText.trim().length > 0;
-  }, [resumeHardRenderBlocked.blocked, resumePreviewPayloadForRender, resumePreviewText]);
+  }, [resumeHardRenderBlocked.blocked, resumePresenter.status, resumePreviewPayloadForRender, resumePreviewText, resumeState.response]);
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
     if (!canonicalResumePreviewPayload) return;
