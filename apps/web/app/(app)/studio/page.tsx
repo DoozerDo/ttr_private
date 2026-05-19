@@ -12842,10 +12842,14 @@ export default function StudioPage() {
       {showArtifactMaterials ? ( 
       <> 
       <section className="space-y-1 px-1"> 
-        <h2 className="text-xl font-semibold text-slate-100">Your application materials</h2>
-        <p className="text-sm text-slate-300">
-          Generate, preview, and export your resume and cover letter.
-        </p>
+        <h2 className="text-xl font-semibold text-slate-100">
+          {hasRenderableResumeContent ? "Resume workspace" : "Your application materials"}
+        </h2>
+        {!hasRenderableResumeContent ? (
+          <p className="text-sm text-slate-300">
+            Generate, preview, and export your resume and cover letter.
+          </p>
+        ) : null}
       </section>
       <>
       <section
@@ -12932,34 +12936,45 @@ export default function StudioPage() {
           ) : null}
         </div>
         {studioEffectiveGenerationState === "generated_unusable" && hasResumeDraft ? (
-          <Alert intent="warning" data-testid="studio-resume-generated-unusable">
-            <div className="space-y-1">
-              <p className="text-sm font-semibold text-slate-100">
+          <details
+            className="rounded-xl border border-amber-300/25 bg-amber-500/5 p-3"
+            data-testid="studio-resume-generated-unusable"
+          >
+            <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+              Draft needs improvement before export
+            </summary>
+            <div className="mt-2 space-y-1">
+              <p className="text-sm text-slate-200">
                 We generated a draft, but it is not strong enough to use yet.
               </p>
               <p className="text-sm text-slate-200">
                 Regenerate or refine the source inputs before exporting.
               </p>
             </div>
-          </Alert>
+          </details>
         ) : null}
         {showResumeDownloadActions && !resumeNeedsRefinement ? (
-          <div className="flex flex-wrap gap-2">
-            <FormButton
-              variant="secondary"
-              onClick={() => void exportResume("docx")}
-              disabled={isResumeDownloadLocked || !canExportResume || resumeExportFormat === "docx"}
-            >
-              {resumeExportFormat === "docx" ? "Downloading..." : "Download DOCX"}
-            </FormButton>
-            <FormButton
-              variant="secondary"
-              onClick={() => void exportResume("pdf")}
-              disabled={isResumeDownloadLocked || !canExportResume || resumeExportFormat === "pdf"}
-            >
-              {resumeExportFormat === "pdf" ? "Downloading..." : "Download PDF"}
-            </FormButton>
-          </div>
+          <details className="rounded-xl border border-white/10 bg-white/[0.03] p-3" data-testid="studio-resume-export">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+              Export (DOCX / PDF)
+            </summary>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <FormButton
+                variant="secondary"
+                onClick={() => void exportResume("docx")}
+                disabled={isResumeDownloadLocked || !canExportResume || resumeExportFormat === "docx"}
+              >
+                {resumeExportFormat === "docx" ? "Downloading..." : "Download DOCX"}
+              </FormButton>
+              <FormButton
+                variant="secondary"
+                onClick={() => void exportResume("pdf")}
+                disabled={isResumeDownloadLocked || !canExportResume || resumeExportFormat === "pdf"}
+              >
+                {resumeExportFormat === "pdf" ? "Downloading..." : "Download PDF"}
+              </FormButton>
+            </div>
+          </details>
         ) : null}
         {/* Resume download actions are rendered as buttons; no extra status line needed here. */}
 
@@ -13311,15 +13326,29 @@ export default function StudioPage() {
             ) : null}
       </section>
 
-      <section
-        className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow"
-        {...(process.env.NODE_ENV !== "production"
-          ? { "data-debug-card-generating": String(coverGenerating || coverAutoGenerating || coverGenerateNowPending) }
-          : {})}
+      <details
+        className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow"
+        data-testid="studio-cover-letter-details"
+        open={!hasRenderableResumeContent || hasRenderableCoverLetterContent}
       >
+        <summary className="cursor-pointer text-sm font-semibold text-slate-200">
+          Cover letter {hasRenderableCoverLetterContent ? "" : "(not generated yet)"}
+        </summary>
+        <div
+          className="mt-3 space-y-3"
+          {...(process.env.NODE_ENV !== "production"
+            ? { "data-debug-card-generating": String(coverGenerating || coverAutoGenerating || coverGenerateNowPending) }
+            : {})}
+        >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-slate-100">Cover letter</h2>
+            <h2
+              className={
+                hasRenderableResumeContent ? "text-base font-semibold text-slate-100" : "text-lg font-semibold text-slate-100"
+              }
+            >
+              Cover letter
+            </h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
               {coverAutoRepairing
                 ? "Repairing cover letter…"
@@ -13384,22 +13413,27 @@ export default function StudioPage() {
               </FormButton>
             ) : null}
             {showCoverDownloadActions && !coverNeedsRefinement ? (
-              <>
-                <FormButton
-                  variant="secondary"
-                  onClick={() => void exportCoverLetter("docx")}
-                  disabled={!canExportCover || coverExportFormat === "docx"}
-                >
-                  {coverExportFormat === "docx" ? "Downloading..." : "Download DOCX"}
-                </FormButton>
-                <FormButton
-                  variant="secondary"
-                  onClick={() => void exportCoverLetter("pdf")}
-                  disabled={!canExportCover || coverExportFormat === "pdf"}
-                >
-                  {coverExportFormat === "pdf" ? "Downloading..." : "Download PDF"}
-                </FormButton>
-              </>
+              <details className="rounded-xl border border-white/10 bg-white/[0.03] p-3" data-testid="studio-cover-export">
+                <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+                  Export (DOCX / PDF)
+                </summary>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <FormButton
+                    variant="secondary"
+                    onClick={() => void exportCoverLetter("docx")}
+                    disabled={!canExportCover || coverExportFormat === "docx"}
+                  >
+                    {coverExportFormat === "docx" ? "Downloading..." : "Download DOCX"}
+                  </FormButton>
+                  <FormButton
+                    variant="secondary"
+                    onClick={() => void exportCoverLetter("pdf")}
+                    disabled={!canExportCover || coverExportFormat === "pdf"}
+                  >
+                    {coverExportFormat === "pdf" ? "Downloading..." : "Download PDF"}
+                  </FormButton>
+                </div>
+              </details>
             ) : null}
           </div>
         </div>
@@ -13779,7 +13813,8 @@ export default function StudioPage() {
             ) : null
           )
         ) : null}
-      </section> 
+        </div>
+      </details> 
       </>
       {isReadySuccessState && artifactQuality.confidence === "LOW" ? (
         <section
