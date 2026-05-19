@@ -30,19 +30,26 @@ export class StudioArtifactsController {
     if (!userId) {
       throw new BadRequestException('Invalid user context');
     }
-    if (!baselineId?.trim() || !baselineVersionId?.trim() || !jobId?.trim() || !analysisId?.trim()) {
+    if (!baselineId?.trim() || !baselineVersionId?.trim() || !jobId?.trim()) {
       throw new UnprocessableEntityException({
         error: {
           code: 'studio_artifacts_missing_ids',
-          message: 'baselineId, baselineVersionId, jobId, and analysisId are required',
+          message: 'baselineId, baselineVersionId, and jobId are required',
         },
       });
     }
-    if (![baselineId, baselineVersionId, jobId, analysisId].every((id) => isUuid(String(id).trim()))) {
+
+    const analysisIdValue = analysisId?.trim() ? analysisId.trim() : null;
+    const idsToValidate = [baselineId, baselineVersionId, jobId].map((id) => String(id).trim());
+    if (analysisIdValue) idsToValidate.push(analysisIdValue);
+
+    if (!idsToValidate.every((id) => isUuid(id))) {
       throw new UnprocessableEntityException({
         error: {
           code: 'studio_artifacts_invalid_ids',
-          message: 'baselineId, baselineVersionId, jobId, and analysisId must be valid UUIDs',
+          message: analysisIdValue
+            ? 'baselineId, baselineVersionId, jobId, and analysisId must be valid UUIDs'
+            : 'baselineId, baselineVersionId, and jobId must be valid UUIDs',
         },
       });
     }
@@ -59,7 +66,7 @@ export class StudioArtifactsController {
       baselineId: baselineId.trim(),
       baselineVersionId: baselineVersionId.trim(),
       jobId: jobId.trim(),
-      analysisId: analysisId?.trim() || null,
+      analysisId: analysisIdValue,
     });
 
     // eslint-disable-next-line no-console

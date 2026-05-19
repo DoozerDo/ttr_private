@@ -453,7 +453,7 @@ describe("Studio page UX", () => {
   it("hydrates completed artifacts from the backend and makes them usable immediately", async () => {
     const fetchMock = installCompletedArtifactFetches();
 
-    renderStudio();
+    const firstMount = renderStudio();
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
 
     await waitFor(() => {
@@ -477,6 +477,155 @@ describe("Studio page UX", () => {
     expect(
       screen.getByText("I bring verified leadership and operational experience aligned to this role."),
     ).toBeInTheDocument();
+  }, 20000);
+
+  it("hydrates persisted artifacts in Studio even when analysisId is missing (no local fallback, no fake readiness)", async () => {
+    overrideSearchParams({
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const localStorageGet = vi.spyOn(Storage.prototype, "getItem");
+
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const rawUrl = rawFetchUrl(input);
+
+      if (rawUrl.includes("/api/studio/artifacts")) {
+        expect(rawUrl.includes("analysisId=")).toBe(false);
+        return Promise.resolve(
+          createResponse({
+            status: "COMPLETED",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "job-fingerprint-1",
+            generationContractVersion: "studio-artifacts-v1",
+            assessmentScore: null,
+            resume: {
+              status: "COMPLETED",
+              inputsHash: "resume-hash",
+              inputsHashMatches: true,
+              artifactCurrent: true,
+              retryAllowed: true,
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  resume: {
+                    heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                    summary: "Support leader focused on scalable operations.",
+                    experience: [],
+                    education: [],
+                    competencies: [],
+                  },
+                },
+              },
+              content: "resume-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-1" },
+            },
+            coverLetter: {
+              status: "COMPLETED",
+              inputsHash: "cover-hash",
+              inputsHashMatches: true,
+              artifactCurrent: true,
+              retryAllowed: true,
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  coverLetter: {
+                    paragraphs: [
+                      "Dear Hiring Team,",
+                      "I bring verified leadership and operational experience aligned to this role.",
+                      "Sincerely,",
+                      "Alex Candidate",
+                    ],
+                  },
+                },
+              },
+              content: "cover-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-1" },
+            },
+          }),
+        );
+      }
+
+      if (rawUrl.includes("/api/analysis/") || rawUrl.includes("/api/analysis")) {
+        return Promise.resolve(
+          createResponse(
+            { error: { code: "not_found", message: "analysis not available" } },
+            { status: 404 },
+          ),
+        );
+      }
+
+      if (rawUrl.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+
+      if (rawUrl.includes("/api/resume/readiness")) {
+        // Keep readiness unknown-ish for this test: no analysis-derived claim should be required to render persisted artifact.
+        return Promise.resolve(createResponse({ status: "limited", reasons: [{ code: "unknown", message: "unknown" }], compliance_flags: [] }));
+      }
+
+      if (rawUrl.includes("/api/analytics/event")) {
+        return Promise.resolve(createResponse({ ok: true }));
+      }
+
+      return Promise.resolve(createResponse({}));
+    });
+
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    const firstMount = renderStudio();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => {
+      const urls = fetchMock.mock.calls.map(([input]) => rawFetchUrl(input));
+      expect(urls.some((url) => url.includes("/api/studio/artifacts"))).toBe(true);
+    });
+
+    const panel = await screen.findByTestId("studio-instant-resume-panel");
+    expect(panel).toBeInTheDocument();
+
+    const instantSummary = await screen.findByTestId("studio-instant-resume-summary");
+    expect(instantSummary).toHaveTextContent("Support leader focused on scalable operations.");
+
+    firstMount.unmount();
+
+    const secondMount = renderStudio();
+    await waitFor(() => {
+      const artifactCalls = fetchMock.mock.calls
+        .map(([input]) => rawFetchUrl(input))
+        .filter((url) => url.includes("/api/studio/artifacts"));
+      expect(artifactCalls.length).toBeGreaterThanOrEqual(2);
+      expect(artifactCalls.every((url) => !url.includes("analysisId="))).toBe(true);
+    });
+
+    const panelAgain = await screen.findByTestId("studio-instant-resume-panel");
+    expect(panelAgain).toBeInTheDocument();
+    const instantSummaryAgain = await screen.findByTestId("studio-instant-resume-summary");
+    expect(instantSummaryAgain).toHaveTextContent("Support leader focused on scalable operations.");
+
+    secondMount.unmount();
+
+    // No localStorage artifact fallback should be needed when backend hydration succeeds.
+    expect(localStorageGet.mock.calls.some(([key]) => String(key).includes("ttr:studio-artifacts"))).toBe(false);
   }, 20000);
 
   it("hydrates an already applied application and keeps the momentum state on refresh", async () => {

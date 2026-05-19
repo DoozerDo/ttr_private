@@ -261,6 +261,122 @@ describe('Studio artifact persistence contract (e2e)', () => {
         )}`,
       );
     }
+
+    const artifactsWithoutAnalysis = await request(app.getHttpServer())
+      .get('/studio/artifacts')
+      .set('Authorization', `Bearer ${authToken}`)
+      .query({
+        baselineId: baseline.id,
+        baselineVersionId: baselineVersion.id,
+        jobId: job.id,
+      })
+      .expect(200);
+
+    expectObject(artifactsWithoutAnalysis.body);
+    expect((artifactsWithoutAnalysis.body as any).assessmentScore).toBe(null);
+    expect((artifactsWithoutAnalysis.body as any).artifactReadiness).toBeUndefined();
+
+    const resumeWithoutAnalysis = (artifactsWithoutAnalysis.body as any).resume as any;
+    const resumeResultWithoutAnalysis = (artifactsWithoutAnalysis.body as any).resumeResult as any;
+    const hasResumeWithoutAnalysis =
+      Boolean(resumeWithoutAnalysis?.responseBody) || Boolean(resumeResultWithoutAnalysis);
+    expect(hasResumeWithoutAnalysis).toBe(true);
+  });
+
+  it('GET /studio/artifacts returns 422 for invalid analysisId (even when optional)', async () => {
+    const baseline = await baselineRepository.save(
+      baselineRepository.create({
+        userId,
+        version: 1,
+        versionNumber: 1,
+        originalFilename: 'resume.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        storagePath: '/tmp/resume.docx',
+        hash: null,
+        isActive: true,
+        archivedAt: null,
+        preserveFromCleanup: true,
+      } as any),
+    );
+
+    const baselineVersion = await baselineVersionRepository.save(
+      baselineVersionRepository.create({
+        baselineId: baseline.id,
+        versionNumber: 1,
+        fileHash: `file-hash-${Date.now()}`,
+        hash: `file-hash-${Date.now()}`,
+        storagePath: '/tmp/baseline-version-1',
+        preserveFromCleanup: true,
+      } as any),
+    );
+
+    const job = await jobRepository.save(
+      jobRepository.create({
+        userId,
+        title: 'Support Ops Lead',
+        company: 'ExampleCo',
+        rawDescription: 'Own support operations.',
+        normalizedResponsibilities: [],
+        normalizedRequirements: [],
+        jdIngestionMethod: JobIngestionMethod.PASTE,
+        jdParsedAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        archivedAt: null,
+        isArchived: false,
+      } as Partial<Job>),
+    );
+
+    const res = await request(app.getHttpServer())
+      .get('/studio/artifacts')
+      .set('Authorization', `Bearer ${authToken}`)
+      .query({
+        baselineId: baseline.id,
+        baselineVersionId: baselineVersion.id,
+        jobId: job.id,
+        analysisId: 'not-a-uuid',
+      });
+
+    expect(res.status).toBe(422);
+    expectObject(res.body);
+    expect((res.body as any).error?.code).toBe('studio_artifacts_invalid_ids');
+  });
+
+  it('GET /studio/artifacts returns 422 when baselineId, baselineVersionId, or jobId is missing', async () => {
+    const valid = '00000000-0000-0000-0000-000000000001';
+
+    const missingBaseline = await request(app.getHttpServer())
+      .get('/studio/artifacts')
+      .set('Authorization', `Bearer ${authToken}`)
+      .query({
+        baselineVersionId: valid,
+        jobId: valid,
+      });
+    expect(missingBaseline.status).toBe(422);
+    expectObject(missingBaseline.body);
+    expect((missingBaseline.body as any).error?.code).toBe('studio_artifacts_missing_ids');
+
+    const missingBaselineVersion = await request(app.getHttpServer())
+      .get('/studio/artifacts')
+      .set('Authorization', `Bearer ${authToken}`)
+      .query({
+        baselineId: valid,
+        jobId: valid,
+      });
+    expect(missingBaselineVersion.status).toBe(422);
+    expectObject(missingBaselineVersion.body);
+    expect((missingBaselineVersion.body as any).error?.code).toBe('studio_artifacts_missing_ids');
+
+    const missingJob = await request(app.getHttpServer())
+      .get('/studio/artifacts')
+      .set('Authorization', `Bearer ${authToken}`)
+      .query({
+        baselineId: valid,
+        baselineVersionId: valid,
+      });
+    expect(missingJob.status).toBe(422);
+    expectObject(missingJob.body);
+    expect((missingJob.body as any).error?.code).toBe('studio_artifacts_missing_ids');
   });
 
   it('happy path: baseline upload -> ingestion persists ResumeV2 -> Studio generates from persisted ResumeV2 (no raw resume reparse)', async () => {

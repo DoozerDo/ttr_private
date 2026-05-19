@@ -9651,6 +9651,11 @@ export default function StudioPage() {
                   </div> 
                 </div> 
                 <div className="space-y-4 rounded-xl border border-white/10 bg-slate-950/40 p-3"> 
+                  {!effectiveRequestedAnalysisId && resumePreviewPayloadForRender ? (
+                    <p className="text-sm leading-6 text-slate-200" data-testid="studio-instant-resume-summary">
+                      {readResumeModel(resumePreviewPayloadForRender)?.summary ?? ""}
+                    </p>
+                  ) : null}
                   {showLowQualityRecoveryLane && !showFullLowQualityResume && !studioIsGeneratedUnusable ? ( 
                     <div className="space-y-3" data-testid="studio-low-quality-resume-preview"> 
                       <div className="rounded-xl border border-amber-300/25 bg-amber-500/5 p-3">
@@ -9904,6 +9909,34 @@ export default function StudioPage() {
       ) : null}
     </RouteStateShell>
   ) : null;
+
+  // When Studio is entered before analysisId exists, persisted artifacts from /api/studio/artifacts must still be visible.
+  // This must not imply readiness/score/assessment truth; it only surfaces persisted preview content.
+  const preAnalysisPersistedResumePanel =
+    !effectiveRequestedAnalysisId && resumePresenter.status === "success" && resumeState.response ? (
+      <section className="rounded-2xl border border-white/10 bg-slate-950/45 p-4" data-testid="studio-instant-resume-panel">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Resume</p>
+            <p className="text-sm text-slate-300">Persisted draft</p>
+          </div>
+        </div>
+        <div className="space-y-4 rounded-xl border border-white/10 bg-slate-950/40 p-3">
+          {resumePreviewPayloadForRender ? (
+            <p className="text-sm leading-6 text-slate-200" data-testid="studio-instant-resume-summary">
+              {readResumeModel(resumePreviewPayloadForRender)?.summary ?? ""}
+            </p>
+          ) : null}
+          <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Excerpt</p>
+            <pre className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-100">
+{resumePreviewText.slice(0, 900)}
+{resumePreviewText.length > 900 ? "\n\nâ€¦(excerpt truncated)" : ""}
+            </pre>
+          </div>
+        </div>
+      </section>
+    ) : null;
 
   const pageTruth = buildStudioPageTruth({
     workflowState: workflowAuthority.workflowState,
@@ -11834,8 +11867,11 @@ export default function StudioPage() {
     const roleUnknownOrEmpty =
       !jobTitle || jobTitle.toLowerCase() === "unknown role" || jobTitle.toLowerCase().startsWith("unknown");
 
-    const requiredIdsMissing = !effectiveJobId || !effectiveRequestedAnalysisId;
-    const analysisMissingOrIncomplete = !analysis || analysisScore === null || Boolean(analysisError && !analysisLoading);
+    // Studio can be entered before analysisId exists; artifacts hydration must still be allowed.
+    const requiredIdsMissing = !effectiveJobId || !effectiveBaselineVersionId || !effectiveBaselineId;
+    const analysisMissingOrIncomplete =
+      Boolean(effectiveRequestedAnalysisId) &&
+      (!analysis || analysisScore === null || Boolean(analysisError && !analysisLoading));
 
     const baselineSourceUnavailable = !effectiveBaselineId && !selectedBaselineId && !requestedBaselineId;
 
@@ -11974,6 +12010,7 @@ export default function StudioPage() {
         </>
       ) : null}
       {showInstantDraftHeroSafe ? instantDraftHero : null}
+      {preAnalysisPersistedResumePanel}
       {showReadinessRecoveryExperience && !activeGenerationReadiness.blocked ? unlockEntryPanel : null}
       {unlockGenerationLoadingMessage && showPrimaryGeneratingNotice ? (
         <Alert intent="info" title="Verified evidence in use">
