@@ -11910,6 +11910,8 @@ export default function StudioPage() {
   const studioContent = (
     <PageShell className="space-y-4 pb-4">
       <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
+      <div className="flex flex-col gap-4">
+        <div className="order-2 space-y-4" data-testid="studio-secondary-systems">
       {!generateNowEligible ? (
         <>
           <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
@@ -12835,7 +12837,8 @@ export default function StudioPage() {
           </div>
         </details>
       ) : null} 
- 
+        </div>
+        <div className="order-1 space-y-4" data-testid="studio-primary-artifacts">
       {showArtifactMaterials ? ( 
       <> 
       <section className="space-y-1 px-1"> 
@@ -13809,6 +13812,8 @@ export default function StudioPage() {
       ) : null}
       </> 
       ) : null} 
+        </div>
+      </div>
 
       {generateNowEligible ? (
         <details className="rounded-2xl border border-white/10 bg-white/[0.03] p-4" data-testid="studio-document-strategy-details">
