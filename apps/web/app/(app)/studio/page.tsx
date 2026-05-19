@@ -5392,6 +5392,7 @@ export default function StudioPage() {
 
   const resumeCardStatus: StudioCardStatus = useMemo(() => {
     const needsMoreBaselineDetail = isInsufficientBaselineEvidenceMessage(resumeState.error);
+    const hasPersistedResumeTruth = hasResumeArtifact || Boolean(resumeState.response) || hasRenderableResumeContent;
     if (resumeGenerating) return "generating";
     if (!canGenerateDocuments && activeGenerationReadiness.blocked) return "blocked_by_compliance";
     if (resumePresenter.status === "blocked") return "blocked_by_compliance";
@@ -5399,9 +5400,11 @@ export default function StudioPage() {
     if (needsMoreBaselineDetail) return "needs_more_baseline_detail";
     if (resumeState.error) return "failed_due_to_system_error";
     if (resumeState.artifactFailure && !hasRenderableResumeContent) return "failed_due_to_system_error";
-    if (resumePresenter.status === "success" && hasResumeArtifact) {
+    if (resumePresenter.status === "success" && hasPersistedResumeTruth) {
       // Never claim success if we cannot render/export a usable preview (e.g. missing normalized model).
-      if (!hasResumeDraft) return "needs_correction";
+      // Treat any hydrated renderable payload as a "draft" for status purposes, even if existence flags lag.
+      const hasDraftTruth = hasResumeDraft || Boolean(resumeState.response) || hasRenderableResumeContent;
+      if (!hasDraftTruth) return "needs_correction";
       return resumeQualityPass ? "generated_successfully" : "needs_correction";
     }
     return canGenerateDocuments ? "ready_to_generate" : "not_generated_yet";
@@ -5415,6 +5418,7 @@ export default function StudioPage() {
     resumePresenter.status,
     resumeState.error,
     resumeState.artifactFailure,
+    resumeState.response,
     resumeQualityPass,
   ]);
   const resumeNeedsBaselineDetail = isInsufficientBaselineEvidenceMessage(resumeState.error);

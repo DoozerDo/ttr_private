@@ -622,6 +622,9 @@ describe("Studio page UX", () => {
     const instantSummaryAgain = await screen.findByTestId("studio-instant-resume-summary");
     expect(instantSummaryAgain).toHaveTextContent("Support leader focused on scalable operations.");
 
+    // No contradictory "not generated" messaging should appear when persisted resume exists.
+    expect(screen.queryByText("Resume not generated yet")).toBeNull();
+
     secondMount.unmount();
 
     // No localStorage artifact fallback should be needed when backend hydration succeeds.
