@@ -11934,11 +11934,17 @@ export default function StudioPage() {
       <div className="flex flex-col gap-4">
         <div className="order-2 space-y-4" data-testid="studio-secondary-systems">
       {!generateNowEligible ? (
-        <>
-          <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
-            {canonicalStudioReadinessMessage}
-          </p>
-          {(() => {
+        <details
+          className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+          data-testid="studio-guidance-details"
+          open={!hasRenderableResumeContent && !hasRenderableCoverLetterContent}
+        >
+          <summary className="cursor-pointer text-sm font-semibold text-slate-200">Guidance</summary>
+          <div className="mt-3 space-y-3">
+            <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
+              {canonicalStudioReadinessMessage}
+            </p>
+            {(() => {
         const generationState = studioGenerationStateInfo.state;
         const bannerIntent = generationState === "ready" ? "info" : "warning";
         const bannerTitle =
@@ -11976,19 +11982,27 @@ export default function StudioPage() {
                   </p>
                   <div className="space-y-1 text-sm text-slate-100">
                     {studioGenerationStateInfo.hasUnsupportedRequirements ? (
-                      <div className="space-y-2" data-testid="studio-degraded-unsupported-requirements">
-                        <p>Remove unsupported requirements to continue with a partial match.</p>
-                        <ul className="list-disc space-y-1 pl-5 text-sm text-slate-100" data-testid="studio-degraded-unsupported-list">
-                          {studioGenerationStateInfo.unsupportedRequirements.map((requirement) => (
-                            <li key={`studio-degraded-unsupported-${requirement}`}>{requirement}</li>
-                          ))}
-                        </ul>
-                        <div>
-                          <FormButton onClick={handleAutoAdjustTargeting} disabled={!studioGenerationStateInfo.unsupportedRequirements.length}>
-                            Remove unsupported requirements and continue
-                          </FormButton>
+                      <details
+                        className="rounded-xl border border-white/10 bg-slate-950/30 p-3"
+                        data-testid="studio-degraded-unsupported-requirements"
+                      >
+                        <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+                          Unsupported requirements
+                        </summary>
+                        <div className="mt-2 space-y-2">
+                          <p>Remove unsupported requirements to continue with a partial match.</p>
+                          <ul className="list-disc space-y-1 pl-5 text-sm text-slate-100" data-testid="studio-degraded-unsupported-list">
+                            {studioGenerationStateInfo.unsupportedRequirements.map((requirement) => (
+                              <li key={`studio-degraded-unsupported-${requirement}`}>{requirement}</li>
+                            ))}
+                          </ul>
+                          <div>
+                            <FormButton onClick={handleAutoAdjustTargeting} disabled={!studioGenerationStateInfo.unsupportedRequirements.length}>
+                              Remove unsupported requirements and continue
+                            </FormButton>
+                          </div>
                         </div>
-                      </div>
+                      </details>
                     ) : null}
                     {studioGenerationStateInfo.hasScoreCapPenalty ? (
                       <div data-testid="studio-score-cap-warning" className="space-y-1">
@@ -12035,7 +12049,8 @@ export default function StudioPage() {
           </Alert>
         );
           })()}
-        </>
+          </div>
+        </details>
       ) : null}
       {showInstantDraftHeroSafe ? instantDraftHero : null}
       {preAnalysisPersistedResumePanel}
