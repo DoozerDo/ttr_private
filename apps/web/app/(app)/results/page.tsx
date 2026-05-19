@@ -1293,23 +1293,6 @@ export function OpportunityMapSection({
                     href={primaryCta.href}
                     onClick={(event) => {
                       primaryCta.onClick?.();
-                      // Ensure funnel continuity even when a legacy CTA payload omits `onClick`.
-                      // Do not double-count: only emit the canonical event when the CTA didn't supply its own handler.
-                      if (primaryCta.onClick) return;
-                      try {
-                        const analyticsAction = mapResultsAnalyticsActionType(canonicalResultsDecision.primaryAction.type);
-                        const isMomentum = isStrongFitScore;
-                        trackEvent("results_primary_cta_clicked", {
-                          source: "results",
-                          intentState: recentIntent ?? "none",
-                          action: analyticsAction,
-                          scoreBucket: resultsScoreBucket ?? null,
-                          readinessStatus: mapResultsAnalyticsReadinessStatus(canonicalResultsDecision.readinessState),
-                          accessMode: isMomentum ? "momentum" : "recovery",
-                        });
-                      } catch {
-                        // ignore analytics failures
-                      }
                       // tests may provide preventDefault; production navigation remains unchanged.
                       void event;
                     }}
