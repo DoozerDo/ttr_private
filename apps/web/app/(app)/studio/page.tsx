@@ -3665,13 +3665,31 @@ export default function StudioPage() {
     [coverLetterParagraphs, documentStrategyPlan, generatedResumeModel],
   );
   const documentReadinessState = useMemo(
-    () =>
-      resolveDocumentReadinessState({
+    () => {
+      const resolved = resolveDocumentReadinessState({
         resumeArtifact: resumeResult,
         coverLetterArtifact: coverLetterResult,
         critiqueResult: documentCritique ? { readiness: documentCritique.overallAssessment } : null,
-      }).state,
-    [coverLetterResult, documentCritique, resumeResult],
+      }).state;
+
+      // Persisted artifacts can hydrate without canonical generation result envelopes.
+      // When we have renderable persisted material, Draft Review must not read as "not generated".
+      if (
+        resolved === "missing" &&
+        (hasRenderableResumeContent || hasRenderableCoverLetterContent)
+      ) {
+        return "generated_unusable" as const;
+      }
+
+      return resolved;
+    },
+    [
+      coverLetterResult,
+      documentCritique,
+      hasRenderableCoverLetterContent,
+      hasRenderableResumeContent,
+      resumeResult,
+    ],
   );
   const roleMatchFinalPass = useMemo(
     () =>

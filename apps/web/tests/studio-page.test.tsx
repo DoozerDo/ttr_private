@@ -624,6 +624,8 @@ describe("Studio page UX", () => {
 
     // No contradictory "not generated" messaging should appear when persisted resume exists.
     expect(screen.queryByText("Resume not generated yet")).toBeNull();
+    // Draft Review label must not say "not generated" when persisted materials are renderable.
+    expect(screen.queryByText(/^not generated$/i)).toBeNull();
 
     secondMount.unmount();
 
