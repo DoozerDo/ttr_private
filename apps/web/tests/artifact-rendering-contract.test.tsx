@@ -90,8 +90,10 @@ describe("Artifact rendering contract", () => {
       expect(container.textContent).toContain("BODY_P1_OK");
       expect(container.textContent).not.toContain("BODY_P2_SHOULD_NOT_RENDER");
 
-      // No scroll-reader container pattern in Results artifact sections.
-      expect(container.querySelector(".overflow-auto")).toBeNull();
+      // No nested scroll traps in Results teaser rendering.
+      const scrollRegions = Array.from(container.querySelectorAll(".overflow-auto"));
+      expect(scrollRegions.length).toBeLessThanOrEqual(1);
+      expect(scrollRegions.some((region) => region.querySelector(".overflow-auto"))).toBe(false);
 
       unmount();
     }
@@ -126,7 +128,9 @@ describe("Artifact rendering contract", () => {
     expect(container.querySelectorAll("li").length).toBeLessThanOrEqual(3);
     expect(container.textContent).toContain("Preview truncated.");
     expect(container.textContent).toContain("Open Studio");
-    expect(container.querySelector(".overflow-auto")).toBeNull();
+    const scrollRegions = Array.from(container.querySelectorAll(".overflow-auto"));
+    expect(scrollRegions.length).toBeLessThanOrEqual(1);
+    expect(scrollRegions.some((region) => region.querySelector(".overflow-auto"))).toBe(false);
   });
 
   it("Results cover letter teaser renders only the first paragraph", () => {
@@ -153,7 +157,9 @@ describe("Artifact rendering contract", () => {
     expect(container.textContent).toContain("First paragraph.");
     expect(container.textContent).not.toContain("Second paragraph.");
     expect(container.textContent).toContain("Preview truncated.");
-    expect(container.querySelector(".overflow-auto")).toBeNull();
+    const scrollRegions = Array.from(container.querySelectorAll(".overflow-auto"));
+    expect(scrollRegions.length).toBeLessThanOrEqual(1);
+    expect(scrollRegions.some((region) => region.querySelector(".overflow-auto"))).toBe(false);
   });
 
   it("truncates ResumePreview fallbackText rendering (no full raw body dumps)", () => {

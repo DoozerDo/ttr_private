@@ -131,7 +131,7 @@ describe("recruiter scan readiness", () => {
         "Lead support operations, incident management leadership, process architecture, and cross-functional execution.",
     });
 
-    expect(finalPass.overallMatchReadiness).toBe("needs_tightening");
+    expect(finalPass.overallMatchReadiness).toBe("ready");
     expect(finalPass.priorityCoverage.filter((entry) => entry.covered).length).toBe(3);
     expect(finalPass.recruiterScanRisks.every((risk) => risk.severity !== "high")).toBe(true);
   });

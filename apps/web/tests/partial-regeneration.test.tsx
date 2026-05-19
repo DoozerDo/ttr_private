@@ -40,6 +40,8 @@ vi.mock("@/lib/baselines", async () => {
         id: "base-1",
         originalFilename: "Leadership Resume",
         version: 1,
+        status: "ACTIVE",
+        isActive: true,
       },
     ]),
   };
@@ -107,8 +109,24 @@ function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   };
 }
 
+function rawFetchUrl(input: RequestInfo): string {
+  return typeof input === "string"
+    ? input
+    : input instanceof URL
+      ? input.toString()
+      : input instanceof Request
+        ? input.url
+        : typeof input === "object" && input && "url" in input
+          ? String((input as { url?: unknown }).url ?? "")
+          : typeof input === "object" && input && "href" in input
+            ? String((input as { href?: unknown }).href ?? "")
+            : String(input ?? "");
+}
+
 describe("partial regeneration", () => {
   beforeEach(() => {
+    window.localStorage?.clear?.();
+    window.sessionStorage?.clear?.();
     overrideSearchParams({
       analysisId: "analysis-1",
       jobId: "job-1",
@@ -118,8 +136,10 @@ describe("partial regeneration", () => {
   });
 
   it("reruns only the targeted artifact when a refinement is applied", async () => {
+    let resumePersisted = false;
+    const readinessCalls: Array<{ url: string; body: unknown }> = [];
     const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input?.url ?? "";
+      const url = rawFetchUrl(input);
       if (url.includes("/api/baselines/base-1/versions")) {
         return Promise.resolve(
           createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
@@ -143,27 +163,100 @@ describe("partial regeneration", () => {
           }),
         );
       }
-      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+      if (url.includes("/api/studio/artifacts")) {
         return Promise.resolve(
           createResponse({
-            assessmentId: "analysis-1",
-            scoring_v2: { score: 84 },
-            jobId: "job-1",
+            status: "COMPLETED",
             baselineId: "base-1",
             baselineVersionId: "base-version-1",
-            company: "Acme",
-            title: "Director of Support",
-            summary: "Strong fit for support operations leadership.",
-            strengths: ["Support operations rigor", "Cross-functional leadership"],
-            gaps: [],
-            recommendedActions: [],
+            baselineVersionHash: "hash-1",
+            jobId: "job-1",
+            jobFingerprint: "job-fingerprint-1",
+            generationContractVersion: "studio-artifacts-v1",
+            artifactReadiness: "ready",
+            resume: resumePersisted
+              ? {
+                  artifactType: "resume",
+                  status: "COMPLETED",
+                  inputsHash: "resume-hash",
+                  responseBody: {
+                    status: "success",
+                    generationStatus: "success",
+                    exportReady: true,
+                    exports: { docx: true, pdf: true },
+                    preview: {
+                      resume: {
+                        heading: { name: "Test Candidate", contactLine: "test@example.com" },
+                        summary: "Verified support leader aligned to the role.",
+                        experience: [
+                          {
+                            company: "Acme",
+                            roleTitle: "Director of Support",
+                            bullets: ["Led support operations and improved team performance."],
+                          },
+                        ],
+                      },
+                    },
+                  },
+                }
+              : null,
+            coverLetter: null,
           }),
         );
       }
+      if (url.includes("/api/analysis/fit-assessments/") && url.includes("analysis-1")) {
+        if (process.env.NODE_ENV !== "production") {
+          // eslint-disable-next-line no-console
+          console.info("[TEST] fit-assessments served", { url });
+        }
+        const payload = {
+          assessmentId: "analysis-1",
+          scoring_v2: { score: 75 },
+          score: 75,
+          overallScore: 75,
+          fitScore: 75,
+          matchScore: 75,
+          analysisScore: 75,
+          scoringV2: { score: 75 },
+          result: { score: 75 },
+          assessment: { score: 75 },
+          jobId: "job-1",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          company: "Acme",
+          title: "Director of Support",
+          summary: "Strong fit for support operations leadership.",
+          strengths: ["Support operations rigor", "Cross-functional leadership"],
+          gaps: [],
+          recommendedActions: [],
+          verification_coverage: {
+            totalClaims: 2,
+            verifiedClaims: 2,
+            inferredClaims: 0,
+            unverifiedClaims: 0,
+          },
+        };
+        return Promise.resolve(createResponse(payload));
+      }
       if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
-        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+        const body = (() => {
+          try {
+            return init?.body ? JSON.parse(String(init.body)) : null;
+          } catch {
+            return init?.body ?? null;
+          }
+        })();
+        readinessCalls.push({ url, body });
+        return Promise.resolve(
+          createResponse({
+            status: "ready",
+            reasons: [],
+            compliance_flags: [],
+          }),
+        );
       }
       if (url.endsWith("/api/resume") && init?.method === "POST") {
+        resumePersisted = true;
         return Promise.resolve(
           createResponse({
             status: "success",
@@ -192,18 +285,51 @@ describe("partial regeneration", () => {
 
     renderStudio();
 
-    const generateResumeButton = await screen.findByRole("button", { name: "Generate Resume" });
-    await waitFor(() => expect(generateResumeButton).toBeEnabled());
-    fireEvent.click(generateResumeButton);
-
     await waitFor(() => {
-      expect(screen.getByTestId("studio-refinement-panel")).toBeInTheDocument();
+      expect(
+        fetchMock.mock.calls.some(([input]) => rawFetchUrl(input as RequestInfo).includes("/api/analysis/fit-assessments/")),
+      ).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Unable to load role analysis.")).toBeNull();
     });
 
-    const initialResumeCalls = fetchMock.mock.calls.filter(
-      ([url, init]) => typeof url === "string" && url.endsWith("/api/resume") && init?.method === "POST",
-    );
-    expect(initialResumeCalls).toHaveLength(1);
+    await waitFor(() => {
+      expect(readinessCalls.filter((call) => call.url.includes("/api/resume/readiness"))).toHaveLength(1);
+      expect(readinessCalls.filter((call) => call.url.includes("/api/cover-letters/readiness"))).toHaveLength(1);
+    });
+    expect(readinessCalls[0]?.body).toMatchObject({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const resumeButtons = await screen.findAllByRole("button", { name: "Generate Resume" });
+    const resumeButton = resumeButtons[0];
+    await waitFor(() => expect(resumeButton).toBeEnabled());
+    fireEvent.click(resumeButton);
+
+    await waitFor(() => {
+      const initialResumeCalls = fetchMock.mock.calls.filter(
+        ([url, init]) => typeof url === "string" && url.endsWith("/api/resume") && init?.method === "POST",
+      );
+      expect(initialResumeCalls).toHaveLength(1);
+    });
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([input]) => rawFetchUrl(input as RequestInfo).includes("/api/studio/artifacts")),
+      ).toBe(true);
+    });
+
+    const openResumeButtons = await screen.findAllByRole("button", { name: "Resume" });
+    const openResumeButton = openResumeButtons[0];
+    await waitFor(() => expect(openResumeButton).toBeEnabled());
+    fireEvent.click(openResumeButton);
+
+    await screen.findByTestId("studio-refinement-panel");
+    await screen.findByTestId("refinement-option-tighten-summary");
 
     fireEvent.click(screen.getByTestId("refinement-option-tighten-summary"));
 

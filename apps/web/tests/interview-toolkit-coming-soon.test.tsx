@@ -12,13 +12,9 @@ describe("Interview Toolkit coming soon", () => {
     expect(screen.getByRole("link", { name: "Go to Results" })).toHaveAttribute("href", "/results");
   });
 
-  it("marks the Interview Toolkit nav entry as coming soon", () => {
+  it("does not include Interview Toolkit in sidebar navigation", () => {
     const route = sidebarRoutes.find((item) => item.id === "interviewToolkit");
 
-    expect(route).toMatchObject({
-      label: "Interview Toolkit · Coming Soon",
-      href: "/interview-toolkit",
-      comingSoon: true,
-    });
+    expect(route).toBeUndefined();
   });
 });

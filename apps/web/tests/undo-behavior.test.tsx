@@ -237,16 +237,6 @@ describe("undo behavior", () => {
         recordFetch({ url, method, body, branch: matchedBranch, responsePayload });
         return Promise.resolve(createResponse(responsePayload));
       }
-<<<<<<< HEAD
-      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
-        return Promise.resolve(
-          createResponse({
-            assessmentId: "analysis-1",
-            score: 84,
-            scoring_v2: { score: 84 },
-            scoringV2: { score: 84 },
-            jobId: "job-1",
-=======
       if (url.includes("/api/applications/insights")) {
         matchedBranch = "applications_insights";
         responsePayload = {
@@ -265,32 +255,14 @@ describe("undo behavior", () => {
             status: "Ready",
             appliedAt: null,
             lastTouchedAt: new Date().toISOString(),
->>>>>>> 5795ad14d667842d27db7af2a89bcf59bf802f80
             baselineId: "base-1",
             jobId: "job-1",
             company: "Acme",
             title: "Director of Support",
-<<<<<<< HEAD
-            summary: "Strong fit for support operations leadership.",
-            strengths: ["Support operations rigor", "Cross-functional leadership"],
-            gaps: [],
-            recommendedActions: [],
-            verification_coverage: {
-              totalClaims: 3,
-              verifiedClaims: 3,
-              inferredClaims: 0,
-              unverifiedClaims: 0,
-              verifiedRequirements: ["Support operations"],
-              unverifiedRequirements: [],
-            },
-          }),
-        );
-=======
           },
         ];
         recordFetch({ url, method, body, branch: matchedBranch, responsePayload });
         return Promise.resolve(createResponse(responsePayload));
->>>>>>> 5795ad14d667842d27db7af2a89bcf59bf802f80
       }
       if (url.startsWith("/api/applications/pair")) {
         matchedBranch = "applications_pair";
@@ -548,18 +520,11 @@ describe("undo behavior", () => {
 
     renderStudio();
 
-<<<<<<< HEAD
-    const resumeButtons = await screen.findAllByRole("button", { name: /resume/i });
-    const generateResumeButton = resumeButtons[0];
-    await waitFor(() => expect(generateResumeButton).toBeEnabled());
-    fireEvent.click(generateResumeButton);
-=======
     try {
       const authorityPanel = await screen.findByTestId("studio-workflow-authority");
       await waitFor(() => {
         expect(authorityPanel.getAttribute("data-workflow-state")).toBe("generation_ready");
       });
->>>>>>> 5795ad14d667842d27db7af2a89bcf59bf802f80
 
       const resumeButton = await screen.findByRole("button", { name: "Resume" });
       await waitFor(() => expect(resumeButton).toBeEnabled());
@@ -587,6 +552,11 @@ describe("undo behavior", () => {
 
       // Current Studio contract: selecting a refinement applies it immediately and triggers
       // regeneration for the relevant target(s).
+      await waitFor(() => {
+        // Refinement must not bypass readiness/authority gating. If authority is still locked after refinement,
+        // generation should not proceed (and this is a product/runtime issue, not a test expectation to weaken).
+        expect(authorityPanel.getAttribute("data-workflow-state")).not.toBe("unlock_required");
+      });
       await waitFor(() => {
         const resumeCalls = fetchMock.mock.calls.filter(
           ([url, init]) => typeof url === "string" && url.endsWith("/api/resume") && init?.method === "POST",

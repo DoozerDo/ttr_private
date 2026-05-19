@@ -80,8 +80,13 @@ describe("Target generation authority", () => {
     renderTarget();
     fireEvent.click(screen.getByRole("button", { name: "Previous result for this role" }));
     await waitFor(() => {
-      expect(screen.getByRole("link", { name: "Generate documents" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Open Studio" })).toBeInTheDocument();
     });
+    const openStudioLink = screen.getByRole("link", { name: "Open Studio" });
+    expect(openStudioLink).toHaveAttribute("href", expect.stringContaining("/studio"));
+    expect(openStudioLink).toHaveAttribute("href", expect.stringContaining("jobId=job-1"));
+    expect(openStudioLink).toHaveAttribute("href", expect.stringContaining("baselineId=base-1"));
+    expect(openStudioLink).toHaveAttribute("href", expect.stringContaining("analysisId=assessment-ready"));
     expect(screen.queryByText("Generation status: BLOCKED")).toBeNull();
     expect(screen.queryByRole("link", { name: "ANALYZE" })).toBeNull();
   });

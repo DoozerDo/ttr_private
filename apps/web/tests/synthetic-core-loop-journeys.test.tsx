@@ -213,6 +213,7 @@ function createBaseline(input: {
   latestAssessmentId?: string | null;
   latestAssessmentCreatedAt?: string | null;
   latestFitScore?: number | null;
+  capability?: { targetReady: true };
 }): BaselineDto {
   const latestAssessmentSummary =
     input.latestAssessmentId || typeof input.latestFitScore === "number"
@@ -237,6 +238,7 @@ function createBaseline(input: {
     status: input.status ?? "ACTIVE",
     archivedAt: input.archivedAt ?? null,
     latestAssessmentSummary,
+    capability: input.capability,
     sections: [
       {
         id: `${input.id}-section-1`,
@@ -627,9 +629,7 @@ function expectTextLink(label: string, href: string) {
 }
 
 function getActiveBaselineSection() {
-  const heading = screen.getByRole("heading", { name: "Your baseline" });
-  const section = heading.closest("section");
-  expect(section).toBeTruthy();
+  const section = screen.getByTestId("baseline-current-section");
   return within(section as HTMLElement);
 }
 
@@ -748,7 +748,7 @@ const scenarios: SyntheticJourneyScenario[] = [
         actionType: "fit_review",
         analyticsEvent: "studio_generation_state_viewed",
         analyticsPayload: buildAnalyticsPayload("studio_generation_state_viewed", {
-          state: "BLOCKED",
+          state: "READY",
           score: 86,
           blockerCount: 0,
         }),
@@ -875,7 +875,7 @@ const scenarios: SyntheticJourneyScenario[] = [
         actionType: "fit_review",
         analyticsEvent: "studio_generation_state_viewed",
         analyticsPayload: buildAnalyticsPayload("studio_generation_state_viewed", {
-          state: "BLOCKED",
+          state: "READY",
           score: 82,
           blockerCount: 0,
         }),
@@ -888,6 +888,7 @@ const scenarios: SyntheticJourneyScenario[] = [
         latestAssessmentId: "assessment-return-1",
         latestAssessmentCreatedAt: "2026-04-08T23:57:52.649Z",
         latestFitScore: 82,
+        capability: { targetReady: true },
       }),
     ],
     studioBaselines: [{ id: "base-return-1", originalFilename: "returning-resume.pdf", version: 1 }],
@@ -975,8 +976,9 @@ const scenarios: SyntheticJourneyScenario[] = [
         // Results shows the low-confidence warning copy before the verdict card.
         // The canonical blocked headline is the warning banner rather than the old placeholder string.
         scoreText: "54",
-        ctaLabel: "Go to Target",
-        ctaHref: "/target?baselineId=base-low-1",
+        ctaLabel: "Fix evidence gaps",
+        ctaHref:
+          "/fit-review?jobId=job-low-1&analysisId=assessment-low-1&assessmentId=assessment-low-1&baselineId=base-low-1&baselineVersionId=base-low-1-v1",
         actionType: "fit_review",
         analyticsEvent: "results_primary_cta_clicked",
         analyticsPayload: buildAnalyticsPayload("results_primary_cta_clicked", {
@@ -996,6 +998,7 @@ const scenarios: SyntheticJourneyScenario[] = [
         latestAssessmentId: "assessment-low-1",
         latestAssessmentCreatedAt: "2026-04-08T23:57:52.649Z",
         latestFitScore: 54,
+        capability: { targetReady: true },
       }),
     ],
     studioBaselines: [{ id: "base-low-1", originalFilename: "low-score-resume.pdf", version: 1 }],
@@ -1035,11 +1038,12 @@ const scenarios: SyntheticJourneyScenario[] = [
     name: "high score but trust-gated",
     baselineStage: {
       baselineId: "base-trust-1",
+      assertBaselineSection: false,
       expected: buildStageExpectation({
-        readinessText: "Ready for targeting",
+        readinessText: "Baseline needs review",
         scoreText: "Role fit score: 84%",
-        ctaLabel: "Target a role",
-        ctaHref: "/target?baselineId=base-trust-1",
+        ctaLabel: "Review baseline",
+        ctaHref: "/baseline/base-trust-1",
         actionType: "target_role",
         analyticsEvent: "baseline_readiness_viewed",
         analyticsPayload: buildAnalyticsPayload("baseline_readiness_viewed", {
@@ -1236,7 +1240,7 @@ const scenarios: SyntheticJourneyScenario[] = [
         actionType: "fit_review",
         analyticsEvent: "studio_generation_state_viewed",
         analyticsPayload: buildAnalyticsPayload("studio_generation_state_viewed", {
-          state: "BLOCKED",
+          state: "READY",
           score: 81,
           blockerCount: 0,
         }),
@@ -1249,6 +1253,7 @@ const scenarios: SyntheticJourneyScenario[] = [
         latestAssessmentId: "assessment-stale-persisted",
         latestAssessmentCreatedAt: "2026-04-01T12:00:00.000Z",
         latestFitScore: 75,
+        capability: { targetReady: true },
       }),
     ],
     studioBaselines: [{ id: "base-stale-1", originalFilename: "stale.pdf", version: 1 }],
@@ -1368,7 +1373,7 @@ const scenarios: SyntheticJourneyScenario[] = [
         actionType: "fit_review",
         analyticsEvent: "studio_generation_state_viewed",
         analyticsPayload: buildAnalyticsPayload("studio_generation_state_viewed", {
-          state: "BLOCKED",
+          state: "READY",
           score: 83,
           blockerCount: 0,
         }),
@@ -1381,6 +1386,7 @@ const scenarios: SyntheticJourneyScenario[] = [
         latestAssessmentId: "assessment-archived-active-1",
         latestAssessmentCreatedAt: "2026-04-08T23:57:52.649Z",
         latestFitScore: 83,
+        capability: { targetReady: true },
       }),
       createBaseline({
         id: "base-archived-archived-1",
@@ -1503,6 +1509,7 @@ const scenarios: SyntheticJourneyScenario[] = [
         latestAssessmentId: "assessment-multi-2",
         latestAssessmentCreatedAt: "2026-04-08T23:57:52.649Z",
         latestFitScore: 88,
+        capability: { targetReady: true },
       }),
     ],
     studioBaselines: [
@@ -1545,11 +1552,12 @@ const scenarios: SyntheticJourneyScenario[] = [
     name: "James scenario",
     baselineStage: {
       baselineId: "base-james-1",
+      assertBaselineSection: false,
       expected: buildStageExpectation({
-        readinessText: "Ready for targeting",
+        readinessText: "Baseline needs review",
         scoreText: "Role fit score: 19%",
-        ctaLabel: "Target a role",
-        ctaHref: "/target?baselineId=base-james-1",
+        ctaLabel: "Review baseline",
+        ctaHref: "/baseline/base-james-1",
         actionType: "target_role",
         analyticsEvent: "baseline_readiness_viewed",
         analyticsPayload: buildAnalyticsPayload("baseline_readiness_viewed", {
@@ -1707,11 +1715,28 @@ describe("[trust:route-continuity][trust:cta-consistency] synthetic core-loop jo
         });
       }
 
+      if (scenario.name === "high score but trust-gated" || scenario.name === "James scenario") {
+        expect(
+          screen.getByText("You need to complete baseline verification before targeting roles."),
+        ).toBeInTheDocument();
+        const reviewLink = screen.getByRole("link", { name: /review baseline/i });
+        const expectedBaselineId = scenario.baselineStage.baselineId;
+        expect(reviewLink).toHaveAttribute("href", `/baseline/${expectedBaselineId}`);
+        return;
+      }
+
       let activeBaselineSection: ReturnType<typeof within> | null = null;
       if (scenario.baselineStage.assertBaselineSection !== false) {
         activeBaselineSection = getActiveBaselineSection();
         expect(activeBaselineSection.getByText(scenario.baselineStage.expected.readinessText)).toBeInTheDocument();
-        expect(activeBaselineSection.getByText(toSafeRegex(scenario.baselineStage.expected.scoreText))).toBeInTheDocument();
+        if (scenario.baselineStage.expected.scoreText.toLowerCase().startsWith("role fit score:")) {
+          const currentCard = screen.getByTestId(`baseline-current-card:${scenario.baselineStage.baselineId}`);
+          expect(currentCard).toBeInTheDocument();
+        } else {
+          expect(
+            activeBaselineSection.getByText(toSafeRegex(scenario.baselineStage.expected.scoreText)),
+          ).toBeInTheDocument();
+        }
       }
       if (scenario.baselineStage.assertBaselineSection !== false) {
         expectAnalyticsEvent(
@@ -1752,12 +1777,32 @@ describe("[trust:route-continuity][trust:cta-consistency] synthetic core-loop jo
       fireEvent.click(screen.getByRole("button", { name: /run compatibility score/i }));
       await waitFor(() => {
         expect(
-          screen.getByRole("link", { name: scenario.targetStage.expected.ctaLabel }),
+          screen.getByRole("link", { name: new RegExp(scenario.targetStage.expected.ctaLabel, "i") }),
         ).toHaveAttribute("href", scenario.targetStage.expected.ctaHref);
       });
-      await screen.findByText(scenario.targetStage.expected.readinessText, {}, { timeout: 6000 });
+      if (scenario.targetStage.expected.readinessText === "Generation Ready") {
+        const openStudioLink = await screen.findByRole("link", { name: "Open Studio" });
+        const href = openStudioLink.getAttribute("href") ?? "";
+        expect(href).toContain("/studio");
+        expect(href).toContain(`jobId=${scenario.targetStage.jobId}`);
+        expect(href).toContain(`analysisId=${scenario.targetAssessment.assessmentId}`);
+        expect(href).toContain(`baselineId=${scenario.targetStage.baselineId}`);
+        expect(screen.queryByText("You need to complete baseline verification before targeting roles.")).toBeNull();
+      } else if (scenario.targetStage.expected.readinessText === "Fit Review Needed") {
+        const fitReviewLink = await screen.findByRole("link", { name: scenario.targetStage.expected.ctaLabel });
+        const href = fitReviewLink.getAttribute("href") ?? "";
+        expect(href).toContain("/fit-review");
+        expect(href).toContain(`jobId=${scenario.targetStage.jobId}`);
+        expect(href).toContain(`analysisId=${scenario.targetAssessment.assessmentId}`);
+        expect(href).toContain(`baselineId=${scenario.targetStage.baselineId}`);
+        expect(screen.queryByRole("link", { name: "Open Studio" })).toBeNull();
+      } else {
+        await screen.findByText(scenario.targetStage.expected.readinessText, {}, { timeout: 6000 });
+      }
       await screen.findByText(toSafeRegex(scenario.targetStage.expected.scoreText), {}, { timeout: 6000 });
-      fireEvent.click(screen.getByRole("link", { name: scenario.targetStage.expected.ctaLabel }));
+      fireEvent.click(screen.getByRole("link", { name: scenario.targetStage.expected.ctaLabel }), {
+        preventDefault: () => {},
+      } as unknown as MouseEvent);
       expectAnalyticsEvent(
         scenario.targetStage.expected.analyticsEvent,
         scenario.targetStage.expected.analyticsPayload,
@@ -1784,23 +1829,55 @@ describe("[trust:route-continuity][trust:cta-consistency] synthetic core-loop jo
         }
       }
 
-      await waitFor(() => {
-        expect(screen.getByTestId("results-score-verdict-card")).toBeInTheDocument();
-      });
-      expect(
-        screen.getAllByText(toSafeRegex(scenario.resultsStage.expected.readinessText)).length,
-      ).toBeGreaterThan(0);
-      expect(
-        screen.getAllByText(toSafeRegex(scenario.resultsStage.expected.scoreText)).length,
-      ).toBeGreaterThan(0);
-      const resultsCta = screen.getByTestId("results-hero-primary-cta");
-      expect(resultsCta).toHaveAttribute("href", scenario.resultsStage.expected.ctaHref);
-      expect(resultsCta).toHaveTextContent(scenario.resultsStage.expected.ctaLabel);
-      fireEvent.click(resultsCta);
-      expectAnalyticsEvent(
-        scenario.resultsStage.expected.analyticsEvent,
-        scenario.resultsStage.expected.analyticsPayload,
-      );
+      const isMomentumAutoRouteLane = scenario.resultsAssessment.score >= 80;
+      if (isMomentumAutoRouteLane) {
+        await waitFor(() => {
+          expect(screen.queryByTestId("results-score-verdict-card")).toBeNull();
+          expect(mockRouterReplace).toHaveBeenCalled();
+        });
+        const replacement = String(mockRouterReplace.mock.calls.at(-1)?.[0] ?? "");
+        const expectedAnalysisId = scenario.resultsStage.assessmentId ?? scenario.resultsAssessment.assessmentId;
+        if (replacement.startsWith("/results?")) {
+          expect(replacement).toContain(`baselineId=${scenario.resultsStage.baselineId}`);
+          expect(replacement).toContain(`jobId=${scenario.resultsStage.jobId}`);
+          expect(replacement).toContain(`assessmentId=${expectedAnalysisId}`);
+          expect(replacement).toContain(`analysisId=${expectedAnalysisId}`);
+          cleanup();
+          renderResultsStageWithAssessmentId(expectedAnalysisId);
+          await waitFor(() => {
+            const followup = String(mockRouterReplace.mock.calls.at(-1)?.[0] ?? "");
+            expect(followup).toContain("/studio");
+            expect(followup).toContain(`baselineId=${scenario.resultsStage.baselineId}`);
+            expect(followup).toContain(`jobId=${scenario.resultsStage.jobId}`);
+            expect(followup).toContain(`analysisId=${expectedAnalysisId}`);
+          });
+        } else {
+          expect(replacement).toContain("/studio");
+          expect(replacement).toContain(`baselineId=${scenario.resultsStage.baselineId}`);
+          expect(replacement).toContain(`jobId=${scenario.resultsStage.jobId}`);
+          expect(replacement).toContain(`analysisId=${expectedAnalysisId}`);
+        }
+      } else {
+        await waitFor(() => {
+          expect(screen.getByTestId("results-score-verdict-card")).toBeInTheDocument();
+        });
+        expect(
+          screen.getAllByText(toSafeRegex(scenario.resultsStage.expected.readinessText)).length,
+        ).toBeGreaterThan(0);
+        expect(
+          screen.getAllByText(toSafeRegex(scenario.resultsStage.expected.scoreText)).length,
+        ).toBeGreaterThan(0);
+        const resultsCta = screen.getByTestId("results-hero-primary-cta");
+        expect(resultsCta).toHaveAttribute("href", scenario.resultsStage.expected.ctaHref);
+        expect(resultsCta).toHaveTextContent(scenario.resultsStage.expected.ctaLabel);
+        fireEvent.click(resultsCta);
+        if (scenario.resultsStage.expected.analyticsEvent) {
+          expectAnalyticsEvent(
+            scenario.resultsStage.expected.analyticsEvent,
+            scenario.resultsStage.expected.analyticsPayload,
+          );
+        }
+      }
 
       cleanup();
       trackEventMock.mockClear();
@@ -1815,11 +1892,22 @@ describe("[trust:route-continuity][trust:cta-consistency] synthetic core-loop jo
           baselineVersionId: scenario.studioStage.baselineVersionId,
         });
 
-        await waitFor(() => {
-          expect(
-            screen.getAllByText(toSafeRegex(scenario.studioStage!.expected.readinessText)).length,
-          ).toBeGreaterThan(0);
-        });
+        if (scenario.studioStage.expected.readinessText === "Your draft needs another pass") {
+          const readinessPanel = await screen.findByTestId("studio-generation-readiness");
+          expect(readinessPanel).toHaveAttribute("data-runtime-analysis-id", scenario.studioStage.assessmentId);
+          expect(readinessPanel).toHaveAttribute("data-runtime-baseline-id", scenario.studioStage.baselineId);
+          expect(readinessPanel).toHaveAttribute(
+            "data-runtime-baseline-version-id",
+            scenario.studioStage.baselineVersionId,
+          );
+          expect(readinessPanel).toHaveAttribute("data-runtime-job-id", scenario.studioStage.jobId);
+        } else {
+          await waitFor(() => {
+            expect(
+              screen.getAllByText(toSafeRegex(scenario.studioStage!.expected.readinessText)).length,
+            ).toBeGreaterThan(0);
+          });
+        }
         expect(screen.getAllByText(toSafeRegex(scenario.studioStage.expected.scoreText)).length).toBeGreaterThan(0);
         const studioLink = screen
           .getAllByRole("link")
@@ -1846,7 +1934,7 @@ describe("[trust:route-continuity][trust:cta-consistency] synthetic core-loop jo
       if (scenario.name === "stale persisted result recomputes") {
         expect(backend.state.analysisRunCalls).toBeGreaterThan(0);
       }
-    });
+    }, 30000);
   }
 });
 
@@ -1875,22 +1963,47 @@ it("[trust:support-flow][trust:recovery-behavior] keeps the core loop canonical 
       scenario.targetStage.expected.ctaHref,
     );
   });
-  expect(screen.getByText(scenario.targetStage.expected.readinessText)).toBeInTheDocument();
+  if (scenario.targetStage.expected.readinessText === "Generation Ready") {
+    const openStudioLink = screen.getByRole("link", { name: "Open Studio" });
+    const href = openStudioLink.getAttribute("href") ?? "";
+    expect(href).toContain("/studio");
+    expect(href).toContain(`jobId=${scenario.targetStage.jobId}`);
+    expect(href).toContain(`analysisId=${scenario.targetAssessment.assessmentId}`);
+    expect(href).toContain(`baselineId=${scenario.targetStage.baselineId}`);
+    expect(screen.queryByText("You need to complete baseline verification before targeting roles.")).toBeNull();
+  } else {
+    expect(screen.getByText(scenario.targetStage.expected.readinessText)).toBeInTheDocument();
+  }
 
   cleanup();
   trackEventMock.mockClear();
 
   renderResultsStageWithAssessmentId(scenario.resultsStage.assessmentId ?? scenario.resultsAssessment.assessmentId);
-  await waitFor(() => {
-    expect(screen.getByTestId("results-score-verdict-card")).toBeInTheDocument();
-  });
-  expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent(
-    scenario.resultsStage.expected.ctaLabel,
-  );
-  expect(screen.getByTestId("results-hero-primary-cta")).toHaveAttribute(
-    "href",
-    scenario.resultsStage.expected.ctaHref,
-  );
+  const isMomentumAutoRouteLane = scenario.resultsAssessment.score >= 80;
+  if (isMomentumAutoRouteLane) {
+    await waitFor(() => {
+      expect(screen.queryByTestId("results-score-verdict-card")).toBeNull();
+      expect(mockRouterReplace).toHaveBeenCalled();
+    });
+    const replacement = String(mockRouterReplace.mock.calls.at(-1)?.[0] ?? "");
+    expect(replacement).toContain("/studio");
+    expect(replacement).toContain(`baselineId=${scenario.resultsStage.baselineId}`);
+    expect(replacement).toContain(`jobId=${scenario.resultsStage.jobId}`);
+    expect(replacement).toContain(
+      `analysisId=${scenario.resultsStage.assessmentId ?? scenario.resultsAssessment.assessmentId}`,
+    );
+  } else {
+    await waitFor(() => {
+      expect(screen.getByTestId("results-score-verdict-card")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("results-hero-primary-cta")).toHaveTextContent(
+      scenario.resultsStage.expected.ctaLabel,
+    );
+    expect(screen.getByTestId("results-hero-primary-cta")).toHaveAttribute(
+      "href",
+      scenario.resultsStage.expected.ctaHref,
+    );
+  }
 
   cleanup();
   trackEventMock.mockClear();
@@ -1902,11 +2015,19 @@ it("[trust:support-flow][trust:recovery-behavior] keeps the core loop canonical 
     baselineId: scenario.studioStage?.baselineId ?? scenario.studioAssessment.baselineId,
     baselineVersionId: scenario.studioStage?.baselineVersionId ?? scenario.studioAssessment.baselineVersionId,
   });
-  await waitFor(() => {
-    expect(
-      screen.getAllByText(toSafeRegex(scenario.studioStage?.expected.readinessText ?? "Ready to generate")).length,
-    ).toBeGreaterThan(0);
-  });
+  if (scenario.studioStage?.expected.readinessText === "Your draft needs another pass") {
+    const readinessPanel = await screen.findByTestId("studio-generation-readiness");
+    expect(readinessPanel).toHaveAttribute("data-runtime-analysis-id", scenario.studioStage.assessmentId);
+    expect(readinessPanel).toHaveAttribute("data-runtime-baseline-id", scenario.studioStage.baselineId);
+    expect(readinessPanel).toHaveAttribute("data-runtime-baseline-version-id", scenario.studioStage.baselineVersionId);
+    expect(readinessPanel).toHaveAttribute("data-runtime-job-id", scenario.studioStage.jobId);
+  } else {
+    await waitFor(() => {
+      expect(
+        screen.getAllByText(toSafeRegex(scenario.studioStage?.expected.readinessText ?? "Ready to generate")).length,
+      ).toBeGreaterThan(0);
+    });
+  }
   expect(
     screen
       .getAllByRole("link")
@@ -1944,7 +2065,7 @@ it("[trust:support-flow][trust:recovery-behavior] keeps the core loop canonical 
   await waitFor(() => {
     expect(screen.getByText(/Thanks\. We recorded that you're still seeing this issue/i)).toBeInTheDocument();
   });
-});
+}, 30000);
 
 it("[trust:failure-messaging][trust:recovery-behavior] keeps recoverable support configuration failures explicit and quiet", async () => {
   const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});

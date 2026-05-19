@@ -37,14 +37,13 @@ describe("ResumePreview", () => {
 
   it("renders discrete bullet list items", () => {
     render(<ResumePreview payload={payload} />);
-    // Collapsed by default: bullets should not be rendered yet.
-    expect(screen.queryByText("Led live operations roadmap delivery across multiple game releases.")).toBeNull();
-
-    fireEvent.click(screen.getByTestId("studio-resume-experience-role-header-0"));
     const bullets = screen.getAllByRole("listitem");
     expect(bullets).toHaveLength(2);
     expect(screen.getByText("Led live operations roadmap delivery across multiple game releases.")).toBeInTheDocument();
     expect(screen.getByText("Improved release quality through tighter cross-team planning.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("studio-resume-experience-role-header-0"));
+    expect(screen.queryByText("Led live operations roadmap delivery across multiple game releases.")).toBeNull();
   });
 
   it("strips duplicated inline date text from company when dateRange is present (exact start-token match only)", () => {
@@ -176,15 +175,11 @@ describe("ResumePreview", () => {
       />,
     );
 
-    // Summary is collapsed by default.
-    expect(screen.queryByText("Summary exists")).toBeNull();
-
-    // Only first two roles are visible by default.
+    // Summary is visible by default.
+    expect(screen.getByText("Summary exists")).toBeInTheDocument();
     expect(screen.getByText("Employer One")).toBeInTheDocument();
     expect(screen.getByText("Employer Two")).toBeInTheDocument();
     expect(screen.queryByText("Employer Three")).toBeNull();
-
-    // Hidden sections stay hidden until toggled.
     expect(screen.queryByText("Core Competencies")).toBeNull();
     expect(screen.queryByText("Education")).toBeNull();
 

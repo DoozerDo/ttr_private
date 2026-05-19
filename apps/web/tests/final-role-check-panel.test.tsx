@@ -55,6 +55,7 @@ describe("final role check panel", () => {
     render(
       <StudioRoleMatchPanel
         finalPass={strongFinalPass}
+        documentReadinessState="ready"
         onApplyAdjustment={onApplyAdjustment}
         isApplying={false}
       />,
@@ -83,6 +84,7 @@ describe("final role check panel", () => {
           recruiterScanRisks: [],
           recommendedFinalAdjustments: [],
         }}
+        documentReadinessState="ready"
         onApplyAdjustment={vi.fn()}
       />,
     );

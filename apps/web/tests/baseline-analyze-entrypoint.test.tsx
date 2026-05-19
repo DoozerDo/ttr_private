@@ -11,16 +11,23 @@ function createJsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-function buildAnalyzedBaselineSummary(latestAssessmentId: string | null) {
-  return {
-    latestAssessmentId,
-    latestAssessmentCreatedAt: latestAssessmentId ? "2026-03-25T00:01:00.000Z" : null,
-    latestFitScore: latestAssessmentId ? 82 : null,
-    hasCompletedAssessment: Boolean(latestAssessmentId),
-  };
-}
+  function buildAnalyzedBaselineSummary(latestAssessmentId: string | null) {
+    return {
+      latestAssessmentId,
+      latestAssessmentCreatedAt: latestAssessmentId ? "2026-03-25T00:01:00.000Z" : null,
+      latestFitScore: latestAssessmentId ? 82 : null,
+      hasCompletedAssessment: Boolean(latestAssessmentId),
+    };
+  }
 
-describe("Baseline analyze entrypoint", () => {
+  function withTargetCapability<T extends { capability?: unknown }>(baseline: T): T {
+    return {
+      ...baseline,
+      capability: { ...(baseline.capability as any), targetReady: true },
+    };
+  }
+
+  describe("Baseline analyze entrypoint", () => {
   it("keeps the canonical baseline CTA in baseline UX and does not redirect to /analyze", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -33,27 +40,29 @@ describe("Baseline analyze entrypoint", () => {
           latestAssessmentSummary: buildAnalyzedBaselineSummary("assessment-1"),
         });
       }
-      if (url.includes("/api/baselines?includeArchived=true")) {
-        return createJsonResponse([
-          {
-            id: "base-1",
-            originalFilename: "resume.pdf",
-            createdAt: "2026-01-01T00:00:00.000Z",
-            status: "ACTIVE",
-            latestAssessmentSummary: buildAnalyzedBaselineSummary("assessment-1"),
-          },
-        ]);
-      }
-      if (url.includes("/api/baselines/base-1")) {
-        return createJsonResponse({
+       if (url.includes("/api/baselines?includeArchived=true")) {
+         return createJsonResponse([
+           withTargetCapability({
+             id: "base-1",
+             originalFilename: "resume.pdf",
+             createdAt: "2026-01-01T00:00:00.000Z",
+             status: "ACTIVE",
+             latestAssessmentSummary: buildAnalyzedBaselineSummary("assessment-1"),
+           }),
+         ]);
+       }
+       if (url.includes("/api/baselines/base-1")) {
+        return createJsonResponse(
+          withTargetCapability({
           id: "base-1",
           originalFilename: "resume.pdf",
           createdAt: "2026-01-01T00:00:00.000Z",
           status: "ACTIVE",
           sections: [{ id: "s1", title: "Summary", content: "Analyzed", order: 1 }],
           latestAssessmentSummary: buildAnalyzedBaselineSummary("assessment-1"),
-        });
-      }
+          }),
+        );
+       }
       return createJsonResponse({});
     });
 
@@ -62,18 +71,18 @@ describe("Baseline analyze entrypoint", () => {
     render(
       <BaselineStudioHome
         baselines={[
-          {
+          withTargetCapability({
             id: "base-1",
             originalFilename: "resume.pdf",
             createdAt: "2026-01-01T00:00:00.000Z",
             status: "ACTIVE",
             latestAssessmentSummary: buildAnalyzedBaselineSummary("assessment-1"),
-          } as never,
+          }) as never,
         ]}
       />,
     );
 
-    expect(await screen.findByRole("link", { name: "Target a role" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /target a role/i })).toBeInTheDocument();
     expect(mockRouterPush).not.toHaveBeenCalledWith(expect.stringContaining("/analyze"));
   });
 
@@ -89,27 +98,29 @@ describe("Baseline analyze entrypoint", () => {
           latestAssessmentSummary: buildAnalyzedBaselineSummary("assessment-1"),
         });
       }
-      if (url.includes("/api/baselines?includeArchived=true")) {
-        return createJsonResponse([
-          {
-            id: "base-1",
-            originalFilename: "resume.pdf",
-            createdAt: "2026-01-01T00:00:00.000Z",
-            status: "ACTIVE",
-            latestAssessmentSummary: buildAnalyzedBaselineSummary("assessment-1"),
-          },
-        ]);
-      }
-      if (url.includes("/api/baselines/base-1")) {
-        return createJsonResponse({
+       if (url.includes("/api/baselines?includeArchived=true")) {
+         return createJsonResponse([
+           withTargetCapability({
+             id: "base-1",
+             originalFilename: "resume.pdf",
+             createdAt: "2026-01-01T00:00:00.000Z",
+             status: "ACTIVE",
+             latestAssessmentSummary: buildAnalyzedBaselineSummary("assessment-1"),
+           }),
+         ]);
+       }
+       if (url.includes("/api/baselines/base-1")) {
+        return createJsonResponse(
+          withTargetCapability({
           id: "base-1",
           originalFilename: "resume.pdf",
           createdAt: "2026-01-01T00:00:00.000Z",
           status: "ACTIVE",
           sections: [{ id: "s1", title: "Summary", content: "Analyzed", order: 1 }],
           latestAssessmentSummary: buildAnalyzedBaselineSummary("assessment-1"),
-        });
-      }
+          }),
+        );
+       }
       return createJsonResponse({});
     });
 
@@ -118,18 +129,18 @@ describe("Baseline analyze entrypoint", () => {
     render(
       <BaselineStudioHome
         baselines={[
-          {
+          withTargetCapability({
             id: "base-1",
             originalFilename: "resume.pdf",
             createdAt: "2026-01-01T00:00:00.000Z",
             status: "ACTIVE",
             latestAssessmentSummary: buildAnalyzedBaselineSummary("assessment-1"),
-          } as never,
+          }) as never,
         ]}
       />,
     );
 
-    expect(await screen.findByRole("link", { name: "Target a role" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /target a role/i })).toBeInTheDocument();
     expect(mockRouterPush).not.toHaveBeenCalledWith(expect.stringContaining("/analyze"));
   });
 
@@ -145,27 +156,29 @@ describe("Baseline analyze entrypoint", () => {
           latestAssessmentSummary: buildAnalyzedBaselineSummary("assessment-1"),
         });
       }
-      if (url.includes("/api/baselines?includeArchived=true")) {
-        return createJsonResponse([
-          {
-            id: "base-1",
-            originalFilename: "resume.pdf",
-            createdAt: "2026-01-01T00:00:00.000Z",
-            status: "ACTIVE",
-            latestAssessmentSummary: buildAnalyzedBaselineSummary("assessment-1"),
-          },
-        ]);
-      }
-      if (url.includes("/api/baselines/base-1")) {
-        return createJsonResponse({
+       if (url.includes("/api/baselines?includeArchived=true")) {
+         return createJsonResponse([
+           withTargetCapability({
+             id: "base-1",
+             originalFilename: "resume.pdf",
+             createdAt: "2026-01-01T00:00:00.000Z",
+             status: "ACTIVE",
+             latestAssessmentSummary: buildAnalyzedBaselineSummary("assessment-1"),
+           }),
+         ]);
+       }
+       if (url.includes("/api/baselines/base-1")) {
+        return createJsonResponse(
+          withTargetCapability({
           id: "base-1",
           originalFilename: "resume.pdf",
           createdAt: "2026-01-01T00:00:00.000Z",
           status: "ACTIVE",
           sections: [{ id: "s1", title: "Summary", content: "Analyzed", order: 1 }],
           latestAssessmentSummary: buildAnalyzedBaselineSummary("assessment-1"),
-        });
-      }
+          }),
+        );
+       }
       return createJsonResponse({});
     });
 
@@ -174,18 +187,18 @@ describe("Baseline analyze entrypoint", () => {
     render(
       <BaselineStudioHome
         baselines={[
-          {
+          withTargetCapability({
             id: "base-1",
             originalFilename: "resume.pdf",
             createdAt: "2026-01-01T00:00:00.000Z",
             status: "ACTIVE",
             latestAssessmentSummary: buildAnalyzedBaselineSummary("assessment-1"),
-          } as never,
+          }) as never,
         ]}
       />,
     );
 
-    expect(await screen.findByRole("link", { name: "Target a role" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /target a role/i })).toBeInTheDocument();
   });
 
   it("shows the Target CTA when analyze returns latestAssessmentId", async () => {
@@ -200,27 +213,29 @@ describe("Baseline analyze entrypoint", () => {
           latestAssessmentSummary: buildAnalyzedBaselineSummary("assessment-1"),
         });
       }
-      if (url.includes("/api/baselines?includeArchived=true")) {
-        return createJsonResponse([
-          {
-            id: "base-1",
-            originalFilename: "resume.pdf",
-            createdAt: "2026-01-01T00:00:00.000Z",
-            status: "ACTIVE",
-            latestAssessmentSummary: buildAnalyzedBaselineSummary("assessment-1"),
-          },
-        ]);
-      }
-      if (url.includes("/api/baselines/base-1")) {
-        return createJsonResponse({
+       if (url.includes("/api/baselines?includeArchived=true")) {
+         return createJsonResponse([
+           withTargetCapability({
+             id: "base-1",
+             originalFilename: "resume.pdf",
+             createdAt: "2026-01-01T00:00:00.000Z",
+             status: "ACTIVE",
+             latestAssessmentSummary: buildAnalyzedBaselineSummary("assessment-1"),
+           }),
+         ]);
+       }
+       if (url.includes("/api/baselines/base-1")) {
+        return createJsonResponse(
+          withTargetCapability({
           id: "base-1",
           originalFilename: "resume.pdf",
           createdAt: "2026-01-01T00:00:00.000Z",
           status: "ACTIVE",
           sections: [{ id: "s1", title: "Summary", content: "Analyzed", order: 1 }],
           latestAssessmentSummary: buildAnalyzedBaselineSummary("assessment-1"),
-        });
-      }
+          }),
+        );
+       }
       return createJsonResponse({});
     });
 
@@ -229,17 +244,17 @@ describe("Baseline analyze entrypoint", () => {
     render(
       <BaselineStudioHome
         baselines={[
-          {
+          withTargetCapability({
             id: "base-1",
             originalFilename: "resume.pdf",
             createdAt: "2026-01-01T00:00:00.000Z",
             status: "ACTIVE",
             latestAssessmentSummary: buildAnalyzedBaselineSummary("assessment-1"),
-          } as never,
+          }) as never,
         ]}
       />,
     );
 
-    expect(await screen.findByRole("link", { name: "Target a role" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /target a role/i })).toBeInTheDocument();
   });
 });

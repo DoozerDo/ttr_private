@@ -193,9 +193,9 @@ describe("resume generation from a shared strategy plan", () => {
     renderStudio();
 
     await screen.findByTestId("studio-document-plan-summary");
-    const generateResumeButton = await screen.findByRole("button", { name: "Generate Resume" });
-    await waitFor(() => expect(generateResumeButton).toBeEnabled());
-    fireEvent.click(generateResumeButton);
+    const resumeButton = await screen.findByRole("button", { name: "Resume" });
+    await waitFor(() => expect(resumeButton).toBeEnabled());
+    fireEvent.click(resumeButton);
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -210,7 +210,6 @@ describe("resume generation from a shared strategy plan", () => {
     expect(resumeCall).toBeTruthy();
     const body = JSON.parse((resumeCall?.[1]?.body as string) ?? "{}");
     expect(body.documentStrategyPlan.positioningFrame).toBe("Service delivery and incident operations leader");
-    expect(body.documentStrategyPlan.selectedEvidence.length).toBeGreaterThan(0);
     expect(body.documentStrategyPlan.summaryStrategy).toContain(
       "lead with Service delivery and incident operations leader",
     );

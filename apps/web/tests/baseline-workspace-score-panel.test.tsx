@@ -166,7 +166,7 @@ describe("BaselineWorkspace live score panel", () => {
       expect(screen.getByText(/Led global support operations at sentinelone/i)).toBeInTheDocument();
       expect(screen.getAllByText("Ready to generate documents.").length).toBeGreaterThan(0);
       expect(
-        screen.getByRole("link", { name: "Generate documents" }),
+        screen.getByRole("link", { name: "Open Studio" }),
       ).toHaveAttribute("href", "/studio?jobId=job-1&analysisId=assessment-1&baselineId=base-1");
       expect(screen.queryByRole("link", { name: "View detailed analysis" })).toBeNull();
       expect(screen.queryByRole("button", { name: "Add to Opportunities" })).toBeNull();
@@ -323,7 +323,7 @@ describe("BaselineWorkspace live score panel", () => {
       });
 
       expect(screen.getByText("You can generate documents for this role.")).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: /Generate documents/i })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: /Open Studio/i })).toBeInTheDocument();
       expect(screen.queryByText(/Document generation is blocked/i)).toBeNull();
       expect(screen.queryByRole("button", { name: "Retry scoring" })).toBeNull();
       expect(screen.queryByRole("link", { name: "Generate Tailored Materials" })).toBeNull();

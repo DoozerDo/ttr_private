@@ -1,9 +1,9 @@
 import { buildGenerationProductReadiness } from "@/lib/generationProductReadiness";
 
 describe("generation product readiness contract", () => {
-  it("fails closed at or below 70", () => {
+  it("fails closed below the unlock floor", () => {
     const readiness = buildGenerationProductReadiness({
-      score: 70,
+      score: 69,
       authorityState: "READY",
       hasCanonicalAssessment: true,
       hasRequiredContext: true,
@@ -51,8 +51,8 @@ describe("generation product readiness contract", () => {
     expect(readiness.generation_readiness.canGenerate).toBe(true);
     expect(readiness.state).toBe("ALLOWED");
     expect(readiness.confidence).toBe("MEDIUM");
-    expect(readiness.needsVerification).toBe(true);
-    expect(readiness.generationMode).toBe("draft");
+    expect(readiness.needsVerification).toBe(false);
+    expect(readiness.generationMode).toBe("verified");
   });
 
   it("allows generation over 70 when readiness is ready and export for pro", () => {
@@ -80,9 +80,9 @@ describe("generation product readiness contract", () => {
     expect(scoreUnlockedNonPro.tier).toBe("generation_allowed");
   });
 
-  it("blocks generation when required context is missing", () => {
+  it("blocks generation when canonical assessment is missing (outside momentum lane)", () => {
     const readiness = buildGenerationProductReadiness({
-      score: 94,
+      score: 75,
       authorityState: "READY",
       hasCanonicalAssessment: false,
       hasRequiredContext: true,

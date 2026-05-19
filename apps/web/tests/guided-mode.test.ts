@@ -3,28 +3,20 @@ import { renderHook } from "@testing-library/react";
 import { deriveGuidedStepFromNextAction, useGuidedMode } from "@/hooks/useGuidedMode";
 
 describe("guided mode", () => {
-  it("maps continue-analysis state", () => {
-    expect(deriveGuidedStepFromNextAction("CONTINUE_ANALYSIS")).toBe("ANALYZE");
+  it("maps fit review next action to resolve gaps", () => {
+    expect(deriveGuidedStepFromNextAction("fit_review")).toBe("RESOLVE_GAPS");
   });
 
-  it("maps weak-fit path to resolve gaps", () => {
-    expect(deriveGuidedStepFromNextAction("RESOLVE_GAPS")).toBe("RESOLVE_GAPS");
+  it("maps studio next action to generate", () => {
+    expect(deriveGuidedStepFromNextAction("studio")).toBe("GENERATE");
   });
 
-  it("maps reanalyze path", () => {
-    expect(deriveGuidedStepFromNextAction("REANALYZE")).toBe("REANALYZE");
+  it("maps studio with save next action to generate", () => {
+    expect(deriveGuidedStepFromNextAction("studio_with_save")).toBe("GENERATE");
   });
 
-  it("maps generation-ready path", () => {
-    expect(deriveGuidedStepFromNextAction("GENERATE_RESUME")).toBe("GENERATE");
-  });
-
-  it("maps post-generation save path", () => {
-    expect(deriveGuidedStepFromNextAction("ADD_TO_OPPORTUNITIES")).toBe("GENERATE");
-  });
-
-  it("maps completed path", () => {
-    expect(deriveGuidedStepFromNextAction("REVIEW_RESULTS")).toBe("COMPLETE");
+  it("maps unknown next action to complete", () => {
+    expect(deriveGuidedStepFromNextAction("unknown_action" as any)).toBe("COMPLETE");
   });
 
   it("exposes guided api surface", () => {

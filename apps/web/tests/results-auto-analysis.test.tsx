@@ -247,7 +247,7 @@ describe("results auto analysis loading", () => {
     });
     expect(authority.querySelector("[data-testid='workflow-authority-eyebrow']")).toBeTruthy();
     expect(authority.querySelector("[data-testid='results-hero-primary-cta']")?.textContent ?? "").toContain(
-      "Apply to this role",
+      "Open Studio",
     );
   });
 
@@ -299,7 +299,7 @@ describe("results auto analysis loading", () => {
       );
     });
     expect(authority.querySelector("[data-testid='results-hero-primary-cta']")?.textContent ?? "").toContain(
-      "Retry generation",
+      "Open Studio",
     );
   });
 
@@ -351,7 +351,7 @@ describe("results auto analysis loading", () => {
       );
     });
     expect(authority.querySelector("[data-testid='results-hero-primary-cta']")?.textContent ?? "").toContain(
-      "Generate documents",
+      "Open Studio",
     );
   });
 
@@ -413,7 +413,9 @@ describe("results auto analysis loading", () => {
     expect(screen.getByTestId("results-generation-unlocked-panel")).toBeInTheDocument();
     expect(screen.getByTestId("results-generation-unlocked-panel")).toHaveTextContent(/generation unlocked/i);
     expect(screen.queryByText("No material gaps were identified in this run.")).toBeNull();
-    expect(screen.getAllByTestId("results-hero-primary-cta")[0]).toHaveTextContent("Fix evidence gaps");
+    expect(screen.getAllByTestId("results-hero-primary-cta")[0]).toHaveTextContent(
+      "Add missing experience now",
+    );
     expect(consoleErrorSpy).not.toHaveBeenCalled();
     consoleErrorSpy.mockRestore();
   });

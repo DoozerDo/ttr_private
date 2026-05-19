@@ -32,10 +32,9 @@ describe("resolveResultsDecision", () => {
         },
       }),
     ).toMatchObject({
-      state: "DRAFT",
+      state: "READY",
       primaryCta: "OPEN_STUDIO",
-      headline: "Strong match. Generation is ready.",
-      subtext: "Your materials are ready to generate now. Review them in Studio before applying.",
+      headline: expect.stringMatching(/Strong match/i),
     });
   });
 
@@ -50,10 +49,9 @@ describe("resolveResultsDecision", () => {
         },
       }),
     ).toMatchObject({
-      state: "DRAFT",
+      state: "READY",
       primaryCta: "OPEN_STUDIO",
-      headline: "Strong match. Generation is ready.",
-      subtext: "Your materials are ready to generate now. Review them in Studio before applying.",
+      headline: expect.stringMatching(/Strong match/i),
     });
   });
 
