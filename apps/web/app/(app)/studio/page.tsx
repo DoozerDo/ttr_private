@@ -3676,7 +3676,10 @@ export default function StudioPage() {
       // When we have renderable persisted material, Draft Review must not read as "not generated".
       if (
         resolved === "missing" &&
-        (hasRenderableResumeContent || hasRenderableCoverLetterContent)
+        ((resumePresenter.status === "success" && Boolean(resumeState.response)) ||
+          (coverPresenter.status === "success" && Boolean(coverState.response)) ||
+          hasRenderableResumeContent ||
+          hasRenderableCoverLetterContent)
       ) {
         return "generated_unusable" as const;
       }
