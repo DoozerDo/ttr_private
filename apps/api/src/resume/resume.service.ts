@@ -1074,6 +1074,12 @@ export class ResumeService {
       .map((bullet) => normalizeMinimalLine(bullet.text))
       .filter(Boolean);
 
+    // If we could not extract any usable job keywords, avoid emitting "Targeting <job title>"
+    // or other tailoring semantics based on ungrounded signals. Keep baseline presentation.
+    if (!keywordSet.size) {
+      return nextSections;
+    }
+
     const rankedExperienceBullets = keywordSet.size
       ? [...experienceBullets].sort((a, b) => countKeywordOverlap(b, keywordSet) - countKeywordOverlap(a, keywordSet))
       : experienceBullets;
