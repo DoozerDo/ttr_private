@@ -24,6 +24,25 @@ Notes:
 - This account should be used only for validation and should not be shared with normal beta testers.
 - If you prefer not to grant founder allowlist access to an operator, you must provision an access code via a trusted admin user (see API `POST /admin/access-codes`) and assign it to the test user **before** first login so auto-redeem can succeed.
 
+## Production beta tester provisioning (operator)
+
+Goal: provision/revoke **non-founder** beta testers in production without disabling access-code gating and without exposing public admin routes.
+
+### Security boundary
+- Requires normal authentication (JWT cookie via `/auth/login`)
+- Requires caller email to be in `FOUNDER_EMAILS` (founder allowlist)
+
+### Workflow
+1. Tester signs up in production (and confirms email if required).
+2. Founder/operator logs in to production.
+3. Founder/operator provisions access for the tester email:
+   - `POST /ops/beta/provision` with `{ "email": "tester@example.com", "notes": "beta cohort A" }`
+4. Tester logs in normally; assigned code is auto-redeemed on first login when access-code gating is enabled.
+5. To revoke access later:
+   - `POST /ops/beta/revoke` with `{ "email": "tester@example.com", "reason": "beta ended" }`
+6. To verify access status:
+   - `GET /ops/beta/status?email=tester@example.com`
+
 ### Canonical synthetic validation (Docker)
 ```
 docker compose -f infra/docker/docker-compose.dev.yml up -d --build

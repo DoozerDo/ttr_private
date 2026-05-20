@@ -38,6 +38,63 @@ export class AccessCodesService {
     private readonly usersService: UsersService,
   ) {}
 
+  async listCodesForUser(userId: string): Promise<AccessCode[]> {
+    const id = userId.trim();
+    if (!id) {
+      return [];
+    }
+
+    return this.accessCodesRepository.find({
+      where: [
+        { assignedUserId: id },
+        { redeemedByUserId: id },
+        { createdByUserId: id },
+        { revokedByUserId: id },
+      ],
+      order: { createdAt: 'DESC' },
+      relations: ['createdBy', 'assignedUser', 'redeemedBy', 'revokedBy'],
+    });
+  }
+
+  async revokeAllForUser(
+    userId: string,
+    input?: { revokedByUserId?: string; reason?: string },
+  ): Promise<{ revokedCount: number; alreadyRevokedCount: number }> {
+    const id = userId.trim();
+    if (!id) {
+      return { revokedCount: 0, alreadyRevokedCount: 0 };
+    }
+
+    // Revoke both redeemed access (enforced by AccessGuard) and any unused assigned codes.
+    const candidates = await this.accessCodesRepository.find({
+      where: [
+        { redeemedByUserId: id, revokedAt: IsNull() },
+        { assignedUserId: id, redeemedAt: IsNull(), revokedAt: IsNull() },
+      ],
+      order: { createdAt: 'DESC' },
+    });
+
+    if (!candidates.length) {
+      return { revokedCount: 0, alreadyRevokedCount: 0 };
+    }
+
+    const now = new Date();
+    const revokedByUserId = input?.revokedByUserId?.trim() || null;
+    const reason = input?.reason?.trim() || '';
+
+    for (const code of candidates) {
+      code.revokedAt = now;
+      code.revokedByUserId = revokedByUserId;
+      if (reason) {
+        code.notes = code.notes ? `${code.notes}\n[revoked] ${reason}` : `[revoked] ${reason}`;
+      }
+    }
+
+    await this.accessCodesRepository.save(candidates);
+
+    return { revokedCount: candidates.length, alreadyRevokedCount: 0 };
+  }
+
   async listCodes(): Promise<AccessCode[]> {
     return this.accessCodesRepository.find({
       order: { createdAt: 'DESC' },

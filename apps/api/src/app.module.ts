@@ -36,6 +36,7 @@ import { AdminFunnelModule } from './admin-funnel/admin-funnel.module';
 import { AdminSignalModule } from './admin-signal/admin-signal.module';
 import { SyntheticModule } from './synthetic/synthetic.module';
 import { BugReportsModule } from './bug-reports/bug-reports.module';
+import { BetaOpsController } from './ops/beta-ops.controller';
 
 @Module({
   imports: [
@@ -102,7 +103,7 @@ import { BugReportsModule } from './bug-reports/bug-reports.module';
     SyntheticModule,
     BugReportsModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, BetaOpsController],
   providers: [
     AppService,
     {
