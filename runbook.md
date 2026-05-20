@@ -43,6 +43,13 @@ Goal: provision/revoke **non-founder** beta testers in production without disabl
 6. To verify access status:
    - `GET /ops/beta/status?email=tester@example.com`
 
+## Production routing note (Railway single-service)
+
+If production is deployed as a single Next.js service (no external reverse proxy like Caddy), `/api/*` is served by Next.js route handlers.
+To ensure `/api/*` reaches the Nest API service:
+- `/api/status` proxies to the API `/status` endpoint.
+- `/api/ops/beta/*` proxies to API `/ops/beta/*` (founder-only endpoints).
+
 ### Canonical synthetic validation (Docker)
 ```
 docker compose -f infra/docker/docker-compose.dev.yml up -d --build
