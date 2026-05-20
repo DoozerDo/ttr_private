@@ -13,12 +13,15 @@ function joinPath(parts: string[]) {
 
 type RouteContext = { params: { path?: string[] } };
 
-async function proxy(req: NextRequest, ctx: RouteContext, method: "GET" | "POST") {
+type NextRouteContext = { params: Promise<{ path: string[] }> };
+
+async function proxy(req: NextRequest, ctx: NextRouteContext, method: "GET" | "POST") {
   const baseUrl = getApiBaseUrl();
   const auth = requireAuthToken(req);
   if (!auth.token) return auth.error;
 
-  const suffix = joinPath(ctx.params.path ?? []);
+  const params = await ctx.params;
+  const suffix = joinPath(params?.path ?? []);
   const search = req.nextUrl.search || "";
   const url = `${baseUrl}/ops/beta/${suffix}${search}`;
 
@@ -43,7 +46,7 @@ async function proxy(req: NextRequest, ctx: RouteContext, method: "GET" | "POST"
   return relayApiResponse(response);
 }
 
-export async function GET(req: NextRequest, ctx: RouteContext) {
+export async function GET(req: NextRequest, ctx: NextRouteContext) {
   try {
     return await proxy(req, ctx, "GET");
   } catch (error) {
@@ -55,7 +58,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
   }
 }
 
-export async function POST(req: NextRequest, ctx: RouteContext) {
+export async function POST(req: NextRequest, ctx: NextRouteContext) {
   try {
     return await proxy(req, ctx, "POST");
   } catch (error) {

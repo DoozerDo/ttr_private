@@ -50,6 +50,8 @@ To ensure `/api/*` reaches the Nest API service:
 - `/api/status` proxies to the API `/status` endpoint.
 - `/api/ops/beta/*` proxies to API `/ops/beta/*` (founder-only endpoints).
 
+Operator note: after landing routing/proxy changes, trigger a fresh web deploy before validating `/api/status` and `/api/ops/beta/*`.
+
 ### Canonical synthetic validation (Docker)
 ```
 docker compose -f infra/docker/docker-compose.dev.yml up -d --build
