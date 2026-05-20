@@ -52,6 +52,90 @@ To ensure `/api/*` reaches the Nest API service:
 
 Operator note: after landing routing/proxy changes, trigger a fresh web deploy before validating `/api/status` and `/api/ops/beta/*`.
 
+## Production beta-ops validation (founder operator, local PowerShell)
+
+Goal: validate production beta onboarding/offboarding end-to-end **without** pasting tokens into chat/logs and **without** printing access codes.
+
+### Prereqs (local shell only)
+- Set founder bearer token (do not echo it):
+  - `$env:TTR_FOUNDER_TOKEN="..."`
+- Set disposable tester email:
+  - `$env:TTR_BETA_TEST_EMAIL="ttr-beta-ops-validate+<unique>@example.com"`
+- Optional override (defaults to production):
+  - `$env:TTR_BASE_URL="https://targetthisrole.com"`
+
+### Command sequence (PowerShell-safe; uses Invoke-RestMethod)
+```powershell
+$ErrorActionPreference = "Stop"
+
+$base = ($env:TTR_BASE_URL ?? "https://targetthisrole.com").TrimEnd("/")
+$email = ($env:TTR_BETA_TEST_EMAIL ?? "").Trim()
+$token = ($env:TTR_FOUNDER_TOKEN ?? "").Trim()
+
+if (-not $email) { throw "Missing TTR_BETA_TEST_EMAIL" }
+if (-not $token) { throw "Missing TTR_FOUNDER_TOKEN" }
+
+$statusUrl = "$base/api/ops/beta/status?email=$([Uri]::EscapeDataString($email))"
+$provisionUrl = "$base/api/ops/beta/provision"
+$revokeUrl = "$base/api/ops/beta/revoke"
+
+Write-Host "1) Unauthenticated status should be 401"
+try {
+  Invoke-RestMethod -Method GET -Uri $statusUrl -Headers @{} | Out-Null
+  throw "Expected 401 but request succeeded"
+} catch {
+  $resp = $_.Exception.Response
+  if ($resp -and $resp.StatusCode.value__ -eq 401) { Write-Host "OK: 401" } else { throw $_ }
+}
+
+$authHeaders = @{ Authorization = "Bearer $token" }
+
+Write-Host "2) Founder-authenticated status should succeed"
+$s0 = Invoke-RestMethod -Method GET -Uri $statusUrl -Headers $authHeaders
+$s0 | Select-Object ok,email,hasActiveAccess | Format-List
+
+Write-Host "3) Provision (do NOT print accessCode)"
+$prov = Invoke-RestMethod -Method POST -Uri $provisionUrl -Headers $authHeaders -ContentType "application/json" `
+  -Body (@{ email = $email; notes = "prod beta-ops validation" } | ConvertTo-Json)
+
+# Never print $prov.accessCode
+$prov | Select-Object ok,email,userId,accessCodeId,status,@{Name="accessCodeReturned";Expression={ [bool]($_.accessCode) }} | Format-List
+
+Write-Host "4) Status after provision should show active/assigned access (at minimum a code row exists)"
+$s1 = Invoke-RestMethod -Method GET -Uri $statusUrl -Headers $authHeaders
+$codeCount = @($s1.codes).Count
+$s1 | Select-Object ok,email,hasActiveAccess,@{Name="codesCount";Expression={$codeCount}} | Format-List
+
+Write-Host "5) Revoke"
+$rev = Invoke-RestMethod -Method POST -Uri $revokeUrl -Headers $authHeaders -ContentType "application/json" `
+  -Body (@{ email = $email; reason = "prod beta-ops validation revoke" } | ConvertTo-Json)
+$rev | Select-Object ok,email,userId,revokedCount,alreadyRevokedCount | Format-List
+
+Write-Host "6) Status after revoke should show hasActiveAccess=false"
+$s2 = Invoke-RestMethod -Method GET -Uri $statusUrl -Headers $authHeaders
+$codeCount2 = @($s2.codes).Count
+$s2 | Select-Object ok,email,hasActiveAccess,@{Name="codesCount";Expression={$codeCount2}} | Format-List
+```
+
+### Success criteria
+- Step (1) returns **401** (auth enforced).
+- Step (2) returns **200** and a payload with `ok=true`.
+- Step (3) returns **200** and `accessCodeReturned=true` but **does not print the access code**.
+- Step (4) shows `codesCount >= 1` and typically `hasActiveAccess=true` after the tester has logged in (note: provision assigns a code; active access becomes true once redeemed).
+- Step (5) returns **200** with a non-negative `revokedCount`.
+- Step (6) shows `hasActiveAccess=false` after revocation (and the tester should lose gated access after their next request).
+
+Status field meanings:
+- `hasActiveAccess`: tester has redeemed, non-revoked access (gating will pass).
+- `hasAssignedAccessCode`: tester has an assigned, unused, non-revoked access code (provisioned but not yet redeemed).
+- `canRedeemAccess`: equivalent to `hasAssignedAccessCode` (tester can redeem by logging in with their assigned code flow).
+
+### Failure classification hints
+- 404 / HTML response: wrong deployment or route not present (web build not active).
+- 500 `API base URL is not configured`: production web missing `API_BASE_URL`/`NEXT_PUBLIC_API_BASE_URL`.
+- 401 even with token: token expired/invalid or not a founder session.
+- 403: founder allowlist (`FOUNDER_EMAILS`) not configured for the operator email.
+
 ### Canonical synthetic validation (Docker)
 ```
 docker compose -f infra/docker/docker-compose.dev.yml up -d --build

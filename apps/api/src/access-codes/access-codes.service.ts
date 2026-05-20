@@ -196,6 +196,24 @@ export class AccessCodesService {
     return count > 0;
   }
 
+  async countAssignedUnredeemedAccessCodes(userId: string): Promise<number> {
+    const id = userId.trim();
+    if (!id) {
+      return 0;
+    }
+
+    return this.accessCodesRepository
+      .createQueryBuilder('accessCode')
+      .where('accessCode.assignedUserId = :userId', { userId: id })
+      .andWhere('accessCode.redeemedAt IS NULL')
+      .andWhere('accessCode.revokedAt IS NULL')
+      .getCount();
+  }
+
+  async userHasAssignedUnredeemedAccessCode(userId: string): Promise<boolean> {
+    return (await this.countAssignedUnredeemedAccessCodes(userId)) > 0;
+  }
+
   async resolveBetaAccessApproved(input: {
     userId: string;
     betaAccessApproved?: boolean | null;

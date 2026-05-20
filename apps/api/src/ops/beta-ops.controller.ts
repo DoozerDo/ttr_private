@@ -148,16 +148,23 @@ export class BetaOpsController {
       return { ok: true, email, user: null };
     }
 
-    const active = await this.accessCodesService.userHasActiveAccess(user.id);
+    const [hasActiveAccess, hasAssignedAccessCode, assignedUnredeemedCount] =
+      await Promise.all([
+        this.accessCodesService.userHasActiveAccess(user.id),
+        this.accessCodesService.userHasAssignedUnredeemedAccessCode(user.id),
+        this.accessCodesService.countAssignedUnredeemedAccessCodes(user.id),
+      ]);
     const rows = await this.accessCodesService.listCodesForUser(user.id);
 
     return {
       ok: true,
       email,
       user: { id: user.id, email: user.email },
-      hasActiveAccess: active,
+      hasActiveAccess,
+      hasAssignedAccessCode,
+      canRedeemAccess: hasAssignedAccessCode,
+      assignedUnredeemedCount,
       codes: rows.map((row) => this.accessCodesService.toAdminListRow(row)),
     };
   }
 }
-
