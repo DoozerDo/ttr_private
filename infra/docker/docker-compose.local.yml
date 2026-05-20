@@ -27,6 +27,8 @@ services:
       - ../../.env.dreamhost
     environment:
       NODE_ENV: development
+      # In Docker, localhost points at the container itself. Use the db service.
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/targetthisrole
       TYPEORM_SYNCHRONIZE: "true"
       ENABLE_LLM_PARITY_SCORE: "true"
       APP_PUBLIC_WEB_URL: ${APP_PUBLIC_WEB_URL:-http://localhost:3000}

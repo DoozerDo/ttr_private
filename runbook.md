@@ -1,6 +1,7 @@
 ## Local Dev (Docker)
 
 ### Start
+Prereq: Docker Desktop must be running (Linux containers / WSL2 backend on Windows).
 ```
 docker compose -f infra/docker/docker-compose.local.yml up -d --build
 ```
