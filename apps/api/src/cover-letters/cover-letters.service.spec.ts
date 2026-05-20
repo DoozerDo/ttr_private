@@ -171,7 +171,7 @@ const buildService = (options?: {
     applicationsService,
     baselineResumeV2BackfillService,
   );
-  return { service, complianceService, coverRepo, workflowIdempotencyService, studioArtifactsService };
+  return { service, complianceService, coverRepo, workflowIdempotencyService, studioArtifactsService, fitRepo };
 };
 
 const request = {
@@ -727,6 +727,22 @@ describe('CoverLettersService contract', () => {
       }),
     );
     buildDraftSpy.mockRestore();
+  });
+
+  it('generates a cover letter when analysisId is omitted but a recent assessment exists', async () => {
+    const { service, fitRepo } = buildService();
+
+    await expect(
+      (service as any).buildCoverLetterDraft('user-1', {
+        baselineId: 'baseline-1',
+        baselineVersionId: 'baseline-version-1',
+        jobId: 'job-1',
+        analysisId: null,
+        oneTap: true,
+      } as any),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+
+    expect(fitRepo.findOne).toHaveBeenCalled();
   });
 
   it('reuses a completed generation request instead of creating a duplicate artifact', async () => {

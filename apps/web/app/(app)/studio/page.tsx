@@ -11321,7 +11321,7 @@ export default function StudioPage() {
     const analysisId = effectiveRequestedAnalysisId ?? null;
     console.log("GENERATE_COVER_CLICKED");
     console.log("GENERATE_PAYLOAD", { baselineId, baselineVersionId, jobId, analysisId });
-    if (!baselineId || !jobId || !baselineVersionId || !analysisId) {
+    if (!baselineId || !jobId || !baselineVersionId) {
       console.error("[studio][generate_missing_context]", {
         baselineId,
         baselineVersionId,
@@ -11334,18 +11334,22 @@ export default function StudioPage() {
         response: null,
         artifactFailure: null,
         tierGateError: null,
-        error: analysisId
-          ? "We couldn't start generation yet. Please reload Studio and try again."
-          : "We couldn't start cover letter generation because analysisId is missing. Return to Results and open Studio again.",
+        error: "We couldn't start generation yet. Please reload Studio and try again.",
       }));
       return;
     }
     setCoverGenerating(true);
     try {
+      const requestBody = {
+        baselineId,
+        baselineVersionId,
+        jobId,
+        ...(analysisId ? { analysisId } : {}),
+      };
       const response = await fetch("/api/cover-letters/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ baselineId, baselineVersionId, jobId, analysisId }),
+        body: JSON.stringify(requestBody),
       });
       const payload = await readResponsePayload(response.clone());
       if (process.env.NODE_ENV === "development") {
@@ -11386,7 +11390,7 @@ export default function StudioPage() {
     const signature = contract.generation.auto.signature;
     if (generationReadyAutoStartRef.current === signature) return;
 
-    const hasRequiredIdsNow = Boolean(effectiveBaselineVersionId && effectiveJobId && effectiveRequestedAnalysisId);
+    const hasRequiredIdsNow = Boolean(effectiveBaselineVersionId && effectiveJobId);
 
     const effectiveGenerationState =
       contract.generation.state === "generated" && !artifactContract.hasUsableArtifacts

@@ -9,7 +9,7 @@ export class GenerateCoverLetterDto {
 
   jobId!: string;
 
-  analysisId!: string;
+  analysisId?: string | null;
 
   opportunityId?: string | null;
 
