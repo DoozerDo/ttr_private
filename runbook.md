@@ -6,6 +6,24 @@ Prereq: Docker Desktop must be running (Linux containers / WSL2 backend on Windo
 docker compose -f infra/docker/docker-compose.local.yml up -d --build
 ```
 
+## Production beta-loop validation (operator)
+
+Goal: allow an operator to run the full beta tester loop end-to-end **without** disabling access-code gating or adding any new bypass.
+
+### Canonical approach: founder-allowlisted operator account
+Production supports a safe operator-only path via the existing **founder allowlist**:
+- `FOUNDER_EMAILS` (prod env) bypasses access-code enforcement and admin guards for that allowlisted email only.
+- This does **not** disable auth; the operator still signs up / logs in normally.
+
+Steps (non-secret):
+1. Ensure production `FOUNDER_EMAILS` includes a dedicated operator email (e.g. `beta-ops-validation@yourdomain.com`). Do this via normal secret/env management for the production deployment.
+2. In production UI, create the account using that email (signup), then complete email confirmation if required.
+3. Log in with that operator account and run the beta loop (baseline -> target role -> compatibility -> Studio -> resume + cover -> package export -> reload).
+
+Notes:
+- This account should be used only for validation and should not be shared with normal beta testers.
+- If you prefer not to grant founder allowlist access to an operator, you must provision an access code via a trusted admin user (see API `POST /admin/access-codes`) and assign it to the test user **before** first login so auto-redeem can succeed.
+
 ### Canonical synthetic validation (Docker)
 ```
 docker compose -f infra/docker/docker-compose.dev.yml up -d --build
