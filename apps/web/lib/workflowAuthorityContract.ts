@@ -195,8 +195,10 @@ function buildAutoGenerationSignature(ids: WorkflowAuthorityContract["ids"]): st
 function hasRequiredAutoGenerationIds(ids: WorkflowAuthorityContract["ids"]): boolean {
   const baselineVersionOk = Boolean((ids.baselineVersionId ?? "").trim());
   const jobOk = Boolean((ids.jobId ?? "").trim());
-  const analysisOk = Boolean(((ids.assessmentId ?? ids.analysisId) ?? "").trim());
-  return baselineVersionOk && jobOk && analysisOk;
+  // Studio auto-generation must be able to proceed when analysisId is absent as long as
+  // baselineVersionId + jobId are present and the backend can resolve the latest assessment.
+  // In that case, /api/studio/artifacts is the source of truth for score + readiness.
+  return baselineVersionOk && jobOk;
 }
 
 export function resolveWorkflowAuthorityContract(input: {

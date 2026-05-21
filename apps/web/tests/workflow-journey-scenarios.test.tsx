@@ -141,6 +141,7 @@ class SyntheticWorkflowServer {
 
   private readinessPayload() {
     const badgeLabel = this.state.readiness.status === "ready" ? "READY" : this.state.readiness.status === "limited" ? "LIMITED" : "BLOCKED";
+    const unsupported = this.state.gapAnalysis?.unverifiedRequirements ?? [];
     return {
       status: this.state.readiness.status,
       blocked: this.state.readiness.blocked,
@@ -148,7 +149,17 @@ class SyntheticWorkflowServer {
       reasons: [],
       badgeLabel,
       summary: badgeLabel === "READY" ? "Ready for generation." : "Needs more evidence.",
-      verificationIssues: [],
+      compliance_flags: unsupported.map((claim) => ({
+        code: "unsupported_technology_claim",
+        severity: "warn",
+        message: "Unsupported requirement emphasis detected.",
+        evidence: [
+          {
+            generated: claim,
+            generatedClaim: { text: claim, type: "technology" },
+          },
+        ],
+      })),
     };
   }
 
@@ -243,6 +254,7 @@ class SyntheticWorkflowServer {
       baselineId: this.state.baselineId,
       jobId: this.state.jobId,
       baselineVersionId: this.state.baselineVersionId,
+      assessmentId: this.state.analysisId,
       assessmentScore: this.state.score,
       baselineVersionHash: "hash-1",
       jobFingerprint: "job-fingerprint-1",
@@ -355,8 +367,9 @@ class SyntheticWorkflowServer {
       return jsonResponse(this.assessmentPayload(), 200);
     }
 
-    if (pathname.includes("/api/analysis/fit-assessments") && url.includes("jobId=")) {
-      return jsonResponse([], 200);
+    if (pathname.includes("/api/analysis/fit-assessments") && (url.includes("jobId=") || url.includes("baselineId="))) {
+      // Studio fallback path resolves the latest assessment when analysisId is absent.
+      return jsonResponse([this.assessmentPayload()], 200);
     }
 
     if (pathname === "/api/resume/readiness" || pathname === "/api/cover-letters/readiness") {
@@ -396,6 +409,24 @@ class SyntheticWorkflowServer {
       if (deferred) return deferred.promise;
 
       const outcome = isResume ? this.state.generationPlan?.resume : this.state.generationPlan?.coverLetter;
+
+      // Regression harness: if the assessment surfaced unsupported requirements, Studio must exclude them
+      // from targeting so generation doesn't partial-succeed (resume only) with contradictory warnings.
+      if (!isResume) {
+        const unsupported = this.state.gapAnalysis?.unverifiedRequirements ?? [];
+        const excluded = (body as any)?.excludedRequirements;
+        const hasExcluded =
+          Array.isArray(excluded) &&
+          unsupported.every((req) =>
+            excluded.some((value: unknown) => String(value ?? "").toLowerCase() === String(req).toLowerCase()),
+          );
+        if (unsupported.length > 0 && !hasExcluded) {
+          this.state.artifacts.coverLetter = { status: "FAILED", retryable: false, failureCategory: "unsupported_input" };
+          this.state.artifacts.pairStatus = "FAILED";
+          return jsonResponse({ category: "unsupported_input", message: "Unsupported requirements must be excluded.", retryable: false }, 422);
+        }
+      }
+
       if (outcome === "failed_non_retryable") {
         if (isResume) this.state.artifacts.resume = { status: "FAILED", retryable: false, failureCategory: "generation_blocked" };
         else this.state.artifacts.coverLetter = { status: "FAILED", retryable: false, failureCategory: "generation_blocked" };
@@ -621,10 +652,31 @@ describe("workflow journey scenarios (synthetic)", () => {
       );
     });
 
-    const coverGenerate = server.requests.find((req) => req.pathname.startsWith("/api/cover-letters") && req.method === "POST");
+    // Golden loop: no partial-success messaging after completion.
+    expect(screen.queryByText(/Cover letter not generated yet/i)).toBeNull();
+    expect(screen.queryByTestId("studio-degraded-unsupported-requirements")).toBeNull();
+
+    const coverGenerate = server.requests.find(
+      (req) =>
+        req.method === "POST" &&
+        (req.pathname === "/api/cover-letters" || req.pathname === "/api/cover-letters/generate"),
+    );
     expect(coverGenerate).toBeTruthy();
     expect(coverGenerate?.body).toBeTruthy();
     expect(coverGenerate?.body).not.toHaveProperty("analysisId");
+    const coverBody = coverGenerate?.body as any;
+    if (!coverBody || typeof coverBody !== "object") {
+      throw new Error(`coverGenerate body missing/invalid: ${JSON.stringify(coverGenerate, null, 2)}`);
+    }
+    if (!Object.prototype.hasOwnProperty.call(coverBody, "excludedRequirements")) {
+      const analysisFetches = server.requests.filter(
+        (req) => req.method === "GET" && req.pathname.startsWith("/api/analysis/fit-assessments/"),
+      );
+      throw new Error(
+        `coverGenerate missing excludedRequirements. coverBody=${JSON.stringify(coverBody, null, 2)} analysisFetches=${JSON.stringify(analysisFetches, null, 2)}`,
+      );
+    }
+    expect(coverBody.excludedRequirements).toContain("Zendesk");
 
     cleanup();
   });

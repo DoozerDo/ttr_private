@@ -2222,6 +2222,12 @@ export default function StudioPage() {
 
         const normalized = normalizeStudioArtifactsBackendPayload(payload);
         if (!normalized) return;
+        if (!requestedAnalysisId) {
+          const resolvedAssessmentId = trimId((normalized as { assessmentId?: unknown }).assessmentId);
+          if (resolvedAssessmentId) {
+            stableAnalysisIdRef.current = resolvedAssessmentId;
+          }
+        }
         applyStudioArtifactsPayload(normalized);
         setStudioArtifactsHydrated(true);
       } catch (error) {
@@ -5552,6 +5558,18 @@ export default function StudioPage() {
 
   function buildCoverLetterPayload(oneTap: boolean): CoverLetterPayload {
     const opportunityId = trackerEntryId ?? applicationContext?.id ?? null;
+    const unsupportedRequirementsFromReadiness = (activeGenerationReadiness.verificationIssues ?? [])
+      .filter((issue) => issue.code === "unsupported_technology_claim")
+      .map((issue) => String((issue as any)?.claim ?? "").trim())
+      .filter((value) => value.length > 0);
+    const excludedRequirementsForGeneration =
+      excludedTargetingLabels.size > 0
+        ? Array.from(excludedTargetingLabels)
+        : studioGenerationStateInfo.hasUnsupportedRequirements
+          ? canonicalUnverifiedRequirements
+          : unsupportedRequirementsFromReadiness.length > 0
+            ? unsupportedRequirementsFromReadiness
+          : [];
     return buildExportPayload({
       documentType: "cover_letter",
       oneTap,
@@ -5564,8 +5582,8 @@ export default function StudioPage() {
         documentStrategyPlan,
         closingTemplateKey: defaultClosingTemplateKey,
         ...(coverLetterJobContext ? { jobContext: coverLetterJobContext } : {}),
-        ...(excludedTargetingLabels.size > 0
-          ? { excludedRequirements: Array.from(excludedTargetingLabels) }
+        ...(excludedRequirementsForGeneration.length > 0
+          ? { excludedRequirements: excludedRequirementsForGeneration }
           : {}),
       },
     }) as CoverLetterPayload;
@@ -5573,6 +5591,18 @@ export default function StudioPage() {
 
   function buildResumePayload(oneTap: boolean) {
     const opportunityId = trackerEntryId ?? applicationContext?.id ?? null;
+    const unsupportedRequirementsFromReadiness = (activeGenerationReadiness.verificationIssues ?? [])
+      .filter((issue) => issue.code === "unsupported_technology_claim")
+      .map((issue) => String((issue as any)?.claim ?? "").trim())
+      .filter((value) => value.length > 0);
+    const excludedRequirementsForGeneration =
+      excludedTargetingLabels.size > 0
+        ? Array.from(excludedTargetingLabels)
+        : studioGenerationStateInfo.hasUnsupportedRequirements
+          ? canonicalUnverifiedRequirements
+          : unsupportedRequirementsFromReadiness.length > 0
+            ? unsupportedRequirementsFromReadiness
+          : [];
     return buildExportPayload({
       documentType: "resume",
       oneTap,
@@ -5585,8 +5615,8 @@ export default function StudioPage() {
         documentStrategyPlan,
         ...(resumeFocus !== "Auto (recommended)" ? { resumeFocus } : {}),
         ...(savedEditedResumeModel ? { editedResume: savedEditedResumeModel } : {}),
-        ...(excludedTargetingLabels.size > 0
-          ? { excludedRequirements: Array.from(excludedTargetingLabels) }
+        ...(excludedRequirementsForGeneration.length > 0
+          ? { excludedRequirements: excludedRequirementsForGeneration }
           : {}),
       },
     });
@@ -6414,7 +6444,8 @@ export default function StudioPage() {
   }, [selectedBaselineId, requestedBaselineVersionId, versionRefreshSignal]);
 
   useEffect(() => {
-    if (!requestedAnalysisId) {
+    const analysisIdToHydrate = effectiveRequestedAnalysisId ?? null;
+    if (!analysisIdToHydrate) {
       setAnalysis(null);
       setAnalysisError(null);
       setAnalysisLoading(false);
@@ -6428,11 +6459,11 @@ export default function StudioPage() {
       operation: "hydrate_analysis",
       status: "info",
       code: "hydration_started",
-      analysisId: requestedAnalysisId,
+      analysisId: analysisIdToHydrate,
     });
     const loadAnalysis = async () => {
       try {
-        const analysisUrl = buildAssessmentAnalysisUrl(requestedAnalysisId);
+        const analysisUrl = buildAssessmentAnalysisUrl(analysisIdToHydrate);
         const response = await fetch(analysisUrl, { cache: "no-store" });
         const payload = await readResponsePayload(response);
         if (canceled) return;
@@ -6445,7 +6476,7 @@ export default function StudioPage() {
             operation: "hydrate_analysis",
             status: "warn",
             code: "hydration_failed",
-            analysisId: requestedAnalysisId,
+            analysisId: analysisIdToHydrate,
             responseStatus: response.status,
           });
           return;
@@ -6458,7 +6489,7 @@ export default function StudioPage() {
             operation: "hydrate_analysis",
             status: "warn",
             code: "hydration_failed",
-            analysisId: requestedAnalysisId,
+            analysisId: analysisIdToHydrate,
             responseStatus: "invalid_payload",
           });
           return;
@@ -6474,7 +6505,7 @@ export default function StudioPage() {
             operation: "hydrate_analysis",
             status: "warn",
             code: "hydration_failed",
-            analysisId: requestedAnalysisId,
+            analysisId: analysisIdToHydrate,
             responseStatus: "missing_required_context",
           });
           return;
@@ -6502,7 +6533,7 @@ export default function StudioPage() {
           operation: "hydrate_analysis",
           status: "info",
           code: "hydration_succeeded",
-          analysisId: requestedAnalysisId,
+          analysisId: analysisIdToHydrate,
           jobId: nextAnalysis?.jobId ?? null,
           baselineId: nextAnalysis?.baselineId ?? null,
           baselineVersionId: nextAnalysis?.baselineVersionId ?? null,
@@ -6534,7 +6565,7 @@ export default function StudioPage() {
           operation: "hydrate_analysis",
           status: "error",
           code: "hydration_failed",
-          analysisId: requestedAnalysisId,
+          analysisId: analysisIdToHydrate,
           responseStatus: "exception",
         });
       } finally {
@@ -6547,7 +6578,7 @@ export default function StudioPage() {
     return () => {
       canceled = true;
     };
-  }, [requestedAnalysisId]);
+  }, [effectiveRequestedAnalysisId]);
 
   useEffect(() => {
     if (!requestedAnalysisId) return;
@@ -11051,12 +11082,13 @@ export default function StudioPage() {
       }
 
       const baselineVersionId = effectiveBaselineVersionId ?? null;
-      const payload = {
-        baselineId,
-        baselineVersionId: baselineVersionId ?? undefined,
-        jobId,
+      const resumePayload = {
+        ...normalizeGenerationPayload(buildResumePayload(true), "resume"),
         forceRegenerate: true,
-        ...(requestedAnalysisId ? { analysisId: requestedAnalysisId } : {}),
+      };
+      const coverPayload = {
+        ...normalizeGenerationPayload(buildCoverLetterPayload(true), "cover_letter"),
+        forceRegenerate: true,
       };
       const scopeGuards: Array<{ artifactType: "resume" | "cover_letter"; key: string }> = [];
 
@@ -11093,7 +11125,7 @@ export default function StudioPage() {
           fetch("/api/resume/generate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
+            body: JSON.stringify(resumePayload),
           }),
         );
       }
@@ -11114,7 +11146,7 @@ export default function StudioPage() {
           fetch("/api/cover-letters/generate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
+            body: JSON.stringify(coverPayload),
           }),
         );
       }
