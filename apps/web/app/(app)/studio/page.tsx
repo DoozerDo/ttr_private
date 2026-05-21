@@ -1216,7 +1216,7 @@ export default function StudioPage() {
   const [hydratedAnalysisScore, setHydratedAnalysisScore] = useState<number | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const [assessmentUnsupportedRequirements, setAssessmentUnsupportedRequirements] = useState<string[]>([]);
+  const [assessmentUnsupportedRequirements, setAssessmentUnsupportedRequirements] = useState<string[] | null>(null);
   const [contextHydrationMessage, setContextHydrationMessage] = useState<string | null>(null);
   const [generationReadiness, setGenerationReadiness] =
     useState<GenerationReadiness>(READINESS_LOADING_STATE);
@@ -3051,7 +3051,8 @@ export default function StudioPage() {
     [analysis?.verification_coverage?.unverifiedRequirements, excludedTargetingLabels],
   );
   const effectiveUnsupportedRequirementsForGeneration = useMemo(() => {
-    if (assessmentUnsupportedRequirements.length === 0) return canonicalUnverifiedRequirements;
+    if (!assessmentUnsupportedRequirements) return canonicalUnverifiedRequirements;
+    if (assessmentUnsupportedRequirements.length === 0) return [];
     return assessmentUnsupportedRequirements.filter(
       (label) => !excludedTargetingLabels.has(label.toLowerCase()),
     );
@@ -6459,11 +6460,13 @@ export default function StudioPage() {
       setAnalysis(null);
       setAnalysisError(null);
       setAnalysisLoading(false);
+      setAssessmentUnsupportedRequirements(null);
       return;
     }
     let canceled = false;
     setAnalysisLoading(true);
     setAnalysisError(null);
+    setAssessmentUnsupportedRequirements(null);
     console.info("[studio] hydration_started", {
       area: "studio",
       operation: "hydrate_analysis",
@@ -6544,10 +6547,13 @@ export default function StudioPage() {
           ];
           const normalizedUnsupported = rawUnsupported
             .map((requirement) =>
-              normalizeUserFacingRequirementLabel(requirement, {
-                sourceContext: null,
-                issueCode: "unsupported_technology_claim",
-              }),
+              normalizeUserFacingRequirementLabel(
+                typeof requirement === "string" ? requirement : requirement == null ? null : String(requirement),
+                {
+                  sourceContext: null,
+                  issueCode: "unsupported_technology_claim",
+                },
+              ),
             )
             .filter((label): label is string => typeof label === "string" && label.length > 0);
           setAssessmentUnsupportedRequirements(Array.from(new Set(normalizedUnsupported)));
@@ -11227,9 +11233,13 @@ export default function StudioPage() {
       }
     },
     [
+      buildCoverLetterPayload,
+      buildResumePayload,
+      canonicalUnverifiedRequirements,
       effectiveBaselineId,
       effectiveBaselineVersionId,
       effectiveJobId,
+      effectiveUnsupportedRequirementsForGeneration,
       markGenerationScopeCompleted,
       refreshStudioArtifactsAfterGenerate,
       releaseGenerationScope,
@@ -11918,6 +11928,8 @@ export default function StudioPage() {
       !analysisLoading &&
       !analysisError &&
       Boolean(analysis);
+    const hasComputedUnsupportedRequirementsFromAssessment =
+      !effectiveRequestedAnalysisId || assessmentUnsupportedRequirements !== null;
     const hasConfirmedNoUnsupportedRequirementsToExclude =
       !analysisLoading &&
       !analysisError &&
@@ -11926,6 +11938,7 @@ export default function StudioPage() {
         : !unsupportedFromReadiness && excludedTargetingLabels.size === 0);
     if (effectiveRequestedAnalysisId) {
       if (!hasHydratedAssessmentContext) return;
+      if (!hasComputedUnsupportedRequirementsFromAssessment) return;
     } else {
       if (!hasConfirmedNoUnsupportedRequirementsToExclude) return;
     }
@@ -11965,6 +11978,7 @@ export default function StudioPage() {
     analysisError,
     analysisLoading,
     activeGenerationReadiness.verificationIssues,
+    assessmentUnsupportedRequirements,
     canonicalUnverifiedRequirements.length,
     excludedTargetingLabels,
     effectiveRequestedAnalysisId,
