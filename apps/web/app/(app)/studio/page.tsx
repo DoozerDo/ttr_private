@@ -1440,6 +1440,68 @@ export default function StudioPage() {
     baselineVersionId: null,
     analysisId: null,
   });
+  const generationScopeGuardRef = useRef<
+    Map<
+      string,
+      {
+        status: "started" | "completed";
+        startedAt: number;
+      }
+    >
+  >(new Map());
+
+  const buildGenerationScopeKey = useCallback(
+    (input: {
+      baselineId: string | null;
+      baselineVersionId: string | null;
+      jobId: string | null;
+      analysisId: string | null;
+      artifactType: "resume" | "cover_letter";
+    }) => {
+      return [
+        "v1",
+        input.artifactType,
+        input.baselineId ?? "none",
+        input.baselineVersionId ?? "none",
+        input.jobId ?? "none",
+        input.analysisId ?? "none",
+      ].join("|");
+    },
+    [],
+  );
+
+  const tryStartGenerationForScope = useCallback(
+    (input: {
+      baselineId: string | null;
+      baselineVersionId: string | null;
+      jobId: string | null;
+      analysisId: string | null;
+      artifactType: "resume" | "cover_letter";
+      allowDuplicate?: boolean;
+    }) => {
+      const key = buildGenerationScopeKey(input);
+      if (input.allowDuplicate) {
+        generationScopeGuardRef.current.delete(key);
+      }
+      const existing = generationScopeGuardRef.current.get(key);
+      if (existing) {
+        return { started: false as const, key, existing };
+      }
+      generationScopeGuardRef.current.set(key, { status: "started", startedAt: Date.now() });
+      return { started: true as const, key, existing: null };
+    },
+    [buildGenerationScopeKey],
+  );
+
+  const markGenerationScopeCompleted = useCallback((key: string) => {
+    const existing = generationScopeGuardRef.current.get(key);
+    if (!existing) return;
+    generationScopeGuardRef.current.set(key, { ...existing, status: "completed" });
+  }, []);
+
+  const releaseGenerationScope = useCallback((key: string) => {
+    generationScopeGuardRef.current.delete(key);
+  }, []);
   const activeResumeGenerationRef = useRef<{ requestId: string; requestKey: string } | null>(null);
   const activeCoverGenerationRef = useRef<{ requestId: string; requestKey: string } | null>(null);
   const activeAutoGenerationRef = useRef<{ requestId: string; requestKey: string } | null>(null);
@@ -1981,6 +2043,22 @@ export default function StudioPage() {
   }, [currentWorkflowScope]);
 
   const applyStudioArtifactsPayload = useCallback((payload: BackendStudioArtifactsResponse) => {
+    // If Studio was opened without an `analysisId`, the backend can still surface an `assessmentScore`
+    // from the latest resolved assessment for the (baselineId, baselineVersionId, jobId) pair.
+    // Use it as a best-effort eligibility signal without forcing an analysis hydration gate.
+    const backendAssessmentScoreRaw = (payload as any)?.assessmentScore;
+    if (backendAssessmentScoreRaw !== undefined && backendAssessmentScoreRaw !== null) {
+      const candidate =
+        typeof backendAssessmentScoreRaw === "number"
+          ? backendAssessmentScoreRaw
+          : typeof backendAssessmentScoreRaw === "string" && backendAssessmentScoreRaw.trim()
+            ? Number(backendAssessmentScoreRaw.trim())
+            : null;
+      if (typeof candidate === "number" && Number.isFinite(candidate)) {
+        setHydratedAnalysisScore((current) => (current === null ? candidate : current));
+      }
+    }
+
     const pairStatus = getBackendPairStatus(payload);
 
     const hasExistingPresenterResponses =
@@ -6700,6 +6778,24 @@ export default function StudioPage() {
     }
 
     const artifactType: StudioArtifactType = "resume";
+    const scopeGuard = tryStartGenerationForScope({
+      baselineId: effectiveBaselineId ?? null,
+      baselineVersionId: effectiveBaselineVersionId ?? null,
+      jobId: effectiveJobId ?? null,
+      analysisId: requestedAnalysisId ?? null,
+      artifactType: "resume",
+      allowDuplicate: Boolean(opts?.forceRegenerate),
+    });
+    if (!scopeGuard.started) {
+      return finish(
+        makeStudioAttempt("resume", {
+          ok: true,
+          status: "skipped",
+          skippedReason: `scope_guard_not_acquired:${scopeGuard.existing?.status ?? "unknown"}`,
+          request: { sessionKey: opts?.sessionKey ?? null, requestId: null },
+        }),
+      );
+    }
     const flightRequestId = createRequestId();
     const flight = acquireStudioArtifactSingleFlight({
       baselineId: effectiveBaselineId ?? null,
@@ -6709,6 +6805,7 @@ export default function StudioPage() {
       requestId: flightRequestId,
     });
     if (!flight.acquired) {
+      releaseGenerationScope(scopeGuard.key);
       if (process.env.NODE_ENV === "development") {
         console.debug("[studioSingleFlight]", {
           artifactType,
@@ -6925,6 +7022,7 @@ export default function StudioPage() {
       ) {
         // Request finished, but Studio moved to a different workflow scope. Release so we don't deadlock
         // if the user returns to this same pair.
+        releaseGenerationScope(scopeGuard.key);
         releaseStudioArtifactSingleFlight({
           baselineId: effectiveBaselineId ?? null,
           jobId: effectiveJobId ?? null,
@@ -7091,6 +7189,7 @@ export default function StudioPage() {
           studioArtifactPresentationStateRef.current = "generated";
           setResumeWarningFlags(extractComplianceWarnings(responsePayload));
           setResumeAuditId(normalizeAuditId(responsePayload));
+          markGenerationScopeCompleted(scopeGuard.key);
           return true;
         }
         setStudioArtifactPairStatus("failed");
@@ -7099,6 +7198,7 @@ export default function StudioPage() {
           error: GENERATION_TRUST_FALLBACK_ERROR,
         }));
         lastFailureSignatureRef.current = generationInputSignature;
+        releaseGenerationScope(scopeGuard.key);
         return false;
       }
 
@@ -7140,6 +7240,7 @@ export default function StudioPage() {
         requestId: request.requestId,
       });
       activityOutcome = "success";
+      markGenerationScopeCompleted(scopeGuard.key);
       await refreshStudioArtifactsAfterGenerate({ expectedResume: true });
       return true;
     } catch (error) {
@@ -7179,6 +7280,7 @@ export default function StudioPage() {
         },
       }));
       setStudioArtifactPairStatus("failed");
+      releaseGenerationScope(scopeGuard.key);
       return false;
     } finally {
       if (timeoutId !== null) window.clearTimeout(timeoutId);
@@ -7571,6 +7673,24 @@ export default function StudioPage() {
     }
 
     const artifactType: StudioArtifactType = "cover_letter";
+    const scopeGuard = tryStartGenerationForScope({
+      baselineId: effectiveBaselineId ?? null,
+      baselineVersionId: effectiveBaselineVersionId ?? null,
+      jobId: effectiveJobId ?? null,
+      analysisId: requestedAnalysisId ?? null,
+      artifactType: "cover_letter",
+      allowDuplicate: Boolean(opts?.forceRegenerate),
+    });
+    if (!scopeGuard.started) {
+      return finish(
+        makeStudioAttempt("cover", {
+          ok: true,
+          status: "skipped",
+          skippedReason: `scope_guard_not_acquired:${scopeGuard.existing?.status ?? "unknown"}`,
+          request: { sessionKey: opts?.sessionKey ?? null, requestId: null },
+        }),
+      );
+    }
     const flightRequestId = createRequestId();
     const flight = acquireStudioArtifactSingleFlight({
       baselineId: effectiveBaselineId ?? null,
@@ -7580,6 +7700,7 @@ export default function StudioPage() {
       requestId: flightRequestId,
     });
     if (!flight.acquired) {
+      releaseGenerationScope(scopeGuard.key);
       if (process.env.NODE_ENV === "development") {
         console.debug("[studioSingleFlight]", {
           artifactType,
@@ -7972,6 +8093,7 @@ export default function StudioPage() {
           error: GENERATION_TRUST_FALLBACK_ERROR,
         }));
         lastFailureSignatureRef.current = generationInputSignature;
+        releaseGenerationScope(scopeGuard.key);
         return fail({
           errorCode: "trust_validation_failed",
           errorMessage: GENERATION_TRUST_FALLBACK_ERROR,
@@ -8014,6 +8136,7 @@ export default function StudioPage() {
         requestId: request.requestId,
       });
       activityOutcome = "success";
+      markGenerationScopeCompleted(scopeGuard.key);
       await refreshStudioArtifactsAfterGenerate({ expectedCover: true });
       return true;
     } catch (error) {
@@ -8026,6 +8149,7 @@ export default function StudioPage() {
         activeCoverGenerationRef.current?.requestId !== request.requestId
       ) {
         finishStudioGenerationRequest("cover_letter", request, "blocked", requestScope);
+        releaseGenerationScope(scopeGuard.key);
         return fail({
           errorCode: "stale_request_scope",
           errorMessage: "Cover letter generation aborted because the workflow scope changed.",
@@ -8058,6 +8182,7 @@ export default function StudioPage() {
         },
       }));
       setStudioArtifactPairStatus("failed");
+      releaseGenerationScope(scopeGuard.key);
       return fail({
         errorCode: requestFinalStatus === "timeout" ? "generation_timeout" : "generation_failed",
         errorMessage: message,
@@ -10933,6 +11058,7 @@ export default function StudioPage() {
         forceRegenerate: true,
         ...(requestedAnalysisId ? { analysisId: requestedAnalysisId } : {}),
       };
+      const scopeGuards: Array<{ artifactType: "resume" | "cover_letter"; key: string }> = [];
 
       if (input.source === "manual") {
         // Bypass the auto-generation succeeded latch for this signature so a user-initiated retry
@@ -10952,6 +11078,17 @@ export default function StudioPage() {
 
       const tasks: Array<Promise<Response>> = [];
       if (input.resume) {
+        const guard = tryStartGenerationForScope({
+          baselineId,
+          baselineVersionId,
+          jobId,
+          analysisId: requestedAnalysisId ?? null,
+          artifactType: "resume",
+        });
+        if (!guard.started) {
+          return;
+        }
+        scopeGuards.push({ artifactType: "resume", key: guard.key });
         tasks.push(
           fetch("/api/resume/generate", {
             method: "POST",
@@ -10961,6 +11098,18 @@ export default function StudioPage() {
         );
       }
       if (input.coverLetter) {
+        const guard = tryStartGenerationForScope({
+          baselineId,
+          baselineVersionId,
+          jobId,
+          analysisId: requestedAnalysisId ?? null,
+          artifactType: "cover_letter",
+        });
+        if (!guard.started) {
+          scopeGuards.forEach((item) => releaseGenerationScope(item.key));
+          return;
+        }
+        scopeGuards.push({ artifactType: "cover_letter", key: guard.key });
         tasks.push(
           fetch("/api/cover-letters/generate", {
             method: "POST",
@@ -10981,6 +11130,7 @@ export default function StudioPage() {
       const coverBody = input.coverLetter ? bodies.pop() : null;
 
       if (resumeResponse && !resumeResponse.ok) {
+        scopeGuards.forEach((item) => releaseGenerationScope(item.key));
         setResumeState((current) => ({
           ...current,
           response: null,
@@ -10990,6 +11140,7 @@ export default function StudioPage() {
         }));
       }
       if (coverResponse && !coverResponse.ok) {
+        scopeGuards.forEach((item) => releaseGenerationScope(item.key));
         setCoverState((current) => ({
           ...current,
           response: null,
@@ -11005,14 +11156,18 @@ export default function StudioPage() {
           expectedCover: input.coverLetter,
         });
         setStudioArtifactsRefreshNonce((current) => current + 1);
+        scopeGuards.forEach((item) => markGenerationScopeCompleted(item.key));
       }
     },
     [
       effectiveBaselineId,
       effectiveBaselineVersionId,
       effectiveJobId,
+      markGenerationScopeCompleted,
       refreshStudioArtifactsAfterGenerate,
+      releaseGenerationScope,
       requestedAnalysisId,
+      tryStartGenerationForScope,
       workflowOrchestratorCore.contract?.generation.auto.signature,
     ],
   );
@@ -11675,6 +11830,8 @@ export default function StudioPage() {
     // (e.g. hydration ordering or legacy contract drift), still auto-start generation once per scope.
     if (!needsAutoGeneration) return;
     if (!autoGenerationSignature) return;
+    // If `intent=generate` is present, the intent path owns first-draft generation for this session.
+    if (hasGenerateIntent) return;
     if (suppressAutoGenerationRef.current) return;
     if (autoGenerationInFlight || resumeGenerating || coverGenerating) return;
     if (hasResumeArtifact || hasCoverLetterArtifact) return;
@@ -11693,6 +11850,7 @@ export default function StudioPage() {
     coverState.artifactFailure,
     hasCoverLetterArtifact,
     hasResumeArtifact,
+    hasGenerateIntent,
     needsAutoGeneration,
     resumeGenerating,
     resumeState.artifactFailure,
@@ -11704,12 +11862,23 @@ export default function StudioPage() {
     if (generationIntentHandledRef.current) return;
     if (!canGenerate) return;
     if (!effectiveBaselineVersionId) return;
+    // Duplicate-generation guard: intent-driven generation must not stack on top of READY-shell auto-generation
+    // or an already-started manual/auto run for this workspace.
+    if (hasAnyArtifactPersisted) return;
+    if (autoGenerationInFlight || resumeGenerating || coverGenerating || studioArtifactPairStatus === "in_progress") return;
+    // Ensure READY-shell auto-start cannot race this intent path on the same render tick.
+    suppressAutoGenerationRef.current = true;
     generationIntentHandledRef.current = true;
 
     void (async () => {
       try {
-        await startGenerationFromReadyShell("shell");
+        // Intent contract: `intent=generate` should always produce the first drafts when the user is eligible,
+        // even if the orchestrator contract does not (yet) resolve a READY shell for this route state.
+        await generateArtifactsNow({ resume: true, coverLetter: true, source: "manual" });
       } finally {
+        // Keep suppression on; `applyStudioArtifactsPayload` will reconcile this after persisted artifacts hydrate.
+        // This prevents a second start during the persistence/hydration window.
+        suppressAutoGenerationRef.current = true;
         // Prevent loops on refresh: strip intent after first handling.
         try {
           if (typeof window === "undefined") return;
@@ -11722,11 +11891,16 @@ export default function StudioPage() {
       }
     })();
   }, [
+    autoGenerationInFlight,
     canGenerate,
+    coverGenerating,
     effectiveBaselineVersionId,
+    hasAnyArtifactPersisted,
     hasGenerateIntent,
+    resumeGenerating,
     router,
-    startGenerationFromReadyShell,
+    generateArtifactsNow,
+    studioArtifactPairStatus,
   ]);
 
   const workflowSurfaceAuthorityStudio = workflowSurfaceAuthorityHero;

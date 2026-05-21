@@ -117,7 +117,7 @@ type ScenarioServerState = {
 class SyntheticWorkflowServer {
   state: ScenarioServerState;
   private deferred: Record<string, { promise: Promise<Response>; resolve: (res: Response) => void }> = {};
-  requests: Array<{ url: string; pathname: string; method: string }> = [];
+  requests: Array<{ url: string; pathname: string; method: string; body?: unknown }> = [];
 
   constructor(initial: ScenarioServerState) {
     this.state = initial;
@@ -243,6 +243,7 @@ class SyntheticWorkflowServer {
       baselineId: this.state.baselineId,
       jobId: this.state.jobId,
       baselineVersionId: this.state.baselineVersionId,
+      assessmentScore: this.state.score,
       baselineVersionHash: "hash-1",
       jobFingerprint: "job-fingerprint-1",
       generationContractVersion: "studio-artifacts-v1",
@@ -289,6 +290,15 @@ class SyntheticWorkflowServer {
   }
 
   coverLetterGenerationPayload() {
+    const paragraphs = [
+      "Dear Hiring Team,",
+      "I’m excited to apply for this role because it sits at the intersection of customer experience, operational rigor, and practical systems thinking. In my recent leadership work, I’ve built and coached support teams, tightened incident response and change practices, and partnered cross‑functionally to improve reliability and customer outcomes. I focus on clear goals, simple mechanisms, and measurable results that are grounded in verified experience. I prioritize fast feedback loops, strong documentation, and consistent execution so the team can scale without burning out.",
+      "For this opportunity, I would bring a track record of translating role requirements into day‑to‑day execution: aligning stakeholders on priorities, building repeatable playbooks, and using data to identify where process or tooling can reduce customer effort. I’m comfortable working across support, engineering, and operations, and I communicate in a way that keeps both frontline teams and leadership aligned. I aim for improvements that are sustainable, documented, and easy to run. When ambiguity is high, I’m disciplined about clarifying success metrics and sequencing work into small, deliverable iterations.",
+      "I’d welcome the chance to share how I approach coaching, quality, and continuous improvement while staying truthful to what’s in the baseline evidence. Thank you for your time and consideration, and I look forward to discussing how I can contribute to your team’s goals with a pragmatic, customer‑first approach. If helpful, I can walk through concrete examples of how I’ve improved response workflows, reduced recurring issues, and helped teams adopt lighter‑weight automation and reporting directly.",
+      "Sincerely,",
+      "Test Candidate",
+    ];
+    const content = paragraphs.join("\n\n");
     return {
       status: "success",
       generationStatus: "success",
@@ -296,7 +306,13 @@ class SyntheticWorkflowServer {
       exports: { docx: true, pdf: true },
       preview: {
         coverLetter: {
-          paragraphs: ["Dear Hiring Team,", "I am applying for this role.", "Sincerely,", "Test Candidate"],
+          paragraphs,
+          content,
+        },
+        // Some validators/presenters expect snake_case fields.
+        cover_letter: {
+          paragraphs,
+          content,
         },
       },
     };
@@ -315,7 +331,21 @@ class SyntheticWorkflowServer {
       (init?.method ? String(init.method) : null) ??
       ((input as any)?.method ? String((input as any).method) : null) ??
       "GET";
-    this.requests.push({ url, pathname, method: requestMethod.toUpperCase() });
+
+    const method = requestMethod.toUpperCase();
+    const body = (() => {
+      if (method === "GET" || method === "HEAD") return undefined;
+      const raw = (init as any)?.body;
+      if (!raw) return undefined;
+      if (typeof raw !== "string") return raw;
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return raw;
+      }
+    })();
+
+    this.requests.push({ url, pathname, method, ...(body !== undefined ? { body } : {}) });
 
     if (pathname.includes("/api/baselines/base-1/versions")) {
       return jsonResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }], 200);
@@ -354,8 +384,13 @@ class SyntheticWorkflowServer {
       return jsonResponse({ ok: true }, 200);
     }
 
-    if (pathname === "/api/resume" || pathname === "/api/cover-letters") {
-      const isResume = pathname === "/api/resume";
+    if (
+      pathname === "/api/resume" ||
+      pathname === "/api/cover-letters" ||
+      pathname === "/api/resume/generate" ||
+      pathname === "/api/cover-letters/generate"
+    ) {
+      const isResume = pathname.startsWith("/api/resume");
       const key = isResume ? "resume_generate" : "cover_generate";
       const deferred = this.deferred[key];
       if (deferred) return deferred.promise;
@@ -529,6 +564,129 @@ describe("workflow journey scenarios (synthetic)", () => {
     cleanup();
   });
 
+  it("Studio auto-generation: score>=80 generates resume + cover letter when analysisId is missing", async () => {
+    const { mountStudio, cleanup } = mountWithCleanup();
+
+    const server = new SyntheticWorkflowServer({
+      analysisId: "analysis-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      jobId: "job-1",
+      score: 83,
+      readiness: { status: "ready", blocked: false },
+      artifacts: {
+        pairStatus: "MISSING",
+        resume: { status: "MISSING" },
+        coverLetter: { status: "MISSING" },
+        staleDraftExists: false,
+      },
+      generationPlan: { resume: "success", coverLetter: "success" },
+    });
+
+    setFetchImplementation(server.handleFetch);
+
+    overrideSearchParams({
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      jobId: "job-1",
+      // regression: analysisId intentionally omitted
+      intent: "generate",
+    });
+
+    mountStudio();
+
+    await waitFor(() => {
+      expect(screen.queryByText(/analysisId is missing/i)).toBeNull();
+    });
+
+    // Studio must surface the resolved high-fit score from artifacts hydration (even without analysisId),
+    // so the generate intent path can proceed.
+    await waitFor(() => {
+      expect(screen.getByText("83.0")).toBeInTheDocument();
+    });
+
+    // Generation should complete and both artifacts should render in the Studio previews.
+    await waitFor(() => {
+      expect(
+        server.requests.some((req) => req.pathname.startsWith("/api/resume") && req.method === "POST"),
+      ).toBe(true);
+      expect(
+        server.requests.some((req) => req.pathname.startsWith("/api/cover-letters") && req.method === "POST"),
+      ).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-materials-completeness")).toHaveTextContent(
+        "Complete set: Resume + cover letter",
+      );
+    });
+
+    const coverGenerate = server.requests.find((req) => req.pathname.startsWith("/api/cover-letters") && req.method === "POST");
+    expect(coverGenerate).toBeTruthy();
+    expect(coverGenerate?.body).toBeTruthy();
+    expect(coverGenerate?.body).not.toHaveProperty("analysisId");
+
+    cleanup();
+  });
+
+  it("Studio intent=generate does not duplicate generation when READY orchestration also applies", async () => {
+    const { mountStudio, cleanup } = mountWithCleanup();
+
+    const server = new SyntheticWorkflowServer({
+      analysisId: "analysis-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      jobId: "job-1",
+      score: 86,
+      readiness: { status: "ready", blocked: false },
+      artifacts: {
+        pairStatus: "MISSING",
+        resume: { status: "MISSING" },
+        coverLetter: { status: "MISSING" },
+        staleDraftExists: false,
+      },
+      generationPlan: { resume: "success", coverLetter: "success" },
+    });
+
+    setFetchImplementation(server.handleFetch);
+
+    // Both intent=generate and a valid analysisId are present; Studio may reach normal READY shell
+    // while also running the intent fallback path. This test asserts we only POST once per artifact.
+    overrideSearchParams({
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      jobId: "job-1",
+      analysisId: "analysis-1",
+      intent: "generate",
+    });
+
+    mountStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-materials-completeness")).toHaveTextContent(
+        "Complete set: Resume + cover letter",
+      );
+    });
+
+    const resumePosts = server.requests.filter(
+      (req) =>
+        req.method === "POST" &&
+        (req.pathname === "/api/resume" || req.pathname === "/api/resume/generate"),
+    );
+    const coverPosts = server.requests.filter(
+      (req) =>
+        req.method === "POST" &&
+        (req.pathname === "/api/cover-letters" || req.pathname === "/api/cover-letters/generate"),
+    );
+
+    expect(resumePosts).toHaveLength(1);
+    expect(["/api/resume", "/api/resume/generate"]).toContain(resumePosts[0]?.pathname);
+    expect(coverPosts).toHaveLength(1);
+    expect(["/api/cover-letters", "/api/cover-letters/generate"]).toContain(coverPosts[0]?.pathname);
+
+    cleanup();
+  });
+
   it("Studio ignores minimal fallback resume artifacts from localStorage hydration fallback", async () => {
     const { mountStudio, cleanup } = mountWithCleanup();
     ensureLocalStorageSupportsWrites();
@@ -691,6 +849,11 @@ describe("workflow journey scenarios (synthetic)", () => {
       expect(screen.getByTestId("studio-workflow-authority")).toBeInTheDocument();
     });
     // Current contract: post-unlock may still surface unlock-required authority depending on verification gaps.
+    // Avoid asserting on the transient "generation_in_progress" state; wait for the post-generation authority.
+    await waitFor(() => {
+      const node = screen.getByTestId("studio-workflow-authority");
+      expect(node.getAttribute("data-workflow-state")).not.toBe("generation_in_progress");
+    });
     expectAuthorityPanel("studio-workflow-authority", "unlock_required", "recovery");
     cleanup();
   });
