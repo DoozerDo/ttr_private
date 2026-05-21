@@ -663,11 +663,11 @@ describe("workflow journey scenarios (synthetic)", () => {
     );
     expect(coverGenerate).toBeTruthy();
     expect(coverGenerate?.body).toBeTruthy();
-    expect(coverGenerate?.body).not.toHaveProperty("analysisId");
     const coverBody = coverGenerate?.body as any;
     if (!coverBody || typeof coverBody !== "object") {
       throw new Error(`coverGenerate body missing/invalid: ${JSON.stringify(coverGenerate, null, 2)}`);
     }
+    expect(coverBody.analysisId).toBe("analysis-1");
     if (!Object.prototype.hasOwnProperty.call(coverBody, "excludedRequirements")) {
       const analysisFetches = server.requests.filter(
         (req) => req.method === "GET" && req.pathname.startsWith("/api/analysis/fit-assessments/"),

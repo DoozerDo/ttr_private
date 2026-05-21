@@ -1072,14 +1072,16 @@ export default function StudioPage() {
     [searchParamValue],
   );
   const requestedAnalysisId = useMemo(
-    () => trimId(searchParams.get("analysisId") ?? searchParams.get("assessmentId")),
+    () => trimId(searchParams.get("analysisId") ?? searchParams.get("assessmentId")) || null,
     [searchParamValue],
   );
+  const [resolvedAssessmentIdFromArtifacts, setResolvedAssessmentIdFromArtifacts] = useState<string | null>(null);
   const stableAnalysisIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (requestedAnalysisId) stableAnalysisIdRef.current = requestedAnalysisId;
   }, [requestedAnalysisId]);
-  const effectiveRequestedAnalysisId = requestedAnalysisId ?? stableAnalysisIdRef.current;
+  const effectiveRequestedAnalysisId =
+    requestedAnalysisId ?? resolvedAssessmentIdFromArtifacts ?? stableAnalysisIdRef.current;
   const isFromUnlock = useMemo(() => searchParams.get("fromUnlock") === "true", [searchParamValue]);
   const studioIntent = useMemo(() => trimString(searchParams.get("intent")).toLowerCase(), [searchParamValue]);
   const hasGenerateIntent = studioIntent === "generate";
@@ -1214,6 +1216,7 @@ export default function StudioPage() {
   const [hydratedAnalysisScore, setHydratedAnalysisScore] = useState<number | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [assessmentUnsupportedRequirements, setAssessmentUnsupportedRequirements] = useState<string[]>([]);
   const [contextHydrationMessage, setContextHydrationMessage] = useState<string | null>(null);
   const [generationReadiness, setGenerationReadiness] =
     useState<GenerationReadiness>(READINESS_LOADING_STATE);
@@ -2226,6 +2229,7 @@ export default function StudioPage() {
           const resolvedAssessmentId = trimId((normalized as { assessmentId?: unknown }).assessmentId);
           if (resolvedAssessmentId) {
             stableAnalysisIdRef.current = resolvedAssessmentId;
+            setResolvedAssessmentIdFromArtifacts(resolvedAssessmentId);
           }
         }
         applyStudioArtifactsPayload(normalized);
@@ -3046,6 +3050,12 @@ export default function StudioPage() {
         .filter((label) => !excludedTargetingLabels.has(label.toLowerCase())),
     [analysis?.verification_coverage?.unverifiedRequirements, excludedTargetingLabels],
   );
+  const effectiveUnsupportedRequirementsForGeneration = useMemo(() => {
+    if (assessmentUnsupportedRequirements.length === 0) return canonicalUnverifiedRequirements;
+    return assessmentUnsupportedRequirements.filter(
+      (label) => !excludedTargetingLabels.has(label.toLowerCase()),
+    );
+  }, [assessmentUnsupportedRequirements, canonicalUnverifiedRequirements, excludedTargetingLabels]);
   const showEvidenceExpansion = useMemo( 
     () => 
       shouldGenerateDocuments(analysisScore) && 
@@ -5565,18 +5575,18 @@ export default function StudioPage() {
     const excludedRequirementsForGeneration =
       excludedTargetingLabels.size > 0
         ? Array.from(excludedTargetingLabels)
-        : studioGenerationStateInfo.hasUnsupportedRequirements
-          ? canonicalUnverifiedRequirements
+        : effectiveUnsupportedRequirementsForGeneration.length > 0
+          ? effectiveUnsupportedRequirementsForGeneration
           : unsupportedRequirementsFromReadiness.length > 0
             ? unsupportedRequirementsFromReadiness
-          : [];
+            : [];
     return buildExportPayload({
       documentType: "cover_letter",
       oneTap,
       jobId: effectiveJobId,
       baselineId: effectiveBaselineId,
       baselineVersionId: effectiveBaselineVersionId,
-      analysisId: requestedAnalysisId,
+      analysisId: effectiveRequestedAnalysisId ?? null,
       extra: {
         ...(opportunityId ? { opportunityId } : {}),
         documentStrategyPlan,
@@ -5598,18 +5608,18 @@ export default function StudioPage() {
     const excludedRequirementsForGeneration =
       excludedTargetingLabels.size > 0
         ? Array.from(excludedTargetingLabels)
-        : studioGenerationStateInfo.hasUnsupportedRequirements
-          ? canonicalUnverifiedRequirements
+        : effectiveUnsupportedRequirementsForGeneration.length > 0
+          ? effectiveUnsupportedRequirementsForGeneration
           : unsupportedRequirementsFromReadiness.length > 0
             ? unsupportedRequirementsFromReadiness
-          : [];
+            : [];
     return buildExportPayload({
       documentType: "resume",
       oneTap,
       jobId: effectiveJobId,
       baselineId: effectiveBaselineId,
       baselineVersionId: effectiveBaselineVersionId,
-      analysisId: requestedAnalysisId,
+      analysisId: effectiveRequestedAnalysisId ?? null,
       extra: {
         ...(opportunityId ? { opportunityId } : {}),
         documentStrategyPlan,
@@ -6527,6 +6537,21 @@ export default function StudioPage() {
         const overallScore = (nextAnalysis as { overallScore?: unknown } | null)?.overallScore;
         setHydratedAnalysisScore(coerceScore(v2Score) ?? coerceScore(directScore) ?? coerceScore(overallScore) ?? null);
         setAnalysis(nextAnalysis);
+        {
+          const rawUnsupported = [
+            ...(((nextAnalysis as any)?.verification_coverage?.unverifiedRequirements ?? []) as unknown[]),
+            ...(((nextAnalysis as any)?.gapAnalysis?.unverifiedRequirements ?? []) as unknown[]),
+          ];
+          const normalizedUnsupported = rawUnsupported
+            .map((requirement) =>
+              normalizeUserFacingRequirementLabel(requirement, {
+                sourceContext: null,
+                issueCode: "unsupported_technology_claim",
+              }),
+            )
+            .filter((label): label is string => typeof label === "string" && label.length > 0);
+          setAssessmentUnsupportedRequirements(Array.from(new Set(normalizedUnsupported)));
+        }
         setAnalysisError(null);
         console.info("[studio] hydration_succeeded", {
           area: "studio",
@@ -11084,10 +11109,20 @@ export default function StudioPage() {
       const baselineVersionId = effectiveBaselineVersionId ?? null;
       const resumePayload = {
         ...normalizeGenerationPayload(buildResumePayload(true), "resume"),
+        ...(effectiveUnsupportedRequirementsForGeneration.length > 0
+          ? { excludedRequirements: effectiveUnsupportedRequirementsForGeneration }
+          : canonicalUnverifiedRequirements.length > 0
+            ? { excludedRequirements: canonicalUnverifiedRequirements }
+            : {}),
         forceRegenerate: true,
       };
       const coverPayload = {
         ...normalizeGenerationPayload(buildCoverLetterPayload(true), "cover_letter"),
+        ...(effectiveUnsupportedRequirementsForGeneration.length > 0
+          ? { excludedRequirements: effectiveUnsupportedRequirementsForGeneration }
+          : canonicalUnverifiedRequirements.length > 0
+            ? { excludedRequirements: canonicalUnverifiedRequirements }
+            : {}),
         forceRegenerate: true,
       };
       const scopeGuards: Array<{ artifactType: "resume" | "cover_letter"; key: string }> = [];
@@ -11423,13 +11458,10 @@ export default function StudioPage() {
   ]);
 
   const handleGenerateResume = useCallback(async () => {
-    console.log("[STUDIO_GENERATE_HANDLER_START]");
     try {
       const baselineId = effectiveBaselineId ?? null;
       const baselineVersionId = effectiveBaselineVersionId ?? null;
       const jobId = effectiveJobId ?? null;
-      console.log("GENERATE_RESUME_CLICKED");
-      console.log("GENERATE_PAYLOAD", { baselineId, baselineVersionId, jobId });
 
       if (!baselineId || !jobId || !baselineVersionId) {
         console.error("[studio][generate_missing_context]", {
@@ -11452,25 +11484,13 @@ export default function StudioPage() {
 
       setResumeGenerating(true);
       try {
-        console.log("[STUDIO_GENERATE_FETCH_START]");
       const response = await fetch("/api/resume/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ baselineId, baselineVersionId, jobId, analysisId: effectiveRequestedAnalysisId ?? null }),
         });
 
-        console.log("[STUDIO_GENERATE_RESPONSE]", {
-          status: response.status,
-          ok: response.ok,
-        });
-
         const payload = await readResponsePayload(response.clone());
-        console.log("[STUDIO_GENERATE_RESPONSE]", {
-          type: "resume",
-          status: response.status,
-          ok: response.ok,
-          bodySummary: summarizeStudioBody(payload),
-        });
 
         if (!response.ok) {
           setResumeState((current) => ({
@@ -11490,8 +11510,6 @@ export default function StudioPage() {
       }
     } catch (error) {
       console.error("[STUDIO_GENERATE_ERROR]", error);
-    } finally {
-      console.log("[STUDIO_GENERATE_HANDLER_END]");
     }
   }, [
     effectiveBaselineId,
@@ -11506,8 +11524,6 @@ export default function StudioPage() {
     const baselineVersionId = effectiveBaselineVersionId ?? null;
     const jobId = effectiveJobId ?? null;
     const analysisId = effectiveRequestedAnalysisId ?? null;
-    console.log("GENERATE_COVER_CLICKED");
-    console.log("GENERATE_PAYLOAD", { baselineId, baselineVersionId, jobId, analysisId });
     if (!baselineId || !jobId || !baselineVersionId) {
       console.error("[studio][generate_missing_context]", {
         baselineId,
@@ -11894,6 +11910,25 @@ export default function StudioPage() {
     if (generationIntentHandledRef.current) return;
     if (!canGenerate) return;
     if (!effectiveBaselineVersionId) return;
+    const unsupportedFromReadiness = (activeGenerationReadiness.verificationIssues ?? []).some(
+      (issue) => issue.code === "unsupported_technology_claim",
+    );
+    const hasHydratedAssessmentContext =
+      Boolean(effectiveRequestedAnalysisId) &&
+      !analysisLoading &&
+      !analysisError &&
+      Boolean(analysis);
+    const hasConfirmedNoUnsupportedRequirementsToExclude =
+      !analysisLoading &&
+      !analysisError &&
+      (hasCanonicalCoverage
+        ? canonicalUnverifiedRequirements.length === 0
+        : !unsupportedFromReadiness && excludedTargetingLabels.size === 0);
+    if (effectiveRequestedAnalysisId) {
+      if (!hasHydratedAssessmentContext) return;
+    } else {
+      if (!hasConfirmedNoUnsupportedRequirementsToExclude) return;
+    }
     // Duplicate-generation guard: intent-driven generation must not stack on top of READY-shell auto-generation
     // or an already-started manual/auto run for this workspace.
     if (hasAnyArtifactPersisted) return;
@@ -11926,6 +11961,14 @@ export default function StudioPage() {
     autoGenerationInFlight,
     canGenerate,
     coverGenerating,
+    analysis,
+    analysisError,
+    analysisLoading,
+    activeGenerationReadiness.verificationIssues,
+    canonicalUnverifiedRequirements.length,
+    excludedTargetingLabels,
+    effectiveRequestedAnalysisId,
+    hasCanonicalCoverage,
     effectiveBaselineVersionId,
     hasAnyArtifactPersisted,
     hasGenerateIntent,
