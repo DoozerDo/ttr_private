@@ -283,9 +283,21 @@ export class StudioArtifactsService {
       }),
       input.analysisId
         ? this.fitAssessmentRepository.findOne({
-            where: { id: input.analysisId, userId: input.userId, jobId: input.jobId, baselineId: input.baselineId },
+            where: {
+              id: input.analysisId,
+              userId: input.userId,
+              jobId: input.jobId,
+              baselineId: input.baselineId,
+            },
           })
-        : Promise.resolve(null),
+        : this.fitAssessmentRepository.findOne({
+            where: {
+              userId: input.userId,
+              jobId: input.jobId,
+              baselineId: input.baselineId,
+            },
+            order: { createdAt: 'DESC' },
+          }),
       this.baselineRepository.findOne({
         where: { id: input.baselineId, userId: input.userId },
         relations: { sections: true, parsedRecords: true },

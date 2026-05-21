@@ -1,0 +1,106 @@
+
+> api@0.0.1 start:dev
+> nest start --watch
+
+[2J[3J[H[[90m8:51:58 PM[0m] Starting compilation in watch mode...
+
+[[90m8:53:03 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:01:31 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:01:34 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:02:33 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:02:33 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:02:54 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:02:55 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:03:15 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:03:15 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:04:00 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:04:00 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:04:48 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:04:49 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:07:23 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:07:23 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:08:10 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:08:10 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:09:35 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:09:35 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:12:48 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:12:49 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:15:05 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:15:08 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:16:01 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:16:02 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:17:05 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:17:06 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:19:01 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:19:02 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:19:34 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:19:35 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:25:36 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:25:36 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:27:47 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:27:47 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:35:13 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:35:22 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:35:22 PM[0m] File change detected. Starting incremental compilation...
+
+[2J[3J[H[[90m9:35:29 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:35:30 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:35:33 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:35:34 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:39:34 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:39:39 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:45:03 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:45:04 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:45:05 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:45:06 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m9:45:07 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m9:45:10 PM[0m] Found 0 errors. Watching for file changes.
+

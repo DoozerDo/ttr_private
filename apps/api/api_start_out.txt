@@ -1,0 +1,7 @@
+
+> api@0.0.1 start
+> nest start
+
+
+ Error  ENOTEMPTY: directory not empty, rmdir 'C:\dev\ttr_private\apps\api\dist\auth'
+
