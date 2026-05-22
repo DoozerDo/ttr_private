@@ -10716,7 +10716,9 @@ export default function StudioPage() {
       try {
         if (!qualifiedForStudioOrchestration) return;
         if (studioReadinessBlocksGeneration) return;
-        if (hasResumeArtifact || hasCoverLetterArtifact) return;
+        const needsResume = !hasResumeArtifact;
+        const needsCover = !hasCoverLetterArtifact;
+        if (!needsResume && !needsCover) return;
         if (
           resumeGenerating ||
           coverGenerating ||
@@ -10824,12 +10826,12 @@ export default function StudioPage() {
             code: "artifact_refresh_started_after_targeting_adjustment",
             dispatchSignature,
             dispatchOk: dispatchResult.ok,
-            expectedResume: true,
-            expectedCover: true,
+            expectedResume: needsResume,
+            expectedCover: needsCover,
           });
 
           try {
-            await refreshStudioArtifactsAfterGenerate({ expectedResume: true, expectedCover: true });
+            await refreshStudioArtifactsAfterGenerate({ expectedResume: needsResume, expectedCover: needsCover });
             console.info("[studio][artifacts][refresh_after_targeting_adjustment_completed]", {
               area: "studio",
               operation: "hydrate_artifacts_after_generate",
