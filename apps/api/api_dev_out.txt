@@ -104,3 +104,95 @@
 
 [[90m9:45:10 PM[0m] Found 0 errors. Watching for file changes.
 
+[2J[3J[H[[90m10:51:36 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m10:51:38 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m10:51:38 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m10:51:39 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m10:51:40 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m10:51:40 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m1:30:59 AM[0m] File change detected. Starting incremental compilation...
+
+[[90m1:31:01 AM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m1:31:01 AM[0m] File change detected. Starting incremental compilation...
+
+[[90m1:31:03 AM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m1:31:23 AM[0m] File change detected. Starting incremental compilation...
+
+[[90m1:31:24 AM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m1:31:25 AM[0m] File change detected. Starting incremental compilation...
+
+[[90m1:31:26 AM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m1:31:26 AM[0m] File change detected. Starting incremental compilation...
+
+[[90m1:31:26 AM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m1:31:27 AM[0m] File change detected. Starting incremental compilation...
+
+[[90m1:31:28 AM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m1:31:28 AM[0m] File change detected. Starting incremental compilation...
+
+[[90m1:31:29 AM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m1:31:30 AM[0m] File change detected. Starting incremental compilation...
+
+[[90m1:31:31 AM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m1:35:15 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m1:35:16 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m1:35:17 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m1:35:19 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m1:35:41 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m1:35:42 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m1:35:42 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m1:35:43 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m1:35:44 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m1:35:46 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m1:35:46 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m1:35:47 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m1:35:49 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m1:35:51 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m1:46:51 PM[0m] File change detected. Starting incremental compilation...
+
+[2J[3J[H[[90m1:49:22 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m1:49:24 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m1:49:31 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m1:49:31 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m6:07:50 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m6:07:52 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m6:07:53 PM[0m] File change detected. Starting incremental compilation...
+
+[[90m6:07:53 PM[0m] Found 0 errors. Watching for file changes.
+
+[2J[3J[H[[90m6:07:54 PM[0m] File change detected. Starting incremental compilation...
+

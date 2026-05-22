@@ -16,6 +16,51 @@ function compactSnippet(text: string, maxWords = 80): string {
   return words.length > maxWords ? words.slice(0, maxWords).join(' ').trim() : cleaned;
 }
 
+function sentenceFromSnippet(text: string): string {
+  const cleaned = ensureSentence(compactSnippet(text, 60));
+  return cleaned.replace(/^[\s-]+/, '').trim();
+}
+
+function varyImpactSentence(source: string): string {
+  const lowered = source.toLowerCase();
+  const stableHash = (() => {
+    let hash = 0;
+    for (let i = 0; i < lowered.length; i += 1) {
+      hash = (hash * 31 + lowered.charCodeAt(i)) | 0;
+    }
+    return Math.abs(hash);
+  })();
+  const candidates = (() => {
+    if (/(incident|escalat|outage|reliab|availability)/.test(lowered)) {
+      return [
+        'That keeps execution calm under pressure and makes escalation paths easier to trust.',
+        'That improves reliability without overstating scope or outcomes.',
+        'That tightens handoffs during escalations and reduces avoidable coordination churn.',
+      ];
+    }
+    if (/(workflow|process|runbook|playbook|handoff)/.test(lowered)) {
+      return [
+        'That clarifies ownership and reduces ambiguity in day-to-day decisions.',
+        'That turns good intentions into repeatable execution that teams can review.',
+        'That strengthens handoffs and keeps expectations explicit across partners.',
+      ];
+    }
+    if (/(queue|sla|support|customer|service)/.test(lowered)) {
+      return [
+        'That protects service quality by keeping signals and decisions explicit.',
+        'That reduces friction for both customers and internal partners.',
+        'That improves the operating rhythm without turning the letter into a checklist.',
+      ];
+    }
+    return [
+      'That keeps priorities clear and execution reviewable.',
+      'That turns evidence into practical decisions teams can follow.',
+      'That improves consistency without inflating claims.',
+    ];
+  })();
+  return candidates[candidates.length ? stableHash % candidates.length : 0] ?? candidates[0];
+}
+
 function chooseVariedOpenings(paragraphs: string[]): string[] {
   const starters = [
     'In prior roles,',
@@ -39,6 +84,16 @@ function chooseVariedOpenings(paragraphs: string[]): string[] {
 
 export class CoverLetterNarrativeComposer {
   private detector = new GenericLanguageDetector();
+
+  private buildBodyParagraph(snippets: string[]): string {
+    const cleaned = snippets.map((s) => trimToText(s)).filter(Boolean);
+    const first = cleaned[0] ? sentenceFromSnippet(cleaned[0]) : '';
+    const second = cleaned[1]
+      ? ensureSentence(`For example, ${compactSnippet(cleaned[1], 50)}`)
+      : '';
+    const impact = cleaned.length ? ensureSentence(varyImpactSentence(cleaned.join(' '))) : '';
+    return [first, second, impact].filter(Boolean).join(' ').trim();
+  }
 
   compose(input: {
     thesis: string | null;
@@ -81,25 +136,11 @@ export class CoverLetterNarrativeComposer {
       .slice(0, Math.max(6, input.maxBodyParagraphs * 4));
 
     const paragraphsRaw: string[] = [];
-    for (let idx = 0; idx < grouped.length; idx += 3) {
+    for (let idx = 0; idx < grouped.length; idx += 2) {
       const a = grouped[idx];
       const b = grouped[idx + 1];
-      const c = grouped[idx + 2];
-      const joined = [a, b, c].filter(Boolean).join(' ');
-      const connective = (() => {
-        const lowered = joined.toLowerCase();
-        if (/(incident|escalat|outage|reliab|availability)/.test(lowered)) {
-          return 'This kept execution calm under pressure, tightened handoffs during escalations, and reduced avoidable coordination churn without overstating outcomes.';
-        }
-        if (/(workflow|process|runbook|playbook|handoff)/.test(lowered)) {
-          return 'This improved handoffs, made ownership clearer, and reduced ambiguity in day-to-day decisions without inflating scope claims.';
-        }
-        if (/(queue|sla|support|customer|service)/.test(lowered)) {
-          return 'This protected service quality by keeping operational signals and decisions explicit, and by making the work easier for partners to trust and review.';
-        }
-        return 'This strengthened execution by clarifying priorities, decision points, and ownership so the work stayed practical and reviewable.';
-      })();
-      paragraphsRaw.push(`${joined} ${connective}`);
+      const paragraph = this.buildBodyParagraph([a, b].filter(Boolean) as string[]);
+      if (paragraph) paragraphsRaw.push(paragraph);
     }
 
     const bodyParagraphs = chooseVariedOpenings(paragraphsRaw).slice(0, input.maxBodyParagraphs);

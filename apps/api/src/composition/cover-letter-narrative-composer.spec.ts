@@ -20,5 +20,45 @@ describe('CoverLetterNarrativeComposer', () => {
     expect(new Set(starts).size).toBeGreaterThan(1);
     expect(result.diagnostics.renderedEvidenceSnippetIds).toEqual(['e1', 'e2', 'e3', 'e4']);
   });
-});
 
+  it('does not glue three evidence snippets into one paragraph or repeat connective filler', () => {
+    const composer = new CoverLetterNarrativeComposer();
+    const result = composer.compose({
+      thesis: null,
+      evidenceSnippets: [
+        { id: 'e1', text: 'EvidenceOne: rebuilt escalation handoffs to reduce queue thrash.' },
+        { id: 'e2', text: 'EvidenceTwo: created weekly operating reviews with clear owners and metrics.' },
+        { id: 'e3', text: 'EvidenceThree: standardized runbooks to reduce ambiguity during incidents.' },
+        { id: 'e4', text: 'EvidenceFour: partnered with engineering to close feedback loops faster.' },
+        { id: 'e5', text: 'EvidenceFive: improved SLA visibility and triage signals for support queues.' },
+        { id: 'e6', text: 'EvidenceSix: tightened change control to protect production stability.' },
+      ],
+      jobCompany: 'ExampleCo',
+      jobTitle: 'Director of Support Operations',
+      maxBodyParagraphs: 3,
+    });
+
+    // Complete letter structure (intro + body + close).
+    expect(result.opening).toMatch(/I am applying/i);
+    expect(result.bodyParagraphs.length).toBeGreaterThanOrEqual(2);
+    expect(result.closing).toMatch(/welcome the chance/i);
+
+    // Regression: prior composer glued 3 raw evidence snippets into a single paragraph.
+    const evidenceNeedles = ['EvidenceOne', 'EvidenceTwo', 'EvidenceThree'];
+    for (const paragraph of result.bodyParagraphs) {
+      const hits = evidenceNeedles.filter((needle) => paragraph.includes(needle)).length;
+      expect(hits).toBeLessThanOrEqual(2);
+    }
+
+    // Impact/connective sentence should not repeat across body paragraphs.
+    const impactSentences = result.bodyParagraphs
+      .map((paragraph) => {
+        const sentences = paragraph.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
+        const impact = sentences.find((s) => /^that\b/i.test(s));
+        return impact ?? '';
+      })
+      .filter(Boolean);
+    expect(impactSentences.length).toBe(result.bodyParagraphs.length);
+    expect(new Set(impactSentences).size).toBe(impactSentences.length);
+  });
+});

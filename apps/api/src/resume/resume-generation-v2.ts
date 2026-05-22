@@ -196,6 +196,21 @@ function buildNormalizedResumeValidationFailures(
 function buildFallbackSummaryFromExperience(
   experience: Array<{ bullets?: unknown }>,
 ): string {
+  const normalizeBulletToSentence = (value: string): string => {
+    const cleaned = trimToText(value)
+      .replace(/^[•\-\u2022]+\s*/g, '')
+      .replace(/\s*;\s*/g, '; ')
+      .trim();
+    if (!cleaned) return '';
+    // Avoid stuffing unrelated tech/claims into a single summary sentence.
+    const tokens = cleaned.split(/\s+/).filter(Boolean);
+    const maxWords = 34;
+    const clipped = tokens.length > maxWords ? `${tokens.slice(0, maxWords).join(' ').trim()}…` : cleaned;
+    const commaCount = (clipped.match(/,/g) ?? []).length;
+    const pruned = commaCount > 3 ? clipped.split(',').slice(0, 3).join(',').trim() : clipped;
+    return /[.!?]\s*$/.test(pruned) ? pruned : `${pruned}.`;
+  };
+
   const bulletCandidates = experience
     .flatMap((entry) =>
       Array.isArray((entry as any)?.bullets) ? ((entry as any).bullets as unknown[]) : [],
@@ -203,7 +218,8 @@ function buildFallbackSummaryFromExperience(
     .map((bullet) => trimToText(bullet))
     .filter(Boolean)
     .filter((bullet) => bullet.length >= 12);
-  return bulletCandidates.slice(0, 2).join(' ');
+  const sentences = bulletCandidates.slice(0, 2).map(normalizeBulletToSentence).filter(Boolean);
+  return sentences.join(' ').trim();
 }
 
 function buildResumeQualityGateFailures(

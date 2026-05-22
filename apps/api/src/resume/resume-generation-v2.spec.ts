@@ -189,6 +189,34 @@ describe('resume generation v2', () => {
     expect(JSON.stringify(result.normalized.experience)).not.toContain('Professional Experience');
   });
 
+  it('builds fallback summary as readable sentences (no stitched tech-list run-ons)', () => {
+    const baselineSections = [
+      {
+        sectionType: 'EXPERIENCE',
+        content: [
+          'Acme | Director of Support | 2020 - 2024',
+          '- Owned support operations across Zendesk, Salesforce, Jira, Confluence, Slack, Datadog, and PagerDuty while improving reliability and escalations.',
+          '- Led cross-functional operating reviews and clarified ownership, metrics, and decision cadence across teams.',
+        ].join('\n'),
+      },
+    ] as any[];
+
+    const result = buildDeterministicResumeV2FromBaseline({
+      baselineSections: baselineSections as any,
+      identity: { name: 'Test User', contactLine: 'test@example.com' },
+      job: { title: 'Director of Support', company: 'ExampleCo', description: 'Own support operations and escalation workflows.' },
+    });
+
+    const summary = String((result.normalized as any).summary ?? '').trim();
+    const sentences = summary.split(/(?<=[.!?])\s+/).filter(Boolean);
+    expect(sentences.length).toBeGreaterThanOrEqual(2);
+    // First sentence should not be a comma-heavy tech stuffing run-on.
+    const firstCommaCount = (sentences[0]?.match(/,/g) ?? []).length;
+    expect(firstCommaCount).toBeLessThanOrEqual(3);
+    // Ensure the two source bullets were not glued into one unpunctuated line.
+    expect(summary).toContain('.');
+  });
+
   it('rejects malformed fragments such as "Vue 3), deck builder frontend" with explicit reasons', () => {
     const baselineSections = [
       {
