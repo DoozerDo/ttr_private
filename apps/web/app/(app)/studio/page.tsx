@@ -10711,208 +10711,8 @@ export default function StudioPage() {
     ],
   );
 
-  useEffect(() => {
-    dispatchGenerationAfterTargetingAdjustmentRef.current = async () => {
-      try {
-        if (!qualifiedForStudioOrchestration) return;
-        if (studioReadinessBlocksGeneration) return;
-        const needsResume = !hasResumeArtifact;
-        const needsCover = !hasCoverLetterArtifact;
-        if (!needsResume && !needsCover) return;
-        if (
-          resumeGenerating ||
-          coverGenerating ||
-          autoGenerationInFlight ||
-          studioArtifactPairStatus === "in_progress"
-        ) {
-          return;
-        }
-
-        // Prevent duplicate dispatch (CTA + auto-generation effects) for the same pair/scope.
-        const dispatchSignature = [
-          effectiveBaselineId ?? "none",
-          effectiveBaselineVersionId ?? "none",
-          effectiveJobId ?? "none",
-          effectiveRequestedAnalysisId ?? "none",
-        ].join(":");
-        if (targetingAdjustmentDispatchSignatureRef.current === dispatchSignature) {
-          console.info("[studio][generation][dispatch_after_targeting_adjustment_skipped]", {
-            area: "studio",
-            operation: "generate",
-            status: "info",
-            code: "generation_dispatch_after_targeting_adjustment_skipped",
-            reason: "duplicate_dispatch_signature",
-            dispatchSignature,
-          });
-          return;
-        }
-        targetingAdjustmentDispatchSignatureRef.current = dispatchSignature;
-
-        // Suppress any other auto-generation lane while we process this CTA.
-        suppressAutoGenerationRef.current = true;
-        if (autoGenerationSignature) {
-          autoGenerationSignatureRef.current = autoGenerationSignature;
-        }
-
-        await new Promise<void>((resolve) =>
-          typeof window !== "undefined" ? window.setTimeout(() => resolve(), 0) : resolve(),
-        );
-
-        const exclusions = Array.from(excludedTargetingLabelsRef.current);
-        console.info("[studio][unsupported_requirements][removal_committed]", {
-          area: "studio",
-          operation: "unsupported_requirements_removal",
-          status: "info",
-          code: "unsupported_requirements_removal_committed",
-          exclusions,
-          analysisId: effectiveRequestedAnalysisId ?? null,
-          jobId: effectiveJobId ?? null,
-          baselineId: effectiveBaselineId ?? null,
-          baselineVersionId: effectiveBaselineVersionId ?? null,
-        });
-
-        try {
-          const response = await fetch("/api/opportunities", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              jobId: effectiveJobId,
-              analysisId: effectiveRequestedAnalysisId,
-              baselineId: effectiveBaselineId,
-              baselineVersionId: effectiveBaselineVersionId,
-              score: Math.round(analysisScore ?? 0),
-              company: selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company",
-              roleTitle: selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Untitled role",
-              generationCompleted: Boolean(hasCompletedGeneration),
-              savedEvidenceSummary: evidenceSummaryBullets.slice(0, 3),
-              excludedRequirements: exclusions,
-              targetingAdjustedAt: new Date().toISOString(),
-            }),
-          });
-          const payload = await response.json().catch(() => null);
-          console.info("[studio][opportunity][targeting_persisted]", {
-            area: "studio",
-            operation: "opportunity_targeting_persist",
-            status: response.ok ? "info" : "warn",
-            code: response.ok ? "opportunity_targeting_persisted" : "opportunity_targeting_persist_failed",
-            responseStatus: response.status,
-            responseSummary: summarizeStudioGenerationResponse(payload),
-          });
-        } catch (error) {
-          console.warn("[studio][opportunity][targeting_persist_failed]", {
-            area: "studio",
-            operation: "opportunity_targeting_persist",
-            status: "warn",
-            code: "opportunity_targeting_persist_failed",
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-
-        console.info("[studio][generation][dispatch_after_targeting_adjustment]", {
-          area: "studio",
-          operation: "generate",
-          status: "info",
-          code: "generation_dispatch_after_targeting_adjustment",
-          dispatchSignature,
-          exclusions,
-        });
-        try {
-          const dispatchResult = await startGenerationFromReadyShell("shell_auto");
-
-          console.info("[studio][artifacts][refresh_after_targeting_adjustment_started]", {
-            area: "studio",
-            operation: "hydrate_artifacts_after_generate",
-            status: "info",
-            code: "artifact_refresh_started_after_targeting_adjustment",
-            dispatchSignature,
-            dispatchOk: dispatchResult.ok,
-            expectedResume: needsResume,
-            expectedCover: needsCover,
-          });
-
-          try {
-            await refreshStudioArtifactsAfterGenerate({ expectedResume: needsResume, expectedCover: needsCover });
-            console.info("[studio][artifacts][refresh_after_targeting_adjustment_completed]", {
-              area: "studio",
-              operation: "hydrate_artifacts_after_generate",
-              status: "info",
-              code: "artifact_refresh_completed_after_targeting_adjustment",
-              dispatchSignature,
-            });
-          } catch (refreshError) {
-            console.warn("[studio][artifacts][refresh_after_targeting_adjustment_failed]", {
-              area: "studio",
-              operation: "hydrate_artifacts_after_generate",
-              status: "warn",
-              code: "artifact_refresh_failed_after_targeting_adjustment",
-              dispatchSignature,
-              error: refreshError instanceof Error ? refreshError.message : String(refreshError),
-            });
-            const message =
-              refreshError instanceof Error
-                ? refreshError.message
-                : "Generated documents are still syncing. Please wait a moment and refresh.";
-            setResumeState((current) => ({ ...current, error: current.error ?? message }));
-            setCoverState((current) => ({ ...current, error: current.error ?? message }));
-          }
-        } finally {
-          // Re-enable auto-generation evaluation after dispatch completes; the core orchestration
-          // will remain blocked by in-flight flags and hydration state until artifacts settle.
-          suppressAutoGenerationRef.current = false;
-        }
-      } catch (error) {
-        console.error("[studio][generation][dispatch_after_targeting_adjustment_failed]", {
-          area: "studio",
-          operation: "generate",
-          status: "error",
-          code: "generation_dispatch_after_targeting_adjustment_failed",
-          error: error instanceof Error ? error.message : String(error),
-        });
-        // Allow the user to retry the CTA if something failed before a stable generation attempt began.
-        const currentSignature = [
-          effectiveBaselineId ?? "none",
-          effectiveBaselineVersionId ?? "none",
-          effectiveJobId ?? "none",
-          effectiveRequestedAnalysisId ?? "none",
-        ].join(":");
-        if (targetingAdjustmentDispatchSignatureRef.current === currentSignature) {
-          targetingAdjustmentDispatchSignatureRef.current = null;
-        }
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Generation could not be started after adjusting targeting.";
-        setResumeState((current) => ({ ...current, error: current.error ?? message }));
-        setCoverState((current) => ({ ...current, error: current.error ?? message }));
-        suppressAutoGenerationRef.current = false;
-      }
-    };
-
-    return () => {
-      dispatchGenerationAfterTargetingAdjustmentRef.current = null;
-    };
-  }, [
-    analysis,
-    analysisScore,
-    autoGenerationInFlight,
-    autoGenerationSignature,
-    coverGenerating,
-    effectiveBaselineId,
-    effectiveBaselineVersionId,
-    effectiveJobId,
-    effectiveRequestedAnalysisId,
-    evidenceSummaryBullets,
-    hasCompletedGeneration,
-    hasCoverLetterArtifact,
-    hasResumeArtifact,
-    qualifiedForStudioOrchestration,
-    resumeGenerating,
-    refreshStudioArtifactsAfterGenerate,
-    selectedJob,
-    startGenerationFromReadyShell,
-    studioArtifactPairStatus,
-    studioReadinessBlocksGeneration,
-  ]);
+  // dispatchGenerationAfterTargetingAdjustmentRef wiring is defined after `generateArtifactsNow`
+  // to avoid temporal-dead-zone access during render.
 
   const [debugAutoGenerationEnabled, setDebugAutoGenerationEnabled] = useState(
     process.env.NODE_ENV !== "production",
@@ -11250,6 +11050,204 @@ export default function StudioPage() {
       workflowOrchestratorCore.contract?.generation.auto.signature,
     ],
   );
+
+  useEffect(() => {
+    dispatchGenerationAfterTargetingAdjustmentRef.current = async () => {
+      try {
+        if (!qualifiedForStudioOrchestration) return;
+        if (studioReadinessBlocksGeneration) return;
+        const needsResume = !hasResumeArtifact;
+        const needsCover = !hasCoverLetterArtifact;
+        if (!needsResume && !needsCover) return;
+        if (
+          resumeGenerating ||
+          coverGenerating ||
+          autoGenerationInFlight ||
+          studioArtifactPairStatus === "in_progress"
+        ) {
+          return;
+        }
+
+        const dispatchSignature = [
+          effectiveBaselineId ?? "none",
+          effectiveBaselineVersionId ?? "none",
+          effectiveJobId ?? "none",
+          effectiveRequestedAnalysisId ?? "none",
+        ].join(":");
+        if (targetingAdjustmentDispatchSignatureRef.current === dispatchSignature) {
+          console.info("[studio][generation][dispatch_after_targeting_adjustment_skipped]", {
+            area: "studio",
+            operation: "generate",
+            status: "info",
+            code: "generation_dispatch_after_targeting_adjustment_skipped",
+            reason: "duplicate_dispatch_signature",
+            dispatchSignature,
+          });
+          return;
+        }
+        targetingAdjustmentDispatchSignatureRef.current = dispatchSignature;
+
+        suppressAutoGenerationRef.current = true;
+        if (autoGenerationSignature) {
+          autoGenerationSignatureRef.current = autoGenerationSignature;
+        }
+
+        await new Promise<void>((resolve) =>
+          typeof window !== "undefined" ? window.setTimeout(() => resolve(), 0) : resolve(),
+        );
+
+        const exclusions = Array.from(excludedTargetingLabelsRef.current);
+        console.info("[studio][unsupported_requirements][removal_committed]", {
+          area: "studio",
+          operation: "unsupported_requirements_removal",
+          status: "info",
+          code: "unsupported_requirements_removal_committed",
+          exclusions,
+          analysisId: effectiveRequestedAnalysisId ?? null,
+          jobId: effectiveJobId ?? null,
+          baselineId: effectiveBaselineId ?? null,
+          baselineVersionId: effectiveBaselineVersionId ?? null,
+        });
+
+        try {
+          const response = await fetch("/api/opportunities", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              jobId: effectiveJobId,
+              analysisId: effectiveRequestedAnalysisId,
+              baselineId: effectiveBaselineId,
+              baselineVersionId: effectiveBaselineVersionId,
+              score: Math.round(analysisScore ?? 0),
+              company: selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company",
+              roleTitle: selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Untitled role",
+              generationCompleted: Boolean(hasCompletedGeneration),
+              savedEvidenceSummary: evidenceSummaryBullets.slice(0, 3),
+              excludedRequirements: exclusions,
+              targetingAdjustedAt: new Date().toISOString(),
+            }),
+          });
+          const payload = await response.json().catch(() => null);
+          console.info("[studio][opportunity][targeting_persisted]", {
+            area: "studio",
+            operation: "opportunity_targeting_persist",
+            status: response.ok ? "info" : "warn",
+            code: response.ok ? "opportunity_targeting_persisted" : "opportunity_targeting_persist_failed",
+            responseStatus: response.status,
+            responseSummary: summarizeStudioGenerationResponse(payload),
+          });
+        } catch (error) {
+          console.warn("[studio][opportunity][targeting_persist_failed]", {
+            area: "studio",
+            operation: "opportunity_targeting_persist",
+            status: "warn",
+            code: "opportunity_targeting_persist_failed",
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+
+        console.info("[studio][generation][dispatch_after_targeting_adjustment]", {
+          area: "studio",
+          operation: "generate",
+          status: "info",
+          code: "generation_dispatch_after_targeting_adjustment",
+          dispatchSignature,
+          exclusions,
+        });
+        try {
+          await generateArtifactsNow({ resume: needsResume, coverLetter: needsCover, source: "manual" });
+
+          console.info("[studio][artifacts][refresh_after_targeting_adjustment_started]", {
+            area: "studio",
+            operation: "hydrate_artifacts_after_generate",
+            status: "info",
+            code: "artifact_refresh_started_after_targeting_adjustment",
+            dispatchSignature,
+            dispatchOk: true,
+            expectedResume: needsResume,
+            expectedCover: needsCover,
+          });
+
+          try {
+            await refreshStudioArtifactsAfterGenerate({ expectedResume: needsResume, expectedCover: needsCover });
+            console.info("[studio][artifacts][refresh_after_targeting_adjustment_completed]", {
+              area: "studio",
+              operation: "hydrate_artifacts_after_generate",
+              status: "info",
+              code: "artifact_refresh_completed_after_targeting_adjustment",
+              dispatchSignature,
+            });
+          } catch (refreshError) {
+            console.warn("[studio][artifacts][refresh_after_targeting_adjustment_failed]", {
+              area: "studio",
+              operation: "hydrate_artifacts_after_generate",
+              status: "warn",
+              code: "artifact_refresh_failed_after_targeting_adjustment",
+              dispatchSignature,
+              error: refreshError instanceof Error ? refreshError.message : String(refreshError),
+            });
+            const message =
+              refreshError instanceof Error
+                ? refreshError.message
+                : "Generated documents are still syncing. Please wait a moment and refresh.";
+            setResumeState((current) => ({ ...current, error: current.error ?? message }));
+            setCoverState((current) => ({ ...current, error: current.error ?? message }));
+          }
+        } finally {
+          suppressAutoGenerationRef.current = false;
+        }
+      } catch (error) {
+        console.error("[studio][generation][dispatch_after_targeting_adjustment_failed]", {
+          area: "studio",
+          operation: "generate",
+          status: "error",
+          code: "generation_dispatch_after_targeting_adjustment_failed",
+          error: error instanceof Error ? error.message : String(error),
+        });
+        const currentSignature = [
+          effectiveBaselineId ?? "none",
+          effectiveBaselineVersionId ?? "none",
+          effectiveJobId ?? "none",
+          effectiveRequestedAnalysisId ?? "none",
+        ].join(":");
+        if (targetingAdjustmentDispatchSignatureRef.current === currentSignature) {
+          targetingAdjustmentDispatchSignatureRef.current = null;
+        }
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Generation could not be started after adjusting targeting.";
+        setResumeState((current) => ({ ...current, error: current.error ?? message }));
+        setCoverState((current) => ({ ...current, error: current.error ?? message }));
+        suppressAutoGenerationRef.current = false;
+      }
+    };
+
+    return () => {
+      dispatchGenerationAfterTargetingAdjustmentRef.current = null;
+    };
+  }, [
+    analysis,
+    analysisScore,
+    autoGenerationInFlight,
+    autoGenerationSignature,
+    coverGenerating,
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    effectiveRequestedAnalysisId,
+    evidenceSummaryBullets,
+    generateArtifactsNow,
+    hasCompletedGeneration,
+    hasCoverLetterArtifact,
+    hasResumeArtifact,
+    qualifiedForStudioOrchestration,
+    refreshStudioArtifactsAfterGenerate,
+    resumeGenerating,
+    selectedJob,
+    studioArtifactPairStatus,
+    studioReadinessBlocksGeneration,
+  ]);
 
   useEffect(() => {
     // Prod-safe diagnostic: only log when the UX is in the "generated unusable" lane.

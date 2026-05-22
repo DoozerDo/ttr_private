@@ -19,6 +19,7 @@
     "synthetic:landing": "playwright test --config playwright.config.ts",
     "synthetic:auth": "playwright test --config playwright.config.ts",
     "synthetic:railway:studio-generate-80": "playwright test tests/synthetic/railway-studio-generate-80.spec.ts --config playwright.config.ts",
+    "closure:railway:studio-golden-loop": "playwright test tests/synthetic/railway-studio-generate-80.spec.ts --config playwright.config.ts",
     "scan:routes": "node scripts/route-integrity-scan.mjs"
     ,
     "test": "node scripts/vitest-test.mjs"

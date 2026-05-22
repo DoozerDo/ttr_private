@@ -739,6 +739,71 @@ describe("workflow journey scenarios (synthetic)", () => {
     cleanup();
   });
 
+  it("Remove unsupported requirements and continue: resume exists, cover missing -> generates cover with excludedRequirements", async () => {
+    const { mountStudio, cleanup } = mountWithCleanup();
+
+    const server = new SyntheticWorkflowServer({
+      analysisId: "analysis-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      jobId: "job-1",
+      score: 83,
+      readiness: { status: "limited", blocked: false },
+      gapAnalysis: { unverifiedRequirements: ["python", "snowflake"] },
+      artifacts: {
+        pairStatus: "DEGRADED",
+        resume: { status: "COMPLETED" },
+        coverLetter: { status: "MISSING" },
+        staleDraftExists: false,
+      },
+      generationPlan: { resume: "success", coverLetter: "success" },
+    });
+
+    setFetchImplementation(server.handleFetch);
+
+    overrideSearchParams({
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      jobId: "job-1",
+      assessmentId: "analysis-1",
+    });
+
+    mountStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-materials-completeness")).toHaveTextContent(
+        "Partial: Resume ready. Cover letter not generated yet.",
+      );
+    });
+
+    // One-step unsupported requirements panel must be visible with the live CTA.
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-auto-adjust-panel")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Remove unsupported requirements and continue" }));
+
+    await waitFor(() => {
+      const coverPosts = server.requests.filter(
+        (req) =>
+          req.method === "POST" &&
+          (req.pathname === "/api/cover-letters" || req.pathname === "/api/cover-letters/generate"),
+      );
+      expect(coverPosts.length).toBe(1);
+      const body = coverPosts[0]?.body as any;
+      expect(body?.excludedRequirements ?? []).toEqual(
+        expect.arrayContaining(["python", "snowflake"]),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-materials-completeness")).toHaveTextContent(
+        "Complete set: Resume + cover letter",
+      );
+    });
+
+    cleanup();
+  });
+
   it("Studio ignores minimal fallback resume artifacts from localStorage hydration fallback", async () => {
     const { mountStudio, cleanup } = mountWithCleanup();
     ensureLocalStorageSupportsWrites();

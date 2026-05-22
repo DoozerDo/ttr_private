@@ -7,6 +7,7 @@ import {
 
 /**
  * Railway / CI requirements (no mocks, real API + web):
+ * This is the closure gate for the Studio golden loop. Local Vitest success is not closure.
  *
  * Required env vars:
  * - BASE_URL: Railway web origin (e.g. "https://<web>.up.railway.app")
@@ -18,6 +19,7 @@ import {
  *
  * Run:
  * - npm -w apps/web run synthetic:railway:studio-generate-80
+ * - npm -w apps/web run closure:railway:studio-golden-loop
  */
 
 const requiredEnv = [
@@ -142,6 +144,10 @@ test.describe("Railway Studio score>=80 (no analysisId) validation", () => {
     );
     await expect(page.getByTestId("studio-resume-ready-panel")).toBeVisible();
     await expect(page.getByTestId("studio-cover-ready-panel")).toBeVisible();
+
+    await expect(page.getByText("Cover letter not generated yet")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Retry generation" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Remove unsupported requirements and continue" })).toHaveCount(0);
 
     await expect.poll(() => resumePosts, { timeout: 90_000 }).toBe(1);
     await expect.poll(() => coverPosts, { timeout: 90_000 }).toBe(1);
