@@ -11,6 +11,31 @@ export type RoleNarrativeShapeInput = {
 export class RoleNarrativeShaper {
   private rewriter = new BulletNarrativeRewriter();
 
+  private diversifyOpenings(bullets: string[]): string[] {
+    const seen = new Map<string, number>();
+    const variants: Array<[RegExp, string[]]> = [
+      [/^\s*Coordinated\b/i, ['Coordinated', 'Owned', 'Led', 'Partnered with', 'Standardized']],
+      [/^\s*Partnered with\b/i, ['Partnered with', 'Coordinated with', 'Aligned with']],
+      [/^\s*Supported\b/i, ['Supported', 'Enabled', 'Strengthened']],
+      [/^\s*Owned\b/i, ['Owned', 'Led', 'Drove', 'Improved']],
+    ];
+
+    return bullets.map((bullet) => {
+      const first = (String(bullet ?? '').trim().split(/\s+/)[0] ?? '').toLowerCase();
+      if (!first) return bullet;
+      const count = (seen.get(first) ?? 0) + 1;
+      seen.set(first, count);
+      if (count <= 1) return bullet;
+
+      for (const [pattern, words] of variants) {
+        if (!pattern.test(bullet)) continue;
+        const replacement = words[Math.min(words.length - 1, count - 1)] ?? words[0];
+        return bullet.replace(pattern, replacement);
+      }
+      return bullet;
+    });
+  }
+
   private scoreBullet(input: {
     bullet: string;
     roleTitle: string;
@@ -94,13 +119,14 @@ export class RoleNarrativeShaper {
       ;
 
     const bullets = bulletsWithProvenance.map((item) => item.rewritten);
+    const diversifiedBullets = this.diversifyOpenings(bullets);
     const bulletSourceRoleKeys = bulletsWithProvenance.map((item) => item.sourceRoleKey);
 
     return {
       company: input.company,
       roleTitle: input.roleTitle,
       ...(input.dateRange ? { dateRange: input.dateRange } : {}),
-      bullets,
+      bullets: diversifiedBullets,
       bulletSourceRoleKeys,
       rewrittenBulletCount,
       genericLanguageFlags,

@@ -9,5 +9,20 @@ describe('BulletNarrativeRewriter', () => {
     expect(result.rewritten).toContain('Coordinated');
     expect(/\d/.test(result.rewritten)).toBe(false);
   });
-});
 
+  it('reduces keyword inventories and caps bullet length without inventing facts', () => {
+    const rewriter = new BulletNarrativeRewriter();
+    const input =
+      'Responsible for support operations, incident response, escalation management, customer communication, stakeholder alignment, tooling improvements, and reporting across teams';
+    const result = rewriter.rewrite({ bullet: input, roleTitle: 'Director of Support', company: 'Acme' });
+
+    expect(result.rewritten).toMatch(/^(Owned|Led|Drove|Delivered|Built|Created|Improved|Reduced|Standardized|Partnered|Coordinated|Supported)\b/);
+    // Avoid raw comma inventories in recruiter-facing bullets.
+    expect((result.rewritten.match(/,/g) ?? []).length).toBeLessThanOrEqual(2);
+    // Keep bullets concise (no run-on fragments).
+    const words = result.rewritten.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+    expect(words.length).toBeLessThanOrEqual(32);
+    // No invented numbers.
+    expect(/\d/.test(result.rewritten)).toBe(false);
+  });
+});

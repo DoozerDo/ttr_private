@@ -14,11 +14,60 @@ function hasDigits(text: string): boolean {
   return /\d/.test(text);
 }
 
+function wordCount(text: string): number {
+  return trimToText(text).split(' ').filter(Boolean).length;
+}
+
+function capWords(text: string, maxWords: number): string {
+  const normalized = trimToText(text);
+  if (!normalized) return '';
+  const words = normalized.split(' ').filter(Boolean);
+  if (words.length <= maxWords) return normalized;
+  return `${words.slice(0, maxWords).join(' ')}...`.replace(/\s{2,}/g, ' ').trim();
+}
+
 function softenBuzzwords(text: string): string {
   return text
     .replace(/\butilize\b/gi, 'use')
     .replace(/\bleverage\b/gi, 'use')
     .replace(/\bsynerg(?:y|ize)\b/gi, 'coordinate');
+}
+
+function reduceInventoryTone(text: string): string {
+  const normalized = trimToText(text);
+  if (!normalized) return '';
+
+  const commaCount = (normalized.match(/,/g) ?? []).length;
+  if (commaCount < 3) return normalized;
+
+  const parts = normalized.split(',').map((p) => trimToText(p)).filter(Boolean);
+  if (parts.length < 4) return normalized;
+
+  const head = parts.slice(0, 2).join(', ');
+  const including = parts.slice(2, 4);
+  const tail = including.length === 2 ? `${including[0]} and ${including[1]}` : including[0] ?? '';
+  const suffix = tail ? `, including ${tail}` : '';
+  return `${head}${suffix}`.replace(/\s{2,}/g, ' ').trim();
+}
+
+function preferActionVerbOpening(text: string): string {
+  const normalized = trimToText(text);
+  if (!normalized) return '';
+
+  if (
+    /^\s*(Owned|Led|Drove|Delivered|Shipped|Launched|Built|Created|Improved|Reduced|Standardized|Partnered|Coordinated|Supported)\b/i.test(
+      normalized,
+    )
+  ) {
+    return normalized;
+  }
+
+  return normalized
+    .replace(/^\s*optimized\s+/i, 'Improved ')
+    .replace(/^\s*handled\s+/i, 'Owned ')
+    .replace(/^\s*participated\s+in\s+/i, 'Supported ')
+    .replace(/^\s*involved\s+in\s+/i, 'Supported ')
+    .replace(/^\s*responsible\s+for\s+/i, 'Owned ');
 }
 
 function reframeImplementationScale(text: string): string {
@@ -71,6 +120,9 @@ export class BulletNarrativeRewriter {
       .replace(/^\s*assisted\s+(?:with\s+)?/i, 'Supported ')
       .replace(/^\s*responsible\s+for\s+/i, 'Owned ');
 
+    text = preferActionVerbOpening(text);
+    text = reduceInventoryTone(text);
+
     // Add operational framing only when the bullet is very short, and only as intent (not results).
     const short = trimToText(text).length < 70;
     if (short) {
@@ -94,6 +146,11 @@ export class BulletNarrativeRewriter {
     if (!originalHasDigits) {
       text = text.replace(/\b\d+(?:\.\d+)?%?\b/g, '');
       text = text.replace(/\s{2,}/g, ' ').trim();
+    }
+
+    const maxWords = 28;
+    if (wordCount(text) > maxWords) {
+      text = capWords(text, maxWords);
     }
 
     const rewritten = ensureSentence(text);
