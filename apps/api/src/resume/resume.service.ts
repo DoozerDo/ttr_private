@@ -2206,6 +2206,7 @@ export class ResumeService {
     if (
       !forceRegenerate &&
       cachedResume?.status === 'COMPLETED' &&
+      cachedResume.usableCurrent === true &&
       cachedResume.responseBody &&
       cachedResume.inputsHash === studioArtifactContext.inputsHash
     ) {

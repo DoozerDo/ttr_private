@@ -2271,6 +2271,73 @@ describe('ResumeService contract', () => {
     baseline.sections = originalSections;
   });
 
+  it('does not reuse cached completed studio artifact when usableCurrent=false (stale/unusable artifacts must not contaminate output)', async () => {
+    const { service, studioArtifactsService } = buildService();
+    const originalSections = baseline.sections;
+    baseline.sections = [baseSection] as any;
+
+    // Match the inputsHash Studio would compute for this request so the cache reuse branch would be eligible
+    // if it ignored usableCurrent.
+    const expectedInputsHash = (studioArtifactsService as any).computeResumeInputsHash({
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: (studioArtifactsService as any).computeJobFingerprint(job),
+      assessmentInputsHash: assessment.inputsHash ?? null,
+    });
+
+    (studioArtifactsService.readState as jest.Mock).mockResolvedValueOnce({
+      status: 'COMPLETED',
+      baselineId: baseline.id,
+      jobId: job.id,
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: 'job-fingerprint-1',
+      generationContractVersion: 'studio-artifacts-v1',
+      resume: {
+        status: 'COMPLETED',
+        inputsHash: expectedInputsHash,
+        inputsHashMatches: true,
+        artifactCurrent: false,
+        usableCurrent: false,
+        retryAllowed: true,
+        responseBody: {
+          ok: true,
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: false,
+          preview: {
+            resume: {
+              heading: { name: 'Cached Candidate', contactLine: '' },
+              summary: 'Led billing support operations focused on invoice accuracy and reconciliation.',
+              experience: [],
+              education: [],
+              competencies: [],
+            },
+          },
+        },
+        content: null,
+        failureCode: null,
+        failureMessage: null,
+        startedAt: null,
+        completedAt: new Date().toISOString(),
+        failedAt: null,
+        metadata: {},
+      },
+      coverLetter: null,
+    });
+
+    const result = await service.generateResume(
+      'user-1',
+      { ...baseRequest, forceRegenerate: false } as any,
+      { skipReadinessGate: true } as any,
+    );
+
+    expect((result as any).idempotency?.reused).not.toBe(true);
+    expect(String(result.preview?.resume?.summary ?? '').toLowerCase()).not.toContain('billing support operations');
+    expect(studioArtifactsService.recordResumeInProgress).toHaveBeenCalled();
+
+    baseline.sections = originalSections;
+  });
+
   it('marks resume as not export-ready when experience headers are malformed (sentence-like title/company)', async () => {
     const { service } = buildService();
     const originalScore = assessment.overallScore;
