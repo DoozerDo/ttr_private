@@ -3368,6 +3368,17 @@ export class ResumeService {
           const jobForPositioning = job
             ? { title: job.title ?? null, company: job.company ?? null, description: job.rawDescription ?? null }
             : { title: null, company: null, description: null };
+          const structuredBaselineForIdentity = (() => {
+            try {
+              const source = resolveBaselineSectionsForGeneration(baseline);
+              return extractStructuredBaselineFromSections((source as any) ?? (baseline.sections as any));
+            } catch {
+              return null;
+            }
+          })();
+          const idempotencyCareerIdentity = structuredBaselineForIdentity
+            ? deriveCareerIdentityFromStructuredBaseline(structuredBaselineForIdentity as any)
+            : null;
           const positioning = this.positioningResolver.resolve({
             job: jobForPositioning,
             // Use the persisted baseline ResumeV2 model when available; otherwise fall back to the response preview.
@@ -3390,17 +3401,6 @@ export class ResumeService {
             baselineIdentity && typeof baselineIdentity === 'object'
               ? (baselineIdentity as unknown as { fullName?: unknown; contactLine?: unknown; links?: unknown })
               : {};
-          const structuredBaselineForIdentity = (() => {
-            try {
-              const source = resolveBaselineSectionsForGeneration(baseline);
-              return extractStructuredBaselineFromSections((source as any) ?? (baseline.sections as any));
-            } catch {
-              return null;
-            }
-          })();
-          const idempotencyCareerIdentity = structuredBaselineForIdentity
-            ? deriveCareerIdentityFromStructuredBaseline(structuredBaselineForIdentity as any)
-            : null;
           const authoritative = buildAuthoritativeResumeDraftFromResumeV2({
             resumeV2: (persistedResumeV2 as any) ?? (response?.preview?.resume as any) ?? {},
             identity: { name: identityRecord.fullName, contactLine: identityRecord.contactLine, links: identityRecord.links },
