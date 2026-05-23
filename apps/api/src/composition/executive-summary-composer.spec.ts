@@ -45,4 +45,22 @@ describe('ExecutiveSummaryComposer', () => {
     // Avoid keyword-stuffed comma inventories in the summary.
     expect((result.summary.match(/,/g) ?? []).length).toBeLessThanOrEqual(2);
   });
+
+  it('does not fabricate a billing-domain narrative when baseline corpus does not support it', () => {
+    const composer = new ExecutiveSummaryComposer();
+
+    const result = composer.compose({
+      positioningThesis:
+        'Support operations leader focused on billing support operations, invoice accuracy, entitlement mismatches, and reconciliation workflows.',
+      experienceSnippets: [
+        'Director of Support at Acme',
+        'Owned escalations and incident communications for a SaaS platform',
+        'Partnered with engineering on reliability improvements',
+      ],
+      evidencePriorities: ['incident response', 'support operations'],
+    });
+
+    // If the baseline evidence doesn't mention billing/invoice/etc, the thesis must not introduce it.
+    expect(result.summary.toLowerCase()).not.toMatch(/\b(billing|invoice|entitlement|reconciliation|metering|credit|dispute|revenue)\b/);
+  });
 });

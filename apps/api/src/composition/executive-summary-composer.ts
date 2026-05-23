@@ -44,6 +44,43 @@ function inferRoleIdentity(corpus: string): string {
   return 'operations-focused professional';
 }
 
+const BILLING_DOMAIN_TERMS = [
+  'billing',
+  'invoice',
+  'invoicing',
+  'reconciliation',
+  'reconcile',
+  'entitlement',
+  'metering',
+  'usage metering',
+  'credit',
+  'dispute',
+  'revenue',
+];
+
+function containsBillingDomain(text: string): boolean {
+  const lowered = trimToText(text).toLowerCase();
+  if (!lowered) return false;
+  return BILLING_DOMAIN_TERMS.some((term) => lowered.includes(term));
+}
+
+function sanitizeThesisAgainstCorpus(thesis: string, corpus: string): string {
+  const normalizedThesis = trimToText(thesis);
+  if (!normalizedThesis) return '';
+
+  // Domain-fidelity guard: do not introduce billing/invoice/entitlement narratives unless the baseline corpus already contains them.
+  const corpusHasBillingDomain = containsBillingDomain(corpus);
+  const thesisHasBillingDomain = containsBillingDomain(normalizedThesis);
+  if (!thesisHasBillingDomain || corpusHasBillingDomain) return normalizedThesis;
+
+  const sentences = normalizedThesis
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => trimToText(s))
+    .filter(Boolean);
+  const filtered = sentences.filter((s) => !containsBillingDomain(s));
+  return filtered.join(' ').trim();
+}
+
 export class ExecutiveSummaryComposer {
   private detector = new GenericLanguageDetector();
 
@@ -56,8 +93,8 @@ export class ExecutiveSummaryComposer {
     genericLanguageFlags: ReturnType<GenericLanguageDetector['detect']>;
     source: 'authoritative_thesis' | 'inferred';
   } {
-    const thesis = trimToText(input.positioningThesis ?? '');
     const corpus = input.experienceSnippets.map((s) => trimToText(s)).filter(Boolean).join(' ');
+    const thesis = sanitizeThesisAgainstCorpus(trimToText(input.positioningThesis ?? ''), corpus);
     const identity = inferRoleIdentity(`${thesis} ${corpus}`);
 
     const themes = (input.evidencePriorities ?? [])
