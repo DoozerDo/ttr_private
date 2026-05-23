@@ -2256,6 +2256,91 @@ describe('ResumeService contract', () => {
     }
   });
 
+  it('quarantines contaminated cached completed resume artifacts when baseline evidence has zero billing-domain support', async () => {
+    const { service, studioArtifactsService } = buildService();
+    const originalSections = baseline.sections;
+    baseline.sections = [
+      {
+        ...baseSection,
+        id: 'exp-ops',
+        sectionType: BaselineSectionType.EXPERIENCE as any,
+        title: 'Experience',
+        order: 1,
+        content: [
+          'Example Co | Support Operations Lead | 2022 - Present',
+          '- Led incident response and escalations across teams.',
+          '- Built dashboards for queue health and CSAT reporting.',
+          '- Ran postmortems and improved cross-functional workflows.',
+          '- Owned support operations playbooks and on-call process improvements.',
+        ].join('\n'),
+      } as any,
+    ] as any;
+
+    (studioArtifactsService.readState as jest.Mock).mockResolvedValueOnce({
+      status: 'NOT_STARTED',
+      baselineId: baseline.id,
+      jobId: job.id,
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: 'job-fingerprint-1',
+      generationContractVersion: 'studio-artifacts-v1',
+      resume: {
+        status: 'COMPLETED',
+        usableCurrent: true,
+        inputsHash: 'resume-hash-1',
+        responseBody: {
+          ok: true,
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          blocked: false,
+          baselineId: baseline.id,
+          baselineVersionId: baselineVersion.id,
+          jobId: job.id,
+          sections: [],
+          compliance_flags: [],
+          compliance_blocked: false,
+          audit_id: 'audit-1',
+          auditId: 'audit-1',
+          baseline_version_hash: baselineVersion.hash,
+          quality: 'final',
+          exports: { docx: true, pdf: true },
+          content:
+            'Billing operations leader focused on invoice accuracy, entitlement mismatches, and reconciliation workflows.',
+          preview: {
+            resume: {
+              heading: { name: 'Test Candidate', contactLine: '' },
+              summary: 'Billing support operations leader.',
+              experience: [
+                {
+                  company: 'Example Co',
+                  roleTitle: 'Billing Operations Lead',
+                  bullets: ['Owned billing KPI reporting and invoice dispute handling.'],
+                  dateRange: '2022 - Present',
+                },
+              ],
+              education: [],
+              competencies: [],
+            },
+          },
+        },
+      },
+      coverLetter: null,
+    });
+
+    try {
+      const result = await service.generateResume('user-1', baseRequest as any);
+      expect(String((result as any)?.idempotency?.status ?? '')).not.toBe('existing_completed');
+      const content = String((result as any).content ?? '').toLowerCase();
+      expect(content).not.toMatch(/\bbilling operations\b/);
+      expect(content).not.toMatch(/\binvoice accuracy\b/);
+      expect(content).not.toMatch(/\bentitlement mismatches?\b/);
+      expect(content).not.toMatch(/\breconciliation\b/);
+    } finally {
+      baseline.sections = originalSections;
+    }
+  });
+
   it('bypasses idempotency reuse/in-flight latches when forceRegenerate=true by using a one-off dedupe key', async () => {
     const { service, workflowIdempotencyService } = buildService();
     const originalSections = baseline.sections;
@@ -3585,6 +3670,70 @@ describe('ResumeService contract', () => {
       expect(resumeContent).not.toMatch(/\brevenue\b/);
       expect(resumeContent).not.toMatch(/\bbilling kpi\b/);
       expect(resumeContent).not.toMatch(/\bbilling reliability\b/);
+
+      const hits = (result as any)?.internal?.productionValidation?.contaminationHits ?? null;
+      // Diagnostics are best-effort; when present, they must show no upstream billing-ops narrative.
+      if (hits) {
+        const assertNoUpstreamContamination = (layer: any) => {
+          expect(layer?.billing_support_operations ?? 0).toBe(0);
+          expect(layer?.billing_operations ?? 0).toBe(0);
+          expect(layer?.invoice_accuracy ?? 0).toBe(0);
+          expect(layer?.entitlement_mismatches ?? 0).toBe(0);
+          expect(layer?.reconciliation ?? 0).toBe(0);
+          expect(layer?.billing_reliability ?? 0).toBe(0);
+          expect(layer?.billing_kpi ?? 0).toBe(0);
+          expect(layer?.billing_nps ?? 0).toBe(0);
+        };
+        assertNoUpstreamContamination(hits?.baselineRaw);
+        assertNoUpstreamContamination(hits?.persistedResumeV2);
+        assertNoUpstreamContamination(hits?.structuredAuthority);
+      }
+
+      // Post-authority contamination trace (scoped to this regression only).
+      // Goal: prove whether billing-domain contamination is introduced after authority, or whether local generation is clean.
+      const lexicon = [
+        { key: 'billing_support_operations', re: /\bbilling support operations\b/gi },
+        { key: 'billing_operations', re: /\bbilling operations\b/gi },
+        { key: 'invoice_accuracy', re: /\binvoice accuracy\b/gi },
+        { key: 'entitlement_mismatches', re: /\bentitlement mismatches?\b/gi },
+        { key: 'reconciliation', re: /\b(reconciliation|reconcile)\b/gi },
+        { key: 'billing_reliability', re: /\bbilling reliability\b/gi },
+        { key: 'billing_kpi', re: /\bbilling kpi\b/gi },
+        { key: 'billing_nps', re: /\bbilling nps\b/gi },
+      ];
+      const countHitsInText = (text: string) => {
+        const out: Record<string, number> = {};
+        for (const { key, re } of lexicon) {
+          const m = text.match(re);
+          out[key] = m ? m.length : 0;
+        }
+        return out;
+      };
+      const stageHits = (label: string, obj: unknown) => {
+        if (obj == null) return { label, hits: countHitsInText('') };
+        const text = typeof obj === 'string' ? obj : JSON.stringify(obj);
+        return { label, hits: countHitsInText(text.toLowerCase()) };
+      };
+      const totalHits = (h: Record<string, number>) => Object.values(h).reduce((a, b) => a + b, 0);
+
+      const postAuthorityStages = [
+        stageHits('renderPlan', (result as any)?.preview?.resume?.__renderPlan ?? (result as any)?.preview?.resume?.renderPlan ?? null),
+        stageHits('positioningThesis', (result as any)?.preview?.resume?.positioningThesis ?? (result as any)?.preview?.positioning?.thesis ?? null),
+        stageHits('evidencePriorities', (result as any)?.preview?.resume?.evidencePriorities ?? (result as any)?.internal?.evidencePriorities ?? null),
+        stageHits('careerIdentity', (result as any)?.internal?.productionValidation?.careerIdentitySnapshot ?? (result as any)?.preview?.resume?.careerIdentitySnapshot ?? null),
+        stageHits('topRankedNarrativeCluster', String((result as any)?.preview?.resume?.__compositionDiagnostics?.topRankedNarrativeCluster ?? '')),
+        stageHits('composedResumeSummary', (result as any)?.preview?.resume?.summary ?? (result as any)?.preview?.resume?.executiveSummary ?? null),
+        stageHits('composedResumeBullets', (result as any)?.preview?.resume?.experience ?? null),
+        stageHits('finalResponseContent', String((result as any)?.content ?? '')),
+      ];
+
+      const firstContaminated = postAuthorityStages.find((s) => totalHits(s.hits) > 0) ?? null;
+      if (firstContaminated) {
+        // Explicitly name the first stage that contains contamination hits (deterministic diagnostics).
+        throw new Error(
+          `[POST_AUTHORITY_CONTAMINATION] firstStage=${firstContaminated.label} hits=${JSON.stringify(firstContaminated.hits)}`,
+        );
+      }
     } finally {
       Object.assign(job as any, originalJob);
       baseline.sections = originalSections;

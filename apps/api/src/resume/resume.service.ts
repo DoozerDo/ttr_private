@@ -2236,12 +2236,85 @@ export class ResumeService {
       analysisId,
     });
     const cachedResume = studioArtifactsState.resume;
+
+    const shouldQuarantineCachedResumeArtifact = (() => {
+      if (forceRegenerate) return { quarantine: false as const, reason: null as string | null };
+      if (
+        cachedResume?.status !== 'COMPLETED' ||
+        cachedResume.usableCurrent !== true ||
+        !cachedResume.responseBody ||
+        cachedResume.inputsHash !== studioArtifactContext.inputsHash
+      ) {
+        return { quarantine: false as const, reason: null as string | null };
+      }
+
+      try {
+        const cachedResponse = cachedResume.responseBody as unknown as ResumeGenerationResponse;
+        const cachedText = [
+          String((cachedResponse as any)?.content ?? ''),
+          String((cachedResponse as any)?.preview?.resume?.summary ?? ''),
+          JSON.stringify((cachedResponse as any)?.preview?.resume?.experience ?? []),
+        ]
+          .join('\n')
+          .toLowerCase();
+
+        // Only quarantine when the baseline has no supporting evidence, but the cached artifact is billing-domain heavy.
+        // This is intentionally narrow: it protects against stale contaminated persisted artifacts being served as "current".
+        const structuredBaselineForIdentity = (() => {
+          try {
+            const source = resolveBaselineSectionsForGeneration(baseline);
+            return extractStructuredBaselineFromSections((source as any) ?? (baseline.sections as any));
+          } catch {
+            return null;
+          }
+        })();
+        if (!structuredBaselineForIdentity) return { quarantine: false as const, reason: null as string | null };
+
+        const careerIdentity = deriveCareerIdentityFromStructuredBaseline(structuredBaselineForIdentity as any);
+        const prohibited = new Set((careerIdentity?.prohibitedDriftDomains ?? []) as string[]);
+        const dominantOperationalDomain = String((careerIdentity as any)?.dominantOperationalDomain ?? '');
+        const billingIsProhibitedByIdentity =
+          prohibited.has('billing_operations') || (dominantOperationalDomain && dominantOperationalDomain !== 'billing_operations');
+        if (!billingIsProhibitedByIdentity) return { quarantine: false as const, reason: null as string | null };
+
+        const baselineEvidenceText = (() => {
+          try {
+            const experience = Array.isArray((structuredBaselineForIdentity as any)?.experience)
+              ? ((structuredBaselineForIdentity as any).experience as any[])
+              : [];
+            return experience
+              .map((e) => {
+                const header = [e?.company, e?.roleTitle, e?.dates].filter(Boolean).join(' ');
+                const bullets = Array.isArray(e?.bullets) ? (e.bullets as any[]).join(' ') : '';
+                return `${header}\n${bullets}`;
+              })
+              .join('\n')
+              .toLowerCase();
+          } catch {
+            return '';
+          }
+        })();
+
+        const billingSignals = /\b(billing support operations|billing operations|invoice accuracy|entitlement mismatches?|reconciliation|billing reliability|billing kpi|billing nps)\b/i;
+        const baselineHasBillingSupport = billingSignals.test(baselineEvidenceText);
+        const cachedHasBillingContamination = billingSignals.test(cachedText);
+
+        if (!baselineHasBillingSupport && cachedHasBillingContamination) {
+          return { quarantine: true as const, reason: 'cached_resume_artifact_contains_prohibited_billing_terms_without_baseline_support' };
+        }
+        return { quarantine: false as const, reason: null as string | null };
+      } catch {
+        return { quarantine: false as const, reason: null as string | null };
+      }
+    })();
+
     if (
       !forceRegenerate &&
       cachedResume?.status === 'COMPLETED' &&
       cachedResume.usableCurrent === true &&
       cachedResume.responseBody &&
-      cachedResume.inputsHash === studioArtifactContext.inputsHash
+      cachedResume.inputsHash === studioArtifactContext.inputsHash &&
+      shouldQuarantineCachedResumeArtifact.quarantine !== true
     ) {
       const cachedResponse = cachedResume.responseBody as unknown as ResumeGenerationResponse;
       recordResumeEvent(true);
@@ -2352,6 +2425,18 @@ export class ResumeService {
       }
 
       return response;
+    }
+
+    if (shouldQuarantineCachedResumeArtifact.quarantine === true) {
+      try {
+        internal.productionValidation = {
+          ...(internal.productionValidation ?? {}),
+          studioArtifactCacheQuarantined: true,
+          studioArtifactCacheQuarantineReason: shouldQuarantineCachedResumeArtifact.reason,
+        } as any;
+      } catch {
+        // ignore diagnostics failures
+      }
     }
 
     const gapInsights =
@@ -4078,6 +4163,53 @@ export class ResumeService {
           first = { stage: '', signals: [] };
         }
 
+        const contaminationLexicon = [
+          { key: 'billing_support_operations', re: /\bbilling\s+support\s+operations\b/i },
+          { key: 'billing_operations', re: /\bbilling\s+operations\b/i },
+          { key: 'invoice_accuracy', re: /\binvoice\s+accuracy\b/i },
+          { key: 'entitlement_mismatches', re: /\bentitlement\s+mismatches?\b/i },
+          { key: 'reconciliation', re: /\breconciliation\b/i },
+          { key: 'billing_reliability', re: /\bbilling\s+reliability\b/i },
+          { key: 'billing_kpi', re: /\bbilling\s+kpi\b/i },
+          { key: 'billing_nps', re: /\bbilling\s+nps\b/i },
+        ] as const;
+        const countContaminationHits = (text: string) => {
+          const t = String(text ?? '');
+          const hits: Record<string, number> = {};
+          for (const item of contaminationLexicon) {
+            hits[item.key] = (t.match(item.re) ?? []).length;
+          }
+          return hits;
+        };
+
+        const baselineRawText = Array.isArray(resumeInputSections as any[])
+          ? (resumeInputSections as any[]).map((s: any) => String(s?.content ?? '')).join('\n')
+          : '';
+        const structuredAuthorityText = Array.isArray((structuredBaselineForAuthorityGate as any)?.experience)
+          ? (structuredBaselineForAuthorityGate as any).experience
+              .map((e: any) => [e?.company, e?.roleTitle, e?.dates, ...(Array.isArray(e?.bullets) ? e.bullets : [])].join(' '))
+              .join(' ')
+          : '';
+        const persistedResumeV2Text = (() => {
+          try {
+            const persisted = (baseline.parsedRecords?.[0] as any)?.resumeV2Json ?? null;
+            if (!persisted || typeof persisted !== 'object') return '';
+            const normalized = normalizeNormalizedResumeDocument(persisted as any);
+            const validation = validateNormalizedResumeDocument(normalized as any);
+            if (!validation.valid) return '';
+            return buildResumePlainText(normalized as any);
+          } catch {
+            return '';
+          }
+        })();
+        const narrativePreviewText = (() => {
+          try {
+            return typeof persistedContent === 'string' ? persistedContent : '';
+          } catch {
+            return '';
+          }
+        })();
+
         const evidence = resolveGenerationEvidence({
           baseline: baseline as any,
           baselineVersionId: baselineVersion.id,
@@ -4096,6 +4228,12 @@ export class ResumeService {
           ...((response as any).internal ?? {}),
           productionValidation: {
             careerIdentity: careerIdentitySnapshot,
+            contaminationHits: {
+              baselineRaw: countContaminationHits(baselineRawText),
+              persistedResumeV2: countContaminationHits(persistedResumeV2Text),
+              structuredAuthority: countContaminationHits(structuredAuthorityText),
+              finalNarrative: countContaminationHits(narrativePreviewText),
+            },
             authoritativeExperienceRoleKeys: authoritativeRoleKeys.slice(0, 40),
             persistedResumeV2RoleKeys: persistedResumeV2RoleKeys.slice(0, 40),
             renderPlanRoleKeys: renderPlanRoleKeys.slice(0, 80),
