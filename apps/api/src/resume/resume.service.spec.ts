@@ -2174,6 +2174,88 @@ describe('ResumeService contract', () => {
     baseline.sections = originalSections;
   });
 
+  it('recomposes cached completed studio artifact responses through the authoritative assembler before returning', async () => {
+    const { service, studioArtifactsService } = buildService();
+    const originalSections = baseline.sections;
+    baseline.sections = [
+      {
+        ...baseSection,
+        id: 'exp-ops',
+        sectionType: BaselineSectionType.EXPERIENCE as any,
+        title: 'Experience',
+        order: 1,
+        content: [
+          'Example Co | Support Operations Lead | 2022 - Present',
+          '- Led incident response and escalations across teams.',
+          '- Built dashboards for queue health and CSAT reporting.',
+          '- Helped route an invoice dispute once by routing it to the right owner.',
+        ].join('\n'),
+      } as any,
+    ] as any;
+
+    (studioArtifactsService.readState as jest.Mock).mockResolvedValueOnce({
+      status: 'NOT_STARTED',
+      baselineId: baseline.id,
+      jobId: job.id,
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: 'job-fingerprint-1',
+      generationContractVersion: 'studio-artifacts-v1',
+      resume: {
+        status: 'COMPLETED',
+        usableCurrent: true,
+        inputsHash: 'resume-hash-1',
+        responseBody: {
+          ok: true,
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          blocked: false,
+          baselineId: baseline.id,
+          baselineVersionId: baselineVersion.id,
+          jobId: job.id,
+          sections: [],
+          compliance_flags: [],
+          compliance_blocked: false,
+          audit_id: 'audit-1',
+          auditId: 'audit-1',
+          baseline_version_hash: baselineVersion.hash,
+          quality: 'final',
+          exports: { docx: true, pdf: true },
+          content: 'Billing operations leader focused on invoice accuracy. Billing operations.',
+          preview: {
+            resume: {
+              heading: { name: 'Test Candidate', contactLine: '' },
+              summary: 'Billing operations leader.',
+              experience: [
+                {
+                  company: 'CenturyLink',
+                  roleTitle: 'Billing Operations Analyst',
+                  bullets: ['Reconciled billing and revenue across systems.'],
+                  dateRange: '2020 - 2022',
+                },
+              ],
+              education: [],
+              competencies: [],
+            },
+          },
+        },
+      },
+      coverLetter: null,
+    });
+
+    try {
+      const result = await service.generateResume('user-1', baseRequest as any);
+      expect(result.ok).toBe(true);
+      const content = String((result as any).content ?? '').toLowerCase();
+      expect(content).not.toMatch(/\bbilling operations\b/);
+      const summary = String((result as any)?.preview?.resume?.summary ?? '').toLowerCase();
+      expect(summary).not.toMatch(/\bbilling operations\b/);
+    } finally {
+      baseline.sections = originalSections;
+    }
+  });
+
   it('bypasses idempotency reuse/in-flight latches when forceRegenerate=true by using a one-off dedupe key', async () => {
     const { service, workflowIdempotencyService } = buildService();
     const originalSections = baseline.sections;

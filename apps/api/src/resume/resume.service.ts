@@ -2245,7 +2245,7 @@ export class ResumeService {
     ) {
       const cachedResponse = cachedResume.responseBody as unknown as ResumeGenerationResponse;
       recordResumeEvent(true);
-      return {
+      const response = {
         ...cachedResponse,
         idempotency: {
           status: 'existing_completed',
@@ -2261,6 +2261,97 @@ export class ResumeService {
           reused: true,
         },
       } as ResumeGenerationResponse;
+
+      // Cache hardening: cached Studio artifacts may contain stale narrative. Always attempt to re-compose the final
+      // preview/content through the authoritative assembler before returning.
+      try {
+        (response as any).internal = {
+          ...((response as any).internal ?? {}),
+          productionValidation: {
+            ...(((response as any).internal?.productionValidation as any) ?? {}),
+            studioArtifactCacheServed: true,
+            studioArtifactCacheRecomposed: false,
+          },
+        };
+      } catch {
+        // ignore diagnostics failures
+      }
+
+      try {
+        const jobForPositioning = job
+          ? { title: job.title ?? null, company: job.company ?? null, description: job.rawDescription ?? null }
+          : { title: null, company: null, description: null };
+        const structuredBaselineForIdentity = (() => {
+          try {
+            const source = resolveBaselineSectionsForGeneration(baseline);
+            return extractStructuredBaselineFromSections((source as any) ?? (baseline.sections as any));
+          } catch {
+            return null;
+          }
+        })();
+        const cacheCareerIdentity = structuredBaselineForIdentity
+          ? deriveCareerIdentityFromStructuredBaseline(structuredBaselineForIdentity as any)
+          : null;
+        const resumeAuthority = (response?.preview?.resume as any) ?? {};
+        const positioning = this.positioningResolver.resolve({
+          job: jobForPositioning,
+          resumeV2: resumeAuthority,
+          careerIdentity: cacheCareerIdentity,
+        });
+        const plan = (() => {
+          try {
+            return this.positioningPlanService.buildPlan({
+              job: jobForPositioning,
+              resumeV2: resumeAuthority,
+              careerIdentity: cacheCareerIdentity,
+            });
+          } catch {
+            return null;
+          }
+        })();
+        const baselineIdentity = resolveBaselineIdentity(baseline);
+        const identityRecord =
+          baselineIdentity && typeof baselineIdentity === 'object'
+            ? (baselineIdentity as unknown as { fullName?: unknown; contactLine?: unknown; links?: unknown })
+            : {};
+        const authoritative = buildAuthoritativeResumeDraftFromResumeV2({
+          resumeV2: resumeAuthority,
+          identity: { name: identityRecord.fullName, contactLine: identityRecord.contactLine, links: identityRecord.links },
+          renderPlan: buildAuthoritativeRenderPlan({
+            positioningPlan: plan,
+            orderedFallbackRoleIds: positioning.prioritizedExperienceIds ?? [],
+            suppressedFallbackRoleIds: positioning.suppressedExperienceIds ?? [],
+            allowedEvidenceSnippetIds: null,
+          }),
+          professionalIdentity: positioning.professionalIdentity ?? null,
+          targetNarrative: positioning.targetNarrative ?? null,
+          structuredBaselineForIdentity: structuredBaselineForIdentity as any,
+          careerIdentity: cacheCareerIdentity,
+        }) as any;
+        const authoritativePreview = sanitizeResumePreviewForStudio(authoritative);
+        const authoritativeContent = trimIncompleteTrailingFragments(buildResumePlainText(authoritative as any));
+        if (!response.preview) (response as any).preview = {};
+        (response.preview as any).resume = authoritativePreview;
+        (response as any).content = authoritativeContent;
+
+        try {
+          (response as any).internal = {
+            ...((response as any).internal ?? {}),
+            productionValidation: {
+              ...(((response as any).internal?.productionValidation as any) ?? {}),
+              studioArtifactCacheRecomposed: true,
+              studioArtifactCacheTopRankedNarrativeCluster:
+                String((authoritativePreview as any)?.__compositionDiagnostics?.topRankedNarrativeCluster ?? '') || null,
+            },
+          };
+        } catch {
+          // ignore diagnostics failures
+        }
+      } catch {
+        // Best-effort only: if recomposition fails, return cached response as-is.
+      }
+
+      return response;
     }
 
     const gapInsights =
