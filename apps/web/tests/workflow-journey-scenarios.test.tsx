@@ -104,8 +104,20 @@ type ScenarioServerState = {
   };
   artifacts: {
     pairStatus: string;
-    resume: { status: StudioArtifactStatus; retryable?: boolean; failureCategory?: string | null };
-    coverLetter: { status: StudioArtifactStatus; retryable?: boolean; failureCategory?: string | null };
+    resume: {
+      status: StudioArtifactStatus;
+      retryable?: boolean;
+      failureCategory?: string | null;
+      artifactCurrent?: boolean;
+      inputsHashPresent?: boolean;
+    };
+    coverLetter: {
+      status: StudioArtifactStatus;
+      retryable?: boolean;
+      failureCategory?: string | null;
+      artifactCurrent?: boolean;
+      inputsHashPresent?: boolean;
+    };
     staleDraftExists: boolean;
   };
   generationPlan?: {
@@ -215,13 +227,20 @@ class SyntheticWorkflowServer {
             preview: {
               resume: {
                 heading: { name: "Test Candidate", contactLine: "test@example.com" },
-                summary: "Verified support leader aligned to the role.",
+                summary:
+                  this.state.artifacts.resume.artifactCurrent === false
+                    ? "Billing support operations leader focused on invoice accuracy and entitlement mismatches."
+                    : "Verified support leader aligned to the role.",
                 experience: [
                   {
                     company: "Acme",
                     roleTitle: "Director of Support",
                     dateRange: "2022 - Present",
-                    bullets: ["Led support operations and improved team performance."],
+                    bullets: [
+                      this.state.artifacts.resume.artifactCurrent === false
+                        ? "Improved invoice accuracy by reconciling billing disputes across systems."
+                        : "Led support operations and improved team performance.",
+                    ],
                   },
                 ],
               },
@@ -240,7 +259,9 @@ class SyntheticWorkflowServer {
               coverLetter: {
                 paragraphs: [
                   "Dear Hiring Team,",
-                  "I am applying for this role.",
+                  this.state.artifacts.coverLetter.artifactCurrent === false
+                    ? "I am applying for this billing support operations role and will improve invoice accuracy."
+                    : "I am applying for this role.",
                   "Sincerely,",
                   "Test Candidate",
                 ],
@@ -263,6 +284,11 @@ class SyntheticWorkflowServer {
         status: this.state.artifacts.resume.status,
         responseBody: resumeResponseBody,
         content: this.state.artifacts.staleDraftExists ? "previous-resume-draft" : null,
+        inputsHash: this.state.artifacts.resume.inputsHashPresent === false ? null : "stored-inputs-hash-legacy",
+        inputsHashMatches: this.state.artifacts.resume.artifactCurrent === false ? false : true,
+        artifactCurrent:
+          this.state.artifacts.resume.artifactCurrent ??
+          (this.state.artifacts.resume.status === "COMPLETED" ? true : false),
         failureCode: resumeFailure?.category ?? null,
         failureMessage: resumeFailure?.explanation ?? null,
         metadata: { auditId: "audit-1" },
@@ -271,6 +297,11 @@ class SyntheticWorkflowServer {
         status: this.state.artifacts.coverLetter.status,
         responseBody: coverResponseBody,
         content: this.state.artifacts.staleDraftExists ? "previous-cover-draft" : null,
+        inputsHash: this.state.artifacts.coverLetter.inputsHashPresent === false ? null : "stored-inputs-hash-legacy",
+        inputsHashMatches: this.state.artifacts.coverLetter.artifactCurrent === false ? false : true,
+        artifactCurrent:
+          this.state.artifacts.coverLetter.artifactCurrent ??
+          (this.state.artifacts.coverLetter.status === "COMPLETED" ? true : false),
         failureCode: coverFailure?.category ?? null,
         failureMessage: coverFailure?.explanation ?? null,
         metadata: { auditId: "audit-1" },
@@ -367,6 +398,10 @@ class SyntheticWorkflowServer {
       return jsonResponse(this.assessmentPayload(), 200);
     }
 
+    if (pathname.includes("/api/analysis/fit-assessments/")) {
+      return jsonResponse(this.assessmentPayload(), 200);
+    }
+
     if (pathname.includes("/api/analysis/fit-assessments") && (url.includes("jobId=") || url.includes("baselineId="))) {
       // Studio fallback path resolves the latest assessment when analysisId is absent.
       return jsonResponse([this.assessmentPayload()], 200);
@@ -391,6 +426,11 @@ class SyntheticWorkflowServer {
         },
         200,
       );
+    }
+
+    if (pathname.startsWith("/api/analysis/")) {
+      // Studio may hit other analysis endpoints while reconciling context; keep them deterministic.
+      return jsonResponse(this.assessmentPayload(), 200);
     }
 
     if (pathname === "/api/baselines/base-1/strengthening-additions") {
@@ -765,7 +805,7 @@ describe("workflow journey scenarios (synthetic)", () => {
       baselineId: "base-1",
       baselineVersionId: "base-version-1",
       jobId: "job-1",
-      assessmentId: "analysis-1",
+      analysisId: "analysis-1",
     });
 
     mountStudio();

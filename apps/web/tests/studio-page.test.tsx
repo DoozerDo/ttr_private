@@ -406,6 +406,308 @@ function installCompletedArtifactFetches() {
   return fetchMock;
 }
 
+function installStaleArtifactRegenerationFetches(options: { staleResume: boolean; staleCover: boolean }) {
+  let completedApplicationsCount = 2;
+  let resumeIsStale = options.staleResume;
+  let coverIsStale = options.staleCover;
+  const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+    const rawUrl = rawFetchUrl(input);
+
+    const isAnalysisRequest =
+      rawUrl.includes("/api/analysis/fit-assessments/analysis-1") ||
+      rawUrl.includes("/api/analysis/job/job-1/latest") ||
+      rawUrl.includes("fit-assessments/analysis-1") ||
+      rawUrl.includes("analysis/job/job-1/latest");
+    if (isAnalysisRequest) {
+      return Promise.resolve(createResponse(createFitAssessment(84)));
+    }
+
+    if (rawUrl.includes("/api/studio/artifacts") || rawUrl.includes("studio/artifacts")) {
+      const payload: any = {
+        status: "COMPLETED",
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        baselineVersionHash: "hash-1",
+        jobFingerprint: "job-fingerprint-1",
+        generationContractVersion: "studio-artifacts-v1",
+      };
+
+      if (options.staleResume) {
+        payload.resume = resumeIsStale
+          ? {
+              status: "COMPLETED",
+              inputsHash: "stale-resume-hash",
+              inputsHashMatches: false,
+              artifactCurrent: false,
+              usableCurrent: false,
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  resume: {
+                    heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                    summary: "Billing support operations leader driving invoice accuracy and reconciliation.",
+                    experience: [
+                      {
+                        company: "Cat Daddy Games",
+                        roleTitle: "Senior Producer",
+                        location: "Los Angeles, CA",
+                        dateRange: "2020 - Present",
+                        bullets: ["Resolved entitlement mismatches across invoices and credits."],
+                      },
+                    ],
+                    education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+                    competencies: ["Billing operations", "Reconciliation"],
+                  },
+                },
+              },
+              content: "stale-resume-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-1" },
+            }
+          : {
+              status: "COMPLETED",
+              inputsHash: "fresh-resume-hash",
+              inputsHashMatches: true,
+              artifactCurrent: true,
+              usableCurrent: true,
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  resume: {
+                    heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                    summary: "Fresh resume summary reflecting current ruleset.",
+                    experience: [
+                      {
+                        company: "Cat Daddy Games",
+                        roleTitle: "Senior Producer",
+                        location: "Los Angeles, CA",
+                        dateRange: "2020 - Present",
+                        bullets: ["Led cross-functional delivery with verified impact."],
+                      },
+                    ],
+                    education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+                    competencies: ["Leadership", "Delivery"],
+                  },
+                },
+              },
+              content: "fresh-resume-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-2" },
+            };
+      }
+
+      if (options.staleCover) {
+        payload.coverLetter = coverIsStale
+          ? {
+              status: "COMPLETED",
+              inputsHash: "stale-cover-hash",
+              inputsHashMatches: false,
+              artifactCurrent: false,
+              usableCurrent: false,
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  coverLetter: {
+                    paragraphs: [
+                      "Dear Hiring Team,",
+                      "I improved invoice accuracy by reconciling billing entitlement mismatches.",
+                      "Sincerely,",
+                      "Alex Candidate",
+                    ],
+                  },
+                },
+              },
+              content: "stale-cover-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-1" },
+            }
+          : {
+              status: "COMPLETED",
+              inputsHash: "fresh-cover-hash",
+              inputsHashMatches: true,
+              artifactCurrent: true,
+              usableCurrent: true,
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  coverLetter: {
+                    paragraphs: [
+                      "Dear Hiring Team,",
+                      "Fresh cover letter paragraph reflecting current ruleset.",
+                      "Sincerely,",
+                      "Alex Candidate",
+                    ],
+                  },
+                },
+              },
+              content: "fresh-cover-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-2" },
+            };
+      }
+
+      return Promise.resolve(createResponse(payload));
+    }
+
+    if (rawUrl.includes("/api/baselines/base-1/versions")) {
+      return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+    }
+    if (rawUrl.includes("/api/jobs/job-1")) {
+      return Promise.resolve(createResponse({ id: "job-1", title: "Support Lead", company: "Company", location: "Remote" }));
+    }
+    if (rawUrl.includes("/api/baselines/base-1")) {
+      return Promise.resolve(createResponse({ id: "base-1" }));
+    }
+
+    if (rawUrl.endsWith("/api/resume/generate")) {
+      resumeIsStale = false;
+      return Promise.resolve(
+        createResponse({
+          status: "success",
+          generationStatus: "success",
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          preview: {
+            resume: {
+              heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+              summary: "Fresh resume summary reflecting current ruleset.",
+              experience: [],
+              education: [],
+              competencies: [],
+            },
+          },
+        }),
+      );
+    }
+    if (rawUrl.endsWith("/api/cover-letters/generate")) {
+      coverIsStale = false;
+      return Promise.resolve(
+        createResponse({
+          status: "success",
+          generationStatus: "success",
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          preview: {
+            coverLetter: {
+              paragraphs: [
+                "Dear Hiring Team,",
+                "Fresh cover letter paragraph reflecting current ruleset.",
+                "Sincerely,",
+                "Alex Candidate",
+              ],
+            },
+          },
+        }),
+      );
+    }
+
+    if (rawUrl.includes("/api/applications/")) {
+      const parsedBody = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+      const nextStatus = String(parsedBody?.applicationStatus ?? parsedBody?.status ?? "").toLowerCase();
+      if (nextStatus === "applied") {
+        completedApplicationsCount = 3;
+      }
+      return Promise.resolve(
+        createResponse({
+          id: "application-1",
+          status: nextStatus === "applied" ? "Applied" : "Ready",
+          appliedAt: nextStatus === "applied" ? new Date().toISOString() : null,
+          lastTouchedAt: new Date().toISOString(),
+          baselineId: "base-1",
+          jobId: "job-1",
+          jobUrl: "https://example.com/job",
+          notes: null,
+          sourceUrl: "https://example.com/job",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          resumeArtifacts: [],
+        }),
+      );
+    }
+    if (rawUrl.includes("/api/applications/insights")) {
+      return Promise.resolve(
+        createResponse({
+          completedApplicationsCount,
+          totalApplicationsCount: 3,
+        }),
+      );
+    }
+    if (rawUrl.includes("/api/analytics/event")) {
+      return Promise.resolve(createResponse({ ok: true }));
+    }
+    if (rawUrl.endsWith("/api/applications")) {
+      return Promise.resolve(
+        createResponse([
+          {
+            id: "application-1",
+            status: "Applied",
+            appliedAt: new Date().toISOString(),
+            lastTouchedAt: new Date().toISOString(),
+            baselineId: "base-1",
+            jobId: "job-0",
+            company: "Northwind",
+            title: "Senior Program Manager",
+          },
+          {
+            id: "application-2",
+            status: "Applied",
+            appliedAt: new Date().toISOString(),
+            lastTouchedAt: new Date().toISOString(),
+            baselineId: "base-1",
+            jobId: "job-1a",
+            company: "Acme",
+            title: "Director of Support",
+          },
+          {
+            id: "application-3",
+            status: "Ready",
+            appliedAt: null,
+            lastTouchedAt: new Date().toISOString(),
+            baselineId: "base-1",
+            jobId: "job-1",
+            company: "Acme",
+            title: "Director of Support",
+          },
+        ]),
+      );
+    }
+
+    return resolveStudioGenerationFallback(input);
+  });
+
+  setFetchImplementation(fetchMock);
+  return fetchMock;
+}
+
 async function openStudioWorkspaceFromReadyShell() {
   const primary = screen.queryByTestId("studio-generation-ready-primary");
   if (primary) {
@@ -479,6 +781,86 @@ describe("Studio page UX", () => {
     ).toBeInTheDocument();
   }, 20000);
 
+  it("treats stale completed artifacts as requiring regeneration and does not render their content as current output", async () => {
+    const fetchMock = installStaleArtifactRegenerationFetches({ staleResume: true, staleCover: true });
+
+    const firstMount = renderStudio();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    await waitFor(() => {
+      const urls = fetchMock.mock.calls.map(([input]) => rawFetchUrl(input));
+      expect(urls.some((url) => url.includes("/api/studio/artifacts"))).toBe(true);
+    });
+
+    await openStudioWorkspaceFromReadyShell();
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    expect(
+      screen.queryByText("Billing support operations leader driving invoice accuracy and reconciliation."),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cover Letter" }));
+    expect(
+      screen.queryByText("I improved invoice accuracy by reconciling billing entitlement mismatches."),
+    ).not.toBeInTheDocument();
+  }, 20000);
+
+  it("regenerates a stale resume artifact through the existing generation path and renders the fresh artifact only after the backend reports it current", async () => {
+    const fetchMock = installStaleArtifactRegenerationFetches({ staleResume: true, staleCover: false });
+
+    renderStudio();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await openStudioWorkspaceFromReadyShell();
+
+    // Stale content is not shown.
+    expect(
+      screen.queryByText("Billing support operations leader driving invoice accuracy and reconciliation."),
+    ).not.toBeInTheDocument();
+
+    // Regeneration is the next action.
+    const generateButton = await screen.findByTestId("studio-generate-resume-button");
+    fireEvent.click(generateButton);
+
+    await waitFor(() => {
+      const urls = fetchMock.mock.calls.map(([input]) => rawFetchUrl(input));
+      expect(urls.some((url) => url.endsWith("/api/resume/generate"))).toBe(true);
+      expect(urls.filter((url) => url.includes("/api/studio/artifacts")).length).toBeGreaterThan(1);
+    });
+
+    // Fresh content renders only after the backend marks it current.
+    await waitFor(() => {
+      expect(screen.getByText("Fresh resume summary reflecting current ruleset.")).toBeInTheDocument();
+    });
+  }, 20000);
+
+  it("regenerates a stale cover letter artifact through the existing generation path and renders the fresh artifact only after the backend reports it current", async () => {
+    const fetchMock = installStaleArtifactRegenerationFetches({ staleResume: false, staleCover: true });
+
+    renderStudio();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await openStudioWorkspaceFromReadyShell();
+
+    // Stale content is not shown.
+    expect(
+      screen.queryByText("I improved invoice accuracy by reconciling billing entitlement mismatches."),
+    ).not.toBeInTheDocument();
+
+    // Regeneration is the next action.
+    const generateButton = await screen.findByTestId("studio-generate-cover-button");
+    fireEvent.click(generateButton);
+
+    await waitFor(() => {
+      const urls = fetchMock.mock.calls.map(([input]) => rawFetchUrl(input));
+      expect(urls.some((url) => url.endsWith("/api/cover-letters/generate"))).toBe(true);
+      expect(urls.filter((url) => url.includes("/api/studio/artifacts")).length).toBeGreaterThan(1);
+    });
+
+    // Fresh content renders only after the backend marks it current.
+    await waitFor(() => {
+      expect(screen.getByText("Fresh cover letter paragraph reflecting current ruleset.")).toBeInTheDocument();
+    });
+  }, 20000);
+
   it("hydrates persisted artifacts in Studio even when analysisId is missing (no local fallback, no fake readiness)", async () => {
     overrideSearchParams({
       jobId: "job-1",
@@ -508,6 +890,7 @@ describe("Studio page UX", () => {
               inputsHash: "resume-hash",
               inputsHashMatches: true,
               artifactCurrent: true,
+              usableCurrent: true,
               retryAllowed: true,
               responseBody: {
                 status: "success",
@@ -537,6 +920,7 @@ describe("Studio page UX", () => {
               inputsHash: "cover-hash",
               inputsHashMatches: true,
               artifactCurrent: true,
+              usableCurrent: true,
               retryAllowed: true,
               responseBody: {
                 status: "success",

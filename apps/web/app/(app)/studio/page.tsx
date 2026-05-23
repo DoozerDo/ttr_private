@@ -1365,10 +1365,27 @@ export default function StudioPage() {
   const hasCoverLetterArtifactPersisted = persistedExistence.hasCoverLetterArtifactPersisted;
   const hasAnyArtifactPersisted = hasResumeArtifactPersisted || hasCoverLetterArtifactPersisted;
 
+  const isBackendArtifactStale = useCallback((record: unknown) => {
+    const artifactRecord = record as { usableCurrent?: unknown; status?: unknown; inputsHash?: unknown } | null;
+    if (!artifactRecord || artifactRecord.status !== "COMPLETED") return false;
+    if (!artifactRecord.inputsHash) return false;
+    return artifactRecord.usableCurrent === false;
+  }, []);
+
+  const resumePersistedArtifactStale = useMemo(
+    () => isBackendArtifactStale(studioArtifactsPayload?.resume as unknown),
+    [isBackendArtifactStale, studioArtifactsPayload?.resume],
+  );
+  const coverPersistedArtifactStale = useMemo(
+    () => isBackendArtifactStale(studioArtifactsPayload?.coverLetter as unknown),
+    [isBackendArtifactStale, studioArtifactsPayload?.coverLetter],
+  );
+
   // Artifact existence authority: only from /api/studio/artifacts (persisted payload).
   // Keep legacy variable names as aliases so downstream UI branches do not accidentally switch back to UI-state checks.
-  const hasResumeArtifact = hasResumeArtifactPersisted;
-  const hasCoverLetterArtifact = hasCoverLetterArtifactPersisted;
+  // Stale artifacts (hash mismatch after composition ruleset changes) must not be treated as usable existing artifacts.
+  const hasResumeArtifact = hasResumeArtifactPersisted && !resumePersistedArtifactStale;
+  const hasCoverLetterArtifact = hasCoverLetterArtifactPersisted && !coverPersistedArtifactStale;
 
   const artifactAuthorityTrackedRef = useRef<string | null>(null);
   useEffect(() => {
@@ -2084,9 +2101,26 @@ export default function StudioPage() {
     const resumeRecord = payload.resume ?? null;
     const coverRecord = payload.coverLetter ?? null;
 
-    // Strict legacy hydration: when the backend record is completed and includes a responseBody,
-    // hydrate the presenter state directly from that responseBody. Do not infer export readiness here.
-    if (resumeRecord?.status === "COMPLETED" && resumeRecord.responseBody) {
+    const resumeArtifactCurrent =
+      resumeRecord?.status === "COMPLETED" &&
+      Boolean((resumeRecord as any)?.usableCurrent) === true;
+    const coverArtifactCurrent =
+      coverRecord?.status === "COMPLETED" &&
+      Boolean((coverRecord as any)?.usableCurrent) === true;
+
+    const resumeArtifactStale =
+      resumeRecord?.status === "COMPLETED" &&
+      Boolean((resumeRecord as any)?.inputsHash) === true &&
+      (resumeRecord as any)?.usableCurrent === false;
+    const coverArtifactStale =
+      coverRecord?.status === "COMPLETED" &&
+      Boolean((coverRecord as any)?.inputsHash) === true &&
+      (coverRecord as any)?.usableCurrent === false;
+
+    // Strict legacy hydration: only hydrate when the backend record is completed *and current*.
+    // If a completed artifact is stale (hash mismatch after composition ruleset changes), do not
+    // show it as usable output; force regeneration instead.
+    if (resumeArtifactCurrent && resumeRecord?.responseBody) {
       setResumeState((current) => ({
         ...current,
         response: resumeRecord.responseBody,
@@ -2096,8 +2130,18 @@ export default function StudioPage() {
       }));
       setHasGeneratedOnce(true);
       studioArtifactPresentationStateRef.current = "hydrated";
+    } else if (resumeArtifactStale) {
+      setResumeState((current) => ({
+        ...current,
+        response: null,
+        error:
+          current.error ??
+          "Your resume draft is out of date due to recent generator improvements. Please regenerate to refresh it.",
+        tierGateError: null,
+        artifactFailure: null,
+      }));
     }
-    if (coverRecord?.status === "COMPLETED" && coverRecord.responseBody) {
+    if (coverArtifactCurrent && coverRecord?.responseBody) {
       setCoverState((current) => ({
         ...current,
         response: coverRecord.responseBody,
@@ -2107,6 +2151,16 @@ export default function StudioPage() {
       }));
       setHasGeneratedOnce(true);
       studioArtifactPresentationStateRef.current = "hydrated";
+    } else if (coverArtifactStale) {
+      setCoverState((current) => ({
+        ...current,
+        response: null,
+        error:
+          current.error ??
+          "Your cover letter draft is out of date due to recent generator improvements. Please regenerate to refresh it.",
+        tierGateError: null,
+        artifactFailure: null,
+      }));
     }
 
     const resumeResponse = normalizeHydratedArtifactResponse(resumeRecord?.responseBody ?? null);
@@ -2131,7 +2185,7 @@ export default function StudioPage() {
     const resumeFailure = buildFailureFromBackendRecord("resume", resumeRecord);
     const coverFailure = buildFailureFromBackendRecord("cover_letter", coverRecord);
 
-    if (resumeResponseWithResult) {
+    if (resumeResponseWithResult && !resumeArtifactStale) {
       setResumeState((current) => ({
         ...current,
         response:
@@ -2148,7 +2202,7 @@ export default function StudioPage() {
       setResumeState((current) => ({ ...current, artifactFailure: resumeFailure, error: null }));
     }
 
-    if (coverResponseWithResult) {
+    if (coverResponseWithResult && !coverArtifactStale) {
       setCoverState((current) => ({
         ...current,
         response:
@@ -3503,12 +3557,26 @@ export default function StudioPage() {
     }
     return canonicalResumePreviewPayload;
   }, [canonicalResumePreviewPayload, effectiveResumeModel, hasSavedResumeEdits, isResumeEditMode]);
+  const resumeBackendArtifactStale = useMemo(() => {
+    const record = studioArtifactsPayload?.resume as any;
+    if (!record || record.status !== "COMPLETED") return false;
+    if (!record.inputsHash) return false;
+    return record.usableCurrent === false;
+  }, [studioArtifactsPayload?.resume]);
   const hasRenderableResumeContent = useMemo(() => {
     if (resumeHardRenderBlocked.blocked) return false;
+    if (resumeBackendArtifactStale) return false;
     if (resumePresenter.status === "success" && resumeState.response) return true;
     if (resumePreviewPayloadForRender) return true;
     return typeof resumePreviewText === "string" && resumePreviewText.trim().length > 0;
-  }, [resumeHardRenderBlocked.blocked, resumePresenter.status, resumePreviewPayloadForRender, resumePreviewText, resumeState.response]);
+  }, [
+    resumeHardRenderBlocked.blocked,
+    resumeBackendArtifactStale,
+    resumePresenter.status,
+    resumePreviewPayloadForRender,
+    resumePreviewText,
+    resumeState.response,
+  ]);
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
     if (!canonicalResumePreviewPayload) return;
@@ -3522,10 +3590,17 @@ export default function StudioPage() {
     () => formatPreview(artifactContract.normalized.coverLetterResponse) || readArtifactTextFallback(artifactContract.normalized.coverLetterResponse),
     [artifactContract.normalized.coverLetterResponse],
   );
+  const coverBackendArtifactStale = useMemo(() => {
+    const record = studioArtifactsPayload?.coverLetter as any;
+    if (!record || record.status !== "COMPLETED") return false;
+    if (!record.inputsHash) return false;
+    return record.usableCurrent === false;
+  }, [studioArtifactsPayload?.coverLetter]);
   const hasRenderableCoverLetterContent = useMemo(() => {
+    if (coverBackendArtifactStale) return false;
     if (coverLetterParagraphs.length > 0) return true;
     return typeof coverPreviewText === "string" && coverPreviewText.trim().length > 0;
-  }, [coverLetterParagraphs.length, coverPreviewText]);
+  }, [coverBackendArtifactStale, coverLetterParagraphs.length, coverPreviewText]);
 
   const coverPresenter = artifactContract.presenters.coverLetter;
   const hasCoverLetterDraft = hasCoverLetterArtifact;

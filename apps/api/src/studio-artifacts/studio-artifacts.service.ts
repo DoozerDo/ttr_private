@@ -33,6 +33,7 @@ export type StudioArtifactRecord = {
   inputsHash: string | null;
   inputsHashMatches: boolean;
   artifactCurrent: boolean;
+  usableCurrent: boolean;
   retryAllowed: boolean;
   responseBody: Record<string, unknown> | null;
   content: string | null;
@@ -123,6 +124,10 @@ type ArtifactPatch = Partial<Pick<
 >>;
 
 const ARTIFACT_CONTRACT_VERSION = 'studio-artifacts-v1';
+// Bump this when composition rules change in a way that should invalidate previously-generated artifacts
+// (even when baseline/job/assessment inputs are identical). This prevents stale/cached artifacts from
+// persisting after quality or domain-fidelity fixes.
+const COMPOSITION_RULESET_VERSION = '2026-05-22-domain-fidelity-v1';
 
 function safeText(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
@@ -1224,6 +1229,7 @@ export class StudioArtifactsService {
         JSON.stringify({
           artifactType: 'resume',
           contractVersion: ARTIFACT_CONTRACT_VERSION,
+          compositionRulesetVersion: COMPOSITION_RULESET_VERSION,
           baselineVersionHash: input.baselineVersionHash,
           jobFingerprint: input.jobFingerprint,
           assessmentInputsHash: input.assessmentInputsHash,
@@ -1241,6 +1247,7 @@ export class StudioArtifactsService {
         JSON.stringify({
           artifactType: 'cover_letter',
           contractVersion: ARTIFACT_CONTRACT_VERSION,
+          compositionRulesetVersion: COMPOSITION_RULESET_VERSION,
           baselineVersionHash: input.baselineVersionHash,
           jobFingerprint: input.jobFingerprint,
         }),
@@ -1294,12 +1301,31 @@ export class StudioArtifactsService {
     const interpretedEvidenceAudit = extractInterpretedEvidenceAuditFromResponseBody(responseBody);
     const minimalResume = artifact === 'resume' ? detectMinimalResumeArtifact(responseBody) : null;
     const artifactCurrent = inputsHashMatches && !(minimalResume?.minimal ?? false);
+    const usableCurrent =
+      status === StudioArtifactLifecycleStatus.COMPLETED && Boolean(responseBody) && artifactCurrent;
+
+    if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
+      // Low-noise observability for stale artifact reuse decisions.
+      // Safe: no content, no PII; only presence/match signals and artifact kind.
+      const storedPresent = Boolean(inputsHash && inputsHash.trim());
+      const expectedPresent = Boolean(expectedInputsHash && expectedInputsHash.trim());
+      // eslint-disable-next-line no-console
+      console.info('[studio-artifacts][reuse_decision]', {
+        artifact,
+        status,
+        storedInputsHashPresent: storedPresent,
+        expectedInputsHashPresent: expectedPresent,
+        inputsHashMatches,
+        artifactCurrent,
+      });
+    }
 
     return {
       status,
       inputsHash,
       inputsHashMatches,
       artifactCurrent,
+      usableCurrent,
       retryAllowed,
       responseBody,
       content,
