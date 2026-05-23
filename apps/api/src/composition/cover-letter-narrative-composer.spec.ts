@@ -61,4 +61,23 @@ describe('CoverLetterNarrativeComposer', () => {
     expect(impactSentences.length).toBe(result.bodyParagraphs.length);
     expect(new Set(impactSentences).size).toBe(impactSentences.length);
   });
+
+  it('does not introduce billing-domain narrative when evidence snippets do not support it', () => {
+    const composer = new CoverLetterNarrativeComposer();
+    const result = composer.compose({
+      thesis: 'I lead billing support operations focused on invoice accuracy, entitlement mismatches, and reconciliation workflows.',
+      evidenceSnippets: [
+        { id: 'e1', text: 'Coordinated incident response workflows across teams to keep service stable.' },
+        { id: 'e2', text: 'Owned escalation handoffs and improved queue health reviews with clear owners.' },
+        { id: 'e3', text: 'Standardized runbooks and escalation paths to reduce execution friction.' },
+        { id: 'e4', text: 'Partnered with engineering leaders to align priorities and timelines.' },
+      ],
+      jobCompany: 'ExampleCo',
+      jobTitle: 'Director of Support Operations',
+      maxBodyParagraphs: 3,
+    });
+
+    const text = [result.opening, ...result.bodyParagraphs, result.closing].join(' ');
+    expect(text.toLowerCase()).not.toMatch(/\b(billing|invoice|entitlement|reconciliation|metering|credit|dispute|revenue)\b/);
+  });
 });

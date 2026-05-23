@@ -82,6 +82,42 @@ function chooseVariedOpenings(paragraphs: string[]): string[] {
   });
 }
 
+const BILLING_DOMAIN_TERMS = [
+  'billing',
+  'invoice',
+  'invoicing',
+  'reconciliation',
+  'reconcile',
+  'entitlement',
+  'metering',
+  'usage metering',
+  'credit',
+  'dispute',
+  'revenue',
+];
+
+function containsBillingDomain(text: string): boolean {
+  const lowered = trimToText(text).toLowerCase();
+  if (!lowered) return false;
+  return BILLING_DOMAIN_TERMS.some((term) => lowered.includes(term));
+}
+
+function stripBillingDomainSentences(text: string): string {
+  const sentences = trimToText(text)
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => trimToText(s))
+    .filter(Boolean);
+  return sentences.filter((s) => !containsBillingDomain(s)).join(' ').trim();
+}
+
+function sanitizeThesisAgainstEvidence(thesis: string, evidenceCorpus: string): string {
+  const normalizedThesis = trimToText(thesis);
+  if (!normalizedThesis) return '';
+  if (!containsBillingDomain(normalizedThesis)) return normalizedThesis;
+  if (containsBillingDomain(evidenceCorpus)) return normalizedThesis;
+  return stripBillingDomainSentences(normalizedThesis);
+}
+
 export class CoverLetterNarrativeComposer {
   private detector = new GenericLanguageDetector();
 
@@ -111,7 +147,8 @@ export class CoverLetterNarrativeComposer {
       narrativeStrategy: string;
     };
   } {
-    const thesis = trimToText(input.thesis ?? '');
+    const evidenceCorpus = input.evidenceSnippets.map((s) => trimToText(s.text)).filter(Boolean).join(' ');
+    const thesis = sanitizeThesisAgainstEvidence(trimToText(input.thesis ?? ''), evidenceCorpus);
     const company = trimToText(input.jobCompany ?? '');
     const title = trimToText(input.jobTitle ?? '');
     const renderedEvidenceSnippetIds = input.evidenceSnippets.map((s) => s.id);
@@ -156,13 +193,19 @@ export class CoverLetterNarrativeComposer {
       return [line1, line2].filter(Boolean).join(' ').trim();
     })();
 
-    const fullText = [opening, ...bodyParagraphs, closing].filter(Boolean).join('\n\n');
+    // Domain-fidelity guard: avoid introducing billing-domain narrative unless supported by evidence snippets.
+    const corpusHasBilling = containsBillingDomain(evidenceCorpus);
+    const safeOpening = corpusHasBilling ? opening : stripBillingDomainSentences(opening);
+    const safeBody = corpusHasBilling ? bodyParagraphs : bodyParagraphs.map(stripBillingDomainSentences).filter(Boolean);
+    const safeClosing = corpusHasBilling ? closing : stripBillingDomainSentences(closing);
+
+    const fullText = [safeOpening, ...safeBody, safeClosing].filter(Boolean).join('\n\n');
     const flags = this.detector.detect(fullText);
 
     return {
-      opening,
-      bodyParagraphs,
-      closing,
+      opening: safeOpening,
+      bodyParagraphs: safeBody,
+      closing: safeClosing,
       diagnostics: {
         genericLanguageFlags: flags,
         renderedEvidenceSnippetIds,

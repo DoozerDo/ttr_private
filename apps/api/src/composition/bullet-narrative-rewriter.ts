@@ -14,6 +14,35 @@ function hasDigits(text: string): boolean {
   return /\d/.test(text);
 }
 
+const BILLING_DOMAIN_TERMS = [
+  'billing',
+  'invoice',
+  'invoicing',
+  'reconciliation',
+  'reconcile',
+  'entitlement',
+  'metering',
+  'usage metering',
+  'credit',
+  'dispute',
+  'revenue',
+];
+
+function containsBillingDomain(text: string): boolean {
+  const lowered = trimToText(text).toLowerCase();
+  if (!lowered) return false;
+  return BILLING_DOMAIN_TERMS.some((term) => lowered.includes(term));
+}
+
+function stripBillingDomainClauses(text: string): string {
+  // Bullet-friendly filter: drop sentences that contain billing-domain terms.
+  const sentences = trimToText(text)
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => trimToText(s))
+    .filter(Boolean);
+  return sentences.filter((s) => !containsBillingDomain(s)).join(' ').trim();
+}
+
 function wordCount(text: string): number {
   return trimToText(text).split(' ').filter(Boolean).length;
 }
@@ -102,6 +131,7 @@ export class BulletNarrativeRewriter {
     if (!raw) return { rewritten: '', changed: false, genericLanguageFlags: [] };
 
     const originalHasDigits = hasDigits(raw);
+    const originalHasBillingDomain = containsBillingDomain(raw);
     let text = softenBuzzwords(raw);
 
     // Reduce inventory-style phrasing without changing the underlying claim.
@@ -146,6 +176,11 @@ export class BulletNarrativeRewriter {
     if (!originalHasDigits) {
       text = text.replace(/\b\d+(?:\.\d+)?%?\b/g, '');
       text = text.replace(/\s{2,}/g, ' ').trim();
+    }
+
+    // Domain-fidelity guard: do not introduce billing-domain narrative unless it was present in baseline bullet text.
+    if (!originalHasBillingDomain && containsBillingDomain(text)) {
+      text = stripBillingDomainClauses(text);
     }
 
     const maxWords = 28;

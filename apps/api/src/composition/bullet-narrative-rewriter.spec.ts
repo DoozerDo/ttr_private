@@ -25,4 +25,11 @@ describe('BulletNarrativeRewriter', () => {
     // No invented numbers.
     expect(/\d/.test(result.rewritten)).toBe(false);
   });
+
+  it('does not introduce billing-domain terms when the original bullet does not contain them', () => {
+    const rewriter = new BulletNarrativeRewriter();
+    const input = 'Managed escalations and incident communications across teams';
+    const result = rewriter.rewrite({ bullet: input, roleTitle: 'Support Lead', company: 'Acme' });
+    expect(result.rewritten.toLowerCase()).not.toMatch(/\b(billing|invoice|entitlement|reconciliation|metering|credit|dispute|revenue)\b/);
+  });
 });
