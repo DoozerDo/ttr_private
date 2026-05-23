@@ -1084,7 +1084,14 @@ export class ResumeService {
       ? [...experienceBullets].sort((a, b) => countKeywordOverlap(b, keywordSet) - countKeywordOverlap(a, keywordSet))
       : experienceBullets;
 
-    const topSignals = rankedExperienceBullets.slice(0, 2);
+    // Domain-fidelity guard (upstream): do not let isolated billing-domain evidence become the governing
+    // "Targeting ..." summary narrative. Billing/domain specialization must be supported by repeated baseline evidence.
+    const billingSignals = /\b(billing|invoice|entitlement|reconciliation|credit|dispute|metering|revenue)\b/i;
+    const billingEvidenceCount = experienceBullets.reduce((sum, bullet) => sum + (billingSignals.test(bullet) ? 1 : 0), 0);
+    const domainFilteredBullets =
+      billingEvidenceCount >= 2 ? rankedExperienceBullets : rankedExperienceBullets.filter((b) => !billingSignals.test(b));
+
+    const topSignals = domainFilteredBullets.slice(0, 2);
     const positioningPrefix = payload.jobTitle ? `Targeting ${payload.jobTitle}. ` : '';
     const dimensionPhrase = strongestDimensions.length
       ? `Strengths: ${strongestDimensions.map((value) => value.replace(/([A-Z])/g, ' $1').trim()).join(', ')}. `

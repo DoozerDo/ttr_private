@@ -3366,4 +3366,134 @@ describe('ResumeService contract', () => {
       assessment.overallScore = originalScore;
     }
   });
+
+  it('does not collapse customer/support operations into a billing-operations archetype when billing evidence is isolated', () => {
+    const apply = (ResumeService as any).prototype.applyJobAlignedPresentation as (payload: any) => any[];
+
+    const sections = [
+      {
+        id: 'exp-1',
+        type: 'EXPERIENCE',
+        title: 'Experience',
+        order: 1,
+        includePolicy: 'ALWAYS',
+        source: 'baseline',
+        content: [
+          'Example Co | Support Operations Lead | 2022 - Present',
+          '- Led incident response and escalations across teams.',
+          '- Built dashboards for queue health and CSAT reporting.',
+          '- Helped resolve an invoice dispute once by routing it to the right owner.',
+          '- Standardized playbooks and improved cross-functional handoffs.',
+        ].join('\n'),
+        bullets: [
+          { id: 'b1', text: 'Led incident response and escalations across teams.', source: { baselineSectionId: 'exp-1', bulletIndex: 0 } },
+          { id: 'b2', text: 'Built dashboards for queue health and CSAT reporting.', source: { baselineSectionId: 'exp-1', bulletIndex: 1 } },
+          { id: 'b3', text: 'Helped resolve an invoice dispute once by routing it to the right owner.', source: { baselineSectionId: 'exp-1', bulletIndex: 2 } },
+          { id: 'b4', text: 'Standardized playbooks and improved cross-functional handoffs.', source: { baselineSectionId: 'exp-1', bulletIndex: 3 } },
+        ],
+      },
+    ];
+
+    const next = apply.call({}, {
+      sections,
+      jobText: 'Billing Operations Manager role owning billing KPI reporting, invoice accuracy, and dispute handling.',
+      jobTitle: 'Billing Operations Manager',
+      dimensionScores: { support_operations_and_process_rigor: 0.9, domain_and_business_context: 0.8 } as any,
+    });
+
+    const summary = next.find((s: any) => String(s.type).toUpperCase() === 'SUMMARY');
+    expect(summary).toBeTruthy();
+    const summaryText = String((summary as any)?.content ?? '');
+    expect(summaryText.toLowerCase()).toContain('targeting billing operations manager');
+    const afterTargeting = summaryText.toLowerCase().split(/strengths:/i)[1] ?? summaryText.toLowerCase();
+    expect(afterTargeting).not.toMatch(/\b(invoice|entitlement|reconciliation|credit|dispute|metering|revenue)\b/);
+  });
+
+  it('does not emit a billing-operations narrative in the generated resume when billing evidence is isolated in the baseline', async () => {
+    const originalJob = { ...job };
+    const originalSections = baseline.sections;
+
+    try {
+      (job as any).title = 'Customer Operations Manager';
+      (job as any).rawDescription = [
+        'Customer Operations Manager role focused on billing operations, invoice accuracy, entitlement mismatches, dispute handling, and reconciliation reporting.',
+        'Own billing KPI reporting and billing reliability across the lifecycle.',
+      ].join('\n');
+
+      const padding =
+        'Verified professional experience in customer support operations, incident management, and cross functional collaboration. '.repeat(
+          80,
+        );
+
+      baseline.sections = [
+        {
+          id: 'summary-ops',
+          baselineId: baseline.id,
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          content: ['Support operations leader focused on reliability, process improvement, and stakeholder alignment.', padding].join(
+            '\n',
+          ),
+        } as any,
+        {
+          id: 'experience-ops',
+          baselineId: baseline.id,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 1,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          content: [
+            'Example Co | Support Operations Lead | 2022 - Present',
+            '- Led incident response and escalations across teams.',
+            '- Built dashboards for queue health and CSAT reporting.',
+            '- Standardized playbooks and improved cross-functional handoffs.',
+            '- Helped route an invoice dispute once to the right owner.',
+            padding,
+          ].join('\n'),
+        } as any,
+        {
+          id: 'skills-ops',
+          baselineId: baseline.id,
+          sectionType: BaselineSectionType.SKILLS,
+          title: 'Skills',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 2,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          content: 'Incident management, analytics dashboards, stakeholder communication',
+        } as any,
+      ];
+
+      const { service } = buildService();
+      const result = await service.generateResume('user-1', {
+        ...baseRequest,
+        oneTap: true,
+        forceRegenerate: true,
+      } as any);
+
+      expect(result.ok).toBe(true);
+      const resumeContent = String((result as any).content ?? '').toLowerCase();
+
+      // The job can be billing-heavy, but the generated resume must not invent a billing-ops specialization
+      // beyond what is actually supported by repeated baseline evidence.
+      expect(resumeContent).not.toMatch(/\bbilling support operations\b/);
+      expect(resumeContent).not.toMatch(/\bbilling operations\b/);
+      expect(resumeContent).not.toMatch(/\binvoice accuracy\b/);
+      expect(resumeContent).not.toMatch(/\bentitlement\b/);
+      expect(resumeContent).not.toMatch(/\breconciliation\b/);
+      expect(resumeContent).not.toMatch(/\bmetering\b/);
+      expect(resumeContent).not.toMatch(/\brevenue\b/);
+      expect(resumeContent).not.toMatch(/\bbilling kpi\b/);
+      expect(resumeContent).not.toMatch(/\bbilling reliability\b/);
+    } finally {
+      Object.assign(job as any, originalJob);
+      baseline.sections = originalSections;
+    }
+  });
 });
