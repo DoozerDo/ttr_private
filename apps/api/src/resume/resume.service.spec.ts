@@ -3487,6 +3487,10 @@ describe('ResumeService contract', () => {
       const supporting = Array.isArray(identity?.supportingDomains) ? identity.supportingDomains.map((d: any) => String(d ?? '')) : [];
       expect(supporting).toContain('saas_operations');
 
+      const topCluster = String((result as any)?.preview?.resume?.__compositionDiagnostics?.topRankedNarrativeCluster ?? '');
+      expect(topCluster.toLowerCase()).toMatch(/\b(support|customer|incident|escalation|process|workflow|cross-functional|dashboards)\b/);
+      expect(topCluster.toLowerCase()).not.toMatch(/\b(billing|invoice|reconciliation|revops|revenue|finance|accounts payable|accounts receivable)\b/);
+
       const resumeContent = String((result as any).content ?? '').toLowerCase();
 
       // The job can be billing-heavy, but the generated resume must not invent a billing-ops specialization

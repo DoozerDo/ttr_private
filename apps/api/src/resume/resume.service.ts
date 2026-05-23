@@ -2751,6 +2751,7 @@ export class ResumeService {
         professionalIdentity: positioning.professionalIdentity ?? null,
         targetNarrative: positioning.targetNarrative ?? null,
         structuredBaselineForIdentity: structuredBaselineForAuthorityGate as any,
+        careerIdentity: careerIdentitySnapshot,
       }) as any;
 
       // Summary strategy: use the positioning thesis as the summary seed when the extracted summary is weak.
@@ -3413,6 +3414,7 @@ export class ResumeService {
             professionalIdentity: positioning.professionalIdentity ?? null,
             targetNarrative: positioning.targetNarrative ?? null,
             structuredBaselineForIdentity: structuredBaselineForIdentity as any,
+            careerIdentity: idempotencyCareerIdentity,
           }) as any;
           const authoritativePreview = sanitizeResumePreviewForStudio(authoritative);
           const authoritativeContent = trimIncompleteTrailingFragments(buildResumePlainText(authoritative as any));

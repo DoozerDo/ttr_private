@@ -1,6 +1,7 @@
 import type { NormalizedResumeDocument } from '../documents/normalized-document.models';
 import type { StructuredBaseline } from '../baseline/structuredBaselineExtractor';
 import type { AuthoritativeRenderPlan } from '../positioning/authoritative-render-plan';
+import type { CareerIdentitySnapshot } from '../career-identity/career-identity.models';
 import { NarrativeCompositionEngine } from '../composition/narrative-composition-engine';
 import { createHash } from 'crypto';
 
@@ -330,6 +331,7 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
   professionalIdentity?: string | null;
   targetNarrative?: string | null;
   structuredBaselineForIdentity?: StructuredBaseline | null;
+  careerIdentity?: CareerIdentitySnapshot | null;
 }): NormalizedResumeDocument {
   const resumeV2ForAuthority = coerceResumeV2ExperienceFromStructuredBaseline({
     resumeV2: input.resumeV2,
@@ -407,6 +409,7 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
   const composition = new NarrativeCompositionEngine().composeResume({
     renderPlan: input.renderPlan ?? null,
     summaryFallback: positioningSummary || trimToText((resumeV2ForAuthority as any)?.summary ?? ''),
+    careerIdentity: input.careerIdentity ?? null,
     experience: (finalExperience as any).map((e: any) => ({
       company: trimToText(e.company),
       roleTitle: trimToText(e.roleTitle),

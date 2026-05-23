@@ -6,6 +6,7 @@ export type RoleNarrativeShapeInput = {
   dateRange?: string;
   bullets: Array<string | { text: string; sourceRoleKey: string; id?: string }>;
   evidencePriorities?: string[] | null;
+  prohibitedDomainSignals?: RegExp[] | null;
 };
 
 export class RoleNarrativeShaper {
@@ -41,6 +42,7 @@ export class RoleNarrativeShaper {
     roleTitle: string;
     company: string;
     positioningThemes?: string[] | null;
+    prohibitedDomainSignals?: RegExp[] | null;
   }): number {
     const text = input.bullet.toLowerCase();
     if (!text.trim()) return -1000;
@@ -65,7 +67,10 @@ export class RoleNarrativeShaper {
     const inventoryPenalty = !roleLooksTechnical && commaCount >= 3 ? 2 : 0;
     const servicesIncludePenalty = !roleLooksTechnical && /\b(including|services include)\b/.test(text) ? 1 : 0;
 
-    return themeHits * 2 + outcomeSignals + ownershipSignals + hasDigits - inventoryPenalty - servicesIncludePenalty;
+    const prohibitedPenalty =
+      (input.prohibitedDomainSignals ?? []).some((re) => re.test(text)) ? 25 : 0;
+
+    return themeHits * 2 + outcomeSignals + ownershipSignals + hasDigits - inventoryPenalty - servicesIncludePenalty - prohibitedPenalty;
   }
 
   shapeRole(input: RoleNarrativeShapeInput): {
@@ -110,6 +115,7 @@ export class RoleNarrativeShaper {
             roleTitle: input.roleTitle,
             company: input.company,
             positioningThemes: input.evidencePriorities,
+            prohibitedDomainSignals: input.prohibitedDomainSignals,
           }),
         };
       })

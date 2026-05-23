@@ -1,4 +1,5 @@
 import type { AuthoritativeRenderPlan } from '../positioning/authoritative-render-plan';
+import type { CareerIdentitySnapshot } from '../career-identity/career-identity.models';
 import { ExecutiveSummaryComposer } from './executive-summary-composer';
 import { RoleNarrativeShaper } from './role-narrative-shaper';
 import { NarrativeQualityEvaluator } from './narrative-quality-evaluator';
@@ -6,6 +7,7 @@ import { NarrativeQualityEvaluator } from './narrative-quality-evaluator';
 export type ResumeCompositionInput = {
   renderPlan: AuthoritativeRenderPlan | null;
   summaryFallback: string;
+  careerIdentity?: CareerIdentitySnapshot | null;
   experience: Array<{
     company: string;
     roleTitle: string;
@@ -76,6 +78,7 @@ export class NarrativeCompositionEngine {
       targetAngle: string;
       employerScopedRankingEnabled: boolean;
       crossEmployerRankingBlocks: number;
+      topRankedNarrativeCluster: string | null;
     };
   } {
     const renderPlan = input.renderPlan;
@@ -83,7 +86,47 @@ export class NarrativeCompositionEngine {
     const evidencePriorities = (Array.isArray(evidencePrioritiesRaw) ? evidencePrioritiesRaw : [])
       .map(normalizeRankingCandidate)
       .filter(Boolean) as RankingCandidate[];
-    const evidencePriorityThemes = evidencePriorities.map((c) => c.theme);
+
+    const identity = input.careerIdentity ?? null;
+    const prohibitedSignals = (() => {
+      const prohibited = new Set((identity?.prohibitedDriftDomains ?? []).map((d) => String(d ?? '').trim()).filter(Boolean));
+      const out: RegExp[] = [];
+      if (prohibited.has('billing_operations')) out.push(/\b(billing|invoice|invoicing|reconciliation|credit|dispute|metering)\b/i);
+      if (prohibited.has('revenue_operations')) out.push(/\b(revops|revenue operations|pipeline|forecast|quota)\b/i);
+      if (prohibited.has('finance_operations')) out.push(/\b(accounts payable|accounts receivable|close|general ledger|sox)\b/i);
+      return out;
+    })();
+
+    const identityAlignedSignals = (() => {
+      const dominant = String(identity?.dominantOperationalDomain ?? '');
+      if (!dominant) return [] as RegExp[];
+      if (dominant === 'support_operations' || dominant === 'customer_operations' || dominant === 'saas_operations' || dominant === 'technical_support_leadership') {
+        return [
+          /\b(customer operations|customer experience|customer success|support operations|service operations|cx)\b/i,
+          /\b(incident|escalation|triage|sla|queue|rca|root cause)\b/i,
+          /\b(process|playbook|workflow|operating rhythm|governance)\b/i,
+          /\b(cross[-\s]?functional|stakeholder|handoff|enablement)\b/i,
+        ];
+      }
+      return [] as RegExp[];
+    })();
+
+    const prohibitTheme = (theme: string) => prohibitedSignals.some((re) => re.test(theme));
+    const alignTheme = (theme: string) => identityAlignedSignals.some((re) => re.test(theme));
+
+    const evidencePrioritiesGoverned = prohibitedSignals.length
+      ? [...evidencePriorities].sort((a, b) => {
+          const aProhibited = prohibitTheme(a.theme);
+          const bProhibited = prohibitTheme(b.theme);
+          if (aProhibited !== bProhibited) return aProhibited ? 1 : -1;
+          const aAligned = alignTheme(a.theme);
+          const bAligned = alignTheme(b.theme);
+          if (aAligned !== bAligned) return aAligned ? -1 : 1;
+          return 0;
+        })
+      : evidencePriorities;
+
+    const evidencePriorityThemes = evidencePrioritiesGoverned.map((c) => c.theme);
     const targetAngle = this.determineTargetAngle(input);
     let rewrittenBulletCount = 0;
     let crossEmployerRankingBlocks = 0;
@@ -99,7 +142,7 @@ export class NarrativeCompositionEngine {
         : '';
       const targetRoleKey = `${String(role.company ?? '')}::${String(role.roleTitle ?? '')}`;
       const filteredCandidates: RankingCandidate[] = [];
-      for (const candidate of evidencePriorities) {
+      for (const candidate of evidencePrioritiesGoverned) {
         if (!candidate?.theme) continue;
         if (candidate.sourceEmployerRoleKey && candidate.sourceEmployerRoleKey !== targetRoleKey) {
           crossEmployerRankingBlocks += 1;
@@ -129,6 +172,7 @@ export class NarrativeCompositionEngine {
         dateRange: role.dateRange,
         bullets: role.bullets,
         evidencePriorities: roleScopedPriorities.length ? roleScopedPriorities : filteredCandidates.map((c) => c.theme),
+        prohibitedDomainSignals: prohibitedSignals.length ? prohibitedSignals : null,
       });
       rewrittenBulletCount += shaped.rewrittenBulletCount;
       if (shaped.genericLanguageFlags.length) genericLanguageFlags.push(...shaped.genericLanguageFlags);
@@ -167,6 +211,7 @@ export class NarrativeCompositionEngine {
         targetAngle,
         employerScopedRankingEnabled: true,
         crossEmployerRankingBlocks,
+        topRankedNarrativeCluster: evidencePriorityThemes.length ? evidencePriorityThemes[0] ?? null : null,
       },
     };
   }
