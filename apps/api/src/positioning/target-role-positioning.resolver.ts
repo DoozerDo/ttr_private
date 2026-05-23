@@ -1,8 +1,10 @@
 import type { NormalizedResumeDocument } from '../documents/normalized-document.models';
+import type { CareerIdentitySnapshot } from '../career-identity/career-identity.models';
 
 export type TargetRolePositioningInput = {
   job: { title: string | null; company: string | null; description: string | null };
   resumeV2: NormalizedResumeDocument;
+  careerIdentity?: CareerIdentitySnapshot | null;
 };
 
 export type TargetRolePositioningOutput = {
@@ -59,10 +61,16 @@ function isSupportOpsTarget(jobText: string): boolean {
   );
 }
 
+function identityIsSupportOps(identity: CareerIdentitySnapshot | null): boolean {
+  if (!identity) return false;
+  const d = identity.dominantOperationalDomain;
+  return d === 'support_operations' || d === 'customer_operations' || d === 'saas_operations' || d === 'technical_support_leadership';
+}
+
 export class TargetRolePositioningResolver {
   resolve(input: TargetRolePositioningInput): TargetRolePositioningOutput {
     const jobText = [input.job.title ?? '', input.job.company ?? '', input.job.description ?? ''].join(' ').trim();
-    const supportOpsTarget = isSupportOpsTarget(jobText);
+    const supportOpsTarget = isSupportOpsTarget(jobText) || identityIsSupportOps(input.careerIdentity ?? null);
     const jobTokens = new Set(tokenize(jobText));
 
     const suppressionReasons: Record<string, string[]> = {};

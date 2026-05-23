@@ -1,4 +1,5 @@
 import type { NormalizedResumeDocument } from '../documents/normalized-document.models';
+import type { CareerDomain, CareerIdentitySnapshot } from '../career-identity/career-identity.models';
 
 export type PositioningRoleFamily =
   | 'support_operations'
@@ -76,6 +77,60 @@ function detectRoleFamily(jobText: string): PositioningRoleFamily {
   return 'unknown';
 }
 
+function toRoleFamily(domain: CareerDomain): PositioningRoleFamily | null {
+  switch (domain) {
+    case 'support_operations':
+      return 'support_operations';
+    case 'customer_operations':
+      return 'customer_operations';
+    case 'saas_operations':
+      return 'saas_operations';
+    case 'technical_support_leadership':
+      return 'technical_support_leadership';
+    case 'general_operations':
+      return 'general_operations';
+    case 'engineering':
+      return 'engineering_heavy';
+    case 'infrastructure':
+      return 'infrastructure_heavy';
+    default:
+      return null;
+  }
+}
+
+function resolveRoleFamilyWithinIdentityBoundary(input: {
+  jobRoleFamily: PositioningRoleFamily;
+  careerIdentity: CareerIdentitySnapshot | null;
+}): PositioningRoleFamily {
+  const jobFamily = input.jobRoleFamily;
+  const identity = input.careerIdentity;
+  if (!identity || identity.dominantOperationalDomain === 'unknown') return jobFamily;
+
+  const allowed = new Set<PositioningRoleFamily>();
+  const primary = toRoleFamily(identity.dominantOperationalDomain);
+  if (primary) allowed.add(primary);
+  for (const d of identity.supportingDomains ?? []) {
+    const family = toRoleFamily(d);
+    if (family) allowed.add(family);
+  }
+
+  if (allowed.size === 0) return jobFamily;
+  if (allowed.has(jobFamily)) return jobFamily;
+  if (jobFamily === 'unknown') return primary ?? Array.from(allowed)[0] ?? jobFamily;
+  return primary ?? Array.from(allowed)[0] ?? jobFamily;
+}
+
+function hasProhibitedDriftSignal(text: string, identity: CareerIdentitySnapshot | null): boolean {
+  if (!identity) return false;
+  const t = trimToText(text).toLowerCase();
+  const prohibited = new Set(identity.prohibitedDriftDomains ?? []);
+  if (!prohibited.size) return false;
+  if (prohibited.has('billing_operations') && /\b(billing|invoice|invoicing|reconciliation|credit|dispute|metering)\b/i.test(t)) return true;
+  if (prohibited.has('revenue_operations') && /\b(revops|revenue operations|pipeline|forecast|quota)\b/i.test(t)) return true;
+  if (prohibited.has('finance_operations') && /\b(accounts payable|accounts receivable|close|general ledger|sox)\b/i.test(t)) return true;
+  return false;
+}
+
 function inferThemes(input: { jobText: string; experienceText: string }): string[] {
   const text = `${input.jobText} ${input.experienceText}`.toLowerCase();
   const candidates: Array<[string, RegExp]> = [
@@ -123,9 +178,13 @@ export class PositioningPlanService {
   buildPlan(input: {
     job: { title: string | null; company: string | null; description: string | null };
     resumeV2: NormalizedResumeDocument;
+    careerIdentity?: CareerIdentitySnapshot | null;
   }): PositioningPlan {
     const jobText = [input.job.title ?? '', input.job.company ?? '', input.job.description ?? ''].join(' ').trim();
-    const roleFamily = detectRoleFamily(jobText);
+    const roleFamily = resolveRoleFamilyWithinIdentityBoundary({
+      jobRoleFamily: detectRoleFamily(jobText),
+      careerIdentity: input.careerIdentity ?? null,
+    });
 
     const experience = Array.isArray((input.resumeV2 as any)?.experience) ? ((input.resumeV2 as any).experience as any[]) : [];
     const experienceText = experience
@@ -152,7 +211,8 @@ export class PositioningPlanService {
           ? (/\b(escalation|triage|incident|sla|playbook|process|stakeholder|cross[-\s]?functional)\b/i.test(text) ? 6 : 0)
           : 0;
       const seniorityBoost = /\b(director|head of|manager|lead)\b/i.test(headerText) ? 2 : 0;
-      return overlap + infraBias + opsBias + seniorityBoost - bulletPenalty - fragmentPenalty;
+      const identityDriftPenalty = hasProhibitedDriftSignal(text, input.careerIdentity ?? null) ? 12 : 0;
+      return overlap + infraBias + opsBias + seniorityBoost - bulletPenalty - fragmentPenalty - identityDriftPenalty;
     };
 
     const scored = experience.map((entry, index) => ({ id: `resume_v2_exp_${index}`, entry, score: scoreRole(entry) }));

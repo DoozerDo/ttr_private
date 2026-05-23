@@ -3454,6 +3454,7 @@ describe('ResumeService contract', () => {
             '- Built dashboards for queue health and CSAT reporting.',
             '- Standardized playbooks and improved cross-functional handoffs.',
             '- Helped route an invoice dispute once to the right owner.',
+            '- Supported SaaS subscription customers by improving renewal-risk triage and entitlement handoffs.',
             padding,
           ].join('\n'),
         } as any,
@@ -3478,6 +3479,14 @@ describe('ResumeService contract', () => {
       } as any);
 
       expect(result.ok).toBe(true);
+
+      const identity = (result as any)?.internal?.careerIdentity ?? null;
+      expect(identity).toBeTruthy();
+      expect(String(identity?.dominantOperationalDomain ?? '')).toMatch(/^(customer_operations|support_operations|saas_operations)$/);
+      expect(String(identity?.dominantOperationalDomain ?? '')).not.toMatch(/^(billing_operations|revenue_operations|finance_operations)$/);
+      const supporting = Array.isArray(identity?.supportingDomains) ? identity.supportingDomains.map((d: any) => String(d ?? '')) : [];
+      expect(supporting).toContain('saas_operations');
+
       const resumeContent = String((result as any).content ?? '').toLowerCase();
 
       // The job can be billing-heavy, but the generated resume must not invent a billing-ops specialization
@@ -3485,7 +3494,6 @@ describe('ResumeService contract', () => {
       expect(resumeContent).not.toMatch(/\bbilling support operations\b/);
       expect(resumeContent).not.toMatch(/\bbilling operations\b/);
       expect(resumeContent).not.toMatch(/\binvoice accuracy\b/);
-      expect(resumeContent).not.toMatch(/\bentitlement\b/);
       expect(resumeContent).not.toMatch(/\breconciliation\b/);
       expect(resumeContent).not.toMatch(/\bmetering\b/);
       expect(resumeContent).not.toMatch(/\brevenue\b/);

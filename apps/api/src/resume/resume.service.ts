@@ -109,6 +109,8 @@ import { sanitizeResumePreviewForStudio } from './resumePreviewSanitizer';
 import { TargetRolePositioningResolver } from '../positioning/target-role-positioning.resolver';
 import { PositioningPlanService } from '../positioning/positioning-plan.service';
 import { buildAuthoritativeRenderPlan } from '../positioning/authoritative-render-plan';
+import type { CareerIdentitySnapshot } from '../career-identity/career-identity.models';
+import { deriveCareerIdentityFromStructuredBaseline } from '../career-identity/career-identity.derive';
 import { buildAuthoritativeResumeDraftFromResumeV2 } from './resumeTemplateAssembler';
 import { validateRealResumeDocument } from '../artifacts/realDocumentValidator';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
@@ -1026,6 +1028,7 @@ export class ResumeService {
     jobText: string | null;
     dimensionScores?: FitAssessment['dimensionScores'] | null;
     jobTitle?: string | null;
+    careerIdentity?: CareerIdentitySnapshot | null;
   }): ResumeDraftSection[] {
     const keywordList = ResumeDraftBullets.extractJobKeywords(payload.jobText, 28);
     const keywordSet = keywordList.length ? new Set(keywordList.map((kw) => kw.toLowerCase())) : new Set<string>();
@@ -1084,12 +1087,32 @@ export class ResumeService {
       ? [...experienceBullets].sort((a, b) => countKeywordOverlap(b, keywordSet) - countKeywordOverlap(a, keywordSet))
       : experienceBullets;
 
-    // Domain-fidelity guard (upstream): do not let isolated billing-domain evidence become the governing
-    // "Targeting ..." summary narrative. Billing/domain specialization must be supported by repeated baseline evidence.
-    const billingSignals = /\b(billing|invoice|entitlement|reconciliation|credit|dispute|metering|revenue)\b/i;
-    const billingEvidenceCount = experienceBullets.reduce((sum, bullet) => sum + (billingSignals.test(bullet) ? 1 : 0), 0);
-    const domainFilteredBullets =
-      billingEvidenceCount >= 2 ? rankedExperienceBullets : rankedExperienceBullets.filter((b) => !billingSignals.test(b));
+    // Canonical identity boundary (upstream): tailoring can shift emphasis but must not pivot the narrative into
+    // prohibited drift domains when that domain is only supported by isolated baseline evidence.
+    const identity = payload.careerIdentity ?? null;
+    const prohibited = new Set((identity?.prohibitedDriftDomains ?? []).map((d) => String(d ?? '').trim()).filter(Boolean));
+    const prohibitedSignals: Array<[string, RegExp]> = [
+      ['billing_operations', /\b(billing|invoice|entitlement|reconciliation|credit|dispute|metering)\b/i],
+      ['revenue_operations', /\b(revops|revenue operations|pipeline|forecast|quota)\b/i],
+      ['finance_operations', /\b(accounts payable|accounts receivable|close|general ledger|sox)\b/i],
+    ];
+    const prohibitedRegexes = prohibitedSignals.filter(([k]) => prohibited.has(k)).map(([, re]) => re);
+    const prohibitedEvidenceCount = prohibitedRegexes.length
+      ? experienceBullets.reduce(
+          (sum, bullet) => sum + (prohibitedRegexes.some((re) => re.test(bullet)) ? 1 : 0),
+          0,
+        )
+      : 0;
+    const billingSignalsLegacy = /\b(billing|invoice|entitlement|reconciliation|credit|dispute|metering|revenue)\b/i;
+    const legacyBillingEvidenceCount = experienceBullets.reduce((sum, bullet) => sum + (billingSignalsLegacy.test(bullet) ? 1 : 0), 0);
+
+    const domainFilteredBullets = prohibitedRegexes.length
+      ? prohibitedEvidenceCount < 2
+        ? rankedExperienceBullets.filter((b) => !prohibitedRegexes.some((re) => re.test(b)))
+        : rankedExperienceBullets
+      : legacyBillingEvidenceCount >= 2
+        ? rankedExperienceBullets
+        : rankedExperienceBullets.filter((b) => !billingSignalsLegacy.test(b));
 
     const topSignals = domainFilteredBullets.slice(0, 2);
     const positioningPrefix = payload.jobTitle ? `Targeting ${payload.jobTitle}. ` : '';
@@ -2022,6 +2045,9 @@ export class ResumeService {
       this.promoteExperienceLikeSections(allowedSections);
 
     const structuredBaselineForAuthorityGate = extractStructuredBaselineFromSections(resumeInputSections as any);
+    const careerIdentitySnapshot: CareerIdentitySnapshot = deriveCareerIdentityFromStructuredBaseline(
+      structuredBaselineForAuthorityGate as any,
+    );
     const templateReadinessForBaseline = evaluateBaselineTemplateReadiness(
       structuredBaselineForAuthorityGate as any,
     );
@@ -2306,6 +2332,7 @@ export class ResumeService {
         jobText: job?.rawDescription ?? null,
         dimensionScores: effectiveAssessment?.dimensionScores ?? null,
         jobTitle: job?.title ?? null,
+        careerIdentity: careerIdentitySnapshot,
       });
       const hasExperienceBullets = sections.some(
         (section) =>
@@ -2670,10 +2697,12 @@ export class ResumeService {
       const plan = this.positioningPlanService.buildPlan({
         job: jobForPositioning,
         resumeV2: normalizedDocument as any,
+        careerIdentity: careerIdentitySnapshot,
       });
       const positioning = this.positioningResolver.resolve({
         job: jobForPositioning,
         resumeV2: normalizedDocument as any,
+        careerIdentity: careerIdentitySnapshot,
       });
       positioningMetadata = { ...positioning, plan };
 
@@ -3343,12 +3372,14 @@ export class ResumeService {
             job: jobForPositioning,
             // Use the persisted baseline ResumeV2 model when available; otherwise fall back to the response preview.
             resumeV2: (persistedResumeV2 as any) ?? (response?.preview?.resume as any) ?? {},
+            careerIdentity: idempotencyCareerIdentity,
           });
           const plan = (() => {
             try {
               return this.positioningPlanService.buildPlan({
                 job: jobForPositioning,
                 resumeV2: (persistedResumeV2 as any) ?? (response?.preview?.resume as any) ?? {},
+                careerIdentity: idempotencyCareerIdentity,
               });
             } catch {
               return null;
@@ -3367,6 +3398,9 @@ export class ResumeService {
               return null;
             }
           })();
+          const idempotencyCareerIdentity = structuredBaselineForIdentity
+            ? deriveCareerIdentityFromStructuredBaseline(structuredBaselineForIdentity as any)
+            : null;
           const authoritative = buildAuthoritativeResumeDraftFromResumeV2({
             resumeV2: (persistedResumeV2 as any) ?? (response?.preview?.resume as any) ?? {},
             identity: { name: identityRecord.fullName, contactLine: identityRecord.contactLine, links: identityRecord.links },
@@ -3577,6 +3611,7 @@ export class ResumeService {
         baselineVersionHash: audit.baselineVersionHash,
         generationPipeline: isResumeV2 ? 'v2' : 'v1',
         complianceFlags,
+        careerIdentity: careerIdentitySnapshot,
         ...(baselineEvidenceTooWeakDetails ? { baselineEvidenceTooWeak: baselineEvidenceTooWeakDetails } : {}),
         resumeGenerationStage: experienceDiagnostics.resumeGenerationStage,
         resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
@@ -3964,9 +3999,10 @@ export class ResumeService {
           evidence,
           targetRequirements: request.excludedRequirements ?? [],
         });
-        (response as any).internal = {
+          (response as any).internal = {
           ...((response as any).internal ?? {}),
           productionValidation: {
+            careerIdentity: careerIdentitySnapshot,
             authoritativeExperienceRoleKeys: authoritativeRoleKeys.slice(0, 40),
             persistedResumeV2RoleKeys: persistedResumeV2RoleKeys.slice(0, 40),
             renderPlanRoleKeys: renderPlanRoleKeys.slice(0, 80),

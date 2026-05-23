@@ -112,6 +112,7 @@ import {
 } from '../artifacts/artifactQualityValidator';
 import { trimIncompleteTrailingFragments } from '../artifacts/artifactQualityValidator';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
+import { deriveCareerIdentityFromStructuredBaseline } from '../career-identity/career-identity.derive';
 import { evaluateBaselineTemplateReadiness } from '../baseline/baselineTemplateReadiness';
 import { buildBaselineEvidenceSignals } from '../baseline/baselineEvidenceSignals';
 import type { EvidenceItem } from '../evidence/evidence-model';
@@ -1468,6 +1469,13 @@ export class CoverLettersService {
       resumeV2PlainText,
       job: jobContext,
     });
+    const careerIdentitySnapshot = (() => {
+      try {
+        return deriveCareerIdentityFromStructuredBaseline(structuredBaseline as any);
+      } catch {
+        return null;
+      }
+    })();
     const positioningMetadata = (() => {
       try {
         const resumeV2Like = {
@@ -1483,6 +1491,7 @@ export class CoverLettersService {
         return this.positioningResolver.resolve({
           job: { title: jobContext.title ?? null, company: jobContext.company ?? null, description: job.rawDescription ?? null },
           resumeV2: resumeV2Like,
+          careerIdentity: careerIdentitySnapshot,
         });
       } catch {
         return null;
@@ -1609,6 +1618,7 @@ export class CoverLettersService {
             return this.positioningPlanService.buildPlan({
               job: { title: job?.title ?? null, company: job?.company ?? null, description: job.rawDescription ?? null },
               resumeV2: resumeV2Like,
+              careerIdentity: careerIdentitySnapshot,
             });
           } catch {
             return null;
@@ -3200,6 +3210,7 @@ export class CoverLettersService {
 
     const positioning = (() => {
       try {
+        const careerIdentitySnapshot = deriveCareerIdentityFromStructuredBaseline(structured as any);
         const resumeV2Like = {
           heading: { name: 'Candidate', contactLine: '' },
           experience: (experience ?? []).map((e: any) => ({
@@ -3213,10 +3224,12 @@ export class CoverLettersService {
         const plan = this.positioningPlanService.buildPlan({
           job: { title: input.job.title ?? null, company: input.job.company ?? null, description: jobText },
           resumeV2: resumeV2Like,
+          careerIdentity: careerIdentitySnapshot,
         });
         const positioning = this.positioningResolver.resolve({
           job: { title: input.job.title ?? null, company: input.job.company ?? null, description: jobText },
           resumeV2: resumeV2Like,
+          careerIdentity: careerIdentitySnapshot,
         });
         return { ...positioning, plan };
       } catch {
