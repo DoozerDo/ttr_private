@@ -1243,6 +1243,9 @@ describe('StudioArtifactsService', () => {
         metadata: expect.objectContaining({ staleLegacy: true }),
       }),
     );
+    // Prompt 15: stale legacy artifacts must never surface as the active preview payload.
+    expect(state.resume?.responseBody).toBeNull();
+    expect(state.resume?.content).toBeNull();
     // Prompt 15: stale legacy artifacts must never surface as the active preview/result.
     expect(state.resumeResult?.preview).toBeNull();
     expect(state.resumeResult?.generationState).toBe('generated_unusable');

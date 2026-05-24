@@ -74,17 +74,9 @@ function normalizeResumeResponse(payload: unknown): unknown {
   const inner = toRecord(raw.payload);
   const candidate = inner ?? raw;
 
-  const preview = toRecord(candidate.preview);
-  const resumeFromPreview = preview ? toRecord(preview.resume) : null;
-  if (resumeFromPreview) return candidate;
-
-  const resumeFromPayload = toRecord(candidate.resume);
-  if (!resumeFromPayload) return candidate;
-
-  return {
-    ...candidate,
-    preview: { ...(preview ?? {}), resume: resumeFromPayload },
-  };
+  // Intentionally do not upgrade legacy `candidate.resume` into `candidate.preview.resume` here.
+  // Studio must render resume content only from the canonical `resumeResult.preview` contract.
+  return candidate;
 }
 
 function normalizeCoverLetterResponse(payload: unknown): unknown {
@@ -121,17 +113,7 @@ function hasNonEmptySectionText(sections: unknown): boolean {
 }
 
 function hasRenderableResumeContent(payload: unknown, model: ResumeModel | null): boolean {
-  if (model && estimateResumeModelBodyLength(model) > 0) return true;
-  const record = toRecord(payload);
-  if (!record) return false;
-  if (hasNonEmptyText(record.content)) return true;
-  if (hasNonEmptySectionText(record.sections)) return true;
-  const preview = toRecord(record.preview);
-  const resumePreview = preview ? toRecord(preview.resume) : null;
-  if (resumePreview) return true;
-  const nestedResume = toRecord(record.resume);
-  if (nestedResume) return true;
-  return false;
+  return Boolean(model && estimateResumeModelBodyLength(model) > 0);
 }
 
 function hasRenderableCoverLetterContent(payload: unknown, paragraphs: string[]): boolean {
@@ -177,13 +159,24 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
   const resumeResult = toRecord(normalizedResumeResponse)?.resumeResult as ArtifactGenerationResult<unknown> | undefined;
   const coverLetterResult = toRecord(normalizedCoverLetterResponse)?.coverLetterResult as ArtifactGenerationResult<unknown> | undefined;
 
-  const resumePresenter = presentResumeGeneration(normalizedResumeResponse);
+  const resumePresenter = presentResumeGeneration(
+    resumeResult?.preview && typeof resumeResult.preview === "object"
+      ? {
+          ...(toRecord(normalizedResumeResponse) ?? {}),
+          status: "success",
+          generationStatus: "success",
+          exportReady: resumeResult.exportReady === true,
+          exports: resumeResult.exports ?? null,
+          preview: { resume: resumeResult.preview },
+        }
+      : normalizedResumeResponse,
+  );
   const coverPresenter = presentCoverLetterGeneration(normalizedCoverLetterResponse);
 
   const resumeModel: ResumeModel | null =
     resumeResult?.preview && typeof resumeResult.preview === "object"
       ? (resumeResult.preview as ResumeModel)
-      : readResumeModel(normalizedResumeResponse);
+      : null;
   const coverParagraphs = (() => {
     const previewRecord = coverLetterResult?.preview && typeof coverLetterResult.preview === "object"
       ? (coverLetterResult.preview as Record<string, unknown>)

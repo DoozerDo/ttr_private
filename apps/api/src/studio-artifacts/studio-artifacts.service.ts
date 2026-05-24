@@ -785,7 +785,7 @@ export class StudioArtifactsService {
       ...(artifactReadiness
         ? { artifactReadiness, artifactReadinessReasons, artifactReadinessReasonDetails }
         : {}),
-      resume: resumeRecord,
+      resume: resumeRecordForResult,
       coverLetter: coverRecord,
       resumeResult,
       coverLetterResult,

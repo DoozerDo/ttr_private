@@ -692,21 +692,8 @@ function isMinimalResumeArtifactPayload(value: unknown): boolean {
 }
 
 function extractResumeResponseFromStudioArtifacts(payload: BackendStudioArtifactsResponse): unknown | null {
-  const responseBody = payload.resume?.responseBody ?? null;
-  const normalized = normalizeHydratedArtifactResponse(responseBody);
-  const content = typeof payload.resume?.content === "string" ? payload.resume.content.trim() : "";
-  if (normalized) {
-    // Persisted artifacts may store the renderable resume text in the record `content` column even when the
-    // response body omits `preview.*` structured models. Merge the persisted content so Studio can render
-    // a fallback preview without requiring resumeModel/preview fields.
-    if (content && typeof normalized === "object" && !Array.isArray(normalized)) {
-      const record = normalized as Record<string, unknown>;
-      const existingContent = typeof record.content === "string" ? record.content.trim() : "";
-      if (!existingContent) return { ...record, content };
-    }
-    return normalized;
-  }
-  if (content) return { content };
+  // Studio must render resume content only from the canonical artifact contract preview (`resumeResult.preview`).
+  // Do not hydrate/merge persisted `resume.responseBody` or `resume.content` here.
   return payload.resumeResult ? ({ resumeResult: payload.resumeResult } as unknown) : null;
 }
 
@@ -3357,13 +3344,8 @@ export default function StudioPage() {
       buildStudioArtifactContract({
         resumeResponse: (() => {
           if (!studioArtifactsPayload) return null;
-          const response = extractResumeResponseFromStudioArtifacts(studioArtifactsPayload);
           const result = studioArtifactsPayload.resumeResult ?? null;
-          if (!result) return response;
-          if (response && typeof response === "object") {
-            return { ...(response as Record<string, unknown>), resumeResult: result };
-          }
-          return { resumeResult: result };
+          return result ? { resumeResult: result } : null;
         })(),
         coverLetterResponse: (() => {
           if (!studioArtifactsPayload) return null;
