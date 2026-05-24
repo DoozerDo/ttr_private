@@ -314,14 +314,27 @@ function isWeakFragmentRole(entry: { company?: string; roleTitle?: string }): bo
 function ensureSummaryMinimum(summary: string, fallbackFromExperience: Array<{ roleTitle?: string; company?: string; bullets?: string[] }>): string {
   const raw = trimToText(summary);
   if (raw && countSentences(raw) >= 2) return raw;
+
+  // Grounded fallback: construct 2–3 concrete sentences from verified experience headers + top bullets.
+  // Avoid generic filler, stitched fragments, and domain invention.
   const roleIdentity = inferRoleIdentity(fallbackFromExperience as any);
-  const topRole = fallbackFromExperience[0]?.roleTitle ? trimToText(fallbackFromExperience[0]?.roleTitle) : '';
-  const scopeSentence = topRole
-    ? `Built around ${topRole.toLowerCase()} scope, spanning systems, process, and cross-functional execution.`
-    : 'Built around systems, process, and cross-functional execution.';
-  const impactSentence = 'Impact-oriented: focuses on clear ownership, measurable improvements, and reliable follow through.';
-  const intro = `Impact-driven ${roleIdentity}.`;
-  return [intro, scopeSentence, impactSentence].join(' ');
+  const top = fallbackFromExperience[0] ?? {};
+  const topRole = top?.roleTitle ? trimToText(top.roleTitle) : '';
+  const topCompany = top?.company ? trimToText(top.company) : '';
+  const topBullets = Array.isArray(top?.bullets) ? (top.bullets as unknown[]).map(trimToText).filter(Boolean) : [];
+  const highlightBullets = topBullets.slice(0, 2);
+
+  const intro = topRole && topCompany
+    ? `${roleIdentity} with leadership experience as ${topRole} at ${topCompany}.`
+    : `${roleIdentity} with leadership experience across customer-facing operations.`;
+
+  const highlights = highlightBullets.length
+    ? `Highlights include: ${highlightBullets.join(' ')}`.replace(/\.\./g, '.')
+    : '';
+
+  const second = highlights || `${raw || ''}`.trim();
+  const sentences = [intro, second].map(trimToText).filter(Boolean);
+  return sentences.join(' ').trim();
 }
 
 export function buildAuthoritativeResumeDraftFromResumeV2(input: {

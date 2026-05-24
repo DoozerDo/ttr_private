@@ -3659,6 +3659,7 @@ describe('ResumeService contract', () => {
       expect(topCluster.toLowerCase()).not.toMatch(/\b(billing|invoice|reconciliation|revops|revenue|finance|accounts payable|accounts receivable)\b/);
 
       const resumeContent = String((result as any).content ?? '').toLowerCase();
+      const resumeSummary = String((result as any)?.preview?.resume?.summary ?? '').toLowerCase();
 
       // The job can be billing-heavy, but the generated resume must not invent a billing-ops specialization
       // beyond what is actually supported by repeated baseline evidence.
@@ -3670,6 +3671,12 @@ describe('ResumeService contract', () => {
       expect(resumeContent).not.toMatch(/\brevenue\b/);
       expect(resumeContent).not.toMatch(/\bbilling kpi\b/);
       expect(resumeContent).not.toMatch(/\bbilling reliability\b/);
+
+      // Golden-loop quality guards: avoid stitched fragments / generic filler fallback prose.
+      expect(resumeContent).not.toMatch(/\bexperience entry needs correction\b/);
+      expect(resumeContent).not.toMatch(/\bvue 3\)\b/);
+      expect(resumeSummary).not.toMatch(/\b(impact-driven|impact-oriented)\b/);
+      expect(resumeSummary).not.toMatch(/\bbuilt around\b/);
 
       const hits = (result as any)?.internal?.productionValidation?.contaminationHits ?? null;
       // Diagnostics are best-effort; when present, they must show no upstream billing-ops narrative.
