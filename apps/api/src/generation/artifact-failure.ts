@@ -30,6 +30,9 @@ export type ArtifactFailurePayload = {
     generationTerminationStage?: string;
     structuredBaselineExperienceCount?: number;
     structuredBaselineMissingEvidenceReasons?: string[];
+
+    // ResumeV2 authority diagnostics (safe metadata only; no raw text).
+    resumeV2UsableExperienceCount?: number;
   };
 };
 

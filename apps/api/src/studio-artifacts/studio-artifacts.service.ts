@@ -92,6 +92,14 @@ export type StudioArtifactsState = {
     hydrationRejected?: boolean;
     rejectedMinimalArtifact?: boolean;
     rejectedMinimalArtifactReason?: string | null;
+    resumeV2Readiness?: {
+      hasResumeV2?: boolean;
+      usableExperienceCount?: number;
+      requiredExperienceCount?: number;
+      failureReasons?: string[];
+      source?: string;
+      valid?: boolean;
+    };
   };
 };
 
@@ -654,7 +662,8 @@ export class StudioArtifactsService {
         return false;
       }
       const internal = normalizeRecord((resumeRecord.responseBody as any)?.internal);
-      const staleLegacy = isTrue((resumeRecord.metadata as any)?.staleLegacy) || isTrue(internal?.staleLegacy);
+      const staleLegacy =
+        isTrue(((resumeRecord ? resumeRecord.metadata : null) as any)?.staleLegacy) || isTrue(internal?.staleLegacy);
       if (staleLegacy) {
         staleArtifactReasonCodes.push('stale_legacy');
         return false;
@@ -676,7 +685,7 @@ export class StudioArtifactsService {
     const resumeInternal = resumeRecord ? normalizeRecord((resumeRecord.responseBody as any)?.internal) : null;
     const resumeIsStaleLegacy =
       Boolean(resumeRecord) &&
-      (isTrue((resumeRecord.metadata as any)?.staleLegacy) || isTrue(resumeInternal?.staleLegacy));
+      (isTrue(((resumeRecord ? resumeRecord.metadata : null) as any)?.staleLegacy) || isTrue(resumeInternal?.staleLegacy));
     const resumeIsMinimal = Boolean(resumeRecord) && detectMinimalResumeArtifact(resumeRecord?.responseBody ?? null).minimal;
 
     // Hydration contract:
