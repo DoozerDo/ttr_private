@@ -2427,18 +2427,6 @@ export class ResumeService {
       return response;
     }
 
-    if (shouldQuarantineCachedResumeArtifact.quarantine === true) {
-      try {
-        internal.productionValidation = {
-          ...(internal.productionValidation ?? {}),
-          studioArtifactCacheQuarantined: true,
-          studioArtifactCacheQuarantineReason: shouldQuarantineCachedResumeArtifact.reason,
-        } as any;
-      } catch {
-        // ignore diagnostics failures
-      }
-    }
-
     const gapInsights =
       !forcedMinimalSections && !request.oneTap && job && latestAssessment
         ? this.gapAnalysisService.analyze({
