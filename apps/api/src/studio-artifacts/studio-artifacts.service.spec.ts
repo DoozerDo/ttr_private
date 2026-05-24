@@ -1256,6 +1256,88 @@ describe('StudioArtifactsService', () => {
     else delete process.env.DOCGEN_DIAGNOSTICS;
   });
 
+  it('does not surface stale baseline_resume_v2_ingestion_failed guidance when baseline ResumeV2 has usable experience', async () => {
+    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+    process.env.DOCGEN_DIAGNOSTICS = 'true';
+
+    const studioArtifactRepository = createRepository<any>();
+    const baselineWithValidResumeV2 = {
+      ...baseline,
+      parsedRecords: [
+        {
+          id: 'parsed-1',
+          baselineVersionId: baselineVersion.id,
+          resumeV2Json: {
+            heading: { name: 'Test', contactLine: 'Test' },
+            experience: [
+              {
+                company: 'Acme',
+                roleTitle: 'Support Ops Lead',
+                dateRange: '2021 - 2024',
+                bullets: ['Owned escalations', 'Built dashboards'],
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const baselineRepository = { findOne: jest.fn(async () => baselineWithValidResumeV2) };
+    const baselineVersionRepository = { findOne: jest.fn(async () => baselineVersion) };
+    const jobRepository = { findOne: jest.fn(async () => job) };
+    const assessmentRepository = { findOne: jest.fn(async () => ({ ...assessment, overallScore: 90 })) };
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository as any,
+      baselineRepository as any,
+      baselineVersionRepository as any,
+      jobRepository as any,
+      assessmentRepository as any,
+      backfillService as any,
+    );
+
+    const jobFingerprint = service.computeJobFingerprint(job as any);
+    const inputsHash = service.computeResumeInputsHash({
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint,
+      assessmentInputsHash: assessment.inputsHash,
+    });
+
+    await service.recordResumeFailure({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint,
+      inputsHash,
+      failureCode: 'baseline_resume_v2_ingestion_failed',
+      failureMessage: 'Baseline ingestion did not produce any usable experience entries for Resume V2.',
+      metadata: {},
+    });
+
+    const state = await service.readState({
+      userId: 'user-1',
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+      baselineVersionId: baselineVersion.id,
+      analysisId: 'analysis-1',
+    });
+
+    expect(state.errors ?? []).toEqual(
+      expect.not.arrayContaining([expect.objectContaining({ code: 'baseline_resume_v2_ingestion_failed' })]),
+    );
+    expect(String((state as any)?.resume?.resumeFailureCode ?? '')).not.toMatch(/^baseline_resume_v2_/);
+    const correctionCodes = Array.isArray((state as any)?.resumeResult?.correctionReasons)
+      ? (state as any).resumeResult.correctionReasons.map((r: any) => String(r?.code ?? '')).filter(Boolean)
+      : [];
+    expect(correctionCodes).not.toContain('baseline_resume_v2_ingestion_failed');
+    expect((state as any)?.diagnostics?.resumeV2Readiness?.usableExperienceCount ?? 0).toBeGreaterThan(0);
+
+    if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+    else delete process.env.DOCGEN_DIAGNOSTICS;
+  });
+
   it('marks baseline_template_not_ready as degraded (not blocked) when validExperience>0', async () => {
     const studioArtifactRepository = createRepository<any>();
     const baselineRepository = {

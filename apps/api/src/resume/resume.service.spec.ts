@@ -1183,6 +1183,48 @@ describe('ResumeService contract', () => {
     }
   });
 
+  it('generates successfully when Resume V2 exists on a newer parsedRecord (not index 0)', async () => {
+    const { service } = buildService();
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
+    const originalParsed = baseline.parsedRecords;
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 90;
+
+    try {
+      baseline.parsedRecords = [
+        {
+          createdAt: new Date('2026-04-01T00:00:00.000Z'),
+          // Older parsed record without ResumeV2 json.
+          resumeV2Json: null,
+        } as any,
+        {
+          createdAt: new Date('2026-05-01T00:00:00.000Z'),
+          resumeV2Json: {
+            heading: { name: 'Test User' },
+            experience: [
+              {
+                company: 'Example Co',
+                roleTitle: 'Senior Program Manager',
+                dateRange: '2020 - 2024',
+                bullets: ['Owned incident response operations across support teams.'],
+              },
+            ],
+          },
+        } as any,
+      ];
+
+      const result = await service.generateResume('user-1', { ...baseRequest } as any);
+      expect(result.ok).toBe(true);
+      expect(String(result.content ?? '')).toMatch(/Example Co|Senior Program Manager/i);
+    } finally {
+      baseline.parsedRecords = originalParsed;
+      assessment.overallScore = originalScore;
+      if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    }
+  });
+
   it('diagnostics identify render_plan as the first contamination stage when authoritative extraction and Resume V2 are clean but render plan candidates are contaminated', async () => {
     const { service } = buildService();
     const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
@@ -2962,6 +3004,47 @@ describe('ResumeService contract', () => {
       reasons: expect.any(Array),
     });
   });
+
+  it('does not block Studio readiness when a valid persisted ResumeV2 has usable experience even if structured template readiness is empty', async () => {
+    const originalSections = baseline.sections;
+    const originalParsedRecords = (baseline as any).parsedRecords;
+
+    try {
+      baseline.sections = []; // structured/template extraction would be empty
+      (baseline as any).parsedRecords = [
+        {
+          id: 'parsed-1',
+          baselineVersionId: baselineVersion.id,
+          resumeV2Json: {
+            heading: { name: 'Test', contactLine: 'Test' },
+            experience: [
+              {
+                company: 'Acme',
+                roleTitle: 'Support Ops Lead',
+                dateRange: '2021 - 2024',
+                bullets: ['Owned escalations', 'Built dashboards'],
+              },
+            ],
+            education: [],
+          },
+        },
+      ];
+      const { service } = buildService();
+      const readiness = await service.getGenerationReadiness('user-1', {
+        ...baseRequest,
+        analysisId: 'analysis-1',
+        oneTap: false,
+      } as any);
+
+      expect(readiness.status).toBe('ready');
+      expect(readiness.blocked).toBe(false);
+      expect((readiness as any)?.canGenerateResume ?? true).toBe(true);
+    } finally {
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = originalParsedRecords;
+    }
+  });
+
 
   it('does not throw generation_blocked for score >= 70 when readiness is BLOCKED and verified-only mode is possible', async () => {
     const { service, applicationsService, opportunitiesService } = buildService({

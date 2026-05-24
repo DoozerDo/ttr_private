@@ -461,17 +461,58 @@ export class StudioArtifactsService {
 
     // Artifacts retrieval must never 422 due to readiness/template gating.
     // Baseline ResumeV2 is used only to enrich readiness with interpreted evidence; treat it as optional here.
-    const baselineTextForInterpretation = (() => {
+    const resumeV2Diagnostics = (() => {
       try {
         if (!persisted || typeof persisted !== 'object') return null;
         const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
         const validation = validateNormalizedResumeDocument(normalized);
-        if (!validation.valid) return null;
-        return buildResumePlainText(normalized);
+        const experienceCount = Array.isArray((normalized as any)?.experience) ? (normalized as any).experience.length : 0;
+        if (!validation.valid) {
+          return {
+            source: 'persisted_resume_v2',
+            valid: false,
+            experienceCount,
+          } as const;
+        }
+        return {
+          source: 'persisted_resume_v2',
+          valid: true,
+          experienceCount,
+          plainText: buildResumePlainText(normalized),
+        } as const;
       } catch {
         return null;
       }
     })();
+    const baselineTextForInterpretation =
+      resumeV2Diagnostics && (resumeV2Diagnostics as any).valid && typeof (resumeV2Diagnostics as any).plainText === 'string'
+        ? String((resumeV2Diagnostics as any).plainText)
+        : null;
+
+    // Readiness/guidance synchronization rule:
+    // If we can validate a non-empty ResumeV2 experience set now, suppress stale ResumeV2-ingestion failure banners
+    // that may have been cached on previous artifacts or raised by earlier backfill attempts.
+    const resumeV2UsableExperienceCount =
+      resumeV2Diagnostics && (resumeV2Diagnostics as any).valid
+        ? Number((resumeV2Diagnostics as any).experienceCount ?? 0)
+        : 0;
+    if (resumeV2UsableExperienceCount > 0 && errors.length) {
+      const before = errors.length;
+      const filtered = errors.filter((e) => !String((e as any)?.code ?? '').startsWith('baseline_resume_v2_'));
+      errors.splice(0, errors.length, ...filtered);
+      if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
+        try {
+          // eslint-disable-next-line no-console
+          console.log('[RESUME_V2_INGEST][STUDIO_READSTATE_SYNC]', {
+            baselineId: String(baseline?.id ?? ''),
+            usableExperienceCount: resumeV2UsableExperienceCount,
+            errorsSuppressed: before - errors.length,
+          });
+        } catch {
+          // ignore
+        }
+      }
+    }
 
     const emptyInterpretedEvidenceSummary: InterpretedEvidenceSummary = {
       strongEvidenceCount: 0,
@@ -573,12 +614,15 @@ export class StudioArtifactsService {
     };
 
     // Never drop persisted artifacts from readState; currentness/staleness must be indicated via metadata flags.
+    const shouldMarkLegacyStale =
+      Boolean(artifactReadiness) && typeof score === 'number' && score >= 80;
+
     const resumeRecord =
-      artifactReadiness && resumeRecordRaw && !isStructuredTemplateResult(resumeRecordRaw.responseBody)
+      shouldMarkLegacyStale && resumeRecordRaw && !isStructuredTemplateResult(resumeRecordRaw.responseBody)
         ? { ...resumeRecordRaw, metadata: { ...(resumeRecordRaw.metadata ?? {}), staleLegacy: true } }
         : resumeRecordRaw;
     const coverRecord =
-      artifactReadiness && coverRecordRaw && !isStructuredTemplateResult(coverRecordRaw.responseBody)
+      shouldMarkLegacyStale && coverRecordRaw && !isStructuredTemplateResult(coverRecordRaw.responseBody)
         ? { ...coverRecordRaw, metadata: { ...(coverRecordRaw.metadata ?? {}), staleLegacy: true } }
         : coverRecordRaw;
 
@@ -629,15 +673,20 @@ export class StudioArtifactsService {
       return true;
     })();
 
-    const resumeRecordForResult =
-      resumeRecord && !resumePreviewAllowed
-        ? {
-            ...resumeRecord,
-            responseBody: null,
-            content: null,
-          }
-        : resumeRecord;
+    const resumeInternal = resumeRecord ? normalizeRecord((resumeRecord.responseBody as any)?.internal) : null;
+    const resumeIsStaleLegacy =
+      Boolean(resumeRecord) &&
+      (isTrue((resumeRecord.metadata as any)?.staleLegacy) || isTrue(resumeInternal?.staleLegacy));
+    const resumeIsMinimal = Boolean(resumeRecord) && detectMinimalResumeArtifact(resumeRecord?.responseBody ?? null).minimal;
 
+    // Hydration contract:
+    // - Never mutate persisted artifact fields.
+    // - Do not surface stale legacy artifacts as the active preview payload (Prompt 15) => null responseBody/content.
+    // - Minimal artifacts keep `responseBody` for audit/diagnostics, but must not surface preview (Prompt 18).
+    const resumeRecordForResult =
+      resumeRecord && resumeIsStaleLegacy && !resumeIsMinimal
+        ? { ...resumeRecord, responseBody: null, content: null }
+        : resumeRecord;
     if (resumeRecord && !resumePreviewAllowed) {
       rejectedArtifactIds.push(authoritativeArtifactId ?? 'unknown');
     }
@@ -668,8 +717,34 @@ export class StudioArtifactsService {
       }
     }
 
-    const resumeResult = this.buildCanonicalResultFromRecord('resume', resumeRecordForResult);
+    const resumeResultRaw = this.buildCanonicalResultFromRecord('resume', resumeRecordForResult);
     const coverLetterResult = this.buildCanonicalResultFromRecord('cover_letter', coverRecord);
+
+    // Note: we intentionally avoid mutating persisted artifact fields (failure codes, response bodies, etc.)
+    // during readState. Any guidance suppression must be handled via non-authoritative `errors` shaping only.
+
+    // Projection-only suppression: if current persisted ResumeV2 is valid and non-empty, do not surface
+    // legacy ResumeV2 ingestion failure guidance as current blockers in the returned state.
+    const shouldSuppressResumeV2Guidance = resumeV2UsableExperienceCount > 0;
+    const resumeResultBase =
+      shouldSuppressResumeV2Guidance && resumeResultRaw && Array.isArray((resumeResultRaw as any).correctionReasons)
+        ? {
+            ...(resumeResultRaw as any),
+            correctionReasons: (resumeResultRaw as any).correctionReasons.filter(
+              (r: any) => !String(r?.code ?? '').startsWith('baseline_resume_v2_'),
+            ),
+          }
+        : resumeResultRaw;
+
+    const resumeResult =
+      resumeResultBase && !resumePreviewAllowed
+        ? {
+            ...(resumeResultBase as any),
+            preview: null,
+            exportReady: false,
+            exports: { docx: false, pdf: false },
+          }
+        : resumeResultBase;
 
     if (shouldLogIngest) {
       try {
@@ -801,6 +876,11 @@ export class StudioArtifactsService {
               hydrationRejected: Boolean(resumeRecord && !resumePreviewAllowed),
               rejectedMinimalArtifact: Boolean(staleArtifactReasonCodes.some((c) => c === 'minimal_artifact_rejected' || String(c).startsWith('minimal:'))),
               rejectedMinimalArtifactReason: staleArtifactReasonCodes.find((c) => String(c).startsWith('minimal:')) ?? null,
+              resumeV2Readiness: {
+                usableExperienceCount: resumeV2UsableExperienceCount,
+                source: resumeV2Diagnostics ? (resumeV2Diagnostics as any).source : 'missing',
+                valid: resumeV2Diagnostics ? Boolean((resumeV2Diagnostics as any).valid) : false,
+              },
             },
           }
         : {}),

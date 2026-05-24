@@ -937,6 +937,20 @@ export class ResumeService {
     }));
   }
 
+  private getLatestPersistedResumeV2Json(parsedRecords: any[] | null | undefined): unknown | null {
+    if (!Array.isArray(parsedRecords) || parsedRecords.length === 0) return null;
+    const candidates = parsedRecords
+      .filter((record) => record && typeof record === 'object' && (record as any).resumeV2Json && typeof (record as any).resumeV2Json === 'object')
+      .slice();
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => {
+      const at = (a as any)?.createdAt ? new Date((a as any).createdAt).getTime() : 0;
+      const bt = (b as any)?.createdAt ? new Date((b as any).createdAt).getTime() : 0;
+      return at - bt;
+    });
+    return (candidates[candidates.length - 1] as any).resumeV2Json ?? null;
+  }
+
   private buildMinimalResumeSections(baselineSections: BaselineSection[]): ResumeDraftSection[] {
     const sections: ResumeDraftSection[] = baselineSections
       .filter((section) => typeof section.content === 'string' && section.content.trim().length > 0)
@@ -1895,7 +1909,7 @@ export class ResumeService {
       // (BaselineParsed.resumeV2Json), never from baseline section concatenations.
       resumeText: isResumeV2
         ? (() => {
-            const persisted = (baseline.parsedRecords?.[0] as any)?.resumeV2Json ?? null;
+            const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
             if (!persisted || typeof persisted !== 'object') return '';
             const normalized = normalizeNormalizedResumeDocument(persisted as any);
             const validation = validateNormalizedResumeDocument(normalized as any);
@@ -2064,7 +2078,7 @@ export class ResumeService {
       // (BaselineParsed.resumeV2Json), never from baseline section concatenations.
       resumeText: isResumeV2
         ? (() => {
-            const persisted = (baseline.parsedRecords?.[0] as any)?.resumeV2Json ?? null;
+            const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
             if (!persisted || typeof persisted !== 'object') return '';
             const normalized = normalizeNormalizedResumeDocument(persisted as any);
             const validation = validateNormalizedResumeDocument(normalized as any);
@@ -2104,7 +2118,27 @@ export class ResumeService {
       map.forEach((value, key) => interpretedEvidenceIdToItem.set(key, value));
     }
 
-    if (enforceTemplateReadiness && !templateReadinessForBaseline.canGenerateResume && !hasMeaningfulInterpretedEvidence) {
+    const resumeV2UsableExperienceCount = (() => {
+      if (!isResumeV2) return 0;
+      try {
+        const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
+        if (!persisted || typeof persisted !== 'object') return 0;
+        const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
+        const validation = validateNormalizedResumeDocument(normalized);
+        if (!validation.valid) return 0;
+        return Array.isArray((normalized as any)?.experience) ? (normalized as any).experience.length : 0;
+      } catch {
+        return 0;
+      }
+    })();
+
+    if (
+      enforceTemplateReadiness &&
+      !templateReadinessForBaseline.canGenerateResume &&
+      !hasMeaningfulInterpretedEvidence &&
+      // If ResumeV2 authority exists, do not hard-block due to section-based structured extraction failure.
+      resumeV2UsableExperienceCount === 0
+    ) {
       // Prompt 14: If structured extraction yields zero valid experience groups, fail closed rather than
       // allowing legacy minimal fallback synthesis to construct employer-role structure from raw text.
       const readinessDetailsAny = templateReadinessForBaseline as any;
@@ -2127,6 +2161,7 @@ export class ResumeService {
             structuredBaselineMissingEvidenceReasons: Array.isArray(readinessDetailsAny?.missingEvidenceReasons)
               ? readinessDetailsAny.missingEvidenceReasons.map((r: any) => String(r ?? '')).filter(Boolean)
               : [],
+            resumeV2UsableExperienceCount,
           },
         }));
       }
@@ -2140,15 +2175,32 @@ export class ResumeService {
 
     minimalDraftSectionsForFailSafe = this.buildMinimalResumeSections(resumeInputSections);
 
-    const baselineText = allowedSections
-      .map((section) => section.content ?? '')
-      .join('\n');
+    const baselineText = isResumeV2
+      ? (() => {
+          try {
+            // In ResumeV2 mode, "insufficient extracted text" must be evaluated against the persisted ResumeV2 authority,
+            // not the baseline section concatenation (which may be empty or intentionally excluded).
+            const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
+            if (!persisted || typeof persisted !== 'object') return '';
+            const normalized = normalizeNormalizedResumeDocument(persisted as any);
+            const validation = validateNormalizedResumeDocument(normalized as any);
+            if (!validation.valid) return '';
+            const text = buildResumePlainText(normalized as any);
+            if (String(text ?? '').trim()) return text;
+            return '';
+          } catch {
+            return '';
+          }
+        })()
+      : '';
+    const effectiveBaselineText = baselineText || allowedSections.map((section) => section.content ?? '').join('\n');
     const insufficientBaselineDetails =
-      getInsufficientExtractedTextDetails(baselineText);
+      getInsufficientExtractedTextDetails(effectiveBaselineText);
     let forcedMinimalSections: ResumeDraftSection[] | null = null;
     if (insufficientBaselineDetails) {
       const normalizedBaselineText = String(baselineText ?? '').trim();
-      if (!normalizedBaselineText) {
+      const normalizedEffectiveBaselineText = String(effectiveBaselineText ?? '').trim();
+      if (!normalizedEffectiveBaselineText) {
         const payload = {
           errorCode: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
           code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
@@ -2167,7 +2219,7 @@ export class ResumeService {
         // Studio lane: only hard-block when we truly have no usable experience evidence.
         // If evidence is usable-but-imperfect (e.g., sparse text / lightly structured bullets),
         // proceed with generation and let Fit Review + quality gates surface refinements.
-        if (!templateReadinessForBaseline.canGenerateResume) {
+        if (!templateReadinessForBaseline.canGenerateResume && resumeV2UsableExperienceCount === 0) {
           throw new UnprocessableEntityException({
             error: {
               code: 'baseline_template_not_ready',
@@ -2564,7 +2616,7 @@ export class ResumeService {
 
     let persistedResumeV2: Record<string, unknown> | null = null;
     if (isResumeV2) {
-      persistedResumeV2 = (baseline.parsedRecords?.[0] as any)?.resumeV2Json ?? null;
+      persistedResumeV2 = (this.getLatestPersistedResumeV2Json(baseline.parsedRecords) as any) ?? null;
       if (!persistedResumeV2 || typeof persistedResumeV2 !== 'object') {
         const backfilled = this.baselineResumeV2BackfillService
           ? await this.baselineResumeV2BackfillService.backfillLatestIfMissing({ baselineId: baseline.id })
@@ -4180,7 +4232,7 @@ export class ResumeService {
           : '';
         const persistedResumeV2Text = (() => {
           try {
-            const persisted = (baseline.parsedRecords?.[0] as any)?.resumeV2Json ?? null;
+            const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
             if (!persisted || typeof persisted !== 'object') return '';
             const normalized = normalizeNormalizedResumeDocument(persisted as any);
             const validation = validateNormalizedResumeDocument(normalized as any);
@@ -4996,6 +5048,33 @@ export class ResumeService {
         order: { sections: { order: 'ASC' } },
       });
       if (baseline) {
+        // ResumeV2 authority rule: when a valid ResumeV2 model with usable experience exists,
+        // do not block Studio generation due to section-based structured template readiness failures.
+        // Template readiness is meant to guard the legacy section/structured extraction lane, not the ResumeV2 lane.
+        try {
+          const persistedResumeV2 = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
+          if (persistedResumeV2 && typeof persistedResumeV2 === 'object') {
+            const normalized = normalizeNormalizedResumeDocument(persistedResumeV2 as NormalizedResumeDocument);
+            const validation = validateNormalizedResumeDocument(normalized);
+            const experienceCount = Array.isArray((normalized as any)?.experience) ? (normalized as any).experience.length : 0;
+            if (validation.valid && experienceCount > 0) {
+              return {
+                status: 'ready' as const,
+                blocked: false,
+                compliance_flags: [],
+                reasons: [],
+                canGenerateResume: true,
+                diagnostics: {
+                  readinessSource: 'resume_v2_authority',
+                  usableExperienceCount: experienceCount,
+                },
+              } as any;
+            }
+          }
+        } catch {
+          // ignore; fall back to structured/template readiness.
+        }
+
         const sourceSections = resolveBaselineSectionsForGeneration(baseline);
         const structuredBaseline = extractStructuredBaselineFromSections(sourceSections as any);
         const templateReadiness = evaluateBaselineTemplateReadiness(structuredBaseline);
