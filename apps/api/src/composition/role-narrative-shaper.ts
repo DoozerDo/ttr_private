@@ -67,11 +67,41 @@ export class RoleNarrativeShaper {
     // Hard suppress generic filler bullets.
     if (/\bverified professional experience\b/.test(text)) return -500;
 
+    // Prefer senior-ownership language when available (without requiring it).
+    const ownershipVerbBonus = /\b(led|owned|drove|directed|established|operationalized|implemented|managed|standardized|coordinated)\b/.test(text)
+      ? 2
+      : 0;
+    const tacticalPenalty =
+      /\b(supported|assisted|helped)\b/.test(text) && !/\b(operationalized|led|owned|drove|managed)\b/.test(text) ? 2 : 0;
+
+    // Downrank customer-handling phrasing that lacks clear ownership / governance / operational scope.
+    const mentionsCustomers = /\b(customer|customers|subscription|renewal)\b/.test(text);
+    const mentionsOpsWork =
+      /\b(triage|handoff|handoffs|routing|queue|playbook|dashboards?|reporting|incident|escalation|postmortem|process|workflow|cadence|governance)\b/.test(
+        text,
+      );
+    const hasStrongOwnership = /\b(owned|led|drove|directed|established|implemented|managed|operationalized|standardized|coordinated)\b/.test(text);
+    const mentionsSystemArtifacts = /\b(playbooks?|dashboards?|reporting|cadence|postmortems?|runbooks?|sla)\b/.test(text);
+    const startsTactical = /^\s*(supported|helped|assisted)\b/.test(text);
+    const customerHandlingPenalty =
+      mentionsCustomers && mentionsOpsWork && !hasStrongOwnership && !/\d/.test(text) ? (startsTactical ? 12 : 6) : 0;
+
+    // Avoid promoting tactical customer-handling fragments into the recruiter-facing top bullets when stronger evidence exists.
+    // Keep them as supporting bullets (lower score) rather than "upgrading" them with artificial senior wording.
+    const tacticalCustomerHandlingHardDownrankCondition =
+      startsTactical &&
+      mentionsCustomers &&
+      /\b(triage|handoff|handoffs|entitlement|renewal)\b/.test(text) &&
+      !hasStrongOwnership &&
+      !mentionsSystemArtifacts &&
+      !/\d/.test(text);
+    if (tacticalCustomerHandlingHardDownrankCondition) return -320;
+
     // Suppress low-signal one-off task bullets (routing/forwarding/hand-off phrasing) when stronger bullets exist.
     // This is domain-agnostic: it targets weak task evidence, not specific billing terms.
     const oneOffTaskHardSuppression =
       /\bonce\b/.test(text) ||
-      /\b(helped|assisted)\s+(route|forward|send|sent|escalate)\b/.test(text) ||
+      /\b(helped|assisted|supported)\s+(route|forward|send|sent|escalate)\b/.test(text) ||
       /\b(route|routed|routing)\b/.test(text) && /\b(to|into)\s+the\s+(right|correct)\s+(owner|team)\b/.test(text) ||
       /\bforwarded\b/.test(text) ||
       /\bsent\b/.test(text) && /\bto\s+(the\s+)?(right|correct)\s+(owner|team)\b/.test(text)
@@ -109,6 +139,9 @@ export class RoleNarrativeShaper {
       themeHits * 2 +
       outcomeSignals +
       ownershipSignals +
+      ownershipVerbBonus -
+      tacticalPenalty +
+      customerHandlingPenalty +
       hasDigits -
       inventoryPenalty -
       servicesIncludePenalty -

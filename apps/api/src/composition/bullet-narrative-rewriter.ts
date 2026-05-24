@@ -118,6 +118,15 @@ function reframeImplementationScale(text: string): string {
   return `Delivered substantial ${subject} delivery${suffix} (${count} lines)`.replace(/\s{2,}/g, ' ').trim();
 }
 
+function stableHash(text: string): number {
+  // Deterministic, fast, stable across runtimes (no crypto).
+  let hash = 5381;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = ((hash << 5) + hash) ^ text.charCodeAt(i);
+  }
+  return Math.abs(hash);
+}
+
 function hasClearOutcomeOrIntent(text: string): boolean {
   const normalized = trimToText(text).toLowerCase();
   if (!normalized) return false;
@@ -135,6 +144,34 @@ function isGenericFillerBullet(text: string): boolean {
   if (/^experienced\s+\w+/.test(normalized) && normalized.length < 55) return true;
   if (/\bproven track record\b/.test(normalized)) return true;
   return false;
+}
+
+function deMechanicalizeIntentClause(text: string): string {
+  const normalized = trimToText(text);
+  if (!normalized) return '';
+  // Convert ", to <verb> ..." into a more natural "that <verb> ..." construction when safe.
+  // This is phrasing-only; it does not add new claims.
+  if (/, to\b/i.test(normalized)) {
+    return normalized.replace(/,\s*to\s+/i, ' that ').replace(/\s{2,}/g, ' ').trim();
+  }
+  return normalized;
+}
+
+function reduceAbstractTailLanguage(text: string): string {
+  const normalized = trimToText(text);
+  if (!normalized) return '';
+
+  // Replace generic, abstract tails with concrete operational language (no new claims).
+  // Only transforms phrasing; does not introduce metrics, timelines, or new scope.
+  return normalized
+    .replace(/\bimprove consistency\b/gi, 'standardize execution')
+    .replace(/\bimpro(?:ve|ved)\s+customer-facing execution\b/gi, 'tighten customer-facing workflows')
+    .replace(/\bstrengthen service reliability\b/gi, 'improve incident response execution')
+    .replace(/\bstrengthen reliability\b/gi, 'improve incident response execution')
+    .replace(/\bimprove execution\b/gi, 'improve operating cadence')
+    .replace(/\bimprove consistency across\b/gi, 'standardize execution across')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }
 
 export class BulletNarrativeRewriter {
@@ -183,18 +220,42 @@ export class BulletNarrativeRewriter {
       const hint = (() => {
         const role = `${trimToText(input.roleTitle)} ${trimToText(input.company)}`.toLowerCase();
         if (/\b(support|customer|service|incident|queue|sla)\b/.test(role)) {
-          return 'to maintain service quality and reduce execution friction';
+          const variants = [
+            'to strengthen service reliability and escalation discipline',
+            'to improve customer-facing execution and operating cadence',
+            'to reduce avoidable escalations and improve consistency',
+          ];
+          return variants[stableHash(`${role}:${text}`) % variants.length] ?? variants[0];
         }
         if (/\b(operations|ops|program|process|workflow)\b/.test(role)) {
-          return 'to improve operating clarity and follow-through';
+          const variants = [
+            'to improve operating clarity and follow-through',
+            'to tighten process execution and decision velocity',
+            'to create repeatable operating rhythms across teams',
+          ];
+          return variants[stableHash(`${role}:${text}`) % variants.length] ?? variants[0];
         }
         if (/\b(infrastructure|systems|devops|linux|platform|sre)\b/.test(role)) {
-          return 'to improve reliability and day-to-day stability';
+          const variants = [
+            'to improve reliability and day-to-day stability',
+            'to reduce operational toil and stabilize delivery',
+            'to improve incident prevention and recovery discipline',
+          ];
+          return variants[stableHash(`${role}:${text}`) % variants.length] ?? variants[0];
         }
-        return 'to improve clarity and follow-through';
+        const variants = [
+          'to improve clarity and follow-through',
+          'to improve execution consistency across stakeholders',
+          'to reduce friction and improve throughput',
+        ];
+        return variants[stableHash(`${role}:${text}`) % variants.length] ?? variants[0];
       })();
       text = `${trimToText(text).replace(/[.;:,\u2013\u2014-]+\s*$/g, '')}, ${hint}`;
     }
+
+    // Reduce mechanical ", to ..." constructions into more natural accomplishment phrasing.
+    text = deMechanicalizeIntentClause(text);
+    text = reduceAbstractTailLanguage(text);
 
     // Avoid injecting numbers when none existed.
     if (!originalHasDigits) {

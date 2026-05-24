@@ -3679,7 +3679,7 @@ describe('ResumeService contract', () => {
             .map((l) => l.replace(/^- /, '').trim())
             .filter(Boolean);
       // Treat "top bullets" as the recruiter-facing emphasis set, not the full supporting list.
-      const topBullets = topBulletsAll.slice(0, 4);
+      const topBullets = topBulletsAll.slice(0, 3);
 
       // Deterministic preview fixture: makes the authored text inspectable from one local command.
       // Run: `npm -w apps/api test -- resume.service.spec.ts -t GOLDEN_RESUME_PREVIEW`
@@ -3694,6 +3694,8 @@ describe('ResumeService contract', () => {
       );
       // eslint-disable-next-line no-console
       console.log('[GOLDEN_RESUME_PREVIEW][TOP_BULLETS]', topBullets);
+      // eslint-disable-next-line no-console
+      console.log('[GOLDEN_RESUME_PREVIEW][ALL_BULLETS]', topBulletsAll);
 
       // General bullet-quality rules (avoid repeated fallback tails / filler / malformed openings).
       const tails = topBullets
@@ -3704,6 +3706,16 @@ describe('ResumeService contract', () => {
         })
         .filter(Boolean);
       expect(new Set(tails).size).toBe(tails.length);
+      const commaToCount = topBullets.filter((b) => /,\s*to\b/i.test(String(b ?? ''))).length;
+      expect(commaToCount).toBeLessThanOrEqual(1);
+      const abstractTailCount = topBullets.filter((b) =>
+        /\b(improve consistency|strengthen (?:service )?reliability|improve customer-facing execution)\b/i.test(String(b ?? '')),
+      ).length;
+      expect(abstractTailCount).toBeLessThanOrEqual(1);
+      const concreteOpsNounCount = topBullets.filter((b) =>
+        /\b(playbooks?|handoffs?|dashboards?|reporting|operating cadence|incident response|escalations?)\b/i.test(String(b ?? '')),
+      ).length;
+      expect(concreteOpsNounCount).toBeGreaterThanOrEqual(2);
       expect(topBullets.join(' ').toLowerCase()).not.toMatch(/\bverified professional experience\b/);
       expect(topBullets.join(' ').toLowerCase()).not.toMatch(/^\s*enabled\s+route\b/m);
       expect(topBullets.join(' ').toLowerCase()).not.toMatch(
@@ -3712,11 +3724,17 @@ describe('ResumeService contract', () => {
 
       // Ensure top bullets contain at least three stronger ops/support accomplishment signals.
       const strongCount = topBullets.filter((b) =>
-        /\b(led|owned|built|standardized|improved|reduced|increased|incident|escalation|dashboards?|reporting|playbooks?|handoffs?|postmortems?|cross-functional)\b/i.test(
+        /\b(led|owned|drove|directed|established|operationalized|implemented|managed|built|standardized|improved|reduced|increased|incident|escalation|dashboards?|reporting|playbooks?|handoffs?|postmortems?|cross-functional)\b/i.test(
           String(b ?? ''),
         ),
       ).length;
       expect(strongCount).toBeGreaterThanOrEqual(3);
+      // Avoid promoting tactical "supported customers" fragments into the recruiter-facing top set.
+      const tacticalCustomerHandlingCount = topBullets.filter((b) =>
+        /^\s*(supported|helped|assisted)\b/i.test(String(b ?? '')) && /\b(customers?|subscription|renewal)\b/i.test(String(b ?? '')),
+      ).length;
+      expect(tacticalCustomerHandlingCount).toBe(0);
+      expect(topBullets.join(' ').toLowerCase()).not.toMatch(/\boperationalized\s+saas\s+subscription\s+customers\b/);
 
       // The job can be billing-heavy, but the generated resume must not invent a billing-ops specialization
       // beyond what is actually supported by repeated baseline evidence.
@@ -3734,6 +3752,20 @@ describe('ResumeService contract', () => {
       expect(resumeContent).not.toMatch(/\bvue 3\)\b/);
       expect(resumeSummary).not.toMatch(/\b(impact-driven|impact-oriented)\b/);
       expect(resumeSummary).not.toMatch(/\bbuilt around\b/);
+      expect(resumeSummary).not.toMatch(/\bfocus areas\b/);
+      expect(resumeSummary).not.toMatch(/\bfocused on\b/);
+      expect(resumeSummary).not.toMatch(/\bknown for\b/i);
+      expect(resumeSummary).not.toMatch(/\bleader leading\b/i);
+      expect(resumeSummary).toMatch(/\b(operating|operational|systems|cadence|execution)\b/);
+      expect(resumeSummary).not.toMatch(/\boperating scope\b/);
+      expect(resumeSummary).not.toMatch(/\bleader driving\b/);
+
+      // Avoid repetitive escalation/incident phrase pairing across multiple sentences.
+      const incidentCount = (resumeSummary.match(/\bincident\b/gi) ?? []).length;
+      const escalationCount = (resumeSummary.match(/\bescalat(?:ion|ions)\b/gi) ?? []).length;
+      // Allow a single mention of each; avoid repeated phrase-pairing across multiple sentences.
+      expect(incidentCount).toBeLessThanOrEqual(2);
+      expect(escalationCount).toBeLessThanOrEqual(2);
 
       const hits = (result as any)?.internal?.productionValidation?.contaminationHits ?? null;
       // Diagnostics are best-effort; when present, they must show no upstream billing-ops narrative.

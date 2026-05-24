@@ -41,7 +41,10 @@ describe('ExecutiveSummaryComposer', () => {
     expect(result.summary).toMatch(/\.$/);
     expect(countSentences(result.summary)).toBeLessThanOrEqual(3);
     expect(countWords(result.summary)).toBeLessThanOrEqual(55);
-    expect(result.summary).toMatch(/Focus areas:\s+/);
+    // Summary should read like natural senior positioning, not metadata labeling.
+    expect(result.summary).not.toMatch(/Focus areas:\s+/i);
+    expect(result.summary).not.toMatch(/\bKnown for\b/i);
+    expect(result.summary).not.toMatch(/\bleader leading\b/i);
     // Avoid keyword-stuffed comma inventories in the summary.
     expect((result.summary.match(/,/g) ?? []).length).toBeLessThanOrEqual(2);
   });

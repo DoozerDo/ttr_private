@@ -318,22 +318,42 @@ function ensureSummaryMinimum(summary: string, fallbackFromExperience: Array<{ r
   // Grounded fallback: construct 2–3 concrete sentences from verified experience headers + top bullets.
   // Avoid generic filler, stitched fragments, and domain invention.
   const roleIdentity = inferRoleIdentity(fallbackFromExperience as any);
+  const roleIdentitySentence = roleIdentity ? `${roleIdentity[0]!.toUpperCase()}${roleIdentity.slice(1)}` : roleIdentity;
   const top = fallbackFromExperience[0] ?? {};
   const topRole = top?.roleTitle ? trimToText(top.roleTitle) : '';
   const topCompany = top?.company ? trimToText(top.company) : '';
   const topBullets = Array.isArray(top?.bullets) ? (top.bullets as unknown[]).map(trimToText).filter(Boolean) : [];
-  const highlightBullets = topBullets.slice(0, 2);
+  const bulletsCorpus = topBullets.join(' ').toLowerCase();
+  const mentionsDashboardsOrReporting = /\b(dashboards?|reporting|csat|queue)\b/.test(bulletsCorpus);
+  const mentionsPlaybooks = /\b(playbooks?|runbooks?)\b/.test(bulletsCorpus);
+  const mentionsIncidentsOrEscalations = /\b(incident response|incident|incidents|escalation|escalations)\b/.test(bulletsCorpus);
+  const mentionsCrossFunctional = /\b(cross-functional|cross functional|handoffs?|partnered|coordinat)\b/.test(bulletsCorpus);
 
   const intro = topRole && topCompany
-    ? `${roleIdentity} with leadership experience as ${topRole} at ${topCompany}.`
-    : `${roleIdentity} with leadership experience across customer-facing operations.`;
+    ? `${roleIdentitySentence} with senior operating experience as ${topRole} at ${topCompany}.`
+    : `${roleIdentitySentence} with senior operating experience across customer-facing operations.`;
 
-  const highlights = highlightBullets.length
-    ? `Highlights include: ${highlightBullets.join(' ')}`.replace(/\.\./g, '.')
-    : '';
+  const support = (() => {
+    // Keep the summary human-readable: do not paste bullet text into the summary.
+    const rawLooksLikeGeneratorMetadata =
+      /\bknown for\b/i.test(raw) ||
+      /\bhighlights include\b/i.test(raw) ||
+      /\bleader\s+leading\b/i.test(raw) ||
+      (raw.match(/,/g) ?? []).length >= 2;
+    if (raw && !rawLooksLikeGeneratorMetadata) return raw;
+    if (mentionsIncidentsOrEscalations && mentionsPlaybooks && mentionsDashboardsOrReporting) {
+      return 'Builds the playbooks, reporting visibility, and operating cadence teams use to run escalations consistently.';
+    }
+    if (mentionsIncidentsOrEscalations && (mentionsPlaybooks || mentionsDashboardsOrReporting)) {
+      return 'Builds the operating cadence and visibility teams use to run escalations consistently.';
+    }
+    if (mentionsCrossFunctional && (mentionsPlaybooks || mentionsDashboardsOrReporting)) {
+      return 'Builds the operating cadence and cross-functional rhythm teams use to execute consistently.';
+    }
+    return 'Builds repeatable operating cadence across teams to keep execution predictable and disciplined.';
+  })();
 
-  const second = highlights || `${raw || ''}`.trim();
-  const sentences = [intro, second].map(trimToText).filter(Boolean);
+  const sentences = [intro, support].map(trimToText).filter(Boolean);
   return sentences.join(' ').trim();
 }
 
