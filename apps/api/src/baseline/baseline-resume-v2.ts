@@ -16,6 +16,18 @@ export function buildValidatedResumeV2FromParsedBaseline(
 ): NormalizedResumeDocument {
   const shouldLog = process.env.RESUME_V2_INGEST_DEBUG === 'true';
   const baselineId = String(parsedBaseline['baseline_id'] ?? '');
+  let lastParsedExperienceCount: number | null = null;
+  let lastMappingStats:
+    | {
+        selectedEntries: number;
+        mappedEntries: number;
+        droppedEmptyEntries: number;
+        entriesMissingHeader: number;
+        entriesMissingDetails: number;
+        survivingBlocks: number;
+        rejectionReasons: Array<{ reason: string; count: number; sampleKeys: string[] }>;
+      }
+    | null = null;
   if (shouldLog) {
     try {
       // eslint-disable-next-line no-console
@@ -89,6 +101,7 @@ export function buildValidatedResumeV2FromParsedBaseline(
     | Array<Record<string, unknown>>
     | undefined;
   if (!sections[0].content.trim() && Array.isArray(experience) && experience.length) {
+    lastParsedExperienceCount = experience.length;
     const rejectionReasons = new Map<string, { count: number; sampleKeys: string[] }>();
     const recordRejection = (reason: string, entry: unknown) => {
       if (!shouldLog) return;
@@ -108,6 +121,15 @@ export function buildValidatedResumeV2FromParsedBaseline(
     const readString = (...candidates: unknown[]) => {
       for (const value of candidates) {
         if (typeof value === 'string' && value.trim()) return value.trim();
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+          const obj = value as Record<string, unknown>;
+          const nested =
+            (typeof obj['name'] === 'string' && obj['name']) ||
+            (typeof obj['value'] === 'string' && obj['value']) ||
+            (typeof obj['text'] === 'string' && obj['text']) ||
+            '';
+          if (nested && nested.trim()) return nested.trim();
+        }
       }
       return '';
     };
@@ -180,42 +202,30 @@ export function buildValidatedResumeV2FromParsedBaseline(
           recordRejection('non_object_entry', entry);
           return '';
         }
-        const company =
-          (typeof entry['company_name'] === 'string' && entry['company_name']) ||
-          (typeof entry['companyName'] === 'string' && entry['companyName']) ||
-          (typeof entry['company'] === 'string' && entry['company']) ||
-          (typeof entry['employer'] === 'string' && entry['employer']) ||
-          (typeof entry['organization'] === 'string' && entry['organization']) ||
-          (typeof entry['org'] === 'string' && entry['org']) ||
-          '';
-        const role =
-          (typeof entry['role_title'] === 'string' && entry['role_title']) ||
-          (typeof entry['roleTitle'] === 'string' && entry['roleTitle']) ||
-          (typeof entry['title'] === 'string' && entry['title']) ||
-          (typeof entry['position'] === 'string' && entry['position']) ||
-          (typeof entry['position_title'] === 'string' && entry['position_title']) ||
-          (typeof entry['positionTitle'] === 'string' && entry['positionTitle']) ||
-          (typeof entry['job_title'] === 'string' && entry['job_title']) ||
-          (typeof entry['jobTitle'] === 'string' && entry['jobTitle']) ||
-          (typeof entry['role'] === 'string' && entry['role']) ||
-          '';
-        const start =
-          (typeof entry['start_date'] === 'string' && entry['start_date']) ||
-          (typeof entry['startDate'] === 'string' && entry['startDate']) ||
-          (typeof entry['start'] === 'string' && entry['start']) ||
-          (typeof entry['from'] === 'string' && entry['from']) ||
-          '';
-        const end =
-          (typeof entry['end_date'] === 'string' && entry['end_date']) ||
-          (typeof entry['endDate'] === 'string' && entry['endDate']) ||
-          (typeof entry['end'] === 'string' && entry['end']) ||
-          (typeof entry['to'] === 'string' && entry['to']) ||
-          'Present';
-        const scopeSummary =
-          (typeof entry['scope_summary'] === 'string' && entry['scope_summary']) ||
-          (typeof entry['scopeSummary'] === 'string' && entry['scopeSummary']) ||
-          (typeof entry['scope'] === 'string' && entry['scope']) ||
-          '';
+        const company = readString(
+          entry['company_name'],
+          entry['companyName'],
+          entry['company'],
+          (entry as any)?.company?.name,
+          entry['employer'],
+          entry['organization'],
+          entry['organization_name'],
+          entry['org'],
+        );
+        const role = readString(
+          entry['role_title'],
+          entry['roleTitle'],
+          entry['title'],
+          entry['position'],
+          entry['position_title'],
+          entry['positionTitle'],
+          entry['job_title'],
+          entry['jobTitle'],
+          entry['role'],
+        );
+        const start = readString(entry['start_date'], entry['startDate'], entry['start'], entry['from']);
+        const end = readString(entry['end_date'], entry['endDate'], entry['end'], entry['to']) || 'Present';
+        const scopeSummary = readString(entry['scope_summary'], entry['scopeSummary'], entry['scope']);
 
         // `structuredBaselineExtractor.parseExperienceHeaderLine` expects: "Company | Role Title | Dates".
         // This ordering matters; reversing it can cause experience entries to be rejected as unsafe/not-company-like.
@@ -301,6 +311,20 @@ export function buildValidatedResumeV2FromParsedBaseline(
       }
     }
 
+    lastMappingStats = {
+      selectedEntries: experience.length,
+      mappedEntries: mappedCount,
+      droppedEmptyEntries: droppedEmptyCount,
+      entriesMissingHeader: rejectedMissingHeaderCount,
+      entriesMissingDetails: rejectedMissingDetailsCount,
+      survivingBlocks: blocks.length,
+      rejectionReasons: Array.from(rejectionReasons.entries()).map(([reason, payload]) => ({
+        reason,
+        count: payload.count,
+        sampleKeys: payload.sampleKeys,
+      })),
+    };
+
     sections[0].content = blocks.join('\n\n');
     if (shouldLog) {
       // eslint-disable-next-line no-console
@@ -337,6 +361,10 @@ export function buildValidatedResumeV2FromParsedBaseline(
           missing: ['experience'],
           hint:
             'No experience entries survived mapping. This often means the parsed baseline schema uses different field names for company/title/bullets, or the resume parser returned empty work history.',
+          diagnostics: {
+            parsedExperienceCount: lastParsedExperienceCount,
+            mapping: lastMappingStats,
+          },
         },
       },
     });

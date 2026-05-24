@@ -50,6 +50,27 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
     expect(validateNormalizedResumeDocument(resumeV2 as any).valid).toBe(true);
   });
 
+  it('accepts nested field shapes (company.name, roleTitle.value) and does not drop usable experience entries', () => {
+    const parsedBaseline: Record<string, unknown> = {
+      baseline_id: 'baseline-nested-1',
+      identity: { full_name: 'Nested Person', location: 'Nested City' },
+      experience: [
+        {
+          company: { name: 'NestedCo' },
+          roleTitle: { value: 'Customer Operations Manager' },
+          startDate: '2021-01',
+          endDate: '2024-02',
+          highlights: ['Owned escalation process', 'Built dashboards for queue health'],
+        },
+      ],
+    };
+
+    const resumeV2 = buildValidatedResumeV2FromParsedBaseline(parsedBaseline);
+    expect(Array.isArray((resumeV2 as any).experience)).toBe(true);
+    expect((resumeV2 as any).experience.length).toBeGreaterThan(0);
+    expect(validateNormalizedResumeDocument(resumeV2 as any).valid).toBe(true);
+  });
+
   it('does not fail with baseline_resume_v2_ingestion_failed when baseline sections contain usable structured experience identities even if parsed experience headers are malformed', () => {
     const parsedBaseline: Record<string, unknown> = {
       baseline_id: 'baseline-prod-1',
