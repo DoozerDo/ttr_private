@@ -5596,8 +5596,12 @@ export default function StudioPage() {
     if (resumePresenter.status === "blocked") return "blocked_by_compliance";
     if (resumePersistedArtifactSyncPending && !hasResumeArtifact) return "syncing_persisted_artifact";
     if (needsMoreBaselineDetail) return "needs_more_baseline_detail";
-    if (resumeState.error) return "failed_due_to_system_error";
-    if (resumeState.artifactFailure && !hasRenderableResumeContent) return "failed_due_to_system_error";
+    // A baseline-ready role must never show "generation constrained" while generation is allowed.
+    // Surface system errors only when generation is not currently allowed by the canonical readiness resolver.
+    if (!canGenerateDocuments) {
+      if (resumeState.error) return "failed_due_to_system_error";
+      if (resumeState.artifactFailure && !hasRenderableResumeContent) return "failed_due_to_system_error";
+    }
     if (resumePresenter.status === "success" && hasPersistedResumeTruth) {
       // Never claim success if we cannot render/export a usable preview (e.g. missing normalized model).
       // Treat any hydrated renderable payload as a "draft" for status purposes, even if existence flags lag.

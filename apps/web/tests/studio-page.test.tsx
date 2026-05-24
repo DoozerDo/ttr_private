@@ -2287,6 +2287,63 @@ describe("Studio page UX", () => {
     expect(screen.queryByTestId("studio-unlock-generation-confirmation")).toBeNull();
   });
 
+  it("does not show a constrained resume state when readiness allows generation (prevents ready vs constrained contradiction)", async () => {
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(createResponse(createFitAssessment(84)));
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "MISSING",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            resume: { status: "MISSING", failureCode: null, failureMessage: null },
+            coverLetter: { status: "MISSING", failureCode: null, failureMessage: null },
+          }),
+        );
+      }
+      if (url.includes("/api/resume") && !url.includes("/readiness") && !url.includes("/export") && init?.method === "POST") {
+        return Promise.resolve(createResponse({ message: "server_error" }, 500));
+      }
+      return resolveStudioGenerationFallback(input);
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+    await openStudioWorkspaceFromReadyShell();
+
+    // Role is generation-ready; the resume panel must not flip into "constrained" because of a transient system error.
+    expect(screen.queryByText(/generation is currently constrained/i)).toBeNull();
+
+    fireEvent.click(await screen.findByTestId("studio-generate-resume-button", {}, { timeout: 5000 }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/resume"),
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/generation is currently constrained/i)).toBeNull();
+    });
+
+    const resumeAction =
+      screen.queryByTestId("studio-generate-resume-button") ??
+      screen.queryByTestId("studio-resume-regenerate-cta") ??
+      screen.queryByRole("button", { name: /regenerate resume|retry/i });
+    expect(resumeAction).toBeTruthy();
+  });
+
   it("lets the user manually generate cover letter artifacts from the Studio workspace when score >= 80", async () => {
     const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
