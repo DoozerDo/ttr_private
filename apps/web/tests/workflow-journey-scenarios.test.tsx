@@ -99,6 +99,11 @@ type ScenarioServerState = {
     status: ReadinessStatus;
     blocked: boolean;
   };
+  resumeV2?: {
+    hasResumeV2?: boolean;
+    usableExperienceCount?: number;
+    errors?: Array<{ code: string; message: string }>;
+  };
   gapAnalysis?: {
     unverifiedRequirements?: string[];
   };
@@ -280,6 +285,7 @@ class SyntheticWorkflowServer {
       baselineVersionHash: "hash-1",
       jobFingerprint: "job-fingerprint-1",
       generationContractVersion: "studio-artifacts-v1",
+      errors: Array.isArray(this.state.resumeV2?.errors) ? this.state.resumeV2?.errors : [],
       resume: {
         status: this.state.artifacts.resume.status,
         responseBody: resumeResponseBody,
@@ -305,6 +311,13 @@ class SyntheticWorkflowServer {
         failureCode: coverFailure?.category ?? null,
         failureMessage: coverFailure?.explanation ?? null,
         metadata: { auditId: "audit-1" },
+      },
+      diagnostics: {
+        resumeV2Readiness: {
+          hasResumeV2: typeof this.state.resumeV2?.hasResumeV2 === "boolean" ? this.state.resumeV2?.hasResumeV2 : true,
+          usableExperienceCount:
+            typeof this.state.resumeV2?.usableExperienceCount === "number" ? this.state.resumeV2?.usableExperienceCount : 1,
+        },
       },
     };
   }
@@ -590,6 +603,7 @@ describe("workflow journey scenarios (synthetic)", () => {
       jobId: "job-1",
       score: 84,
       readiness: { status: "ready", blocked: false },
+      resumeV2: { hasResumeV2: true, usableExperienceCount: 1, errors: [] },
       artifacts: {
         pairStatus: "MISSING",
         resume: { status: "MISSING" },
@@ -617,6 +631,10 @@ describe("workflow journey scenarios (synthetic)", () => {
     });
     expectSinglePrimaryStudioAuthority();
     expectAuthorityPanel("studio-workflow-authority", "generation_ready", "ready");
+    expect(
+      screen.queryByText(/Baseline ingestion did not produce any usable experience entries for Resume V2/i),
+    ).toBeNull();
+    expect(screen.queryByText(/baseline_resume_v2_/i)).toBeNull();
 
     // Hold generation so we can assert activity + in-progress state.
     server.defer("resume_generate");
@@ -636,6 +654,63 @@ describe("workflow journey scenarios (synthetic)", () => {
       expect(screen.getByTestId("studio-workflow-authority")).toBeInTheDocument();
     });
     expectAuthorityPanel("studio-workflow-authority", "generation_in_progress");
+    cleanup();
+  });
+
+  it("Studio blocks generation when Resume V2 usable experience is missing and never shows Ready-to-generate with baseline_resume_v2_* blocker", async () => {
+    const { mount, mountStudio, cleanup } = mountWithCleanup();
+    const server = new SyntheticWorkflowServer({
+      analysisId: "analysis-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      jobId: "job-1",
+      score: 84,
+      readiness: { status: "ready", blocked: false },
+      resumeV2: {
+        hasResumeV2: true,
+        usableExperienceCount: 0,
+        errors: [
+          {
+            code: "baseline_resume_v2_ingestion_failed",
+            message: "Baseline ingestion did not produce any usable experience entries for Resume V2.",
+          },
+        ],
+      },
+      artifacts: {
+        pairStatus: "MISSING",
+        resume: { status: "MISSING" },
+        coverLetter: { status: "MISSING" },
+        staleDraftExists: false,
+      },
+      generationPlan: { resume: "success", coverLetter: "success" },
+    });
+    setFetchImplementation(server.handleFetch as unknown as typeof fetch);
+
+    overrideSearchParams({ analysisId: "analysis-1" });
+    mount(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(mockRouterReplace).toHaveBeenCalled();
+    });
+    const toStudio = String(mockRouterReplace.mock.calls.at(-1)?.[0] ?? "");
+    overrideSearchParams(parseQueryToObject(toStudio));
+    mountStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-workflow-authority")).toBeInTheDocument();
+    });
+
+    // Contract: a ResumeV2 baseline blocker must not render alongside generation-ready CTAs.
+    await waitFor(() => {
+      expect(screen.queryByText(/^Ready to generate$/i)).toBeNull();
+      expect(screen.queryByText(/Ready to generate resume/i)).toBeNull();
+      expect(screen.queryByText(/Generate resume and cover letter/i)).toBeNull();
+    });
+
+    // No per-artifact generation CTAs should be present.
+    expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cover Letter" })).toBeNull();
+
     cleanup();
   });
 

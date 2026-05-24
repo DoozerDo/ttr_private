@@ -3282,6 +3282,37 @@ export default function StudioPage() {
   const productReadiness = productDecisionState.productReadiness; 
   const qualifiedForGeneration = shouldGenerateDocuments(analysisScore); 
 
+  const resumeV2Authority = useMemo(() => {
+    const diagnostics = (studioArtifactsPayload as any)?.diagnostics ?? null;
+    const readiness = diagnostics && typeof diagnostics === "object" ? (diagnostics as any).resumeV2Readiness ?? null : null;
+    const usableExperienceCountRaw =
+      readiness && typeof readiness === "object" ? (readiness as any).usableExperienceCount : null;
+    const usableExperienceCount =
+      typeof usableExperienceCountRaw === "number" && Number.isFinite(usableExperienceCountRaw)
+        ? usableExperienceCountRaw
+        : null;
+    const hasResumeV2Raw = readiness && typeof readiness === "object" ? (readiness as any).hasResumeV2 : null;
+    const hasResumeV2 = typeof hasResumeV2Raw === "boolean" ? hasResumeV2Raw : null;
+
+    const errorCodes = Array.isArray((studioArtifactsPayload as any)?.errors)
+      ? ((studioArtifactsPayload as any).errors as any[]).map((e) => String((e as any)?.code ?? "")).filter(Boolean)
+      : [];
+    const hasResumeV2BlockingGuidance = errorCodes.some((code) => code.startsWith("baseline_resume_v2_"));
+
+    // Single authoritative rule: ResumeV2 unusable experience blocks generation UI (no mixed "ready" states).
+    const blocksGeneration =
+      hasResumeV2BlockingGuidance ||
+      (typeof usableExperienceCount === "number" && usableExperienceCount <= 0) ||
+      (hasResumeV2 === false && hasResumeV2BlockingGuidance);
+
+    return {
+      hasResumeV2,
+      usableExperienceCount,
+      hasResumeV2BlockingGuidance,
+      blocksGeneration,
+    };
+  }, [studioArtifactsPayload]);
+
   const resumeV2FallbackEvaluation = useMemo(() => {
     const codes = new Set<string>();
 
@@ -3326,7 +3357,9 @@ export default function StudioPage() {
 
   const resumeV2FallbackAttemptable = resumeV2FallbackEvaluation.attemptable;
 
-  const studioReadinessBlocksGeneration = Boolean(activeGenerationReadiness.blocked && !resumeV2FallbackAttemptable);
+  const studioReadinessBlocksGeneration = Boolean(
+    resumeV2Authority.blocksGeneration || (activeGenerationReadiness.blocked && !resumeV2FallbackAttemptable),
+  );
   const studioDraftMode = 
     resolveDocumentGenerationMode(analysisScore) === "draft" && isFromUnlock && !hasGeneratedOnce; 
   const improveBaselineHref = useMemo(() => {
@@ -3481,6 +3514,9 @@ export default function StudioPage() {
             : "") || "";
     const baselineExists = Boolean(resolvedBaselineId.trim()) && Boolean(resolvedBaselineVersionId.trim());
     const score = typeof analysisScore === "number" ? analysisScore : null;
+    // ResumeV2 authority: if ResumeV2 reports zero usable experience entries, Studio must hard-block generation
+    // and avoid rendering generation-ready CTAs (no contradictory states).
+    if (resumeV2Authority.blocksGeneration) return false;
     return baselineExists && typeof score === "number" && score >= 80;
   }, [
     analysisScore,
@@ -3490,6 +3526,7 @@ export default function StudioPage() {
     requestedBaselineVersionId,
     selectedBaselineId,
     selectedBaselineVersionId,
+    resumeV2Authority.blocksGeneration,
   ]);
 
   const canExportResume = artifactContract.resumeExportAvailable;
@@ -3704,11 +3741,30 @@ export default function StudioPage() {
 
   // Canonical workflow authority (additive layer): owns top-level readiness/failure messaging decisions.
   const resolvedScoreForContract = analysisScore;
+  const workflowAuthorityReadiness = useMemo(() => {
+    if (!resumeV2Authority.blocksGeneration) return activeGenerationReadiness;
+    const errors = Array.isArray((studioArtifactsPayload as any)?.errors) ? ((studioArtifactsPayload as any).errors as any[]) : [];
+    const first = errors.find((e) => String((e as any)?.code ?? "").startsWith("baseline_resume_v2_")) ?? null;
+    const code = String((first as any)?.code ?? "baseline_resume_v2_invalid");
+    const message = String(
+      (first as any)?.message ?? "Baseline ingestion did not produce any usable experience entries for Resume V2.",
+    );
+    return {
+      ...activeGenerationReadiness,
+      status: "blocked",
+      blocked: true,
+      reasonCodes: [code],
+      reasons: [{ code, message }],
+      verificationIssues: [{ code, message }],
+      badgeLabel: "BLOCKED",
+      summary: message,
+    } as any;
+  }, [activeGenerationReadiness, resumeV2Authority.blocksGeneration, studioArtifactsPayload]);
   const workflowAuthority = useMemo(
     () =>
       resolveWorkflowAuthority({
         score: resolvedScoreForContract,
-        generationReadiness: activeGenerationReadiness,
+        generationReadiness: workflowAuthorityReadiness,
         resumeState: {
           hasOutput: hasResumeArtifact,
           failed: Boolean(resumeState.error || resumeState.artifactFailure),
@@ -3722,7 +3778,7 @@ export default function StudioPage() {
         isHydrating: analysisLoading,
       }),
     [
-      activeGenerationReadiness,
+      workflowAuthorityReadiness,
       analysisLoading,
       coverState.artifactFailure,
       coverState.error,
@@ -5592,6 +5648,7 @@ export default function StudioPage() {
     const needsMoreBaselineDetail = isInsufficientBaselineEvidenceMessage(resumeState.error);
     const hasPersistedResumeTruth = hasResumeArtifact || Boolean(resumeState.response) || hasRenderableResumeContent;
     if (resumeGenerating) return "generating";
+    if (resumeV2Authority.blocksGeneration) return "needs_more_baseline_detail";
     if (!canGenerateDocuments && activeGenerationReadiness.blocked) return "blocked_by_compliance";
     if (resumePresenter.status === "blocked") return "blocked_by_compliance";
     if (resumePersistedArtifactSyncPending && !hasResumeArtifact) return "syncing_persisted_artifact";
@@ -5617,6 +5674,7 @@ export default function StudioPage() {
     hasRenderableResumeContent,
     resumePersistedArtifactSyncPending,
     resumeGenerating,
+    resumeV2Authority.blocksGeneration,
     resumePresenter.status,
     resumeState.error,
     resumeState.artifactFailure,
@@ -5627,6 +5685,7 @@ export default function StudioPage() {
 
   const coverCardStatus: StudioCardStatus = useMemo(() => {
     if (coverGenerating) return "generating";
+    if (resumeV2Authority.blocksGeneration) return "not_generated_yet";
     if (!canGenerateDocuments && activeGenerationReadiness.blocked) return "blocked_by_compliance";
     if (coverLetterComplianceBlocked || coverPresenter.status === "blocked") {
       return "blocked_by_compliance";
@@ -5649,6 +5708,7 @@ export default function StudioPage() {
     hasCoverLetterArtifact,
     coverPersistedArtifactSyncPending,
     coverQualityPass,
+    resumeV2Authority.blocksGeneration,
   ]);
 
   function buildCoverLetterPayload(oneTap: boolean): CoverLetterPayload {
