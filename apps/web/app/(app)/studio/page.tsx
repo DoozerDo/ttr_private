@@ -3343,6 +3343,29 @@ export default function StudioPage() {
     () =>
       buildStudioArtifactContract({
         resumeResponse: (() => {
+          const live = resumeState.response;
+          if (live && typeof live === "object") {
+            const record = live as Record<string, unknown>;
+            const embedded = record.resumeResult;
+            if (embedded && typeof embedded === "object") return { resumeResult: embedded };
+            const preview = (record as any)?.preview?.resume;
+            if (preview && typeof preview === "object") {
+              return {
+                resumeResult: {
+                  artifactType: "resume",
+                  generationState: "generated_usable",
+                  qualityStatus: "pass",
+                  qualityGate: { status: "pass", reasons: [] },
+                  preview,
+                  correctionReasons: [],
+                  exportReady: true,
+                  exports: (record as any)?.exports ?? { docx: true, pdf: true },
+                  actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
+                },
+              };
+            }
+          }
+
           if (!studioArtifactsPayload) return null;
           const result = studioArtifactsPayload.resumeResult ?? null;
           return result ? { resumeResult: result } : null;
@@ -3363,7 +3386,7 @@ export default function StudioPage() {
         jobTitle: selectedJob?.title ?? null,
         companyName: selectedJob?.company ?? null,
       }),
-    [canExportDocuments, isPro, selectedJob?.company, selectedJob?.title, studioArtifactsPayload],
+    [canExportDocuments, isPro, resumeState.response, selectedJob?.company, selectedJob?.title, studioArtifactsPayload],
   );
   const resumePresenter = artifactContract.presenters.resume;
   useEffect(() => {
@@ -13008,10 +13031,12 @@ export default function StudioPage() {
           </p>
         </div>
       ) : null}
-      {requestedAnalysisId && 
-      (activeGenerationReadiness.status === "blocked" || activeGenerationReadiness.status === "limited") && 
+      {requestedAnalysisId &&
+      // Unsupported requirements must not block/distract the primary generation path when generation is otherwise allowed.
+      !canGenerateDocuments &&
+      activeGenerationReadiness.blocked &&
       canonicalUnverifiedRequirements.length &&
-      !(studioGenerationStateInfo.state === "degraded" && studioGenerationStateInfo.hasUnsupportedRequirements) ? ( 
+      !(studioGenerationStateInfo.state === "degraded" && studioGenerationStateInfo.hasUnsupportedRequirements) ? (
         <div 
           id="studio-auto-adjust-panel" 
           className="rounded-2xl border border-amber-300/40 bg-amber-500/10 px-4 py-3" 

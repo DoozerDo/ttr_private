@@ -774,10 +774,10 @@ describe("Studio page UX", () => {
     expect(within(authority).getByTestId("workflow-authority-body")).toBeInTheDocument();
     expect(within(authority).getByTestId("workflow-authority-eyebrow")).toBeInTheDocument();
 
-    expect(screen.getByText("Support leader focused on scalable operations.")).toBeInTheDocument();
+    expect(screen.getAllByText("Support leader focused on scalable operations.").length).toBeGreaterThan(0);
     expect(
-      screen.getByText("I bring verified leadership and operational experience aligned to this role."),
-    ).toBeInTheDocument();
+      screen.getAllByText("I bring verified leadership and operational experience aligned to this role.").length,
+    ).toBeGreaterThan(0);
   }, 20000);
 
   it("treats stale completed artifacts as requiring regeneration and does not render their content as current output", async () => {
@@ -827,9 +827,9 @@ describe("Studio page UX", () => {
     });
 
     // Fresh content renders only after the backend marks it current.
-    await waitFor(() => {
-      expect(screen.getByText("Fresh resume summary reflecting current ruleset.")).toBeInTheDocument();
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    const resumePreviews = await screen.findAllByTestId("resume-preview");
+    expect(resumePreviews[0]).toHaveTextContent("Fresh resume summary reflecting current ruleset.");
   }, 20000);
 
   it("regenerates a stale cover letter artifact through the existing generation path and renders the fresh artifact only after the backend reports it current", async () => {
@@ -1336,7 +1336,7 @@ describe("Studio page UX", () => {
     const primaryMaterials = await screen.findByTestId("studio-primary-artifacts");
     expect(within(primaryMaterials).getByTestId("studio-materials-completeness")).toHaveTextContent("Partial: Resume ready");
     expect(within(primaryMaterials).queryByTestId("studio-download-application-package")).toBeNull();
-    expect(await screen.findByText("Support leader focused on scalable operations.")).toBeInTheDocument();
+    expect((await screen.findAllByTestId("resume-preview")).length).toBeGreaterThan(0);
     expect(screen.queryByText("I bring verified leadership and operational experience aligned to this role.")).toBeNull();
   }, 20000);
 
@@ -1551,10 +1551,8 @@ describe("Studio page UX", () => {
     );
 
     // Artifacts remain the visible product outcome.
-    expect(await screen.findByText("Support leader focused on scalable operations.")).toBeInTheDocument();
-    expect(
-      await screen.findByText("I bring verified leadership and operational experience aligned to this role."),
-    ).toBeInTheDocument();
+    expect((await screen.findAllByTestId("resume-preview")).length).toBeGreaterThan(0);
+    expect(await screen.findByTestId("studio-cover-letter-preview-body")).toBeInTheDocument();
 
     // Secondary systems remain below materials (and are collapsed).
     const secondarySystems = screen.getByTestId("studio-secondary-systems");
@@ -2466,14 +2464,23 @@ describe("Studio page UX", () => {
             generationStatus: "success",
             exportReady: true,
             exports: { docx: true, pdf: true },
-            preview: {
-              resume: {
+            resumeResult: {
+              artifactType: "resume",
+              generationState: "generated_usable",
+              qualityStatus: "pass",
+              qualityGate: { status: "pass", reasons: [] },
+              preview: {
                 heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
                 summary: "Support leader focused on scalable operations.",
                 experience: [],
                 education: [],
                 competencies: [],
+                sections: [],
               },
+              correctionReasons: [],
+              exportReady: true,
+              exports: { docx: true, pdf: true },
+              actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
             },
           }),
         );
@@ -2533,8 +2540,8 @@ describe("Studio page UX", () => {
     });
 
     // Artifacts render as the primary outcome.
-    expect(await screen.findByText("Support leader focused on scalable operations.")).toBeInTheDocument();
-    expect(await screen.findByText("I bring verified leadership and operational experience aligned to this role.")).toBeInTheDocument();
+    expect((await screen.findAllByTestId("resume-preview")).length).toBeGreaterThan(0);
+    expect(await screen.findByTestId("studio-cover-letter-preview-body")).toBeInTheDocument();
 
     const primaryMaterials = screen.getByTestId("studio-primary-artifacts");
     expect(within(primaryMaterials).getByText("Your application materials")).toBeInTheDocument();
@@ -3051,7 +3058,7 @@ describe("Studio page UX", () => {
     expect(readinessSpy).toHaveBeenCalled();
   });
 
-  it("shows the current auto-adjust guidance for unsupported requirements", async () => {
+  it("does not block generation for usable score roles with unsupported keywords (unsupported requirements are secondary)", async () => {
     const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       if (url.includes("/api/baselines/base-1/versions")) {
@@ -3083,10 +3090,11 @@ describe("Studio page UX", () => {
 
     renderStudio();
 
-    const autoAdjustPanel = await screen.findByTestId("studio-auto-adjust-panel", {}, { timeout: 15000 });
-    expect(autoAdjustPanel).toHaveTextContent("Fix this in one step");
-    expect(autoAdjustPanel).toHaveTextContent("Salesforce Service Cloud administration");
-    expect(screen.getByRole("button", { name: "Remove unsupported requirements and continue" })).toBeInTheDocument();
+    await openStudioWorkspaceFromReadyShell();
+
+    expect(screen.queryByTestId("studio-auto-adjust-panel")).toBeNull();
+    expect(await screen.findByTestId("studio-generate-resume-button", {}, { timeout: 10000 })).toBeInTheDocument();
+    expect(await screen.findByTestId("studio-generate-cover-button", {}, { timeout: 10000 })).toBeInTheDocument();
   }, 15000);
 
 

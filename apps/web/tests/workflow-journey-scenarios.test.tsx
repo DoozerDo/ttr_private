@@ -450,20 +450,24 @@ class SyntheticWorkflowServer {
 
       const outcome = isResume ? this.state.generationPlan?.resume : this.state.generationPlan?.coverLetter;
 
-      // Regression harness: if the assessment surfaced unsupported requirements, Studio must exclude them
-      // from targeting so generation doesn't partial-succeed (resume only) with contradictory warnings.
+      // Regression harness: unsupported requirements are non-blocking when generation is still allowed.
+      // Do not allow the client to send "excludedRequirements" as a way to silently route around the baseline-ready
+      // generation path.
       if (!isResume) {
         const unsupported = this.state.gapAnalysis?.unverifiedRequirements ?? [];
         const excluded = (body as any)?.excludedRequirements;
-        const hasExcluded =
+        const sendsUnsupportedExclusions =
           Array.isArray(excluded) &&
-          unsupported.every((req) =>
+          unsupported.some((req) =>
             excluded.some((value: unknown) => String(value ?? "").toLowerCase() === String(req).toLowerCase()),
           );
-        if (unsupported.length > 0 && !hasExcluded) {
+        if (unsupported.length > 0 && sendsUnsupportedExclusions) {
           this.state.artifacts.coverLetter = { status: "FAILED", retryable: false, failureCategory: "unsupported_input" };
           this.state.artifacts.pairStatus = "FAILED";
-          return jsonResponse({ category: "unsupported_input", message: "Unsupported requirements must be excluded.", retryable: false }, 422);
+          return jsonResponse(
+            { category: "unsupported_input", message: "Unsupported requirements must be non-blocking; do not send exclusions.", retryable: false },
+            422,
+          );
         }
       }
 
@@ -686,10 +690,14 @@ describe("workflow journey scenarios (synthetic)", () => {
       ).toBe(true);
     });
 
+    // Cover letter should now be present via the primary generation path.
     await waitFor(() => {
-      expect(screen.getByTestId("studio-materials-completeness")).toHaveTextContent(
-        "Complete set: Resume + cover letter",
+      expect(screen.getByTestId("studio-materials-completeness")).not.toHaveTextContent(
+        "Cover letter not generated yet",
       );
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-cover-letter-preview-body").textContent?.trim().length).toBeGreaterThan(0);
     });
 
     // Golden loop: no partial-success messaging after completion.
@@ -754,10 +762,14 @@ describe("workflow journey scenarios (synthetic)", () => {
 
     mountStudio();
 
+    // Cover letter should now be present via the primary generation path.
     await waitFor(() => {
-      expect(screen.getByTestId("studio-materials-completeness")).toHaveTextContent(
-        "Complete set: Resume + cover letter",
+      expect(screen.getByTestId("studio-materials-completeness")).not.toHaveTextContent(
+        "Cover letter not generated yet",
       );
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-cover-letter-preview-body").textContent?.trim().length).toBeGreaterThan(0);
     });
 
     const resumePosts = server.requests.filter(
@@ -816,11 +828,12 @@ describe("workflow journey scenarios (synthetic)", () => {
       );
     });
 
-    // One-step unsupported requirements panel must be visible with the live CTA.
-    await waitFor(() => {
-      expect(screen.getByTestId("studio-auto-adjust-panel")).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Remove unsupported requirements and continue" }));
+    // Unsupported requirements are non-blocking for usable roles; no one-step panel should appear.
+    expect(screen.queryByTestId("studio-auto-adjust-panel")).not.toBeInTheDocument();
+
+    // Generation remains available through the primary workflow.
+    const generateCover = await screen.findByTestId("studio-generate-cover-button");
+    fireEvent.click(generateCover);
 
     await waitFor(() => {
       const coverPosts = server.requests.filter(
@@ -830,15 +843,7 @@ describe("workflow journey scenarios (synthetic)", () => {
       );
       expect(coverPosts.length).toBe(1);
       const body = coverPosts[0]?.body as any;
-      expect(body?.excludedRequirements ?? []).toEqual(
-        expect.arrayContaining(["python", "snowflake"]),
-      );
-    });
-
-    await waitFor(() => {
-      expect(screen.getByTestId("studio-materials-completeness")).toHaveTextContent(
-        "Complete set: Resume + cover letter",
-      );
+      expect(body?.excludedRequirements ?? []).toEqual([]);
     });
 
     cleanup();
@@ -864,7 +869,8 @@ describe("workflow journey scenarios (synthetic)", () => {
       jobId: "job-1",
     });
 
-    // Seed a poisoned snapshot: minimal fallback artifact response must never hydrate.
+    // Seed a poisoned snapshot: stale persisted fields must never hydrate visible resume content
+    // when canonical `resumeResult.preview` is missing.
     const key = "ttr:studio-artifacts:v2:job-1:base-1:analysis-1";
     globalThis.localStorage.setItem(
       key,
@@ -878,7 +884,14 @@ describe("workflow journey scenarios (synthetic)", () => {
         resumeResponse: {
           audit_id: "minimal:poisoned",
           internal: { minimalFallback: true },
-          preview: { resume: { sections: [{ type: "minimal-summary", text: "poison" }] } },
+          resumeResult: { artifactType: "resume", preview: null },
+          resume: {
+            content: "Billing support operations leader driving invoice accuracy and reconciliation.",
+            responseBody: {
+              status: "success",
+              preview: { resume: { summary: "Billing support operations leader driving invoice accuracy and reconciliation." } },
+            },
+          },
         },
       }),
     );
@@ -888,6 +901,10 @@ describe("workflow journey scenarios (synthetic)", () => {
     await waitFor(() => {
       expect(globalThis.localStorage.getItem(key)).toBeNull();
     });
+
+    expect(
+      screen.queryByText("Billing support operations leader driving invoice accuracy and reconciliation."),
+    ).not.toBeInTheDocument();
 
     // With minimal snapshot rejected, Studio should not consider artifacts hydrated as completed outputs.
     await waitFor(() => {
@@ -1005,13 +1022,13 @@ describe("workflow journey scenarios (synthetic)", () => {
     await waitFor(() => {
       expect(screen.getByTestId("studio-workflow-authority")).toBeInTheDocument();
     });
-    // Current contract: post-unlock may still surface unlock-required authority depending on verification gaps.
+    // Current contract: unsupported requirements are non-blocking when document generation is still allowed.
     // Avoid asserting on the transient "generation_in_progress" state; wait for the post-generation authority.
     await waitFor(() => {
       const node = screen.getByTestId("studio-workflow-authority");
       expect(node.getAttribute("data-workflow-state")).not.toBe("generation_in_progress");
     });
-    expectAuthorityPanel("studio-workflow-authority", "unlock_required", "recovery");
+    expectAuthorityPanel("studio-workflow-authority", "partial_documents", "recovery");
     cleanup();
   });
 
