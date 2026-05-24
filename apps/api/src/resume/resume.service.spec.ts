@@ -3660,6 +3660,63 @@ describe('ResumeService contract', () => {
 
       const resumeContent = String((result as any).content ?? '').toLowerCase();
       const resumeSummary = String((result as any)?.preview?.resume?.summary ?? '').toLowerCase();
+      const renderedExperience = Array.isArray((result as any)?.preview?.resume?.experience)
+        ? ((result as any).preview.resume.experience as any[])
+        : [];
+      const topRole = renderedExperience?.[0] ?? null;
+      const topBulletsFromPreview = Array.isArray(topRole?.bullets)
+        ? (topRole.bullets as unknown[]).map((b) => String(b ?? '').trim()).filter(Boolean)
+        : Array.isArray((topRole as any)?.bulletPoints)
+          ? (((topRole as any).bulletPoints as unknown[]) ?? []).map((b) => String(b ?? '').trim()).filter(Boolean)
+          : [];
+      const topBulletsAll = topBulletsFromPreview.length
+        ? topBulletsFromPreview
+        : String((result as any).content ?? '')
+            .split(/\r?\n/)
+            .map((l) => l.trim())
+            .filter((l) => l.startsWith('- '))
+            .slice(0, 6)
+            .map((l) => l.replace(/^- /, '').trim())
+            .filter(Boolean);
+      // Treat "top bullets" as the recruiter-facing emphasis set, not the full supporting list.
+      const topBullets = topBulletsAll.slice(0, 4);
+
+      // Deterministic preview fixture: makes the authored text inspectable from one local command.
+      // Run: `npm -w apps/api test -- resume.service.spec.ts -t GOLDEN_RESUME_PREVIEW`
+      // eslint-disable-next-line no-console
+      console.log('[GOLDEN_RESUME_PREVIEW][SUMMARY]', String((result as any)?.preview?.resume?.summary ?? '').trim());
+      // eslint-disable-next-line no-console
+      console.log(
+        '[GOLDEN_RESUME_PREVIEW][TOP_ROLE]',
+        topRole
+          ? `${String((topRole as any)?.roleTitle ?? (topRole as any)?.title ?? '').trim()} @ ${String((topRole as any)?.company ?? '').trim()}`.trim()
+          : '',
+      );
+      // eslint-disable-next-line no-console
+      console.log('[GOLDEN_RESUME_PREVIEW][TOP_BULLETS]', topBullets);
+
+      // General bullet-quality rules (avoid repeated fallback tails / filler / malformed openings).
+      const tails = topBullets
+        .map((b) => String(b ?? ''))
+        .map((b) => {
+          const m = b.match(/,\s*(to\s+[^.]+)\.\s*$/i);
+          return m ? String(m[1]).toLowerCase().trim() : '';
+        })
+        .filter(Boolean);
+      expect(new Set(tails).size).toBe(tails.length);
+      expect(topBullets.join(' ').toLowerCase()).not.toMatch(/\bverified professional experience\b/);
+      expect(topBullets.join(' ').toLowerCase()).not.toMatch(/^\s*enabled\s+route\b/m);
+      expect(topBullets.join(' ').toLowerCase()).not.toMatch(
+        /\b(once|forwarded|helped\s+(route|forward|send|sent|escalate)|routed?\s+to\s+the\s+(right|correct)\s+(owner|team))\b/,
+      );
+
+      // Ensure top bullets contain at least three stronger ops/support accomplishment signals.
+      const strongCount = topBullets.filter((b) =>
+        /\b(led|owned|built|standardized|improved|reduced|increased|incident|escalation|dashboards?|reporting|playbooks?|handoffs?|postmortems?|cross-functional)\b/i.test(
+          String(b ?? ''),
+        ),
+      ).length;
+      expect(strongCount).toBeGreaterThanOrEqual(3);
 
       // The job can be billing-heavy, but the generated resume must not invent a billing-ops specialization
       // beyond what is actually supported by repeated baseline evidence.

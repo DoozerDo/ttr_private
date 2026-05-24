@@ -12,12 +12,29 @@ export type RoleNarrativeShapeInput = {
 export class RoleNarrativeShaper {
   private rewriter = new BulletNarrativeRewriter();
 
+  private stripRepeatedTrailingIntentPhrases(bullets: string[]): string[] {
+    const tailRe = /,\s*(to\s+[a-z][^.]*)\.\s*$/i;
+    const seen = new Set<string>();
+    return bullets.map((b) => {
+      const m = String(b ?? '').match(tailRe);
+      if (!m) return b;
+      const tail = String(m[1] ?? '').toLowerCase().trim();
+      if (!tail) return b;
+      if (!seen.has(tail)) {
+        seen.add(tail);
+        return b;
+      }
+      return String(b).replace(tailRe, '.').replace(/\s{2,}/g, ' ').trim();
+    });
+  }
+
   private diversifyOpenings(bullets: string[]): string[] {
     const seen = new Map<string, number>();
     const variants: Array<[RegExp, string[]]> = [
       [/^\s*Coordinated\b/i, ['Coordinated', 'Owned', 'Led', 'Partnered with', 'Standardized']],
       [/^\s*Partnered with\b/i, ['Partnered with', 'Coordinated with', 'Aligned with']],
-      [/^\s*Supported\b/i, ['Supported', 'Enabled', 'Strengthened']],
+      // Avoid grammatically awkward replacements like "Enabled route...". Keep variants verb-compatible.
+      [/^\s*Supported\b/i, ['Supported', 'Helped', 'Assisted']],
       [/^\s*Owned\b/i, ['Owned', 'Led', 'Drove', 'Improved']],
     ];
 
@@ -47,6 +64,21 @@ export class RoleNarrativeShaper {
     const text = input.bullet.toLowerCase();
     if (!text.trim()) return -1000;
 
+    // Hard suppress generic filler bullets.
+    if (/\bverified professional experience\b/.test(text)) return -500;
+
+    // Suppress low-signal one-off task bullets (routing/forwarding/hand-off phrasing) when stronger bullets exist.
+    // This is domain-agnostic: it targets weak task evidence, not specific billing terms.
+    const oneOffTaskHardSuppression =
+      /\bonce\b/.test(text) ||
+      /\b(helped|assisted)\s+(route|forward|send|sent|escalate)\b/.test(text) ||
+      /\b(route|routed|routing)\b/.test(text) && /\b(to|into)\s+the\s+(right|correct)\s+(owner|team)\b/.test(text) ||
+      /\bforwarded\b/.test(text) ||
+      /\bsent\b/.test(text) && /\bto\s+(the\s+)?(right|correct)\s+(owner|team)\b/.test(text)
+        ? true
+        : false;
+    if (oneOffTaskHardSuppression) return -300;
+
     const themes = (input.positioningThemes ?? []).map((t) => String(t ?? '').toLowerCase()).filter(Boolean);
     const themeHits = themes.filter((t) => t.length >= 4 && text.includes(t)).length;
 
@@ -70,7 +102,20 @@ export class RoleNarrativeShaper {
     const prohibitedPenalty =
       (input.prohibitedDomainSignals ?? []).some((re) => re.test(text)) ? 25 : 0;
 
-    return themeHits * 2 + outcomeSignals + ownershipSignals + hasDigits - inventoryPenalty - servicesIncludePenalty - prohibitedPenalty;
+    const lowSignalOncePenalty = /\bonce\b/.test(text) && !/\d/.test(text) ? 2 : 0;
+    const weakRoutingPenalty = /\b(route|routing)\b/.test(text) && ownershipSignals === 0 ? 1 : 0;
+
+    return (
+      themeHits * 2 +
+      outcomeSignals +
+      ownershipSignals +
+      hasDigits -
+      inventoryPenalty -
+      servicesIncludePenalty -
+      prohibitedPenalty -
+      lowSignalOncePenalty -
+      weakRoutingPenalty
+    );
   }
 
   shapeRole(input: RoleNarrativeShapeInput): {
@@ -125,7 +170,8 @@ export class RoleNarrativeShaper {
       ;
 
     const bullets = bulletsWithProvenance.map((item) => item.rewritten);
-    const diversifiedBullets = this.diversifyOpenings(bullets);
+    const dedupedIntent = this.stripRepeatedTrailingIntentPhrases(bullets);
+    const diversifiedBullets = this.diversifyOpenings(dedupedIntent);
     const bulletSourceRoleKeys = bulletsWithProvenance.map((item) => item.sourceRoleKey);
 
     return {

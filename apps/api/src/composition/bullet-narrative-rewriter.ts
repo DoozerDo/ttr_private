@@ -118,6 +118,25 @@ function reframeImplementationScale(text: string): string {
   return `Delivered substantial ${subject} delivery${suffix} (${count} lines)`.replace(/\s{2,}/g, ' ').trim();
 }
 
+function hasClearOutcomeOrIntent(text: string): boolean {
+  const normalized = trimToText(text).toLowerCase();
+  if (!normalized) return false;
+  if (/\b(to|so that)\b\s+\w+/.test(normalized)) return true;
+  if (/\bby\b\s+\w+/.test(normalized)) return true;
+  if (/\d/.test(normalized)) return true;
+  if (/\b(result(?:ed)? in|leading to|which (?:re)?duced|which improved)\b/.test(normalized)) return true;
+  return false;
+}
+
+function isGenericFillerBullet(text: string): boolean {
+  const normalized = trimToText(text).toLowerCase();
+  if (!normalized) return false;
+  if (normalized.startsWith('verified professional experience')) return true;
+  if (/^experienced\s+\w+/.test(normalized) && normalized.length < 55) return true;
+  if (/\bproven track record\b/.test(normalized)) return true;
+  return false;
+}
+
 export class BulletNarrativeRewriter {
   private detector = new GenericLanguageDetector();
 
@@ -129,6 +148,11 @@ export class BulletNarrativeRewriter {
   }): { rewritten: string; changed: boolean; genericLanguageFlags: ReturnType<GenericLanguageDetector['detect']> } {
     const raw = trimToText(input.bullet);
     if (!raw) return { rewritten: '', changed: false, genericLanguageFlags: [] };
+
+    // Keep filler out of top bullets by collapsing to empty (caller will drop).
+    if (isGenericFillerBullet(raw)) {
+      return { rewritten: '', changed: true, genericLanguageFlags: this.detector.detect(raw) };
+    }
 
     const originalHasDigits = hasDigits(raw);
     const originalHasBillingDomain = containsBillingDomain(raw);
@@ -155,7 +179,7 @@ export class BulletNarrativeRewriter {
 
     // Add operational framing only when the bullet is very short, and only as intent (not results).
     const short = trimToText(text).length < 70;
-    if (short) {
+    if (short && !hasClearOutcomeOrIntent(text)) {
       const hint = (() => {
         const role = `${trimToText(input.roleTitle)} ${trimToText(input.company)}`.toLowerCase();
         if (/\b(support|customer|service|incident|queue|sla)\b/.test(role)) {
