@@ -750,8 +750,13 @@ describe("workflow journey scenarios (synthetic)", () => {
 
     // Repair guidance remains visible (single recovery lane).
     await waitFor(() => {
-      expect(screen.getByTestId("studio-generation-state-baseline-blocked")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-baseline-blocked-recovery")).toBeInTheDocument();
     });
+    expect(screen.getAllByTestId("studio-resume-reprocess-baseline")).toHaveLength(1);
+    expect(screen.queryByTestId("studio-blocker-next-action")).toBeNull();
+    expect(
+      screen.getAllByText("Your baseline needs to be reprocessed before documents can be generated.").length,
+    ).toBe(1);
 
     expect(
       consoleError.mock.calls.some((call) =>
@@ -960,7 +965,7 @@ describe("workflow journey scenarios (synthetic)", () => {
     // Studio resolves to blocked-by-baseline lane (single authoritative readiness state only).
     expectSinglePrimaryStudioAuthority();
     await waitFor(() => {
-      expect(screen.getByTestId("studio-generation-state-blocked")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-baseline-blocked-recovery")).toBeInTheDocument();
     });
 
     // No generation-ready messaging, no generation CTAs, and no mixed authority states.

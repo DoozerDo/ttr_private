@@ -9825,7 +9825,7 @@ export default function StudioPage() {
           </Link>
         ) : null}
 	      </div>
-	      {topLevelArtifactFailure && canRetryTopLevelFailure ? (
+	      {topLevelArtifactFailure && canRetryTopLevelFailure && !studioBlockedBaselineContract ? (
 	        <ArtifactFailureState
 	          failure={topLevelArtifactFailure}
 	          onRetry={
@@ -12433,26 +12433,43 @@ export default function StudioPage() {
         >
           <summary className="cursor-pointer text-sm font-semibold text-slate-200">Guidance</summary>
           <div className="mt-3 space-y-3">
-            <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
-              {activeGenerationReadiness.reasons[0]?.message ||
-                activeGenerationReadiness.reasons[0]?.code ||
-                canonicalStudioReadinessMessage}
-            </p>
-            {!hasRenderableResumeContent &&
-            !hasRenderableCoverLetterContent &&
-            (activeGenerationReadiness.blocked || !canGenerateDocuments) &&
-            studioCanonicalDecision.primaryAction.destination ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <Link
-                  href={studioCanonicalDecision.primaryAction.destination}
-                  className="text-sm font-semibold text-slate-100 underline decoration-slate-400/70 underline-offset-4 transition hover:decoration-slate-200"
-                  data-testid="studio-blocker-next-action"
-                >
-                  {primaryNextAction.label}
-                </Link>
+            {studioBlockedBaselineContract ? (
+              <div className="space-y-3" data-testid="studio-baseline-blocked-recovery">
+                <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
+                  Your baseline needs to be reprocessed before documents can be generated.
+                </p>
+                <div className="flex justify-end">
+                  <Link
+                    href={fitReviewHref}
+                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                    data-testid="studio-resume-reprocess-baseline"
+                  >
+                    Reprocess baseline
+                  </Link>
+                </div>
               </div>
-            ) : null}
-            {(() => {
+            ) : (
+              <>
+                <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
+                  {activeGenerationReadiness.reasons[0]?.message ||
+                    activeGenerationReadiness.reasons[0]?.code ||
+                    canonicalStudioReadinessMessage}
+                </p>
+                {!hasRenderableResumeContent &&
+                !hasRenderableCoverLetterContent &&
+                (activeGenerationReadiness.blocked || !canGenerateDocuments) &&
+                studioCanonicalDecision.primaryAction.destination ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link
+                      href={studioCanonicalDecision.primaryAction.destination}
+                      className="text-sm font-semibold text-slate-100 underline decoration-slate-400/70 underline-offset-4 transition hover:decoration-slate-200"
+                      data-testid="studio-blocker-next-action"
+                    >
+                      {primaryNextAction.label}
+                    </Link>
+                  </div>
+                ) : null}
+                {(() => {
         const generationState = studioGenerationStateInfo.state;
         const bannerIntent = baselineBlockedByResumeV2 ? "warning" : generationState === "ready" ? "info" : "warning";
         const bannerTitle = baselineBlockedByResumeV2
@@ -12478,11 +12495,7 @@ export default function StudioPage() {
                   </p>
                 </div>
               ) : null}
-              {baselineBlockedByResumeV2 ? (
-                <p data-testid="studio-generation-state-baseline-blocked" className="text-sm text-slate-100">
-                  Document generation is unavailable until your Resume V2 baseline is repaired.
-                </p>
-              ) : generationState === "ready" ? (
+              {generationState === "ready" ? (
                 <p data-testid="studio-generation-state-ready" className="text-sm text-slate-100">
                   This role is ready for generation using your verified baseline.
                 </p>
@@ -12553,15 +12566,12 @@ export default function StudioPage() {
                 </div>
               ) : null}
 
-              {generationState === "blocked" ? (
-                <p data-testid="studio-generation-state-blocked" className="text-sm text-slate-100">
-                  Document generation is unavailable for this role.
-                </p>
-              ) : null}
             </div>
           </Alert>
         );
-          })()}
+                })()}
+              </>
+            )}
           </div>
         </details>
       ) : null}
@@ -12578,7 +12588,7 @@ export default function StudioPage() {
           {autoGenerationLoadingMessage}
         </Alert>
       ) : null}
-      {pageTruth.state === "failed" && !workflowAuthority.suppressFailureMessaging ? (
+      {pageTruth.state === "failed" && !workflowAuthority.suppressFailureMessaging && !studioBlockedBaselineContract ? (
         <Alert intent="warning" title="Document generation needs attention">
           <div className="space-y-3">
             <div>
@@ -13503,6 +13513,7 @@ export default function StudioPage() {
           </p>
         ) : null}
       </section>
+      {studioBlockedBaselineContract ? null : (
       <>
       <section
         ref={(node) => {
@@ -14488,6 +14499,7 @@ export default function StudioPage() {
         </div>
       </details>
       </>
+      )}
 
       {!shouldShowRefinementAboveMaterials && hasAuthoritativeArtifacts && !studioCardsGenerationBlocked && !baselineBlockedByResumeV2 ? (
         <details className="rounded-2xl border border-white/10 bg-slate-950/35 p-4" data-testid="studio-refinement-details">
