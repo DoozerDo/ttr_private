@@ -2155,6 +2155,7 @@ function setupFetchWithResumeV2StructuralFailure(code: "baseline_resume_v2_missi
     vi.fn((input: RequestInfo) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       if (url.includes("/api/studio/artifacts")) {
+        const hasResumeV2 = code !== "baseline_resume_v2_missing";
         return Promise.resolve(
           createResponse({
             status: "failed",
@@ -2164,10 +2165,20 @@ function setupFetchWithResumeV2StructuralFailure(code: "baseline_resume_v2_missi
             baselineVersionHash: "hash-1",
             jobFingerprint: "fp-1",
             generationContractVersion: "studio-artifacts-v1",
+            errors: [{ code, message: "Baseline ResumeV2 structural failure." }],
+            diagnostics: {
+              resumeV2Readiness: {
+                hasResumeV2,
+                usableExperienceCount: 0,
+                source: hasResumeV2 ? "persisted_resume_v2" : "missing",
+                valid: false,
+                reasons: [code],
+              },
+            },
             resumeResult: null,
             coverLetterResult: null,
             resume: {
-              status: "failed",
+              status: "FAILED",
               inputsHash: "ih-failed",
               responseBody: null,
               content: null,

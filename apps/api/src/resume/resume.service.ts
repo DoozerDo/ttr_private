@@ -5068,42 +5068,79 @@ export class ResumeService {
         // Template readiness is meant to guard the legacy section/structured extraction lane, not the ResumeV2 lane.
         try {
           const persistedResumeV2 = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
-          if (persistedResumeV2 && typeof persistedResumeV2 === 'object') {
-            const normalized = normalizeNormalizedResumeDocument(persistedResumeV2 as NormalizedResumeDocument);
-            const validation = validateNormalizedResumeDocument(normalized);
-            const experienceCount = Array.isArray((normalized as any)?.experience) ? (normalized as any).experience.length : 0;
-            if (validation.valid && experienceCount === 0) {
-              return {
-                status: 'blocked' as const,
-                blocked: true,
-                compliance_flags: [],
-                reasons: [
-                  {
-                    code: 'baseline_resume_v2_invalid',
-                    message: 'Baseline ResumeV2 has zero usable experience. Repair your baseline before generating.',
-                    details: { usableExperienceCount: 0 },
-                  },
-                ],
-                canGenerateResume: false,
-                diagnostics: {
-                  readinessSource: 'resume_v2_authority',
-                  usableExperienceCount: 0,
+          if (!persistedResumeV2 || typeof persistedResumeV2 !== 'object') {
+            return {
+              status: 'blocked' as const,
+              blocked: true,
+              compliance_flags: [],
+              reasons: [
+                {
+                  code: 'baseline_resume_v2_missing',
+                  message: 'Baseline ResumeV2 is missing. Repair your baseline before generating.',
+                  details: { usableExperienceCount: 0 },
                 },
-              } as any;
-            }
-            if (validation.valid && experienceCount > 0) {
-              return {
-                status: 'ready' as const,
-                blocked: false,
-                compliance_flags: [],
-                reasons: [],
-                canGenerateResume: true,
-                diagnostics: {
-                  readinessSource: 'resume_v2_authority',
-                  usableExperienceCount: experienceCount,
+              ],
+              canGenerateResume: false,
+              diagnostics: {
+                readinessSource: 'resume_v2_authority',
+                usableExperienceCount: 0,
+              },
+            } as any;
+          }
+
+          const normalized = normalizeNormalizedResumeDocument(persistedResumeV2 as NormalizedResumeDocument);
+          const validation = validateNormalizedResumeDocument(normalized);
+          const experienceCount = Array.isArray((normalized as any)?.experience) ? (normalized as any).experience.length : 0;
+          if (!validation.valid) {
+            return {
+              status: 'blocked' as const,
+              blocked: true,
+              compliance_flags: [],
+              reasons: [
+                {
+                  code: 'baseline_resume_v2_invalid',
+                  message: 'Baseline ResumeV2 is invalid. Repair your baseline before generating.',
+                  details: { usableExperienceCount: 0, reasons: validation.reasons },
                 },
-              } as any;
-            }
+              ],
+              canGenerateResume: false,
+              diagnostics: {
+                readinessSource: 'resume_v2_authority',
+                usableExperienceCount: 0,
+              },
+            } as any;
+          }
+          if (validation.valid && experienceCount === 0) {
+            return {
+              status: 'blocked' as const,
+              blocked: true,
+              compliance_flags: [],
+              reasons: [
+                {
+                  code: 'baseline_resume_v2_invalid',
+                  message: 'Baseline ResumeV2 has zero usable experience. Repair your baseline before generating.',
+                  details: { usableExperienceCount: 0 },
+                },
+              ],
+              canGenerateResume: false,
+              diagnostics: {
+                readinessSource: 'resume_v2_authority',
+                usableExperienceCount: 0,
+              },
+            } as any;
+          }
+          if (validation.valid && experienceCount > 0) {
+            return {
+              status: 'ready' as const,
+              blocked: false,
+              compliance_flags: [],
+              reasons: [],
+              canGenerateResume: true,
+              diagnostics: {
+                readinessSource: 'resume_v2_authority',
+                usableExperienceCount: experienceCount,
+              },
+            } as any;
           }
         } catch {
           // ignore; fall back to structured/template readiness.

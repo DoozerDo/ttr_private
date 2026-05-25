@@ -3046,7 +3046,44 @@ export default function StudioPage() {
     () => applyTargetingExclusionsToReadiness(reconciledGenerationReadiness, excludedTargetingLabels),
     [reconciledGenerationReadiness, excludedTargetingLabels],
   );
-  const activeGenerationReadiness = adjustedReadinessResult.readiness;
+  const baselineResumeV2AuthorityBlockers = useMemo(() => {
+    const codes: string[] = [];
+    const errors = Array.isArray((studioArtifactsPayload as any)?.errors) ? ((studioArtifactsPayload as any).errors as any[]) : [];
+    for (const err of errors) {
+      const code = String((err as any)?.code ?? "").trim();
+      if (code.startsWith("baseline_resume_v2_")) codes.push(code);
+    }
+    const resumeFailureCode = String(((studioArtifactsPayload as any)?.resume as any)?.failureCode ?? "").trim();
+    if (resumeFailureCode.startsWith("baseline_resume_v2_")) codes.push(resumeFailureCode);
+    return Array.from(new Set(codes));
+  }, [studioArtifactsPayload]);
+
+  const activeGenerationReadiness = useMemo(() => {
+    const base = adjustedReadinessResult.readiness;
+    if (!baselineResumeV2AuthorityBlockers.length) return base;
+
+    const mergedReasonCodes = Array.from(
+      new Set([...(Array.isArray(base.reasonCodes) ? base.reasonCodes.map((c) => String(c ?? "")) : []), ...baselineResumeV2AuthorityBlockers]),
+    ).filter(Boolean);
+
+    // Baseline ResumeV2 authority is a hard override: Studio must never surface READY/current/unlocked
+    // states while structural baseline authority blocks generation.
+    return {
+      ...base,
+      status: "blocked" as const,
+      blocked: true,
+      badgeLabel: "BLOCKED" as const,
+      summary: "Blocked",
+      reasonCodes: mergedReasonCodes,
+      reasons: [
+        {
+          code: "full_block" as const,
+          message: "Your baseline needs to be reprocessed before documents can be generated.",
+        },
+        ...(Array.isArray(base.reasons) ? base.reasons : []),
+      ],
+    };
+  }, [adjustedReadinessResult.readiness, baselineResumeV2AuthorityBlockers]);
   const canonicalClaimIssues = useMemo(
     () => buildVerificationIssuesFromCanonicalClaims(activeClaimVerifications),
     [activeClaimVerifications],
@@ -3300,16 +3337,20 @@ export default function StudioPage() {
       : [];
     const hasResumeV2BlockingGuidance = errorCodes.some((code) => code.startsWith("baseline_resume_v2_"));
 
+    const resumeFailureCode = String(((studioArtifactsPayload as any)?.resume as any)?.failureCode ?? "").trim();
+    const hasResumeFailureBaselineBlocker = resumeFailureCode.startsWith("baseline_resume_v2_");
+
     // Single authoritative rule: ResumeV2 unusable experience blocks generation UI (no mixed "ready" states).
     const blocksGeneration =
       hasResumeV2BlockingGuidance ||
+      hasResumeFailureBaselineBlocker ||
       (typeof usableExperienceCount === "number" && usableExperienceCount <= 0) ||
-      (hasResumeV2 === false && hasResumeV2BlockingGuidance);
+      (hasResumeV2 === false && (hasResumeV2BlockingGuidance || hasResumeFailureBaselineBlocker));
 
     return {
       hasResumeV2,
       usableExperienceCount,
-      hasResumeV2BlockingGuidance,
+      hasResumeV2BlockingGuidance: hasResumeV2BlockingGuidance || hasResumeFailureBaselineBlocker,
       blocksGeneration,
     };
   }, [studioArtifactsPayload]);
@@ -12515,13 +12556,37 @@ export default function StudioPage() {
       ) : null}
       {pageTruth.state === "failed" && !workflowAuthority.suppressFailureMessaging ? (
         <Alert intent="warning" title="Document generation needs attention">
-          {toConstraintMessage(
-            resumeState.error ??
-              coverState.error ??
-              resumeState.artifactFailure?.explanation ??
-              coverState.artifactFailure?.explanation ??
-              "Generation failed. Please try again.",
-          )}
+          <div className="space-y-3">
+            <div>
+              {toConstraintMessage(
+                resumeState.error ??
+                  coverState.error ??
+                  resumeState.artifactFailure?.explanation ??
+                  coverState.artifactFailure?.explanation ??
+                  "Generation failed. Please try again.",
+              )}
+            </div>
+            {resumeV2Authority.hasResumeV2BlockingGuidance ? (
+              <div className="space-y-2" data-testid="studio-resume-artifact-issue">
+                <p className="text-sm font-semibold text-slate-100">
+                  Your baseline needs to be reprocessed before documents can be generated.
+                </p>
+                <p className="text-sm text-slate-300">
+                  We need to rebuild your structured resume profile from your baseline resume. This keeps generated
+                  resumes and cover letters accurate and grounded.
+                </p>
+                <div className="flex justify-end">
+                  <Link
+                    href={fitReviewHref}
+                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                    data-testid="studio-resume-reprocess-baseline"
+                  >
+                    Reprocess baseline
+                  </Link>
+                </div>
+              </div>
+            ) : null}
+          </div>
         </Alert>
       ) : null}
       {pageTruth.state === "ready" &&
@@ -13621,12 +13686,13 @@ export default function StudioPage() {
           </Alert>
         ) : null}
 
-        {resumeState.artifactFailure && !hasRenderableResumeContent ? (
+        {(!hasRenderableResumeContent && (resumeState.artifactFailure || resumeV2Authority.hasResumeV2BlockingGuidance)) ? (
           <div
             className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
             data-testid="studio-resume-artifact-issue"
           >
-            {resumeState.artifactFailure?.category === "baseline_requires_reprocess" ? (
+            {resumeState.artifactFailure?.category === "baseline_requires_reprocess" ||
+            resumeV2Authority.hasResumeV2BlockingGuidance ? (
               <>
                 <div className="space-y-1">
                   <p className="text-sm font-semibold text-slate-100">

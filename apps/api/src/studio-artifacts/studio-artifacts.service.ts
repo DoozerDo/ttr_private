@@ -480,6 +480,15 @@ export class StudioArtifactsService {
             source: 'persisted_resume_v2',
             valid: false,
             experienceCount,
+            reasons: validation.reasons,
+          } as const;
+        }
+        if (experienceCount === 0) {
+          return {
+            source: 'persisted_resume_v2',
+            valid: false,
+            experienceCount: 0,
+            reasons: ['usable_experience_empty'],
           } as const;
         }
         return {
@@ -536,6 +545,43 @@ export class StudioArtifactsService {
       resumeV2Diagnostics && (resumeV2Diagnostics as any).valid
         ? Number((resumeV2Diagnostics as any).experienceCount ?? 0)
         : 0;
+
+    const resumeV2Readiness = {
+      hasResumeV2: Boolean(persisted && typeof persisted === 'object'),
+      usableExperienceCount: resumeV2UsableExperienceCount,
+      source: resumeV2Diagnostics ? String((resumeV2Diagnostics as any).source ?? 'unknown') : 'missing',
+      valid: resumeV2Diagnostics ? Boolean((resumeV2Diagnostics as any).valid) : false,
+      reasons:
+        resumeV2Diagnostics && !(resumeV2Diagnostics as any).valid && Array.isArray((resumeV2Diagnostics as any).reasons)
+          ? ((resumeV2Diagnostics as any).reasons as any[]).map((r) => String(r ?? '')).filter(Boolean).slice(0, 8)
+          : [],
+    } as const;
+
+    if (!resumeV2Readiness.hasResumeV2) {
+      errors.push({
+        code: 'baseline_resume_v2_missing',
+        message: 'Baseline ResumeV2 missing. Re-run baseline processing to restore structured generation authority.',
+        details: { usableExperienceCount: 0 },
+      });
+    } else if (!resumeV2Readiness.valid || resumeV2Readiness.usableExperienceCount <= 0) {
+      errors.push({
+        code: 'baseline_resume_v2_invalid',
+        message: 'Baseline ResumeV2 invalid. Repair your baseline to restore structured generation authority.',
+        details: { usableExperienceCount: 0, reasons: resumeV2Readiness.reasons },
+      });
+    }
+
+    if (errors.length) {
+      const seen = new Set<string>();
+      const deduped = errors.filter((e) => {
+        const key = String((e as any)?.code ?? '');
+        if (!key) return true;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      errors.splice(0, errors.length, ...deduped);
+    }
     if (resumeV2UsableExperienceCount > 0 && errors.length) {
       const before = errors.length;
       const filtered = errors.filter((e) => !String((e as any)?.code ?? '').startsWith('baseline_resume_v2_'));
@@ -894,6 +940,22 @@ export class StudioArtifactsService {
       jobFingerprint,
       generationContractVersion: ARTIFACT_CONTRACT_VERSION,
       ...(errors.length ? { errors } : {}),
+      diagnostics: {
+        resumeV2Readiness,
+        ...(process.env.DOCGEN_DIAGNOSTICS === 'true'
+          ? {
+              staleArtifactRejected: Boolean(rejectedArtifactIds.length),
+              staleArtifactReasonCodes: [...new Set(staleArtifactReasonCodes)].slice(0, 12),
+              hydrationSource: resumePreviewAllowed ? 'authoritative_current_artifact' : 'blocked',
+              authoritativeArtifactId,
+              rejectedArtifactIds: rejectedArtifactIds.slice(0, 8),
+              retrievalDecisionPath: resumePreviewAllowed ? 'use_current_completed' : 'reject_preview_fail_closed',
+              hydrationRejected: Boolean(resumeRecord && !resumePreviewAllowed),
+              rejectedMinimalArtifact: Boolean(staleArtifactReasonCodes.some((c) => c === 'minimal_artifact_rejected' || String(c).startsWith('minimal:'))),
+              rejectedMinimalArtifactReason: staleArtifactReasonCodes.find((c) => String(c).startsWith('minimal:')) ?? null,
+            }
+          : {}),
+      },
       assessmentScore: score,
       structuredBaselineExperienceCount,
       structuredBaselineMissingEvidenceReasons,
@@ -905,6 +967,7 @@ export class StudioArtifactsService {
       coverLetter: coverRecord,
       resumeResult,
       coverLetterResult,
+<<<<<<< HEAD
       ...(process.env.DOCGEN_DIAGNOSTICS === 'true'
         ? {
             diagnostics: {
@@ -929,6 +992,8 @@ export class StudioArtifactsService {
               resumeV2Readiness,
             },
           }),
+=======
+>>>>>>> 6ae95e1b2fab05b2bf4ae3bed01c353edba912a6
     };
   }
 
