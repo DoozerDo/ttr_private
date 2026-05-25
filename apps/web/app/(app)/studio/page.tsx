@@ -13361,6 +13361,9 @@ export default function StudioPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
               {(() => {
                 const score = Math.round(analysisScore);
+                if (resumeV2Authority.blocksGeneration) {
+                  return `Compatibility: Baseline repair required (${score})`;
+                }
                 const sourcedVerdict =
                   typeof (analysis as LatestAnalysis | null)?.verdict === "string"
                     ? (analysis as LatestAnalysis).verdict?.trim()

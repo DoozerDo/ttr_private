@@ -155,9 +155,10 @@ describe("Studio execution surface", () => {
       expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument();
     });
 
-    // Blocked readiness should not surface export-ready materials; user should see the constrained generation shell.
-    expect(screen.getByTestId("studio-resume-missing")).toBeInTheDocument();
-    expect(screen.getByTestId("studio-cover-missing")).toBeInTheDocument();
+    // Contract: blocked readiness must not surface generation CTAs or "not generated yet" empty states.
+    expect(screen.queryByTestId("studio-resume-missing")).toBeNull();
+    expect(screen.queryByTestId("studio-cover-missing")).toBeNull();
+    expect(screen.getByTestId("studio-evidence-blocked-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("studio-evidence-allowed-panel")).toBeNull();
   });
 

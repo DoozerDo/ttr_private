@@ -2657,6 +2657,21 @@ export class ResumeService {
               },
             });
           }
+          const experienceCount = Array.isArray((normalized as any)?.experience) ? (normalized as any).experience.length : 0;
+          if (experienceCount === 0) {
+            const failures = buildNormalizedResumeValidationFailures(normalized);
+            throw new UnprocessableEntityException({
+              error: {
+                code: 'baseline_resume_v2_invalid',
+                message: 'Baseline ResumeV2 contains no usable experience entries.',
+                details: {
+                  reasons: ['usable_experience_empty'],
+                  failures,
+                  usableExperienceCount: 0,
+                },
+              },
+            });
+          }
           if (Array.isArray((normalized as any).experience)) {
             const enforced = enforceEmployerRoleBulletProvenance({ experience: (normalized as any).experience });
             (normalized as any).experience = enforced.experience as any;
@@ -2701,7 +2716,7 @@ export class ResumeService {
           // Deterministic fallback: if ResumeV2 ingestion/validation is missing/failed for this baseline,
           // fall back to section-based structured extraction so qualified users can still generate a
           // truthful draft from their baseline text.
-          if (code === 'baseline_resume_v2_missing' || code === 'baseline_resume_v2_invalid' || code === 'baseline_resume_v2_ingestion_failed') {
+          if (code === 'baseline_resume_v2_missing' || code === 'baseline_resume_v2_ingestion_failed') {
             if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
               try {
                 // eslint-disable-next-line no-console
@@ -5057,6 +5072,25 @@ export class ResumeService {
             const normalized = normalizeNormalizedResumeDocument(persistedResumeV2 as NormalizedResumeDocument);
             const validation = validateNormalizedResumeDocument(normalized);
             const experienceCount = Array.isArray((normalized as any)?.experience) ? (normalized as any).experience.length : 0;
+            if (validation.valid && experienceCount === 0) {
+              return {
+                status: 'blocked' as const,
+                blocked: true,
+                compliance_flags: [],
+                reasons: [
+                  {
+                    code: 'baseline_resume_v2_invalid',
+                    message: 'Baseline ResumeV2 has zero usable experience. Repair your baseline before generating.',
+                    details: { usableExperienceCount: 0 },
+                  },
+                ],
+                canGenerateResume: false,
+                diagnostics: {
+                  readinessSource: 'resume_v2_authority',
+                  usableExperienceCount: 0,
+                },
+              } as any;
+            }
             if (validation.valid && experienceCount > 0) {
               return {
                 status: 'ready' as const,

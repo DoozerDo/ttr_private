@@ -153,8 +153,8 @@ describe("studio low-quality preview gating", () => {
           },
         });
       }
-      if (url.includes("/api/resume/readiness")) return jsonResponse({ status: "blocked", blocked: true, reasons: [{ code: "full_block", message: "Unverified Python" }], reasonCodes: ["full_block"], compliance_flags: [] });
-      if (url.includes("/api/cover-letters/readiness")) return jsonResponse({ status: "blocked", blocked: true, reasons: [{ code: "full_block", message: "Unverified Snowflake" }], reasonCodes: ["full_block"], compliance_flags: [] });
+      if (url.includes("/api/resume/readiness")) return jsonResponse({ status: "ready", blocked: false, reasons: [], reasonCodes: [], compliance_flags: [] });
+      if (url.includes("/api/cover-letters/readiness")) return jsonResponse({ status: "ready", blocked: false, reasons: [], reasonCodes: [], compliance_flags: [] });
       if (url.includes("/api/studio/artifacts")) {
         return jsonResponse({
           status: "COMPLETED",

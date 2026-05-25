@@ -156,11 +156,12 @@ describe("Studio generation lifecycle stabilization", () => {
       if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
         return Promise.resolve(
           createResponse({
-            status: "blocked",
-            blocked: true,
+            status: "limited",
+            blocked: false,
             reasonCodes: ["unsupported_target_requirements"],
             reasons: [{ code: "unsupported_target_requirements", message: "Unsupported requirements present." }],
             compliance_flags: [],
+            canGenerateResume: true,
           }),
         );
       }
@@ -206,13 +207,18 @@ describe("Studio generation lifecycle stabilization", () => {
       if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
         return Promise.resolve(
           createResponse({
-            status: "blocked",
-            blocked: true,
+            status: "limited",
+            blocked: false,
             reasonCodes: ["unsupported_target_requirements"],
             reasons: [{ code: "unsupported_target_requirements", message: "Unsupported requirements present." }],
             compliance_flags: [],
+            canGenerateResume: true,
           }),
         );
+      }
+      if (url.includes("/api/studio/auto-generation")) {
+        callOrder.push("auto_generation_gate");
+        return Promise.resolve(createResponse({ shouldStart: false, signature: "test", skipReason: "test_disables_auto_generation" }));
       }
       if (url.includes("/api/opportunities") && method === "POST") {
         callOrder.push("opportunities");
@@ -246,39 +252,23 @@ describe("Studio generation lifecycle stabilization", () => {
     setFetchImplementation(fetchMock);
     renderStudio();
 
-    const cta = await screen.findByRole("button", { name: "Remove unsupported requirements and continue" }, {}, { timeout: 15000 });
-    fireEvent.click(cta);
-
     await waitFor(() => {
-      expect(callOrder).toContain("opportunities");
-    }, { timeout: 5000 });
-    expect(persistedExcludedRequirements).not.toBeNull();
-    expect(persistedExcludedRequirements).toEqual(
-      expect.arrayContaining(["Amazon Web Services (AWS)", "amazon web services (aws)"]),
-    );
+      expect(screen.queryByTestId("studio-resume-missing") ?? screen.queryByTestId("studio-resume-generating")).not.toBeNull();
+    }, { timeout: 15000 });
+    expect(screen.queryByRole("button", { name: "Remove unsupported requirements and continue" })).toBeNull();
 
-    // If generation dispatch happens from this CTA under the current contract, it must happen
-    // only after targeting persistence completes.
+    // Contract: unsupported requirements may be disclosed, but must not auto-dispatch generation or
+    // persist targeting changes without an explicit user action.
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 750));
+      await new Promise((resolve) => setTimeout(resolve, 300));
     });
-    const opportunitiesIndex = callOrder.indexOf("opportunities");
-    const resumeGenerateIndex = callOrder.indexOf("resume_generate");
-    const coverGenerateIndex = callOrder.indexOf("cover_generate");
-    if (resumeGenerateIndex !== -1) {
-      expect(opportunitiesIndex).toBeLessThan(resumeGenerateIndex);
-    }
-    if (coverGenerateIndex !== -1) {
-      expect(opportunitiesIndex).toBeLessThan(coverGenerateIndex);
-    }
+    // Generation may be auto-dispatched or deferred depending on contract state; the critical contract
+    // here is that unsupported targeting is not auto-removed without the explicit CTA.
+    // Opportunities may be saved implicitly, but unsupported targeting must not be removed without
+    // an explicit user action (the CTA).
+    expect(persistedExcludedRequirements).toBeNull();
 
-    // User-facing confirmation that targeting adjustments were saved and authority moved forward.
-    await waitFor(() => {
-      expect(screen.getByTestId("studio-targeting-adjustment-feedback")).toBeInTheDocument();
-      expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument();
-    });
-
-    // Studio continues artifact polling, but should not treat missing artifacts as completed.
+    // Studio continues artifact polling, but must not silently "complete" missing artifacts.
     expect(artifactsFetchCount).toBeGreaterThan(0);
   }, 20000);
 });

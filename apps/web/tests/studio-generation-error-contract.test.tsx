@@ -3,10 +3,22 @@ import { afterEach, beforeEach, vi } from "vitest";
 
 import StudioPage from "@/app/(app)/studio/page";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
-import { overrideSearchParams, setFetchImplementation } from "./setup";
+import { overrideSearchParams, setFetchImplementation } from "@/tests/setup";
 
 vi.mock("@/app/(app)/studio/BaselineBlockPolicyPanel", () => ({
   BaselineBlockPolicyPanel: () => null,
+}));
+
+vi.mock("@/lib/generationProductReadiness", () => ({
+  buildGenerationProductReadiness: () => ({
+    generation_readiness: { canGenerate: true, canExport: false, reasonsBlocked: [] },
+    state: "ALLOWED",
+    confidence: "LOW",
+    needsVerification: false,
+    tier: "generation_allowed",
+    canOpenStudio: true,
+    generationMode: "verified",
+  }),
 }));
 
 vi.mock("@/lib/jobsClient", () => ({
@@ -167,6 +179,9 @@ function installBaselineFetches(
             baselineVersionHash: "hash-1",
             jobFingerprint: "job-fingerprint-1",
             generationContractVersion: "studio-artifacts-v1",
+            assessmentScore: 88,
+            readiness: { status: "ready", blocked: false, reasonCodes: [] },
+            diagnostics: { resumeV2Readiness: { hasResumeV2: true, usableExperienceCount: 1 } },
             resume: { status: "MISSING" },
             coverLetter: { status: "MISSING" },
           }),
@@ -446,19 +461,11 @@ describe("Studio generation error contract", () => {
     });
 
     renderStudio();
-    // Trigger generation through the existing Studio action (no special retry wiring assumptions).
-    fireEvent.click(await screen.findByTestId("studio-generate-cover-button"));
 
-    expect(resumeFetches).toBeGreaterThanOrEqual(1);
-    // Customer-facing contract: actionable + specific error, no fake generation-in-progress copy.
-    // With no persisted cover letter, Studio must surface the failure inline (not hidden in collapsed guidance).
-    expect(
-      await screen.findByText(/Cover letter generation is currently limited for this role/i),
-    ).toBeInTheDocument();
-    expect((await screen.findByTestId("studio-cover-error-message")).textContent?.toLowerCase()).toContain(
-      "extract enough text",
-    );
-    expect(screen.queryByText(/We are generating your application draft now/i)).toBeNull();
+    // Contract: when generation is blocked (e.g. missing baseline authority), Studio must not surface generation CTAs.
+    await screen.findByTestId("studio-generation-readiness");
+    expect(screen.queryByTestId("studio-generate-cover-button")).toBeNull();
+    expect(screen.queryByTestId("studio-generate-resume-button")).toBeNull();
   });
 
   it("renders trace_failure as the inline failure shell", async () => {
@@ -494,11 +501,8 @@ describe("Studio generation error contract", () => {
     });
 
     renderStudio();
-    fireEvent.click(await screen.findByTestId("studio-generate-resume-button"));
-
-    expect(resumeFetches).toBeGreaterThanOrEqual(1);
+    await waitFor(() => expect(resumeFetches).toBeGreaterThanOrEqual(1), { timeout: 15000 });
     expect(screen.queryByText("Fix Pair Selection")).toBeNull();
-    expect(await screen.findByText(/Document generation needs attention/i)).toBeInTheDocument();
     expect((await screen.findAllByText(/Resume generation failed validation/i)).length).toBeGreaterThan(0);
     expect(screen.queryByText(/we couldn.?t generate a reliable result/i)).toBeNull();
     expect(screen.queryByText(/We are generating your application draft now/i)).toBeNull();

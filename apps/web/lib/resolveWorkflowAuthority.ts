@@ -40,23 +40,20 @@ export function resolveWorkflowAuthority(input: ResolveWorkflowAuthorityInput): 
   // Deterministic authority rules (single lane):
   // - Once any usable output exists, workflow is READY regardless of lifecycle turbulence.
   // - Otherwise, baseline ResumeV2 blockers are always BLOCKED (structural baseline authority).
-  // - Otherwise, score >= 80 is READY (generate-now contract), even if readiness has blockers.
   // - Otherwise, readiness.blocked is BLOCKED.
+  // - Otherwise, score >= 80 is READY (generate-now contract).
   const workflowState: WorkflowAuthorityState = hasAnyUsableOutput
     ? "READY"
     : hasBaselineResumeV2Blocker
       ? "BLOCKED"
-      : typeof score === "number" && score >= 80
-        ? "READY"
-        : input.generationReadiness.blocked
-          ? "BLOCKED"
+      : input.generationReadiness.blocked
+        ? "BLOCKED"
+        : typeof score === "number" && score >= 80
+          ? "READY"
           : "REVIEW_REQUIRED";
 
   const canGenerate =
-    typeof score === "number" &&
-    score >= 70 &&
-    (!input.generationReadiness.blocked || score >= 80) &&
-    !hasBaselineResumeV2Blocker;
+    typeof score === "number" && score >= 80 && !input.generationReadiness.blocked && !hasBaselineResumeV2Blocker;
   const suppressFailureMessaging = hasAnyUsableOutput;
 
   const primaryAction: WorkflowAuthorityPrimaryAction =

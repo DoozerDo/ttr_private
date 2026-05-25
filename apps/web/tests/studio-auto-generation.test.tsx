@@ -556,15 +556,17 @@ describe("Studio auto-generation", () => {
     Object.defineProperty(window, "localStorage", { value: originalLocalStorage, configurable: true });
   }, 15000);
 
-  it("auto-generates when readiness is blocked but contract is READY (score >= 80)", async () => {
+  it("does not auto-generate when readiness is blocked (even if score >= 80)", async () => {
     const fetchMock = installStrongFitFetches({ readinessStatus: "blocked" });
 
     renderStudio();
 
     await waitFor(() => {
-      expect(countPostCalls(fetchMock, "/api/resume")).toBeGreaterThan(0);
-      expect(countPostCalls(fetchMock, "/api/cover-letters")).toBeGreaterThan(0);
+      expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument();
     }, { timeout: 6000 });
+
+    expect(countPostCalls(fetchMock, "/api/resume")).toBe(0);
+    expect(countPostCalls(fetchMock, "/api/cover-letters")).toBe(0);
   }, 15000);
 
   it("still auto-generates when verification confidence is limited", async () => {

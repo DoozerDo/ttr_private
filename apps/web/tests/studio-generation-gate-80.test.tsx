@@ -99,20 +99,10 @@ describe("Studio generation gate (score >= 80)", () => {
 
     renderStudio();
 
-    await waitFor(() => expect(screen.getByText("Your application materials")).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Resume" })).toBeInTheDocument());
-    expect(screen.getByRole("heading", { name: "Cover letter" })).toBeInTheDocument();
-
-    // Current Studio contract: score alone does not guarantee generation is allowed.
-    // When generation is constrained, Studio surfaces the readiness/truth panel and offers a safe retry path.
+    // Contract: score >= 80 does not imply "unlocked/current" if readiness is blocked.
     const readinessPanel = await screen.findByTestId("studio-generation-readiness");
     expect(readinessPanel).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /retry generation/i })).toBeInTheDocument();
-
-    // Artifact cards should clearly communicate the constrained state (no "generate now" bypass).
-    expect(screen.queryByTestId("studio-generation-ready-shell")).toBeNull();
-    expect(screen.queryByTestId("studio-decision-panel")).toBeNull();
-    expect(screen.queryByTestId("studio-evidence-allowed-panel")).toBeNull();
+    expect(screen.queryByText("Your application materials")).toBeNull();
 
     // No debug metadata in normal Studio view.
     expect(screen.queryByText(/generationMode:/i)).toBeNull();
