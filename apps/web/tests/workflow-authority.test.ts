@@ -55,7 +55,7 @@ describe("resolveWorkflowAuthority", () => {
     expect(result.nextStepHint).toBe("Generate your documents to proceed.");
   });
 
-  it("returns READY for score >= 80 even when readiness is blocked and no artifacts exist", () => {
+  it("returns BLOCKED when readiness is blocked even if score >= 80 and no artifacts exist", () => {
     const result = resolveWorkflowAuthority({
       score: 92,
       generationReadiness: readiness({ blocked: true, status: "blocked" }),
@@ -66,12 +66,12 @@ describe("resolveWorkflowAuthority", () => {
       isHydrating: false,
     });
 
-    expect(result.workflowState).toBe("READY");
-    expect(result.canGenerate).toBe(true);
-    expect(result.primaryAction).toBe("GENERATE");
-    expect(result.headline).toBe("Your application is being prepared");
-    expect(result.body).toBe("Your fit is strong enough to generate documents for this role.");
-    expect(result.nextStepHint).toBe("Generate your documents to proceed.");
+    expect(result.workflowState).toBe("BLOCKED");
+    expect(result.canGenerate).toBe(false);
+    expect(result.primaryAction).toBe("BLOCKED");
+    expect(result.headline).toBe("Generation is blocked");
+    expect(result.body).toBe("Resolve the current blockers before continuing.");
+    expect(result.nextStepHint).toBe("Resolve blockers before continuing.");
   });
 
   it("returns REVIEW_REQUIRED for low score when not blocked and no artifacts exist", () => {

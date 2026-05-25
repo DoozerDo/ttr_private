@@ -16,6 +16,7 @@ export type UnlockPathInput = {
   analysisExists: boolean;
   score: number | null;
   readinessStatus?: "ready" | "limited" | "blocked" | null;
+  readinessReasonCodes?: string[] | null;
   hasGeneratedDocuments: boolean;
   hasSavedOpportunity?: boolean;
 };
@@ -29,6 +30,9 @@ function matchesPath(pathname: string | undefined, prefix: string): boolean {
 
 export function resolveUnlockPathState(input: UnlockPathInput): UnlockPathResolvedState {
   const readinessStatus = input.readinessStatus ?? null;
+  const readinessReasonCodes = Array.isArray(input.readinessReasonCodes)
+    ? input.readinessReasonCodes.filter((c): c is string => typeof c === "string")
+    : [];
   const contract = resolveWorkflowAuthorityContract({
     surface: "app_shell",
     currentPathname: input.currentPathname ?? null,
@@ -36,7 +40,7 @@ export function resolveUnlockPathState(input: UnlockPathInput): UnlockPathResolv
     analysisExists: input.analysisExists,
     score: input.score ?? null,
     generationReadiness: readinessStatus
-      ? { status: readinessStatus, blocked: readinessStatus === "blocked", reasonCodes: [] }
+      ? { status: readinessStatus, blocked: readinessStatus === "blocked", reasonCodes: readinessReasonCodes }
       : null,
     artifact: {
       // Stepper only needs a coarse document state.

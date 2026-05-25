@@ -480,6 +480,16 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
     analysisPayload?.readiness?.status ??
     analysisPayload?.readinessStatus ??
     null;
+  const readinessReasonCodes =
+    analysisPayload?.scoring_v2?.generation_readiness?.reasonCodes ??
+    analysisPayload?.scoring_v2?.generation_readiness?.reason_codes ??
+    analysisPayload?.scoring_v2?.readiness?.reasonCodes ??
+    analysisPayload?.scoring_v2?.readiness?.reason_codes ??
+    analysisPayload?.generation_readiness?.reasonCodes ??
+    analysisPayload?.generation_readiness?.reason_codes ??
+    analysisPayload?.readiness?.reasonCodes ??
+    analysisPayload?.readiness?.reason_codes ??
+    null;
   const hasGeneratedDocuments =
     Array.isArray(analysisPayload?.generatedDocuments) ||
     Array.isArray(analysisPayload?.generated_documents) ||
@@ -513,6 +523,7 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
                     analysisExists={Boolean(lastAnalysis)}
                     score={lastAnalysis?.fitScore ?? null}
                     readinessStatus={readinessStatus}
+                    readinessReasonCodes={Array.isArray(readinessReasonCodes) ? readinessReasonCodes : null}
                     hasGeneratedDocuments={hasGeneratedDocuments}
                     hasSavedOpportunity={pathname.startsWith("/job-tracker")}
                     onNavigate={(href) => {
