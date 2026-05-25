@@ -492,6 +492,38 @@ export class StudioArtifactsService {
         return null;
       }
     })();
+
+    const resumeV2Readiness = {
+      hasResumeV2: Boolean(persisted && typeof persisted === 'object'),
+      usableExperienceCount:
+        resumeV2Diagnostics && (resumeV2Diagnostics as any).valid
+          ? Number((resumeV2Diagnostics as any).experienceCount ?? 0)
+          : 0,
+      valid: resumeV2Diagnostics ? Boolean((resumeV2Diagnostics as any).valid) : false,
+      source: resumeV2Diagnostics ? String((resumeV2Diagnostics as any).source ?? 'missing') : 'missing',
+    };
+
+    // ResumeV2 authority contract: if persisted ResumeV2 is missing/invalid/empty, surface a deterministic
+    // baseline_resume_v2_* blocker in the artifacts authority envelope so the web contract cannot depend
+    // on a single endpoint to emit the baseline invalid signal.
+    if (errors) {
+      const errorCodes = new Set(
+        errors.map((e: any) => String((e as any)?.code ?? '')).filter(Boolean),
+      );
+      const addError = (code: string, message: string, details?: Record<string, unknown>) => {
+        if (errorCodes.has(code)) return;
+        errors.push({ code, message, ...(details ? { details } : {}) } as any);
+        errorCodes.add(code);
+      };
+
+      if (!resumeV2Readiness.hasResumeV2) {
+        addError('baseline_resume_v2_missing', 'Baseline ResumeV2 missing.', { expected: ['baseline_parsed.resumeV2Json'] });
+      } else if (!resumeV2Readiness.valid) {
+        addError('baseline_resume_v2_invalid', 'Baseline ResumeV2 is invalid.', { usableExperienceCount: resumeV2Readiness.usableExperienceCount });
+      } else if (resumeV2Readiness.usableExperienceCount <= 0) {
+        addError('baseline_resume_v2_invalid', 'Baseline ResumeV2 has zero usable experience.', { usableExperienceCount: 0 });
+      }
+    }
     const baselineTextForInterpretation =
       resumeV2Diagnostics && (resumeV2Diagnostics as any).valid && typeof (resumeV2Diagnostics as any).plainText === 'string'
         ? String((resumeV2Diagnostics as any).plainText)
@@ -885,14 +917,18 @@ export class StudioArtifactsService {
               hydrationRejected: Boolean(resumeRecord && !resumePreviewAllowed),
               rejectedMinimalArtifact: Boolean(staleArtifactReasonCodes.some((c) => c === 'minimal_artifact_rejected' || String(c).startsWith('minimal:'))),
               rejectedMinimalArtifactReason: staleArtifactReasonCodes.find((c) => String(c).startsWith('minimal:')) ?? null,
-              resumeV2Readiness: {
-                usableExperienceCount: resumeV2UsableExperienceCount,
-                source: resumeV2Diagnostics ? (resumeV2Diagnostics as any).source : 'missing',
-                valid: resumeV2Diagnostics ? Boolean((resumeV2Diagnostics as any).valid) : false,
-              },
+              resumeV2Readiness,
             },
           }
         : {}),
+      // Always include ResumeV2 readiness so Studio web authority cannot depend on debug-only envelopes.
+      ...(process.env.DOCGEN_DIAGNOSTICS === 'true'
+        ? {}
+        : {
+            diagnostics: {
+              resumeV2Readiness,
+            },
+          }),
     };
   }
 
