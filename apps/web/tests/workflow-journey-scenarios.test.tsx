@@ -664,6 +664,7 @@ describe("workflow journey scenarios (synthetic)", () => {
 
   it("Studio blocks generation when Resume V2 usable experience is missing and never shows Ready-to-generate with baseline_resume_v2_* blocker", async () => {
     const { mount, mountStudio, cleanup } = mountWithCleanup();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const server = new SyntheticWorkflowServer({
       analysisId: "analysis-1",
       baselineId: "base-1",
@@ -747,12 +748,24 @@ describe("workflow journey scenarios (synthetic)", () => {
     expect(screen.queryByRole("button", { name: "Remove unsupported requirements and continue" })).toBeNull();
     expect(screen.queryByRole("link", { name: /^refine$/i })).toBeNull();
 
+    // Repair guidance remains visible (single recovery lane).
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-generation-state-baseline-blocked")).toBeInTheDocument();
+    });
+
+    expect(
+      consoleError.mock.calls.some((call) =>
+        String(call[0] ?? "").includes("[studio-contract-violation] blocked baseline rendered actionable CTA"),
+      ),
+    ).toBe(false);
+
     // No optimization/refinement workflows should visually compete with baseline repair.
     expect(screen.queryByText("Document strategy")).toBeNull();
     expect(screen.queryByText("Optional: strengthen evidence")).toBeNull();
     expect(screen.queryByText(/Role and evidence/i)).toBeNull();
     expect(screen.queryByText(/Adjust positioning/i)).toBeNull();
 
+    consoleError.mockRestore();
     cleanup();
   });
 

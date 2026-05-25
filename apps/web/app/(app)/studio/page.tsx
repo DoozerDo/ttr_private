@@ -3400,6 +3400,7 @@ export default function StudioPage() {
   const resumeV2FallbackAttemptable = resumeV2FallbackEvaluation.attemptable;
 
   const baselineBlockedByResumeV2 = Boolean(resumeV2Authority.blocksGeneration);
+  const studioBlockedBaselineContract = baselineBlockedByResumeV2;
   const studioReadinessBlocksGeneration = Boolean(
     resumeV2Authority.blocksGeneration || (activeGenerationReadiness.blocked && !resumeV2FallbackAttemptable),
   );
@@ -8727,6 +8728,15 @@ export default function StudioPage() {
   const suppressTopLevelFailureLanguage = hasCompletedGeneration;
   const topLevelArtifactFailure = suppressTopLevelFailureLanguage ? null : lifecycleArtifactFailure;
   const canRetryTopLevelFailure = Boolean(topLevelArtifactFailure?.retryable) || canRetryGeneration;
+
+  const shouldRenderRefineCta = !studioBlockedBaselineContract;
+  const shouldRenderGenerateCtas = !studioBlockedBaselineContract;
+
+  if ((process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test") && studioBlockedBaselineContract) {
+    if (shouldRenderRefineCta || shouldRenderGenerateCtas) {
+      console.error("[studio-contract-violation] blocked baseline rendered actionable CTA");
+    }
+  }
   const showGenericRetry =
     !suppressTopLevelFailureLanguage &&
     !topLevelArtifactFailure &&
@@ -9720,34 +9730,39 @@ export default function StudioPage() {
 	          trustTone: workflowSurfaceAuthorityHero.trustTone,
 	        }}
 	        primaryAction={
-	          isApplicationFullyReady && !isApplicationApplied
-	            ? {
-	                label: "Apply to this role",
-	                onClick: handleApplyToThisRole,
-	                testId: "studio-primary-cta-apply",
-	              }
-	            : shouldPrimaryCompleteCover
-	              ? {
-	                  label: "Complete cover letter",
-	                  onClick: handlePrimaryCoverAction,
-	                  disabled:
-	                    coverGenerating ||
-	                    autoGenerationInFlight ||
-	                    (generateNowEligible && !isReadySuccessState && !hasCoverLetterArtifact && !coverState.artifactFailure),
-	                  testId: "studio-primary-cta-complete-cover",
-	                }
-	              : shouldPrimaryCompleteResume
-	                ? {
-	                    label: "Complete resume",
-	                    onClick: handlePrimaryResumeAction,
-	                    disabled:
-	                      resumeGenerating ||
-	                      autoGenerationInFlight ||
-	                      (generateNowEligible && !isReadySuccessState && !hasResumeArtifact && !resumeState.artifactFailure),
-	                    testId: "studio-primary-cta-complete-resume",
-	                  }
-	                : null
-	        }
+            !shouldRenderGenerateCtas
+              ? null
+              : isApplicationFullyReady && !isApplicationApplied
+                ? {
+                    label: "Apply to this role",
+                    onClick: handleApplyToThisRole,
+                    testId: "studio-primary-cta-apply",
+                  }
+                : shouldPrimaryCompleteCover
+                  ? {
+                      label: "Complete cover letter",
+                      onClick: handlePrimaryCoverAction,
+                      disabled:
+                        coverGenerating ||
+                        autoGenerationInFlight ||
+                        (generateNowEligible &&
+                          !isReadySuccessState &&
+                          !hasCoverLetterArtifact &&
+                          !coverState.artifactFailure),
+                      testId: "studio-primary-cta-complete-cover",
+                    }
+                  : shouldPrimaryCompleteResume
+                    ? {
+                        label: "Complete resume",
+                        onClick: handlePrimaryResumeAction,
+                        disabled:
+                          resumeGenerating ||
+                          autoGenerationInFlight ||
+                          (generateNowEligible && !isReadySuccessState && !hasResumeArtifact && !resumeState.artifactFailure),
+                        testId: "studio-primary-cta-complete-resume",
+                      }
+                    : null
+          }
 	        supporting={
 	          <div className="space-y-2">
 	            {isReadySuccessState && !isApplicationApplied && hasUsableResume && !hasUsableCoverLetter ? (
@@ -9775,7 +9790,7 @@ export default function StudioPage() {
 	        }
 	      />
 	      <div className="flex flex-wrap gap-3">
-	        {!shouldPrimaryCompleteResume ? (
+          {shouldRenderGenerateCtas && !shouldPrimaryCompleteResume ? (
 	          <FormButton
 	            variant={isApplicationFullyReady || isReadySuccessState || shouldPrimaryCompleteCover ? "secondary" : undefined}
 	            onClick={handlePrimaryResumeAction}
@@ -9788,7 +9803,7 @@ export default function StudioPage() {
             {hasResumeArtifact || generateNowEligible ? "Resume" : "Generate Resume"}
           </FormButton>
         ) : null}
-        {!shouldPrimaryCompleteCover ? (
+        {shouldRenderGenerateCtas && !shouldPrimaryCompleteCover ? (
           <FormButton
             variant={isApplicationFullyReady || isReadySuccessState || shouldPrimaryCompleteResume ? "secondary" : undefined}
             onClick={handlePrimaryCoverAction}
@@ -9801,7 +9816,7 @@ export default function StudioPage() {
             {hasCoverLetterArtifact || generateNowEligible ? "Cover Letter" : "Generate Cover Letter"}
           </FormButton>
         ) : null}
-        {!baselineBlockedByResumeV2 ? (
+        {shouldRenderRefineCta ? (
           <Link
             href={fitReviewHref}
             className="inline-flex items-center justify-center px-1 py-2 text-sm font-semibold text-slate-100 underline decoration-slate-400/70 underline-offset-4 transition hover:decoration-slate-200"
