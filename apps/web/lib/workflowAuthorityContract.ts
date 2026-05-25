@@ -352,11 +352,15 @@ export function resolveWorkflowAuthorityContract(input: {
         : input.analysisExists
           ? "complete"
           : "available";
+
+  const hasBaselineResumeV2Blocker = readiness.blockers.some((code) => code.startsWith("baseline_resume_v2_"));
   const fitReviewState: WorkflowModuleState =
     !input.analysisExists
       ? "locked"
       : routeModule === "fitReview"
         ? "current"
+        : routeModule === "studio" && hasBaselineResumeV2Blocker
+          ? "current"
         : readiness.status === "ready" && !readiness.blocked
           ? "complete"
           : "available";
@@ -364,7 +368,9 @@ export function resolveWorkflowAuthorityContract(input: {
   const studioEligible = workflowAuthority.canGenerate || hasAnyOutput;
   const studioState: WorkflowModuleState =
     routeModule === "studio"
-      ? "current"
+      ? hasBaselineResumeV2Blocker
+        ? "locked"
+        : "current"
       : !studioEligible
         ? "locked"
         : pairState === "generated"
@@ -392,7 +398,13 @@ export function resolveWorkflowAuthorityContract(input: {
   };
 
   if (routeModule && stepper[routeModule] === "locked") {
+    // Special case: Studio baseline repair must not present Studio as CURRENT in the rail when
+    // structural baseline ResumeV2 authority blocks generation. Promote Fit Review as the active lane instead.
+    if (routeModule === "studio" && hasBaselineResumeV2Blocker) {
+      // keep locked
+    } else {
     stepper[routeModule] = "current";
+    }
   }
 
   const surfaceCta = resolvePrimaryCtaFromSurface(surfaceAuthority);

@@ -717,6 +717,24 @@ describe("workflow journey scenarios (synthetic)", () => {
     expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Cover Letter" })).toBeNull();
 
+    // Structural baseline repair must collapse the Studio surface to a single recovery lane.
+    // - Studio must not appear as CURRENT in the unlock path rail.
+    // - Fit Review must be the active lane for repair.
+    const studioTile = screen.queryByTestId("unlock-path-studio");
+    const fitReviewTile = screen.queryByTestId("unlock-path-fitReview");
+    if (studioTile && fitReviewTile) {
+      expect(studioTile.getAttribute("data-state")).not.toBe("CURRENT");
+      expect(fitReviewTile.getAttribute("data-state")).toBe("CURRENT");
+    }
+
+    // No competing tailoring/optimization panels should render during baseline repair.
+    expect(screen.queryByTestId("studio-auto-adjust-panel")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("studio-evidence-expansion")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("studio-document-strategy-details")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("studio-optional-evidence-details")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Role and evidence/i)).toBeNull();
+    expect(screen.queryByText(/Adjust positioning/i)).toBeNull();
+
     cleanup();
   });
 
