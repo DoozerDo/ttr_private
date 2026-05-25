@@ -3399,6 +3399,7 @@ export default function StudioPage() {
 
   const resumeV2FallbackAttemptable = resumeV2FallbackEvaluation.attemptable;
 
+  const baselineBlockedByResumeV2 = Boolean(resumeV2Authority.blocksGeneration);
   const studioReadinessBlocksGeneration = Boolean(
     resumeV2Authority.blocksGeneration || (activeGenerationReadiness.blocked && !resumeV2FallbackAttemptable),
   );
@@ -8725,6 +8726,7 @@ export default function StudioPage() {
   const lifecycleArtifactFailure = resumeState.artifactFailure ?? coverState.artifactFailure ?? null;
   const suppressTopLevelFailureLanguage = hasCompletedGeneration;
   const topLevelArtifactFailure = suppressTopLevelFailureLanguage ? null : lifecycleArtifactFailure;
+  const canRetryTopLevelFailure = Boolean(topLevelArtifactFailure?.retryable) || canRetryGeneration;
   const showGenericRetry =
     !suppressTopLevelFailureLanguage &&
     !topLevelArtifactFailure &&
@@ -9799,14 +9801,16 @@ export default function StudioPage() {
             {hasCoverLetterArtifact || generateNowEligible ? "Cover Letter" : "Generate Cover Letter"}
           </FormButton>
         ) : null}
-        <Link
-          href={fitReviewHref}
-          className="inline-flex items-center justify-center px-1 py-2 text-sm font-semibold text-slate-100 underline decoration-slate-400/70 underline-offset-4 transition hover:decoration-slate-200"
-	        >
-	          Refine
-	        </Link>
+        {!baselineBlockedByResumeV2 ? (
+          <Link
+            href={fitReviewHref}
+            className="inline-flex items-center justify-center px-1 py-2 text-sm font-semibold text-slate-100 underline decoration-slate-400/70 underline-offset-4 transition hover:decoration-slate-200"
+          >
+            Refine
+          </Link>
+        ) : null}
 	      </div>
-	      {topLevelArtifactFailure && canRetryGeneration ? (
+	      {topLevelArtifactFailure && canRetryTopLevelFailure ? (
 	        <ArtifactFailureState
 	          failure={topLevelArtifactFailure}
 	          onRetry={
@@ -12435,9 +12439,10 @@ export default function StudioPage() {
             ) : null}
             {(() => {
         const generationState = studioGenerationStateInfo.state;
-        const bannerIntent = generationState === "ready" ? "info" : "warning";
-        const bannerTitle =
-          generationState === "ready"
+        const bannerIntent = baselineBlockedByResumeV2 ? "warning" : generationState === "ready" ? "info" : "warning";
+        const bannerTitle = baselineBlockedByResumeV2
+          ? "Baseline repair required"
+          : generationState === "ready"
             ? "Ready to generate"
             : generationState === "degraded"
               ? "This role is a partial match"
@@ -12458,13 +12463,17 @@ export default function StudioPage() {
                   </p>
                 </div>
               ) : null}
-              {generationState === "ready" ? (
+              {baselineBlockedByResumeV2 ? (
+                <p data-testid="studio-generation-state-baseline-blocked" className="text-sm text-slate-100">
+                  Document generation is unavailable until your Resume V2 baseline is repaired.
+                </p>
+              ) : generationState === "ready" ? (
                 <p data-testid="studio-generation-state-ready" className="text-sm text-slate-100">
                   This role is ready for generation using your verified baseline.
                 </p>
               ) : null}
 
-              {generationState === "degraded" ? (
+              {!baselineBlockedByResumeV2 && generationState === "degraded" ? (
                 <div data-testid="studio-generation-state-degraded" className="space-y-2">
                   <p className="text-sm text-slate-100">
                     Some requirements are not supported by your verified experience. You can continue, but results are limited.
@@ -13173,6 +13182,7 @@ export default function StudioPage() {
       ) : null}
       {requestedAnalysisId &&
       // Unsupported requirements must not block/distract the primary generation path when generation is otherwise allowed.
+      !baselineBlockedByResumeV2 &&
       activeGenerationReadiness.blocked &&
       canonicalUnverifiedRequirements.length &&
       !(studioGenerationStateInfo.state === "degraded" && studioGenerationStateInfo.hasUnsupportedRequirements) ? (
@@ -13202,7 +13212,7 @@ export default function StudioPage() {
           </div>
         </div> 
       ) : null} 
-      {showEvidenceExpansion ? (  
+      {!baselineBlockedByResumeV2 && showEvidenceExpansion ? (  
         <section className="rounded-2xl border border-white/15 bg-slate-950/35 p-4" data-testid="studio-evidence-expansion">  
           <h2 className="text-base font-semibold text-slate-100">Prove this experience instead</h2>  
           <p className="mt-1 text-sm text-slate-300"> 
@@ -14142,10 +14152,10 @@ export default function StudioPage() {
                 >
                   {coverLetterComplianceBlocked.cta.label}
                 </Link>
+                    ) : null}
+                  </div>
+                </div>
               ) : null}
-            </div>
-          </div>
-        ) : null}
 
         {coverGating.primaryBlocker === "tier_gate" && coverState.tierGateError ? (
           <section
@@ -14398,7 +14408,7 @@ export default function StudioPage() {
                     {coverState.error}
                   </p>
                   <div className="flex justify-end">
-                    {canRetryGeneration ? (
+                    {(canRetryGeneration || Boolean(coverState.artifactFailure?.retryable)) && !baselineBlockedByResumeV2 ? (
                       <FormButton onClick={() => void handleCoverDraft()} disabled={coverGenerating}>
                         Retry generation
                       </FormButton>
@@ -14464,7 +14474,7 @@ export default function StudioPage() {
       </details>
       </>
 
-      {!shouldShowRefinementAboveMaterials && hasAuthoritativeArtifacts && !studioCardsGenerationBlocked ? (
+      {!shouldShowRefinementAboveMaterials && hasAuthoritativeArtifacts && !studioCardsGenerationBlocked && !baselineBlockedByResumeV2 ? (
         <details className="rounded-2xl border border-white/10 bg-slate-950/35 p-4" data-testid="studio-refinement-details">
           <summary className="cursor-pointer text-sm font-semibold text-slate-100">
             Review & refine (optional)
@@ -14539,7 +14549,7 @@ export default function StudioPage() {
         </div>
       </div>
 
-      {generateNowEligible ? (
+      {generateNowEligible && !baselineBlockedByResumeV2 ? (
         <details className="rounded-2xl border border-white/10 bg-white/[0.03] p-4" data-testid="studio-document-strategy-details">
           <summary className="cursor-pointer text-sm font-semibold text-slate-200">
             Document strategy
@@ -14550,7 +14560,7 @@ export default function StudioPage() {
         </details>
       ) : null}
 
-      {showOptionalEvidenceStrengthening ? (
+      {showOptionalEvidenceStrengthening && !baselineBlockedByResumeV2 ? (
         <section
           className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
           data-testid="studio-optional-evidence-details"
@@ -14711,82 +14721,86 @@ export default function StudioPage() {
         </section>
       ) : null}
  
-      <details className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4"> 
-        <summary className="cursor-pointer text-sm font-semibold text-slate-200"> 
-          Role and evidence 
-        </summary> 
-        <div className="mt-3 space-y-3">
-          <p className="text-sm text-slate-300">
-            <span className="font-semibold text-slate-100">
-              {(selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company")} ? {(selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Unknown role")}
-            </span>
-          </p>
-          <p className="text-sm text-slate-300">
-            Using resume <span className="font-semibold text-slate-100">{sourceResumeLabel}</span>
-          </p>
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Fit Score</p>
-            <p className="text-3xl font-semibold text-slate-100">
-              {analysisLoading ? "Loading..." : analysisScore !== null ? analysisScore.toFixed(1) : "n/a"}
-            </p>
-          </div>
-          <div className="space-y-2 rounded-xl border border-white/10 bg-slate-900/40 p-3">
-            <p className="text-sm font-semibold text-slate-100">Evidence used for this resume</p>
-            {evidenceSummaryBullets.length ? (
-              <ul className="space-y-1 text-sm text-slate-200">
-                {evidenceSummaryBullets.map((bullet) => (
-                  <li key={`evidence-summary-${bullet}`}>? {bullet}</li>
-                ))}
-              </ul>
-            ) : (
+      {!baselineBlockedByResumeV2 ? (
+        <>
+          <details className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4"> 
+            <summary className="cursor-pointer text-sm font-semibold text-slate-200"> 
+              Role and evidence 
+            </summary> 
+            <div className="mt-3 space-y-3">
               <p className="text-sm text-slate-300">
-                Role analysis evidence will appear here after loading context from Results.
+                <span className="font-semibold text-slate-100">
+                  {(selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company")} ? {(selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Unknown role")}
+                </span>
               </p>
-            )}
-            <details className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
-              <summary className="cursor-pointer text-sm font-medium text-slate-300">
-                View full baseline evidence
-              </summary>
-              <p className="mt-3 text-sm text-slate-300">{fullBaselineEvidence}</p>
-            </details>
-          </div>
-        </div>
-      </details>
+              <p className="text-sm text-slate-300">
+                Using resume <span className="font-semibold text-slate-100">{sourceResumeLabel}</span>
+              </p>
+              <div>
+                <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Fit Score</p>
+                <p className="text-3xl font-semibold text-slate-100">
+                  {analysisLoading ? "Loading..." : analysisScore !== null ? analysisScore.toFixed(1) : "n/a"}
+                </p>
+              </div>
+              <div className="space-y-2 rounded-xl border border-white/10 bg-slate-900/40 p-3">
+                <p className="text-sm font-semibold text-slate-100">Evidence used for this resume</p>
+                {evidenceSummaryBullets.length ? (
+                  <ul className="space-y-1 text-sm text-slate-200">
+                    {evidenceSummaryBullets.map((bullet) => (
+                      <li key={`evidence-summary-${bullet}`}>? {bullet}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-slate-300">
+                    Role analysis evidence will appear here after loading context from Results.
+                  </p>
+                )}
+                <details className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
+                  <summary className="cursor-pointer text-sm font-medium text-slate-300">
+                    View full baseline evidence
+                  </summary>
+                  <p className="mt-3 text-sm text-slate-300">{fullBaselineEvidence}</p>
+                </details>
+              </div>
+            </div>
+          </details>
 
-      <details className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
-        <summary className="cursor-pointer text-sm font-semibold text-slate-200">
-          Adjust positioning (optional)
-        </summary>
-        <div className="mt-3 space-y-3">
-          <label className="flex flex-col gap-2 text-sm text-slate-400">
-            Resume Focus
-            <span className="text-sm text-slate-200">Recommended: Leadership emphasis</span>
-            <select
-              className="rounded-2xl border border-white/10 bg-slate-800/60 px-3 py-2 text-sm text-white"
-              value={resumeFocus}
-              onChange={(event) => setResumeFocus(event.target.value as ResumeFocusOption)}
-            >
-              {resumeFocusDefinitions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="space-y-2 rounded-xl border border-white/10 bg-slate-900/40 p-3 text-sm text-slate-300">
-            {resumeFocusDefinitions.map((option) => (
-              <p key={`focus-def-${option.value}`}>
-                <span className="font-semibold text-slate-100">{option.label}:</span> {option.definition}{" "}
-                {option.value === recommendedResumeFocus ? (
-                  <span className="font-semibold text-amber-200">Recommended for this role.</span>
-                ) : option.value === "Technical Depth" ? (
-                  <span className="font-semibold text-slate-400">Optional.</span>
-                ) : null}
-              </p>
-            ))}
-          </div>
-        </div>
-      </details>
+          <details className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-200">
+              Adjust positioning (optional)
+            </summary>
+            <div className="mt-3 space-y-3">
+              <label className="flex flex-col gap-2 text-sm text-slate-400">
+                Resume Focus
+                <span className="text-sm text-slate-200">Recommended: Leadership emphasis</span>
+                <select
+                  className="rounded-2xl border border-white/10 bg-slate-800/60 px-3 py-2 text-sm text-white"
+                  value={resumeFocus}
+                  onChange={(event) => setResumeFocus(event.target.value as ResumeFocusOption)}
+                >
+                  {resumeFocusDefinitions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="space-y-2 rounded-xl border border-white/10 bg-slate-900/40 p-3 text-sm text-slate-300">
+                {resumeFocusDefinitions.map((option) => (
+                  <p key={`focus-def-${option.value}`}>
+                    <span className="font-semibold text-slate-100">{option.label}:</span> {option.definition}{" "}
+                    {option.value === recommendedResumeFocus ? (
+                      <span className="font-semibold text-amber-200">Recommended for this role.</span>
+                    ) : option.value === "Technical Depth" ? (
+                      <span className="font-semibold text-slate-400">Optional.</span>
+                    ) : null}
+                  </p>
+                ))}
+              </div>
+            </div>
+          </details>
+        </>
+      ) : null}
 
       {selectedBaselineId && selectedBaselineVersionId && hasAuthoritativeArtifacts && !studioCardsGenerationBlocked ? (
         <details className="space-y-4">

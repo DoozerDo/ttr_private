@@ -507,5 +507,68 @@ describe("Studio generation error contract", () => {
     expect(screen.queryByText(/we couldn.?t generate a reliable result/i)).toBeNull();
     expect(screen.queryByText(/We are generating your application draft now/i)).toBeNull();
   });
+
+  it("shows a Retry action for retryable persistence failures even when inputs have not changed", async () => {
+    installBaselineFetches((url, init) => {
+      if (url.includes("/api/studio/ready_shell")) {
+        return Promise.resolve(
+          createResponse({
+            workflowState: "READY",
+            canGenerate: true,
+            suppressFailureMessaging: false,
+            primaryAction: "RETRY",
+            headline: "Generate in Studio",
+            body: "Generate, preview, and export your resume and cover letter.",
+            nextStepHint: "Retry generation from the current verified inputs.",
+          }),
+        );
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "FAILED",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "job-fingerprint-1",
+            generationContractVersion: "studio-artifacts-v1",
+            assessmentScore: 88,
+            readiness: { status: "ready", blocked: false, reasonCodes: [] },
+            diagnostics: { resumeV2Readiness: { hasResumeV2: true, usableExperienceCount: 1 } },
+            resume: {
+              status: "FAILED",
+              failureCode: "artifact_sync_exhausted",
+              failureMessage: "Saved document unavailable",
+            },
+            coverLetter: { status: "MISSING" },
+            resumeResult: {
+              artifactType: "resume",
+              generationState: "failed_retryable",
+              qualityStatus: "needs_refinement",
+              preview: null,
+              correctionReasons: [
+                {
+                  code: "artifact_sync_exhausted",
+                  message: "Generation completed, but the saved document could not be loaded.",
+                  retryable: true,
+                },
+              ],
+              exportReady: false,
+              exports: { docx: false, pdf: false },
+              actions: { canEdit: true, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
+            },
+            coverLetterResult: null,
+          }),
+        );
+      }
+      return null;
+    });
+
+    renderStudio();
+    await waitFor(() => expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: /strengthen my experience/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /^retry$/i })).toBeInTheDocument();
+  });
 });
 

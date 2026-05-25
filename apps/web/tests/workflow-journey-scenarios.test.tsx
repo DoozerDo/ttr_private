@@ -743,6 +743,15 @@ describe("workflow journey scenarios (synthetic)", () => {
     // No per-artifact generation CTAs should be present.
     expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Cover Letter" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry generation" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove unsupported requirements and continue" })).toBeNull();
+    expect(screen.queryByRole("link", { name: /^refine$/i })).toBeNull();
+
+    // No optimization/refinement workflows should visually compete with baseline repair.
+    expect(screen.queryByText("Document strategy")).toBeNull();
+    expect(screen.queryByText("Optional: strengthen evidence")).toBeNull();
+    expect(screen.queryByText(/Role and evidence/i)).toBeNull();
+    expect(screen.queryByText(/Adjust positioning/i)).toBeNull();
 
     cleanup();
   });
