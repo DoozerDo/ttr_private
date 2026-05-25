@@ -1373,6 +1373,7 @@ export default function StudioPage() {
   // Stale artifacts (hash mismatch after composition ruleset changes) must not be treated as usable existing artifacts.
   const hasResumeArtifact = hasResumeArtifactPersisted && !resumePersistedArtifactStale;
   const hasCoverLetterArtifact = hasCoverLetterArtifactPersisted && !coverPersistedArtifactStale;
+  const hasAuthoritativeArtifacts = hasResumeArtifact || hasCoverLetterArtifact;
 
   const artifactAuthorityTrackedRef = useRef<string | null>(null);
   useEffect(() => {
@@ -4096,7 +4097,7 @@ export default function StudioPage() {
     resumePresenter.status === "success" &&
     coverPresenter.status === "success" &&
     Boolean(resumeState.response && coverState.response);
-  const shouldShowRefinementAboveMaterials = !hasRenderableResumeContent && !hasRenderableCoverLetterContent;
+  const shouldShowRefinementAboveMaterials = !hasAuthoritativeArtifacts;
   useEffect(() => {
     if (!studioArtifactStorageKey) return;
     if (typeof window === "undefined") return;
@@ -5779,8 +5780,8 @@ export default function StudioPage() {
   }
 
   const queueRefinement = useCallback((preset: RefinementPreset) => {
-    if (!resumeState.response && !coverState.response) {
-      setRefinementStatusMessage("Generate a resume or cover letter before refining the output.");
+    if (!hasAuthoritativeArtifacts || studioCardsGenerationBlocked) {
+      setRefinementStatusMessage("Generate your documents before refining the output.");
       return;
     }
 
@@ -5812,8 +5813,10 @@ export default function StudioPage() {
     coverState.response,
     effectiveBaselineId,
     effectiveJobId,
+    hasAuthoritativeArtifacts,
     refinementInstructions,
     resumeState.response,
+    studioCardsGenerationBlocked,
   ]);
   const applyFinalRoleAdjustment = useCallback(
     (adjustment: RoleMatchFinalAdjustment) => {
@@ -10502,9 +10505,8 @@ export default function StudioPage() {
 
   const showArtifactMaterials =
     !studioBlockedByNextAction &&
-    (hasResumeArtifact ||
-      hasCoverLetterArtifact ||
-      !studioGenerationRenderState.isBlocked ||
+    (hasAuthoritativeArtifacts ||
+      (!studioGenerationRenderState.isBlocked && !studioCardsGenerationBlocked) ||
       resumeGating.primaryBlocker === "tier_gate" ||
       coverGating.primaryBlocker === "tier_gate");
 
@@ -10998,17 +11000,17 @@ export default function StudioPage() {
   const autoGenerationLastSignatureRef = useRef<string | null>(null);
   const autoGenerationWasReadyRef = useRef(false);
 
-  const shouldShowResumeRegenerate = resumeResult
+  const shouldShowResumeRegenerate = hasResumeArtifact && !studioCardsGenerationBlocked && (resumeResult
     ? resumeResult.actions?.canRegenerate === true ||
       resumeResult.generationState === "generated_needs_correction" ||
       resumeResult.qualityStatus === "needs_refinement"
-    : studioEffectiveGenerationState === "generated_unusable" && resumeNeedsRefinement;
-  const shouldShowCoverRegenerate = coverLetterResult
+    : studioEffectiveGenerationState === "generated_unusable" && resumeNeedsRefinement);
+  const shouldShowCoverRegenerate = hasCoverLetterArtifact && !studioCardsGenerationBlocked && (coverLetterResult
     ? coverLetterResult.actions?.canRegenerate === true ||
       coverLetterResult.generationState === "generated_needs_correction" ||
       coverLetterResult.qualityStatus === "failed" ||
       coverLetterResult.qualityStatus === "needs_refinement"
-    : studioEffectiveGenerationState === "generated_unusable" && coverNeedsRefinement;
+    : studioEffectiveGenerationState === "generated_unusable" && coverNeedsRefinement);
 
   const generationHardBlockedByTemplateReadiness = baselineTemplateReadinessSignal.hardBlocked;
   const shouldShowResumeRegenerateBlockedSafe = shouldShowResumeRegenerate && !generationHardBlockedByTemplateReadiness;
@@ -13895,7 +13897,8 @@ export default function StudioPage() {
         open={!hasRenderableResumeContent || hasRenderableCoverLetterContent}
       >
         <summary className="cursor-pointer text-sm font-semibold text-slate-200">
-          Cover letter {hasRenderableCoverLetterContent ? "" : "(not generated yet)"}
+          Cover letter{" "}
+          {!studioCardsGenerationBlocked && !hasCoverLetterArtifact ? "(not generated yet)" : ""}
         </summary>
         <div
           className="mt-3 space-y-3"
@@ -14392,7 +14395,7 @@ export default function StudioPage() {
       </details>
       </>
 
-      {!shouldShowRefinementAboveMaterials && hasCompletedGeneration ? (
+      {!shouldShowRefinementAboveMaterials && hasAuthoritativeArtifacts && !studioCardsGenerationBlocked ? (
         <details className="rounded-2xl border border-white/10 bg-slate-950/35 p-4" data-testid="studio-refinement-details">
           <summary className="cursor-pointer text-sm font-semibold text-slate-100">
             Review & refine (optional)
@@ -14716,7 +14719,7 @@ export default function StudioPage() {
         </div>
       </details>
 
-      {selectedBaselineId && selectedBaselineVersionId ? (
+      {selectedBaselineId && selectedBaselineVersionId && hasAuthoritativeArtifacts && !studioCardsGenerationBlocked ? (
         <details className="space-y-4">
           <summary className="cursor-pointer list-none rounded-2xl border border-white/10 bg-white/5 p-4 text-sm font-semibold text-slate-200 shadow-sm">
             Customize content (advanced)

@@ -923,6 +923,7 @@ describe("workflow journey scenarios (synthetic)", () => {
     expect(screen.queryByText(/not generated yet/i)).toBeNull();
     expect(screen.queryByTestId("studio-generate-resume-button")).toBeNull();
     expect(screen.queryByTestId("studio-generate-cover-button")).toBeNull();
+    expect(screen.queryByTestId("studio-refinement-details")).toBeNull();
 
     cleanup();
   });
