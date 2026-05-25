@@ -5,8 +5,9 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import ResultsPage from "@/app/(app)/results/page";
 import StudioPage from "@/app/(app)/studio/page";
+import { resolveWorkflowAuthorityContract } from "@/lib/workflowAuthorityContract";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
-import { mockRouterPush, mockRouterReplace, overrideSearchParams, setFetchImplementation } from "./setup";
+import { mockPathname, mockRouterPush, mockRouterReplace, overrideSearchParams, setFetchImplementation } from "./setup";
 
 const trackEventMock = vi.fn();
 
@@ -690,14 +691,10 @@ describe("workflow journey scenarios (synthetic)", () => {
     });
     setFetchImplementation(server.handleFetch as unknown as typeof fetch);
 
-    overrideSearchParams({ analysisId: "analysis-1" });
-    mount(<ResultsPage />);
-
-    await waitFor(() => {
-      expect(mockRouterReplace).toHaveBeenCalled();
-    });
-    const toStudio = String(mockRouterReplace.mock.calls.at(-1)?.[0] ?? "");
-    overrideSearchParams(parseQueryToObject(toStudio));
+    // Deep-link contract: even if the user lands directly on `/studio` with an 80+ score,
+    // structural Resume V2 baseline failures must keep Studio locked and redirect attention to baseline repair.
+    mockPathname.mockReturnValue("/studio");
+    overrideSearchParams({ analysisId: "analysis-1", baselineId: "base-1", jobId: "job-1" });
     mountStudio();
 
     await waitFor(() => {
@@ -705,6 +702,36 @@ describe("workflow journey scenarios (synthetic)", () => {
       const evidenceBlocked = screen.queryByTestId("studio-evidence-blocked-panel");
       expect(Boolean(authority || evidenceBlocked)).toBe(true);
     });
+
+    const contract = resolveWorkflowAuthorityContract({
+      surface: "studio",
+      currentPathname: "/studio",
+      ids: {
+        baselineId: "base-1",
+        baselineVersionId: "base-version-1",
+        jobId: "job-1",
+        assessmentId: "analysis-1",
+        analysisId: "analysis-1",
+      },
+      baselineReady: true,
+      analysisExists: true,
+      score: 84,
+      generationReadiness: {
+        status: "blocked",
+        blocked: true,
+        reasonCodes: ["baseline_resume_v2_missing"],
+      },
+      artifact: {
+        resume: { status: "MISSING", hasOutput: false, failed: false },
+        coverLetter: { status: "MISSING", hasOutput: false, failed: false },
+        pair: { status: "MISSING" },
+      },
+      opportunity: null,
+      contexts: null,
+    });
+
+    expect(contract.stepper.studio).toBe("locked");
+    expect(contract.stepper.baseline).toBe("current");
 
     // Contract: a ResumeV2 baseline blocker must not render alongside generation-ready CTAs.
     await waitFor(() => {

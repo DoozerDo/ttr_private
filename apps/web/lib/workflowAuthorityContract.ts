@@ -361,10 +361,15 @@ export function resolveWorkflowAuthorityContract(input: {
           ? "complete"
           : "available";
 
+  const hasBaselineResumeV2Blocker = readiness.blockers.some((code) => String(code ?? "").startsWith("baseline_resume_v2_"));
   const studioEligible = workflowAuthority.canGenerate || hasAnyOutput;
   const studioState: WorkflowModuleState =
     routeModule === "studio"
-      ? "current"
+      ? // Contract guard: Studio must never be CURRENT when structural ResumeV2 authority is blocked
+        // (even if the user deep-links to `/studio`).
+        hasBaselineResumeV2Blocker
+        ? "locked"
+        : "current"
       : !studioEligible
         ? "locked"
         : pairState === "generated"
@@ -391,8 +396,15 @@ export function resolveWorkflowAuthorityContract(input: {
     results: resultsState,
   };
 
-  if (routeModule && stepper[routeModule] === "locked") {
+  // Deep-link friendliness: if the user lands on a locked route, reflect that module as CURRENT
+  // so the UI can explain the gate — except Studio, where structural ResumeV2 baseline failures
+  // must redirect attention back to baseline repair and must not advertise "current/unlocked" Studio.
+  if (routeModule && stepper[routeModule] === "locked" && routeModule !== "studio") {
     stepper[routeModule] = "current";
+  }
+
+  if (routeModule === "studio" && hasBaselineResumeV2Blocker) {
+    stepper.baseline = "current";
   }
 
   const surfaceCta = resolvePrimaryCtaFromSurface(surfaceAuthority);
