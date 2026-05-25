@@ -3076,10 +3076,10 @@ export default function StudioPage() {
       summary: "Blocked",
       reasonCodes: mergedReasonCodes,
       reasons: [
-        ...baselineResumeV2AuthorityBlockers.map((code) => ({
-          code,
+        {
+          code: "full_block" as const,
           message: "Your baseline needs to be reprocessed before documents can be generated.",
-        })),
+        },
         ...(Array.isArray(base.reasons) ? base.reasons : []),
       ],
     };
