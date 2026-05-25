@@ -35,6 +35,14 @@ jobs:
           set -euo pipefail
           node scripts/ci/health-gate.mjs >> "$GITHUB_OUTPUT"
 
+      - name: Production release marker
+        if: steps.gate.outputs.healthy == 'true'
+        run: |
+          echo "prod_web_version=${{ steps.gate.outputs.web_version }}"
+          echo "prod_api_version=${{ steps.gate.outputs.api_version }}"
+          echo "prod_web_env=${{ steps.gate.outputs.web_env }}"
+          echo "prod_api_env=${{ steps.gate.outputs.api_env }}"
+
       - name: Skip (production not healthy yet)
         if: steps.gate.outputs.healthy != 'true'
         run: |
@@ -49,4 +57,3 @@ jobs:
           SMOKE_LOGIN_EMAIL: ${{ secrets.PROD_SMOKE_LOGIN_EMAIL }}
           SYNTHETIC_USER_PASSWORD: ${{ secrets.PROD_SMOKE_LOGIN_PASSWORD }}
         run: npm run synthetic:core-loop-smoke
-

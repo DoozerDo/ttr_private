@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, vi } from "vitest";
 
 import StudioPage from "@/app/(app)/studio/page";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
@@ -33,6 +33,10 @@ vi.mock("@/lib/baselines", async () => {
       },
     ]),
   };
+});
+
+afterEach(() => {
+  cleanup();
 });
 
 vi.mock("@/lib/generationProductReadiness", () => ({

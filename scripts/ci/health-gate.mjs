@@ -48,14 +48,20 @@ function classifyFailure(errOrStatus) {
 async function probeOnce({ apiUrl, webUrl }) {
   const apiStatusUrl = `${apiUrl}/status`;
   const webStatusUrl = `${webUrl}/api/status`;
+  const webRootUrl = `${webUrl}/`;
 
   try {
-    const [api, web] = await Promise.all([fetchJson(apiStatusUrl), fetchJson(webStatusUrl)]);
+    const [api, web, webRoot] = await Promise.all([
+      fetchJson(apiStatusUrl),
+      fetchJson(webStatusUrl),
+      fetchJson(webRootUrl),
+    ]);
     const apiOk = api.response.ok;
     const webOk = web.response.ok;
+    const webRootOk = webRoot.response.ok;
 
     return {
-      ok: apiOk && webOk,
+      ok: apiOk && webOk && webRootOk,
       api: {
         url: apiStatusUrl,
         status: api.response.status,
@@ -68,8 +74,19 @@ async function probeOnce({ apiUrl, webUrl }) {
         ok: webOk,
         json: web.json,
       },
+      webRoot: {
+        url: webRootUrl,
+        status: webRoot.response.status,
+        ok: webRootOk,
+      },
       transient: classifyFailure(api.response.status).transient || classifyFailure(web.response.status).transient,
-      reason: !apiOk ? `api_${api.response.status}` : !webOk ? `web_${web.response.status}` : null,
+      reason: !apiOk
+        ? `api_${api.response.status}`
+        : !webOk
+          ? `web_${web.response.status}`
+          : !webRootOk
+            ? `webroot_${webRoot.response.status}`
+            : null,
     };
   } catch (error) {
     const classified = classifyFailure(error);
@@ -77,6 +94,7 @@ async function probeOnce({ apiUrl, webUrl }) {
       ok: false,
       api: { url: apiStatusUrl, status: null, ok: false, json: null },
       web: { url: webStatusUrl, status: null, ok: false, json: null },
+      webRoot: { url: webRootUrl, status: null, ok: false },
       transient: classified.transient,
       reason: classified.reason,
       error: error instanceof Error ? error.message : String(error),
@@ -102,10 +120,25 @@ async function main() {
     const result = await probeOnce({ apiUrl, webUrl });
     last = result;
     if (result.ok) {
-      log("health-gate-healthy", { attempt, api: result.api, web: result.web });
+      const apiVersion = result.api?.json && typeof result.api.json === "object" ? result.api.json.version : null;
+      const apiEnv = result.api?.json && typeof result.api.json === "object" ? result.api.json.env : null;
+      const webVersion = result.web?.json && typeof result.web.json === "object" ? result.web.json.version : null;
+      const webEnv = result.web?.json && typeof result.web.json === "object" ? result.web.json.env : null;
+
+      log("health-gate-healthy", {
+        attempt,
+        api: result.api,
+        web: result.web,
+        webRoot: result.webRoot,
+        marker: { apiVersion, apiEnv, webVersion, webEnv },
+      });
       // Emit outputs for GitHub Actions via GITHUB_OUTPUT redirection.
       process.stdout.write(`healthy=true\n`);
       process.stdout.write(`reason=healthy\n`);
+      if (apiVersion) process.stdout.write(`api_version=${String(apiVersion)}\n`);
+      if (webVersion) process.stdout.write(`web_version=${String(webVersion)}\n`);
+      if (apiEnv) process.stdout.write(`api_env=${String(apiEnv)}\n`);
+      if (webEnv) process.stdout.write(`web_env=${String(webEnv)}\n`);
       return;
     }
     log("health-gate-wait", {
@@ -134,4 +167,3 @@ main().catch((error) => {
   // Missing env / script error should fail the workflow (not a deploy-window skip).
   process.exitCode = 1;
 });
-

@@ -32,3 +32,9 @@ jobs:
 
       - name: Run beta verification
         run: npm run verify:ci:core
+
+      - name: Studio release contract (golden path)
+        run: npm -w apps/web test -- workflow-journey-scenarios.test.tsx --runInBand
+
+      - name: Studio suite
+        run: npm -w apps/web test -- studio --runInBand
