@@ -1887,8 +1887,10 @@ describe("Studio page UX", () => {
       if (url.includes("/api/resume/readiness")) {
         return Promise.resolve(
           createResponse({
-            status: "blocked",
-            reasons: [{ code: "readiness_pending", message: "blocked" }],
+            status: "ready",
+            blocked: false,
+            reasons: [],
+            reasonCodes: [],
             compliance_flags: [],
           }),
         );
@@ -1896,8 +1898,10 @@ describe("Studio page UX", () => {
       if (url.includes("/api/cover-letters/readiness")) {
         return Promise.resolve(
           createResponse({
-            status: "blocked",
-            reasons: [{ code: "readiness_pending", message: "blocked" }],
+            status: "ready",
+            blocked: false,
+            reasons: [],
+            reasonCodes: [],
             compliance_flags: [],
           }),
         );
@@ -1988,8 +1992,8 @@ describe("Studio page UX", () => {
       if (url.includes("/api/resume/readiness")) {
         return Promise.resolve(
           createResponse({
-            status: "limited",
-            reasons: [{ code: "readiness_pending", message: "limited" }],
+            status: "ready",
+            reasons: [],
             compliance_flags: [],
           }),
         );
@@ -1997,8 +2001,8 @@ describe("Studio page UX", () => {
       if (url.includes("/api/cover-letters/readiness")) {
         return Promise.resolve(
           createResponse({
-            status: "limited",
-            reasons: [{ code: "readiness_pending", message: "limited" }],
+            status: "ready",
+            reasons: [],
             compliance_flags: [],
           }),
         );

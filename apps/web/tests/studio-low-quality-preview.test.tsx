@@ -78,14 +78,18 @@ describe("studio low-quality preview gating", () => {
           verification_coverage: { totalClaims: 2, verifiedClaims: 2, inferredClaims: 0, unverifiedClaims: 0 },
         });
       }
-      if (url.includes("/api/resume/readiness")) return jsonResponse({ status: "ready", reasons: [], compliance_flags: [] });
-      if (url.includes("/api/cover-letters/readiness")) return jsonResponse({ status: "ready", reasons: [], compliance_flags: [] });
+      if (url.includes("/api/resume/readiness")) return jsonResponse({ status: "ready", blocked: false, reasons: [], reasonCodes: [], compliance_flags: [] });
+      if (url.includes("/api/cover-letters/readiness")) return jsonResponse({ status: "ready", blocked: false, reasons: [], reasonCodes: [], compliance_flags: [] });
       if (url.includes("/api/studio/artifacts")) {
         return jsonResponse({
           status: "COMPLETED",
           baselineId: "base-1",
           jobId: "job-1",
           baselineVersionId: "base-version-1",
+          artifactReadiness: "ready",
+          assessmentScore: 79,
+          readiness: { status: "ready", blocked: false },
+          diagnostics: { resumeV2Readiness: { hasResumeV2: true, usableExperienceCount: 1 } },
           resume: { status: "COMPLETED", responseBody: { status: "success", preview: { resume: { heading: { name: "Alex Candidate" } } } } },
           coverLetter: { status: "COMPLETED", responseBody: { status: "success", preview: { coverLetter: { paragraphs: ["Dear Hiring Team,", "Body"] } } } },
         });
@@ -102,7 +106,7 @@ describe("studio low-quality preview gating", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByTestId("studio-decision-panel")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-workflow-authority")).toBeInTheDocument();
     });
 
     expect(screen.queryByText(/Strong output: you can use this now with confidence/i)).toBeNull();
@@ -149,14 +153,18 @@ describe("studio low-quality preview gating", () => {
           },
         });
       }
-      if (url.includes("/api/resume/readiness")) return jsonResponse({ status: "blocked", reasons: [{ code: "full_block", message: "Unverified Python" }], compliance_flags: [] });
-      if (url.includes("/api/cover-letters/readiness")) return jsonResponse({ status: "blocked", reasons: [{ code: "full_block", message: "Unverified Snowflake" }], compliance_flags: [] });
+      if (url.includes("/api/resume/readiness")) return jsonResponse({ status: "blocked", blocked: true, reasons: [{ code: "full_block", message: "Unverified Python" }], reasonCodes: ["full_block"], compliance_flags: [] });
+      if (url.includes("/api/cover-letters/readiness")) return jsonResponse({ status: "blocked", blocked: true, reasons: [{ code: "full_block", message: "Unverified Snowflake" }], reasonCodes: ["full_block"], compliance_flags: [] });
       if (url.includes("/api/studio/artifacts")) {
         return jsonResponse({
           status: "COMPLETED",
           baselineId: "base-1",
           jobId: "job-1",
           baselineVersionId: "base-version-1",
+          artifactReadiness: "ready",
+          assessmentScore: 84,
+          readiness: { status: "ready", blocked: false },
+          diagnostics: { resumeV2Readiness: { hasResumeV2: true, usableExperienceCount: 1 } },
           resume: { status: "COMPLETED", responseBody: { status: "success", preview: { resume: { heading: { name: "Alex Candidate" } } } } },
           coverLetter: { status: "COMPLETED", responseBody: { status: "success", preview: { coverLetter: { paragraphs: ["Dear Hiring Team,", "Body"] } } } },
         });

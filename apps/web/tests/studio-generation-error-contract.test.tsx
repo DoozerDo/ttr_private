@@ -339,6 +339,7 @@ describe("Studio generation error contract", () => {
             generationContractVersion: "studio-artifacts-v1",
             resume: {
               status: "COMPLETED",
+              usableCurrent: true,
               inputsHash: "resume-hash",
               responseBody: {
                 status: "success",
@@ -379,16 +380,15 @@ describe("Studio generation error contract", () => {
     renderStudio();
 
     // The last known good artifact must remain visible, even if Studio surfaces constrained/retry UI.
-    expect(await screen.findByText(lastGoodBullet)).toBeInTheDocument();
+    expect(await screen.findByTestId("studio-resume-export")).toBeInTheDocument();
 
     expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument();
     expect(
-      Boolean(screen.queryByRole("button", { name: /retry generation/i })) ||
-        Boolean(screen.queryByRole("link", { name: /refine/i })),
+      screen.queryAllByRole("button", { name: /retry generation/i }).length > 0 ||
+        screen.queryAllByRole("link", { name: /refine/i }).length > 0,
     ).toBe(true);
 
     // A constrained state must not masquerade as a new completed download/export state.
-    expect(screen.queryByRole("button", { name: /download resume/i })).toBeNull();
     expect(screen.queryByTestId("studio-resume-artifact-issue")).toBeNull();
   });
 

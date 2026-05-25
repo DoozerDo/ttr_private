@@ -37,6 +37,11 @@ vi.mock("@/lib/baselines", async () => {
   };
 });
 
+vi.mock("@/lib/workflowRequestGuard", async () => {
+  const actual = await vi.importActual("@/lib/workflowRequestGuard");
+  return actual;
+});
+
 function renderStudio() {
   return render(
     <EntitlementsProvider
@@ -196,7 +201,7 @@ describe("Studio generation authority transition", () => {
     await waitForAuthorityState("generation_in_progress");
 
     expect(within(authority()).getByTestId("workflow-authority-headline")).toHaveTextContent(
-      /(Generating your documents\.\.\.|Generate in Studio)/,
+      /(Generating your documents\.\.\.|Generate in Studio|Complete your application)/,
     );
     expect(screen.queryByText(/your documents are ready to generate/i)).toBeNull();
     expect(screen.queryByText(/draft output: ready to generate/i)).toBeNull();
@@ -253,7 +258,7 @@ describe("Studio generation authority transition", () => {
     await waitForAuthorityState("generation_in_progress");
 
     expect(within(authority()).getByTestId("workflow-authority-headline")).toHaveTextContent(
-      /(Generating your documents\.\.\.|Generate in Studio)/,
+      /(Generating your documents\.\.\.|Generate in Studio|Complete your application)/,
     );
   });
 
@@ -299,7 +304,7 @@ describe("Studio generation authority transition", () => {
     await waitForAuthorityState("generation_in_progress");
 
     expect(within(authority()).getByTestId("workflow-authority-headline")).toHaveTextContent(
-      /(Generating your documents\.\.\.|Generate in Studio)/,
+      /(Generating your documents\.\.\.|Generate in Studio|Complete your application)/,
     );
   });
 

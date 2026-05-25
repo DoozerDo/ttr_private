@@ -32,20 +32,31 @@ export function resolveWorkflowAuthority(input: ResolveWorkflowAuthorityInput): 
   const hasAnyUsableOutput = Boolean(input.resumeState.hasOutput || input.coverState.hasOutput);
   const hasAnyFailures = Boolean(input.resumeState.failed || input.coverState.failed);
   const hasPartialFailure = hasAnyUsableOutput && hasAnyFailures;
+  const reasonCodes = Array.isArray(input.generationReadiness.reasonCodes)
+    ? input.generationReadiness.reasonCodes.map((c) => String(c ?? ""))
+    : [];
+  const hasBaselineResumeV2Blocker = reasonCodes.some((code) => code.startsWith("baseline_resume_v2_"));
 
   // Deterministic authority rules (single lane):
   // - Once any usable output exists, workflow is READY regardless of lifecycle turbulence.
-  // - Otherwise, score >= 80 is READY (generate-now contract), then defer to readiness block.
+  // - Otherwise, baseline ResumeV2 blockers are always BLOCKED (structural baseline authority).
+  // - Otherwise, score >= 80 is READY (generate-now contract), even if readiness has blockers.
+  // - Otherwise, readiness.blocked is BLOCKED.
   const workflowState: WorkflowAuthorityState = hasAnyUsableOutput
     ? "READY"
-    : typeof score === "number" && score >= 80
-      ? "READY"
-      : input.generationReadiness.blocked
-        ? "BLOCKED"
-        : "REVIEW_REQUIRED";
+    : hasBaselineResumeV2Blocker
+      ? "BLOCKED"
+      : typeof score === "number" && score >= 80
+        ? "READY"
+        : input.generationReadiness.blocked
+          ? "BLOCKED"
+          : "REVIEW_REQUIRED";
 
   const canGenerate =
-    typeof score === "number" && score >= 70 && (!input.generationReadiness.blocked || score >= 80);
+    typeof score === "number" &&
+    score >= 70 &&
+    (!input.generationReadiness.blocked || score >= 80) &&
+    !hasBaselineResumeV2Blocker;
   const suppressFailureMessaging = hasAnyUsableOutput;
 
   const primaryAction: WorkflowAuthorityPrimaryAction =

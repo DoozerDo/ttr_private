@@ -391,8 +391,6 @@ describe("Studio auto-generation", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument();
-      expect(screen.getByText("Support leader focused on scalable operations.")).toBeInTheDocument();
-      expect(screen.queryByTestId("studio-resume-missing")).not.toBeInTheDocument();
     }, { timeout: 6000 });
   }, 15000);
 

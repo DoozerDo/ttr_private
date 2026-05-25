@@ -154,7 +154,15 @@ describe("Studio generation lifecycle stabilization", () => {
         return Promise.resolve(createResponse(fitAssessment(84)));
       }
       if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
-        return Promise.resolve(createResponse({ status: "limited", blocked: false, reasons: [], compliance_flags: [] }));
+        return Promise.resolve(
+          createResponse({
+            status: "blocked",
+            blocked: true,
+            reasonCodes: ["unsupported_target_requirements"],
+            reasons: [{ code: "unsupported_target_requirements", message: "Unsupported requirements present." }],
+            compliance_flags: [],
+          }),
+        );
       }
       if (url.includes("/api/studio/artifacts")) {
         return Promise.resolve(createResponse({ resume: null, coverLetter: null }));
@@ -196,14 +204,26 @@ describe("Studio generation lifecycle stabilization", () => {
         return Promise.resolve(createResponse(fitAssessment(84, ["aws"])));
       }
       if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
-        return Promise.resolve(createResponse({ status: "limited", blocked: false, reasons: [], compliance_flags: [] }));
+        return Promise.resolve(
+          createResponse({
+            status: "blocked",
+            blocked: true,
+            reasonCodes: ["unsupported_target_requirements"],
+            reasons: [{ code: "unsupported_target_requirements", message: "Unsupported requirements present." }],
+            compliance_flags: [],
+          }),
+        );
       }
       if (url.includes("/api/opportunities") && method === "POST") {
         callOrder.push("opportunities");
         const body = init?.body ? JSON.parse(String(init.body)) : {};
-        persistedExcludedRequirements = Array.isArray(body.excludedRequirements)
-          ? body.excludedRequirements
-          : null;
+        const exclusions = body.excludedRequirements ?? body.excludedTargetingLabels ?? null;
+        const nextExclusions = Array.isArray(exclusions)
+          ? exclusions
+          : typeof exclusions === "string"
+            ? exclusions.split(",").map((value) => value.trim()).filter(Boolean)
+            : null;
+        if (nextExclusions) persistedExcludedRequirements = nextExclusions;
         return Promise.resolve(createResponse({ status: "SAVED", updatedAt: new Date().toISOString() }));
       }
       if (url.endsWith("/api/resume") && method === "POST") {

@@ -3859,8 +3859,7 @@ export default function StudioPage() {
     resumeState.response,
   ]);
 
-  const canGenerateWithUsableEvidence = canGenerate;
-  const canGenerateDocuments = canGenerate;
+  const canGenerateDocuments = workflowAuthority.canGenerate;
   const generationLifecycle = useMemo(
     () =>
       resolvePairGenerationLifecycle({
@@ -4309,7 +4308,7 @@ export default function StudioPage() {
     }
   }, [effectiveBaselineId, effectiveJobId, hasGeneratedDocumentPair, roleMatchFinalPass, roleMatchFinalSignature]);
   const studioGenerationRenderState = useMemo(() => {
-    const canGenerateByEvidence = canGenerateWithUsableEvidence;
+    const canGenerateByEvidence = canGenerateDocuments;
     const isGenerating = pairWorkflowState.pairStatus === "generating";
     const artifactType =
       pairWorkflowState.coverLetterStatus === "ready" || pairWorkflowState.coverLetterStatus === "generating"
@@ -4335,7 +4334,7 @@ export default function StudioPage() {
     hasGeneratedOnce,
     isFirstGenerationAfterUnlock,
     isFromUnlock,
-    canGenerateWithUsableEvidence,
+    canGenerateDocuments,
     baselineTemplateReadinessSignal.usableEvidenceExists,
     pairWorkflowState.coverLetterStatus,
     pairWorkflowState.pairStatus,
@@ -5649,7 +5648,7 @@ export default function StudioPage() {
     const hasPersistedResumeTruth = hasResumeArtifact || Boolean(resumeState.response) || hasRenderableResumeContent;
     if (resumeGenerating) return "generating";
     if (resumeV2Authority.blocksGeneration) return "needs_more_baseline_detail";
-    if (!canGenerateDocuments && activeGenerationReadiness.blocked) return "blocked_by_compliance";
+    if (workflowAuthority.workflowState === "BLOCKED") return "blocked_by_compliance";
     if (resumePresenter.status === "blocked") return "blocked_by_compliance";
     if (resumePersistedArtifactSyncPending && !hasResumeArtifact) return "syncing_persisted_artifact";
     if (needsMoreBaselineDetail) return "needs_more_baseline_detail";
@@ -5669,7 +5668,7 @@ export default function StudioPage() {
     return canGenerateDocuments ? "ready_to_generate" : "not_generated_yet";
   }, [
     canGenerateDocuments,
-    activeGenerationReadiness.blocked,
+    workflowAuthority.workflowState,
     hasResumeArtifact,
     hasRenderableResumeContent,
     resumePersistedArtifactSyncPending,
@@ -5686,7 +5685,7 @@ export default function StudioPage() {
   const coverCardStatus: StudioCardStatus = useMemo(() => {
     if (coverGenerating) return "generating";
     if (resumeV2Authority.blocksGeneration) return "not_generated_yet";
-    if (!canGenerateDocuments && activeGenerationReadiness.blocked) return "blocked_by_compliance";
+    if (workflowAuthority.workflowState === "BLOCKED") return "blocked_by_compliance";
     if (coverLetterComplianceBlocked || coverPresenter.status === "blocked") {
       return "blocked_by_compliance";
     }
@@ -5702,7 +5701,7 @@ export default function StudioPage() {
     canGenerateDocuments,
     coverGenerating,
     coverLetterComplianceBlocked,
-    activeGenerationReadiness.blocked,
+    workflowAuthority.workflowState,
     coverPresenter.status,
     coverState.error,
     hasCoverLetterArtifact,
@@ -11198,8 +11197,15 @@ export default function StudioPage() {
   useEffect(() => {
     dispatchGenerationAfterTargetingAdjustmentRef.current = async () => {
       try {
-        if (!qualifiedForStudioOrchestration) return;
-        if (studioReadinessBlocksGeneration) return;
+        if (
+          !effectiveBaselineId ||
+          !effectiveBaselineVersionId ||
+          !effectiveJobId ||
+          !effectiveRequestedAnalysisId
+        ) {
+          return;
+        }
+        const shouldDispatchGeneration = !studioReadinessBlocksGeneration;
         const needsResume = !hasResumeArtifact;
         const needsCover = !hasCoverLetterArtifact;
         if (!needsResume && !needsCover) return;
@@ -11299,6 +11305,7 @@ export default function StudioPage() {
           exclusions,
         });
         try {
+          if (!shouldDispatchGeneration) return;
           await generateArtifactsNow({ resume: needsResume, coverLetter: needsCover, source: "manual" });
 
           console.info("[studio][artifacts][refresh_after_targeting_adjustment_started]", {
@@ -13097,7 +13104,6 @@ export default function StudioPage() {
       ) : null}
       {requestedAnalysisId &&
       // Unsupported requirements must not block/distract the primary generation path when generation is otherwise allowed.
-      !canGenerateDocuments &&
       activeGenerationReadiness.blocked &&
       canonicalUnverifiedRequirements.length &&
       !(studioGenerationStateInfo.state === "degraded" && studioGenerationStateInfo.hasUnsupportedRequirements) ? (

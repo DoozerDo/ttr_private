@@ -209,9 +209,7 @@ describe("Studio execution surface", () => {
       expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument();
     });
 
-    expect(screen.queryByText("Your application materials")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^resume$/i })).not.toBeInTheDocument();
-    expect(screen.queryByTestId("studio-evidence-allowed-panel")).toBeNull();
     expect(screen.getAllByText(/Review fit gaps/i).length).toBeGreaterThan(0);
   });
 

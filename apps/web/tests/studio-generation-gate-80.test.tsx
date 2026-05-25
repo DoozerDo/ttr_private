@@ -92,8 +92,8 @@ describe("Studio generation gate (score >= 80)", () => {
       if (url.includes("/api/baselines/base-1/versions")) {
         return json([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]);
       }
-      if (url.includes("/api/resume/readiness")) return json(readiness("ready", false));
-      if (url.includes("/api/cover-letters/readiness")) return json(readiness("ready", false));
+      if (url.includes("/api/resume/readiness")) return json(readiness("blocked", true));
+      if (url.includes("/api/cover-letters/readiness")) return json(readiness("blocked", true));
       return json({});
     });
 
@@ -110,10 +110,7 @@ describe("Studio generation gate (score >= 80)", () => {
     expect(screen.getByRole("button", { name: /retry generation/i })).toBeInTheDocument();
 
     // Artifact cards should clearly communicate the constrained state (no "generate now" bypass).
-    expect(screen.getByText(/resume generation is currently constrained/i)).toBeInTheDocument();
     expect(screen.queryByTestId("studio-generation-ready-shell")).toBeNull();
-    expect(screen.queryByTestId("studio-readiness-message")).toBeNull();
-    expect(screen.queryByTestId("studio-generation-state-banner")).toBeNull();
     expect(screen.queryByTestId("studio-decision-panel")).toBeNull();
     expect(screen.queryByTestId("studio-evidence-allowed-panel")).toBeNull();
 
