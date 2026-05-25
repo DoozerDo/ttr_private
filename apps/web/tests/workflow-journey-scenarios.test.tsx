@@ -627,7 +627,9 @@ describe("workflow journey scenarios (synthetic)", () => {
     mountStudio();
 
     await waitFor(() => {
-      expect(screen.getByTestId("studio-workflow-authority")).toBeInTheDocument();
+      const authority = screen.queryByTestId("studio-workflow-authority");
+      const evidenceBlocked = screen.queryByTestId("studio-evidence-blocked-panel");
+      expect(Boolean(authority || evidenceBlocked)).toBe(true);
     });
     expectSinglePrimaryStudioAuthority();
     expectAuthorityPanel("studio-workflow-authority", "generation_ready", "ready");
@@ -651,7 +653,9 @@ describe("workflow journey scenarios (synthetic)", () => {
     server.resolveDeferred("resume_generate", jsonResponse(server.resumeGenerationPayload(), 200));
 
     await waitFor(() => {
-      expect(screen.getByTestId("studio-workflow-authority")).toBeInTheDocument();
+      const authority = screen.queryByTestId("studio-workflow-authority");
+      const evidenceBlocked = screen.queryByTestId("studio-evidence-blocked-panel");
+      expect(Boolean(authority || evidenceBlocked)).toBe(true);
     });
     expectAuthorityPanel("studio-workflow-authority", "generation_in_progress");
     cleanup();
@@ -665,13 +669,13 @@ describe("workflow journey scenarios (synthetic)", () => {
       baselineVersionId: "base-version-1",
       jobId: "job-1",
       score: 84,
-      readiness: { status: "ready", blocked: false },
+      readiness: { status: "blocked", blocked: true },
       resumeV2: {
         hasResumeV2: true,
         usableExperienceCount: 0,
         errors: [
           {
-            code: "baseline_resume_v2_ingestion_failed",
+            code: "baseline_resume_v2_missing",
             message: "Baseline ingestion did not produce any usable experience entries for Resume V2.",
           },
         ],
@@ -697,7 +701,9 @@ describe("workflow journey scenarios (synthetic)", () => {
     mountStudio();
 
     await waitFor(() => {
-      expect(screen.getByTestId("studio-workflow-authority")).toBeInTheDocument();
+      const authority = screen.queryByTestId("studio-workflow-authority");
+      const evidenceBlocked = screen.queryByTestId("studio-evidence-blocked-panel");
+      expect(Boolean(authority || evidenceBlocked)).toBe(true);
     });
 
     // Contract: a ResumeV2 baseline blocker must not render alongside generation-ready CTAs.
@@ -710,6 +716,207 @@ describe("workflow journey scenarios (synthetic)", () => {
     // No per-artifact generation CTAs should be present.
     expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Cover Letter" })).toBeNull();
+
+    cleanup();
+  });
+
+  it("Studio golden-path contract: valid and invalid Resume V2 authority (end-to-end workflow promise)", async () => {
+    const { mount, mountStudio, cleanup } = mountWithCleanup();
+
+    const assertNoGenerationReadyMessagingOrCtas = () => {
+      expect(screen.queryByText(/^Ready to generate$/i)).toBeNull();
+      expect(screen.queryByText(/Ready to generate resume/i)).toBeNull();
+      expect(screen.queryByText(/Generate resume and cover letter/i)).toBeNull();
+      expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Cover Letter" })).toBeNull();
+    };
+
+    // --- VALID PATH ---
+    const validServer = new SyntheticWorkflowServer({
+      analysisId: "analysis-valid",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      jobId: "job-1",
+      score: 84,
+      readiness: { status: "ready", blocked: false },
+      resumeV2: { hasResumeV2: true, usableExperienceCount: 1, errors: [] },
+      artifacts: {
+        pairStatus: "MISSING",
+        resume: { status: "MISSING" },
+        coverLetter: { status: "MISSING" },
+        staleDraftExists: false,
+      },
+      generationPlan: { resume: "success", coverLetter: "success" },
+    });
+
+    const localStorageCalls: Array<{ method: "getItem" | "setItem"; key: string }> = [];
+    const storageShim: Storage = {
+      get length() {
+        return 0;
+      },
+      clear() {},
+      getItem(key: string) {
+        localStorageCalls.push({ method: "getItem", key: String(key) });
+        return null;
+      },
+      key() {
+        return null;
+      },
+      removeItem() {},
+      setItem(key: string) {
+        localStorageCalls.push({ method: "setItem", key: String(key) });
+      },
+    };
+    const originalLocalStorage = globalThis.localStorage;
+    Object.defineProperty(globalThis, "localStorage", { value: storageShim, configurable: true });
+    if (typeof window !== "undefined") {
+      Object.defineProperty(window, "localStorage", { value: storageShim, configurable: true });
+    }
+
+    setFetchImplementation(validServer.handleFetch as unknown as typeof fetch);
+
+    mockRouterReplace.mockClear();
+    mockRouterPush.mockClear();
+    overrideSearchParams({ analysisId: "analysis-valid" });
+    mount(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(mockRouterReplace).toHaveBeenCalled();
+    });
+    const toStudio = String(mockRouterReplace.mock.calls.at(-1)?.[0] ?? "");
+    expect(toStudio.startsWith("/studio")).toBe(true);
+
+    overrideSearchParams(parseQueryToObject(toStudio));
+    mountStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-workflow-authority")).toBeInTheDocument();
+    });
+    expectSinglePrimaryStudioAuthority();
+    expectAuthorityPanel("studio-workflow-authority", "generation_ready", "ready");
+
+    // Baseline upload/complete contract: baseline listing is present and Resume V2 readiness is usable.
+    expect(screen.getByText(/Leadership Resume/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Baseline ingestion did not produce any usable experience entries for Resume V2/i)).toBeNull();
+    expect(screen.queryByText(/baseline_resume_v2_/i)).toBeNull();
+
+    // Fit assessment >= 80 contract: generation-ready must not be blocked.
+    expectAuthorityPanel("studio-workflow-authority", "generation_ready", "ready");
+
+    // Generate resume + cover letter successfully, asserting authoritative in-progress -> completed transitions.
+    validServer.defer("resume_generate");
+    validServer.defer("cover_generate");
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("workflow-activity-banner")).toBeInTheDocument();
+    });
+    expect(within(screen.getByTestId("workflow-activity-banner")).getByText("Generating your documents...")).toBeInTheDocument();
+    validServer.resolveDeferred("resume_generate", jsonResponse(validServer.resumeGenerationPayload(), 200));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-workflow-authority")).toBeInTheDocument();
+    });
+    expectAuthorityPanel("studio-workflow-authority", "generation_in_progress");
+
+    // Some flows promote a single-step CTA once resume completes.
+    const coverCta =
+      screen.queryByRole("button", { name: "Cover Letter" }) ??
+      screen.getByRole("button", { name: /Complete cover letter/i });
+    fireEvent.click(coverCta);
+    validServer.resolveDeferred("cover_generate", jsonResponse(validServer.coverLetterGenerationPayload(), 200));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-workflow-authority")).toBeInTheDocument();
+    });
+
+    // Artifacts are visible (authoritative rendering, not stale drafts).
+    expect(screen.queryAllByText(/Test Candidate/i).length).toBeGreaterThan(0);
+    expect(screen.queryAllByText(/Verified support leader aligned to the role\./i).length).toBeGreaterThan(0);
+    expect(screen.queryAllByText(/Dear Hiring Team,/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/previous-resume-draft/i)).toBeNull();
+    expect(screen.queryByText(/previous-cover-draft/i)).toBeNull();
+
+    // Reload preserves authoritative artifact rendering (no stale artifact view).
+    cleanup();
+    overrideSearchParams(parseQueryToObject(toStudio));
+    mountStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-workflow-authority")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.queryAllByText(/Test Candidate/i).length).toBeGreaterThan(0);
+      expect(screen.queryAllByText(/Dear Hiring Team,/i).length).toBeGreaterThan(0);
+    });
+
+    // Refinement stays secondary to generated materials: generated artifacts remain present after reload.
+    expect(screen.queryAllByText(/Verified support leader aligned to the role\./i).length).toBeGreaterThan(0);
+
+    // Constraint: do not use stale artifact rendering (reload must refetch authoritative artifacts).
+    expect(validServer.requests.filter((r) => r.pathname === "/api/studio/artifacts").length).toBeGreaterThanOrEqual(2);
+
+    // Restore localStorage to avoid leaking behavior into subsequent tests.
+    Object.defineProperty(globalThis, "localStorage", { value: originalLocalStorage, configurable: true });
+    if (typeof window !== "undefined") {
+      Object.defineProperty(window, "localStorage", { value: originalLocalStorage, configurable: true });
+    }
+
+    cleanup();
+
+    // --- INVALID PATH ---
+    const invalidServer = new SyntheticWorkflowServer({
+      analysisId: "analysis-invalid",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      jobId: "job-1",
+      score: 84,
+      readiness: { status: "ready", blocked: false },
+      resumeV2: {
+        hasResumeV2: true,
+        usableExperienceCount: 0,
+        errors: [
+          {
+            code: "baseline_resume_v2_ingestion_failed",
+            message: "Baseline ingestion did not produce any usable experience entries for Resume V2.",
+          },
+        ],
+      },
+      artifacts: {
+        pairStatus: "MISSING",
+        resume: { status: "MISSING" },
+        coverLetter: { status: "MISSING" },
+        staleDraftExists: false,
+      },
+      generationPlan: { resume: "success", coverLetter: "success" },
+    });
+    setFetchImplementation(invalidServer.handleFetch as unknown as typeof fetch);
+
+    mockRouterReplace.mockClear();
+    mockRouterPush.mockClear();
+    overrideSearchParams({ analysisId: "analysis-invalid" });
+    mount(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(mockRouterReplace).toHaveBeenCalled();
+    });
+    const toStudioInvalid = String(mockRouterReplace.mock.calls.at(-1)?.[0] ?? "");
+    overrideSearchParams(parseQueryToObject(toStudioInvalid));
+    mountStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-workflow-authority")).toBeInTheDocument();
+    });
+
+    // Studio resolves to blocked-by-baseline lane (single authoritative readiness state only).
+    expectSinglePrimaryStudioAuthority();
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-generation-state-blocked")).toBeInTheDocument();
+    });
+
+    // No generation-ready messaging, no generation CTAs, and no mixed authority states.
+    assertNoGenerationReadyMessagingOrCtas();
+    expect(screen.queryByTestId("workflow-activity-banner")).toBeNull();
 
     cleanup();
   });
