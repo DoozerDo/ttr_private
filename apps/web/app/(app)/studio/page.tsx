@@ -3792,6 +3792,8 @@ export default function StudioPage() {
     ],
   );
 
+  const studioCardsGenerationBlocked = Boolean(workflowAuthority.workflowState === "BLOCKED" || resumeV2Authority.blocksGeneration);
+
   const pairWorkflowState = useMemo(() => {
     const resumeStatus: PairWorkflowArtifactStatus = resumeGenerating || autoGenerationInFlight
       ? "generating"
@@ -13420,7 +13422,7 @@ export default function StudioPage() {
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Resume</h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-              {resumeAutoRepairing
+              {studioCardsGenerationBlocked ? "Generation unavailable" : resumeAutoRepairing
                 ? "Repairing resume…"
                 : (hasResumeDraft && (resumeNeedsRefinement || resumeRequiresCorrectionCopy))
                   ? studioEffectiveGenerationState === "generated_unusable"
@@ -13846,12 +13848,16 @@ export default function StudioPage() {
               <EmptyState
                 testId="studio-resume-missing"
                 title={
-                  resumePersistedArtifactSyncPending
+                  studioCardsGenerationBlocked
+                    ? "Resume generation unavailable"
+                    : resumePersistedArtifactSyncPending
                     ? "Syncing generated resume..."
                     : "Resume not generated yet"
                 }
                 body={
-                  !canGenerateDocuments
+                  studioCardsGenerationBlocked
+                    ? "Document generation is unavailable for this role."
+                    : !canGenerateDocuments
                     ? "Improve your baseline to generate materials."
                     : resumePersistedArtifactSyncPending
                       ? "Generation completed. Loading the saved document..."
@@ -13860,22 +13866,24 @@ export default function StudioPage() {
                       : "Generate your resume to preview and refine your application."
                 }
                 cta={
-                  <FormButton
-                    type="button"
-                    onClick={() => void handleGenerateResume()}
-                    disabled={
-                      !canGenerateDocuments ||
-                      !effectiveBaselineId ||
-                      !effectiveBaselineVersionId ||
-                      !effectiveJobId ||
-                      pageTruth.isGenerating ||
-                      resumeGenerating ||
-                      coverGenerating
-                    }
-                    data-testid="studio-generate-resume-button"
-                  >
-                    {resumeGenerating ? "Generating..." : "Generate resume"}
-                  </FormButton>
+                  studioCardsGenerationBlocked ? null : (
+                    <FormButton
+                      type="button"
+                      onClick={() => void handleGenerateResume()}
+                      disabled={
+                        !canGenerateDocuments ||
+                        !effectiveBaselineId ||
+                        !effectiveBaselineVersionId ||
+                        !effectiveJobId ||
+                        pageTruth.isGenerating ||
+                        resumeGenerating ||
+                        coverGenerating
+                      }
+                      data-testid="studio-generate-resume-button"
+                    >
+                      {resumeGenerating ? "Generating..." : "Generate resume"}
+                    </FormButton>
+                  )
                 }
               />
             ) : null}
@@ -13905,7 +13913,7 @@ export default function StudioPage() {
               Cover letter
             </h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-              {coverAutoRepairing
+              {studioCardsGenerationBlocked ? "Generation unavailable" : coverAutoRepairing
                 ? "Repairing cover letter…"
                 : (hasCoverLetterDraft && (coverNeedsRefinement || coverRequiresCorrectionCopy))
                   ? studioEffectiveGenerationState === "generated_unusable"
@@ -14339,21 +14347,25 @@ export default function StudioPage() {
                   coverAutoGenerating || coverGenerateNowPending ? "studio-cover-generating" : "studio-cover-missing"
                 }
                 title={
-                  coverPersistedArtifactSyncPending
+                  studioCardsGenerationBlocked
+                    ? "Cover letter generation unavailable"
+                    : coverPersistedArtifactSyncPending
                     ? "Syncing generated cover letter..."
                     : coverAutoGenerating || coverGenerateNowPending
                       ? "Generating your cover letter..."
                       : "Cover letter not generated yet"
                 }
                 body={
-                  coverPersistedArtifactSyncPending
+                  studioCardsGenerationBlocked
+                    ? "Document generation is unavailable for this role."
+                    : coverPersistedArtifactSyncPending
                     ? "Generation completed. Loading the saved document..."
                     : coverAutoGenerating || coverGenerateNowPending
                       ? "This usually finishes in a moment."
                       : "Generate your cover letter to create a tailored introduction."
                 }
                 cta={
-                  coverAutoGenerating || coverGenerateNowPending ? null : (
+                  studioCardsGenerationBlocked || coverAutoGenerating || coverGenerateNowPending ? null : (
                     <FormButton
                       type="button"
                       onClick={() => void handleGenerateCoverLetter()}

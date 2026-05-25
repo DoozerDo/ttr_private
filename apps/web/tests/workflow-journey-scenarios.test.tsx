@@ -918,6 +918,12 @@ describe("workflow journey scenarios (synthetic)", () => {
     assertNoGenerationReadyMessagingOrCtas();
     expect(screen.queryByTestId("workflow-activity-banner")).toBeNull();
 
+    // Card-level contract: no contradictory empty states or CTAs when blocked-by-baseline.
+    expect(screen.queryByText(/draft needs edits/i)).toBeNull();
+    expect(screen.queryByText(/not generated yet/i)).toBeNull();
+    expect(screen.queryByTestId("studio-generate-resume-button")).toBeNull();
+    expect(screen.queryByTestId("studio-generate-cover-button")).toBeNull();
+
     cleanup();
   });
 
