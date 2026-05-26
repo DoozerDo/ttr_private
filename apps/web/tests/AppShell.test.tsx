@@ -62,9 +62,11 @@ describe("AppShell unlock path navigation", () => {
       jobSource: { type: "unknown" },
       fitScore: 83,
       analysis: {
+        assessmentId: "analysis-1",
         scoring_v2: {
           score: 83,
-          generation_readiness: { status: "blocked", reasonCodes: ["baseline_resume_v2_missing"] },
+          // Production leak repro: stepper reads stored analysis readiness; this may be missing structural reason codes.
+          generation_readiness: { status: "ready", reasonCodes: [] },
         },
       },
     };
@@ -153,6 +155,34 @@ describe("AppShell unlock path navigation", () => {
       throw new Error(`Unexpected fetch: ${method} ${url}`);
     });
 
+    // Vitest's DOM environment may not provide a writable localStorage; provide a minimal one for this regression.
+    const localStore = new Map<string, string>();
+    (window as any).localStorage = {
+      getItem: (key: string) => (localStore.has(key) ? localStore.get(key)! : null),
+      setItem: (key: string, value: string) => {
+        localStore.set(key, String(value));
+      },
+      removeItem: (key: string) => {
+        localStore.delete(key);
+      },
+      clear: () => {
+        localStore.clear();
+      },
+    };
+
+    // Canonical Studio artifact surface (persisted snapshot) contains the structural baseline blocker.
+    const blockedSnapshot = JSON.stringify({
+      version: 2,
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      jobId: "job-1",
+      analysisId: "analysis-1",
+      scoring_v2: { generation_readiness: { status: "blocked", reasonCodes: ["baseline_resume_v2_missing"] } },
+      errors: [{ code: "baseline_resume_v2_missing" }],
+    });
+    window.localStorage.setItem("ttr:studio-artifacts:v2:job-1:base-1:analysis-1", blockedSnapshot);
+    window.localStorage.setItem("ttr:studio-artifacts:v2:job-1:base-1:_", blockedSnapshot);
+
     render(
       <AppShell userEmail="test@example.com">
         <EntitlementsProvider
@@ -179,6 +209,9 @@ describe("AppShell unlock path navigation", () => {
     const studioCard = await screen.findByTestId("unlock-path-studio");
     expect(studioCard.getAttribute("data-state")).not.toBe("CURRENT");
     expect(within(studioCard).queryByText("CURRENT")).toBeNull();
+    // Studio card must not imply generation intent while structurally blocked.
+    expect(within(studioCard).queryByText(/Generate resume and cover letter/i)).toBeNull();
+    expect(within(studioCard).queryByText(/Studio unlocks when score/i)).toBeNull();
 
     // No actionable generation actions may render.
     expect(screen.queryByRole("button", { name: /Generate Documents/i })).toBeNull();

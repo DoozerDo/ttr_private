@@ -80,6 +80,9 @@ type UnlockPathBarProps = UnlockPathInput & {
 export function UnlockPathBar(props: UnlockPathBarProps) {
   const pathname = usePathname() ?? "/";
   const router = useRouter();
+  const hasStructuralBaselineBlocker = Array.isArray(props.readinessReasonCodes)
+    ? props.readinessReasonCodes.some((code) => String(code ?? "").startsWith("baseline_resume_v2_"))
+    : false;
   const resolved = useMemo(
     () => resolveUnlockPathState({ ...props, currentPathname: props.currentPathname ?? pathname }),
     [pathname, props],
@@ -105,7 +108,15 @@ export function UnlockPathBar(props: UnlockPathBarProps) {
           const isComplete = visibleState === "COMPLETE";
           const isClickable = !isLocked;
           const badge = STATE_LABEL[visibleState];
-          const title = isLocked ? `${module.title}: ${module.lockedReason}` : module.title;
+          const moduleSubtitle =
+            module.id === "studio" && isLocked && hasStructuralBaselineBlocker
+              ? "Baseline repair required."
+              : module.subtitle;
+          const moduleLockedReason =
+            module.id === "studio" && hasStructuralBaselineBlocker
+              ? "Repair your baseline before Studio can unlock."
+              : module.lockedReason;
+          const title = isLocked ? `${module.title}: ${moduleLockedReason}` : module.title;
 
           return (
             <button
@@ -135,7 +146,7 @@ export function UnlockPathBar(props: UnlockPathBarProps) {
                   <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
                     {module.title}
                   </p>
-                  <p className="mt-1 text-sm leading-5 text-slate-200">{module.subtitle}</p>
+                  <p className="mt-1 text-sm leading-5 text-slate-200">{moduleSubtitle}</p>
                 </div>
                 {isLocked ? <LockIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" /> : null}
               </div>
@@ -155,7 +166,7 @@ export function UnlockPathBar(props: UnlockPathBarProps) {
                   {badge}
                 </span>
                 {isLocked ? (
-                  <span className="text-[11px] leading-4 text-slate-400">{module.lockedReason}</span>
+                  <span className="text-[11px] leading-4 text-slate-400">{moduleLockedReason}</span>
                 ) : !isCurrent ? (
                   <span className="text-[11px] leading-4 text-slate-400">
                     {isComplete ? "Completed" : "Available"}
