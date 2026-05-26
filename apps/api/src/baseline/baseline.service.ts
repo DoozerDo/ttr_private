@@ -2070,10 +2070,11 @@ export class BaselineService {
       mimeType: baseline.mimeType ?? null,
     });
 
+    const baselineSections = Array.isArray(baseline.sections) ? baseline.sections : [];
     const rawSection =
-      baseline.sections.find(
+      baselineSections.find(
         (section) => section.sectionType === BaselineSectionType.RAW,
-      ) ?? baseline.sections[0];
+      ) ?? baselineSections[0];
 
     const fallbackRawText = (rawSection?.content ?? '').trim();
     const hasStoredSourceFile = Boolean(baseline.storagePath?.trim());
@@ -2302,6 +2303,14 @@ export class BaselineService {
             ? String((error as { stack?: unknown }).stack ?? '')
             : '',
       });
+      if (!(error instanceof HttpException)) {
+        throw new UnprocessableEntityException({
+          code: 'baseline_reparse_persistence_failed',
+          message:
+            'Reprocessing failed while saving your updated baseline. Please try again or re-upload your resume.',
+          details: error instanceof Error ? error.message : String(error ?? 'unknown'),
+        });
+      }
       throw error;
     }
   }

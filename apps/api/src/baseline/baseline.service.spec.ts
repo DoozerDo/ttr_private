@@ -1263,6 +1263,55 @@ describe('BaselineService - reparse ingestion source', () => {
       expect(error.getStatus()).not.toBe(500);
     }
   });
+
+  it('reparseBaselineForUser returns 422 baseline_reparse_persistence_failed when transaction persistence throws', async () => {
+    const canonical = {
+      ...canonicalBaseline,
+      schema_version: 'baseline_schema_v1',
+    } as any;
+
+    ingestionService.ingest.mockResolvedValue({
+      rawText: 'from file',
+      parsedSections: [],
+      canonical,
+      sourceFormat: 'pdf',
+    });
+
+    baselineRepository.findOne.mockResolvedValue({
+      ...baseline,
+      sections: [
+        {
+          ...sections[0],
+          sectionType: BaselineSectionType.RAW,
+          content: 'raw baseline text',
+        },
+      ],
+    } as Baseline);
+
+    (service as any).persistParsedBaseline = jest.fn().mockResolvedValue(undefined);
+    (service as any).baselineVersionRepository.findOne.mockResolvedValue(null);
+    (service as any).baselineBlockPolicyRepository.find.mockResolvedValue([]);
+
+    baselineRepository.manager.transaction.mockImplementationOnce(async (cb: any) =>
+      cb({
+        create: jest.fn((_: any, payload: any) => payload),
+        save: jest.fn(async (value: any) => value),
+        delete: jest.fn(async () => {
+          throw new Error('db delete failed');
+        }),
+      }),
+    );
+
+    try {
+      await service.reparseBaselineForUser(baselineUuid, 'user-1');
+    } catch (error: any) {
+      expect(error.getStatus()).toBe(422);
+      expect(error.getResponse()).toMatchObject({
+        code: 'baseline_reparse_persistence_failed',
+      });
+      expect(error.getStatus()).not.toBe(500);
+    }
+  });
 });
 
 describe('BaselineService - score history persistence', () => {
