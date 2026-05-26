@@ -2246,7 +2246,6 @@ export class BaselineService {
         baseline.version = nextVersionNumber;
         baseline.versionNumber = nextVersionNumber;
         baseline.isActive = true;
-        baseline.versions = [savedVersion];
 
         this.logger.debug('[BASELINE][REPARSE_RESUMEV2_BEGIN]', {
           baselineId: baseline.id,
@@ -2280,7 +2279,27 @@ export class BaselineService {
           baselineVersionId: savedVersion.id,
         });
 
-        const savedBaseline = await manager.save(baseline);
+        await manager.update(
+          Baseline,
+          { id: baseline.id, userId },
+          {
+            version: nextVersionNumber,
+            versionNumber: nextVersionNumber,
+            isActive: true,
+            status: BaselineStatus.ACTIVE,
+            archivedAt: null,
+          },
+        );
+
+        const savedBaseline = {
+          ...baseline,
+          version: nextVersionNumber,
+          versionNumber: nextVersionNumber,
+          isActive: true,
+          status: BaselineStatus.ACTIVE,
+          archivedAt: null,
+          versions: [savedVersion],
+        } as Baseline;
         this.logger.log('[BASELINE][REPARSE_SUCCESS]', {
           baselineId: baseline.id,
           userId,

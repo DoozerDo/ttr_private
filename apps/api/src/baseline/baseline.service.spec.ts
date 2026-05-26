@@ -989,6 +989,7 @@ describe('BaselineService - reparse ingestion source', () => {
           cb({
             create: jest.fn((_: any, payload: any) => payload),
             save: jest.fn(async (value: any) => value),
+            update: jest.fn(async () => ({ affected: 1 })),
             delete: jest.fn(),
           }),
         ),
@@ -1311,6 +1312,156 @@ describe('BaselineService - reparse ingestion source', () => {
       });
       expect(error.getStatus()).not.toBe(500);
     }
+  });
+
+  it('reparseBaselineForUser does not save parent baseline with partial versions relation after Resume V2 persistence', async () => {
+    const canonical = {
+      ...canonicalBaseline,
+      schema_version: 'baseline_schema_v1',
+    } as any;
+
+    ingestionService.ingest.mockResolvedValue({
+      rawText: 'from file',
+      parsedSections: [],
+      canonical,
+      sourceFormat: 'pdf',
+    });
+
+    baselineRepository.findOne.mockResolvedValue({
+      ...baseline,
+      sections: [
+        {
+          ...sections[0],
+          sectionType: BaselineSectionType.RAW,
+          content: 'raw baseline text',
+        },
+      ],
+      versions: [{ id: 'existing-version-id', baselineId: baselineUuid, versionNumber: 1 }],
+    } as Baseline);
+
+    const txSave = jest.fn(async (value: any) => {
+      if (value?.id === baselineUuid && Array.isArray(value?.versions)) {
+        throw new Error('parent baseline save with versions relation is not allowed');
+      }
+      if (value?.baselineId === baselineUuid && value?.versionNumber === 2 && !value?.id) {
+        return { ...value, id: 'new-version-id' };
+      }
+      return value;
+    });
+    const txUpdate = jest.fn(async () => ({ affected: 1 }));
+
+    baselineRepository.manager.transaction.mockImplementationOnce(async (cb: any) =>
+      cb({
+        create: jest.fn((_: any, payload: any) => payload),
+        save: txSave,
+        update: txUpdate,
+        delete: jest.fn(),
+      }),
+    );
+
+    (service as any).persistParsedBaseline = jest.fn().mockResolvedValue(undefined);
+    (service as any).baselineVersionRepository.findOne.mockResolvedValue({
+      id: 'existing-version-id',
+      baselineId: baselineUuid,
+      versionNumber: 1,
+      verifiedAdditions: [],
+    });
+    (service as any).baselineBlockPolicyRepository.find.mockResolvedValue([]);
+
+    const result = await service.reparseBaselineForUser(baselineUuid, 'user-1');
+
+    expect(result.versions?.[0]?.id).toBe('new-version-id');
+    expect(txUpdate).toHaveBeenCalledWith(
+      Baseline,
+      { id: baselineUuid, userId: 'user-1' },
+      expect.objectContaining({ version: 2, versionNumber: 2, isActive: true }),
+    );
+    expect(txSave).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: baselineUuid, versions: expect.any(Array) }),
+    );
+  });
+
+  it('reparseBaselineForUser returns new usable baseline version payload without detaching baseline_versions ownership', async () => {
+    const canonical = {
+      ...canonicalBaseline,
+      schema_version: 'baseline_schema_v1',
+    } as any;
+
+    ingestionService.ingest.mockResolvedValue({
+      rawText: 'from file',
+      parsedSections: [],
+      canonical,
+      sourceFormat: 'pdf',
+    });
+
+    baselineRepository.findOne.mockResolvedValue({
+      ...baseline,
+      sections: [
+        {
+          ...sections[0],
+          sectionType: BaselineSectionType.RAW,
+          content: 'raw baseline text',
+        },
+      ],
+      versions: [{ id: 'existing-version-id', baselineId: baselineUuid, versionNumber: 1 }],
+    } as Baseline);
+
+    const txSave = jest.fn(async (value: any) => {
+      if (value?.id === baselineUuid && Array.isArray(value?.versions)) {
+        throw new Error('unexpected parent baseline save with partial versions');
+      }
+      if (value?.baselineId === baselineUuid && value?.versionNumber === 2 && !value?.id) {
+        return { ...value, id: 'new-usable-version-id' };
+      }
+      return value;
+    });
+    const txUpdate = jest.fn(async () => ({ affected: 1 }));
+    const txDelete = jest.fn();
+    const txCreate = jest.fn((_: any, payload: any) => payload);
+
+    baselineRepository.manager.transaction.mockImplementationOnce(async (cb: any) =>
+      cb({
+        create: txCreate,
+        save: txSave,
+        update: txUpdate,
+        delete: txDelete,
+      }),
+    );
+
+    const persistParsedBaselineSpy = jest
+      .spyOn(service as any, 'persistParsedBaseline')
+      .mockResolvedValue(undefined);
+
+    (service as any).baselineVersionRepository.findOne.mockResolvedValue({
+      id: 'existing-version-id',
+      baselineId: baselineUuid,
+      versionNumber: 1,
+      verifiedAdditions: [],
+    });
+    (service as any).baselineBlockPolicyRepository.find.mockResolvedValue([]);
+
+    const result = await service.reparseBaselineForUser(baselineUuid, 'user-1');
+
+    expect(result.id).toBe(baselineUuid);
+    expect(result.version).toBe(2);
+    expect(result.versionNumber).toBe(2);
+    expect(result.versions?.[0]?.id).toBe('new-usable-version-id');
+    expect(result.versions?.[0]?.baselineId).toBe(baselineUuid);
+    expect(persistParsedBaselineSpy).toHaveBeenCalledTimes(1);
+
+    expect(txSave).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: baselineUuid, versions: expect.any(Array) }),
+    );
+    expect(txUpdate).not.toHaveBeenCalledWith(
+      BaselineVersion,
+      expect.anything(),
+      expect.objectContaining({ baselineId: null }),
+    );
+    expect(txUpdate).toHaveBeenCalledWith(
+      Baseline,
+      { id: baselineUuid, userId: 'user-1' },
+      expect.objectContaining({ version: 2, versionNumber: 2, isActive: true }),
+    );
   });
 });
 
