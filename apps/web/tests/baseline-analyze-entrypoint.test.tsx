@@ -82,7 +82,7 @@ function createJsonResponse(body: unknown, status = 200): Response {
       />,
     );
 
-    expect(await screen.findByRole("link", { name: /target a role/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /target a role/i })).toBeInTheDocument();
     expect(mockRouterPush).not.toHaveBeenCalledWith(expect.stringContaining("/analyze"));
   });
 
@@ -140,7 +140,7 @@ function createJsonResponse(body: unknown, status = 200): Response {
       />,
     );
 
-    expect(await screen.findByRole("link", { name: /target a role/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /target a role/i })).toBeInTheDocument();
     expect(mockRouterPush).not.toHaveBeenCalledWith(expect.stringContaining("/analyze"));
   });
 
@@ -198,7 +198,7 @@ function createJsonResponse(body: unknown, status = 200): Response {
       />,
     );
 
-    expect(await screen.findByRole("link", { name: /target a role/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /target a role/i })).toBeInTheDocument();
   });
 
   it("shows the Target CTA when analyze returns latestAssessmentId", async () => {
@@ -255,6 +255,6 @@ function createJsonResponse(body: unknown, status = 200): Response {
       />,
     );
 
-    expect(await screen.findByRole("link", { name: /target a role/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /target a role/i })).toBeInTheDocument();
   });
 });
