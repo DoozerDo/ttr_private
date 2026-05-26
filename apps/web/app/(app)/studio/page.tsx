@@ -1995,6 +1995,9 @@ export default function StudioPage() {
   const [studioArtifactsRefreshNonce, setStudioArtifactsRefreshNonce] = useState(0);
 
   const [baselineReprocessInFlight, setBaselineReprocessInFlight] = useState(false);
+  const [baselineReprocessFailure, setBaselineReprocessFailure] = useState<
+    { code?: string | null; message?: string | null } | null
+  >(null);
   const handleReprocessBaseline = useCallback(async () => {
     const baselineId = effectiveBaselineId ?? selectedBaselineId ?? requestedBaselineId ?? null;
     if (!baselineId) return;
@@ -2005,7 +2008,25 @@ export default function StudioPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source: "studio_blocked_baseline" }),
       });
-      if (!response.ok) return;
+      if (!response.ok) {
+        const payload = (await readResponsePayload(response)) as any;
+        setBaselineReprocessFailure({
+          code:
+            typeof payload?.code === "string"
+              ? payload.code
+              : typeof payload?.error?.code === "string"
+                ? payload.error.code
+                : null,
+          message:
+            typeof payload?.message === "string"
+              ? payload.message
+              : typeof payload?.error?.message === "string"
+                ? payload.error.message
+                : "Baseline reprocess failed. Please try again.",
+        });
+        return;
+      }
+      setBaselineReprocessFailure(null);
 
       const versionsRes = await fetch(`/api/baselines/${encodeURIComponent(baselineId)}/versions`, { cache: "no-store" });
       const versionsPayload = (await readResponsePayload(versionsRes)) as unknown;
@@ -2025,6 +2046,8 @@ export default function StudioPage() {
       if (latestVersionId) params.set("baselineVersionId", latestVersionId);
       if (requestedAnalysisId) params.set("analysisId", requestedAnalysisId);
       void router.push(`/studio?${params.toString()}`);
+      // Ensure the new baseline version + resumed readiness are fetched immediately.
+      router.refresh();
     } finally {
       setBaselineReprocessInFlight(false);
     }
@@ -12476,15 +12499,20 @@ export default function StudioPage() {
         >
           <summary className="cursor-pointer text-sm font-semibold text-slate-200">Guidance</summary>
           <div className="mt-3 space-y-3">
-            {studioBlockedBaselineContract ? (
-              <div className="space-y-3" data-testid="studio-baseline-blocked-recovery">
-                <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
-                  Your baseline needs to be reprocessed before documents can be generated.
-                </p>
-                <div className="flex justify-end">
-                  <FormButton
-                    onClick={() => void handleReprocessBaseline()}
-                    disabled={baselineReprocessInFlight}
+             {studioBlockedBaselineContract ? (
+               <div className="space-y-3" data-testid="studio-baseline-blocked-recovery">
+                 <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
+                   Your baseline needs to be reprocessed before documents can be generated.
+                 </p>
+                 {baselineReprocessFailure?.message ? (
+                   <p className="text-sm text-slate-200" data-testid="studio-reprocess-failure-message">
+                     {baselineReprocessFailure.message}
+                   </p>
+                 ) : null}
+                 <div className="flex justify-end">
+                   <FormButton
+                     onClick={() => void handleReprocessBaseline()}
+                     disabled={baselineReprocessInFlight}
                     data-testid="studio-resume-reprocess-baseline"
                   >
                     {baselineReprocessInFlight ? "Reprocessing…" : "Reprocess baseline"}

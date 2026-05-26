@@ -126,6 +126,7 @@ type ScenarioServerState = {
     resume: "success" | "failed_retryable" | "failed_non_retryable";
     coverLetter: "success" | "failed_retryable" | "failed_non_retryable";
   };
+  reparseFailure?: { status: number; code: string; message: string } | null;
 };
 
 class SyntheticWorkflowServer {
@@ -429,6 +430,12 @@ class SyntheticWorkflowServer {
     }
 
     if (pathname.includes("/api/baselines/base-1/reparse") && method === "POST") {
+      if (this.state.reparseFailure) {
+        return jsonResponse(
+          { code: this.state.reparseFailure.code, message: this.state.reparseFailure.message },
+          this.state.reparseFailure.status,
+        );
+      }
       // Canonical repair: reparse should produce a usable ResumeV2 baseline and advance baselineVersionId.
       this.state = {
         ...this.state,
@@ -1059,12 +1066,33 @@ describe("workflow journey scenarios (synthetic)", () => {
     });
 
     fireEvent.click(screen.getByTestId("studio-generate-resume-button"));
+
+    await waitFor(() => {
+      // Resume is visibly generated first.
+      expect(screen.queryAllByText(/Test Candidate/i).length).toBeGreaterThan(0);
+    });
+
+    await waitFor(() => {
+      const coverActionCount =
+        Number(Boolean(screen.queryByTestId("studio-generate-cover-button"))) +
+        Number(Boolean(screen.queryByTestId("studio-primary-cta-complete-cover")));
+      expect(coverActionCount).toBe(1);
+    });
+
+    // Deterministic next action: cover generation only (no repair/retry ambiguity).
+    expect(screen.queryByTestId("studio-baseline-blocked-recovery")).toBeNull();
+    expect(screen.queryByRole("button", { name: /retry generation/i })).toBeNull();
+
+    await waitFor(() => {
+      const coverBtn =
+        screen.queryByTestId("studio-generate-cover-button") ??
+        screen.queryByTestId("studio-primary-cta-complete-cover");
+      expect(coverBtn).toBeTruthy();
+    });
     const coverBtn =
       screen.queryByTestId("studio-generate-cover-button") ??
       screen.queryByTestId("studio-primary-cta-complete-cover");
-    if (!coverBtn) {
-      throw new Error("Expected a cover generation CTA after baseline reprocess, but none was found.");
-    }
+    if (!coverBtn) throw new Error("Expected a cover generation CTA after baseline reprocess, but none was found.");
     fireEvent.click(coverBtn);
 
     await waitFor(() => {
@@ -1099,6 +1127,219 @@ describe("workflow journey scenarios (synthetic)", () => {
     expect(screen.queryByText(/Retry generation/i)).toBeNull();
     expect(screen.queryByTestId("studio-generate-resume-button")).toBeNull();
     expect(screen.queryByTestId("studio-generate-cover-button")).toBeNull();
+
+    cleanup();
+  });
+
+  it("Studio reprocess failure surfaces typed backend reason and stays repair-only (no dead click)", async () => {
+    const { mount, mountStudio, cleanup } = mountWithCleanup();
+
+    const assertNoGenerationReadyMessagingOrCtas = () => {
+      expect(screen.queryByText(/^Ready to generate$/i)).toBeNull();
+      expect(screen.queryByText(/Ready to generate resume/i)).toBeNull();
+      expect(screen.queryByText(/Generate resume and cover letter/i)).toBeNull();
+      expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Cover Letter" })).toBeNull();
+    };
+
+    const server = new SyntheticWorkflowServer({
+      analysisId: "analysis-reparse-fail",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      jobId: "job-1",
+      score: 83,
+      readiness: { status: "blocked", blocked: true },
+      resumeV2: {
+        hasResumeV2: false,
+        usableExperienceCount: 0,
+        errors: [{ code: "baseline_resume_v2_missing", message: "Baseline ResumeV2 missing" }],
+      },
+      artifacts: {
+        pairStatus: "MISSING",
+        resume: { status: "MISSING" },
+        coverLetter: { status: "MISSING" },
+        staleDraftExists: false,
+      },
+      generationPlan: { resume: "success", coverLetter: "success" },
+      reparseFailure: {
+        status: 422,
+        code: "baseline_reparse_ingestion_failed",
+        message: "Reprocessing failed while re-ingesting your resume content.",
+      },
+    });
+    setFetchImplementation(server.handleFetch as unknown as typeof fetch);
+
+    mockRouterReplace.mockClear();
+    mockRouterPush.mockClear();
+    overrideSearchParams({ analysisId: "analysis-reparse-fail" });
+    mount(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(mockRouterReplace).toHaveBeenCalled();
+    });
+    const toStudio = String(mockRouterReplace.mock.calls.at(-1)?.[0] ?? "");
+    overrideSearchParams(parseQueryToObject(toStudio));
+    mountStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-baseline-blocked-recovery")).toBeInTheDocument();
+    });
+
+    assertNoGenerationReadyMessagingOrCtas();
+
+    fireEvent.click(await screen.findByTestId("studio-resume-reprocess-baseline"));
+
+    await waitFor(() => {
+      expect(
+        server.requests.some((req) => req.method === "POST" && req.pathname.includes("/api/baselines/base-1/reparse")),
+      ).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-reprocess-failure-message")).toHaveTextContent(
+        "Reprocessing failed while re-ingesting your resume content.",
+      );
+    });
+
+    expect(mockRouterPush).not.toHaveBeenCalled();
+    assertNoGenerationReadyMessagingOrCtas();
+    expect(screen.getAllByTestId("studio-resume-reprocess-baseline")).toHaveLength(1);
+
+    cleanup();
+  });
+
+  it("Contract: baseline repair -> reprocess -> generate -> persisted reload shows materials", async () => {
+    const { mount, mountStudio, cleanup } = mountWithCleanup();
+
+    const assertRepairOnly = () => {
+      expect(screen.getByTestId("studio-baseline-blocked-recovery")).toBeInTheDocument();
+      expect(screen.getAllByTestId("studio-resume-reprocess-baseline")).toHaveLength(1);
+      expect(screen.queryByTestId("studio-generate-resume-button")).toBeNull();
+      expect(screen.queryByTestId("studio-generate-cover-button")).toBeNull();
+      expect(screen.queryByRole("button", { name: /retry generation/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /export/i })).toBeNull();
+    };
+
+    const server = new SyntheticWorkflowServer({
+      analysisId: "analysis-repair-to-generate",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      jobId: "job-1",
+      score: 83,
+      readiness: { status: "blocked", blocked: true },
+      resumeV2: {
+        hasResumeV2: false,
+        usableExperienceCount: 0,
+        errors: [{ code: "baseline_resume_v2_missing", message: "Baseline ResumeV2 missing" }],
+      },
+      artifacts: {
+        pairStatus: "MISSING",
+        resume: { status: "MISSING" },
+        coverLetter: { status: "MISSING" },
+        staleDraftExists: false,
+      },
+      generationPlan: { resume: "success", coverLetter: "success" },
+      reparseFailure: null,
+    });
+    setFetchImplementation(server.handleFetch as unknown as typeof fetch);
+
+    mockRouterReplace.mockClear();
+    mockRouterPush.mockClear();
+
+    overrideSearchParams({ analysisId: "analysis-repair-to-generate" });
+    mount(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(mockRouterReplace).toHaveBeenCalled();
+    });
+    const toStudio = String(mockRouterReplace.mock.calls.at(-1)?.[0] ?? "");
+    overrideSearchParams(parseQueryToObject(toStudio));
+    mountStudio();
+
+    await waitFor(() => assertRepairOnly());
+
+    // Only available action: Reprocess baseline.
+    fireEvent.click(await screen.findByTestId("studio-resume-reprocess-baseline"));
+    await waitFor(() => {
+      expect(
+        server.requests.some((req) => req.method === "POST" && req.pathname.includes("/api/baselines/base-1/reparse")),
+      ).toBe(true);
+    });
+
+    // Reprocess navigates to the new baselineVersionId.
+    await waitFor(() => {
+      expect(mockRouterPush).toHaveBeenCalled();
+    });
+    const lastPush = String(mockRouterPush.mock.calls.at(-1)?.[0] ?? "");
+    expect(lastPush).toContain("baselineVersionId=base-version-2");
+
+    // Refresh Studio on the new baseline version id and confirm generation is enabled.
+    cleanup();
+    overrideSearchParams({
+      baselineId: "base-1",
+      baselineVersionId: "base-version-2",
+      jobId: "job-1",
+      analysisId: "analysis-repair-to-generate",
+      assessmentId: "analysis-repair-to-generate",
+    });
+    mountStudio();
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("studio-baseline-blocked-recovery")).toBeNull();
+      expect(screen.getByTestId("studio-generate-resume-button")).toBeInTheDocument();
+      expect(
+        Boolean(
+          screen.queryByTestId("studio-generate-cover-button") ||
+            screen.queryByTestId("studio-primary-cta-complete-cover"),
+        ),
+      ).toBe(true);
+    });
+
+    fireEvent.click(screen.getByTestId("studio-generate-resume-button"));
+    const coverBtn =
+      screen.queryByTestId("studio-generate-cover-button") ??
+      screen.queryByTestId("studio-primary-cta-complete-cover");
+    if (!coverBtn) {
+      throw new Error("Expected a cover generation CTA after baseline reprocess, but none was found.");
+    }
+    fireEvent.click(coverBtn);
+
+    await waitFor(() => {
+      expect(screen.queryAllByText(/Test Candidate/i).length).toBeGreaterThan(0);
+      expect(screen.queryAllByText(/Dear Hiring Team,/i).length).toBeGreaterThan(0);
+    });
+
+    // Reload: artifacts must persist via /api/studio/artifacts and remain the dominant state.
+    cleanup();
+    mountStudio();
+
+    await waitFor(() => {
+      expect(screen.queryAllByText(/Test Candidate/i).length).toBeGreaterThan(0);
+      expect(screen.queryAllByText(/Dear Hiring Team,/i).length).toBeGreaterThan(0);
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("studio-baseline-blocked-recovery")).toBeNull();
+      expect(screen.queryByTestId("studio-guidance-details")).toBeNull();
+      expect(screen.queryByTestId("studio-generate-resume-button")).toBeNull();
+      expect(screen.queryByTestId("studio-generate-cover-button")).toBeNull();
+      expect(screen.queryByRole("button", { name: /^generate cover letter$/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /retry generation/i })).toBeNull();
+      expect(screen.queryByTestId("studio-resume-missing")).toBeNull();
+      expect(screen.queryByTestId("studio-cover-missing")).toBeNull();
+      expect(screen.queryByTestId("studio-resume-preview-unavailable")).toBeNull();
+    });
+    const qualityStatusCopyVisible = Boolean(screen.queryByText(/draft needs edits/i));
+    if (qualityStatusCopyVisible) {
+      expect(screen.queryAllByText(/Test Candidate/i).length).toBeGreaterThan(0);
+      expect(screen.queryAllByText(/Dear Hiring Team,/i).length).toBeGreaterThan(0);
+      expect(screen.queryByTestId("studio-resume-missing")).toBeNull();
+      expect(screen.queryByTestId("studio-cover-missing")).toBeNull();
+      expect(screen.queryByTestId("studio-resume-preview-unavailable")).toBeNull();
+      expect(screen.queryByTestId("studio-generate-resume-button")).toBeNull();
+      expect(screen.queryByRole("button", { name: /^generate cover letter$/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /retry generation/i })).toBeNull();
+      expect(screen.queryByTestId("studio-baseline-blocked-recovery")).toBeNull();
+    }
 
     cleanup();
   });

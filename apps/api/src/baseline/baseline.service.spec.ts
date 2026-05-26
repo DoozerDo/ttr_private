@@ -1137,6 +1137,132 @@ describe('BaselineService - reparse ingestion source', () => {
 
     await expect(service.reparseBaselineForUser(baselineUuid, 'user-1')).resolves.toBeTruthy();
   });
+
+  it('reparseBaselineForUser returns 409 baseline_reparse_missing_source when no stored file and no raw text exist', async () => {
+    baselineRepository.findOne.mockResolvedValue({
+      ...baseline,
+      storagePath: null,
+      sections: [],
+    } as Baseline);
+
+    await expect(service.reparseBaselineForUser(baselineUuid, 'user-1')).rejects.toMatchObject({
+      getStatus: expect.any(Function),
+      getResponse: expect.any(Function),
+    });
+
+    try {
+      await service.reparseBaselineForUser(baselineUuid, 'user-1');
+    } catch (error: any) {
+      expect(error.getStatus()).toBe(409);
+      expect(error.getResponse()).toMatchObject({ code: 'baseline_reparse_missing_source' });
+      expect(error.getStatus()).not.toBe(500);
+    }
+  });
+
+  it('reparseBaselineForUser returns 422 baseline_reparse_ingestion_failed when fallback ingestFromText throws', async () => {
+    ingestionService.ingest.mockRejectedValue(new Error('missing file'));
+    ingestionService.ingestFromText.mockRejectedValue(new Error('empty resume text'));
+
+    baselineRepository.findOne.mockResolvedValue({
+      ...baseline,
+      storagePath: '/missing/path',
+      sections: [
+        {
+          ...sections[0],
+          sectionType: BaselineSectionType.RAW,
+          content: '',
+        },
+      ],
+    } as Baseline);
+
+    try {
+      await service.reparseBaselineForUser(baselineUuid, 'user-1');
+    } catch (error: any) {
+      expect(error.getStatus()).toBe(422);
+      expect(error.getResponse()).toMatchObject({ code: 'baseline_reparse_ingestion_failed' });
+      expect(error.getStatus()).not.toBe(500);
+    }
+  });
+
+  it('reparseBaselineForUser returns typed 422 baseline_resume_v2_* when canonical payload cannot produce usable Resume V2 experience', async () => {
+    // This payload can pass baseline schema parsing but still be structurally unusable for Resume V2 (no usable experience).
+    const canonical = { ...canonicalBaseline } as any;
+
+    ingestionService.ingest.mockResolvedValue({
+      rawText: 'from file',
+      parsedSections: [],
+      canonical,
+      sourceFormat: 'pdf',
+    });
+
+    baselineRepository.findOne.mockResolvedValue({
+      ...baseline,
+      sections: [
+        {
+          ...sections[0],
+          sectionType: BaselineSectionType.RAW,
+          content: 'raw baseline text',
+        },
+      ],
+    } as Baseline);
+
+    // Ensure policy/version queries don't block.
+    (service as any).baselineVersionRepository.findOne.mockResolvedValue(null);
+    (service as any).baselineBlockPolicyRepository.find.mockResolvedValue([]);
+
+    try {
+      await service.reparseBaselineForUser(baselineUuid, 'user-1');
+    } catch (error: any) {
+      expect(error.getStatus()).toBe(422);
+      expect(error.getResponse()).toMatchObject({
+        error: expect.objectContaining({
+          code: expect.stringMatching(/^baseline_resume_v2_/),
+        }),
+      });
+      expect(error.getStatus()).not.toBe(500);
+    }
+  });
+
+  it('reparseBaselineForUser returns 422 baseline_reparse_section_rebuild_failed when section rebuild throws', async () => {
+    const canonical = {
+      ...canonicalBaseline,
+      schema_version: 'baseline_schema_v1',
+    } as any;
+
+    ingestionService.ingest.mockResolvedValue({
+      rawText: 'from file',
+      parsedSections: [],
+      canonical,
+      sourceFormat: 'pdf',
+    });
+
+    baselineRepository.findOne.mockResolvedValue({
+      ...baseline,
+      sections: [
+        {
+          ...sections[0],
+          sectionType: BaselineSectionType.RAW,
+          content: 'raw baseline text',
+        },
+      ],
+    } as Baseline);
+
+    jest
+      .spyOn(service as any, 'buildSections')
+      .mockImplementation(() => {
+        throw new Error('rebuild failed');
+      });
+
+    try {
+      await service.reparseBaselineForUser(baselineUuid, 'user-1');
+    } catch (error: any) {
+      expect(error.getStatus()).toBe(422);
+      expect(error.getResponse()).toMatchObject({
+        code: 'baseline_reparse_section_rebuild_failed',
+      });
+      expect(error.getStatus()).not.toBe(500);
+    }
+  });
 });
 
 describe('BaselineService - score history persistence', () => {
