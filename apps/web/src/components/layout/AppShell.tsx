@@ -462,12 +462,28 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
     | {
         scoring_v2?: {
           score?: number | null;
-          readiness?: { status?: "ready" | "limited" | "blocked" | null };
-          generation_readiness?: { status?: "ready" | "limited" | "blocked" | null };
+          readiness?: {
+            status?: "ready" | "limited" | "blocked" | null;
+            reasonCodes?: string[] | null;
+            reason_codes?: string[] | null;
+          };
+          generation_readiness?: {
+            status?: "ready" | "limited" | "blocked" | null;
+            reasonCodes?: string[] | null;
+            reason_codes?: string[] | null;
+          };
         } | null;
-        readiness?: { status?: "ready" | "limited" | "blocked" | null };
+        readiness?: {
+          status?: "ready" | "limited" | "blocked" | null;
+          reasonCodes?: string[] | null;
+          reason_codes?: string[] | null;
+        };
         readinessStatus?: "ready" | "limited" | "blocked" | null;
-        generation_readiness?: { status?: "ready" | "limited" | "blocked" | null };
+        generation_readiness?: {
+          status?: "ready" | "limited" | "blocked" | null;
+          reasonCodes?: string[] | null;
+          reason_codes?: string[] | null;
+        };
         generatedDocuments?: unknown[];
         generated_documents?: unknown[];
         studio?: { generatedDocuments?: unknown[] };
