@@ -2008,8 +2008,8 @@ export default function StudioPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source: "studio_blocked_baseline" }),
       });
+      const payload = (await readResponsePayload(response)) as any;
       if (!response.ok) {
-        const payload = (await readResponsePayload(response)) as any;
         setBaselineReprocessFailure({
           code:
             typeof payload?.code === "string"
@@ -2028,6 +2028,11 @@ export default function StudioPage() {
       }
       setBaselineReprocessFailure(null);
 
+      const responseVersionId =
+        typeof payload?.baselineVersionId === "string" && payload.baselineVersionId.trim().length > 0
+          ? payload.baselineVersionId.trim()
+          : null;
+
       const versionsRes = await fetch(`/api/baselines/${encodeURIComponent(baselineId)}/versions`, { cache: "no-store" });
       const versionsPayload = (await readResponsePayload(versionsRes)) as unknown;
       const versions = Array.isArray(versionsPayload) ? (versionsPayload as Array<any>) : [];
@@ -2037,13 +2042,19 @@ export default function StudioPage() {
           .sort((a, b) => (Number((b as any).versionNumber ?? 0) || 0) - (Number((a as any).versionNumber ?? 0) || 0))[0] ??
         null;
       const latestVersionId = latest && typeof latest.id === "string" ? latest.id : null;
+      const nextBaselineVersionId = responseVersionId ?? latestVersionId;
+
+      if (nextBaselineVersionId) {
+        pendingVersionSelectionRef.current = nextBaselineVersionId;
+        setSelectedBaselineVersionId(nextBaselineVersionId);
+      }
 
       setStudioArtifactsRefreshNonce((n) => n + 1);
 
       const params = new URLSearchParams();
       if (effectiveJobId) params.set("jobId", effectiveJobId);
       params.set("baselineId", baselineId);
-      if (latestVersionId) params.set("baselineVersionId", latestVersionId);
+      if (nextBaselineVersionId) params.set("baselineVersionId", nextBaselineVersionId);
       if (requestedAnalysisId) params.set("analysisId", requestedAnalysisId);
       void router.push(`/studio?${params.toString()}`);
       // Ensure the new baseline version + resumed readiness are fetched immediately.
@@ -6680,15 +6691,11 @@ export default function StudioPage() {
             pendingVersionSelectionRef.current = null;
             return pending;
           }
+          if (requestedBaselineVersionId && parsed.some((version) => version.id === requestedBaselineVersionId)) {
+            return requestedBaselineVersionId;
+          }
           if (current && parsed.some((version) => version.id === current)) {
             return current;
-          }
-          if (
-            !versionTouchedRef.current &&
-            requestedBaselineVersionId &&
-            parsed.some((version) => version.id === requestedBaselineVersionId)
-          ) {
-            return requestedBaselineVersionId;
           }
           return parsed[0]?.id ?? "";
         });
@@ -6838,7 +6845,12 @@ export default function StudioPage() {
           setSelectedBaselineId(analysisBaselineId);
         }
         if (analysisBaselineVersionId) {
+          // Do not clobber an explicitly routed baselineVersionId (for example, immediately after successful reparse).
+          if (requestedBaselineVersionId && requestedBaselineVersionId.trim().length > 0) {
+            setSelectedBaselineVersionId(requestedBaselineVersionId);
+          } else {
           setSelectedBaselineVersionId(analysisBaselineVersionId);
+          }
         }
       } catch (error) {
         if (canceled) return;

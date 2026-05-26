@@ -1273,19 +1273,14 @@ describe("workflow journey scenarios (synthetic)", () => {
     const lastPush = String(mockRouterPush.mock.calls.at(-1)?.[0] ?? "");
     expect(lastPush).toContain("baselineVersionId=base-version-2");
 
-    // Refresh Studio on the new baseline version id and confirm generation is enabled.
+    // Refresh Studio on the pushed reprocess URL and confirm we immediately leave repair lane.
     cleanup();
-    overrideSearchParams({
-      baselineId: "base-1",
-      baselineVersionId: "base-version-2",
-      jobId: "job-1",
-      analysisId: "analysis-repair-to-generate",
-      assessmentId: "analysis-repair-to-generate",
-    });
+    overrideSearchParams(parseQueryToObject(lastPush));
     mountStudio();
 
     await waitFor(() => {
       expect(screen.queryByTestId("studio-baseline-blocked-recovery")).toBeNull();
+      expect(screen.queryByTestId("studio-resume-reprocess-baseline")).toBeNull();
       expect(screen.getByTestId("studio-generate-resume-button")).toBeInTheDocument();
       expect(
         Boolean(
