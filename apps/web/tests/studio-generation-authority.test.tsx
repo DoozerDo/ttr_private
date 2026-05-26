@@ -730,7 +730,9 @@ describe("Studio artifact quality gating (soft)", () => {
       expect(
         screen.queryByText(/Regenerate resume/i) ??
           screen.queryByText(/Retry generation/i) ??
-          screen.queryByTestId("studio-generation-ready-primary"),
+          screen.queryByTestId("studio-generation-ready-primary") ??
+          // Structural baseline repair can supersede retry when ResumeV2 authority is blocked.
+          screen.queryByTestId("studio-resume-reprocess-baseline"),
       ).toBeTruthy();
       expect(screen.queryByText(/resume_v2_normalized_model_invalid/i)).toBeNull();
       expect(screen.queryByText(/Download DOCX/i)).toBeNull();

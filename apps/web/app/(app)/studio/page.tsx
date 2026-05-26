@@ -1993,6 +1993,49 @@ export default function StudioPage() {
     [effectiveBaselineId, effectiveJobId, effectiveRequestedAnalysisId],
   );
   const [studioArtifactsRefreshNonce, setStudioArtifactsRefreshNonce] = useState(0);
+
+  const [baselineReprocessInFlight, setBaselineReprocessInFlight] = useState(false);
+  const handleReprocessBaseline = useCallback(async () => {
+    const baselineId = effectiveBaselineId ?? selectedBaselineId ?? requestedBaselineId ?? null;
+    if (!baselineId) return;
+    setBaselineReprocessInFlight(true);
+    try {
+      const response = await fetch(`/api/baselines/${encodeURIComponent(baselineId)}/reparse`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: "studio_blocked_baseline" }),
+      });
+      if (!response.ok) return;
+
+      const versionsRes = await fetch(`/api/baselines/${encodeURIComponent(baselineId)}/versions`, { cache: "no-store" });
+      const versionsPayload = (await readResponsePayload(versionsRes)) as unknown;
+      const versions = Array.isArray(versionsPayload) ? (versionsPayload as Array<any>) : [];
+      const latest =
+        versions
+          .filter((v) => v && typeof v === "object" && typeof (v as any).id === "string")
+          .sort((a, b) => (Number((b as any).versionNumber ?? 0) || 0) - (Number((a as any).versionNumber ?? 0) || 0))[0] ??
+        null;
+      const latestVersionId = latest && typeof latest.id === "string" ? latest.id : null;
+
+      setStudioArtifactsRefreshNonce((n) => n + 1);
+
+      const params = new URLSearchParams();
+      if (effectiveJobId) params.set("jobId", effectiveJobId);
+      params.set("baselineId", baselineId);
+      if (latestVersionId) params.set("baselineVersionId", latestVersionId);
+      if (requestedAnalysisId) params.set("analysisId", requestedAnalysisId);
+      void router.push(`/studio?${params.toString()}`);
+    } finally {
+      setBaselineReprocessInFlight(false);
+    }
+  }, [
+    effectiveBaselineId,
+    effectiveJobId,
+    requestedAnalysisId,
+    requestedBaselineId,
+    router,
+    selectedBaselineId,
+  ]);
   const studioArtifactHydrationSignature = useMemo(
     () =>
       [
@@ -12439,13 +12482,13 @@ export default function StudioPage() {
                   Your baseline needs to be reprocessed before documents can be generated.
                 </p>
                 <div className="flex justify-end">
-                  <Link
-                    href={fitReviewHref}
-                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                  <FormButton
+                    onClick={() => void handleReprocessBaseline()}
+                    disabled={baselineReprocessInFlight}
                     data-testid="studio-resume-reprocess-baseline"
                   >
-                    Reprocess baseline
-                  </Link>
+                    {baselineReprocessInFlight ? "Reprocessing…" : "Reprocess baseline"}
+                  </FormButton>
                 </div>
               </div>
             ) : (

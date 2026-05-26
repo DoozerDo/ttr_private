@@ -402,7 +402,9 @@ class SyntheticWorkflowServer {
     this.requests.push({ url, pathname, method, ...(body !== undefined ? { body } : {}) });
 
     if (pathname.includes("/api/baselines/base-1/versions")) {
-      return jsonResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }], 200);
+      const version = this.state.baselineVersionId ?? "base-version-1";
+      const versionNumber = version === "base-version-2" ? 2 : 1;
+      return jsonResponse([{ id: version, fileHash: `hash-${versionNumber}`, versionNumber }], 200);
     }
 
     if (pathname.includes(`/api/analysis/fit-assessments/${this.state.analysisId}`)) {
@@ -424,6 +426,17 @@ class SyntheticWorkflowServer {
 
     if (pathname === "/api/studio/artifacts") {
       return jsonResponse(this.studioArtifactsPayload(), 200);
+    }
+
+    if (pathname.includes("/api/baselines/base-1/reparse") && method === "POST") {
+      // Canonical repair: reparse should produce a usable ResumeV2 baseline and advance baselineVersionId.
+      this.state = {
+        ...this.state,
+        baselineVersionId: "base-version-2",
+        readiness: { status: "ready", blocked: false },
+        resumeV2: { hasResumeV2: true, usableExperienceCount: 1, errors: [] },
+      };
+      return jsonResponse({ ok: true, baselineId: this.state.baselineId, baselineVersionId: "base-version-2" }, 200);
     }
 
     if (pathname === "/api/baselines/analyze" && method === "POST") {
@@ -1003,6 +1016,89 @@ describe("workflow journey scenarios (synthetic)", () => {
     expect(screen.queryByTestId("studio-generate-resume-button")).toBeNull();
     expect(screen.queryByTestId("studio-generate-cover-button")).toBeNull();
     expect(screen.queryByTestId("studio-refinement-details")).toBeNull();
+
+    // --- REPROCESS CONTRACT ---
+    // Clicking reprocess must call the canonical baseline reparse endpoint and advance baselineVersionId.
+    fireEvent.click(await screen.findByTestId("studio-resume-reprocess-baseline"));
+    await waitFor(() => {
+      expect(
+        invalidServer.requests.some((req) => req.method === "POST" && req.pathname.includes("/api/baselines/base-1/reparse")),
+      ).toBe(true);
+    });
+
+    // Studio must navigate to a URL that includes the new baselineVersionId.
+    await waitFor(() => {
+      expect(mockRouterPush).toHaveBeenCalled();
+    });
+    const lastPush = String(mockRouterPush.mock.calls.at(-1)?.[0] ?? "");
+    expect(lastPush).toContain("baselineVersionId=base-version-2");
+
+    // Remount Studio on the reprocessed baseline version and validate generation is now enabled.
+    cleanup();
+    overrideSearchParams({
+      baselineId: "base-1",
+      baselineVersionId: "base-version-2",
+      jobId: "job-1",
+      analysisId: "analysis-invalid",
+      assessmentId: "analysis-invalid",
+    });
+    mountStudio();
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("studio-baseline-blocked-recovery")).toBeNull();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-generate-resume-button")).toBeInTheDocument();
+      // Cover CTA may be rendered as a primary "complete" action depending on orchestration state.
+      expect(
+        Boolean(
+          screen.queryByTestId("studio-generate-cover-button") ||
+            screen.queryByTestId("studio-primary-cta-complete-cover"),
+        ),
+      ).toBe(true);
+    });
+
+    fireEvent.click(screen.getByTestId("studio-generate-resume-button"));
+    const coverBtn =
+      screen.queryByTestId("studio-generate-cover-button") ??
+      screen.queryByTestId("studio-primary-cta-complete-cover");
+    if (!coverBtn) {
+      throw new Error("Expected a cover generation CTA after baseline reprocess, but none was found.");
+    }
+    fireEvent.click(coverBtn);
+
+    await waitFor(() => {
+      expect(
+        invalidServer.requests.some((req) => req.method === "POST" && req.pathname.startsWith("/api/resume")),
+      ).toBe(true);
+      expect(
+        invalidServer.requests.some((req) => req.method === "POST" && req.pathname.startsWith("/api/cover-letters")),
+      ).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(screen.queryAllByText(/Test Candidate/i).length).toBeGreaterThan(0);
+      expect(screen.queryAllByText(/Dear Hiring Team,/i).length).toBeGreaterThan(0);
+    });
+
+    // Reload: generated artifacts must persist via /api/studio/artifacts and remain dominant.
+    cleanup();
+    overrideSearchParams({
+      baselineId: "base-1",
+      baselineVersionId: "base-version-2",
+      jobId: "job-1",
+      analysisId: "analysis-invalid",
+      assessmentId: "analysis-invalid",
+    });
+    mountStudio();
+    await waitFor(() => {
+      expect(screen.queryAllByText(/Test Candidate/i).length).toBeGreaterThan(0);
+      expect(screen.queryAllByText(/Dear Hiring Team,/i).length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByTestId("studio-resume-reprocess-baseline")).toBeNull();
+    expect(screen.queryByText(/Retry generation/i)).toBeNull();
+    expect(screen.queryByTestId("studio-generate-resume-button")).toBeNull();
+    expect(screen.queryByTestId("studio-generate-cover-button")).toBeNull();
 
     cleanup();
   });
