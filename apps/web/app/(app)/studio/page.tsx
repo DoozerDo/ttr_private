@@ -12471,8 +12471,8 @@ export default function StudioPage() {
                 ) : null}
                 {(() => {
         const generationState = studioGenerationStateInfo.state;
-        const bannerIntent = baselineBlockedByResumeV2 ? "warning" : generationState === "ready" ? "info" : "warning";
-        const bannerTitle = baselineBlockedByResumeV2
+        const bannerIntent = studioBlockedBaselineContract ? "warning" : generationState === "ready" ? "info" : "warning";
+        const bannerTitle = studioBlockedBaselineContract
           ? "Baseline repair required"
           : generationState === "ready"
             ? "Ready to generate"
@@ -12501,7 +12501,7 @@ export default function StudioPage() {
                 </p>
               ) : null}
 
-              {!baselineBlockedByResumeV2 && generationState === "degraded" ? (
+              {!studioBlockedBaselineContract && generationState === "degraded" ? (
                 <div data-testid="studio-generation-state-degraded" className="space-y-2">
                   <p className="text-sm text-slate-100">
                     Some requirements are not supported by your verified experience. You can continue, but results are limited.
@@ -13207,7 +13207,7 @@ export default function StudioPage() {
       ) : null}
       {requestedAnalysisId &&
       // Unsupported requirements must not block/distract the primary generation path when generation is otherwise allowed.
-      !baselineBlockedByResumeV2 &&
+      !studioBlockedBaselineContract &&
       activeGenerationReadiness.blocked &&
       canonicalUnverifiedRequirements.length &&
       !(studioGenerationStateInfo.state === "degraded" && studioGenerationStateInfo.hasUnsupportedRequirements) ? (
@@ -13237,7 +13237,7 @@ export default function StudioPage() {
           </div>
         </div> 
       ) : null} 
-      {!baselineBlockedByResumeV2 && showEvidenceExpansion ? (  
+      {!studioBlockedBaselineContract && showEvidenceExpansion ? (  
         <section className="rounded-2xl border border-white/15 bg-slate-950/35 p-4" data-testid="studio-evidence-expansion">  
           <h2 className="text-base font-semibold text-slate-100">Prove this experience instead</h2>  
           <p className="mt-1 text-sm text-slate-300"> 
@@ -14434,7 +14434,7 @@ export default function StudioPage() {
                     {coverState.error}
                   </p>
                   <div className="flex justify-end">
-                    {(canRetryGeneration || Boolean(coverState.artifactFailure?.retryable)) && !baselineBlockedByResumeV2 ? (
+                    {(canRetryGeneration || Boolean(coverState.artifactFailure?.retryable)) && !studioBlockedBaselineContract ? (
                       <FormButton onClick={() => void handleCoverDraft()} disabled={coverGenerating}>
                         Retry generation
                       </FormButton>
@@ -14501,7 +14501,7 @@ export default function StudioPage() {
       </>
       )}
 
-      {!shouldShowRefinementAboveMaterials && hasAuthoritativeArtifacts && !studioCardsGenerationBlocked && !baselineBlockedByResumeV2 ? (
+      {!shouldShowRefinementAboveMaterials && hasAuthoritativeArtifacts && !studioCardsGenerationBlocked && !studioBlockedBaselineContract ? (
         <details className="rounded-2xl border border-white/10 bg-slate-950/35 p-4" data-testid="studio-refinement-details">
           <summary className="cursor-pointer text-sm font-semibold text-slate-100">
             Review & refine (optional)
@@ -14553,7 +14553,7 @@ export default function StudioPage() {
               Your materials are usable, but they will be stronger after another generation pass backed by verified
               evidence.
             </p>
-            {canRetryGeneration ? (
+            {canRetryGeneration && !studioBlockedBaselineContract ? (
               <div className="mt-3 flex justify-end">
                 <FormButton
                   variant="secondary"
@@ -14576,7 +14576,7 @@ export default function StudioPage() {
         </div>
       </div>
 
-      {generateNowEligible && !baselineBlockedByResumeV2 ? (
+      {generateNowEligible && !studioBlockedBaselineContract ? (
         <details className="rounded-2xl border border-white/10 bg-white/[0.03] p-4" data-testid="studio-document-strategy-details">
           <summary className="cursor-pointer text-sm font-semibold text-slate-200">
             Document strategy
@@ -14587,7 +14587,7 @@ export default function StudioPage() {
         </details>
       ) : null}
 
-      {showOptionalEvidenceStrengthening && !baselineBlockedByResumeV2 ? (
+      {showOptionalEvidenceStrengthening && !studioBlockedBaselineContract ? (
         <section
           className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
           data-testid="studio-optional-evidence-details"
@@ -14748,7 +14748,7 @@ export default function StudioPage() {
         </section>
       ) : null}
  
-      {!baselineBlockedByResumeV2 ? (
+      {!studioBlockedBaselineContract ? (
         <>
           <details className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4"> 
             <summary className="cursor-pointer text-sm font-semibold text-slate-200"> 

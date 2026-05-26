@@ -15,7 +15,7 @@ type MockSearchParams = {
   toString: () => string;
 };
 
-const mockSearchParams = vi.fn<[], MockSearchParams>(() => ({
+export const mockSearchParams = vi.fn<[], MockSearchParams>(() => ({
   get: (_key?: string) => null,
   getAll: (_key: string) => [],
   toString: () => "",

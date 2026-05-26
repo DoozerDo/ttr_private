@@ -31,17 +31,13 @@ vi.mock("@/lib/jobsClient", () => ({
   ]),
 }));
 
+let mockedBaselines: Array<{ id: string; originalFilename: string; version: number }> = [];
+
 vi.mock("@/lib/baselines", async () => {
   const actual = await vi.importActual("@/lib/baselines");
   return {
     ...(actual as object),
-    listBaselines: vi.fn(async () => [
-      {
-        id: "base-1",
-        originalFilename: "Leadership Resume",
-        version: 1,
-      },
-    ]),
+    listBaselines: vi.fn(async () => mockedBaselines),
   };
 });
 
@@ -136,6 +132,7 @@ class SyntheticWorkflowServer {
   state: ScenarioServerState;
   private deferred: Record<string, { promise: Promise<Response>; resolve: (res: Response) => void }> = {};
   requests: Array<{ url: string; pathname: string; method: string; body?: unknown }> = [];
+  ingestedBaselineId: string | null = null;
 
   constructor(initial: ScenarioServerState) {
     this.state = initial;
@@ -429,6 +426,20 @@ class SyntheticWorkflowServer {
       return jsonResponse(this.studioArtifactsPayload(), 200);
     }
 
+    if (pathname === "/api/baselines/analyze" && method === "POST") {
+      // Minimal ingest contract: resume ingest creates a canonical baseline id that downstream scoring uses.
+      // Keep the id stable for the rest of the harness.
+      this.ingestedBaselineId = this.state.baselineId;
+      mockedBaselines = [
+        {
+          id: this.state.baselineId,
+          originalFilename: "Leadership Resume",
+          version: 1,
+        },
+      ];
+      return jsonResponse({ baselineId: this.state.baselineId }, 200);
+    }
+
     if (pathname === "/api/analysis/run") {
       const deferred = this.deferred["analysis_run"];
       if (deferred) return deferred.promise;
@@ -543,6 +554,9 @@ beforeEach(() => {
 });
 
 describe("workflow journey scenarios (synthetic)", () => {
+  beforeEach(() => {
+    mockedBaselines = [];
+  });
   function ensureLocalStorageSupportsWrites() {
     const storageLike = globalThis.localStorage as unknown as Partial<Storage> | undefined;
     if (storageLike && typeof storageLike.setItem === "function" && typeof storageLike.getItem === "function") {
@@ -785,7 +799,7 @@ describe("workflow journey scenarios (synthetic)", () => {
       expect(screen.queryByRole("button", { name: "Cover Letter" })).toBeNull();
     };
 
-    // --- VALID PATH ---
+    // --- VALID PATH (starts from resume ingest) ---
     const validServer = new SyntheticWorkflowServer({
       analysisId: "analysis-valid",
       baselineId: "base-1",
@@ -831,6 +845,12 @@ describe("workflow journey scenarios (synthetic)", () => {
 
     mockRouterReplace.mockClear();
     mockRouterPush.mockClear();
+
+    // Ingest contract: resume ingest creates the canonical baseline id used downstream.
+    await validServer.handleFetch("http://localhost/api/baselines/analyze", { method: "POST", body: "fake" as any } as any);
+    expect(validServer.ingestedBaselineId).toBe("base-1");
+    expect(mockedBaselines.some((b) => b.id === "base-1")).toBe(true);
+
     overrideSearchParams({ analysisId: "analysis-valid" });
     mount(<ResultsPage />);
 
@@ -853,6 +873,11 @@ describe("workflow journey scenarios (synthetic)", () => {
     expect(screen.getByText(/Leadership Resume/i)).toBeInTheDocument();
     expect(screen.queryByText(/Baseline ingestion did not produce any usable experience entries for Resume V2/i)).toBeNull();
     expect(screen.queryByText(/baseline_resume_v2_/i)).toBeNull();
+
+    // Baseline id propagation contract: target role scoring runs against the ingested baseline id.
+    await waitFor(() => {
+      expect(validServer.requests.some((req) => String(req.url).includes("baselineId=base-1"))).toBe(true);
+    });
 
     // Fit assessment >= 80 contract: generation-ready must not be blocked.
     expectAuthorityPanel("studio-workflow-authority", "generation_ready", "ready");
@@ -1046,6 +1071,38 @@ describe("workflow journey scenarios (synthetic)", () => {
     // Golden loop: no partial-success messaging after completion.
     expect(screen.queryByText(/Cover letter not generated yet/i)).toBeNull();
     expect(screen.queryByTestId("studio-degraded-unsupported-requirements")).toBeNull();
+
+    // --- RELOAD CONTRACT ---
+    // After both artifacts exist, a Studio reload must show generated materials as the dominant state
+    // with no repair, retry, or generate CTAs.
+    cleanup();
+    const { mountStudio: remountStudio, cleanup: cleanupReload } = mountWithCleanup();
+    setFetchImplementation(server.handleFetch as unknown as typeof fetch);
+    overrideSearchParams({
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      jobId: "job-1",
+      analysisId: "analysis-1",
+      assessmentId: "analysis-1",
+    });
+    remountStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-cover-letter-preview-body").textContent?.trim().length).toBeGreaterThan(0);
+    });
+    const resumePreviewsAfterReload = await screen.findAllByTestId("resume-preview");
+    expect(resumePreviewsAfterReload[0].textContent?.trim().length).toBeGreaterThan(0);
+
+    expect(screen.queryByTestId("studio-baseline-blocked-recovery")).toBeNull();
+    expect(screen.queryByTestId("studio-resume-reprocess-baseline")).toBeNull();
+    expect(
+      screen.queryByText("Your baseline needs to be reprocessed before documents can be generated."),
+    ).toBeNull();
+    expect(screen.queryByText(/Retry generation/i)).toBeNull();
+    expect(screen.queryByTestId("studio-generate-resume-button")).toBeNull();
+    expect(screen.queryByTestId("studio-generate-cover-button")).toBeNull();
+
+    cleanupReload();
 
     const coverGenerate = server.requests.find(
       (req) =>
