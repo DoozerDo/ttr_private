@@ -728,7 +728,9 @@ describe("Studio artifact quality gating (soft)", () => {
         await screen.findByText(/We hit an issue generating your resume\./i);
       }
       expect(
-        screen.queryByText(/Regenerate resume/i) ?? screen.queryByTestId("studio-generation-ready-primary"),
+        screen.queryByText(/Regenerate resume/i) ??
+          screen.queryByText(/Retry generation/i) ??
+          screen.queryByTestId("studio-generation-ready-primary"),
       ).toBeTruthy();
       expect(screen.queryByText(/resume_v2_normalized_model_invalid/i)).toBeNull();
       expect(screen.queryByText(/Download DOCX/i)).toBeNull();

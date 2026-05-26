@@ -466,23 +466,31 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
             status?: "ready" | "limited" | "blocked" | null;
             reasonCodes?: string[] | null;
             reason_codes?: string[] | null;
+            reasons?: Array<{ code?: string | null } | null> | null;
+            verificationIssues?: Array<{ code?: string | null } | null> | null;
           };
           generation_readiness?: {
             status?: "ready" | "limited" | "blocked" | null;
             reasonCodes?: string[] | null;
             reason_codes?: string[] | null;
+            reasons?: Array<{ code?: string | null } | null> | null;
+            verificationIssues?: Array<{ code?: string | null } | null> | null;
           };
         } | null;
         readiness?: {
           status?: "ready" | "limited" | "blocked" | null;
           reasonCodes?: string[] | null;
           reason_codes?: string[] | null;
+          reasons?: Array<{ code?: string | null } | null> | null;
+          verificationIssues?: Array<{ code?: string | null } | null> | null;
         };
         readinessStatus?: "ready" | "limited" | "blocked" | null;
         generation_readiness?: {
           status?: "ready" | "limited" | "blocked" | null;
           reasonCodes?: string[] | null;
           reason_codes?: string[] | null;
+          reasons?: Array<{ code?: string | null } | null> | null;
+          verificationIssues?: Array<{ code?: string | null } | null> | null;
         };
         generatedDocuments?: unknown[];
         generated_documents?: unknown[];
@@ -496,16 +504,43 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
     analysisPayload?.readiness?.status ??
     analysisPayload?.readinessStatus ??
     null;
-  const readinessReasonCodes =
-    analysisPayload?.scoring_v2?.generation_readiness?.reasonCodes ??
-    analysisPayload?.scoring_v2?.generation_readiness?.reason_codes ??
-    analysisPayload?.scoring_v2?.readiness?.reasonCodes ??
-    analysisPayload?.scoring_v2?.readiness?.reason_codes ??
-    analysisPayload?.generation_readiness?.reasonCodes ??
-    analysisPayload?.generation_readiness?.reason_codes ??
-    analysisPayload?.readiness?.reasonCodes ??
-    analysisPayload?.readiness?.reason_codes ??
-    null;
+
+  const readinessReasonCodes = (() => {
+    const codes: string[] = [];
+    const pushCodes = (value: unknown) => {
+      if (!Array.isArray(value)) return;
+      for (const item of value) {
+        const code = typeof item === "string" ? item : null;
+        if (code) codes.push(code);
+      }
+    };
+    const pushCodeObjects = (value: unknown) => {
+      if (!Array.isArray(value)) return;
+      for (const item of value) {
+        if (!item || typeof item !== "object") continue;
+        const code = (item as { code?: unknown }).code;
+        if (typeof code === "string" && code.trim()) codes.push(code.trim());
+      }
+    };
+
+    const scoring = analysisPayload?.scoring_v2 ?? null;
+    const generation = scoring?.generation_readiness ?? analysisPayload?.generation_readiness ?? null;
+    const readiness = scoring?.readiness ?? analysisPayload?.readiness ?? null;
+
+    pushCodes(generation?.reasonCodes);
+    pushCodes(generation?.reason_codes);
+    pushCodes(readiness?.reasonCodes);
+    pushCodes(readiness?.reason_codes);
+
+    if (!codes.length) {
+      pushCodeObjects(generation?.reasons);
+      pushCodeObjects(generation?.verificationIssues);
+      pushCodeObjects(readiness?.reasons);
+      pushCodeObjects(readiness?.verificationIssues);
+    }
+
+    return codes.length ? codes : null;
+  })();
   const hasGeneratedDocuments =
     Array.isArray(analysisPayload?.generatedDocuments) ||
     Array.isArray(analysisPayload?.generated_documents) ||

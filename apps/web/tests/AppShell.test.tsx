@@ -187,6 +187,8 @@ describe("AppShell unlock path navigation", () => {
     expect(screen.queryByTestId("studio-generate-cover-button")).toBeNull();
     expect(screen.queryByTestId("studio-generation-ready-primary")).toBeNull();
     expect(screen.queryByTestId("studio-generation-ready-secondary")).toBeNull();
+    expect(screen.queryByText(/strong enough to generate documents/i)).toBeNull();
+    expect(screen.queryByText(/generate documents for this role/i)).toBeNull();
     expect(screen.queryByText(/Download DOCX/i)).toBeNull();
     expect(screen.queryByText(/Download PDF/i)).toBeNull();
     expect(screen.queryByText(/^Export/i)).toBeNull();

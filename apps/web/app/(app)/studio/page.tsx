@@ -13018,7 +13018,7 @@ export default function StudioPage() {
               >
                 Resolve blockers
               </Link>
-            ) : workflowAuthority.primaryAction === "RETRY" ? (
+            ) : workflowAuthority.primaryAction === "RETRY" && !studioBlockedBaselineContract ? (
               topLevelArtifactFailure?.category === "baseline_requires_reprocess" ? (
                 <Link
                   href={fitReviewHref}
