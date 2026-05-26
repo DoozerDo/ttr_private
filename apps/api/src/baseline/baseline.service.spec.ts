@@ -259,6 +259,7 @@ const ingestionResult = {
         {
           provide: EmbeddingService,
           useValue: {
+            embed: jest.fn().mockResolvedValue([]),
             embedText: jest.fn().mockResolvedValue([]),
             embedTexts: jest.fn().mockResolvedValue([]),
           },
@@ -898,10 +899,12 @@ describe('BaselineService - reparse ingestion source', () => {
   let service: BaselineService;
   let baselineRepository: any;
   let ingestionService: any;
+  let embeddingService: any;
+  const baselineUuid = '00000000-0000-4000-8000-000000000001';
   const sections: BaselineSection[] = [
     {
       id: 's-1',
-      baselineId: 'b-1',
+      baselineId: baselineUuid,
       sectionType: BaselineSectionType.EXPERIENCE as any,
       title: null,
       content: 'Did important work.',
@@ -912,7 +915,7 @@ describe('BaselineService - reparse ingestion source', () => {
     } as BaselineSection,
   ];
   const baseline: Baseline = {
-    id: 'b-1',
+    id: baselineUuid,
     userId: 'user-1',
     version: 1,
     originalFilename: 'resume.pdf',
@@ -1023,6 +1026,7 @@ describe('BaselineService - reparse ingestion source', () => {
         {
           provide: EmbeddingService,
           useValue: {
+            embed: jest.fn().mockResolvedValue([]),
             embedText: jest.fn().mockResolvedValue([]),
             embedTexts: jest.fn().mockResolvedValue([]),
           },
@@ -1031,6 +1035,7 @@ describe('BaselineService - reparse ingestion source', () => {
     }).compile();
 
     service = module.get(BaselineService);
+    embeddingService = module.get(EmbeddingService);
   });
 
   it('preserves newlines in sanitizeSectionContent', () => {
@@ -1094,6 +1099,43 @@ describe('BaselineService - reparse ingestion source', () => {
     expect(ingestionService.ingest).toHaveBeenCalledTimes(1);
     expect(ingestionService.ingestFromText).toHaveBeenCalledWith('raw fallback text', 'pdf');
     expect(result.rawText).toBe('fallback');
+  });
+
+  it('reparseBaselineForUser does not 500 when embeddings fail (embeddings are advisory)', async () => {
+    const canonical = {
+      ...canonicalBaseline,
+      schema_version: 'baseline_schema_v1',
+    } as any;
+
+    ingestionService.ingest.mockResolvedValue({
+      rawText: 'from file',
+      parsedSections: [],
+      canonical,
+      sourceFormat: 'pdf',
+    });
+
+    baselineRepository.findOne.mockResolvedValue({
+      ...baseline,
+      sections: [
+        {
+          ...sections[0],
+          sectionType: BaselineSectionType.RAW,
+          content: 'raw baseline text',
+        },
+      ],
+    } as Baseline);
+
+    // Force embedding provider failure.
+    embeddingService.embed.mockRejectedValue(new Error('embedding provider down'));
+
+    // Ensure policy/version queries don't block.
+    (service as any).baselineVersionRepository.findOne.mockResolvedValue(null);
+    (service as any).baselineBlockPolicyRepository.find.mockResolvedValue([]);
+
+    // This test targets the embedding failure tolerance specifically; parsing/ResumeV2 shape is covered elsewhere.
+    (service as any).persistParsedBaseline = jest.fn().mockResolvedValue(undefined);
+
+    await expect(service.reparseBaselineForUser(baselineUuid, 'user-1')).resolves.toBeTruthy();
   });
 });
 
@@ -1497,6 +1539,7 @@ describe('BaselineService - score history persistence', () => {
       NotFoundException,
     );
   });
+
 });
 
 describe('BaselineService - strengthening additions', () => {

@@ -397,8 +397,17 @@ export class BaselineService {
 
     await Promise.all(
       sections.map(async (section) => {
-        section.embedding =
-          (await this.embeddingService.embed(section.content ?? '')) ?? null;
+        try {
+          section.embedding =
+            (await this.embeddingService.embed(section.content ?? '')) ?? null;
+        } catch (error) {
+          // Embeddings are advisory and must not break baseline ingest/reparse.
+          // If the embedding provider is unavailable, keep the baseline usable for ResumeV2 readiness + generation.
+          this.logger.warn('Embedding generation failed; continuing without embeddings', {
+            error: error instanceof Error ? error.message : String(error ?? 'unknown'),
+          });
+          section.embedding = null;
+        }
       }),
     );
   }
