@@ -13507,7 +13507,7 @@ export default function StudioPage() {
             })()}
           </div>
         ) : null}
-        {!hasRenderableResumeContent ? (
+        {!studioBlockedBaselineContract && !hasRenderableResumeContent ? (
           <p className="text-sm text-slate-300">
             Generate, preview, and export your resume and cover letter.
           </p>

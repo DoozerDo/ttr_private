@@ -565,7 +565,24 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
     const primaryKey = `ttr:studio-artifacts:v2:${safeJobId}:${safeBaselineId}:${safeAnalysisId}`;
     const fallbackKey = `ttr:studio-artifacts:v2:${safeJobId}:${safeBaselineId}:_`;
     try {
-      const raw = window.localStorage?.getItem(primaryKey) ?? window.localStorage?.getItem(fallbackKey);
+      const prefix = `ttr:studio-artifacts:v2:${safeJobId}:${safeBaselineId}:`;
+      const findAnyMatchingKey = (): string | null => {
+        const storage = window.localStorage as unknown as { length?: number; key?: (index: number) => string | null };
+        const length = typeof storage?.length === "number" ? storage.length : 0;
+        for (let i = 0; i < length; i += 1) {
+          const k = typeof storage?.key === "function" ? storage.key(i) : null;
+          if (k && k.startsWith(prefix)) return k;
+        }
+        return null;
+      };
+
+      const raw =
+        window.localStorage?.getItem(primaryKey) ??
+        window.localStorage?.getItem(fallbackKey) ??
+        (() => {
+          const anyKey = findAnyMatchingKey();
+          return anyKey ? window.localStorage?.getItem(anyKey) : null;
+        })();
       if (!raw) return [];
       const snapshot = JSON.parse(raw) as { errors?: unknown; scoring_v2?: any };
 

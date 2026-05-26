@@ -168,6 +168,10 @@ describe("AppShell unlock path navigation", () => {
       clear: () => {
         localStore.clear();
       },
+      key: (index: number) => Array.from(localStore.keys())[index] ?? null,
+      get length() {
+        return localStore.size;
+      },
     };
 
     // Canonical Studio artifact surface (persisted snapshot) contains the structural baseline blocker.
