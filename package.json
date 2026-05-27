@@ -21,6 +21,7 @@
     "synthetic:loop": "npm -w apps/api run synthetic:loop",
     "synthetic:core-loop": "npm run synthetic:loop",
     "synthetic:core-loop-smoke": "node scripts/synthetic-core-loop.mjs",
+    "smoke:beta-loop": "node scripts/beta-loop-smoke.mjs",
     "synthetic:landing": "npm -w apps/web run synthetic:landing",
     "synthetic:auth": "npm -w apps/web run synthetic:auth",
     "synthetic:bug-report": "npm -w apps/web run synthetic:bug-report",

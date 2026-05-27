@@ -369,9 +369,21 @@ describe('ResumeService contract', () => {
       } as any);
 
       expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
+      expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalledTimes(1);
       const persisted = (studioArtifactsService.recordResumeSuccess as any).mock.calls[0][0];
+      expect(persisted).toEqual(
+        expect.objectContaining({
+          userId: baseline.userId,
+          baselineId: baseRequest.baselineId,
+          baselineVersionId: baseRequest.baselineVersionId,
+          jobId: baseRequest.jobId,
+          analysisId: baseRequest.analysisId,
+          responseBody: expect.any(Object),
+        }),
+      );
       expect(persisted?.responseBody?.internal).toBeTruthy();
       expect(persisted?.responseBody?.internal?.generationPipeline).toBe('v2');
+      expect(String(persisted?.responseBody?.preview?.resume?.summary ?? '').trim().length).toBeGreaterThan(0);
       expect(JSON.stringify(persisted?.responseBody?.preview ?? {})).not.toContain('Vue 3), deck builder frontend');
       expect(JSON.stringify(persisted?.responseBody?.preview ?? {})).not.toContain('Experience entry needs correction');
       expect(JSON.stringify(persisted?.responseBody?.preview ?? {})).not.toContain('Automation & Monitoring');
@@ -389,6 +401,18 @@ describe('ResumeService contract', () => {
         delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
       }
     }
+  });
+
+  it('does not complete a successful resume generation when Studio artifact persistence fails', async () => {
+    const { service, studioArtifactsService } = buildService();
+    baseline.sections = [baseSection] as any;
+
+    (studioArtifactsService.recordResumeSuccess as any).mockRejectedValueOnce(
+      new Error('persistence_failed'),
+    );
+
+    await expect(service.generateResume('user-1', baseRequest as any)).rejects.toBeTruthy();
+    expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
   });
 
   it('does not use top-level minimal fallback when RESUME_GENERATION_V2=true and V2 fails', async () => {

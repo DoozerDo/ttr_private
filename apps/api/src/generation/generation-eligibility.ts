@@ -17,6 +17,7 @@ export type GenerationEligibilityHardBlockerCode =
   | 'missing_baseline_version'
   | 'missing_target_role'
   | 'readiness_below_threshold'
+  | 'missing_compatibility_score'
   | 'compatibility_below_threshold'
   | 'hard_compliance_blocker'
   | 'no_verified_work_history_evidence';
@@ -98,7 +99,18 @@ export function decideGenerationEligibility(params: {
   }
 
   const score = params.assessment?.overallScore ?? null;
-  if (typeof score === 'number' && score < 80) {
+  if (typeof score !== 'number') {
+    return {
+      eligible: false,
+      warnings,
+      omittedUnsupportedRequirements: [],
+      hardBlocker: {
+        code: 'missing_compatibility_score',
+        message: 'Compatibility score is missing.',
+      },
+    };
+  }
+  if (score < 80) {
     return {
       eligible: false,
       warnings,
@@ -153,4 +165,3 @@ export function decideGenerationEligibility(params: {
     hardBlocker: null,
   };
 }
-

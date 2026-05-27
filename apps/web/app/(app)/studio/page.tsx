@@ -156,6 +156,7 @@ import {
 } from "@/src/lib/recentIntent";
 import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
 import { resolveDocumentReadinessState } from "@shared/documentReadinessState";
+import { resolveWorkflowContract } from "@shared/workflowContract";
 
 function LockIcon(props: { className?: string; "aria-hidden"?: boolean }) {
   const className = props.className ?? "h-5 w-5";
@@ -3525,6 +3526,39 @@ export default function StudioPage() {
     return query ? `/baseline?${query}` : "/baseline";
   }, [requestedAnalysisId, effectiveJobId, effectiveBaselineId, effectiveBaselineVersionId]);
   const canExportDocuments = productReadiness.generation_readiness.canExport;
+  const persistedArtifactContract = useMemo(() => {
+    if (!studioArtifactsPayload) {
+      return {
+        hasResumeArtifact: false,
+        hasCoverLetterArtifact: false,
+      };
+    }
+    const resumeResponse = studioArtifactsPayload.resume?.responseBody ?? null;
+    const coverResponse = studioArtifactsPayload.coverLetter?.responseBody ?? null;
+    const contract = buildStudioArtifactContract({
+      resumeResponse,
+      coverLetterResponse: coverResponse,
+      canExportDocuments,
+      isPro,
+      persistedPipelineVersion: studioArtifactsPayload?.generationContractVersion ?? null,
+      jobTitle: selectedJob?.title ?? null,
+      companyName: selectedJob?.company ?? null,
+    });
+    return {
+      hasResumeArtifact: contract.hasResumeArtifact,
+      hasCoverLetterArtifact: contract.hasCoverLetterArtifact,
+    };
+  }, [canExportDocuments, isPro, selectedJob?.company, selectedJob?.title, studioArtifactsPayload]);
+
+  const workflowContract = useMemo(() => {
+    const baselineUsable = !studioReadinessBlocksGeneration;
+    return resolveWorkflowContract({
+      baselineUsable,
+      score: analysisScore ?? null,
+      hasRenderableResumeArtifact: persistedArtifactContract.hasResumeArtifact,
+      hasRenderableCoverLetterArtifact: persistedArtifactContract.hasCoverLetterArtifact,
+    });
+  }, [analysisScore, persistedArtifactContract.hasCoverLetterArtifact, persistedArtifactContract.hasResumeArtifact, studioReadinessBlocksGeneration]);
   const artifactContract = useMemo(
     () =>
       buildStudioArtifactContract({
@@ -14070,17 +14104,17 @@ export default function StudioPage() {
               <EmptyState
                 testId="studio-resume-missing"
                 title={
-                  studioCardsGenerationBlocked
+                  !workflowContract.resumeGenerationAllowed
                     ? "Resume generation unavailable"
                     : resumePersistedArtifactSyncPending
                     ? "Syncing generated resume..."
                     : "Resume not generated yet"
                 }
                 body={
-                  studioCardsGenerationBlocked
-                    ? "Document generation is unavailable for this role."
-                    : !canGenerateDocuments
-                    ? "Improve your baseline to generate materials."
+                  !workflowContract.baselineUsable
+                    ? "Repair your baseline to generate materials."
+                    : !workflowContract.scoreAllowsGeneration
+                    ? "Score is below the generation threshold (80)."
                     : resumePersistedArtifactSyncPending
                       ? "Generation completed. Loading the saved document..."
                     : resumeState.error
@@ -14088,12 +14122,11 @@ export default function StudioPage() {
                       : "Generate your resume to preview and refine your application."
                 }
                 cta={
-                  studioCardsGenerationBlocked ? null : (
+                  workflowContract.resumeGenerationAllowed ? (
                     <FormButton
                       type="button"
                       onClick={() => void handleGenerateResume()}
                       disabled={
-                        !canGenerateDocuments ||
                         !effectiveBaselineId ||
                         !effectiveBaselineVersionId ||
                         !effectiveJobId ||
@@ -14105,7 +14138,7 @@ export default function StudioPage() {
                     >
                       {resumeGenerating ? "Generating..." : "Generate resume"}
                     </FormButton>
-                  )
+                  ) : null
                 }
               />
             ) : null}
@@ -14172,7 +14205,7 @@ export default function StudioPage() {
               : null}
           </div>
           <div className="flex flex-wrap gap-2">
-            {!generateNowEligible ? (
+            {!hasRenderableCoverLetterContent && workflowContract.coverLetterGenerationAllowed ? (
               <FormButton
                 variant="secondary"
                 onClick={() => {
@@ -14570,7 +14603,7 @@ export default function StudioPage() {
                   coverAutoGenerating || coverGenerateNowPending ? "studio-cover-generating" : "studio-cover-missing"
                 }
                 title={
-                  studioCardsGenerationBlocked
+                  !workflowContract.coverLetterGenerationAllowed
                     ? "Cover letter generation unavailable"
                     : coverPersistedArtifactSyncPending
                     ? "Syncing generated cover letter..."
@@ -14579,8 +14612,10 @@ export default function StudioPage() {
                       : "Cover letter not generated yet"
                 }
                 body={
-                  studioCardsGenerationBlocked
-                    ? "Document generation is unavailable for this role."
+                  !workflowContract.baselineUsable
+                    ? "Repair your baseline to generate materials."
+                    : !workflowContract.scoreAllowsGeneration
+                    ? "Score is below the generation threshold (80)."
                     : coverPersistedArtifactSyncPending
                     ? "Generation completed. Loading the saved document..."
                     : coverAutoGenerating || coverGenerateNowPending
@@ -14588,12 +14623,11 @@ export default function StudioPage() {
                       : "Generate your cover letter to create a tailored introduction."
                 }
                 cta={
-                  studioCardsGenerationBlocked || coverAutoGenerating || coverGenerateNowPending ? null : (
+                  workflowContract.coverLetterGenerationAllowed && !coverAutoGenerating && !coverGenerateNowPending ? (
                     <FormButton
                       type="button"
                       onClick={() => void handleGenerateCoverLetter()}
                       disabled={
-                        !canGenerateDocuments ||
                         !effectiveBaselineId ||
                         !effectiveBaselineVersionId ||
                         !effectiveJobId ||
@@ -14605,7 +14639,7 @@ export default function StudioPage() {
                     >
                       {coverGenerating ? "Generating..." : "Generate cover letter"}
                     </FormButton>
-                  )
+                  ) : null
                 }
               />
             ) : null
