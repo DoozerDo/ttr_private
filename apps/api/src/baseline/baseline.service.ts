@@ -582,23 +582,108 @@ export class BaselineService {
               where: { userId, status: BaselineStatus.ACTIVE, isActive: true },
             });
             const shouldBecomeActive = activePointerCount === 0;
-            if (shouldBecomeActive) {
-              await this.setSingleActiveBaseline(manager, userId, existingByHash.id);
-            }
-            await manager.update(
-              Baseline,
-              { id: existingByHash.id, userId },
-              {
-                status: BaselineStatus.ACTIVE,
-                archivedAt: null,
-                isActive: shouldBecomeActive ? true : existingByHash.isActive,
-              },
-            );
             const revived = await manager.findOne(Baseline, {
               where: { id: existingByHash.id, userId },
               relations: ['sections'],
               order: { sections: { order: 'ASC' } },
             });
+
+            if (!revived) {
+              throw new NotFoundException('Baseline not found');
+            }
+
+            const sectionPayloads =
+              parseResult?.sections?.map((section, index) => ({
+                sectionType: section.sectionType ?? BaselineSectionType.OTHER,
+                title: this.getSectionTitle(section.sectionType, section.title),
+                content: this.sanitizeSectionContent(section.content),
+                includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
+                order: section.order ?? index,
+              })) ?? [];
+
+            if (sectionPayloads.length > 0 && parseResult?.ingestion) {
+              await manager.delete(BaselineSection, { baselineId: revived.id });
+              await this.attachEmbeddingsToSections(sectionPayloads);
+
+              const revivedSections = sectionPayloads.map((section) =>
+                manager.create(BaselineSection, {
+                  ...section,
+                  baselineId: revived.id,
+                }),
+              );
+              const persistedSections = await manager.save(revivedSections);
+              revived.sections = persistedSections;
+
+              let normalization: CanonicalNormalizationResult | undefined;
+              if (parseResult.ingestion.canonical) {
+                normalization = normalizeExtractedToCanonicalV1(parseResult.ingestion.canonical);
+                parseResult.ingestion.canonical = normalization.canonical;
+              }
+
+              const nextVersionNumber = await this.getNextBaselineVersionNumber(userId);
+              const policyState = this.normalizePoliciesFromSections(
+                (revived.sections ?? []) as PolicySectionInput[],
+              );
+              const versionHash = this.buildVersionHash(fileHash, policyState);
+              const allowlistSnapshot = buildBaselineAllowlistSnapshot(
+                (revived.sections ?? []).map((section) => ({
+                  title: section.title,
+                  content: section.content,
+                  sectionType: section.sectionType ?? null,
+                  sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+                })),
+              );
+
+              const versionRecord = manager.create(BaselineVersion, {
+                baselineId: revived.id,
+                versionNumber: nextVersionNumber,
+                fileHash: versionHash,
+                storagePath: revived.storagePath,
+                verifiedAdditions: [],
+                additionDiff: null,
+                promotedFromInterviewId: null,
+                allowedCompanies: allowlistSnapshot.allowedCompanies,
+                allowedRoles: allowlistSnapshot.allowedRoles,
+                allowedTechnologies: allowlistSnapshot.allowedTechnologies,
+                allowedMetricTokens: allowlistSnapshot.allowedMetricTokens,
+              });
+              const savedVersion = await manager.save(versionRecord);
+              const policyEntities = policyState.map((policy) =>
+                manager.create(BaselineBlockPolicy, {
+                  baselineVersionId: savedVersion.id,
+                  baselineSectionId: policy.baselineSectionId,
+                  includePolicy: policy.includePolicy,
+                  order: policy.order,
+                }),
+              );
+              await manager.save(policyEntities);
+              await this.persistParsedBaseline(manager, revived, parseResult.ingestion);
+
+              revived.version = nextVersionNumber;
+              revived.versionNumber = nextVersionNumber;
+              revived.versions = [savedVersion];
+
+              if (normalization) {
+                parseResult.ingestion.canonical = normalization.canonical;
+              }
+            }
+
+            if (shouldBecomeActive) {
+              await this.setSingleActiveBaseline(manager, userId, revived.id);
+            }
+            await manager.update(
+              Baseline,
+              { id: revived.id, userId },
+              {
+                status: BaselineStatus.ACTIVE,
+                archivedAt: null,
+                isActive: shouldBecomeActive ? true : revived.isActive,
+                ...(typeof revived.versionNumber === 'number'
+                  ? { version: revived.versionNumber, versionNumber: revived.versionNumber }
+                  : {}),
+              },
+            );
+
             return {
               baseline:
                 revived ??

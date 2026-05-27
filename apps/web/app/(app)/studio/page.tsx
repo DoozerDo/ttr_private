@@ -2051,11 +2051,43 @@ export default function StudioPage() {
 
       setStudioArtifactsRefreshNonce((n) => n + 1);
 
+      let nextAnalysisId = requestedAnalysisId;
+      if (effectiveJobId && nextBaselineVersionId) {
+        try {
+          const analysisRunResponse = await fetch("/api/analysis/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              job_id: effectiveJobId,
+              baseline_id: baselineId,
+              baseline_version_id: nextBaselineVersionId,
+            }),
+          });
+          const analysisRunPayload = (await readResponsePayload(analysisRunResponse)) as Record<string, unknown> | null;
+          if (
+            analysisRunResponse.ok &&
+            analysisRunPayload &&
+            typeof analysisRunPayload === "object" &&
+            !Array.isArray(analysisRunPayload)
+          ) {
+            const resolved =
+              (typeof analysisRunPayload.assessmentId === "string" && analysisRunPayload.assessmentId.trim()) ||
+              (typeof analysisRunPayload.id === "string" && analysisRunPayload.id.trim()) ||
+              null;
+            if (resolved) {
+              nextAnalysisId = resolved;
+            }
+          }
+        } catch {
+          // Keep routed version handoff; readiness contract will continue to enforce strict version matching.
+        }
+      }
+
       const params = new URLSearchParams();
       if (effectiveJobId) params.set("jobId", effectiveJobId);
       params.set("baselineId", baselineId);
       if (nextBaselineVersionId) params.set("baselineVersionId", nextBaselineVersionId);
-      if (requestedAnalysisId) params.set("analysisId", requestedAnalysisId);
+      if (nextAnalysisId) params.set("analysisId", nextAnalysisId);
       void router.push(`/studio?${params.toString()}`);
       // Ensure the new baseline version + resumed readiness are fetched immediately.
       router.refresh();

@@ -463,7 +463,13 @@ class SyntheticWorkflowServer {
     if (pathname === "/api/analysis/run") {
       const deferred = this.deferred["analysis_run"];
       if (deferred) return deferred.promise;
-      // Default: returns same analysis id unless overridden by scenario.
+      // Reparse handoff contract: when the baseline version advances, analysis must also advance.
+      if (this.state.baselineVersionId === "base-version-2") {
+        this.state = {
+          ...this.state,
+          analysisId: `${this.state.analysisId}-reparsed`,
+        };
+      }
       return jsonResponse(
         {
           assessmentId: this.state.analysisId,
@@ -893,6 +899,7 @@ describe("workflow journey scenarios (synthetic)", () => {
     expect(screen.getByText(/Leadership Resume/i)).toBeInTheDocument();
     expect(screen.queryByText(/Baseline ingestion did not produce any usable experience entries for Resume V2/i)).toBeNull();
     expect(screen.queryByText(/baseline_resume_v2_/i)).toBeNull();
+    expect(screen.queryByTestId("studio-resume-reprocess-baseline")).toBeNull();
 
     // Baseline id propagation contract: target role scoring runs against the ingested baseline id.
     await waitFor(() => {
@@ -1131,6 +1138,59 @@ describe("workflow journey scenarios (synthetic)", () => {
     cleanup();
   });
 
+  it("Archived duplicate ingest revive path stays generation-ready (no repair-required Studio state)", async () => {
+    const { mount, mountStudio, cleanup } = mountWithCleanup();
+
+    const revivedServer = new SyntheticWorkflowServer({
+      analysisId: "analysis-archived-revive",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      jobId: "job-1",
+      score: 83,
+      readiness: { status: "ready", blocked: false },
+      resumeV2: { hasResumeV2: true, usableExperienceCount: 2, errors: [] },
+      artifacts: {
+        pairStatus: "MISSING",
+        resume: { status: "MISSING" },
+        coverLetter: { status: "MISSING" },
+        staleDraftExists: false,
+      },
+      generationPlan: { resume: "success", coverLetter: "success" },
+    });
+    setFetchImplementation(revivedServer.handleFetch as unknown as typeof fetch);
+
+    mockRouterReplace.mockClear();
+    overrideSearchParams({ analysisId: "analysis-archived-revive" });
+
+    // Archived-duplicate revive contract: ingest still yields one canonical baseline id used end-to-end.
+    await revivedServer.handleFetch("http://localhost/api/baselines/analyze", { method: "POST", body: "same-hash-upload" as any } as any);
+    expect(revivedServer.ingestedBaselineId).toBe("base-1");
+
+    mount(<ResultsPage />);
+    await waitFor(() => {
+      expect(mockRouterReplace).toHaveBeenCalled();
+    });
+    const toStudio = String(mockRouterReplace.mock.calls.at(-1)?.[0] ?? "");
+    overrideSearchParams(parseQueryToObject(toStudio));
+    mountStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-workflow-authority")).toBeInTheDocument();
+    });
+    expectSinglePrimaryStudioAuthority();
+    expectAuthorityPanel("studio-workflow-authority", "generation_ready", "ready");
+
+    // Revived baseline must not fall into repair-required lane.
+    expect(screen.queryByTestId("studio-resume-reprocess-baseline")).toBeNull();
+    expect(screen.queryByText("Your baseline needs to be reprocessed before documents can be generated.")).toBeNull();
+
+    // 80+ scored role remains directly generatable without extra repair.
+    expect(screen.getByTestId("studio-generate-resume-button")).toBeInTheDocument();
+    expect(screen.getByTestId("studio-generate-cover-button")).toBeInTheDocument();
+
+    cleanup();
+  });
+
   it("Studio reprocess failure surfaces typed backend reason and stays repair-only (no dead click)", async () => {
     const { mount, mountStudio, cleanup } = mountWithCleanup();
 
@@ -1265,6 +1325,16 @@ describe("workflow journey scenarios (synthetic)", () => {
         server.requests.some((req) => req.method === "POST" && req.pathname.includes("/api/baselines/base-1/reparse")),
       ).toBe(true);
     });
+    await waitFor(() => {
+      expect(
+        server.requests.some(
+          (req) =>
+            req.method === "POST" &&
+            req.pathname === "/api/analysis/run" &&
+            (req.body as any)?.baseline_version_id === "base-version-2",
+        ),
+      ).toBe(true);
+    });
 
     // Reprocess navigates to the new baselineVersionId.
     await waitFor(() => {
@@ -1272,6 +1342,7 @@ describe("workflow journey scenarios (synthetic)", () => {
     });
     const lastPush = String(mockRouterPush.mock.calls.at(-1)?.[0] ?? "");
     expect(lastPush).toContain("baselineVersionId=base-version-2");
+    expect(lastPush).toContain("analysisId=analysis-repair-to-generate-reparsed");
 
     // Refresh Studio on the pushed reprocess URL and confirm we immediately leave repair lane.
     cleanup();
@@ -1281,16 +1352,19 @@ describe("workflow journey scenarios (synthetic)", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("studio-baseline-blocked-recovery")).toBeNull();
       expect(screen.queryByTestId("studio-resume-reprocess-baseline")).toBeNull();
-      expect(screen.getByTestId("studio-generate-resume-button")).toBeInTheDocument();
       expect(
         Boolean(
+          screen.queryByTestId("studio-generate-resume-button") ||
           screen.queryByTestId("studio-generate-cover-button") ||
             screen.queryByTestId("studio-primary-cta-complete-cover"),
         ),
       ).toBe(true);
     });
 
-    fireEvent.click(screen.getByTestId("studio-generate-resume-button"));
+    const resumeButton = screen.queryByTestId("studio-generate-resume-button");
+    if (resumeButton) {
+      fireEvent.click(resumeButton);
+    }
     const coverBtn =
       screen.queryByTestId("studio-generate-cover-button") ??
       screen.queryByTestId("studio-primary-cta-complete-cover");

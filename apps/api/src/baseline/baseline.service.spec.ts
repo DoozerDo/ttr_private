@@ -762,6 +762,10 @@ describe('BaselineService - library capacity', () => {
   });
 
   it('reuses archived baselines when the same resume hash is uploaded again (no 500)', async () => {
+    const persistParsedBaselineSpy = jest
+      .spyOn(service as any, 'persistParsedBaseline')
+      .mockResolvedValue(undefined);
+
     baselineRepository.findOne.mockImplementation(async ({ where }: any) => {
       if (where?.hash && where?.userId === 'user-1') {
         return {
@@ -803,6 +807,17 @@ describe('BaselineService - library capacity', () => {
     expect(result.baselineId).toBe('baseline-archived');
     expect(result.baseline.status).toBe(BaselineStatus.ACTIVE);
     expect(result.baseline.isActive).toBe(true);
+    expect(persistParsedBaselineSpy).toHaveBeenCalledTimes(1);
+    expect(transactionManager.delete).toHaveBeenCalledWith(BaselineSection, { baselineId: 'baseline-archived' });
+    expect(
+      transactionManager.save.mock.calls.some(
+        (call: any[]) =>
+          call.length >= 1 &&
+          !Array.isArray(call[0]) &&
+          call[0]?.baselineId === 'baseline-archived' &&
+          typeof call[0]?.versionNumber === 'number',
+      ),
+    ).toBe(true);
   });
 
   it('increments the active baseline version and keeps only one active baseline', async () => {
