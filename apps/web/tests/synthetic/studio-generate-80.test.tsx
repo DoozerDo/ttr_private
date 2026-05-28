@@ -388,6 +388,7 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
 
     const authority = await screen.findByTestId("studio-workflow-authority");
     expect(authority.getAttribute("data-workflow-state")).toBe("hard_blocked");
+    expect(authority.getAttribute("data-workflow-trust-tone")).toBe("blocked");
 
     expect(screen.queryByTestId("studio-generate-resume-button")).toBeNull();
     expect(screen.queryByTestId("studio-generate-cover-button")).toBeNull();

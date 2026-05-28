@@ -9640,7 +9640,7 @@ export default function StudioPage() {
         assessmentId: effectiveRequestedAnalysisId || null,
       },
       score: typeof analysisScore === "number" ? analysisScore : null,
-      generationReadiness: activeGenerationReadiness,
+      generationReadiness: workflowAuthorityReadiness,
       workflowAuthority,
       artifact: {
         // Authority surface output presence should track the same "ready" statuses used by the artifact cards.
@@ -9719,6 +9719,7 @@ export default function StudioPage() {
     unlockReanalysisFailure?.priorScore,
     workflowActivity,
     workflowAuthority,
+    workflowAuthorityReadiness,
   ]);
 
   const workflowSurfaceAuthorityHero = workflowOrchestratorCore.authorityState;
