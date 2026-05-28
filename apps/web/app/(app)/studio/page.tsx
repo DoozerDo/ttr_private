@@ -13624,7 +13624,7 @@ export default function StudioPage() {
                   const reasonCodes = Array.isArray(workflowAuthorityReadiness.reasonCodes)
                     ? workflowAuthorityReadiness.reasonCodes.map((c: unknown) => String(c ?? ""))
                     : [];
-                  const hasResumeV2Blocker = reasonCodes.some((code) => code.startsWith("baseline_resume_v2_"));
+                  const hasResumeV2Blocker = reasonCodes.some((code: string) => code.startsWith("baseline_resume_v2_"));
                   if (hasResumeV2Blocker) {
                     return `Compatibility: Baseline repair required (${score})`;
                   }
