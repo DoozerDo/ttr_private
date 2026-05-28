@@ -240,7 +240,8 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
       const url = typeof input === "string" ? input : String((input as any)?.url ?? input);
       const method = String(init?.method ?? "GET").toUpperCase();
       if (url.startsWith("/api/studio/artifacts")) {
-        return jsonResponse({ resume: null, coverLetter: null, generationContractVersion: "pipeline-test" });
+        // Simulate persisted assessmentScore existing in the artifacts hydration payload (stale source).
+        return jsonResponse({ resume: null, coverLetter: null, assessmentScore: 83, generationContractVersion: "pipeline-test" });
       }
       if (url === "/api/resume/readiness" && method === "POST") return new Response("bad request", { status: 400 });
       if (url === "/api/cover-letters/readiness" && method === "POST") return new Response("bad request", { status: 400 });
@@ -260,6 +261,7 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
     await expect(screen.findByTestId("studio-ready-secondary-summary")).resolves.toBeTruthy();
     expect(screen.getByTestId("studio-ready-secondary-summary")).toHaveTextContent(/Fit score unavailable/i);
     expect(screen.getByTestId("studio-ready-secondary-summary")).toHaveTextContent(/Blocked/i);
+    expect(screen.queryByText(/\(83\)/)).toBeNull();
 
     // Must not show the "Ready" lane while also showing baseline repair required messaging.
     expect(screen.queryByText(/Baseline repair required/i)).toBeNull();

@@ -1204,6 +1204,7 @@ export default function StudioPage() {
   const [hydratedAnalysisScore, setHydratedAnalysisScore] = useState<number | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [readinessError, setReadinessError] = useState<string | null>(null);
   const [assessmentUnsupportedRequirements, setAssessmentUnsupportedRequirements] = useState<string[] | null>(null);
   const [contextHydrationMessage, setContextHydrationMessage] = useState<string | null>(null);
   const [generationReadiness, setGenerationReadiness] =
@@ -1799,7 +1800,7 @@ export default function StudioPage() {
   const analysisScore = useMemo(() => { 
     // Fail-closed: if analysis failed to load/run, do not reuse any hydrated/stored score.
     // This prevents a mixed authority state where stale score implies READY while readiness/analysis errors imply repair required.
-    if (analysisError) return null;
+    if (analysisError || readinessError) return null;
     const coerceScore = (value: unknown): number | null => {
       if (typeof value === "number" && Number.isFinite(value)) return value;
       if (typeof value === "string") {
@@ -1819,7 +1820,7 @@ export default function StudioPage() {
     const overallRaw = (assessment as { overallScore?: unknown } | null)?.overallScore;
     const overall = coerceScore(overallRaw);
     return v2 ?? direct ?? overall ?? hydratedAnalysisScore ?? null;
-  }, [analysis, analysisError, hydratedAnalysisScore]); 
+  }, [analysis, analysisError, hydratedAnalysisScore, readinessError]); 
   const generateNowEligible = isGenerateNowEligible(analysisScore);
 
   const readGenerationDebug = useCallback(
@@ -2169,6 +2170,8 @@ export default function StudioPage() {
     // Use it as a best-effort eligibility signal without forcing an analysis hydration gate.
     const backendAssessmentScoreRaw = (payload as any)?.assessmentScore;
     if (backendAssessmentScoreRaw !== undefined && backendAssessmentScoreRaw !== null) {
+      // Fail-closed: do not accept stale persisted assessmentScore when analysis/readiness is in an error state.
+      if (analysisError || readinessError) return;
       const candidate =
         typeof backendAssessmentScoreRaw === "number"
           ? backendAssessmentScoreRaw
@@ -2325,7 +2328,7 @@ export default function StudioPage() {
     }
     // If hydration confirms artifacts are missing, allow auto-generation to proceed afterwards.
     suppressAutoGenerationRef.current = pairStatus !== "missing";
-  }, []);
+  }, [analysisError, readinessError]);
 
   function normalizeStudioArtifactsBackendPayload(payload: unknown): BackendStudioArtifactsResponse | null {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
@@ -3047,6 +3050,7 @@ export default function StudioPage() {
     if (!requestedAnalysisId || !effectiveJobId || !effectiveBaselineId) {
       setGenerationReadiness(READINESS_LOADING_STATE);
       setPairReadinessContractState({ resume: "unknown", cover: "unknown" });
+      setReadinessError(null);
       return;
     }
     const readinessKey = [
@@ -3115,10 +3119,13 @@ export default function StudioPage() {
           cover: resolved.coverReadinessState,
         });
         if (!resumeResponse.ok || !coverResponse.ok) {
+          setReadinessError(`readiness_http_${resumeResponse.ok ? coverResponse.status : resumeResponse.status}`);
           failedReadinessKeysRef.current.add(readinessKey);
           return;
         }
+        setReadinessError(null);
       } catch {
+        setReadinessError("readiness_fetch_failed");
         failedReadinessKeysRef.current.add(readinessKey);
       }
     })();
