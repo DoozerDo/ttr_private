@@ -3121,6 +3121,56 @@ describe('ResumeService contract', () => {
     }
   });
 
+  it('prefers ResumeV2 generation when persisted ResumeV2 is usable even if the feature flag is off (prevents legacy structured-empty failures)', async () => {
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+
+    const originalSections = baseline.sections;
+    const originalParsedRecords = (baseline as any).parsedRecords;
+
+    try {
+      baseline.sections = []; // legacy structured extraction is empty
+      (baseline as any).parsedRecords = [
+        {
+          id: 'parsed-1',
+          baselineVersionId: baselineVersion.id,
+          resumeV2Json: {
+            heading: { name: 'Test', contactLine: 'Test' },
+            experience: [
+              {
+                company: 'Acme',
+                roleTitle: 'Support Ops Lead',
+                dateRange: '2021 - 2024',
+                bullets: ['Owned escalations', 'Built dashboards'],
+              },
+            ],
+            education: [],
+          },
+        },
+      ];
+
+      const { service } = buildService();
+      await expect(
+        service.generateResume(
+          'user-1',
+          {
+            ...baseRequest,
+            analysisId: 'analysis-1',
+            oneTap: false,
+          } as any,
+        ),
+      ).resolves.toMatchObject({
+        ok: true,
+        status: 'success',
+      });
+    } finally {
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = originalParsedRecords;
+      if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    }
+  });
+
   it('blocks Studio readiness with the canonical ResumeV2 invalid reason when persisted ResumeV2 has no usable experience', async () => {
     const originalSections = baseline.sections;
     const originalParsedRecords = (baseline as any).parsedRecords;

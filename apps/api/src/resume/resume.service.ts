@@ -1824,6 +1824,19 @@ export class ResumeService {
         throw new NotFoundException('Baseline not found');
       }
 
+      // Production parity: when a usable persisted ResumeV2 authority exists, prefer the ResumeV2 lane even if the
+      // feature flag is off. Readiness can approve baselines based on ResumeV2 while legacy structured extraction
+      // remains empty; generation must not fail later due to that legacy lane.
+      if (!isResumeV2) {
+        try {
+          const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
+          const usability = evaluateResumeV2Usability(persisted);
+          if (usability.usable) isResumeV2 = true;
+        } catch {
+          // ignore; retain legacy lane selection
+        }
+      }
+
     const baselineVersion = baselineVersionId
       ? await this.baselineVersionRepository.findOne({
           where: { id: baselineVersionId, baselineId: baseline.id },
@@ -3889,7 +3902,10 @@ export class ResumeService {
       // In that case, do not block persistence solely because structured extraction returns 0.
       const resumeV2ExperienceCount = (() => {
         try {
-          const exp = (persistedResumeV2 as any)?.experience;
+          const resumeV2ForGuard =
+            (persistedResumeV2 as any) ??
+            ((this.getLatestPersistedResumeV2Json(baseline.parsedRecords) as any) ?? null);
+          const exp = resumeV2ForGuard?.experience;
           return Array.isArray(exp) ? exp.length : 0;
         } catch {
           return 0;
