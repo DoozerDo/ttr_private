@@ -543,6 +543,52 @@ const ingestionResult = {
     expect(validation.valid).toBe(true);
   });
 
+  it('surfaces a structured error payload when ResumeV2 build fails during baseline ingestion', async () => {
+    const baselineForTest = { ...baseline, id: '00000000-0000-0000-0000-000000000000' };
+    const manager = {
+      create: jest.fn((_entity: any, value: any) => value),
+      save: jest.fn(async (value: any) => value),
+    } as any;
+
+    const ingestion = {
+      rawText: 'Test Resume',
+      parsedSections: [
+        {
+          sectionType: BaselineSectionType.EXPERIENCE,
+          content: 'Acme | Engineer | 2020 - Present\n- Shipped features',
+        },
+      ],
+      canonical: {
+        // Force a schema error in BaselineSchema.parse (missing required identity fields, etc.)
+        identity: null,
+        summary: null,
+        experience: [],
+        education: [],
+        skills: [],
+        people_leadership: null,
+        operational_ownership: null,
+        tooling_and_platforms: null,
+        cross_functional_partnership: null,
+        customer_advocacy: null,
+        scale_and_scope: null,
+        metrics_and_outcomes: null,
+        skills_and_tools: null,
+        system_generated_read_only: { missing_fields: [], ambiguity_flags: [], low_confidence_extractions: [] },
+      } as any,
+      sourceFormat: 'docx' as const,
+    };
+
+    await expect((service as any).persistParsedBaseline(manager, baselineForTest, ingestion)).rejects.toMatchObject({
+      status: 422,
+      response: expect.objectContaining({
+        error: expect.objectContaining({
+          code: 'baseline_reparse_invalid_parsed_baseline',
+          message: expect.any(String),
+        }),
+      }),
+    });
+  });
+
   it('uses distinctOn when loading the latest assessment summary', async () => {
     baselineRepository.find = jest.fn().mockResolvedValue([baseline]);
     const qb = {

@@ -1088,10 +1088,12 @@ export class BaselineService {
     } catch (error) {
       // Canonical parsed baseline must be valid for ResumeV2 generation; expose a stable typed error for repair flows.
       throw new UnprocessableEntityException({
-        code: 'baseline_reparse_invalid_parsed_baseline',
-        message:
-          'Your baseline could not be reprocessed because the parsed resume payload is invalid. Please re-upload your resume and try again.',
-        details: error instanceof Error ? error.message : String(error ?? 'unknown'),
+        error: {
+          code: 'baseline_reparse_invalid_parsed_baseline',
+          message:
+            'Your baseline could not be reprocessed because the parsed resume payload is invalid. Please re-upload your resume and try again.',
+          details: error instanceof Error ? error.message : String(error ?? 'unknown'),
+        },
       });
     }
 
@@ -1154,10 +1156,12 @@ export class BaselineService {
         throw error;
       }
       throw new UnprocessableEntityException({
-        code: 'baseline_reparse_resume_v2_invalid',
-        message:
-          'Your baseline could not be reprocessed into a usable Resume V2. Please re-upload your resume and try again.',
-        details: error instanceof Error ? error.message : String(error ?? 'unknown'),
+        error: {
+          code: 'baseline_reparse_resume_v2_invalid',
+          message:
+            'Your baseline could not be reprocessed into a usable Resume V2. Please re-upload your resume and try again.',
+          details: error instanceof Error ? error.message : String(error ?? 'unknown'),
+        },
       });
     }
 
