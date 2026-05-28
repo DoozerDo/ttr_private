@@ -43,10 +43,12 @@ export async function POST(req: NextRequest) {
     const payload = await req.json();
     if (process.env.NODE_ENV !== "production") {
       console.log("[web/api/analysis/run] request", {
-        baselineId: payload?.baselineId ?? null,
-        jobId: payload?.jobId ?? null,
+        baselineId: payload?.baselineId ?? payload?.baseline_id ?? null,
+        jobId: payload?.jobId ?? payload?.job_id ?? null,
       });
     }
+    const baselineId = payload?.baselineId ?? payload?.baseline_id ?? null;
+    const jobId = payload?.jobId ?? payload?.job_id ?? null;
     const response = await fetch(`${baseUrl}/analysis/run`, {
       method: "POST",
       headers: {
@@ -54,8 +56,8 @@ export async function POST(req: NextRequest) {
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
-        baselineId: payload?.baselineId,
-        jobId: payload?.jobId,
+        baselineId,
+        jobId,
         debug: payload?.debug,
       }),
     });

@@ -72,4 +72,33 @@ describe("POST /api/analysis/run", () => {
     expect(response.headers.get("content-type")).toMatch(/application\/json/);
     await expect(response.json()).resolves.toEqual(payload);
   });
+
+  it("accepts snake_case payloads (baseline_id/job_id) and forwards as baselineId/jobId", async () => {
+    const jsonResponse = new Response(JSON.stringify({ score: 83 }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+
+    const fetchSpy = vi.fn(() => Promise.resolve(jsonResponse));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const req = new NextRequest("https://example.com/api/analysis/run", {
+      method: "POST",
+      headers: new Headers({
+        "Content-Type": "application/json",
+        cookie: `${AUTH_COOKIE_NAME}=cookie-token`,
+      }),
+      body: JSON.stringify({
+        baseline_id: "baseline",
+        job_id: "job",
+        debug: true,
+      }),
+    });
+
+    const response = await POST(req);
+    expect(response.status).toBe(200);
+
+    const forwardedBody = JSON.parse(String((fetchSpy.mock.calls[0]?.[1] as any)?.body ?? "{}"));
+    expect(forwardedBody).toEqual(expect.objectContaining({ baselineId: "baseline", jobId: "job", debug: true }));
+  });
 });
