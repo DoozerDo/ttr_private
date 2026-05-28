@@ -1354,6 +1354,10 @@ export class StudioArtifactsService {
     jobFingerprint: string | null;
     assessmentInputsHash: string | null;
   }) {
+    const normalizedAssessmentInputsHash =
+      typeof input.assessmentInputsHash === 'string' && input.assessmentInputsHash.trim().length === 0
+        ? null
+        : input.assessmentInputsHash;
     return createHash('sha256')
       .update(
         JSON.stringify({
@@ -1362,7 +1366,7 @@ export class StudioArtifactsService {
           compositionRulesetVersion: COMPOSITION_RULESET_VERSION,
           baselineVersionHash: input.baselineVersionHash,
           jobFingerprint: input.jobFingerprint,
-          assessmentInputsHash: input.assessmentInputsHash,
+          assessmentInputsHash: normalizedAssessmentInputsHash,
         }),
       )
       .digest('hex');
