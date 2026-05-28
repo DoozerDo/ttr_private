@@ -13615,7 +13615,7 @@ export default function StudioPage() {
                 const score = Math.round(analysisScore);
                 if (!workflowContract.baselineUsable) {
                   const reasonCodes = Array.isArray(workflowAuthorityReadiness.reasonCodes)
-                    ? workflowAuthorityReadiness.reasonCodes.map((c) => String(c ?? ""))
+                    ? workflowAuthorityReadiness.reasonCodes.map((c: unknown) => String(c ?? ""))
                     : [];
                   const hasResumeV2Blocker = reasonCodes.some((code) => code.startsWith("baseline_resume_v2_"));
                   if (hasResumeV2Blocker) {
