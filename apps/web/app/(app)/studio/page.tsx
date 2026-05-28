@@ -9788,6 +9788,20 @@ export default function StudioPage() {
     const readinessCodes = Array.isArray(workflowAuthorityReadiness.reasonCodes)
       ? workflowAuthorityReadiness.reasonCodes.map((c: unknown) => String(c ?? "")).filter(Boolean)
       : [];
+    const latestKnownBaselineVersionId = (() => {
+      const list = Array.isArray(versions) ? versions : [];
+      const sorted = [...list].sort(
+        (a, b) => (Number((b as any)?.versionNumber ?? 0) || 0) - (Number((a as any)?.versionNumber ?? 0) || 0),
+      );
+      const first = sorted[0] as any;
+      return typeof first?.id === "string" && first.id.trim().length > 0 ? first.id.trim() : null;
+    })();
+    const readinessContext = {
+      baselineId: effectiveBaselineId ?? null,
+      baselineVersionId: effectiveBaselineVersionId ?? null,
+      jobId: effectiveJobId ?? null,
+      analysisId: effectiveRequestedAnalysisId ?? null,
+    };
     return {
       buildId: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? process.env.NEXT_PUBLIC_BUILD_ID ?? null,
       ids: {
@@ -9796,11 +9810,33 @@ export default function StudioPage() {
         jobId: effectiveJobId ?? null,
         analysisId: effectiveRequestedAnalysisId ?? null,
       },
+      latestKnownBaselineVersionId,
+      urlIds: {
+        baselineId: requestedBaselineId ?? null,
+        baselineVersionId: requestedBaselineVersionId ?? null,
+        jobId: requestedJobId ?? null,
+        analysisId: requestedAnalysisId ?? null,
+      },
+      readinessContext,
+      readinessVersionMatchesUrl:
+        Boolean(readinessContext.baselineVersionId) &&
+        Boolean(requestedBaselineVersionId) &&
+        String(readinessContext.baselineVersionId) === String(requestedBaselineVersionId),
+      readinessVersionMatchesLatestKnown:
+        Boolean(readinessContext.baselineVersionId) &&
+        Boolean(latestKnownBaselineVersionId) &&
+        String(readinessContext.baselineVersionId) === String(latestKnownBaselineVersionId),
       score: analysisScore,
       scoreSource: authorityScoreSource,
       workflowAuthorityReadiness: {
         blocked: Boolean(workflowAuthorityReadiness.blocked),
         reasonCodes: readinessCodes,
+        reasons: Array.isArray((workflowAuthorityReadiness as any).reasons)
+          ? ((workflowAuthorityReadiness as any).reasons as any[])
+              .map((r) => (r && typeof r === "object" ? { code: String((r as any).code ?? ""), message: String((r as any).message ?? "") } : null))
+              .filter(Boolean)
+          : [],
+        diagnostics: (workflowAuthorityReadiness as any)?.diagnostics ?? null,
       },
       workflowContract: {
         baselineUsable: workflowContract.baselineUsable,
@@ -9823,6 +9859,11 @@ export default function StudioPage() {
     effectiveBaselineVersionId,
     effectiveJobId,
     effectiveRequestedAnalysisId,
+    requestedAnalysisId,
+    requestedBaselineId,
+    requestedBaselineVersionId,
+    requestedJobId,
+    versions,
     workflowAuthority.workflowState,
     workflowAuthorityReadiness.blocked,
     workflowAuthorityReadiness.reasonCodes,
