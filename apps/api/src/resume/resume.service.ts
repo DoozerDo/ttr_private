@@ -3921,13 +3921,28 @@ export class ResumeService {
     (response as any).content = persistedContent;
 
     const authoritativeExperienceCountForGuard = (() => {
-      try {
-        const structured = extractStructuredBaselineFromSections(resumeInputSections as any);
-        if (Array.isArray((structured as any)?.experience)) return (structured as any).experience.length;
-        return 0;
-      } catch {
-        return 0;
-      }
+      // Guard against persisting minimal/unusable resume outputs.
+      // IMPORTANT: ResumeV2 is the primary authority lane for Studio generation. Some baselines can
+      // have weak/empty section-based structured extraction while still having a valid ResumeV2 experience model.
+      // In that case, do not block persistence solely because structured extraction returns 0.
+      const resumeV2ExperienceCount = (() => {
+        try {
+          const exp = (persistedResumeV2 as any)?.experience;
+          return Array.isArray(exp) ? exp.length : 0;
+        } catch {
+          return 0;
+        }
+      })();
+      const structuredExperienceCount = (() => {
+        try {
+          const structured = extractStructuredBaselineFromSections(resumeInputSections as any);
+          if (Array.isArray((structured as any)?.experience)) return (structured as any).experience.length;
+          return 0;
+        } catch {
+          return 0;
+        }
+      })();
+      return Math.max(resumeV2ExperienceCount, structuredExperienceCount);
     })();
     const hasMinimalSummarySection = (() => {
       try {

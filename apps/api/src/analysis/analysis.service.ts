@@ -35,6 +35,10 @@ import {
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { BaselineSchema, BaselineSchemaCoreShape } from '../baseline/baseline-schema';
+import {
+  normalizeNormalizedResumeDocument,
+  validateNormalizedResumeDocument,
+} from '../resume/resume-normalization';
 import { ComplianceService } from '../compliance/compliance.service';
 import {
   ComplianceAction,
@@ -1164,6 +1168,36 @@ export class AnalysisService {
         canonical: this.buildFallbackCanonicalBaseline(baseline),
         fallbackUsed: true,
       };
+    }
+
+    // Product contract: do not allow scoring on a baseline that cannot produce a usable Resume V2.
+    // This prevents a "high score" from being computed on fallback-only section text while Studio generation is blocked.
+    const resumeV2 = (latest as any).resumeV2Json ?? null;
+    if (!resumeV2 || typeof resumeV2 !== 'object') {
+      throw new BadRequestException({
+        error: {
+          code: 'baseline_resume_v2_missing',
+          message:
+            'Baseline ingestion did not produce a Resume V2 profile. Reprocess your baseline before scoring.',
+        },
+      });
+    }
+    const normalizedResumeV2 = normalizeNormalizedResumeDocument(resumeV2 as any);
+    const resumeV2Validation = validateNormalizedResumeDocument(normalizedResumeV2 as any);
+    const experienceCount = Array.isArray((normalizedResumeV2 as any)?.experience)
+      ? (normalizedResumeV2 as any).experience.length
+      : 0;
+    if (!resumeV2Validation.valid || experienceCount <= 0) {
+      throw new BadRequestException({
+        error: {
+          code: 'baseline_resume_v2_invalid',
+          message:
+            'Baseline ingestion did not produce any usable experience entries for Resume V2. Reprocess your baseline before scoring.',
+          details: resumeV2Validation.valid
+            ? { experienceCount }
+            : { reasons: resumeV2Validation.reasons, experienceCount },
+        },
+      });
     }
 
     try {

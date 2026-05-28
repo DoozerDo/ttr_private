@@ -1432,6 +1432,58 @@ describe('ResumeService contract', () => {
     }
   });
 
+  it('does not block resume generation when structured extraction yields zero experience but ResumeV2 experience is usable', async () => {
+    const { service, studioArtifactsService } = buildService();
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+    const originalScore = assessment.overallScore;
+
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
+    assessment.overallScore = 82;
+
+    try {
+      baseline.parsedRecords = [
+        {
+          createdAt: new Date('2026-05-01T00:00:00.000Z'),
+          resumeV2Json: {
+            heading: { name: 'Test Candidate', contactLine: '' },
+            summary: 'Support operations leader.',
+            experience: [
+              {
+                company: 'Acme',
+                roleTitle: 'Support Ops Lead',
+                bullets: ['Improved SLA adherence by refining triage and escalation workflow.'],
+                dateRange: '2022 - 2026',
+              },
+            ],
+            education: [],
+          },
+        } as any,
+      ];
+      // Force structured baseline extraction to see zero experience (malformed section), but ResumeV2 is usable.
+      baseline.sections = [
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          order: 1,
+          content: ['Seattle', '- Reconciled billing and revenue across systems.'].join('\n'),
+        } as any,
+      ] as any;
+
+      const result = await service.generateResume('user-1', baseRequest as any);
+      expect(result.ok).toBe(true);
+      expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
+    } finally {
+      baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsed;
+      assessment.overallScore = originalScore;
+      if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    }
+  });
+
   it('generates a real exportReady resume when Resume V2 is invalid and baseline work history is verified (omits unsupported requirements with warnings)', async () => {
     const { service } = buildService();
     const originalSections = baseline.sections;

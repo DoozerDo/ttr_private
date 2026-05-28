@@ -1157,6 +1157,50 @@ const sampleScoringV2: CxFitV2Result = {
     expect(result.scoringReliability).toBe('ok');
   });
 
+  it('blocks analysis.run when Resume V2 is invalid even if fallback canonical baseline sections exist', async () => {
+    // Force parsed canonical baseline JSON to exist but ResumeV2 to be unusable.
+    baselineRepository.findOne.mockResolvedValue({
+      ...defaultBaselineRecord,
+      sections: [
+        {
+          id: 's-1',
+          baselineId: 'b-1',
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: 'Example Co | Program Manager | 2020-2024\n- Led ops.',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 0,
+        } as any,
+      ],
+      parsedRecords: [
+        {
+          id: 'parsed-1',
+          baselineId: 'b-1',
+          createdAt: new Date(),
+          parsedJson: {
+            schema_version: 'v1',
+            source_format: 'pdf',
+            ingested_at: new Date().toISOString(),
+            system_generated_read_only: { missing_fields: [], ambiguity_flags: [], low_confidence_extractions: [] },
+            experience: [{ company: 'Example', role: 'PM', company_name: 'Example', role_title: 'PM', start_date: null, end_date: null, evidence: [], details_text: 'Led ops.' }],
+            skills_and_tools: { tools: [], domains: [], methodologies: [] },
+          },
+          resumeV2Json: { heading: { name: 'Test', contactLine: '' }, summary: 'Test', experience: [] },
+        } as any,
+      ],
+    } as any);
+
+    await expect(
+      service.runFitAssessment('user-1', { baselineId: 'b-1', jobId: 'job-1' } as any),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        error: expect.objectContaining({
+          code: 'baseline_resume_v2_invalid',
+        }),
+      }),
+    });
+  });
+
   it('flags scoring as unreliable when a non-empty job description yields zero extracted terms', async () => {
     const monicaJobRecord: Partial<Job> = {
       ...defaultJobRecord,
