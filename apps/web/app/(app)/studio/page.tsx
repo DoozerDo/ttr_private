@@ -1822,6 +1822,14 @@ export default function StudioPage() {
     return v2 ?? direct ?? overall ?? hydratedAnalysisScore ?? null;
   }, [analysis, analysisError, hydratedAnalysisScore, readinessError]); 
   const generateNowEligible = isGenerateNowEligible(analysisScore);
+  const debugAuthorityEnabled = useMemo(() => {
+    try {
+      const raw = searchParams?.get?.("debugAuthority");
+      return raw === "1" || raw === "true";
+    } catch {
+      return false;
+    }
+  }, [searchParams]);
 
   const readGenerationDebug = useCallback(
     (payload: unknown): { generationMode: string; templateVersion: string } => {
@@ -1846,6 +1854,23 @@ export default function StudioPage() {
     },
     [],
   );
+
+  const authorityScoreSource = useMemo(() => {
+    const assessment = analysis;
+    const v2Raw = (assessment as { scoring_v2?: { score?: unknown } | null } | null)?.scoring_v2?.score;
+    const directRaw = (assessment as { score?: unknown } | null)?.score;
+    const overallRaw = (assessment as { overallScore?: unknown } | null)?.overallScore;
+    const hasV2 = typeof v2Raw === "number" || (typeof v2Raw === "string" && v2Raw.trim().length > 0);
+    const hasDirect = typeof directRaw === "number" || (typeof directRaw === "string" && directRaw.trim().length > 0);
+    const hasOverall = typeof overallRaw === "number" || (typeof overallRaw === "string" && overallRaw.trim().length > 0);
+    if (analysisError) return "analysis_error";
+    if (readinessError) return "readiness_error";
+    if (hasV2) return "analysis.scoring_v2.score";
+    if (hasDirect) return "analysis.score";
+    if (hasOverall) return "analysis.overallScore";
+    if (hydratedAnalysisScore !== null) return "hydrated_assessmentScore";
+    return "none";
+  }, [analysis, analysisError, hydratedAnalysisScore, readinessError]);
 
   const readMissingStructuredBaselineSignal = useCallback((payload: unknown): boolean => {
     if (!payload || typeof payload !== "object") return false;
@@ -9758,6 +9783,58 @@ export default function StudioPage() {
         }
       : {};
 
+  const debugAuthoritySnapshot = useMemo(() => {
+    if (!debugAuthorityEnabled) return null;
+    const readinessCodes = Array.isArray(workflowAuthorityReadiness.reasonCodes)
+      ? workflowAuthorityReadiness.reasonCodes.map((c: unknown) => String(c ?? "")).filter(Boolean)
+      : [];
+    return {
+      buildId: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? process.env.NEXT_PUBLIC_BUILD_ID ?? null,
+      ids: {
+        baselineId: effectiveBaselineId ?? null,
+        baselineVersionId: effectiveBaselineVersionId ?? null,
+        jobId: effectiveJobId ?? null,
+        analysisId: effectiveRequestedAnalysisId ?? null,
+      },
+      score: analysisScore,
+      scoreSource: authorityScoreSource,
+      workflowAuthorityReadiness: {
+        blocked: Boolean(workflowAuthorityReadiness.blocked),
+        reasonCodes: readinessCodes,
+      },
+      workflowContract: {
+        baselineUsable: workflowContract.baselineUsable,
+        scoreAllowsGeneration: workflowContract.scoreAllowsGeneration,
+        resumeGenerationAllowed: workflowContract.resumeGenerationAllowed,
+        coverLetterGenerationAllowed: workflowContract.coverLetterGenerationAllowed,
+      },
+      workflowOrchestrator: {
+        canonicalState: workflowSurfaceAuthorityHero.canonicalState,
+        trustTone: workflowSurfaceAuthorityHero.trustTone,
+        contractGenerationState: workflowOrchestratorCore.contract?.generation?.state ?? null,
+        authorityWorkflowState: workflowAuthority.workflowState,
+      },
+    };
+  }, [
+    authorityScoreSource,
+    analysisScore,
+    debugAuthorityEnabled,
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    effectiveRequestedAnalysisId,
+    workflowAuthority.workflowState,
+    workflowAuthorityReadiness.blocked,
+    workflowAuthorityReadiness.reasonCodes,
+    workflowContract.baselineUsable,
+    workflowContract.coverLetterGenerationAllowed,
+    workflowContract.resumeGenerationAllowed,
+    workflowContract.scoreAllowsGeneration,
+    workflowOrchestratorCore.contract?.generation?.state,
+    workflowSurfaceAuthorityHero.canonicalState,
+    workflowSurfaceAuthorityHero.trustTone,
+  ]);
+
   const normalizedArtifactsPanelModel = useMemo(() => {
     const state = normalizedArtifacts.artifactDisplayState;
     const headline = normalizedArtifacts.primaryArtifactTruth.headline;
@@ -12588,6 +12665,14 @@ export default function StudioPage() {
   const studioContent = (
     <PageShell className="space-y-4 pb-4">
       <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
+      {debugAuthoritySnapshot ? (
+        <pre
+          data-testid="studio-debug-authority"
+          className="rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-xs leading-5 text-slate-200"
+        >
+{JSON.stringify(debugAuthoritySnapshot, null, 2)}
+        </pre>
+      ) : null}
       <div className="flex flex-col gap-4">
         <div className="order-2 space-y-4" data-testid="studio-secondary-systems">
       {!generateNowEligible || activeGenerationReadiness.blocked || !canGenerateDocuments ? (
