@@ -3869,7 +3869,9 @@ export class ResumeService {
         const cleanedBullets = bullets
           .map((b: unknown) => (typeof b === 'string' ? trimIncompleteTrailingFragments(b) : ''))
           .map((b: string) => b.trim())
-          .filter((b: string) => b.length >= 10);
+          // ResumeV2 authority: do not drop short-but-meaningful bullets, or the artifact can become empty and fail persistence.
+          // Legacy structured lane may keep a minimum-length filter to avoid low-signal fragments.
+          .filter((b: string) => (isResumeV2 ? b.length > 0 : b.length >= 10));
         return { ...entry, bullets: cleanedBullets };
       });
     }

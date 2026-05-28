@@ -3171,6 +3171,57 @@ describe('ResumeService contract', () => {
     }
   });
 
+  it('does not drop short-but-meaningful ResumeV2 bullets and block persistence (ResumeV2 lane)', async () => {
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
+
+    const originalSections = baseline.sections;
+    const originalParsedRecords = (baseline as any).parsedRecords;
+
+    try {
+      baseline.sections = []; // legacy structured extraction empty
+      (baseline as any).parsedRecords = [
+        {
+          id: 'parsed-1',
+          baselineVersionId: baselineVersion.id,
+          resumeV2Json: {
+            heading: { name: 'Test', contactLine: 'Test' },
+            experience: [
+              {
+                company: 'Acme',
+                roleTitle: 'Support Ops Lead',
+                dateRange: '2021 - 2024',
+                // Intentionally short bullets that used to be filtered out (< 10 chars) and could cause empty output.
+                bullets: ['Owned', 'Scaled'],
+              },
+            ],
+            education: [],
+          },
+        },
+      ];
+
+      const { service } = buildService();
+      await expect(
+        service.generateResume(
+          'user-1',
+          {
+            ...baseRequest,
+            analysisId: 'analysis-1',
+            oneTap: false,
+          } as any,
+        ),
+      ).resolves.toMatchObject({
+        ok: true,
+        status: 'success',
+      });
+    } finally {
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = originalParsedRecords;
+      if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    }
+  });
+
   it('blocks Studio readiness with the canonical ResumeV2 invalid reason when persisted ResumeV2 has no usable experience', async () => {
     const originalSections = baseline.sections;
     const originalParsedRecords = (baseline as any).parsedRecords;
