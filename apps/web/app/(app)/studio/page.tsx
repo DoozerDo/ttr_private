@@ -12780,7 +12780,7 @@ export default function StudioPage() {
         return (
           <Alert intent={bannerIntent} title={bannerTitle}>
             <div data-testid="studio-generation-state-banner" className="space-y-2">
-              {scoringReliability === "unreliable" ? (
+              {scoringReliability === "unreliable" && !readinessError ? (
                 <div
                   className="rounded-2xl border border-amber-300/25 bg-amber-500/10 p-4 text-slate-100"
                   data-testid="studio-score-reliability-warning"
@@ -12792,7 +12792,7 @@ export default function StudioPage() {
                   </p>
                 </div>
               ) : null}
-              {generationState === "ready" ? (
+              {renderedTopState === "ready" ? (
                 <p data-testid="studio-generation-state-ready" className="text-sm text-slate-100">
                   This role is ready for generation using your verified baseline.
                 </p>
@@ -13105,7 +13105,9 @@ export default function StudioPage() {
                 </p>
               ) : null}
               <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-50">  
-                {workflowSurfaceAuthorityHero.canonicalState === "generation_in_progress"
+                {readinessError
+                  ? "Readiness error"
+                  : workflowSurfaceAuthorityHero.canonicalState === "generation_in_progress"
                   ? "Generating your documents..."
                   : hasCompletedGeneration  
                   ? showLowQualityRecoveryLane  
@@ -13117,12 +13119,14 @@ export default function StudioPage() {
                       : "Strong output: ready to refine in Studio."  
                   : workflowOrchestratorCore.contract.generation.state === "ready"
                     ? "Draft output: ready to generate."
-                    : generateNowEligible
+                  : generateNowEligible
                       ? "Output may be limited, but you can generate and refine."
                       : "Limited output: not ready yet."}
               </h2>
               <p className="mt-2 text-sm text-slate-200">  
-                {workflowSurfaceAuthorityHero.canonicalState === "generation_in_progress"
+                {readinessError
+                  ? "We couldn’t evaluate generation readiness from the current state. Refresh the page or try again from Analyze."
+                  : workflowSurfaceAuthorityHero.canonicalState === "generation_in_progress"
                   ? "We're building your tailored resume and cover letter now."
                   : hasCompletedGeneration  
                   ? showLowQualityRecoveryLane  
@@ -13134,7 +13138,7 @@ export default function StudioPage() {
                       : "Built from your verified experience and aligned to the role. Review and refine as needed before applying." 
                   : workflowOrchestratorCore.contract.generation.state === "ready"
                     ? "Built from your baseline evidence and ready for generation."
-                    : generateNowEligible
+                  : generateNowEligible
                       ? "Output may be limited due to gaps in your baseline, but you can still generate and refine."
                       : "Built from your baseline evidence, but a few signals still need strengthening."}
               </p>
@@ -13387,7 +13391,12 @@ export default function StudioPage() {
           </div>
         ) : null}
       </section>
-      {!generateNowEligible && !isReadySuccessState && (workflowAuthority.workflowState === "READY" || canGenerateDocuments) ? (
+      {!generateNowEligible &&
+      !isReadySuccessState &&
+      !readinessError &&
+      !workflowAuthorityReadiness.blocked &&
+      canGenerateDocuments &&
+      (workflowAuthority.workflowState === "READY" || canGenerateDocuments) ? (
         <section className="rounded-2xl border border-white/10 bg-white/5 p-4" data-testid="studio-evidence-allowed-panel">
           <h2 className="text-base font-semibold text-slate-100">
             {workflowAuthority.workflowState === "READY" ? "Why this output is grounded" : "Why this output is limited"}

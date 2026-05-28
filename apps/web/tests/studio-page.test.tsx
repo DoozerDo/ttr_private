@@ -1553,6 +1553,8 @@ describe("Studio page UX", () => {
     // Artifacts remain the visible product outcome.
     expect((await screen.findAllByTestId("resume-preview")).length).toBeGreaterThan(0);
     expect(await screen.findByTestId("studio-cover-letter-preview-body")).toBeInTheDocument();
+    expect(screen.queryByText(/readiness could not be evaluated/i)).toBeNull();
+    expect(screen.queryByText("Why generation is blocked")).toBeNull();
 
     // Secondary systems remain below materials (and are collapsed).
     const secondarySystems = screen.getByTestId("studio-secondary-systems");
@@ -1627,6 +1629,8 @@ describe("Studio page UX", () => {
     const nextAction = within(guidance).getByTestId("studio-blocker-next-action");
     expect(nextAction.getAttribute("href")?.trim().length).toBeGreaterThan(0);
     expect(screen.queryByTestId("studio-download-application-package")).toBeNull();
+    expect(screen.queryByText("Ready to generate")).toBeNull();
+    expect(screen.queryByText(/ready for generation using your verified baseline/i)).toBeNull();
 
     // No fake materials should render when artifacts are missing and generation is blocked.
     expect(screen.queryByTestId("studio-resume-ready-panel")).toBeNull();
@@ -1694,6 +1698,10 @@ describe("Studio page UX", () => {
     expect(within(guidance).getByTestId("studio-readiness-message")).toHaveTextContent(
       "Readiness could not be evaluated",
     );
+    expect(screen.queryByText(/ready for generation using your verified baseline/i)).toBeNull();
+    expect(screen.queryByText(/built from your baseline evidence and ready for generation/i)).toBeNull();
+    expect(screen.queryByText(/you can still generate drafts/i)).toBeNull();
+    expect(screen.queryByText(/output may be limited, but you can generate/i)).toBeNull();
     expect(screen.queryByText("Ready to generate")).toBeNull();
     expect(screen.queryByTestId("studio-evidence-blocked-panel")).toBeNull();
   }, 20000);
