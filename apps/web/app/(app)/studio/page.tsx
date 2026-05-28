@@ -1797,6 +1797,9 @@ export default function StudioPage() {
   }, []);
 
   const analysisScore = useMemo(() => { 
+    // Fail-closed: if analysis failed to load/run, do not reuse any hydrated/stored score.
+    // This prevents a mixed authority state where stale score implies READY while readiness/analysis errors imply repair required.
+    if (analysisError) return null;
     const coerceScore = (value: unknown): number | null => {
       if (typeof value === "number" && Number.isFinite(value)) return value;
       if (typeof value === "string") {
@@ -1816,7 +1819,7 @@ export default function StudioPage() {
     const overallRaw = (assessment as { overallScore?: unknown } | null)?.overallScore;
     const overall = coerceScore(overallRaw);
     return v2 ?? direct ?? overall ?? hydratedAnalysisScore ?? null;
-  }, [analysis, hydratedAnalysisScore]); 
+  }, [analysis, analysisError, hydratedAnalysisScore]); 
   const generateNowEligible = isGenerateNowEligible(analysisScore);
 
   const readGenerationDebug = useCallback(
@@ -13610,8 +13613,14 @@ export default function StudioPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
               {(() => {
                 const score = Math.round(analysisScore);
-                if (resumeV2Authority.blocksGeneration) {
-                  return `Compatibility: Baseline repair required (${score})`;
+                if (!workflowContract.baselineUsable) {
+                  const reasonCodes = Array.isArray(workflowAuthorityReadiness.reasonCodes)
+                    ? workflowAuthorityReadiness.reasonCodes.map((c) => String(c ?? ""))
+                    : [];
+                  const hasResumeV2Blocker = reasonCodes.some((code) => code.startsWith("baseline_resume_v2_"));
+                  if (hasResumeV2Blocker) {
+                    return `Compatibility: Baseline repair required (${score})`;
+                  }
                 }
                 const sourcedVerdict =
                   typeof (analysis as LatestAnalysis | null)?.verdict === "string"

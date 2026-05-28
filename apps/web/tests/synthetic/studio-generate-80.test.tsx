@@ -230,5 +230,49 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
     expect(resumePosts).toBe(1);
     expect(coverPosts).toBe(1);
   }, 120_000);
-});
 
+  it("does not show mixed authority when score is present but readiness fails with 400", async () => {
+    const user = userEvent.setup();
+
+    // Override assessment score to 83 (the reported production contradiction) while forcing readiness to 400.
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : String((input as any)?.url ?? input);
+      const method = String(init?.method ?? "GET").toUpperCase();
+      if (url.startsWith("/api/studio/artifacts")) {
+        return jsonResponse({ resume: null, coverLetter: null, generationContractVersion: "pipeline-test" });
+      }
+      if (url === "/api/resume/readiness" && method === "POST") return new Response("bad request", { status: 400 });
+      if (url === "/api/cover-letters/readiness" && method === "POST") return new Response("bad request", { status: 400 });
+      if (url.startsWith("/api/baselines")) return jsonResponse([{ id: "base-80", status: "ACTIVE" }]);
+      if (url.startsWith("/api/jobs")) return jsonResponse([{ id: "job-80", title: "Local scoring validation role", company: "TargetThisRole" }]);
+      if (url.startsWith("/api/analysis/fit-assessments")) {
+        return jsonResponse({ assessments: [{ id: "analysis-83", baselineId: "base-80", overallScore: 83, createdAt: "2026-05-27T00:00:00.000Z" }] });
+      }
+      return new Response(`Unhandled fetch: ${method} ${url}`, { status: 500 });
+    });
+
+    const StudioPage = (await import("@/app/(app)/studio/page")).default;
+    render(<StudioPage />);
+
+    // Coherent single lane: when readiness fails, we must not present READY/CURRENT messaging driven by a stale score.
+    // Score should be treated as unavailable when analysis/readiness errors are present.
+    await expect(screen.findByTestId("studio-ready-secondary-summary")).resolves.toBeTruthy();
+    expect(screen.getByTestId("studio-ready-secondary-summary")).toHaveTextContent(/Fit score unavailable/i);
+    expect(screen.getByTestId("studio-ready-secondary-summary")).toHaveTextContent(/Blocked/i);
+
+    // Must not show the "Ready" lane while also showing baseline repair required messaging.
+    expect(screen.queryByText(/Baseline repair required/i)).toBeNull();
+
+    // Must not show generation CTAs when blocked by readiness errors.
+    expect(screen.queryByTestId("studio-generate-resume-button")).toBeNull();
+    expect(screen.queryByTestId("studio-generate-cover-button")).toBeNull();
+
+    // No retries/repair mixed prompts.
+    expect(screen.queryByText(/retry generation/i)).toBeNull();
+    expect(screen.queryByText(/generation is blocked/i)).toBeNull();
+
+    // Touch user to avoid unused var (keeps pattern consistent with other test).
+    await user.keyboard("{Escape}");
+  }, 60_000);
+});
