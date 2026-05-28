@@ -12751,15 +12751,31 @@ export default function StudioPage() {
                   </div>
                 ) : null}
                 {(() => {
+        // Canonical rendered top-level state: do not allow readiness internal errors to coexist with READY/blocked UI.
+        // Readiness errors are fail-closed and must suppress any "Ready to generate" state.
         const generationState = studioGenerationStateInfo.state;
-        const bannerIntent = studioBlockedBaselineContract ? "warning" : generationState === "ready" ? "info" : "warning";
-        const bannerTitle = studioBlockedBaselineContract
-          ? "Baseline repair required"
-          : generationState === "ready"
-            ? "Ready to generate"
-            : generationState === "degraded"
-              ? "This role is a partial match"
-              : "Review your fit";
+        const renderedTopState: "loading" | "blocked" | "ready" = analysisLoading
+          ? "loading"
+          : readinessError
+            ? "blocked"
+            : studioBlockedBaselineContract || workflowAuthorityReadiness.blocked || !canGenerateDocuments
+              ? "blocked"
+              : generationState === "ready"
+                ? "ready"
+                : "blocked";
+
+        const bannerIntent =
+          renderedTopState === "ready" && !studioBlockedBaselineContract ? "info" : "warning";
+        const bannerTitle =
+          readinessError
+            ? "Readiness error"
+            : studioBlockedBaselineContract
+              ? "Baseline repair required"
+              : renderedTopState === "ready"
+                ? "Ready to generate"
+                : generationState === "degraded"
+                  ? "This role is a partial match"
+                  : "Review your fit";
 
         return (
           <Alert intent={bannerIntent} title={bannerTitle}>
@@ -13410,6 +13426,7 @@ export default function StudioPage() {
       ) : hasLoadedAnalysis &&
         !showReadinessRecoveryExperience &&
         workflowAuthority.workflowState === "BLOCKED" &&
+        !readinessError &&
         !studioDraftMode ? (
         <RouteStateShell
           testId="studio-evidence-blocked-panel"

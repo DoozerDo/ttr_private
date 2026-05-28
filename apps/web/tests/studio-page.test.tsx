@@ -1635,6 +1635,69 @@ describe("Studio page UX", () => {
     expect(screen.queryByText("I bring verified leadership and operational experience aligned to this role.")).toBeNull();
   }, 20000);
 
+  it("renders a single blocked readiness state when readiness fails (no READY + blocked contradiction)", async () => {
+    overrideSearchParams({
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      analysisId: "analysis-1",
+    });
+
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const rawUrl = rawFetchUrl(input);
+
+      if (rawUrl.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "COMPLETED",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "job-fingerprint-1",
+            generationContractVersion: "studio-artifacts-v1",
+            assessmentScore: 83,
+            resume: null,
+            coverLetter: null,
+          }),
+        );
+      }
+
+      if (rawUrl.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(createResponse(createFitAssessment(83)));
+      }
+
+      if (rawUrl.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+
+      if (rawUrl.includes("/api/resume/readiness")) {
+        return Promise.resolve(createResponse({ error: { code: "readiness_http_500" } }, false, 500));
+      }
+
+      if (rawUrl.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ error: { code: "readiness_http_500" } }, false, 500));
+      }
+
+      if (rawUrl.includes("/api/analytics/event")) {
+        return Promise.resolve(createResponse({ ok: true }));
+      }
+
+      return Promise.resolve(createResponse({}));
+    });
+
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    renderStudio();
+
+    const guidance = await screen.findByTestId("studio-guidance-details");
+    expect(within(guidance).getByTestId("studio-readiness-message")).toHaveTextContent(
+      "Readiness could not be evaluated",
+    );
+    expect(screen.queryByText("Ready to generate")).toBeNull();
+    expect(screen.queryByTestId("studio-evidence-blocked-panel")).toBeNull();
+  }, 20000);
+
   it("hydrates an already applied application and keeps the momentum state on refresh", async () => {
     const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
