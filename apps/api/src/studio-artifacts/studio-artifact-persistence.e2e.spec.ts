@@ -498,6 +498,135 @@ describe('Studio artifact persistence contract (e2e)', () => {
     expect(persistedPreview).toBeTruthy();
   });
 
+  it('transitions resume from missing to completed when cover letter already persisted for the same baseline/job', async () => {
+    const baseline = await baselineRepository.save(
+      baselineRepository.create({
+        userId,
+        version: 1,
+        versionNumber: 1,
+        originalFilename: 'resume.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        storagePath: '/tmp/resume.docx',
+        hash: null,
+        isActive: true,
+        archivedAt: null,
+      }),
+    );
+
+    await seedBaselineParsedWithResumeV2({ baselineId: baseline.id });
+
+    const baselineVersion = await baselineVersionRepository.save(
+      baselineVersionRepository.create({
+        baselineId: baseline.id,
+        versionNumber: 1,
+        fileHash: `file-hash-${Date.now()}`,
+        hash: `file-hash-${Date.now()}`,
+        storagePath: '/tmp/baseline-version-1',
+      }),
+    );
+
+    const job = await jobRepository.save(
+      jobRepository.create({
+        userId,
+        title: 'Support Operations Lead',
+        company: 'ExampleCo',
+        rawDescription: 'Own support operations, build tooling, and partner with product/engineering.',
+        normalizedResponsibilities: [],
+        normalizedRequirements: [],
+        jdIngestionMethod: JobIngestionMethod.PASTE,
+        jdParsedAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        archivedAt: null,
+      } as any),
+    );
+
+    const assessment = await fitAssessmentRepository.save(
+      fitAssessmentRepository.create({
+        userId,
+        jobId: job.id,
+        baselineId: baseline.id,
+        baselineVersion: baselineVersion.versionNumber,
+        overallScore: 82,
+        verdict: FitAssessmentVerdict.APPLY,
+        dimensionScores: {
+          experienceAlignment: 80,
+          leadershipLevel: 80,
+          technicalPlatformFit: 80,
+          industryContext: 80,
+          strategicTacticalFit: 80,
+        },
+        strengths: [],
+        gaps: [],
+        complianceFlags: [],
+        inputsHash: null,
+        isSynthetic: false,
+        syntheticScenarioKey: null,
+        syntheticRunId: null,
+        syntheticCreatedAt: null,
+        preserveFromCleanup: true,
+      } as any),
+    );
+
+    // Step 1: persist cover letter first (resume missing).
+    const coverGenerate = await request(app.getHttpServer())
+      .post('/cover-letters/generate')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({
+        baselineId: baseline.id,
+        baselineVersionId: baselineVersion.id,
+        jobId: job.id,
+        analysisId: assessment.id,
+      });
+    expect([201, 200, 403, 422]).toContain(coverGenerate.status);
+
+    const artifactsAfterCover = await request(app.getHttpServer())
+      .get('/studio/artifacts')
+      .set('Authorization', `Bearer ${authToken}`)
+      .query({
+        baselineId: baseline.id,
+        baselineVersionId: baselineVersion.id,
+        jobId: job.id,
+        analysisId: assessment.id,
+      })
+      .expect(200);
+    expectObject(artifactsAfterCover.body);
+    const cover = (artifactsAfterCover.body as any).coverLetter as any;
+    expect(cover).toBeTruthy();
+    const resumeBefore = (artifactsAfterCover.body as any).resume as any;
+    expect(resumeBefore == null || String(resumeBefore?.status ?? 'MISSING') === 'MISSING').toBe(true);
+
+    // Step 2: generate resume and ensure it transitions to non-missing + renderable.
+    const resumeGenerate = await request(app.getHttpServer())
+      .post('/resume/generate')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({
+        baselineId: baseline.id,
+        baselineVersionId: baselineVersion.id,
+        jobId: job.id,
+        analysisId: assessment.id,
+      })
+      .expect(200);
+    expectObject(resumeGenerate.body);
+
+    const artifactsAfterResume = await request(app.getHttpServer())
+      .get('/studio/artifacts')
+      .set('Authorization', `Bearer ${authToken}`)
+      .query({
+        baselineId: baseline.id,
+        baselineVersionId: baselineVersion.id,
+        jobId: job.id,
+        analysisId: assessment.id,
+      })
+      .expect(200);
+    expectObject(artifactsAfterResume.body);
+    const resume = (artifactsAfterResume.body as any).resume as any;
+    expect(resume).toBeTruthy();
+    expect(String(resume?.status ?? '')).not.toBe('MISSING');
+    const preview = resume?.responseBody?.preview?.resume ?? null;
+    expect(preview).toBeTruthy();
+  });
+
   it('GET /studio/artifacts returns 422 for invalid analysisId (even when optional)', async () => {
     const baseline = await baselineRepository.save(
       baselineRepository.create({

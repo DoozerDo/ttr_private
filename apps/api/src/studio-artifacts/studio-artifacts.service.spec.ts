@@ -274,5 +274,128 @@ describe('StudioArtifactsService persistence boundary', () => {
     expect(hydrated.coverLetter?.responseBody ?? null).toBeTruthy();
     expect(String(hydrated.status ?? '').toLowerCase()).not.toBe('missing');
   });
-});
 
+  it('does not treat exportReady=false as missing when a renderable resume preview exists (hydration contract)', async () => {
+    const userId = randomUUID();
+    const baselineId = randomUUID();
+    const baselineVersionId = randomUUID();
+    const jobId = randomUUID();
+    const analysisId = randomUUID();
+
+    const studioArtifactRepository = buildRepo<any>();
+    studioArtifactRepository.findOne.mockResolvedValue({
+      id: 'pair-1',
+      userId,
+      baselineId,
+      jobId,
+      baselineVersionId,
+      baselineVersionHash: baselineVersionId,
+      jobFingerprint: 'jobfp',
+      generationContractVersion: 'studio-artifacts-v1',
+      resumeStatus: 'complete',
+      coverLetterStatus: 'missing',
+      resumeInputsHash: 'resume_hash',
+      coverLetterInputsHash: null,
+      resumeResponseBody: {
+        resumeResult: {
+          ...resumeResult({
+            summary: 'Hello',
+            experience: [{ company: 'Acme', bullets: ['Did thing'] }],
+          }),
+          exportReady: false,
+          exports: { docx: false, pdf: false },
+        },
+        exportReady: false,
+        exports: { docx: false, pdf: false },
+        qualityGate: { status: 'pass', reasons: [] },
+        preview: {
+          resume: {
+            heading: { name: 'Alex Candidate', contactLine: 'Test' },
+            summary: 'Hello',
+            experience: [{ company: 'Acme', roleTitle: 'Engineer', bullets: ['Did thing'] }],
+          },
+        },
+      },
+      resumeContent: 'Alex Candidate\nAcme\n- Did thing',
+      coverLetterResponseBody: null,
+      coverLetterContent: null,
+      resumeFailureCode: null,
+      coverLetterFailureCode: null,
+      resumeFailureMessage: null,
+      coverLetterFailureMessage: null,
+      resumeGenerationStartedAt: new Date('2026-05-27T00:00:00.000Z'),
+      coverLetterGenerationStartedAt: null,
+      resumeGeneratedAt: new Date('2026-05-27T00:00:01.000Z'),
+      coverLetterGeneratedAt: null,
+      resumeFailedAt: null,
+      coverLetterFailedAt: null,
+      resumeMetadata: {},
+      coverLetterMetadata: {},
+      createdAt: new Date('2026-05-27T00:00:00.000Z'),
+      updatedAt: new Date('2026-05-27T00:00:02.000Z'),
+    });
+
+    const baselineVersionRepository = buildRepo<any>();
+    baselineVersionRepository.findOne.mockResolvedValue({
+      id: baselineVersionId,
+      baselineId,
+      hash: baselineVersionId,
+    });
+
+    const jobRepository = buildRepo<any>();
+    jobRepository.findOne.mockResolvedValue({
+      id: jobId,
+      userId,
+      title: 'Role',
+      companyName: 'Acme',
+      description: 'Desc',
+      createdAt: new Date('2026-05-27T00:00:00.000Z'),
+    });
+
+    const fitAssessmentRepository = buildRepo<any>();
+    fitAssessmentRepository.findOne.mockResolvedValue({
+      id: analysisId,
+      userId,
+      jobId,
+      baselineId,
+      overallScore: 85,
+      inputsHash: 'inputs',
+      createdAt: new Date('2026-05-27T00:00:00.000Z'),
+    });
+
+    const baselineRepository = buildRepo<any>();
+    baselineRepository.findOne.mockResolvedValue({
+      id: baselineId,
+      userId,
+      sections: [],
+      parsedRecords: [],
+    });
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository,
+      baselineRepository,
+      baselineVersionRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      { ensureResumeV2ExistsForBaseline: jest.fn(async () => null) } as any,
+    ) as any;
+
+    // Force input hash match; this unit test isn't asserting hash derivation.
+    service.computeJobFingerprint = () => 'jobfp';
+    service.computeResumeInputsHash = () => 'resume_hash';
+    service.computeCoverLetterInputsHash = () => 'cover_hash';
+
+    const result = await service.readState({
+      userId,
+      baselineId,
+      baselineVersionId,
+      jobId,
+      analysisId,
+    });
+
+    expect(result.resume?.status ?? null).toBeTruthy();
+    expect(result.resume?.responseBody ?? null).toBeTruthy();
+    expect((result.resume as any)?.usableCurrent ?? true).toBe(true);
+    expect((result.resumeResult as any)?.preview ?? null).toBeTruthy();
+  });
+});
