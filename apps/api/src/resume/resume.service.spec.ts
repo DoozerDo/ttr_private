@@ -3121,6 +3121,64 @@ describe('ResumeService contract', () => {
     }
   });
 
+  it('blocks Studio readiness with the canonical ResumeV2 invalid reason when persisted ResumeV2 has no usable experience', async () => {
+    const originalSections = baseline.sections;
+    const originalParsedRecords = (baseline as any).parsedRecords;
+
+    try {
+      baseline.sections = []; // structured/template extraction would be empty (ResumeV2 authority should apply)
+      (baseline as any).parsedRecords = [
+        {
+          id: 'parsed-1',
+          baselineVersionId: baselineVersion.id,
+          resumeV2Json: {
+            heading: { name: 'Test', contactLine: 'Test' },
+            experience: [],
+            education: [],
+          },
+        },
+      ];
+
+      const { service } = buildService();
+      const readiness = await service.getGenerationReadiness(
+        'user-1',
+        {
+          ...baseRequest,
+          analysisId: 'analysis-1',
+          oneTap: false,
+        } as any,
+      );
+
+      expect(readiness.status).toBe('blocked');
+      expect(readiness.blocked).toBe(true);
+      expect(readiness.reasons?.[0]?.code).toBe('baseline_resume_v2_invalid');
+      expect(typeof readiness.reasons?.[0]?.message).toBe('string');
+      expect(String(readiness.reasons?.[0]?.message ?? '')).toContain('ResumeV2');
+
+      await expect(
+        service.generateResume(
+          'user-1',
+          {
+            ...baseRequest,
+            analysisId: 'analysis-1',
+            oneTap: false,
+          } as any,
+        ),
+      ).rejects.toMatchObject({
+        status: 422,
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: 'baseline_resume_v2_invalid',
+            message: readiness.reasons?.[0]?.message,
+          }),
+        }),
+      });
+    } finally {
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = originalParsedRecords;
+    }
+  });
+
 
   it('does not throw generation_blocked for score >= 70 when readiness is BLOCKED and verified-only mode is possible', async () => {
     const { service, applicationsService, opportunitiesService } = buildService({

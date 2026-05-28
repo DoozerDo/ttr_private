@@ -56,6 +56,7 @@ import {
 } from '../docx-templates/docx-template.registry';
 import { resolveBaselineIdentity } from '../baseline/baseline-identity.utils';
 import { resolveBaselineSectionsForGeneration } from '../baseline/baseline-section-source';
+import { assertUsableResumeV2, evaluateResumeV2Usability } from '../baseline/baseline-resume-v2';
 import * as ResumeDraftBullets from './resume-draft-bullets';
 import type { ResumeDraftSection } from './resume-draft-bullets';
 import {
@@ -2630,48 +2631,9 @@ export class ResumeService {
         try {
           const shouldLogV2 = process.env.RESUME_V2_INGEST_DEBUG === 'true';
           const persisted = persistedResumeV2;
-          if (!persisted || typeof persisted !== 'object') {
-            throw new UnprocessableEntityException({
-              error: {
-                code: 'baseline_resume_v2_missing',
-                message:
-                  'Baseline is missing a persisted ResumeV2 model. Re-run baseline processing (Fit Review) or re-upload your resume to re-ingest.',
-                details: {
-                  expected: ['baseline_parsed.resumeV2Json'],
-                },
-              },
-            });
-          }
+          // Canonical validity check (throws baseline_resume_v2_invalid with canonical message/details).
+          assertUsableResumeV2(persisted);
           const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
-          const validation = validateNormalizedResumeDocument(normalized);
-          if (!validation.valid) {
-            const failures = buildNormalizedResumeValidationFailures(normalized);
-            throw new UnprocessableEntityException({
-              error: {
-                code: 'baseline_resume_v2_invalid',
-                message: formatResumeV2InvalidMessage({ reasons: validation.reasons, failures }),
-                details: {
-                  reasons: validation.reasons,
-                  failures,
-                },
-              },
-            });
-          }
-          const experienceCount = Array.isArray((normalized as any)?.experience) ? (normalized as any).experience.length : 0;
-          if (experienceCount === 0) {
-            const failures = buildNormalizedResumeValidationFailures(normalized);
-            throw new UnprocessableEntityException({
-              error: {
-                code: 'baseline_resume_v2_invalid',
-                message: 'Baseline ResumeV2 contains no usable experience entries.',
-                details: {
-                  reasons: ['usable_experience_empty'],
-                  failures,
-                  usableExperienceCount: 0,
-                },
-              },
-            });
-          }
           if (Array.isArray((normalized as any).experience)) {
             const enforced = enforceEmployerRoleBulletProvenance({ experience: (normalized as any).experience });
             (normalized as any).experience = enforced.experience as any;
@@ -5083,80 +5045,47 @@ export class ResumeService {
         // Template readiness is meant to guard the legacy section/structured extraction lane, not the ResumeV2 lane.
         try {
           const persistedResumeV2 = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
-          if (!persistedResumeV2 || typeof persistedResumeV2 !== 'object') {
-            return {
-              status: 'blocked' as const,
-              blocked: true,
-              compliance_flags: [],
-              reasons: [
-                {
-                  code: 'baseline_resume_v2_missing',
-                  message: 'Baseline ResumeV2 is missing. Repair your baseline before generating.',
-                  details: { usableExperienceCount: 0 },
+          try {
+            assertUsableResumeV2(persistedResumeV2);
+          } catch (error) {
+            if (error instanceof UnprocessableEntityException) {
+              const response = (error as any).getResponse?.() as any;
+              const code = String(response?.error?.code ?? 'baseline_resume_v2_invalid');
+              const message = String(response?.error?.message ?? 'Baseline ResumeV2 is invalid. Repair your baseline before generating.');
+              return {
+                status: 'blocked' as const,
+                blocked: true,
+                compliance_flags: [],
+                reasons: [
+                  {
+                    code,
+                    message,
+                    details: response?.error?.details ?? { usableExperienceCount: 0 },
+                  },
+                ],
+                canGenerateResume: false,
+                diagnostics: {
+                  readinessSource: 'resume_v2_authority',
+                  usableExperienceCount: 0,
                 },
-              ],
-              canGenerateResume: false,
-              diagnostics: {
-                readinessSource: 'resume_v2_authority',
-                usableExperienceCount: 0,
-              },
-            } as any;
+              } as any;
+            }
+            throw error;
           }
 
           const normalized = normalizeNormalizedResumeDocument(persistedResumeV2 as NormalizedResumeDocument);
-          const validation = validateNormalizedResumeDocument(normalized);
           const experienceCount = Array.isArray((normalized as any)?.experience) ? (normalized as any).experience.length : 0;
-          if (!validation.valid) {
-            return {
-              status: 'blocked' as const,
-              blocked: true,
-              compliance_flags: [],
-              reasons: [
-                {
-                  code: 'baseline_resume_v2_invalid',
-                  message: 'Baseline ResumeV2 is invalid. Repair your baseline before generating.',
-                  details: { usableExperienceCount: 0, reasons: validation.reasons },
-                },
-              ],
-              canGenerateResume: false,
-              diagnostics: {
-                readinessSource: 'resume_v2_authority',
-                usableExperienceCount: 0,
-              },
-            } as any;
-          }
-          if (validation.valid && experienceCount === 0) {
-            return {
-              status: 'blocked' as const,
-              blocked: true,
-              compliance_flags: [],
-              reasons: [
-                {
-                  code: 'baseline_resume_v2_invalid',
-                  message: 'Baseline ResumeV2 has zero usable experience. Repair your baseline before generating.',
-                  details: { usableExperienceCount: 0 },
-                },
-              ],
-              canGenerateResume: false,
-              diagnostics: {
-                readinessSource: 'resume_v2_authority',
-                usableExperienceCount: 0,
-              },
-            } as any;
-          }
-          if (validation.valid && experienceCount > 0) {
-            return {
-              status: 'ready' as const,
-              blocked: false,
-              compliance_flags: [],
-              reasons: [],
-              canGenerateResume: true,
-              diagnostics: {
-                readinessSource: 'resume_v2_authority',
-                usableExperienceCount: experienceCount,
-              },
-            } as any;
-          }
+          return {
+            status: 'ready' as const,
+            blocked: false,
+            compliance_flags: [],
+            reasons: [],
+            canGenerateResume: true,
+            diagnostics: {
+              readinessSource: 'resume_v2_authority',
+              usableExperienceCount: experienceCount,
+            },
+          } as any;
         } catch {
           // ignore; fall back to structured/template readiness.
         }
