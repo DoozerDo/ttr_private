@@ -1822,14 +1822,7 @@ export default function StudioPage() {
     return v2 ?? direct ?? overall ?? hydratedAnalysisScore ?? null;
   }, [analysis, analysisError, hydratedAnalysisScore, readinessError]); 
   const generateNowEligible = isGenerateNowEligible(analysisScore);
-  const debugAuthorityEnabled = useMemo(() => {
-    try {
-      const raw = searchParams?.get?.("debugAuthority");
-      return raw === "1" || raw === "true";
-    } catch {
-      return false;
-    }
-  }, [searchParams]);
+  const debugAuthorityEnabled = useMemo(() => searchParams?.get("debugAuthority") === "1", [searchParams]);
 
   const readGenerationDebug = useCallback(
     (payload: unknown): { generationMode: string; templateVersion: string } => {
@@ -12706,14 +12699,6 @@ export default function StudioPage() {
   const studioContent = (
     <PageShell className="space-y-4 pb-4">
       <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
-      {debugAuthoritySnapshot ? (
-        <pre
-          data-testid="studio-debug-authority"
-          className="rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-xs leading-5 text-slate-200"
-        >
-{JSON.stringify(debugAuthoritySnapshot, null, 2)}
-        </pre>
-      ) : null}
       <div className="flex flex-col gap-4">
         <div className="order-2 space-y-4" data-testid="studio-secondary-systems">
       {!generateNowEligible || activeGenerationReadiness.blocked || !canGenerateDocuments ? (
@@ -15163,6 +15148,14 @@ export default function StudioPage() {
 
   return (
     <div data-testid="studio-root" suppressHydrationWarning>
+      {debugAuthorityEnabled ? (
+        <pre
+          data-testid="studio-debug-authority"
+          className="mb-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-xs leading-5 text-slate-200"
+        >
+{JSON.stringify(debugAuthoritySnapshot ?? { debugAuthority: "enabled", snapshot: null }, null, 2)}
+        </pre>
+      ) : null}
       {mounted ? (isStateInvalid ? invalidStateFallback : studioContent) : stableSkeleton}
     </div>
   );

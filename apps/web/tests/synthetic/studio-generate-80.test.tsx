@@ -10,6 +10,7 @@ vi.mock("next/navigation", () => {
   searchParams.set("baselineVersionId", "basev-1");
   searchParams.set("jobId", "job-80");
   searchParams.set("intent", "generate");
+  searchParams.set("debugAuthority", "1");
   return {
     usePathname: () => "/studio",
     useSearchParams: () => searchParams,
@@ -405,5 +406,30 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
     expect(last).toEqual(expect.objectContaining({ baselineId: "base-80", jobId: "job-80" }));
 
     await user.keyboard("{Escape}");
+  }, 60_000);
+
+  it("renders debug authority payload when debugAuthority=1 even while readiness is blocked", async () => {
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : String((input as any)?.url ?? input);
+      const method = String(init?.method ?? "GET").toUpperCase();
+      if (url.startsWith("/api/studio/artifacts")) {
+        return jsonResponse({ resume: null, coverLetter: null, assessmentScore: 83, generationContractVersion: "pipeline-test" });
+      }
+      if (url === "/api/resume/readiness" && method === "POST") return new Response("bad request", { status: 400 });
+      if (url === "/api/cover-letters/readiness" && method === "POST") return new Response("bad request", { status: 400 });
+      if (url.startsWith("/api/baselines")) return jsonResponse([{ id: "base-80", status: "ACTIVE" }]);
+      if (url.startsWith("/api/jobs")) return jsonResponse([{ id: "job-80", title: "Local scoring validation role", company: "TargetThisRole" }]);
+      if (url.startsWith("/api/analysis/fit-assessments")) {
+        return jsonResponse({ assessments: [{ id: "analysis-83", baselineId: "base-80", overallScore: 83, createdAt: "2026-05-27T00:00:00.000Z" }] });
+      }
+      return new Response(`Unhandled fetch: ${method} ${url}`, { status: 500 });
+    });
+
+    const StudioPage = (await import("@/app/(app)/studio/page")).default;
+    render(<StudioPage />);
+
+    const debug = await screen.findByTestId("studio-debug-authority");
+    expect(debug.textContent ?? "").toMatch(/\"debugAuthority\"\\s*:\\s*\"enabled\"/);
   }, 60_000);
 });
