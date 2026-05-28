@@ -231,6 +231,68 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
     expect(coverPosts).toBe(1);
   }, 120_000);
 
+  it("score 83 + usable baseline completes generate + persist + reload loop", async () => {
+    const user = userEvent.setup();
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : String((input as any)?.url ?? input);
+      const method = String(init?.method ?? "GET").toUpperCase();
+
+      if (url.startsWith("/api/studio/artifacts")) {
+        return jsonResponse({
+          resume: persisted.resume,
+          coverLetter: persisted.coverLetter,
+          resumeResult: persisted.resume ? (persisted.resume.responseBody as any)?.resumeResult ?? null : null,
+          coverLetterResult: persisted.coverLetter ? (persisted.coverLetter.responseBody as any)?.coverLetterResult ?? null : null,
+          generationContractVersion: persisted.generationContractVersion,
+        });
+      }
+      if (url === "/api/resume/readiness" && method === "POST") return jsonResponse(baselineUsableReadinessPayload);
+      if (url === "/api/cover-letters/readiness" && method === "POST") return jsonResponse(baselineUsableReadinessPayload);
+      if (url === "/api/resume/generate" && method === "POST") {
+        resumePosts += 1;
+        persisted.resume = { responseBody: renderableResume };
+        return jsonResponse(renderableResume);
+      }
+      if (url === "/api/cover-letters/generate" && method === "POST") {
+        coverPosts += 1;
+        persisted.coverLetter = { responseBody: renderableCover };
+        return jsonResponse(renderableCover);
+      }
+      if (url.startsWith("/api/baselines")) return jsonResponse([{ id: "base-80", status: "ACTIVE" }]);
+      if (url.startsWith("/api/jobs")) return jsonResponse([{ id: "job-80", title: "Local scoring validation role", company: "TargetThisRole" }]);
+      if (url.startsWith("/api/analysis/fit-assessments")) {
+        return jsonResponse({ assessments: [{ id: "analysis-83", baselineId: "base-80", overallScore: 83, createdAt: "2026-05-27T00:00:00.000Z" }] });
+      }
+      return new Response(`Unhandled fetch: ${method} ${url}`, { status: 500 });
+    });
+
+    const StudioPage = (await import("@/app/(app)/studio/page")).default;
+    render(<StudioPage />);
+
+    const resumeGenerateButton = await screen.findByTestId("studio-generate-resume-button");
+    await user.click(resumeGenerateButton);
+    const coverGenerateButton = await screen.findByTestId("studio-generate-cover-button");
+    await user.click(coverGenerateButton);
+
+    await waitFor(() => expect(resumePosts).toBe(1));
+    await waitFor(() => expect(coverPosts).toBe(1));
+
+    await expect(screen.findByTestId("studio-materials-completeness")).resolves.toBeTruthy();
+    await expect(screen.findByTestId("studio-resume-ready-panel")).resolves.toBeTruthy();
+    await expect(screen.findByTestId("studio-cover-ready-panel")).resolves.toBeTruthy();
+    expect(screen.queryByText(/baseline repair required/i)).toBeNull();
+
+    cleanup();
+    render(<StudioPage />);
+    await expect(screen.findByTestId("studio-materials-completeness")).resolves.toBeTruthy();
+    await expect(screen.findByTestId("studio-resume-ready-panel")).resolves.toBeTruthy();
+    await expect(screen.findByTestId("studio-cover-ready-panel")).resolves.toBeTruthy();
+    expect(resumePosts).toBe(1);
+    expect(coverPosts).toBe(1);
+  }, 120_000);
+
   it("does not show mixed authority when score is present but readiness fails with 400", async () => {
     const user = userEvent.setup();
 
@@ -275,6 +337,69 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
     expect(screen.queryByText(/generation is blocked/i)).toBeNull();
 
     // Touch user to avoid unused var (keeps pattern consistent with other test).
+    await user.keyboard("{Escape}");
+  }, 60_000);
+
+  it("score 83 + truly unusable baseline shows one repair-required lane (no CURRENT, no generation CTAs)", async () => {
+    const user = userEvent.setup();
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const analysisRunBodies: any[] = [];
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : String((input as any)?.url ?? input);
+      const method = String(init?.method ?? "GET").toUpperCase();
+      if (url.startsWith("/api/studio/artifacts")) {
+        return jsonResponse({ resume: null, coverLetter: null, assessmentScore: 83, generationContractVersion: "pipeline-test" });
+      }
+      if (url === "/api/analysis/run" && method === "POST") {
+        const raw = typeof init?.body === "string" ? init?.body : "";
+        const parsed = raw ? JSON.parse(raw) : null;
+        analysisRunBodies.push(parsed);
+        return jsonResponse({ assessmentId: "analysis-83", baselineId: "base-80", score: 83 });
+      }
+      if (url === "/api/resume/readiness" && method === "POST") {
+        return jsonResponse({
+          status: "blocked",
+          blocked: true,
+          compliance_flags: [],
+          reasonCodes: ["baseline_resume_v2_missing"],
+          reasons: [{ code: "baseline_resume_v2_missing", message: "Baseline ResumeV2 is missing. Repair your baseline before generating." }],
+        });
+      }
+      if (url === "/api/cover-letters/readiness" && method === "POST") {
+        return jsonResponse({
+          status: "blocked",
+          blocked: true,
+          compliance_flags: [],
+          reasonCodes: ["baseline_resume_v2_missing"],
+          reasons: [{ code: "baseline_resume_v2_missing", message: "Baseline ResumeV2 is missing. Repair your baseline before generating." }],
+        });
+      }
+      if (url.startsWith("/api/baselines")) return jsonResponse([{ id: "base-80", status: "ACTIVE" }]);
+      if (url.startsWith("/api/jobs")) return jsonResponse([{ id: "job-80", title: "Local scoring validation role", company: "TargetThisRole" }]);
+      if (url.startsWith("/api/analysis/fit-assessments")) {
+        return jsonResponse({ assessments: [{ id: "analysis-83", baselineId: "base-80", overallScore: 83, createdAt: "2026-05-27T00:00:00.000Z" }] });
+      }
+      return new Response(`Unhandled fetch: ${method} ${url}`, { status: 500 });
+    });
+
+    const StudioPage = (await import("@/app/(app)/studio/page")).default;
+    render(<StudioPage />);
+
+    const authority = await screen.findByTestId("studio-workflow-authority");
+    expect(authority.getAttribute("data-workflow-state")).toBe("hard_blocked");
+
+    expect(screen.queryByTestId("studio-generate-resume-button")).toBeNull();
+    expect(screen.queryByTestId("studio-generate-cover-button")).toBeNull();
+    expect(screen.queryByText(/baseline repair required/i)).toBeTruthy();
+    const reprocess = await screen.findByTestId("studio-resume-reprocess-baseline");
+    expect(reprocess).toBeTruthy();
+    await user.click(reprocess);
+
+    await waitFor(() => expect(analysisRunBodies.length).toBeGreaterThan(0));
+    const last = analysisRunBodies[analysisRunBodies.length - 1];
+    expect(last).toEqual(expect.objectContaining({ baselineId: "base-80", jobId: "job-80" }));
+
     await user.keyboard("{Escape}");
   }, 60_000);
 });

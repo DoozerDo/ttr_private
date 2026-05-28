@@ -2063,9 +2063,8 @@ export default function StudioPage() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              job_id: effectiveJobId,
-              baseline_id: baselineId,
-              baseline_version_id: nextBaselineVersionId,
+              jobId: effectiveJobId,
+              baselineId: baselineId,
             }),
           });
           const analysisRunPayload = (await readResponsePayload(analysisRunResponse)) as Record<string, unknown> | null;
@@ -3939,6 +3938,19 @@ export default function StudioPage() {
   // Canonical workflow authority (additive layer): owns top-level readiness/failure messaging decisions.
   const resolvedScoreForContract = analysisScore;
   const workflowAuthorityReadiness = useMemo(() => {
+    if (readinessError) {
+      const message = "Readiness could not be evaluated from the current state.";
+      return {
+        ...activeGenerationReadiness,
+        status: "blocked",
+        blocked: true,
+        reasonCodes: [String(readinessError)],
+        reasons: [{ code: String(readinessError), message }],
+        verificationIssues: [{ code: String(readinessError), message }],
+        badgeLabel: "BLOCKED",
+        summary: message,
+      } as any;
+    }
     if (!resumeV2Authority.blocksGeneration) return activeGenerationReadiness;
     const errors = Array.isArray((studioArtifactsPayload as any)?.errors) ? ((studioArtifactsPayload as any).errors as any[]) : [];
     const first = errors.find((e) => String((e as any)?.code ?? "").startsWith("baseline_resume_v2_")) ?? null;
@@ -3956,7 +3968,7 @@ export default function StudioPage() {
       badgeLabel: "BLOCKED",
       summary: message,
     } as any;
-  }, [activeGenerationReadiness, resumeV2Authority.blocksGeneration, studioArtifactsPayload]);
+  }, [activeGenerationReadiness, readinessError, resumeV2Authority.blocksGeneration, studioArtifactsPayload]);
   const workflowAuthority = useMemo(
     () =>
       resolveWorkflowAuthority({
@@ -6214,9 +6226,8 @@ export default function StudioPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          job_id: effectiveJobId,
-          baseline_id: effectiveBaselineId,
-          baseline_version_id: effectiveBaselineVersionId || undefined,
+          jobId: effectiveJobId,
+          baselineId: effectiveBaselineId,
         }),
       });
       const payload = await readResponsePayload(response);
@@ -6258,9 +6269,8 @@ export default function StudioPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            job_id: effectiveJobId,
-            baseline_id: effectiveBaselineId,
-            baseline_version_id: effectiveBaselineVersionId || undefined,
+            jobId: effectiveJobId,
+            baselineId: effectiveBaselineId,
           }),
         });
         const payload = await readResponsePayload(response);
