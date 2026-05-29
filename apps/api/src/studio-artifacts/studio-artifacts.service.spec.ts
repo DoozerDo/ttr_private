@@ -63,9 +63,20 @@ describe('StudioArtifactsService persistence boundary', () => {
       assessmentId: analysisId,
       artifactType: 'resume',
       responseBody: {
+        exportReady: true,
+        exports: { docx: true, pdf: true },
+        qualityGate: { status: 'pass', reasons: [] },
+        preview: {
+          resume: {
+            heading: { name: 'Alex Candidate', contactLine: 'Test' },
+            summary: 'Hello',
+            experience: [{ company: 'Acme', roleTitle: 'Ops', bullets: ['Did thing'] }],
+          },
+        },
         resumeResult: resumeResult({
+          heading: { name: 'Alex Candidate', contactLine: 'Test' },
           summary: 'Hello',
-          experience: [{ company: 'Acme', bullets: ['Did thing'] }],
+          experience: [{ company: 'Acme', roleTitle: 'Ops', bullets: ['Did thing'] }],
         }),
       },
       content: null,
@@ -80,6 +91,12 @@ describe('StudioArtifactsService persistence boundary', () => {
       assessmentId: analysisId,
       artifactType: 'cover_letter',
       responseBody: {
+        exportReady: true,
+        exports: { docx: true, pdf: true },
+        qualityGate: { status: 'pass', reasons: [] },
+        preview: {
+          coverLetter: { paragraphs: ['Hello', 'Fit', 'Thanks'] },
+        },
         coverLetterResult: coverLetterResult({ paragraphs: ['Hello', 'Fit', 'Thanks'] }),
       },
       content: null,
@@ -96,8 +113,8 @@ describe('StudioArtifactsService persistence boundary', () => {
       baselineVersionHash: baselineVersionId,
       jobFingerprint: 'jobfp',
       generationContractVersion: 'studio-artifacts-v1',
-      resumeStatus: 'complete',
-      coverLetterStatus: 'complete',
+      resumeStatus: 'COMPLETED',
+      coverLetterStatus: 'COMPLETED',
       resumeInputsHash: 'resume_hash',
       coverLetterInputsHash: 'cover_hash',
       resumeResponseBody: persistedResume.responseBody,
@@ -128,6 +145,9 @@ describe('StudioArtifactsService persistence boundary', () => {
       buildRepo<any>(),
       { ensureResumeV2ExistsForBaseline: jest.fn(async () => null) } as any,
     ) as any;
+    service.computeJobFingerprint = () => 'jobfp';
+    service.computeResumeInputsHash = () => 'resume_hash';
+    service.computeCoverLetterInputsHash = () => 'cover_hash';
 
     const result = await service.readState({
       userId,
@@ -217,14 +237,20 @@ describe('StudioArtifactsService persistence boundary', () => {
       fitAssessmentRepository,
       { ensureResumeV2ExistsForBaseline: jest.fn(async () => null) } as any,
     ) as any;
+    service.computeJobFingerprint = () => 'jobfp';
+    service.computeResumeInputsHash = () => 'resume_hash';
+    service.computeCoverLetterInputsHash = () => 'cover_hash';
 
     const resumeResponseBody = {
       preview: {
         resume: {
+          heading: { name: 'Alex Candidate', contactLine: 'Test' },
           summary: 'Hello',
           experience: [{ company: 'Acme', roleTitle: 'Ops', bullets: ['Did thing'] }],
         },
       },
+      exportReady: true,
+      exports: { docx: true, pdf: true },
       qualityGate: { status: 'pass', reasons: [] },
       internal: {},
     };
@@ -232,6 +258,8 @@ describe('StudioArtifactsService persistence boundary', () => {
       preview: {
         coverLetter: { paragraphs: ['Hello', 'Fit', 'Thanks'] },
       },
+      exportReady: true,
+      exports: { docx: true, pdf: true },
       qualityGate: { status: 'pass', reasons: [] },
       internal: {},
     };
@@ -241,24 +269,28 @@ describe('StudioArtifactsService persistence boundary', () => {
       userId,
       baselineId,
       baselineVersionId,
+      baselineVersionHash: baselineVersionId,
       jobId,
+      jobFingerprint: 'jobfp',
+      inputsHash: 'resume_hash',
       analysisId,
       responseBody: resumeResponseBody,
       content: null,
       metadata: { auditId: 'audit-1' },
-      generationContractVersion: service.getContractVersion(),
     });
 
     await service.recordCoverLetterSuccess({
       userId,
       baselineId,
       baselineVersionId,
+      baselineVersionHash: baselineVersionId,
       jobId,
+      jobFingerprint: 'jobfp',
+      inputsHash: 'cover_hash',
       analysisId,
       responseBody: coverResponseBody,
       content: null,
       metadata: { auditId: 'audit-2' },
-      generationContractVersion: service.getContractVersion(),
     });
 
     const hydrated = await service.readState({
@@ -292,8 +324,8 @@ describe('StudioArtifactsService persistence boundary', () => {
       baselineVersionHash: baselineVersionId,
       jobFingerprint: 'jobfp',
       generationContractVersion: 'studio-artifacts-v1',
-      resumeStatus: 'complete',
-      coverLetterStatus: 'missing',
+      resumeStatus: 'COMPLETED',
+      coverLetterStatus: 'MISSING',
       resumeInputsHash: 'resume_hash',
       coverLetterInputsHash: null,
       resumeResponseBody: {

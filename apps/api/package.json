@@ -22,6 +22,7 @@
     "start:prod": "npm run migration:run && node dist/apps/api/src/main.js",
     "lint": "eslint \"src/**/*.ts\"",
     "test": "jest",
+    "test:studio-artifacts:contract": "jest studio-artifacts/studio-artifacts.service.spec.ts studio-artifacts/studio-artifacts.controller.spec.ts --runInBand",
     "test:calibration": "jest --config jest.calibration.config.js --runInBand",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
