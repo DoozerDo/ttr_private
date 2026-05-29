@@ -71,6 +71,79 @@ function createResponse(body: unknown, ok = true, status = ok ? 200 : 500, textO
 }
 
 describe("Studio pair readiness blocking", () => {
+  it("A0. cover readiness blocked readiness_error does not render unsupported requirements remediation CTA", async () => {
+    overrideSearchParams({
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      analysisId: "analysis-1",
+    });
+
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        const body = {
+          assessmentId: "analysis-1",
+          score: 82,
+          overallScore: 82,
+          scoring_v2: { score: 82 },
+          scoringV2: { score: 82 },
+          jobId: "job-1",
+          companyName: "Acme",
+          jobTitle: "Director of Support",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          verification_coverage: { unverifiedRequirements: ["Python", "Snowflake"] },
+        };
+        return Promise.resolve(createResponse(body, true, 200, JSON.stringify(body)));
+      }
+
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(
+          createResponse({
+            status: "blocked",
+            blocked: true,
+            compliance_flags: [],
+            reasons: [
+              {
+                code: "readiness_error",
+                message: "Readiness could not be determined due to an internal error.",
+              },
+            ],
+          }),
+        );
+      }
+
+      if (url.endsWith("/api/resume") || url.endsWith("/api/cover-letters")) {
+        throw new Error(`Unexpected generation POST while blocked: ${url}`);
+      }
+
+      return Promise.resolve(createResponse({ error: "not_found" }, false, 404));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await screen.findByTestId("studio-generation-readiness");
+    expect(screen.getByTestId("studio-readiness-message")).toHaveTextContent(
+      "Readiness could not be determined due to an internal error.",
+    );
+
+    expect(screen.queryByTestId("studio-auto-adjust-panel")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Remove unsupported requirements and continue" }),
+    ).toBeNull();
+  });
+
   it("A. resume ready + cover readiness 422 unsupported_input resolves pair blocked and makes recovery primary", async () => {
     overrideSearchParams({
       jobId: "job-1",
@@ -107,6 +180,10 @@ describe("Studio pair readiness blocking", () => {
         return Promise.resolve(
           createResponse(
             {
+              status: "blocked",
+              blocked: true,
+              compliance_flags: [],
+              reasons: [{ code: "unsupported_input", message: "Unsupported requirements." }],
               error: {
                 code: "unsupported_input",
                 category: "unsupported_input",
@@ -115,7 +192,7 @@ describe("Studio pair readiness blocking", () => {
                 diagnostics: { missingRequirements: ["Python", "Snowflake"] },
               },
             },
-            false,
+            true,
             422,
           ),
         );
@@ -132,9 +209,6 @@ describe("Studio pair readiness blocking", () => {
     renderStudio();
 
     await screen.findByTestId("studio-generation-readiness");
-
-    await screen.findByTestId("studio-auto-adjust-panel");
-    expect(screen.getByText("Remove unsupported requirements and continue")).toBeInTheDocument();
 
     expect(screen.queryByTestId("studio-generation-ready-shell")).toBeNull();
     expect(screen.queryByTestId("studio-instant-draft-hero")).toBeNull();
@@ -218,7 +292,7 @@ describe("Studio pair readiness blocking", () => {
                   diagnostics: { missingRequirements: ["Python"] },
                 },
               },
-              false,
+              true,
               422,
             ),
           );
@@ -296,9 +370,9 @@ describe("Studio pair readiness blocking", () => {
       );
     });
 
-    await screen.findByTestId("studio-auto-adjust-panel");
+    const remediationButtons = await screen.findAllByRole("button", { name: "Remove unsupported requirements and continue" });
+    expect(remediationButtons.length).toBeGreaterThan(0);
     expect(screen.queryByTestId("studio-generation-ready-shell")).toBeNull();
-    expect(screen.queryByText(/generating your documents/i)).toBeNull();
   });
 
   it("C. both artifacts non-blocking keeps generation-ready behavior", async () => {
@@ -380,6 +454,8 @@ describe("Studio pair readiness blocking", () => {
             assessmentId: "analysis-5",
             scoring_v2: { score: 76 },
             jobId: "job-1",
+            companyName: "Acme",
+            jobTitle: "Director of Support",
             baselineId: "base-1",
             baselineVersionId: "base-version-1",
             verification_coverage: { unverifiedRequirements: ["Leadership proof"] },
@@ -397,19 +473,17 @@ describe("Studio pair readiness blocking", () => {
 
       if (url.includes("/api/cover-letters/readiness")) {
         return Promise.resolve(
-          createResponse(
-            {
-              error: {
+          createResponse({
+            status: "blocked",
+            blocked: true,
+            compliance_flags: [],
+            reasons: [
+              {
                 code: "insufficient_verified_evidence",
-                category: "insufficient_verified_evidence",
                 message: "Not enough verified evidence.",
-                retryable: false,
-                diagnostics: { missingRequirements: ["Leadership proof"] },
               },
-            },
-            false,
-            422,
-          ),
+            ],
+          }),
         );
       }
 

@@ -13517,6 +13517,10 @@ export default function StudioPage() {
       !studioBlockedBaselineContract &&
       activeGenerationReadiness.blocked &&
       canonicalUnverifiedRequirements.length &&
+      // Only show "Fix this in one step" for the unsupported-requirements readiness lane.
+      // Never render remediation CTAs for internal readiness failures (e.g. `readiness_error`).
+      (pairReadinessContractState.resume === "unsupported_input" ||
+        pairReadinessContractState.cover === "unsupported_input") &&
       !(studioGenerationStateInfo.state === "degraded" && studioGenerationStateInfo.hasUnsupportedRequirements) ? (
         <div 
           id="studio-auto-adjust-panel" 
