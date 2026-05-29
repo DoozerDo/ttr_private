@@ -2101,18 +2101,18 @@ describe('ResumeService contract', () => {
     }
   });
 
-  it('generation fails cleanly when authoritative extraction returns zero roles (no legacy minimal fallback synthesis)', async () => {
-    const { service } = buildService();
-    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
-    process.env.DOCGEN_DIAGNOSTICS = 'true';
-    const originalResumeV2Flag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
-    delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
-    const originalSections = baseline.sections;
-    const originalParsed = baseline.parsedRecords;
+	  it('generation degrades to baseline-only draft when authoritative extraction returns zero roles (non-blocking)', async () => {
+	    const { service, studioArtifactsService } = buildService();
+	    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+	    process.env.DOCGEN_DIAGNOSTICS = 'true';
+	    const originalResumeV2Flag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+	    delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+	    const originalSections = baseline.sections;
+	    const originalParsed = baseline.parsedRecords;
 
-    try {
-        baseline.parsedRecords = []; // ensure ResumeV2 is not usable
-        baseline.sections = [
+	    try {
+	        baseline.parsedRecords = []; // ensure ResumeV2 is not usable
+	        baseline.sections = [
         {
           ...baseSection,
           sectionType: BaselineSectionType.EXPERIENCE,
@@ -2125,42 +2125,39 @@ describe('ResumeService contract', () => {
             '- Reduced billing exceptions by automating metering and reporting checks.',
           ].join('\n'),
         } as any,
-        ] as any;
-        expect(extractStructuredBaselineFromSections(baseline.sections as any).experience.length).toBe(0);
+	        ] as any;
+	        expect(extractStructuredBaselineFromSections(baseline.sections as any).experience.length).toBe(0);
 
-      let err: any = null;
-      try {
-        await service.generateResume('user-1', {
-          baselineId: baseline.id,
-          baselineVersionId: baselineVersion.id,
-          jobId: job.id,
-          analysisId: assessment.id,
-          oneTap: false,
-        } as any);
-      } catch (caught) {
-        err = caught;
-      }
-      expect(err).toBeInstanceOf(UnprocessableEntityException);
-      const responseBody = err?.getResponse?.() ?? null;
-      const code = responseBody?.code ?? responseBody?.error?.code ?? null;
-      const category = responseBody?.category ?? responseBody?.error?.category ?? null;
-      expect(code).toBe('generation_blocked');
-      expect(category).toBe('generation_blocked');
-      const diagnostics = responseBody?.diagnostics ?? responseBody?.error?.diagnostics ?? {};
-      expect(diagnostics.authoritativeExtractionSucceeded).toBe(false);
-      expect(diagnostics.authoritativeExperienceGroupCount).toBe(0);
-      expect(diagnostics.fallbackGenerationPrevented).toBe(true);
-      expect(diagnostics.legacyFallbackAttemptBlocked).toBe(true);
-      expect(diagnostics.generationTerminationStage).toBe('authoritative_extraction_gate');
-    } finally {
-      baseline.sections = originalSections;
-      baseline.parsedRecords = originalParsed;
-      if (typeof originalResumeV2Flag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalResumeV2Flag;
-      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
-      if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
-      else delete process.env.DOCGEN_DIAGNOSTICS;
-    }
-  });
+	      const result = await service.generateResume('user-1', {
+	        baselineId: baseline.id,
+	        baselineVersionId: baselineVersion.id,
+	        jobId: job.id,
+	        analysisId: assessment.id,
+	        oneTap: false,
+	      } as any);
+	      expect(result.status).toBe('success');
+	      expect(result.blocked).toBe(false);
+	      expect(result.preview?.resume).toBeTruthy();
+	      expect(JSON.stringify(result.preview?.resume ?? {})).not.toContain('We couldnâ€™t generate');
+	      const limitation = (result as any)?.internal?.tailoringLimitations?.structuredBaselineTemplate ?? null;
+	      expect(limitation).toEqual(
+	        expect.objectContaining({
+	          reason: 'zero_experience_headers',
+	          missingEvidenceReasons: expect.any(Array),
+	        }),
+	      );
+	      // Verified-only fallback emits an empty traceMap by design (no drafted bullet anchoring).
+	      expect(result.traceMap).toEqual({});
+	      expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
+	    } finally {
+	      baseline.sections = originalSections;
+	      baseline.parsedRecords = originalParsed;
+	      if (typeof originalResumeV2Flag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalResumeV2Flag;
+	      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+	      if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+	      else delete process.env.DOCGEN_DIAGNOSTICS;
+	    }
+	  });
 
   it('render plan fingerprint changes when role corpus changes (diagnostics-only)', async () => {
     const { service } = buildService();

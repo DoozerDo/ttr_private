@@ -1941,10 +1941,10 @@ export class ResumeService {
         return tools.length > 0 || metrics.length > 0;
       });
 
-    if (!options?.skipReadinessGate && !isVerifiedOnlyRequest) {
-      const readiness = await this.getGenerationReadiness(userId, request, {
-        skipReadinessGate: true,
-      });
+	    if (!options?.skipReadinessGate && !isVerifiedOnlyRequest) {
+	      const readiness = await this.getGenerationReadiness(userId, request, {
+	        skipReadinessGate: true,
+	      });
       // Limited readiness is non-blocking; proceed with generation and rely on strict template safety filtering.
       if (readiness.status === 'blocked') {
         const templateNotReadyReason = (readiness as any)?.reasons?.find?.(
@@ -1961,30 +1961,16 @@ export class ResumeService {
           const details = (templateNotReadyReason?.details as any) ?? {};
           const totalExperience = Number(details?.totalExperience ?? 0);
           const validExperience = Number(details?.validExperience ?? 0);
-          // Prompt 14: Fail closed when no authoritative experience groups exist.
-          // Never fall back to legacy minimal resume synthesis to construct employer-role structure from raw text.
-          if (totalExperience === 0 && validExperience === 0) {
-            throw new UnprocessableEntityException(buildArtifactFailurePayload({
-              code: 'generation_blocked',
-              category: 'generation_blocked',
-              message: 'Resume generation is blocked because employer-role experience extraction failed.',
-              detail:
-                'No valid structured experience groups (company + role title + bullets) were found. Reprocess the baseline resume or re-upload with clearer experience headers.',
-              retryable: true,
-              diagnostics: {
-                artifactReadiness: 'blocked',
-                authoritativeExtractionSucceeded: false,
-                authoritativeExperienceGroupCount: 0,
-                fallbackGenerationPrevented: true,
-                legacyFallbackAttemptBlocked: true,
-                generationTerminationStage: 'authoritative_extraction_gate',
-              },
-            }));
-          }
-          throw new UnprocessableEntityException({
-            code: 'baseline_template_not_ready',
-            reasons:
-              (templateNotReadyReason?.details as any)?.reasons ??
+	          // Product contract (Studio): resume generation must not hard-block high-eligibility workflows
+	          // when verified baseline content exists. If authoritative extraction yields zero roles, we
+	          // degrade to a verified-only baseline draft later in the pipeline instead of returning 422.
+	          if (totalExperience === 0 && validExperience === 0) {
+	            // Continue generation (non-blocking). Compliance enforcement still prevents fabrication.
+	          } else {
+	          throw new UnprocessableEntityException({
+	            code: 'baseline_template_not_ready',
+	            reasons:
+	              (templateNotReadyReason?.details as any)?.reasons ??
               [
                 {
                   code: 'baseline_template_not_ready',
@@ -1992,9 +1978,10 @@ export class ResumeService {
                     'Baseline is usable for scoring but is not template-safe for resume generation.',
                 },
               ],
-            details: templateNotReadyReason?.details ?? {},
-          });
-        }
+	            details: templateNotReadyReason?.details ?? {},
+	          });
+	          }
+	        }
 
         const score = effectiveAssessment?.overallScore ?? null;
         if (
@@ -2602,8 +2589,8 @@ export class ResumeService {
       links: [],
     };
 
-    const TEMPLATE_ASSEMBLY_THRESHOLD = 80;
-    const STRUCTURED_BASELINE_TEMPLATE_VERSION = 'structured-baseline-v1';
+	    const TEMPLATE_ASSEMBLY_THRESHOLD = 80;
+	    const STRUCTURED_BASELINE_TEMPLATE_VERSION = 'structured-baseline-v1';
     const scoreForTemplateRaw =
       effectiveAssessment?.overallScore ?? latestAssessment?.overallScore ?? 0;
     const scoreForTemplate = Number(scoreForTemplateRaw);
@@ -2618,8 +2605,12 @@ export class ResumeService {
       (!request.oneTap &&
         Number.isFinite(scoreForTemplate) &&
         scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD);
-    let usedStructuredBaselineTemplate = false;
-    let structuredBaselineExtractionMissingReasons: string[] | null = null;
+	    let usedStructuredBaselineTemplate = false;
+	    let structuredBaselineTemplateDegradedToBaselineOnly: {
+	      missingEvidenceReasons: string[];
+	      reason: 'zero_experience_headers';
+	    } | null = null;
+	    let structuredBaselineExtractionMissingReasons: string[] | null = null;
     let structuredBaselineTrace: {
       source: 'freshly_parsed_baseline_content' | 'persisted_cached' | 'responseBody_previous_artifact' | 'unknown';
       experienceCount: number;
@@ -2832,28 +2823,28 @@ export class ResumeService {
             bulletCount: Array.isArray((entry as any)?.bullets) ? (entry as any).bullets.length : 0,
           })),
         };
-        // eslint-disable-next-line no-console
-        console.log('FORCED_TEMPLATE_RESUME', {
-          score: scoreForTemplate,
-          experienceCount: (structured.experience ?? []).length,
-        });
-        if ((structured.experience ?? []).length === 0) {
-          throw new UnprocessableEntityException(buildArtifactFailurePayload({
-            code: 'generation_blocked',
-            category: 'generation_blocked',
-            message: 'Resume could not be assembled because required baseline evidence is missing.',
-            detail: 'A fit score >= 80 requires structured baseline experience entries (company + role title).',
-            retryable: false,
-            userAction: {
-              title: 'Add verified experience structure',
-              description: 'Ensure your baseline includes Experience entries with company and role title headers.',
-            },
-            diagnostics: {
-              missingRequirements: structured.missingEvidenceReasons.slice(0, 8),
-            },
-          }));
-        }
-        usedStructuredBaselineTemplate = true;
+	        // eslint-disable-next-line no-console
+	        console.log('FORCED_TEMPLATE_RESUME', {
+	          score: scoreForTemplate,
+	          experienceCount: (structured.experience ?? []).length,
+	        });
+	        if ((structured.experience ?? []).length === 0) {
+	          // Contract: do not block generation for high-eligibility workflows. Degrade to a baseline-only
+	          // resume draft (verified content only) and mark limitations as non-blocking metadata.
+	          structuredBaselineExtractionMissingReasons = structured.missingEvidenceReasons.slice(0, 12);
+	          structuredBaselineTemplateDegradedToBaselineOnly = {
+	            reason: 'zero_experience_headers',
+	            missingEvidenceReasons: structuredBaselineExtractionMissingReasons,
+	          };
+	          usedMinimalFallback = true;
+	          sections = this.buildMinimalResumeSections(resumeInputSections);
+	          return buildNormalizedResumeDocument(
+	            sections as ResumeExportSection[],
+	            identity,
+	            { documentStrategyPlan: request.documentStrategyPlan ?? undefined },
+	          );
+	        }
+	        usedStructuredBaselineTemplate = true;
         // `resolveBaselineIdentity` returns `BaselineIdentity` (`fullName`, etc). Use those fields
         // explicitly so template assembly always has a stable, verified name and doesn't depend on
         // any untyped/legacy identity shape.
@@ -3814,22 +3805,25 @@ export class ResumeService {
       gapGuidance,
       display,
       safeDisplay: display,
-      internal: {
-        auditId: audit.id,
-        baselineVersionHash: audit.baselineVersionHash,
-        generationPipeline: isResumeV2 ? 'v2' : 'v1',
-        complianceFlags,
-        careerIdentity: careerIdentitySnapshot,
-        ...(baselineEvidenceTooWeakDetails ? { baselineEvidenceTooWeak: baselineEvidenceTooWeakDetails } : {}),
-        resumeGenerationStage: experienceDiagnostics.resumeGenerationStage,
-        resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
-        resumeGenerationDiagnostics: experienceDiagnostics,
-        normalizationDiagnostics: experienceDiagnostics,
-        ...(usedInterpretedEvidenceInDraft
-          ? {
-              interpretedEvidenceSummary: interpretedEvidenceForBaseline.summary,
-              interpretedEvidenceReadiness,
-              bypassedTemplateHardBlockWithInterpretedEvidence,
+	      internal: {
+	        auditId: audit.id,
+	        baselineVersionHash: audit.baselineVersionHash,
+	        generationPipeline: isResumeV2 ? 'v2' : 'v1',
+	        complianceFlags,
+	        careerIdentity: careerIdentitySnapshot,
+	        ...(baselineEvidenceTooWeakDetails ? { baselineEvidenceTooWeak: baselineEvidenceTooWeakDetails } : {}),
+	        resumeGenerationStage: experienceDiagnostics.resumeGenerationStage,
+	        resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
+	        resumeGenerationDiagnostics: experienceDiagnostics,
+	        normalizationDiagnostics: experienceDiagnostics,
+	        ...(structuredBaselineTemplateDegradedToBaselineOnly
+	          ? { tailoringLimitations: { structuredBaselineTemplate: structuredBaselineTemplateDegradedToBaselineOnly } }
+	          : {}),
+	        ...(usedInterpretedEvidenceInDraft
+	          ? {
+	              interpretedEvidenceSummary: interpretedEvidenceForBaseline.summary,
+	              interpretedEvidenceReadiness,
+	              bypassedTemplateHardBlockWithInterpretedEvidence,
               omittedInterpretedEvidence: {
                 weak: interpretedEligibility.omissions.omittedWeakEvidenceIds,
                 unusable: interpretedEligibility.omissions.omittedUnusableEvidenceIds,
@@ -4478,34 +4472,10 @@ export class ResumeService {
           reason: error instanceof Error ? error.message : String(error),
         });
 
-        // Prompt 14: Never synthesize employer-role structure from unstructured text blobs.
-        // If we cannot extract any valid structured experience groups, fail closed instead of returning a minimal fallback resume.
-        try {
-          const structured = extractStructuredBaselineFromSections(
-            (resolveBaselineSectionsForGeneration(baselineForFailSafe) as any) ?? (baselineForFailSafe.sections as any),
-          ) as any;
-          const expCount = Array.isArray(structured?.experience) ? structured.experience.length : 0;
-          if (expCount === 0) {
-            throw new UnprocessableEntityException(buildArtifactFailurePayload({
-              code: 'generation_blocked',
-              category: 'generation_blocked',
-              message: 'Resume generation is blocked because employer-role experience extraction failed.',
-              detail:
-                'No valid structured experience groups (company + role title + bullets) were found. Reprocess the baseline resume or re-upload with clearer experience headers.',
-              retryable: true,
-              diagnostics: {
-                artifactReadiness: 'blocked',
-                authoritativeExtractionSucceeded: false,
-                authoritativeExperienceGroupCount: 0,
-                fallbackGenerationPrevented: true,
-                legacyFallbackAttemptBlocked: true,
-                generationTerminationStage: 'top_level_fail_safe_minimal_blocked',
-              },
-            }));
-          }
-        } catch (guardErr) {
-          if (guardErr instanceof UnprocessableEntityException) throw guardErr;
-        }
+	        // Product contract (Studio): if verified baseline content exists, do not hard-block resume generation
+	        // solely because structured employer-role headers could not be extracted. Degrade to a baseline-only
+	        // draft below; compliance enforcement prevents fabrication in the normal pipeline, and this fallback
+	        // never invents content beyond the baseline text.
 
         const identity = resolveBaselineIdentity(baselineForFailSafe);
         let normalizedDocument: NormalizedResumeDocument | null = null;
@@ -4595,12 +4565,18 @@ export class ResumeService {
           gapGuidance: null,
           display: this.buildSuccessDisplayPayload(),
           safeDisplay: this.buildSuccessDisplayPayload(),
-          internal: {
-            minimalFallback: true,
-            resumeGenerationMode: 'top_level_fail_safe_minimal',
-            resumeFailSafeMinimalUsed: true,
-            interpretedEvidenceAuditUnavailableReason: 'minimal_fail_safe_no_trace_audit',
-            ...(interpretedEvidenceAvailable
+	          internal: {
+	            minimalFallback: true,
+	            resumeGenerationMode: 'top_level_fail_safe_minimal',
+	            resumeFailSafeMinimalUsed: true,
+	            tailoringLimitations: {
+	              structuredBaselineTemplate: {
+	                reason: 'zero_experience_headers',
+	                missingEvidenceReasons: [],
+	              },
+	            },
+	            interpretedEvidenceAuditUnavailableReason: 'minimal_fail_safe_no_trace_audit',
+	            ...(interpretedEvidenceAvailable
               ? {
                   interpretedEvidenceAvailable: true,
                   interpretedEvidenceSummary: interpretedEvidenceForFailSafe.summary,

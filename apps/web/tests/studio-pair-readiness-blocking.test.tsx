@@ -500,4 +500,105 @@ describe("Studio pair readiness blocking", () => {
     expect(screen.getByRole("heading", { name: "Generation is blocked" })).toBeInTheDocument();
     expect(blockedSummary).toHaveTextContent("Resolve blockers");
   });
+
+	  it("E. cover succeeds + resume 422 failure captures diagnostics in orchestration debug without unsupported remediation CTA", async () => {
+	    overrideSearchParams({
+	      jobId: "job-1",
+	      baselineId: "base-1",
+	      baselineVersionId: "base-version-1",
+	      analysisId: "analysis-6",
+	    });
+
+	    const resumeErrorBody = {
+	      status: "error",
+	      artifactType: "resume",
+	      category: "generation_failed",
+	      code: "resume_backend_failed",
+	      errorCode: "resume_backend_failed",
+	      message: "Resume pipeline failed.",
+	    };
+
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.includes("/api/analysis/fit-assessments/analysis-6")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-6",
+            scoring_v2: { score: 82 },
+            scoringV2: { score: 82 },
+            score: 82,
+            jobId: "job-1",
+            companyName: "Acme",
+            jobTitle: "Director of Support",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            verification_coverage: { unverifiedRequirements: ["Python"] },
+          }),
+        );
+      }
+
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "missing",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            generationContractVersion: "studio-artifacts-v1",
+            resume: null,
+            coverLetter: null,
+          }),
+        );
+      }
+
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+
+      if (method === "POST" && url === "/api/cover-letters") {
+        return Promise.resolve(
+          createResponse({
+            status: "success",
+            generationStatus: "success",
+            exports: { docx: false, pdf: false },
+            preview: { coverLetter: { paragraphs: ["Cover letter paragraph."] } },
+          }),
+        );
+      }
+
+	      if (method === "POST" && url === "/api/resume") {
+	        return Promise.resolve(createResponse(resumeErrorBody, false, 422));
+	      }
+
+      return Promise.resolve(createResponse({ error: "not_found" }, false, 404));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await screen.findByTestId("studio-generation-readiness");
+
+    fireEvent.click(await screen.findByTestId("studio-generate-cover-button"));
+	    await screen.findByText(/cover letter paragraph/i);
+
+	    fireEvent.click(await screen.findByRole("button", { name: /generate resume/i }));
+	    const resumeIssue = await screen.findByTestId("studio-resume-artifact-issue");
+	    expect(resumeIssue).toHaveTextContent("We hit an issue generating your resume.");
+
+    expect(screen.queryByTestId("studio-auto-adjust-panel")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove unsupported requirements and continue" })).toBeNull();
+
+	    const debug = await screen.findByTestId("studio-orchestration-debug");
+	    expect(debug).toHaveTextContent("\"endpoint\": \"/api/resume\"");
+	    expect(debug).toHaveTextContent("\"httpStatus\": 422");
+	    expect(debug).toHaveTextContent("\"backendCode\": \"resume_backend_failed\"");
+	    expect(debug).toHaveTextContent("\"backendMessage\": \"Resume pipeline failed.\"");
+	  });
 });

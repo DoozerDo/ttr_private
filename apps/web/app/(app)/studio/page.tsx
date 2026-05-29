@@ -967,6 +967,17 @@ export default function StudioPage() {
     }
   }, []);
 
+  const [resumeFailureDiagnostics, setResumeFailureDiagnostics] = useState<null | {
+    endpoint: "/api/resume";
+    httpStatus: number;
+    backendCode: string | null;
+    backendMessage: string | null;
+    requestId: string | null;
+    sessionKey: string | null;
+    beforeHydration: boolean;
+    responseBody: unknown | null;
+  }>(null);
+
   const isNonProduction = process.env.NODE_ENV !== "production";
   const readCanonicalResumePreviewPayload = (value: unknown): unknown | null => {
     if (!value || typeof value !== "object") return null;
@@ -5324,6 +5335,7 @@ export default function StudioPage() {
       versionsError,
       analysisScore,
       resumeState,
+      resumeFailureDiagnostics,
       coverLetterState: coverState,
       hydrationSignature: studioArtifactHydrationSignature,
       orchestrationDecision,
@@ -5354,6 +5366,7 @@ export default function StudioPage() {
     resumeSingleFlightInFlight,
     resumeGenerating,
     resumeState,
+    resumeFailureDiagnostics,
     resumeV2FallbackEvaluation.codes,
     resumeV2FallbackAttemptable,
     studioArtifactPairStatus,
@@ -7451,6 +7464,46 @@ export default function StudioPage() {
       });
       if (timeoutId !== null) window.clearTimeout(timeoutId);
       const responsePayload = await readResponsePayload(response);
+      const captureResumeFailureDiagnostics = () => {
+        if (response.ok) {
+          setResumeFailureDiagnostics(null);
+          return;
+        }
+        const payload = responsePayload as any;
+        const backendCode =
+          typeof payload?.error?.code === "string"
+            ? payload.error.code
+            : typeof payload?.errorCode === "string"
+              ? payload.errorCode
+              : null;
+        const backendMessage =
+          typeof payload?.error?.message === "string"
+            ? payload.error.message
+            : typeof payload?.message === "string"
+              ? payload.message
+              : typeof payload?.errorMessage === "string"
+                ? payload.errorMessage
+                : null;
+        const responseBodySafe =
+          payload == null || typeof payload === "number" || typeof payload === "boolean"
+            ? payload
+            : typeof payload === "string"
+              ? payload.slice(0, 20_000)
+              : typeof payload === "object"
+                ? payload
+                : String(payload);
+
+        setResumeFailureDiagnostics({
+          endpoint: "/api/resume",
+          httpStatus: response.status,
+          backendCode,
+          backendMessage,
+          requestId: typeof (payloadWithRequestId as any)?.requestId === "string" ? (payloadWithRequestId as any).requestId : null,
+          sessionKey: typeof (payloadWithRequestId as any)?.sessionKey === "string" ? (payloadWithRequestId as any).sessionKey : null,
+          beforeHydration: studioArtifactPresentationStateRef.current !== "hydrated",
+          responseBody: responseBodySafe,
+        });
+      };
       if (
         isWorkflowRequestStale(requestScope, currentWorkflowScopeRef.current) ||
         activeResumeGenerationRef.current?.requestId !== request.requestId
@@ -7468,6 +7521,7 @@ export default function StudioPage() {
         return false;
       }
       if (!response.ok) {
+        captureResumeFailureDiagnostics();
         console.warn("[studio] generation_failed", {
           area: "studio",
           operation: "generate",
@@ -7520,6 +7574,7 @@ export default function StudioPage() {
         lastFailureSignatureRef.current = generationInputSignature;
         throw new Error(formatErrorMessage(responsePayload, "Resume generation failed."));
       }
+      setResumeFailureDiagnostics(null);
       const presenter = presentResumeGeneration(responsePayload);
       const failure = presenter.failure;
       if (failure) {
