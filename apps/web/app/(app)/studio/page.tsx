@@ -156,6 +156,7 @@ import {
 } from "@/src/lib/recentIntent";
 import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
 import { resolveDocumentReadinessState } from "@shared/documentReadinessState";
+import { resolveWorkflowContract } from "@shared/workflowContract";
 
 function LockIcon(props: { className?: string; "aria-hidden"?: boolean }) {
   const className = props.className ?? "h-5 w-5";
@@ -966,6 +967,17 @@ export default function StudioPage() {
     }
   }, []);
 
+  const [resumeFailureDiagnostics, setResumeFailureDiagnostics] = useState<null | {
+    endpoint: "/api/resume";
+    httpStatus: number;
+    backendCode: string | null;
+    backendMessage: string | null;
+    requestId: string | null;
+    sessionKey: string | null;
+    beforeHydration: boolean;
+    responseBody: unknown | null;
+  }>(null);
+
   const isNonProduction = process.env.NODE_ENV !== "production";
   const readCanonicalResumePreviewPayload = (value: unknown): unknown | null => {
     if (!value || typeof value !== "object") return null;
@@ -1203,6 +1215,7 @@ export default function StudioPage() {
   const [hydratedAnalysisScore, setHydratedAnalysisScore] = useState<number | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [readinessError, setReadinessError] = useState<string | null>(null);
   const [assessmentUnsupportedRequirements, setAssessmentUnsupportedRequirements] = useState<string[] | null>(null);
   const [contextHydrationMessage, setContextHydrationMessage] = useState<string | null>(null);
   const [generationReadiness, setGenerationReadiness] =
@@ -1796,6 +1809,9 @@ export default function StudioPage() {
   }, []);
 
   const analysisScore = useMemo(() => { 
+    // Fail-closed: if analysis failed to load/run, do not reuse any hydrated/stored score.
+    // This prevents a mixed authority state where stale score implies READY while readiness/analysis errors imply repair required.
+    if (analysisError || readinessError) return null;
     const coerceScore = (value: unknown): number | null => {
       if (typeof value === "number" && Number.isFinite(value)) return value;
       if (typeof value === "string") {
@@ -1815,8 +1831,9 @@ export default function StudioPage() {
     const overallRaw = (assessment as { overallScore?: unknown } | null)?.overallScore;
     const overall = coerceScore(overallRaw);
     return v2 ?? direct ?? overall ?? hydratedAnalysisScore ?? null;
-  }, [analysis, hydratedAnalysisScore]); 
+  }, [analysis, analysisError, hydratedAnalysisScore, readinessError]); 
   const generateNowEligible = isGenerateNowEligible(analysisScore);
+  const debugAuthorityEnabled = useMemo(() => searchParams?.get("debugAuthority") === "1", [searchParams]);
 
   const readGenerationDebug = useCallback(
     (payload: unknown): { generationMode: string; templateVersion: string } => {
@@ -1841,6 +1858,23 @@ export default function StudioPage() {
     },
     [],
   );
+
+  const authorityScoreSource = useMemo(() => {
+    const assessment = analysis;
+    const v2Raw = (assessment as { scoring_v2?: { score?: unknown } | null } | null)?.scoring_v2?.score;
+    const directRaw = (assessment as { score?: unknown } | null)?.score;
+    const overallRaw = (assessment as { overallScore?: unknown } | null)?.overallScore;
+    const hasV2 = typeof v2Raw === "number" || (typeof v2Raw === "string" && v2Raw.trim().length > 0);
+    const hasDirect = typeof directRaw === "number" || (typeof directRaw === "string" && directRaw.trim().length > 0);
+    const hasOverall = typeof overallRaw === "number" || (typeof overallRaw === "string" && overallRaw.trim().length > 0);
+    if (analysisError) return "analysis_error";
+    if (readinessError) return "readiness_error";
+    if (hasV2) return "analysis.scoring_v2.score";
+    if (hasDirect) return "analysis.score";
+    if (hasOverall) return "analysis.overallScore";
+    if (hydratedAnalysisScore !== null) return "hydrated_assessmentScore";
+    return "none";
+  }, [analysis, analysisError, hydratedAnalysisScore, readinessError]);
 
   const readMissingStructuredBaselineSignal = useCallback((payload: unknown): boolean => {
     if (!payload || typeof payload !== "object") return false;
@@ -1993,6 +2027,114 @@ export default function StudioPage() {
     [effectiveBaselineId, effectiveJobId, effectiveRequestedAnalysisId],
   );
   const [studioArtifactsRefreshNonce, setStudioArtifactsRefreshNonce] = useState(0);
+
+  const [baselineReprocessInFlight, setBaselineReprocessInFlight] = useState(false);
+  const [baselineReprocessFailure, setBaselineReprocessFailure] = useState<
+    { code?: string | null; message?: string | null } | null
+  >(null);
+  const handleReprocessBaseline = useCallback(async () => {
+    const baselineId = effectiveBaselineId ?? selectedBaselineId ?? requestedBaselineId ?? null;
+    if (!baselineId) return;
+    setBaselineReprocessInFlight(true);
+    try {
+      const response = await fetch(`/api/baselines/${encodeURIComponent(baselineId)}/reparse`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: "studio_blocked_baseline" }),
+      });
+      const payload = (await readResponsePayload(response)) as any;
+      if (!response.ok) {
+        setBaselineReprocessFailure({
+          code:
+            typeof payload?.code === "string"
+              ? payload.code
+              : typeof payload?.error?.code === "string"
+                ? payload.error.code
+                : null,
+          message:
+            typeof payload?.message === "string"
+              ? payload.message
+              : typeof payload?.error?.message === "string"
+                ? payload.error.message
+                : "Baseline reprocess failed. Please try again.",
+        });
+        return;
+      }
+      setBaselineReprocessFailure(null);
+
+      const responseVersionId =
+        typeof payload?.baselineVersionId === "string" && payload.baselineVersionId.trim().length > 0
+          ? payload.baselineVersionId.trim()
+          : null;
+
+      const versionsRes = await fetch(`/api/baselines/${encodeURIComponent(baselineId)}/versions`, { cache: "no-store" });
+      const versionsPayload = (await readResponsePayload(versionsRes)) as unknown;
+      const versions = Array.isArray(versionsPayload) ? (versionsPayload as Array<any>) : [];
+      const latest =
+        versions
+          .filter((v) => v && typeof v === "object" && typeof (v as any).id === "string")
+          .sort((a, b) => (Number((b as any).versionNumber ?? 0) || 0) - (Number((a as any).versionNumber ?? 0) || 0))[0] ??
+        null;
+      const latestVersionId = latest && typeof latest.id === "string" ? latest.id : null;
+      const nextBaselineVersionId = responseVersionId ?? latestVersionId;
+
+      if (nextBaselineVersionId) {
+        pendingVersionSelectionRef.current = nextBaselineVersionId;
+        setSelectedBaselineVersionId(nextBaselineVersionId);
+      }
+
+      setStudioArtifactsRefreshNonce((n) => n + 1);
+
+      let nextAnalysisId = requestedAnalysisId;
+      if (effectiveJobId && nextBaselineVersionId) {
+        try {
+          const analysisRunResponse = await fetch("/api/analysis/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              jobId: effectiveJobId,
+              baselineId: baselineId,
+            }),
+          });
+          const analysisRunPayload = (await readResponsePayload(analysisRunResponse)) as Record<string, unknown> | null;
+          if (
+            analysisRunResponse.ok &&
+            analysisRunPayload &&
+            typeof analysisRunPayload === "object" &&
+            !Array.isArray(analysisRunPayload)
+          ) {
+            const resolved =
+              (typeof analysisRunPayload.assessmentId === "string" && analysisRunPayload.assessmentId.trim()) ||
+              (typeof analysisRunPayload.id === "string" && analysisRunPayload.id.trim()) ||
+              null;
+            if (resolved) {
+              nextAnalysisId = resolved;
+            }
+          }
+        } catch {
+          // Keep routed version handoff; readiness contract will continue to enforce strict version matching.
+        }
+      }
+
+      const params = new URLSearchParams();
+      if (effectiveJobId) params.set("jobId", effectiveJobId);
+      params.set("baselineId", baselineId);
+      if (nextBaselineVersionId) params.set("baselineVersionId", nextBaselineVersionId);
+      if (nextAnalysisId) params.set("analysisId", nextAnalysisId);
+      void router.push(`/studio?${params.toString()}`);
+      // Ensure the new baseline version + resumed readiness are fetched immediately.
+      router.refresh();
+    } finally {
+      setBaselineReprocessInFlight(false);
+    }
+  }, [
+    effectiveBaselineId,
+    effectiveJobId,
+    requestedAnalysisId,
+    requestedBaselineId,
+    router,
+    selectedBaselineId,
+  ]);
   const studioArtifactHydrationSignature = useMemo(
     () =>
       [
@@ -2056,6 +2198,8 @@ export default function StudioPage() {
     // Use it as a best-effort eligibility signal without forcing an analysis hydration gate.
     const backendAssessmentScoreRaw = (payload as any)?.assessmentScore;
     if (backendAssessmentScoreRaw !== undefined && backendAssessmentScoreRaw !== null) {
+      // Fail-closed: do not accept stale persisted assessmentScore when analysis/readiness is in an error state.
+      if (analysisError || readinessError) return;
       const candidate =
         typeof backendAssessmentScoreRaw === "number"
           ? backendAssessmentScoreRaw
@@ -2212,7 +2356,7 @@ export default function StudioPage() {
     }
     // If hydration confirms artifacts are missing, allow auto-generation to proceed afterwards.
     suppressAutoGenerationRef.current = pairStatus !== "missing";
-  }, []);
+  }, [analysisError, readinessError]);
 
   function normalizeStudioArtifactsBackendPayload(payload: unknown): BackendStudioArtifactsResponse | null {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
@@ -2934,6 +3078,7 @@ export default function StudioPage() {
     if (!requestedAnalysisId || !effectiveJobId || !effectiveBaselineId) {
       setGenerationReadiness(READINESS_LOADING_STATE);
       setPairReadinessContractState({ resume: "unknown", cover: "unknown" });
+      setReadinessError(null);
       return;
     }
     const readinessKey = [
@@ -3002,10 +3147,13 @@ export default function StudioPage() {
           cover: resolved.coverReadinessState,
         });
         if (!resumeResponse.ok || !coverResponse.ok) {
+          setReadinessError(`readiness_http_${resumeResponse.ok ? coverResponse.status : resumeResponse.status}`);
           failedReadinessKeysRef.current.add(readinessKey);
           return;
         }
+        setReadinessError(null);
       } catch {
+        setReadinessError("readiness_fetch_failed");
         failedReadinessKeysRef.current.add(readinessKey);
       }
     })();
@@ -3420,6 +3568,39 @@ export default function StudioPage() {
     return query ? `/baseline?${query}` : "/baseline";
   }, [requestedAnalysisId, effectiveJobId, effectiveBaselineId, effectiveBaselineVersionId]);
   const canExportDocuments = productReadiness.generation_readiness.canExport;
+  const persistedArtifactContract = useMemo(() => {
+    if (!studioArtifactsPayload) {
+      return {
+        hasResumeArtifact: false,
+        hasCoverLetterArtifact: false,
+      };
+    }
+    const resumeResponse = studioArtifactsPayload.resume?.responseBody ?? null;
+    const coverResponse = studioArtifactsPayload.coverLetter?.responseBody ?? null;
+    const contract = buildStudioArtifactContract({
+      resumeResponse,
+      coverLetterResponse: coverResponse,
+      canExportDocuments,
+      isPro,
+      persistedPipelineVersion: studioArtifactsPayload?.generationContractVersion ?? null,
+      jobTitle: selectedJob?.title ?? null,
+      companyName: selectedJob?.company ?? null,
+    });
+    return {
+      hasResumeArtifact: contract.hasResumeArtifact,
+      hasCoverLetterArtifact: contract.hasCoverLetterArtifact,
+    };
+  }, [canExportDocuments, isPro, selectedJob?.company, selectedJob?.title, studioArtifactsPayload]);
+
+  const workflowContract = useMemo(() => {
+    const baselineUsable = !studioReadinessBlocksGeneration;
+    return resolveWorkflowContract({
+      baselineUsable,
+      score: analysisScore ?? null,
+      hasRenderableResumeArtifact: persistedArtifactContract.hasResumeArtifact,
+      hasRenderableCoverLetterArtifact: persistedArtifactContract.hasCoverLetterArtifact,
+    });
+  }, [analysisScore, persistedArtifactContract.hasCoverLetterArtifact, persistedArtifactContract.hasResumeArtifact, studioReadinessBlocksGeneration]);
   const artifactContract = useMemo(
     () =>
       buildStudioArtifactContract({
@@ -3790,6 +3971,19 @@ export default function StudioPage() {
   // Canonical workflow authority (additive layer): owns top-level readiness/failure messaging decisions.
   const resolvedScoreForContract = analysisScore;
   const workflowAuthorityReadiness = useMemo(() => {
+    if (readinessError) {
+      const message = "Readiness could not be evaluated from the current state.";
+      return {
+        ...activeGenerationReadiness,
+        status: "blocked",
+        blocked: true,
+        reasonCodes: [String(readinessError)],
+        reasons: [{ code: String(readinessError), message }],
+        verificationIssues: [{ code: String(readinessError), message }],
+        badgeLabel: "BLOCKED",
+        summary: message,
+      } as any;
+    }
     if (!resumeV2Authority.blocksGeneration) return activeGenerationReadiness;
     const errors = Array.isArray((studioArtifactsPayload as any)?.errors) ? ((studioArtifactsPayload as any).errors as any[]) : [];
     const first = errors.find((e) => String((e as any)?.code ?? "").startsWith("baseline_resume_v2_")) ?? null;
@@ -3807,7 +4001,7 @@ export default function StudioPage() {
       badgeLabel: "BLOCKED",
       summary: message,
     } as any;
-  }, [activeGenerationReadiness, resumeV2Authority.blocksGeneration, studioArtifactsPayload]);
+  }, [activeGenerationReadiness, readinessError, resumeV2Authority.blocksGeneration, studioArtifactsPayload]);
   const workflowAuthority = useMemo(
     () =>
       resolveWorkflowAuthority({
@@ -5145,6 +5339,7 @@ export default function StudioPage() {
       versionsError,
       analysisScore,
       resumeState,
+      resumeFailureDiagnostics,
       coverLetterState: coverState,
       hydrationSignature: studioArtifactHydrationSignature,
       orchestrationDecision,
@@ -5175,6 +5370,7 @@ export default function StudioPage() {
     resumeSingleFlightInFlight,
     resumeGenerating,
     resumeState,
+    resumeFailureDiagnostics,
     resumeV2FallbackEvaluation.codes,
     resumeV2FallbackAttemptable,
     studioArtifactPairStatus,
@@ -6065,9 +6261,8 @@ export default function StudioPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          job_id: effectiveJobId,
-          baseline_id: effectiveBaselineId,
-          baseline_version_id: effectiveBaselineVersionId || undefined,
+          jobId: effectiveJobId,
+          baselineId: effectiveBaselineId,
         }),
       });
       const payload = await readResponsePayload(response);
@@ -6109,9 +6304,8 @@ export default function StudioPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            job_id: effectiveJobId,
-            baseline_id: effectiveBaselineId,
-            baseline_version_id: effectiveBaselineVersionId || undefined,
+            jobId: effectiveJobId,
+            baselineId: effectiveBaselineId,
           }),
         });
         const payload = await readResponsePayload(response);
@@ -6618,15 +6812,11 @@ export default function StudioPage() {
             pendingVersionSelectionRef.current = null;
             return pending;
           }
+          if (requestedBaselineVersionId && parsed.some((version) => version.id === requestedBaselineVersionId)) {
+            return requestedBaselineVersionId;
+          }
           if (current && parsed.some((version) => version.id === current)) {
             return current;
-          }
-          if (
-            !versionTouchedRef.current &&
-            requestedBaselineVersionId &&
-            parsed.some((version) => version.id === requestedBaselineVersionId)
-          ) {
-            return requestedBaselineVersionId;
           }
           return parsed[0]?.id ?? "";
         });
@@ -6776,7 +6966,12 @@ export default function StudioPage() {
           setSelectedBaselineId(analysisBaselineId);
         }
         if (analysisBaselineVersionId) {
+          // Do not clobber an explicitly routed baselineVersionId (for example, immediately after successful reparse).
+          if (requestedBaselineVersionId && requestedBaselineVersionId.trim().length > 0) {
+            setSelectedBaselineVersionId(requestedBaselineVersionId);
+          } else {
           setSelectedBaselineVersionId(analysisBaselineVersionId);
+          }
         }
       } catch (error) {
         if (canceled) return;
@@ -7273,6 +7468,46 @@ export default function StudioPage() {
       });
       if (timeoutId !== null) window.clearTimeout(timeoutId);
       const responsePayload = await readResponsePayload(response);
+      const captureResumeFailureDiagnostics = () => {
+        if (response.ok) {
+          setResumeFailureDiagnostics(null);
+          return;
+        }
+        const payload = responsePayload as any;
+        const backendCode =
+          typeof payload?.error?.code === "string"
+            ? payload.error.code
+            : typeof payload?.errorCode === "string"
+              ? payload.errorCode
+              : null;
+        const backendMessage =
+          typeof payload?.error?.message === "string"
+            ? payload.error.message
+            : typeof payload?.message === "string"
+              ? payload.message
+              : typeof payload?.errorMessage === "string"
+                ? payload.errorMessage
+                : null;
+        const responseBodySafe =
+          payload == null || typeof payload === "number" || typeof payload === "boolean"
+            ? payload
+            : typeof payload === "string"
+              ? payload.slice(0, 20_000)
+              : typeof payload === "object"
+                ? payload
+                : String(payload);
+
+        setResumeFailureDiagnostics({
+          endpoint: "/api/resume",
+          httpStatus: response.status,
+          backendCode,
+          backendMessage,
+          requestId: typeof (payloadWithRequestId as any)?.requestId === "string" ? (payloadWithRequestId as any).requestId : null,
+          sessionKey: typeof (payloadWithRequestId as any)?.sessionKey === "string" ? (payloadWithRequestId as any).sessionKey : null,
+          beforeHydration: studioArtifactPresentationStateRef.current !== "hydrated",
+          responseBody: responseBodySafe,
+        });
+      };
       if (
         isWorkflowRequestStale(requestScope, currentWorkflowScopeRef.current) ||
         activeResumeGenerationRef.current?.requestId !== request.requestId
@@ -7290,6 +7525,7 @@ export default function StudioPage() {
         return false;
       }
       if (!response.ok) {
+        captureResumeFailureDiagnostics();
         console.warn("[studio] generation_failed", {
           area: "studio",
           operation: "generate",
@@ -7342,6 +7578,7 @@ export default function StudioPage() {
         lastFailureSignatureRef.current = generationInputSignature;
         throw new Error(formatErrorMessage(responsePayload, "Resume generation failed."));
       }
+      setResumeFailureDiagnostics(null);
       const presenter = presentResumeGeneration(responsePayload);
       const failure = presenter.failure;
       if (failure) {
@@ -9470,7 +9707,7 @@ export default function StudioPage() {
         assessmentId: effectiveRequestedAnalysisId || null,
       },
       score: typeof analysisScore === "number" ? analysisScore : null,
-      generationReadiness: activeGenerationReadiness,
+      generationReadiness: workflowAuthorityReadiness,
       workflowAuthority,
       artifact: {
         // Authority surface output presence should track the same "ready" statuses used by the artifact cards.
@@ -9549,6 +9786,7 @@ export default function StudioPage() {
     unlockReanalysisFailure?.priorScore,
     workflowActivity,
     workflowAuthority,
+    workflowAuthorityReadiness,
   ]);
 
   const workflowSurfaceAuthorityHero = workflowOrchestratorCore.authorityState;
@@ -9586,6 +9824,99 @@ export default function StudioPage() {
           "data-debug-artifact-generating": String(artifactGeneratingDebug),
         }
       : {};
+
+  const debugAuthoritySnapshot = useMemo(() => {
+    if (!debugAuthorityEnabled) return null;
+    const readinessCodes = Array.isArray(workflowAuthorityReadiness.reasonCodes)
+      ? workflowAuthorityReadiness.reasonCodes.map((c: unknown) => String(c ?? "")).filter(Boolean)
+      : [];
+    const latestKnownBaselineVersionId = (() => {
+      const list = Array.isArray(versions) ? versions : [];
+      const sorted = [...list].sort(
+        (a, b) => (Number((b as any)?.versionNumber ?? 0) || 0) - (Number((a as any)?.versionNumber ?? 0) || 0),
+      );
+      const first = sorted[0] as any;
+      return typeof first?.id === "string" && first.id.trim().length > 0 ? first.id.trim() : null;
+    })();
+    const readinessContext = {
+      baselineId: effectiveBaselineId ?? null,
+      baselineVersionId: effectiveBaselineVersionId ?? null,
+      jobId: effectiveJobId ?? null,
+      analysisId: effectiveRequestedAnalysisId ?? null,
+    };
+    return {
+      buildId: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? process.env.NEXT_PUBLIC_BUILD_ID ?? null,
+      ids: {
+        baselineId: effectiveBaselineId ?? null,
+        baselineVersionId: effectiveBaselineVersionId ?? null,
+        jobId: effectiveJobId ?? null,
+        analysisId: effectiveRequestedAnalysisId ?? null,
+      },
+      latestKnownBaselineVersionId,
+      urlIds: {
+        baselineId: requestedBaselineId ?? null,
+        baselineVersionId: requestedBaselineVersionId ?? null,
+        jobId: requestedJobId ?? null,
+        analysisId: requestedAnalysisId ?? null,
+      },
+      readinessContext,
+      readinessVersionMatchesUrl:
+        Boolean(readinessContext.baselineVersionId) &&
+        Boolean(requestedBaselineVersionId) &&
+        String(readinessContext.baselineVersionId) === String(requestedBaselineVersionId),
+      readinessVersionMatchesLatestKnown:
+        Boolean(readinessContext.baselineVersionId) &&
+        Boolean(latestKnownBaselineVersionId) &&
+        String(readinessContext.baselineVersionId) === String(latestKnownBaselineVersionId),
+      score: analysisScore,
+      scoreSource: authorityScoreSource,
+      workflowAuthorityReadiness: {
+        blocked: Boolean(workflowAuthorityReadiness.blocked),
+        reasonCodes: readinessCodes,
+        reasons: Array.isArray((workflowAuthorityReadiness as any).reasons)
+          ? ((workflowAuthorityReadiness as any).reasons as any[])
+              .map((r) => (r && typeof r === "object" ? { code: String((r as any).code ?? ""), message: String((r as any).message ?? "") } : null))
+              .filter(Boolean)
+          : [],
+        diagnostics: (workflowAuthorityReadiness as any)?.diagnostics ?? null,
+      },
+      workflowContract: {
+        baselineUsable: workflowContract.baselineUsable,
+        scoreAllowsGeneration: workflowContract.scoreAllowsGeneration,
+        resumeGenerationAllowed: workflowContract.resumeGenerationAllowed,
+        coverLetterGenerationAllowed: workflowContract.coverLetterGenerationAllowed,
+      },
+      workflowOrchestrator: {
+        canonicalState: workflowSurfaceAuthorityHero.canonicalState,
+        trustTone: workflowSurfaceAuthorityHero.trustTone,
+        contractGenerationState: workflowOrchestratorCore.contract?.generation?.state ?? null,
+        authorityWorkflowState: workflowAuthority.workflowState,
+      },
+    };
+  }, [
+    authorityScoreSource,
+    analysisScore,
+    debugAuthorityEnabled,
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    effectiveRequestedAnalysisId,
+    requestedAnalysisId,
+    requestedBaselineId,
+    requestedBaselineVersionId,
+    requestedJobId,
+    versions,
+    workflowAuthority.workflowState,
+    workflowAuthorityReadiness.blocked,
+    workflowAuthorityReadiness.reasonCodes,
+    workflowContract.baselineUsable,
+    workflowContract.coverLetterGenerationAllowed,
+    workflowContract.resumeGenerationAllowed,
+    workflowContract.scoreAllowsGeneration,
+    workflowOrchestratorCore.contract?.generation?.state,
+    workflowSurfaceAuthorityHero.canonicalState,
+    workflowSurfaceAuthorityHero.trustTone,
+  ]);
 
   const normalizedArtifactsPanelModel = useMemo(() => {
     const state = normalizedArtifacts.artifactDisplayState;
@@ -12420,6 +12751,7 @@ export default function StudioPage() {
         >
           <summary className="cursor-pointer text-sm font-semibold text-slate-200">Guidance</summary>
           <div className="mt-3 space-y-3">
+<<<<<<< HEAD
             <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
               {activeGenerationReadiness.reasons[0]?.message ||
                 activeGenerationReadiness.reasons[0]?.code ||
@@ -12448,11 +12780,80 @@ export default function StudioPage() {
             : generationState === "degraded"
               ? "This role is a partial match"
               : "Review your fit";
+=======
+             {studioBlockedBaselineContract ? (
+               <div className="space-y-3" data-testid="studio-baseline-blocked-recovery">
+                 <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
+                   Your baseline needs to be reprocessed before documents can be generated.
+                 </p>
+                 {baselineReprocessFailure?.message ? (
+                   <p className="text-sm text-slate-200" data-testid="studio-reprocess-failure-message">
+                     {baselineReprocessFailure.message}
+                   </p>
+                 ) : null}
+                 <div className="flex justify-end">
+                   <FormButton
+                     onClick={() => void handleReprocessBaseline()}
+                     disabled={baselineReprocessInFlight}
+                    data-testid="studio-resume-reprocess-baseline"
+                  >
+                    {baselineReprocessInFlight ? "Reprocessing…" : "Reprocess baseline"}
+                  </FormButton>
+                </div>
+              </div>
+            ) : (
+              <>
+                <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
+                  {activeGenerationReadiness.reasons[0]?.message ||
+                    activeGenerationReadiness.reasons[0]?.code ||
+                    canonicalStudioReadinessMessage}
+                </p>
+                {!hasRenderableResumeContent &&
+                !hasRenderableCoverLetterContent &&
+                (activeGenerationReadiness.blocked || !canGenerateDocuments) &&
+                studioCanonicalDecision.primaryAction.destination ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link
+                      href={studioCanonicalDecision.primaryAction.destination}
+                      className="text-sm font-semibold text-slate-100 underline decoration-slate-400/70 underline-offset-4 transition hover:decoration-slate-200"
+                      data-testid="studio-blocker-next-action"
+                    >
+                      {primaryNextAction.label}
+                    </Link>
+                  </div>
+                ) : null}
+                {(() => {
+        // Canonical rendered top-level state: do not allow readiness internal errors to coexist with READY/blocked UI.
+        // Readiness errors are fail-closed and must suppress any "Ready to generate" state.
+        const generationState = studioGenerationStateInfo.state;
+        const renderedTopState: "loading" | "blocked" | "ready" = analysisLoading
+          ? "loading"
+          : readinessError
+            ? "blocked"
+            : studioBlockedBaselineContract || workflowAuthorityReadiness.blocked || !canGenerateDocuments
+              ? "blocked"
+              : generationState === "ready"
+                ? "ready"
+                : "blocked";
+
+        const bannerIntent =
+          renderedTopState === "ready" && !studioBlockedBaselineContract ? "info" : "warning";
+        const bannerTitle =
+          readinessError
+            ? "Readiness error"
+            : studioBlockedBaselineContract
+              ? "Baseline repair required"
+              : renderedTopState === "ready"
+                ? "Ready to generate"
+                : generationState === "degraded"
+                  ? "This role is a partial match"
+                  : "Review your fit";
+>>>>>>> 8b795c54e09a34aa95f1be6432023a3a88cf1c24
 
         return (
           <Alert intent={bannerIntent} title={bannerTitle}>
             <div data-testid="studio-generation-state-banner" className="space-y-2">
-              {scoringReliability === "unreliable" ? (
+              {scoringReliability === "unreliable" && !readinessError ? (
                 <div
                   className="rounded-2xl border border-amber-300/25 bg-amber-500/10 p-4 text-slate-100"
                   data-testid="studio-score-reliability-warning"
@@ -12464,13 +12865,17 @@ export default function StudioPage() {
                   </p>
                 </div>
               ) : null}
-              {generationState === "ready" ? (
+              {renderedTopState === "ready" ? (
                 <p data-testid="studio-generation-state-ready" className="text-sm text-slate-100">
                   This role is ready for generation using your verified baseline.
                 </p>
               ) : null}
 
+<<<<<<< HEAD
               {generationState === "degraded" ? (
+=======
+              {!studioBlockedBaselineContract && generationState === "degraded" ? (
+>>>>>>> 8b795c54e09a34aa95f1be6432023a3a88cf1c24
                 <div data-testid="studio-generation-state-degraded" className="space-y-2">
                   <p className="text-sm text-slate-100">
                     Some requirements are not supported by your verified experience. You can continue, but results are limited.
@@ -12780,7 +13185,9 @@ export default function StudioPage() {
                 </p>
               ) : null}
               <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-50">  
-                {workflowSurfaceAuthorityHero.canonicalState === "generation_in_progress"
+                {readinessError
+                  ? "Readiness error"
+                  : workflowSurfaceAuthorityHero.canonicalState === "generation_in_progress"
                   ? "Generating your documents..."
                   : hasCompletedGeneration  
                   ? showLowQualityRecoveryLane  
@@ -12792,12 +13199,14 @@ export default function StudioPage() {
                       : "Strong output: ready to refine in Studio."  
                   : workflowOrchestratorCore.contract.generation.state === "ready"
                     ? "Draft output: ready to generate."
-                    : generateNowEligible
+                  : generateNowEligible
                       ? "Output may be limited, but you can generate and refine."
                       : "Limited output: not ready yet."}
               </h2>
               <p className="mt-2 text-sm text-slate-200">  
-                {workflowSurfaceAuthorityHero.canonicalState === "generation_in_progress"
+                {readinessError
+                  ? "We couldn’t evaluate generation readiness from the current state. Refresh the page or try again from Analyze."
+                  : workflowSurfaceAuthorityHero.canonicalState === "generation_in_progress"
                   ? "We're building your tailored resume and cover letter now."
                   : hasCompletedGeneration  
                   ? showLowQualityRecoveryLane  
@@ -12809,7 +13218,7 @@ export default function StudioPage() {
                       : "Built from your verified experience and aligned to the role. Review and refine as needed before applying." 
                   : workflowOrchestratorCore.contract.generation.state === "ready"
                     ? "Built from your baseline evidence and ready for generation."
-                    : generateNowEligible
+                  : generateNowEligible
                       ? "Output may be limited due to gaps in your baseline, but you can still generate and refine."
                       : "Built from your baseline evidence, but a few signals still need strengthening."}
               </p>
@@ -12990,7 +13399,7 @@ export default function StudioPage() {
               >
                 Resolve blockers
               </Link>
-            ) : workflowAuthority.primaryAction === "RETRY" ? (
+            ) : workflowAuthority.primaryAction === "RETRY" && !studioBlockedBaselineContract ? (
               topLevelArtifactFailure?.category === "baseline_requires_reprocess" ? (
                 <Link
                   href={fitReviewHref}
@@ -13062,7 +13471,12 @@ export default function StudioPage() {
           </div>
         ) : null}
       </section>
-      {!generateNowEligible && !isReadySuccessState && (workflowAuthority.workflowState === "READY" || canGenerateDocuments) ? (
+      {!generateNowEligible &&
+      !isReadySuccessState &&
+      !readinessError &&
+      !workflowAuthorityReadiness.blocked &&
+      canGenerateDocuments &&
+      (workflowAuthority.workflowState === "READY" || canGenerateDocuments) ? (
         <section className="rounded-2xl border border-white/10 bg-white/5 p-4" data-testid="studio-evidence-allowed-panel">
           <h2 className="text-base font-semibold text-slate-100">
             {workflowAuthority.workflowState === "READY" ? "Why this output is grounded" : "Why this output is limited"}
@@ -13101,6 +13515,7 @@ export default function StudioPage() {
       ) : hasLoadedAnalysis &&
         !showReadinessRecoveryExperience &&
         workflowAuthority.workflowState === "BLOCKED" &&
+        !readinessError &&
         !studioDraftMode ? (
         <RouteStateShell
           testId="studio-evidence-blocked-panel"
@@ -13179,9 +13594,19 @@ export default function StudioPage() {
       ) : null}
       {requestedAnalysisId &&
       // Unsupported requirements must not block/distract the primary generation path when generation is otherwise allowed.
+<<<<<<< HEAD
       activeGenerationReadiness.blocked &&
       canonicalUnverifiedRequirements.length &&
       !structuralBaselineRepairActive &&
+=======
+      !studioBlockedBaselineContract &&
+      activeGenerationReadiness.blocked &&
+      canonicalUnverifiedRequirements.length &&
+      // Only show "Fix this in one step" for the unsupported-requirements readiness lane.
+      // Never render remediation CTAs for internal readiness failures (e.g. `readiness_error`).
+      (pairReadinessContractState.resume === "unsupported_input" ||
+        pairReadinessContractState.cover === "unsupported_input") &&
+>>>>>>> 8b795c54e09a34aa95f1be6432023a3a88cf1c24
       !(studioGenerationStateInfo.state === "degraded" && studioGenerationStateInfo.hasUnsupportedRequirements) ? (
         <div 
           id="studio-auto-adjust-panel" 
@@ -13209,7 +13634,11 @@ export default function StudioPage() {
           </div>
         </div> 
       ) : null} 
+<<<<<<< HEAD
       {showEvidenceExpansion ? (  
+=======
+      {!studioBlockedBaselineContract && showEvidenceExpansion ? (  
+>>>>>>> 8b795c54e09a34aa95f1be6432023a3a88cf1c24
         <section className="rounded-2xl border border-white/15 bg-slate-950/35 p-4" data-testid="studio-evidence-expansion">  
           <h2 className="text-base font-semibold text-slate-100">Prove this experience instead</h2>  
           <p className="mt-1 text-sm text-slate-300"> 
@@ -13433,8 +13862,14 @@ export default function StudioPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
               {(() => {
                 const score = Math.round(analysisScore);
-                if (resumeV2Authority.blocksGeneration) {
-                  return `Compatibility: Baseline repair required (${score})`;
+                if (!workflowContract.baselineUsable) {
+                  const reasonCodes = Array.isArray(workflowAuthorityReadiness.reasonCodes)
+                    ? workflowAuthorityReadiness.reasonCodes.map((c: unknown) => String(c ?? ""))
+                    : [];
+                  const hasResumeV2Blocker = reasonCodes.some((code: string) => code.startsWith("baseline_resume_v2_"));
+                  if (hasResumeV2Blocker) {
+                    return `Compatibility: Baseline repair required (${score})`;
+                  }
                 }
                 const sourcedVerdict =
                   typeof (analysis as LatestAnalysis | null)?.verdict === "string"
@@ -13479,7 +13914,7 @@ export default function StudioPage() {
             })()}
           </div>
         ) : null}
-        {!hasRenderableResumeContent ? (
+        {!studioBlockedBaselineContract && !hasRenderableResumeContent ? (
           <p className="text-sm text-slate-300">
             Generate, preview, and export your resume and cover letter.
           </p>
@@ -13926,17 +14361,17 @@ export default function StudioPage() {
               <EmptyState
                 testId="studio-resume-missing"
                 title={
-                  studioCardsGenerationBlocked
+                  !workflowContract.resumeGenerationAllowed
                     ? "Resume generation unavailable"
                     : resumePersistedArtifactSyncPending
                     ? "Syncing generated resume..."
                     : "Resume not generated yet"
                 }
                 body={
-                  studioCardsGenerationBlocked
-                    ? "Document generation is unavailable for this role."
-                    : !canGenerateDocuments
-                    ? "Improve your baseline to generate materials."
+                  !workflowContract.baselineUsable
+                    ? "Repair your baseline to generate materials."
+                    : !workflowContract.scoreAllowsGeneration
+                    ? "Score is below the generation threshold (80)."
                     : resumePersistedArtifactSyncPending
                       ? "Generation completed. Loading the saved document..."
                     : resumeState.error
@@ -13944,12 +14379,11 @@ export default function StudioPage() {
                       : "Generate your resume to preview and refine your application."
                 }
                 cta={
-                  studioCardsGenerationBlocked ? null : (
+                  workflowContract.resumeGenerationAllowed ? (
                     <FormButton
                       type="button"
                       onClick={() => void handleGenerateResume()}
                       disabled={
-                        !canGenerateDocuments ||
                         !effectiveBaselineId ||
                         !effectiveBaselineVersionId ||
                         !effectiveJobId ||
@@ -13961,7 +14395,7 @@ export default function StudioPage() {
                     >
                       {resumeGenerating ? "Generating..." : "Generate resume"}
                     </FormButton>
-                  )
+                  ) : null
                 }
               />
             ) : null}
@@ -14028,7 +14462,7 @@ export default function StudioPage() {
               : null}
           </div>
           <div className="flex flex-wrap gap-2">
-            {!generateNowEligible ? (
+            {!hasRenderableCoverLetterContent && workflowContract.coverLetterGenerationAllowed ? (
               <FormButton
                 variant="secondary"
                 onClick={() => {
@@ -14405,7 +14839,11 @@ export default function StudioPage() {
                     {coverState.error}
                   </p>
                   <div className="flex justify-end">
+<<<<<<< HEAD
                     {canRetryGeneration ? (
+=======
+                    {(canRetryGeneration || Boolean(coverState.artifactFailure?.retryable)) && !studioBlockedBaselineContract ? (
+>>>>>>> 8b795c54e09a34aa95f1be6432023a3a88cf1c24
                       <FormButton onClick={() => void handleCoverDraft()} disabled={coverGenerating}>
                         Retry generation
                       </FormButton>
@@ -14426,7 +14864,7 @@ export default function StudioPage() {
                   coverAutoGenerating || coverGenerateNowPending ? "studio-cover-generating" : "studio-cover-missing"
                 }
                 title={
-                  studioCardsGenerationBlocked
+                  !workflowContract.coverLetterGenerationAllowed
                     ? "Cover letter generation unavailable"
                     : coverPersistedArtifactSyncPending
                     ? "Syncing generated cover letter..."
@@ -14435,8 +14873,10 @@ export default function StudioPage() {
                       : "Cover letter not generated yet"
                 }
                 body={
-                  studioCardsGenerationBlocked
-                    ? "Document generation is unavailable for this role."
+                  !workflowContract.baselineUsable
+                    ? "Repair your baseline to generate materials."
+                    : !workflowContract.scoreAllowsGeneration
+                    ? "Score is below the generation threshold (80)."
                     : coverPersistedArtifactSyncPending
                     ? "Generation completed. Loading the saved document..."
                     : coverAutoGenerating || coverGenerateNowPending
@@ -14444,12 +14884,11 @@ export default function StudioPage() {
                       : "Generate your cover letter to create a tailored introduction."
                 }
                 cta={
-                  studioCardsGenerationBlocked || coverAutoGenerating || coverGenerateNowPending ? null : (
+                  workflowContract.coverLetterGenerationAllowed && !coverAutoGenerating && !coverGenerateNowPending ? (
                     <FormButton
                       type="button"
                       onClick={() => void handleGenerateCoverLetter()}
                       disabled={
-                        !canGenerateDocuments ||
                         !effectiveBaselineId ||
                         !effectiveBaselineVersionId ||
                         !effectiveJobId ||
@@ -14461,7 +14900,7 @@ export default function StudioPage() {
                     >
                       {coverGenerating ? "Generating..." : "Generate cover letter"}
                     </FormButton>
-                  )
+                  ) : null
                 }
               />
             ) : null
@@ -14471,7 +14910,11 @@ export default function StudioPage() {
       </details>
       </>
 
+<<<<<<< HEAD
       {!shouldShowRefinementAboveMaterials && hasAuthoritativeArtifacts && !studioCardsGenerationBlocked ? (
+=======
+      {!shouldShowRefinementAboveMaterials && hasAuthoritativeArtifacts && !studioCardsGenerationBlocked && !studioBlockedBaselineContract ? (
+>>>>>>> 8b795c54e09a34aa95f1be6432023a3a88cf1c24
         <details className="rounded-2xl border border-white/10 bg-slate-950/35 p-4" data-testid="studio-refinement-details">
           <summary className="cursor-pointer text-sm font-semibold text-slate-100">
             Review & refine (optional)
@@ -14523,7 +14966,7 @@ export default function StudioPage() {
               Your materials are usable, but they will be stronger after another generation pass backed by verified
               evidence.
             </p>
-            {canRetryGeneration ? (
+            {canRetryGeneration && !studioBlockedBaselineContract ? (
               <div className="mt-3 flex justify-end">
                 <FormButton
                   variant="secondary"
@@ -14546,7 +14989,11 @@ export default function StudioPage() {
         </div>
       </div>
 
+<<<<<<< HEAD
       {generateNowEligible && !structuralBaselineRepairActive ? (
+=======
+      {generateNowEligible && !studioBlockedBaselineContract ? (
+>>>>>>> 8b795c54e09a34aa95f1be6432023a3a88cf1c24
         <details className="rounded-2xl border border-white/10 bg-white/[0.03] p-4" data-testid="studio-document-strategy-details">
           <summary className="cursor-pointer text-sm font-semibold text-slate-200">
             Document strategy
@@ -14557,7 +15004,11 @@ export default function StudioPage() {
         </details>
       ) : null}
 
+<<<<<<< HEAD
       {showOptionalEvidenceStrengthening && !structuralBaselineRepairActive ? (
+=======
+      {showOptionalEvidenceStrengthening && !studioBlockedBaselineContract ? (
+>>>>>>> 8b795c54e09a34aa95f1be6432023a3a88cf1c24
         <section
           className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
           data-testid="studio-optional-evidence-details"
@@ -14718,7 +15169,11 @@ export default function StudioPage() {
         </section>
       ) : null}
  
+<<<<<<< HEAD
       {!structuralBaselineRepairActive ? (
+=======
+      {!studioBlockedBaselineContract ? (
+>>>>>>> 8b795c54e09a34aa95f1be6432023a3a88cf1c24
         <>
           <details className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4"> 
             <summary className="cursor-pointer text-sm font-semibold text-slate-200"> 
@@ -14831,6 +15286,14 @@ export default function StudioPage() {
 
   return (
     <div data-testid="studio-root" suppressHydrationWarning>
+      {debugAuthorityEnabled ? (
+        <pre
+          data-testid="studio-debug-authority"
+          className="mb-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-xs leading-5 text-slate-200"
+        >
+{JSON.stringify(debugAuthoritySnapshot ?? { debugAuthority: "enabled", snapshot: null }, null, 2)}
+        </pre>
+      ) : null}
       {mounted ? (isStateInvalid ? invalidStateFallback : studioContent) : stableSkeleton}
     </div>
   );

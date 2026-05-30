@@ -369,9 +369,21 @@ describe('ResumeService contract', () => {
       } as any);
 
       expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
+      expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalledTimes(1);
       const persisted = (studioArtifactsService.recordResumeSuccess as any).mock.calls[0][0];
+      expect(persisted).toEqual(
+        expect.objectContaining({
+          userId: baseline.userId,
+          baselineId: baseRequest.baselineId,
+          baselineVersionId: baseRequest.baselineVersionId,
+          jobId: baseRequest.jobId,
+          analysisId: baseRequest.analysisId,
+          responseBody: expect.any(Object),
+        }),
+      );
       expect(persisted?.responseBody?.internal).toBeTruthy();
       expect(persisted?.responseBody?.internal?.generationPipeline).toBe('v2');
+      expect(String(persisted?.responseBody?.preview?.resume?.summary ?? '').trim().length).toBeGreaterThan(0);
       expect(JSON.stringify(persisted?.responseBody?.preview ?? {})).not.toContain('Vue 3), deck builder frontend');
       expect(JSON.stringify(persisted?.responseBody?.preview ?? {})).not.toContain('Experience entry needs correction');
       expect(JSON.stringify(persisted?.responseBody?.preview ?? {})).not.toContain('Automation & Monitoring');
@@ -389,6 +401,18 @@ describe('ResumeService contract', () => {
         delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
       }
     }
+  });
+
+  it('does not complete a successful resume generation when Studio artifact persistence fails', async () => {
+    const { service, studioArtifactsService } = buildService();
+    baseline.sections = [baseSection] as any;
+
+    (studioArtifactsService.recordResumeSuccess as any).mockRejectedValueOnce(
+      new Error('persistence_failed'),
+    );
+
+    await expect(service.generateResume('user-1', baseRequest as any)).rejects.toBeTruthy();
+    expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
   });
 
   it('does not use top-level minimal fallback when RESUME_GENERATION_V2=true and V2 fails', async () => {
@@ -1408,6 +1432,58 @@ describe('ResumeService contract', () => {
     }
   });
 
+  it('does not block resume generation when structured extraction yields zero experience but ResumeV2 experience is usable', async () => {
+    const { service, studioArtifactsService } = buildService();
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+    const originalScore = assessment.overallScore;
+
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
+    assessment.overallScore = 82;
+
+    try {
+      baseline.parsedRecords = [
+        {
+          createdAt: new Date('2026-05-01T00:00:00.000Z'),
+          resumeV2Json: {
+            heading: { name: 'Test Candidate', contactLine: '' },
+            summary: 'Support operations leader.',
+            experience: [
+              {
+                company: 'Acme',
+                roleTitle: 'Support Ops Lead',
+                bullets: ['Improved SLA adherence by refining triage and escalation workflow.'],
+                dateRange: '2022 - 2026',
+              },
+            ],
+            education: [],
+          },
+        } as any,
+      ];
+      // Force structured baseline extraction to see zero experience (malformed section), but ResumeV2 is usable.
+      baseline.sections = [
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          order: 1,
+          content: ['Seattle', '- Reconciled billing and revenue across systems.'].join('\n'),
+        } as any,
+      ] as any;
+
+      const result = await service.generateResume('user-1', baseRequest as any);
+      expect(result.ok).toBe(true);
+      expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
+    } finally {
+      baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsed;
+      assessment.overallScore = originalScore;
+      if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    }
+  });
+
   it('generates a real exportReady resume when Resume V2 is invalid and baseline work history is verified (omits unsupported requirements with warnings)', async () => {
     const { service } = buildService();
     const originalSections = baseline.sections;
@@ -2025,18 +2101,18 @@ describe('ResumeService contract', () => {
     }
   });
 
-  it('generation fails cleanly when authoritative extraction returns zero roles (no legacy minimal fallback synthesis)', async () => {
-    const { service } = buildService();
-    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
-    process.env.DOCGEN_DIAGNOSTICS = 'true';
-    const originalResumeV2Flag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
-    delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
-    const originalSections = baseline.sections;
-    const originalParsed = baseline.parsedRecords;
+	  it('generation degrades to baseline-only draft when authoritative extraction returns zero roles (non-blocking)', async () => {
+	    const { service, studioArtifactsService } = buildService();
+	    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
+	    process.env.DOCGEN_DIAGNOSTICS = 'true';
+	    const originalResumeV2Flag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+	    delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+	    const originalSections = baseline.sections;
+	    const originalParsed = baseline.parsedRecords;
 
-    try {
-        baseline.parsedRecords = []; // ensure ResumeV2 is not usable
-        baseline.sections = [
+	    try {
+	        baseline.parsedRecords = []; // ensure ResumeV2 is not usable
+	        baseline.sections = [
         {
           ...baseSection,
           sectionType: BaselineSectionType.EXPERIENCE,
@@ -2049,42 +2125,39 @@ describe('ResumeService contract', () => {
             '- Reduced billing exceptions by automating metering and reporting checks.',
           ].join('\n'),
         } as any,
-        ] as any;
-        expect(extractStructuredBaselineFromSections(baseline.sections as any).experience.length).toBe(0);
+	        ] as any;
+	        expect(extractStructuredBaselineFromSections(baseline.sections as any).experience.length).toBe(0);
 
-      let err: any = null;
-      try {
-        await service.generateResume('user-1', {
-          baselineId: baseline.id,
-          baselineVersionId: baselineVersion.id,
-          jobId: job.id,
-          analysisId: assessment.id,
-          oneTap: false,
-        } as any);
-      } catch (caught) {
-        err = caught;
-      }
-      expect(err).toBeInstanceOf(UnprocessableEntityException);
-      const responseBody = err?.getResponse?.() ?? null;
-      const code = responseBody?.code ?? responseBody?.error?.code ?? null;
-      const category = responseBody?.category ?? responseBody?.error?.category ?? null;
-      expect(code).toBe('generation_blocked');
-      expect(category).toBe('generation_blocked');
-      const diagnostics = responseBody?.diagnostics ?? responseBody?.error?.diagnostics ?? {};
-      expect(diagnostics.authoritativeExtractionSucceeded).toBe(false);
-      expect(diagnostics.authoritativeExperienceGroupCount).toBe(0);
-      expect(diagnostics.fallbackGenerationPrevented).toBe(true);
-      expect(diagnostics.legacyFallbackAttemptBlocked).toBe(true);
-      expect(diagnostics.generationTerminationStage).toBe('authoritative_extraction_gate');
-    } finally {
-      baseline.sections = originalSections;
-      baseline.parsedRecords = originalParsed;
-      if (typeof originalResumeV2Flag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalResumeV2Flag;
-      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
-      if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
-      else delete process.env.DOCGEN_DIAGNOSTICS;
-    }
-  });
+	      const result = await service.generateResume('user-1', {
+	        baselineId: baseline.id,
+	        baselineVersionId: baselineVersion.id,
+	        jobId: job.id,
+	        analysisId: assessment.id,
+	        oneTap: false,
+	      } as any);
+	      expect(result.status).toBe('success');
+	      expect(result.blocked).toBe(false);
+	      expect(result.preview?.resume).toBeTruthy();
+	      expect(JSON.stringify(result.preview?.resume ?? {})).not.toContain('We couldnâ€™t generate');
+	      const limitation = (result as any)?.internal?.tailoringLimitations?.structuredBaselineTemplate ?? null;
+	      expect(limitation).toEqual(
+	        expect.objectContaining({
+	          reason: 'zero_experience_headers',
+	          missingEvidenceReasons: expect.any(Array),
+	        }),
+	      );
+	      // Verified-only fallback emits an empty traceMap by design (no drafted bullet anchoring).
+	      expect(result.traceMap).toEqual({});
+	      expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
+	    } finally {
+	      baseline.sections = originalSections;
+	      baseline.parsedRecords = originalParsed;
+	      if (typeof originalResumeV2Flag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalResumeV2Flag;
+	      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+	      if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
+	      else delete process.env.DOCGEN_DIAGNOSTICS;
+	    }
+	  });
 
   it('render plan fingerprint changes when role corpus changes (diagnostics-only)', async () => {
     const { service } = buildService();
@@ -3039,6 +3112,165 @@ describe('ResumeService contract', () => {
       expect(readiness.status).toBe('ready');
       expect(readiness.blocked).toBe(false);
       expect((readiness as any)?.canGenerateResume ?? true).toBe(true);
+    } finally {
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = originalParsedRecords;
+    }
+  });
+
+  it('prefers ResumeV2 generation when persisted ResumeV2 is usable even if the feature flag is off (prevents legacy structured-empty failures)', async () => {
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+
+    const originalSections = baseline.sections;
+    const originalParsedRecords = (baseline as any).parsedRecords;
+
+    try {
+      baseline.sections = []; // legacy structured extraction is empty
+      (baseline as any).parsedRecords = [
+        {
+          id: 'parsed-1',
+          baselineVersionId: baselineVersion.id,
+          resumeV2Json: {
+            heading: { name: 'Test', contactLine: 'Test' },
+            experience: [
+              {
+                company: 'Acme',
+                roleTitle: 'Support Ops Lead',
+                dateRange: '2021 - 2024',
+                bullets: ['Owned escalations', 'Built dashboards'],
+              },
+            ],
+            education: [],
+          },
+        },
+      ];
+
+      const { service } = buildService();
+      await expect(
+        service.generateResume(
+          'user-1',
+          {
+            ...baseRequest,
+            analysisId: 'analysis-1',
+            oneTap: false,
+          } as any,
+        ),
+      ).resolves.toMatchObject({
+        ok: true,
+        status: 'success',
+      });
+    } finally {
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = originalParsedRecords;
+      if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    }
+  });
+
+  it('does not drop short-but-meaningful ResumeV2 bullets and block persistence (ResumeV2 lane)', async () => {
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
+
+    const originalSections = baseline.sections;
+    const originalParsedRecords = (baseline as any).parsedRecords;
+
+    try {
+      baseline.sections = []; // legacy structured extraction empty
+      (baseline as any).parsedRecords = [
+        {
+          id: 'parsed-1',
+          baselineVersionId: baselineVersion.id,
+          resumeV2Json: {
+            heading: { name: 'Test', contactLine: 'Test' },
+            experience: [
+              {
+                company: 'Acme',
+                roleTitle: 'Support Ops Lead',
+                dateRange: '2021 - 2024',
+                // Intentionally short bullets that used to be filtered out (< 10 chars) and could cause empty output.
+                bullets: ['Owned', 'Scaled'],
+              },
+            ],
+            education: [],
+          },
+        },
+      ];
+
+      const { service } = buildService();
+      await expect(
+        service.generateResume(
+          'user-1',
+          {
+            ...baseRequest,
+            analysisId: 'analysis-1',
+            oneTap: false,
+          } as any,
+        ),
+      ).resolves.toMatchObject({
+        ok: true,
+        status: 'success',
+      });
+    } finally {
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = originalParsedRecords;
+      if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    }
+  });
+
+  it('blocks Studio readiness with the canonical ResumeV2 invalid reason when persisted ResumeV2 has no usable experience', async () => {
+    const originalSections = baseline.sections;
+    const originalParsedRecords = (baseline as any).parsedRecords;
+
+    try {
+      baseline.sections = []; // structured/template extraction would be empty (ResumeV2 authority should apply)
+      (baseline as any).parsedRecords = [
+        {
+          id: 'parsed-1',
+          baselineVersionId: baselineVersion.id,
+          resumeV2Json: {
+            heading: { name: 'Test', contactLine: 'Test' },
+            experience: [],
+            education: [],
+          },
+        },
+      ];
+
+      const { service } = buildService();
+      const readiness = await service.getGenerationReadiness(
+        'user-1',
+        {
+          ...baseRequest,
+          analysisId: 'analysis-1',
+          oneTap: false,
+        } as any,
+      );
+
+      expect(readiness.status).toBe('blocked');
+      expect(readiness.blocked).toBe(true);
+      expect(readiness.reasons?.[0]?.code).toBe('baseline_resume_v2_invalid');
+      expect(typeof readiness.reasons?.[0]?.message).toBe('string');
+      expect(String(readiness.reasons?.[0]?.message ?? '')).toContain('ResumeV2');
+
+      await expect(
+        service.generateResume(
+          'user-1',
+          {
+            ...baseRequest,
+            analysisId: 'analysis-1',
+            oneTap: false,
+          } as any,
+        ),
+      ).rejects.toMatchObject({
+        status: 422,
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: 'baseline_resume_v2_invalid',
+            message: readiness.reasons?.[0]?.message,
+          }),
+        }),
+      });
     } finally {
       baseline.sections = originalSections;
       (baseline as any).parsedRecords = originalParsedRecords;

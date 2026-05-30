@@ -38,12 +38,15 @@ export function resolveWorkflowAuthority(input: ResolveWorkflowAuthorityInput): 
   const hasBaselineResumeV2Blocker = reasonCodes.some((code) => code.startsWith("baseline_resume_v2_"));
 
   // Deterministic authority rules (single lane):
-  // - Once any usable output exists, workflow is READY regardless of lifecycle turbulence.
-  // - Otherwise, baseline ResumeV2 blockers are always BLOCKED (structural baseline authority).
-  // - Otherwise, readiness.blocked is BLOCKED.
+  // - Structural baseline/readiness blockers always win (never show READY/CURRENT when blocked).
   // - Otherwise, score >= 80 is READY (generate-now contract).
+  // - Output presence affects messaging/actions, but must not override blockers.
   const workflowState: WorkflowAuthorityState = hasAnyUsableOutput
-    ? "READY"
+    ? (hasBaselineResumeV2Blocker || input.generationReadiness.blocked
+        ? "BLOCKED"
+        : typeof score === "number" && score >= 80
+          ? "READY"
+          : "REVIEW_REQUIRED")
     : hasBaselineResumeV2Blocker
       ? "BLOCKED"
       : input.generationReadiness.blocked

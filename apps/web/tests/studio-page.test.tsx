@@ -1553,6 +1553,8 @@ describe("Studio page UX", () => {
     // Artifacts remain the visible product outcome.
     expect((await screen.findAllByTestId("resume-preview")).length).toBeGreaterThan(0);
     expect(await screen.findByTestId("studio-cover-letter-preview-body")).toBeInTheDocument();
+    expect(screen.queryByText(/readiness could not be evaluated/i)).toBeNull();
+    expect(screen.queryByText("Why generation is blocked")).toBeNull();
 
     // Secondary systems remain below materials (and are collapsed).
     const secondarySystems = screen.getByTestId("studio-secondary-systems");
@@ -1627,12 +1629,81 @@ describe("Studio page UX", () => {
     const nextAction = within(guidance).getByTestId("studio-blocker-next-action");
     expect(nextAction.getAttribute("href")?.trim().length).toBeGreaterThan(0);
     expect(screen.queryByTestId("studio-download-application-package")).toBeNull();
+    expect(screen.queryByText("Ready to generate")).toBeNull();
+    expect(screen.queryByText(/ready for generation using your verified baseline/i)).toBeNull();
 
     // No fake materials should render when artifacts are missing and generation is blocked.
     expect(screen.queryByTestId("studio-resume-ready-panel")).toBeNull();
     expect(screen.queryByTestId("studio-resume-correction-panel")).toBeNull();
     expect(screen.queryByText("Support leader focused on scalable operations.")).toBeNull();
     expect(screen.queryByText("I bring verified leadership and operational experience aligned to this role.")).toBeNull();
+  }, 20000);
+
+  it("renders a single blocked readiness state when readiness fails (no READY + blocked contradiction)", async () => {
+    overrideSearchParams({
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      analysisId: "analysis-1",
+    });
+
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const rawUrl = rawFetchUrl(input);
+
+      if (rawUrl.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "COMPLETED",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "job-fingerprint-1",
+            generationContractVersion: "studio-artifacts-v1",
+            assessmentScore: 83,
+            resume: null,
+            coverLetter: null,
+          }),
+        );
+      }
+
+      if (rawUrl.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(createResponse(createFitAssessment(83)));
+      }
+
+      if (rawUrl.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+
+      if (rawUrl.includes("/api/resume/readiness")) {
+        return Promise.resolve(createResponse({ error: { code: "readiness_http_500" } }, false, 500));
+      }
+
+      if (rawUrl.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ error: { code: "readiness_http_500" } }, false, 500));
+      }
+
+      if (rawUrl.includes("/api/analytics/event")) {
+        return Promise.resolve(createResponse({ ok: true }));
+      }
+
+      return Promise.resolve(createResponse({}));
+    });
+
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    renderStudio();
+
+    const guidance = await screen.findByTestId("studio-guidance-details");
+    expect(within(guidance).getByTestId("studio-readiness-message")).toHaveTextContent(
+      "Readiness could not be evaluated",
+    );
+    expect(screen.queryByText(/ready for generation using your verified baseline/i)).toBeNull();
+    expect(screen.queryByText(/built from your baseline evidence and ready for generation/i)).toBeNull();
+    expect(screen.queryByText(/you can still generate drafts/i)).toBeNull();
+    expect(screen.queryByText(/output may be limited, but you can generate/i)).toBeNull();
+    expect(screen.queryByText("Ready to generate")).toBeNull();
+    expect(screen.queryByTestId("studio-evidence-blocked-panel")).toBeNull();
   }, 20000);
 
   it("hydrates an already applied application and keeps the momentum state on refresh", async () => {

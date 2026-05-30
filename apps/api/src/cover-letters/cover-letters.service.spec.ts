@@ -366,6 +366,23 @@ describe('CoverLettersService contract', () => {
       const result = await service.generateCoverLetter('user-1', request as any);
       expect(result.status).toBe('success');
       expect(studioArtifactsService.recordCoverLetterSuccess).toHaveBeenCalled();
+      expect(studioArtifactsService.recordCoverLetterSuccess).toHaveBeenCalledTimes(1);
+      const persisted = (studioArtifactsService.recordCoverLetterSuccess as any).mock.calls[0][0];
+      expect(persisted).toEqual(
+        expect.objectContaining({
+          userId: baseline.userId,
+          baselineId: request.baselineId,
+          baselineVersionId: request.baselineVersionId,
+          jobId: request.jobId,
+          analysisId: request.analysisId,
+          responseBody: expect.any(Object),
+        }),
+      );
+      expect(
+        Array.isArray((persisted?.responseBody as any)?.preview?.coverLetter?.paragraphs)
+          ? (persisted.responseBody as any).preview.coverLetter.paragraphs.length
+          : 0,
+      ).toBeGreaterThan(0);
       expect(String((result as any).content ?? '')).toMatch(/Node\.js|PostgreSQL|AWS|35%/i);
       // Interpreted-evidence audit fields are optional when ResumeV2-derived baseline evidence is sufficient.
     } finally {
@@ -377,6 +394,17 @@ describe('CoverLettersService contract', () => {
         } as any,
       ];
     }
+  });
+
+  it('does not complete a successful cover letter generation when Studio artifact persistence fails', async () => {
+    const { service, studioArtifactsService } = buildService();
+
+    (studioArtifactsService.recordCoverLetterSuccess as any).mockRejectedValueOnce(
+      new Error('persistence_failed'),
+    );
+
+    await expect(service.generateCoverLetter('user-1', request as any)).rejects.toBeTruthy();
+    expect(studioArtifactsService.recordCoverLetterSuccess).toHaveBeenCalled();
   });
 
   it('selects strong ResumeV2 evidence blocks for cover letter (drops weak/suppressed fragments when strong roles exist)', async () => {

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   type ChangeEvent,
   type DragEvent,
@@ -383,6 +384,7 @@ function extractApprovedSignalAdditions(baseline: BaselineDto | null): string[] 
 }
 
 export function BaselineStudioHome({ baselines, libraryMode = "editable" }: BaselineStudioHomeProps) {
+  const router = useRouter();
   const [isHydrated, setIsHydrated] = useState(false);
   const [baselineList, setBaselineList] = useState<BaselineDto[]>(baselines);
   const [primaryBaselineId, setPrimaryBaselineId] = useState<string | null>(() =>
@@ -1662,12 +1664,12 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 ) : null}
                 <div className="mt-4 flex flex-wrap gap-2">
                   {primaryBaseline.capability?.targetReady === true ? (
-                    <Link
-                      href={targetRoleHref}
-                      className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold uppercase text-cyan-50 transition hover:bg-cyan-400/15"
+                    <FormButton
+                      onClick={() => router.push(targetRoleHref)}
+                      className="bg-cyan-400/10 uppercase text-cyan-50 hover:bg-cyan-400/15"
                     >
                       {TARGET_ROLE_CTA_LABEL}
-                    </Link>
+                    </FormButton>
                   ) : (
                     <Link
                       href={baselineDetailsHref}
@@ -1784,12 +1786,12 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                     <div className="mt-4 space-y-3">
                       <div className="flex flex-wrap gap-2">
                         {isReadyBaseline ? (
-                          <Link
-                            href={baselineTargetRoleHref}
-                            className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold uppercase text-cyan-50 transition hover:bg-cyan-400/15"
+                          <FormButton
+                            onClick={() => router.push(baselineTargetRoleHref)}
+                            className="bg-cyan-400/10 uppercase text-cyan-50 hover:bg-cyan-400/15"
                           >
                             {TARGET_ROLE_CTA_LABEL}
-                          </Link>
+                          </FormButton>
                         ) : (
                           <FormButton
                             onClick={() => handleSetCurrentBaseline(baseline.id)}

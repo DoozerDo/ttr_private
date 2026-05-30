@@ -10,6 +10,53 @@ import {
 import { BaselineIncludePolicy, BaselineSectionType } from './baseline-section.entity';
 import { extractStructuredBaselineFromSections } from './structuredBaselineExtractor';
 
+export type ResumeV2Usability = {
+  usable: boolean;
+  usableExperienceCount: number;
+  reasons: string[];
+};
+
+export function evaluateResumeV2Usability(resumeV2Json: unknown): ResumeV2Usability {
+  if (!resumeV2Json || typeof resumeV2Json !== 'object') {
+    return { usable: false, usableExperienceCount: 0, reasons: ['missing_resume_v2'] };
+  }
+  const normalized = normalizeNormalizedResumeDocument(resumeV2Json as NormalizedResumeDocument);
+  const validation = validateNormalizedResumeDocument(normalized);
+  const experienceCount = Array.isArray((normalized as any)?.experience) ? (normalized as any).experience.length : 0;
+  if (!validation.valid) {
+    return { usable: false, usableExperienceCount: 0, reasons: ['invalid_resume_v2', ...validation.reasons] };
+  }
+  if (experienceCount <= 0) {
+    return { usable: false, usableExperienceCount: 0, reasons: ['usable_experience_empty'] };
+  }
+  return { usable: true, usableExperienceCount: experienceCount, reasons: [] };
+}
+
+export function assertUsableResumeV2(resumeV2Json: unknown) {
+  const usability = evaluateResumeV2Usability(resumeV2Json);
+  if (usability.usable) return usability;
+  if (usability.reasons.includes('missing_resume_v2')) {
+    throw new UnprocessableEntityException({
+      error: {
+        code: 'baseline_resume_v2_missing',
+        message: 'Baseline ResumeV2 is missing. Repair your baseline before generating.',
+        details: { usableExperienceCount: 0 },
+      },
+    });
+  }
+  const normalized = resumeV2Json && typeof resumeV2Json === 'object'
+    ? normalizeNormalizedResumeDocument(resumeV2Json as NormalizedResumeDocument)
+    : null;
+  const failures = normalized ? buildNormalizedResumeValidationFailures(normalized as any) : [];
+  throw new UnprocessableEntityException({
+    error: {
+      code: 'baseline_resume_v2_invalid',
+      message: formatResumeV2InvalidMessage({ reasons: usability.reasons, failures }),
+      details: { usableExperienceCount: 0, reasons: usability.reasons, failures },
+    },
+  });
+}
+
 export function buildValidatedResumeV2FromParsedBaseline(
   parsedBaseline: Record<string, unknown>,
   baselineSections?: Array<Record<string, unknown>> | null,

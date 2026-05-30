@@ -462,12 +462,36 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
     | {
         scoring_v2?: {
           score?: number | null;
-          readiness?: { status?: "ready" | "limited" | "blocked" | null };
-          generation_readiness?: { status?: "ready" | "limited" | "blocked" | null };
+          readiness?: {
+            status?: "ready" | "limited" | "blocked" | null;
+            reasonCodes?: string[] | null;
+            reason_codes?: string[] | null;
+            reasons?: Array<{ code?: string | null } | null> | null;
+            verificationIssues?: Array<{ code?: string | null } | null> | null;
+          };
+          generation_readiness?: {
+            status?: "ready" | "limited" | "blocked" | null;
+            reasonCodes?: string[] | null;
+            reason_codes?: string[] | null;
+            reasons?: Array<{ code?: string | null } | null> | null;
+            verificationIssues?: Array<{ code?: string | null } | null> | null;
+          };
         } | null;
-        readiness?: { status?: "ready" | "limited" | "blocked" | null };
+        readiness?: {
+          status?: "ready" | "limited" | "blocked" | null;
+          reasonCodes?: string[] | null;
+          reason_codes?: string[] | null;
+          reasons?: Array<{ code?: string | null } | null> | null;
+          verificationIssues?: Array<{ code?: string | null } | null> | null;
+        };
         readinessStatus?: "ready" | "limited" | "blocked" | null;
-        generation_readiness?: { status?: "ready" | "limited" | "blocked" | null };
+        generation_readiness?: {
+          status?: "ready" | "limited" | "blocked" | null;
+          reasonCodes?: string[] | null;
+          reason_codes?: string[] | null;
+          reasons?: Array<{ code?: string | null } | null> | null;
+          verificationIssues?: Array<{ code?: string | null } | null> | null;
+        };
         generatedDocuments?: unknown[];
         generated_documents?: unknown[];
         studio?: { generatedDocuments?: unknown[] };
@@ -480,6 +504,115 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
     analysisPayload?.readiness?.status ??
     analysisPayload?.readinessStatus ??
     null;
+
+  const readinessReasonCodes = (() => {
+    const codes: string[] = [];
+    const pushCodes = (value: unknown) => {
+      if (!Array.isArray(value)) return;
+      for (const item of value) {
+        const code = typeof item === "string" ? item : null;
+        if (code) codes.push(code);
+      }
+    };
+    const pushCodeObjects = (value: unknown) => {
+      if (!Array.isArray(value)) return;
+      for (const item of value) {
+        if (!item || typeof item !== "object") continue;
+        const code = (item as { code?: unknown }).code;
+        if (typeof code === "string" && code.trim()) codes.push(code.trim());
+      }
+    };
+
+    const scoring = analysisPayload?.scoring_v2 ?? null;
+    const generation = scoring?.generation_readiness ?? analysisPayload?.generation_readiness ?? null;
+    const readiness = scoring?.readiness ?? analysisPayload?.readiness ?? null;
+
+    pushCodes(generation?.reasonCodes);
+    pushCodes(generation?.reason_codes);
+    pushCodes(readiness?.reasonCodes);
+    pushCodes(readiness?.reason_codes);
+
+    if (!codes.length) {
+      pushCodeObjects(generation?.reasons);
+      pushCodeObjects(generation?.verificationIssues);
+      pushCodeObjects(readiness?.reasons);
+      pushCodeObjects(readiness?.verificationIssues);
+    }
+
+    return codes.length ? codes : null;
+  })();
+
+  // Studio stepper authority must honor structural baseline blockers even when they are only known
+  // from the canonical Studio artifacts surface (persisted /api/studio/artifacts hydration).
+  const studioStructuralBlockerCodes = (() => {
+    if (typeof window === "undefined") return [];
+    if (!pathname.startsWith("/studio")) return [];
+
+    const baselineId = typeof lastAnalysis?.baselineId === "string" ? lastAnalysis?.baselineId : null;
+    const jobId = typeof lastAnalysis?.jobId === "string" ? lastAnalysis?.jobId : null;
+    const analysisId =
+      typeof (lastAnalysis?.analysis as any)?.assessmentId === "string"
+        ? String((lastAnalysis?.analysis as any)?.assessmentId)
+        : typeof (lastAnalysis?.analysis as any)?.analysisId === "string"
+          ? String((lastAnalysis?.analysis as any)?.analysisId)
+          : null;
+
+    const safeJobId = typeof jobId === "string" ? jobId.trim() : "";
+    const safeBaselineId = typeof baselineId === "string" ? baselineId.trim() : "";
+    const safeAnalysisId = typeof analysisId === "string" && analysisId.trim() ? analysisId.trim() : "_";
+    if (!safeJobId || !safeBaselineId) return [];
+
+    const primaryKey = `ttr:studio-artifacts:v2:${safeJobId}:${safeBaselineId}:${safeAnalysisId}`;
+    const fallbackKey = `ttr:studio-artifacts:v2:${safeJobId}:${safeBaselineId}:_`;
+    try {
+      const prefix = `ttr:studio-artifacts:v2:${safeJobId}:${safeBaselineId}:`;
+      const findAnyMatchingKey = (): string | null => {
+        const storage = window.localStorage as unknown as { length?: number; key?: (index: number) => string | null };
+        const length = typeof storage?.length === "number" ? storage.length : 0;
+        for (let i = 0; i < length; i += 1) {
+          const k = typeof storage?.key === "function" ? storage.key(i) : null;
+          if (k && k.startsWith(prefix)) return k;
+        }
+        return null;
+      };
+
+      const raw =
+        window.localStorage?.getItem(primaryKey) ??
+        window.localStorage?.getItem(fallbackKey) ??
+        (() => {
+          const anyKey = findAnyMatchingKey();
+          return anyKey ? window.localStorage?.getItem(anyKey) : null;
+        })();
+      if (!raw) return [];
+      const snapshot = JSON.parse(raw) as { errors?: unknown; scoring_v2?: any };
+
+      const codes: string[] = [];
+      const errors = Array.isArray((snapshot as any)?.errors) ? ((snapshot as any).errors as any[]) : [];
+      for (const err of errors) {
+        const code = typeof err?.code === "string" ? err.code : null;
+        if (code && code.startsWith("baseline_resume_v2_")) codes.push(code);
+      }
+
+      const fromReadiness = (snapshot as any)?.scoring_v2?.generation_readiness?.reasonCodes;
+      if (Array.isArray(fromReadiness)) {
+        for (const item of fromReadiness) {
+          const code = typeof item === "string" ? item : null;
+          if (code && code.startsWith("baseline_resume_v2_")) codes.push(code);
+        }
+      }
+
+      return codes;
+    } catch {
+      return [];
+    }
+  })();
+
+  const mergedReadinessReasonCodes = (() => {
+    const set = new Set<string>();
+    for (const code of readinessReasonCodes ?? []) set.add(code);
+    for (const code of studioStructuralBlockerCodes) set.add(code);
+    return set.size ? Array.from(set) : null;
+  })();
   const hasGeneratedDocuments =
     Array.isArray(analysisPayload?.generatedDocuments) ||
     Array.isArray(analysisPayload?.generated_documents) ||
@@ -513,6 +646,7 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
                     analysisExists={Boolean(lastAnalysis)}
                     score={lastAnalysis?.fitScore ?? null}
                     readinessStatus={readinessStatus}
+                    readinessReasonCodes={mergedReadinessReasonCodes}
                     hasGeneratedDocuments={hasGeneratedDocuments}
                     hasSavedOpportunity={pathname.startsWith("/job-tracker")}
                     onNavigate={(href) => {

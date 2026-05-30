@@ -3,7 +3,7 @@ import { vi } from "vitest";
 
 import { BaselineStudioHome } from "@/app/(app)/baseline/BaselineStudioHome";
 import { publishBaselineUpdated } from "@/src/lib/baseline-sync";
-import { setFetchImplementation } from "@/tests/setup";
+import { mockRouterPush, setFetchImplementation } from "@/tests/setup";
 
 function createBaseline(
   id: string,
@@ -169,7 +169,7 @@ describe("BaselineStudioHome", () => {
     expect(screen.queryByText("Your resume has been converted into a baseline.")).toBeNull();
     expect(screen.queryByText(/Your baseline is ready for targeting, but it still needs analysis/i)).toBeNull();
     expect(screen.getByRole("heading", { name: "Other baselines" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "TARGET A ROLE" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "TARGET A ROLE" })).toBeNull();
     expect(screen.getByRole("link", { name: "REVIEW BASELINE" })).toBeInTheDocument();
     expect(
       screen.getByText("You need to complete baseline verification before targeting roles."),
@@ -210,11 +210,63 @@ describe("BaselineStudioHome", () => {
     );
 
     await screen.findByRole("heading", { name: "Current baseline" });
-    expect(screen.getByRole("link", { name: "TARGET A ROLE" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "TARGET A ROLE" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "REVIEW BASELINE" })).toBeNull();
     expect(
       screen.queryByText("You need to complete baseline verification before targeting roles."),
     ).toBeNull();
+  });
+
+  it("clicking TARGET A ROLE on the current baseline triggers navigation", async () => {
+    setFetchImplementation(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(
+      <BaselineStudioHome
+        baselines={[
+          createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf", {
+            latestAssessmentId: null,
+            latestAssessmentCreatedAt: null,
+            latestFitScore: null,
+            hasCompletedAssessment: false,
+          }, 82, true),
+        ]}
+      />,
+    );
+
+    await screen.findByRole("heading", { name: "Current baseline" });
+    fireEvent.click(screen.getByRole("button", { name: "TARGET A ROLE" }));
+    expect(mockRouterPush).toHaveBeenCalledWith("/target?baselineId=base-1");
+  });
+
+  it("clicking TARGET A ROLE on a secondary baseline triggers navigation with that baselineId", async () => {
+    setFetchImplementation(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(
+      <BaselineStudioHome
+        baselines={[
+          createBaseline("base-current", "2026-01-01T00:00:00.000Z", "resume-current.pdf", undefined, 82, true),
+          createBaseline("base-secondary", "2026-01-02T00:00:00.000Z", "resume-secondary.pdf", undefined, 82, false),
+        ]}
+      />,
+    );
+
+    await screen.findByRole("heading", { name: "Other baselines" });
+    const librarySection = screen.getByTestId("baseline-library-section");
+    const ctas = within(librarySection).getAllByRole("button", { name: "TARGET A ROLE" });
+    fireEvent.click(ctas[0]);
+    expect(mockRouterPush).toHaveBeenCalledWith("/target?baselineId=base-secondary");
   });
 
   it("shows the upload setup CTA when no baseline exists", async () => {
@@ -285,15 +337,11 @@ describe("BaselineStudioHome", () => {
       />,
     );
 
-    const targetRoleLink = () => screen.getAllByRole("link", { name: "TARGET A ROLE" })[0];
+    const targetRoleLink = () => screen.getAllByRole("button", { name: "TARGET A ROLE" })[0];
 
     await screen.findByRole("heading", { name: "Current baseline" });
-    await waitFor(() => {
-      expect(targetRoleLink()).toHaveAttribute(
-        "href",
-        "/target?baselineId=base-2",
-      );
-    });
+    fireEvent.click(targetRoleLink());
+    expect(mockRouterPush).toHaveBeenCalledWith("/target?baselineId=base-2");
 
     const sourceSection = screen.getByRole("heading", { name: "Other baselines" }).closest("section");
     expect(sourceSection).toBeTruthy();
@@ -309,8 +357,8 @@ describe("BaselineStudioHome", () => {
     });
     await waitFor(() => {
       expect(targetRoleLink()).toHaveAttribute(
-        "href",
-        "/target?baselineId=base-2",
+        "type",
+        "button",
       );
       expect(within(sourceSection as HTMLElement).queryByText("resume-1.pdf")).toBeNull();
     });
@@ -323,7 +371,7 @@ describe("BaselineStudioHome", () => {
     expect(screen.queryByTestId("baseline-upload-surface")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Upload resume" })).toBeNull();
     expect(screen.getAllByRole("button", { name: /upload another resume/i }).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("link", { name: "TARGET A ROLE" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "TARGET A ROLE" })).toBeNull();
   });
 
   it("shows the launch point for a qualified analyzed baseline", async () => {
@@ -351,12 +399,10 @@ describe("BaselineStudioHome", () => {
     expect(within(activeSection as HTMLElement).getByText("Version 1 (current)")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Upload resume" })).toBeNull();
     expect(screen.getAllByRole("link", { name: "View baseline details" }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: "TARGET A ROLE" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "TARGET A ROLE" }).length).toBeGreaterThan(0);
     await waitFor(() => {
-      expect(screen.getAllByRole("link", { name: "TARGET A ROLE" })[0]).toHaveAttribute(
-        "href",
-        "/target?baselineId=base-1",
-      );
+      fireEvent.click(screen.getAllByRole("button", { name: "TARGET A ROLE" })[0]);
+      expect(mockRouterPush).toHaveBeenCalledWith("/target?baselineId=base-1");
     });
     expect(screen.queryByRole("link", { name: "START FIT REVIEW" })).toBeNull();
     expect(screen.getByText("What is a baseline?")).toBeInTheDocument();
@@ -458,10 +504,8 @@ describe("BaselineStudioHome", () => {
     await waitFor(() => {
       const currentSection = screen.getByRole("heading", { name: "Current baseline" }).closest("section");
       expect(currentSection).toBeTruthy();
-      expect(within(currentSection as HTMLElement).getByRole("link", { name: "TARGET A ROLE" })).toHaveAttribute(
-        "href",
-        "/target?baselineId=base-1",
-      );
+      fireEvent.click(within(currentSection as HTMLElement).getByRole("button", { name: "TARGET A ROLE" }));
+      expect(mockRouterPush).toHaveBeenCalledWith("/target?baselineId=base-1");
     });
     expect(screen.getByRole("heading", { name: "Other baselines" })).toBeInTheDocument();
     clickSpy.mockRestore();
@@ -573,7 +617,7 @@ describe("BaselineStudioHome", () => {
     expect(within(activeSection as HTMLElement).queryByText("Validated baseline")).toBeNull();
     expect(screen.queryByRole("button", { name: "Upload resume" })).toBeNull();
     expect(screen.getAllByRole("link", { name: "View baseline details" }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: "TARGET A ROLE" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "TARGET A ROLE" }).length).toBeGreaterThan(0);
     expect(screen.queryByRole("link", { name: "OPEN RESUME STUDIO" })).toBeNull();
   });
 
@@ -921,7 +965,7 @@ describe("BaselineStudioHome", () => {
     await screen.findByRole("heading", { name: "Current baseline" });
     const activeSection = screen.getByRole("heading", { name: "Current baseline" }).closest("section");
     expect(activeSection).toBeTruthy();
-    expect(within(activeSection as HTMLElement).getAllByRole("link", { name: "TARGET A ROLE" }).length).toBeGreaterThan(0);
+    expect(within(activeSection as HTMLElement).getAllByRole("button", { name: "TARGET A ROLE" }).length).toBeGreaterThan(0);
 
     const activeCard = within(screen.getAllByText("resume-new.pdf")[0].closest("article") as HTMLElement);
     expect(activeCard.getByText(/ready for targeting/i)).toBeInTheDocument();

@@ -246,8 +246,8 @@ export function resolveWorkflowOrchestrator(input: WorkflowOrchestratorInput): W
         surface: input.surface,
         currentPathname: null,
         ids: input.ids ?? undefined,
-        baselineReady: true,
-        analysisExists: true,
+        baselineReady: !safeReadiness.blocked,
+        analysisExists: typeof input.score === "number",
         score: typeof input.score === "number" ? input.score : null,
         generationReadiness: {
           status: safeReadiness.status,

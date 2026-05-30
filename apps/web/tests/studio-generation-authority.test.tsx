@@ -728,7 +728,11 @@ describe("Studio artifact quality gating (soft)", () => {
         await screen.findByText(/We hit an issue generating your resume\./i);
       }
       expect(
-        screen.queryByText(/Regenerate resume/i) ?? screen.queryByTestId("studio-generation-ready-primary"),
+        screen.queryByText(/Regenerate resume/i) ??
+          screen.queryByText(/Retry generation/i) ??
+          screen.queryByTestId("studio-generation-ready-primary") ??
+          // Structural baseline repair can supersede retry when ResumeV2 authority is blocked.
+          screen.queryByTestId("studio-resume-reprocess-baseline"),
       ).toBeTruthy();
       expect(screen.queryByText(/resume_v2_normalized_model_invalid/i)).toBeNull();
       expect(screen.queryByText(/Download DOCX/i)).toBeNull();
@@ -742,7 +746,9 @@ describe("Studio artifact quality gating (soft)", () => {
     // The legacy correction panel is no longer guaranteed under the safe single-eligibility gate.
     // If the artifact is malformed or missing required preview fields, Studio should show the clean issue message.
     await screen.findByText(/We hit an issue generating your resume\./i);
-    expect(screen.getByText(/Regenerate resume/i)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Regenerate resume/i) ?? screen.queryByText(/Retry generation/i),
+    ).toBeTruthy();
     expect(screen.queryByText(/resume_v2_normalized_model_invalid/i)).toBeNull();
     expect(calls.filter((c) => c.url.includes("/api/studio/artifacts")).length).toBeGreaterThanOrEqual(2);
   });

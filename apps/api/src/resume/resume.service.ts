@@ -56,6 +56,7 @@ import {
 } from '../docx-templates/docx-template.registry';
 import { resolveBaselineIdentity } from '../baseline/baseline-identity.utils';
 import { resolveBaselineSectionsForGeneration } from '../baseline/baseline-section-source';
+import { assertUsableResumeV2, evaluateResumeV2Usability } from '../baseline/baseline-resume-v2';
 import * as ResumeDraftBullets from './resume-draft-bullets';
 import type { ResumeDraftSection } from './resume-draft-bullets';
 import {
@@ -1823,6 +1824,19 @@ export class ResumeService {
         throw new NotFoundException('Baseline not found');
       }
 
+      // Production parity: when a usable persisted ResumeV2 authority exists, prefer the ResumeV2 lane even if the
+      // feature flag is off. Readiness can approve baselines based on ResumeV2 while legacy structured extraction
+      // remains empty; generation must not fail later due to that legacy lane.
+      if (!isResumeV2) {
+        try {
+          const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
+          const usability = evaluateResumeV2Usability(persisted);
+          if (usability.usable) isResumeV2 = true;
+        } catch {
+          // ignore; retain legacy lane selection
+        }
+      }
+
     const baselineVersion = baselineVersionId
       ? await this.baselineVersionRepository.findOne({
           where: { id: baselineVersionId, baselineId: baseline.id },
@@ -1927,10 +1941,10 @@ export class ResumeService {
         return tools.length > 0 || metrics.length > 0;
       });
 
-    if (!options?.skipReadinessGate && !isVerifiedOnlyRequest) {
-      const readiness = await this.getGenerationReadiness(userId, request, {
-        skipReadinessGate: true,
-      });
+	    if (!options?.skipReadinessGate && !isVerifiedOnlyRequest) {
+	      const readiness = await this.getGenerationReadiness(userId, request, {
+	        skipReadinessGate: true,
+	      });
       // Limited readiness is non-blocking; proceed with generation and rely on strict template safety filtering.
       if (readiness.status === 'blocked') {
         const templateNotReadyReason = (readiness as any)?.reasons?.find?.(
@@ -1947,30 +1961,16 @@ export class ResumeService {
           const details = (templateNotReadyReason?.details as any) ?? {};
           const totalExperience = Number(details?.totalExperience ?? 0);
           const validExperience = Number(details?.validExperience ?? 0);
-          // Prompt 14: Fail closed when no authoritative experience groups exist.
-          // Never fall back to legacy minimal resume synthesis to construct employer-role structure from raw text.
-          if (totalExperience === 0 && validExperience === 0) {
-            throw new UnprocessableEntityException(buildArtifactFailurePayload({
-              code: 'generation_blocked',
-              category: 'generation_blocked',
-              message: 'Resume generation is blocked because employer-role experience extraction failed.',
-              detail:
-                'No valid structured experience groups (company + role title + bullets) were found. Reprocess the baseline resume or re-upload with clearer experience headers.',
-              retryable: true,
-              diagnostics: {
-                artifactReadiness: 'blocked',
-                authoritativeExtractionSucceeded: false,
-                authoritativeExperienceGroupCount: 0,
-                fallbackGenerationPrevented: true,
-                legacyFallbackAttemptBlocked: true,
-                generationTerminationStage: 'authoritative_extraction_gate',
-              },
-            }));
-          }
-          throw new UnprocessableEntityException({
-            code: 'baseline_template_not_ready',
-            reasons:
-              (templateNotReadyReason?.details as any)?.reasons ??
+	          // Product contract (Studio): resume generation must not hard-block high-eligibility workflows
+	          // when verified baseline content exists. If authoritative extraction yields zero roles, we
+	          // degrade to a verified-only baseline draft later in the pipeline instead of returning 422.
+	          if (totalExperience === 0 && validExperience === 0) {
+	            // Continue generation (non-blocking). Compliance enforcement still prevents fabrication.
+	          } else {
+	          throw new UnprocessableEntityException({
+	            code: 'baseline_template_not_ready',
+	            reasons:
+	              (templateNotReadyReason?.details as any)?.reasons ??
               [
                 {
                   code: 'baseline_template_not_ready',
@@ -1978,9 +1978,10 @@ export class ResumeService {
                     'Baseline is usable for scoring but is not template-safe for resume generation.',
                 },
               ],
-            details: templateNotReadyReason?.details ?? {},
-          });
-        }
+	            details: templateNotReadyReason?.details ?? {},
+	          });
+	          }
+	        }
 
         const score = effectiveAssessment?.overallScore ?? null;
         if (
@@ -2588,8 +2589,8 @@ export class ResumeService {
       links: [],
     };
 
-    const TEMPLATE_ASSEMBLY_THRESHOLD = 80;
-    const STRUCTURED_BASELINE_TEMPLATE_VERSION = 'structured-baseline-v1';
+	    const TEMPLATE_ASSEMBLY_THRESHOLD = 80;
+	    const STRUCTURED_BASELINE_TEMPLATE_VERSION = 'structured-baseline-v1';
     const scoreForTemplateRaw =
       effectiveAssessment?.overallScore ?? latestAssessment?.overallScore ?? 0;
     const scoreForTemplate = Number(scoreForTemplateRaw);
@@ -2604,8 +2605,12 @@ export class ResumeService {
       (!request.oneTap &&
         Number.isFinite(scoreForTemplate) &&
         scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD);
-    let usedStructuredBaselineTemplate = false;
-    let structuredBaselineExtractionMissingReasons: string[] | null = null;
+	    let usedStructuredBaselineTemplate = false;
+	    let structuredBaselineTemplateDegradedToBaselineOnly: {
+	      missingEvidenceReasons: string[];
+	      reason: 'zero_experience_headers';
+	    } | null = null;
+	    let structuredBaselineExtractionMissingReasons: string[] | null = null;
     let structuredBaselineTrace: {
       source: 'freshly_parsed_baseline_content' | 'persisted_cached' | 'responseBody_previous_artifact' | 'unknown';
       experienceCount: number;
@@ -2630,48 +2635,9 @@ export class ResumeService {
         try {
           const shouldLogV2 = process.env.RESUME_V2_INGEST_DEBUG === 'true';
           const persisted = persistedResumeV2;
-          if (!persisted || typeof persisted !== 'object') {
-            throw new UnprocessableEntityException({
-              error: {
-                code: 'baseline_resume_v2_missing',
-                message:
-                  'Baseline is missing a persisted ResumeV2 model. Re-run baseline processing (Fit Review) or re-upload your resume to re-ingest.',
-                details: {
-                  expected: ['baseline_parsed.resumeV2Json'],
-                },
-              },
-            });
-          }
+          // Canonical validity check (throws baseline_resume_v2_invalid with canonical message/details).
+          assertUsableResumeV2(persisted);
           const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
-          const validation = validateNormalizedResumeDocument(normalized);
-          if (!validation.valid) {
-            const failures = buildNormalizedResumeValidationFailures(normalized);
-            throw new UnprocessableEntityException({
-              error: {
-                code: 'baseline_resume_v2_invalid',
-                message: formatResumeV2InvalidMessage({ reasons: validation.reasons, failures }),
-                details: {
-                  reasons: validation.reasons,
-                  failures,
-                },
-              },
-            });
-          }
-          const experienceCount = Array.isArray((normalized as any)?.experience) ? (normalized as any).experience.length : 0;
-          if (experienceCount === 0) {
-            const failures = buildNormalizedResumeValidationFailures(normalized);
-            throw new UnprocessableEntityException({
-              error: {
-                code: 'baseline_resume_v2_invalid',
-                message: 'Baseline ResumeV2 contains no usable experience entries.',
-                details: {
-                  reasons: ['usable_experience_empty'],
-                  failures,
-                  usableExperienceCount: 0,
-                },
-              },
-            });
-          }
           if (Array.isArray((normalized as any).experience)) {
             const enforced = enforceEmployerRoleBulletProvenance({ experience: (normalized as any).experience });
             (normalized as any).experience = enforced.experience as any;
@@ -2857,28 +2823,28 @@ export class ResumeService {
             bulletCount: Array.isArray((entry as any)?.bullets) ? (entry as any).bullets.length : 0,
           })),
         };
-        // eslint-disable-next-line no-console
-        console.log('FORCED_TEMPLATE_RESUME', {
-          score: scoreForTemplate,
-          experienceCount: (structured.experience ?? []).length,
-        });
-        if ((structured.experience ?? []).length === 0) {
-          throw new UnprocessableEntityException(buildArtifactFailurePayload({
-            code: 'generation_blocked',
-            category: 'generation_blocked',
-            message: 'Resume could not be assembled because required baseline evidence is missing.',
-            detail: 'A fit score >= 80 requires structured baseline experience entries (company + role title).',
-            retryable: false,
-            userAction: {
-              title: 'Add verified experience structure',
-              description: 'Ensure your baseline includes Experience entries with company and role title headers.',
-            },
-            diagnostics: {
-              missingRequirements: structured.missingEvidenceReasons.slice(0, 8),
-            },
-          }));
-        }
-        usedStructuredBaselineTemplate = true;
+	        // eslint-disable-next-line no-console
+	        console.log('FORCED_TEMPLATE_RESUME', {
+	          score: scoreForTemplate,
+	          experienceCount: (structured.experience ?? []).length,
+	        });
+	        if ((structured.experience ?? []).length === 0) {
+	          // Contract: do not block generation for high-eligibility workflows. Degrade to a baseline-only
+	          // resume draft (verified content only) and mark limitations as non-blocking metadata.
+	          structuredBaselineExtractionMissingReasons = structured.missingEvidenceReasons.slice(0, 12);
+	          structuredBaselineTemplateDegradedToBaselineOnly = {
+	            reason: 'zero_experience_headers',
+	            missingEvidenceReasons: structuredBaselineExtractionMissingReasons,
+	          };
+	          usedMinimalFallback = true;
+	          sections = this.buildMinimalResumeSections(resumeInputSections);
+	          return buildNormalizedResumeDocument(
+	            sections as ResumeExportSection[],
+	            identity,
+	            { documentStrategyPlan: request.documentStrategyPlan ?? undefined },
+	          );
+	        }
+	        usedStructuredBaselineTemplate = true;
         // `resolveBaselineIdentity` returns `BaselineIdentity` (`fullName`, etc). Use those fields
         // explicitly so template assembly always has a stable, verified name and doesn't depend on
         // any untyped/legacy identity shape.
@@ -3839,22 +3805,25 @@ export class ResumeService {
       gapGuidance,
       display,
       safeDisplay: display,
-      internal: {
-        auditId: audit.id,
-        baselineVersionHash: audit.baselineVersionHash,
-        generationPipeline: isResumeV2 ? 'v2' : 'v1',
-        complianceFlags,
-        careerIdentity: careerIdentitySnapshot,
-        ...(baselineEvidenceTooWeakDetails ? { baselineEvidenceTooWeak: baselineEvidenceTooWeakDetails } : {}),
-        resumeGenerationStage: experienceDiagnostics.resumeGenerationStage,
-        resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
-        resumeGenerationDiagnostics: experienceDiagnostics,
-        normalizationDiagnostics: experienceDiagnostics,
-        ...(usedInterpretedEvidenceInDraft
-          ? {
-              interpretedEvidenceSummary: interpretedEvidenceForBaseline.summary,
-              interpretedEvidenceReadiness,
-              bypassedTemplateHardBlockWithInterpretedEvidence,
+	      internal: {
+	        auditId: audit.id,
+	        baselineVersionHash: audit.baselineVersionHash,
+	        generationPipeline: isResumeV2 ? 'v2' : 'v1',
+	        complianceFlags,
+	        careerIdentity: careerIdentitySnapshot,
+	        ...(baselineEvidenceTooWeakDetails ? { baselineEvidenceTooWeak: baselineEvidenceTooWeakDetails } : {}),
+	        resumeGenerationStage: experienceDiagnostics.resumeGenerationStage,
+	        resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
+	        resumeGenerationDiagnostics: experienceDiagnostics,
+	        normalizationDiagnostics: experienceDiagnostics,
+	        ...(structuredBaselineTemplateDegradedToBaselineOnly
+	          ? { tailoringLimitations: { structuredBaselineTemplate: structuredBaselineTemplateDegradedToBaselineOnly } }
+	          : {}),
+	        ...(usedInterpretedEvidenceInDraft
+	          ? {
+	              interpretedEvidenceSummary: interpretedEvidenceForBaseline.summary,
+	              interpretedEvidenceReadiness,
+	              bypassedTemplateHardBlockWithInterpretedEvidence,
               omittedInterpretedEvidence: {
                 weak: interpretedEligibility.omissions.omittedWeakEvidenceIds,
                 unusable: interpretedEligibility.omissions.omittedUnusableEvidenceIds,
@@ -3894,7 +3863,9 @@ export class ResumeService {
         const cleanedBullets = bullets
           .map((b: unknown) => (typeof b === 'string' ? trimIncompleteTrailingFragments(b) : ''))
           .map((b: string) => b.trim())
-          .filter((b: string) => b.length >= 10);
+          // ResumeV2 authority: do not drop short-but-meaningful bullets, or the artifact can become empty and fail persistence.
+          // Legacy structured lane may keep a minimum-length filter to avoid low-signal fragments.
+          .filter((b: string) => (isResumeV2 ? b.length > 0 : b.length >= 10));
         return { ...entry, bullets: cleanedBullets };
       });
     }
@@ -3921,13 +3892,31 @@ export class ResumeService {
     (response as any).content = persistedContent;
 
     const authoritativeExperienceCountForGuard = (() => {
-      try {
-        const structured = extractStructuredBaselineFromSections(resumeInputSections as any);
-        if (Array.isArray((structured as any)?.experience)) return (structured as any).experience.length;
-        return 0;
-      } catch {
-        return 0;
-      }
+      // Guard against persisting minimal/unusable resume outputs.
+      // IMPORTANT: ResumeV2 is the primary authority lane for Studio generation. Some baselines can
+      // have weak/empty section-based structured extraction while still having a valid ResumeV2 experience model.
+      // In that case, do not block persistence solely because structured extraction returns 0.
+      const resumeV2ExperienceCount = (() => {
+        try {
+          const resumeV2ForGuard =
+            (persistedResumeV2 as any) ??
+            ((this.getLatestPersistedResumeV2Json(baseline.parsedRecords) as any) ?? null);
+          const exp = resumeV2ForGuard?.experience;
+          return Array.isArray(exp) ? exp.length : 0;
+        } catch {
+          return 0;
+        }
+      })();
+      const structuredExperienceCount = (() => {
+        try {
+          const structured = extractStructuredBaselineFromSections(resumeInputSections as any);
+          if (Array.isArray((structured as any)?.experience)) return (structured as any).experience.length;
+          return 0;
+        } catch {
+          return 0;
+        }
+      })();
+      return Math.max(resumeV2ExperienceCount, structuredExperienceCount);
     })();
     const hasMinimalSummarySection = (() => {
       try {
@@ -4483,34 +4472,10 @@ export class ResumeService {
           reason: error instanceof Error ? error.message : String(error),
         });
 
-        // Prompt 14: Never synthesize employer-role structure from unstructured text blobs.
-        // If we cannot extract any valid structured experience groups, fail closed instead of returning a minimal fallback resume.
-        try {
-          const structured = extractStructuredBaselineFromSections(
-            (resolveBaselineSectionsForGeneration(baselineForFailSafe) as any) ?? (baselineForFailSafe.sections as any),
-          ) as any;
-          const expCount = Array.isArray(structured?.experience) ? structured.experience.length : 0;
-          if (expCount === 0) {
-            throw new UnprocessableEntityException(buildArtifactFailurePayload({
-              code: 'generation_blocked',
-              category: 'generation_blocked',
-              message: 'Resume generation is blocked because employer-role experience extraction failed.',
-              detail:
-                'No valid structured experience groups (company + role title + bullets) were found. Reprocess the baseline resume or re-upload with clearer experience headers.',
-              retryable: true,
-              diagnostics: {
-                artifactReadiness: 'blocked',
-                authoritativeExtractionSucceeded: false,
-                authoritativeExperienceGroupCount: 0,
-                fallbackGenerationPrevented: true,
-                legacyFallbackAttemptBlocked: true,
-                generationTerminationStage: 'top_level_fail_safe_minimal_blocked',
-              },
-            }));
-          }
-        } catch (guardErr) {
-          if (guardErr instanceof UnprocessableEntityException) throw guardErr;
-        }
+	        // Product contract (Studio): if verified baseline content exists, do not hard-block resume generation
+	        // solely because structured employer-role headers could not be extracted. Degrade to a baseline-only
+	        // draft below; compliance enforcement prevents fabrication in the normal pipeline, and this fallback
+	        // never invents content beyond the baseline text.
 
         const identity = resolveBaselineIdentity(baselineForFailSafe);
         let normalizedDocument: NormalizedResumeDocument | null = null;
@@ -4600,12 +4565,18 @@ export class ResumeService {
           gapGuidance: null,
           display: this.buildSuccessDisplayPayload(),
           safeDisplay: this.buildSuccessDisplayPayload(),
-          internal: {
-            minimalFallback: true,
-            resumeGenerationMode: 'top_level_fail_safe_minimal',
-            resumeFailSafeMinimalUsed: true,
-            interpretedEvidenceAuditUnavailableReason: 'minimal_fail_safe_no_trace_audit',
-            ...(interpretedEvidenceAvailable
+	          internal: {
+	            minimalFallback: true,
+	            resumeGenerationMode: 'top_level_fail_safe_minimal',
+	            resumeFailSafeMinimalUsed: true,
+	            tailoringLimitations: {
+	              structuredBaselineTemplate: {
+	                reason: 'zero_experience_headers',
+	                missingEvidenceReasons: [],
+	              },
+	            },
+	            interpretedEvidenceAuditUnavailableReason: 'minimal_fail_safe_no_trace_audit',
+	            ...(interpretedEvidenceAvailable
               ? {
                   interpretedEvidenceAvailable: true,
                   interpretedEvidenceSummary: interpretedEvidenceForFailSafe.summary,
@@ -5068,80 +5039,47 @@ export class ResumeService {
         // Template readiness is meant to guard the legacy section/structured extraction lane, not the ResumeV2 lane.
         try {
           const persistedResumeV2 = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
-          if (!persistedResumeV2 || typeof persistedResumeV2 !== 'object') {
-            return {
-              status: 'blocked' as const,
-              blocked: true,
-              compliance_flags: [],
-              reasons: [
-                {
-                  code: 'baseline_resume_v2_missing',
-                  message: 'Baseline ResumeV2 is missing. Repair your baseline before generating.',
-                  details: { usableExperienceCount: 0 },
+          try {
+            assertUsableResumeV2(persistedResumeV2);
+          } catch (error) {
+            if (error instanceof UnprocessableEntityException) {
+              const response = (error as any).getResponse?.() as any;
+              const code = String(response?.error?.code ?? 'baseline_resume_v2_invalid');
+              const message = String(response?.error?.message ?? 'Baseline ResumeV2 is invalid. Repair your baseline before generating.');
+              return {
+                status: 'blocked' as const,
+                blocked: true,
+                compliance_flags: [],
+                reasons: [
+                  {
+                    code,
+                    message,
+                    details: response?.error?.details ?? { usableExperienceCount: 0 },
+                  },
+                ],
+                canGenerateResume: false,
+                diagnostics: {
+                  readinessSource: 'resume_v2_authority',
+                  usableExperienceCount: 0,
                 },
-              ],
-              canGenerateResume: false,
-              diagnostics: {
-                readinessSource: 'resume_v2_authority',
-                usableExperienceCount: 0,
-              },
-            } as any;
+              } as any;
+            }
+            throw error;
           }
 
           const normalized = normalizeNormalizedResumeDocument(persistedResumeV2 as NormalizedResumeDocument);
-          const validation = validateNormalizedResumeDocument(normalized);
           const experienceCount = Array.isArray((normalized as any)?.experience) ? (normalized as any).experience.length : 0;
-          if (!validation.valid) {
-            return {
-              status: 'blocked' as const,
-              blocked: true,
-              compliance_flags: [],
-              reasons: [
-                {
-                  code: 'baseline_resume_v2_invalid',
-                  message: 'Baseline ResumeV2 is invalid. Repair your baseline before generating.',
-                  details: { usableExperienceCount: 0, reasons: validation.reasons },
-                },
-              ],
-              canGenerateResume: false,
-              diagnostics: {
-                readinessSource: 'resume_v2_authority',
-                usableExperienceCount: 0,
-              },
-            } as any;
-          }
-          if (validation.valid && experienceCount === 0) {
-            return {
-              status: 'blocked' as const,
-              blocked: true,
-              compliance_flags: [],
-              reasons: [
-                {
-                  code: 'baseline_resume_v2_invalid',
-                  message: 'Baseline ResumeV2 has zero usable experience. Repair your baseline before generating.',
-                  details: { usableExperienceCount: 0 },
-                },
-              ],
-              canGenerateResume: false,
-              diagnostics: {
-                readinessSource: 'resume_v2_authority',
-                usableExperienceCount: 0,
-              },
-            } as any;
-          }
-          if (validation.valid && experienceCount > 0) {
-            return {
-              status: 'ready' as const,
-              blocked: false,
-              compliance_flags: [],
-              reasons: [],
-              canGenerateResume: true,
-              diagnostics: {
-                readinessSource: 'resume_v2_authority',
-                usableExperienceCount: experienceCount,
-              },
-            } as any;
-          }
+          return {
+            status: 'ready' as const,
+            blocked: false,
+            compliance_flags: [],
+            reasons: [],
+            canGenerateResume: true,
+            diagnostics: {
+              readinessSource: 'resume_v2_authority',
+              usableExperienceCount: experienceCount,
+            },
+          } as any;
         } catch {
           // ignore; fall back to structured/template readiness.
         }

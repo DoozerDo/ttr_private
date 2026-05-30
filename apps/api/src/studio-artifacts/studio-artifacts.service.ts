@@ -714,11 +714,9 @@ export class StudioArtifactsService {
         staleArtifactReasonCodes.push('stale_legacy');
         return false;
       }
-      const exportReady = isTrue((resumeRecord.responseBody as any)?.exportReady);
-      if (!exportReady) {
-        staleArtifactReasonCodes.push('export_ready_false');
-        return false;
-      }
+      // Renderability contract: Studio needs a preview to hydrate after generation.
+      // Export readiness is an output-quality concern and must not hide an otherwise renderable preview.
+      // (Export gating is handled separately by export endpoints / UI affordances.)
       const gate = (resumeRecord.responseBody as any)?.qualityGate;
       const gateStatus = gate && typeof gate === 'object' ? String((gate as any).status ?? '') : '';
       if (gateStatus === 'failed' || gateStatus === 'blocked') {
@@ -1355,6 +1353,10 @@ export class StudioArtifactsService {
     jobFingerprint: string | null;
     assessmentInputsHash: string | null;
   }) {
+    const normalizedAssessmentInputsHash =
+      typeof input.assessmentInputsHash === 'string' && input.assessmentInputsHash.trim().length === 0
+        ? null
+        : input.assessmentInputsHash;
     return createHash('sha256')
       .update(
         JSON.stringify({
@@ -1363,7 +1365,7 @@ export class StudioArtifactsService {
           compositionRulesetVersion: COMPOSITION_RULESET_VERSION,
           baselineVersionHash: input.baselineVersionHash,
           jobFingerprint: input.jobFingerprint,
-          assessmentInputsHash: input.assessmentInputsHash,
+          assessmentInputsHash: normalizedAssessmentInputsHash,
         }),
       )
       .digest('hex');

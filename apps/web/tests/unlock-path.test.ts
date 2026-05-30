@@ -8,6 +8,7 @@ describe("unlock path state", () => {
       analysisExists: false,
       score: null,
       readinessStatus: null,
+      readinessReasonCodes: null,
       hasGeneratedDocuments: false,
       hasSavedOpportunity: false,
     });
@@ -25,6 +26,7 @@ describe("unlock path state", () => {
       analysisExists: false,
       score: null,
       readinessStatus: null,
+      readinessReasonCodes: null,
       hasGeneratedDocuments: false,
       hasSavedOpportunity: false,
     });
@@ -42,6 +44,7 @@ describe("unlock path state", () => {
       analysisExists: false,
       score: null,
       readinessStatus: null,
+      readinessReasonCodes: null,
       hasGeneratedDocuments: false,
       hasSavedOpportunity: false,
     });
@@ -59,6 +62,7 @@ describe("unlock path state", () => {
       analysisExists: true,
       score: 84,
       readinessStatus: "limited",
+      readinessReasonCodes: null,
       hasGeneratedDocuments: false,
       hasSavedOpportunity: false,
     });
@@ -75,6 +79,7 @@ describe("unlock path state", () => {
       analysisExists: false,
       score: null,
       readinessStatus: null,
+      readinessReasonCodes: null,
       hasGeneratedDocuments: false,
       hasSavedOpportunity: false,
     });
@@ -83,34 +88,67 @@ describe("unlock path state", () => {
     expect(state.fitReview).toBe("LOCKED");
   });
 
-  it("routes score 76 with unready generation to fit review current and studio locked", () => {
+  it("keeps Studio locked below the 80 score floor even when readiness is limited", () => {
     const state = resolveUnlockPathState({
       currentPathname: "/results",
       baselineReady: true,
       analysisExists: true,
       score: 76,
       readinessStatus: "limited",
+      readinessReasonCodes: null,
       hasGeneratedDocuments: false,
       hasSavedOpportunity: false,
     });
 
     expect(state.fitReview).toBe("UNLOCKED");
-    expect(state.studio).toBe("UNLOCKED");
+    expect(state.studio).toBe("LOCKED");
   });
 
-  it("shows studio current when readiness is ready", () => {
+  it("score 83 + usable baseline resolves Studio CURRENT and enables progression", () => {
     const state = resolveUnlockPathState({
       currentPathname: "/studio",
       baselineReady: true,
       analysisExists: true,
-      score: 76,
+      score: 83,
       readinessStatus: "ready",
+      readinessReasonCodes: [],
       hasGeneratedDocuments: false,
       hasSavedOpportunity: false,
     });
 
     expect(state.studio).toBe("CURRENT");
     expect(state.fitReview).toBe("COMPLETE");
+  });
+
+  it("score 83 + baseline repair required must never mark Studio CURRENT (dominant baseline blocker)", () => {
+    const state = resolveUnlockPathState({
+      currentPathname: "/studio",
+      baselineReady: true,
+      analysisExists: true,
+      score: 83,
+      readinessStatus: "blocked",
+      readinessReasonCodes: ["baseline_resume_v2_missing"],
+      hasGeneratedDocuments: false,
+      hasSavedOpportunity: false,
+    });
+
+    expect(state.studio).toBe("LOCKED");
+    expect(state.baseline).toBe("CURRENT");
+  });
+
+  it("score 79 + usable baseline keeps Studio locked", () => {
+    const state = resolveUnlockPathState({
+      currentPathname: "/results",
+      baselineReady: true,
+      analysisExists: true,
+      score: 79,
+      readinessStatus: "ready",
+      readinessReasonCodes: [],
+      hasGeneratedDocuments: false,
+      hasSavedOpportunity: false,
+    });
+
+    expect(state.studio).toBe("LOCKED");
   });
 
   it("shows opportunities current on the opportunities route", () => {
@@ -120,6 +158,7 @@ describe("unlock path state", () => {
       analysisExists: true,
       score: 84,
       readinessStatus: "ready",
+      readinessReasonCodes: null,
       hasGeneratedDocuments: true,
       hasSavedOpportunity: false,
     });

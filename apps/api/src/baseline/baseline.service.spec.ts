@@ -259,6 +259,7 @@ const ingestionResult = {
         {
           provide: EmbeddingService,
           useValue: {
+            embed: jest.fn().mockResolvedValue([]),
             embedText: jest.fn().mockResolvedValue([]),
             embedTexts: jest.fn().mockResolvedValue([]),
           },
@@ -542,6 +543,52 @@ const ingestionResult = {
     expect(validation.valid).toBe(true);
   });
 
+  it('surfaces a structured error payload when ResumeV2 build fails during baseline ingestion', async () => {
+    const baselineForTest = { ...baseline, id: '00000000-0000-0000-0000-000000000000' };
+    const manager = {
+      create: jest.fn((_entity: any, value: any) => value),
+      save: jest.fn(async (value: any) => value),
+    } as any;
+
+    const ingestion = {
+      rawText: 'Test Resume',
+      parsedSections: [
+        {
+          sectionType: BaselineSectionType.EXPERIENCE,
+          content: 'Acme | Engineer | 2020 - Present\n- Shipped features',
+        },
+      ],
+      canonical: {
+        // Force a schema error in BaselineSchema.parse (missing required identity fields, etc.)
+        identity: null,
+        summary: null,
+        experience: [],
+        education: [],
+        skills: [],
+        people_leadership: null,
+        operational_ownership: null,
+        tooling_and_platforms: null,
+        cross_functional_partnership: null,
+        customer_advocacy: null,
+        scale_and_scope: null,
+        metrics_and_outcomes: null,
+        skills_and_tools: null,
+        system_generated_read_only: { missing_fields: [], ambiguity_flags: [], low_confidence_extractions: [] },
+      } as any,
+      sourceFormat: 'docx' as const,
+    };
+
+    await expect((service as any).persistParsedBaseline(manager, baselineForTest, ingestion)).rejects.toMatchObject({
+      status: 422,
+      response: expect.objectContaining({
+        error: expect.objectContaining({
+          code: 'baseline_reparse_invalid_parsed_baseline',
+          message: expect.any(String),
+        }),
+      }),
+    });
+  });
+
   it('uses distinctOn when loading the latest assessment summary', async () => {
     baselineRepository.find = jest.fn().mockResolvedValue([baseline]);
     const qb = {
@@ -761,6 +808,10 @@ describe('BaselineService - library capacity', () => {
   });
 
   it('reuses archived baselines when the same resume hash is uploaded again (no 500)', async () => {
+    const persistParsedBaselineSpy = jest
+      .spyOn(service as any, 'persistParsedBaseline')
+      .mockResolvedValue(undefined);
+
     baselineRepository.findOne.mockImplementation(async ({ where }: any) => {
       if (where?.hash && where?.userId === 'user-1') {
         return {
@@ -802,6 +853,17 @@ describe('BaselineService - library capacity', () => {
     expect(result.baselineId).toBe('baseline-archived');
     expect(result.baseline.status).toBe(BaselineStatus.ACTIVE);
     expect(result.baseline.isActive).toBe(true);
+    expect(persistParsedBaselineSpy).toHaveBeenCalledTimes(1);
+    expect(transactionManager.delete).toHaveBeenCalledWith(BaselineSection, { baselineId: 'baseline-archived' });
+    expect(
+      transactionManager.save.mock.calls.some(
+        (call: any[]) =>
+          call.length >= 1 &&
+          !Array.isArray(call[0]) &&
+          call[0]?.baselineId === 'baseline-archived' &&
+          typeof call[0]?.versionNumber === 'number',
+      ),
+    ).toBe(true);
   });
 
   it('increments the active baseline version and keeps only one active baseline', async () => {
@@ -898,10 +960,12 @@ describe('BaselineService - reparse ingestion source', () => {
   let service: BaselineService;
   let baselineRepository: any;
   let ingestionService: any;
+  let embeddingService: any;
+  const baselineUuid = '00000000-0000-4000-8000-000000000001';
   const sections: BaselineSection[] = [
     {
       id: 's-1',
-      baselineId: 'b-1',
+      baselineId: baselineUuid,
       sectionType: BaselineSectionType.EXPERIENCE as any,
       title: null,
       content: 'Did important work.',
@@ -912,7 +976,7 @@ describe('BaselineService - reparse ingestion source', () => {
     } as BaselineSection,
   ];
   const baseline: Baseline = {
-    id: 'b-1',
+    id: baselineUuid,
     userId: 'user-1',
     version: 1,
     originalFilename: 'resume.pdf',
@@ -986,6 +1050,7 @@ describe('BaselineService - reparse ingestion source', () => {
           cb({
             create: jest.fn((_: any, payload: any) => payload),
             save: jest.fn(async (value: any) => value),
+            update: jest.fn(async () => ({ affected: 1 })),
             delete: jest.fn(),
           }),
         ),
@@ -1023,6 +1088,7 @@ describe('BaselineService - reparse ingestion source', () => {
         {
           provide: EmbeddingService,
           useValue: {
+            embed: jest.fn().mockResolvedValue([]),
             embedText: jest.fn().mockResolvedValue([]),
             embedTexts: jest.fn().mockResolvedValue([]),
           },
@@ -1031,6 +1097,7 @@ describe('BaselineService - reparse ingestion source', () => {
     }).compile();
 
     service = module.get(BaselineService);
+    embeddingService = module.get(EmbeddingService);
   });
 
   it('preserves newlines in sanitizeSectionContent', () => {
@@ -1094,6 +1161,368 @@ describe('BaselineService - reparse ingestion source', () => {
     expect(ingestionService.ingest).toHaveBeenCalledTimes(1);
     expect(ingestionService.ingestFromText).toHaveBeenCalledWith('raw fallback text', 'pdf');
     expect(result.rawText).toBe('fallback');
+  });
+
+  it('reparseBaselineForUser does not 500 when embeddings fail (embeddings are advisory)', async () => {
+    const canonical = {
+      ...canonicalBaseline,
+      schema_version: 'baseline_schema_v1',
+    } as any;
+
+    ingestionService.ingest.mockResolvedValue({
+      rawText: 'from file',
+      parsedSections: [],
+      canonical,
+      sourceFormat: 'pdf',
+    });
+
+    baselineRepository.findOne.mockResolvedValue({
+      ...baseline,
+      sections: [
+        {
+          ...sections[0],
+          sectionType: BaselineSectionType.RAW,
+          content: 'raw baseline text',
+        },
+      ],
+    } as Baseline);
+
+    // Force embedding provider failure.
+    embeddingService.embed.mockRejectedValue(new Error('embedding provider down'));
+
+    // Ensure policy/version queries don't block.
+    (service as any).baselineVersionRepository.findOne.mockResolvedValue(null);
+    (service as any).baselineBlockPolicyRepository.find.mockResolvedValue([]);
+
+    // This test targets the embedding failure tolerance specifically; parsing/ResumeV2 shape is covered elsewhere.
+    (service as any).persistParsedBaseline = jest.fn().mockResolvedValue(undefined);
+
+    await expect(service.reparseBaselineForUser(baselineUuid, 'user-1')).resolves.toBeTruthy();
+  });
+
+  it('reparseBaselineForUser returns 409 baseline_reparse_missing_source when no stored file and no raw text exist', async () => {
+    baselineRepository.findOne.mockResolvedValue({
+      ...baseline,
+      storagePath: null,
+      sections: [],
+    } as Baseline);
+
+    await expect(service.reparseBaselineForUser(baselineUuid, 'user-1')).rejects.toMatchObject({
+      getStatus: expect.any(Function),
+      getResponse: expect.any(Function),
+    });
+
+    try {
+      await service.reparseBaselineForUser(baselineUuid, 'user-1');
+    } catch (error: any) {
+      expect(error.getStatus()).toBe(409);
+      expect(error.getResponse()).toMatchObject({ code: 'baseline_reparse_missing_source' });
+      expect(error.getStatus()).not.toBe(500);
+    }
+  });
+
+  it('reparseBaselineForUser returns 422 baseline_reparse_ingestion_failed when fallback ingestFromText throws', async () => {
+    ingestionService.ingest.mockRejectedValue(new Error('missing file'));
+    ingestionService.ingestFromText.mockRejectedValue(new Error('empty resume text'));
+
+    baselineRepository.findOne.mockResolvedValue({
+      ...baseline,
+      storagePath: '/missing/path',
+      sections: [
+        {
+          ...sections[0],
+          sectionType: BaselineSectionType.RAW,
+          content: '',
+        },
+      ],
+    } as Baseline);
+
+    try {
+      await service.reparseBaselineForUser(baselineUuid, 'user-1');
+    } catch (error: any) {
+      expect(error.getStatus()).toBe(422);
+      expect(error.getResponse()).toMatchObject({ code: 'baseline_reparse_ingestion_failed' });
+      expect(error.getStatus()).not.toBe(500);
+    }
+  });
+
+  it('reparseBaselineForUser returns typed 422 baseline_resume_v2_* when canonical payload cannot produce usable Resume V2 experience', async () => {
+    // This payload can pass baseline schema parsing but still be structurally unusable for Resume V2 (no usable experience).
+    const canonical = { ...canonicalBaseline } as any;
+
+    ingestionService.ingest.mockResolvedValue({
+      rawText: 'from file',
+      parsedSections: [],
+      canonical,
+      sourceFormat: 'pdf',
+    });
+
+    baselineRepository.findOne.mockResolvedValue({
+      ...baseline,
+      sections: [
+        {
+          ...sections[0],
+          sectionType: BaselineSectionType.RAW,
+          content: 'raw baseline text',
+        },
+      ],
+    } as Baseline);
+
+    // Ensure policy/version queries don't block.
+    (service as any).baselineVersionRepository.findOne.mockResolvedValue(null);
+    (service as any).baselineBlockPolicyRepository.find.mockResolvedValue([]);
+
+    try {
+      await service.reparseBaselineForUser(baselineUuid, 'user-1');
+    } catch (error: any) {
+      expect(error.getStatus()).toBe(422);
+      expect(error.getResponse()).toMatchObject({
+        error: expect.objectContaining({
+          code: expect.stringMatching(/^baseline_resume_v2_/),
+        }),
+      });
+      expect(error.getStatus()).not.toBe(500);
+    }
+  });
+
+  it('reparseBaselineForUser returns 422 baseline_reparse_section_rebuild_failed when section rebuild throws', async () => {
+    const canonical = {
+      ...canonicalBaseline,
+      schema_version: 'baseline_schema_v1',
+    } as any;
+
+    ingestionService.ingest.mockResolvedValue({
+      rawText: 'from file',
+      parsedSections: [],
+      canonical,
+      sourceFormat: 'pdf',
+    });
+
+    baselineRepository.findOne.mockResolvedValue({
+      ...baseline,
+      sections: [
+        {
+          ...sections[0],
+          sectionType: BaselineSectionType.RAW,
+          content: 'raw baseline text',
+        },
+      ],
+    } as Baseline);
+
+    jest
+      .spyOn(service as any, 'buildSections')
+      .mockImplementation(() => {
+        throw new Error('rebuild failed');
+      });
+
+    try {
+      await service.reparseBaselineForUser(baselineUuid, 'user-1');
+    } catch (error: any) {
+      expect(error.getStatus()).toBe(422);
+      expect(error.getResponse()).toMatchObject({
+        code: 'baseline_reparse_section_rebuild_failed',
+      });
+      expect(error.getStatus()).not.toBe(500);
+    }
+  });
+
+  it('reparseBaselineForUser returns 422 baseline_reparse_persistence_failed when transaction persistence throws', async () => {
+    const canonical = {
+      ...canonicalBaseline,
+      schema_version: 'baseline_schema_v1',
+    } as any;
+
+    ingestionService.ingest.mockResolvedValue({
+      rawText: 'from file',
+      parsedSections: [],
+      canonical,
+      sourceFormat: 'pdf',
+    });
+
+    baselineRepository.findOne.mockResolvedValue({
+      ...baseline,
+      sections: [
+        {
+          ...sections[0],
+          sectionType: BaselineSectionType.RAW,
+          content: 'raw baseline text',
+        },
+      ],
+    } as Baseline);
+
+    (service as any).persistParsedBaseline = jest.fn().mockResolvedValue(undefined);
+    (service as any).baselineVersionRepository.findOne.mockResolvedValue(null);
+    (service as any).baselineBlockPolicyRepository.find.mockResolvedValue([]);
+
+    baselineRepository.manager.transaction.mockImplementationOnce(async (cb: any) =>
+      cb({
+        create: jest.fn((_: any, payload: any) => payload),
+        save: jest.fn(async (value: any) => value),
+        delete: jest.fn(async () => {
+          throw new Error('db delete failed');
+        }),
+      }),
+    );
+
+    try {
+      await service.reparseBaselineForUser(baselineUuid, 'user-1');
+    } catch (error: any) {
+      expect(error.getStatus()).toBe(422);
+      expect(error.getResponse()).toMatchObject({
+        code: 'baseline_reparse_persistence_failed',
+      });
+      expect(error.getStatus()).not.toBe(500);
+    }
+  });
+
+  it('reparseBaselineForUser does not save parent baseline with partial versions relation after Resume V2 persistence', async () => {
+    const canonical = {
+      ...canonicalBaseline,
+      schema_version: 'baseline_schema_v1',
+    } as any;
+
+    ingestionService.ingest.mockResolvedValue({
+      rawText: 'from file',
+      parsedSections: [],
+      canonical,
+      sourceFormat: 'pdf',
+    });
+
+    baselineRepository.findOne.mockResolvedValue({
+      ...baseline,
+      sections: [
+        {
+          ...sections[0],
+          sectionType: BaselineSectionType.RAW,
+          content: 'raw baseline text',
+        },
+      ],
+      versions: [{ id: 'existing-version-id', baselineId: baselineUuid, versionNumber: 1 }],
+    } as Baseline);
+
+    const txSave = jest.fn(async (value: any) => {
+      if (value?.id === baselineUuid && Array.isArray(value?.versions)) {
+        throw new Error('parent baseline save with versions relation is not allowed');
+      }
+      if (value?.baselineId === baselineUuid && value?.versionNumber === 2 && !value?.id) {
+        return { ...value, id: 'new-version-id' };
+      }
+      return value;
+    });
+    const txUpdate = jest.fn(async () => ({ affected: 1 }));
+
+    baselineRepository.manager.transaction.mockImplementationOnce(async (cb: any) =>
+      cb({
+        create: jest.fn((_: any, payload: any) => payload),
+        save: txSave,
+        update: txUpdate,
+        delete: jest.fn(),
+      }),
+    );
+
+    (service as any).persistParsedBaseline = jest.fn().mockResolvedValue(undefined);
+    (service as any).baselineVersionRepository.findOne.mockResolvedValue({
+      id: 'existing-version-id',
+      baselineId: baselineUuid,
+      versionNumber: 1,
+      verifiedAdditions: [],
+    });
+    (service as any).baselineBlockPolicyRepository.find.mockResolvedValue([]);
+
+    const result = await service.reparseBaselineForUser(baselineUuid, 'user-1');
+
+    expect(result.versions?.[0]?.id).toBe('new-version-id');
+    expect(txUpdate).toHaveBeenCalledWith(
+      Baseline,
+      { id: baselineUuid, userId: 'user-1' },
+      expect.objectContaining({ version: 2, versionNumber: 2, isActive: true }),
+    );
+    expect(txSave).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: baselineUuid, versions: expect.any(Array) }),
+    );
+  });
+
+  it('reparseBaselineForUser returns new usable baseline version payload without detaching baseline_versions ownership', async () => {
+    const canonical = {
+      ...canonicalBaseline,
+      schema_version: 'baseline_schema_v1',
+    } as any;
+
+    ingestionService.ingest.mockResolvedValue({
+      rawText: 'from file',
+      parsedSections: [],
+      canonical,
+      sourceFormat: 'pdf',
+    });
+
+    baselineRepository.findOne.mockResolvedValue({
+      ...baseline,
+      sections: [
+        {
+          ...sections[0],
+          sectionType: BaselineSectionType.RAW,
+          content: 'raw baseline text',
+        },
+      ],
+      versions: [{ id: 'existing-version-id', baselineId: baselineUuid, versionNumber: 1 }],
+    } as Baseline);
+
+    const txSave = jest.fn(async (value: any) => {
+      if (value?.id === baselineUuid && Array.isArray(value?.versions)) {
+        throw new Error('unexpected parent baseline save with partial versions');
+      }
+      if (value?.baselineId === baselineUuid && value?.versionNumber === 2 && !value?.id) {
+        return { ...value, id: 'new-usable-version-id' };
+      }
+      return value;
+    });
+    const txUpdate = jest.fn(async () => ({ affected: 1 }));
+    const txDelete = jest.fn();
+    const txCreate = jest.fn((_: any, payload: any) => payload);
+
+    baselineRepository.manager.transaction.mockImplementationOnce(async (cb: any) =>
+      cb({
+        create: txCreate,
+        save: txSave,
+        update: txUpdate,
+        delete: txDelete,
+      }),
+    );
+
+    const persistParsedBaselineSpy = jest
+      .spyOn(service as any, 'persistParsedBaseline')
+      .mockResolvedValue(undefined);
+
+    (service as any).baselineVersionRepository.findOne.mockResolvedValue({
+      id: 'existing-version-id',
+      baselineId: baselineUuid,
+      versionNumber: 1,
+      verifiedAdditions: [],
+    });
+    (service as any).baselineBlockPolicyRepository.find.mockResolvedValue([]);
+
+    const result = await service.reparseBaselineForUser(baselineUuid, 'user-1');
+
+    expect(result.id).toBe(baselineUuid);
+    expect(result.version).toBe(2);
+    expect(result.versionNumber).toBe(2);
+    expect(result.versions?.[0]?.id).toBe('new-usable-version-id');
+    expect(result.versions?.[0]?.baselineId).toBe(baselineUuid);
+    expect(persistParsedBaselineSpy).toHaveBeenCalledTimes(1);
+
+    expect(txSave).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: baselineUuid, versions: expect.any(Array) }),
+    );
+    expect(txUpdate).not.toHaveBeenCalledWith(
+      BaselineVersion,
+      expect.anything(),
+      expect.objectContaining({ baselineId: null }),
+    );
+    expect(txUpdate).toHaveBeenCalledWith(
+      Baseline,
+      { id: baselineUuid, userId: 'user-1' },
+      expect.objectContaining({ version: 2, versionNumber: 2, isActive: true }),
+    );
   });
 });
 
@@ -1497,6 +1926,7 @@ describe('BaselineService - score history persistence', () => {
       NotFoundException,
     );
   });
+
 });
 
 describe('BaselineService - strengthening additions', () => {

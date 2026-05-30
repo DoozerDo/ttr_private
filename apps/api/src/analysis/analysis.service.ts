@@ -35,6 +35,7 @@ import {
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { BaselineSchema, BaselineSchemaCoreShape } from '../baseline/baseline-schema';
+import { evaluateResumeV2Usability } from '../baseline/baseline-resume-v2';
 import { ComplianceService } from '../compliance/compliance.service';
 import {
   ComplianceAction,
@@ -1164,6 +1165,25 @@ export class AnalysisService {
         canonical: this.buildFallbackCanonicalBaseline(baseline),
         fallbackUsed: true,
       };
+    }
+
+    // Product contract: do not allow scoring on a baseline that cannot produce a usable Resume V2.
+    // This prevents a "high score" from being computed on fallback-only section text while Studio generation is blocked.
+    const resumeV2 = (latest as any).resumeV2Json ?? null;
+    const resumeV2Usability = evaluateResumeV2Usability(resumeV2);
+    if (!resumeV2Usability.usable) {
+      throw new BadRequestException({
+        error: {
+          code: resumeV2Usability.reasons.includes('missing_resume_v2')
+            ? 'baseline_resume_v2_missing'
+            : 'baseline_resume_v2_invalid',
+          message:
+            resumeV2Usability.reasons.includes('missing_resume_v2')
+              ? 'Baseline ingestion did not produce a Resume V2 profile. Reprocess your baseline before scoring.'
+              : 'Baseline ingestion did not produce any usable experience entries for Resume V2. Reprocess your baseline before scoring.',
+          details: { reasons: resumeV2Usability.reasons, usableExperienceCount: resumeV2Usability.usableExperienceCount },
+        },
+      });
     }
 
     try {

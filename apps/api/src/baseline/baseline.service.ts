@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   InternalServerErrorException,
   Injectable,
   Logger,
@@ -397,8 +398,17 @@ export class BaselineService {
 
     await Promise.all(
       sections.map(async (section) => {
-        section.embedding =
-          (await this.embeddingService.embed(section.content ?? '')) ?? null;
+        try {
+          section.embedding =
+            (await this.embeddingService.embed(section.content ?? '')) ?? null;
+        } catch (error) {
+          // Embeddings are advisory and must not break baseline ingest/reparse.
+          // If the embedding provider is unavailable, keep the baseline usable for ResumeV2 readiness + generation.
+          this.logger.warn('Embedding generation failed; continuing without embeddings', {
+            error: error instanceof Error ? error.message : String(error ?? 'unknown'),
+          });
+          section.embedding = null;
+        }
       }),
     );
   }
@@ -572,23 +582,108 @@ export class BaselineService {
               where: { userId, status: BaselineStatus.ACTIVE, isActive: true },
             });
             const shouldBecomeActive = activePointerCount === 0;
-            if (shouldBecomeActive) {
-              await this.setSingleActiveBaseline(manager, userId, existingByHash.id);
-            }
-            await manager.update(
-              Baseline,
-              { id: existingByHash.id, userId },
-              {
-                status: BaselineStatus.ACTIVE,
-                archivedAt: null,
-                isActive: shouldBecomeActive ? true : existingByHash.isActive,
-              },
-            );
             const revived = await manager.findOne(Baseline, {
               where: { id: existingByHash.id, userId },
               relations: ['sections'],
               order: { sections: { order: 'ASC' } },
             });
+
+            if (!revived) {
+              throw new NotFoundException('Baseline not found');
+            }
+
+            const sectionPayloads =
+              parseResult?.sections?.map((section, index) => ({
+                sectionType: section.sectionType ?? BaselineSectionType.OTHER,
+                title: this.getSectionTitle(section.sectionType, section.title),
+                content: this.sanitizeSectionContent(section.content),
+                includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
+                order: section.order ?? index,
+              })) ?? [];
+
+            if (sectionPayloads.length > 0 && parseResult?.ingestion) {
+              await manager.delete(BaselineSection, { baselineId: revived.id });
+              await this.attachEmbeddingsToSections(sectionPayloads);
+
+              const revivedSections = sectionPayloads.map((section) =>
+                manager.create(BaselineSection, {
+                  ...section,
+                  baselineId: revived.id,
+                }),
+              );
+              const persistedSections = await manager.save(revivedSections);
+              revived.sections = persistedSections;
+
+              let normalization: CanonicalNormalizationResult | undefined;
+              if (parseResult.ingestion.canonical) {
+                normalization = normalizeExtractedToCanonicalV1(parseResult.ingestion.canonical);
+                parseResult.ingestion.canonical = normalization.canonical;
+              }
+
+              const nextVersionNumber = await this.getNextBaselineVersionNumber(userId);
+              const policyState = this.normalizePoliciesFromSections(
+                (revived.sections ?? []) as PolicySectionInput[],
+              );
+              const versionHash = this.buildVersionHash(fileHash, policyState);
+              const allowlistSnapshot = buildBaselineAllowlistSnapshot(
+                (revived.sections ?? []).map((section) => ({
+                  title: section.title,
+                  content: section.content,
+                  sectionType: section.sectionType ?? null,
+                  sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+                })),
+              );
+
+              const versionRecord = manager.create(BaselineVersion, {
+                baselineId: revived.id,
+                versionNumber: nextVersionNumber,
+                fileHash: versionHash,
+                storagePath: revived.storagePath,
+                verifiedAdditions: [],
+                additionDiff: null,
+                promotedFromInterviewId: null,
+                allowedCompanies: allowlistSnapshot.allowedCompanies,
+                allowedRoles: allowlistSnapshot.allowedRoles,
+                allowedTechnologies: allowlistSnapshot.allowedTechnologies,
+                allowedMetricTokens: allowlistSnapshot.allowedMetricTokens,
+              });
+              const savedVersion = await manager.save(versionRecord);
+              const policyEntities = policyState.map((policy) =>
+                manager.create(BaselineBlockPolicy, {
+                  baselineVersionId: savedVersion.id,
+                  baselineSectionId: policy.baselineSectionId,
+                  includePolicy: policy.includePolicy,
+                  order: policy.order,
+                }),
+              );
+              await manager.save(policyEntities);
+              await this.persistParsedBaseline(manager, revived, parseResult.ingestion);
+
+              revived.version = nextVersionNumber;
+              revived.versionNumber = nextVersionNumber;
+              revived.versions = [savedVersion];
+
+              if (normalization) {
+                parseResult.ingestion.canonical = normalization.canonical;
+              }
+            }
+
+            if (shouldBecomeActive) {
+              await this.setSingleActiveBaseline(manager, userId, revived.id);
+            }
+            await manager.update(
+              Baseline,
+              { id: revived.id, userId },
+              {
+                status: BaselineStatus.ACTIVE,
+                archivedAt: null,
+                isActive: shouldBecomeActive ? true : revived.isActive,
+                ...(typeof revived.versionNumber === 'number'
+                  ? { version: revived.versionNumber, versionNumber: revived.versionNumber }
+                  : {}),
+              },
+            );
+
             return {
               baseline:
                 revived ??
@@ -980,14 +1075,27 @@ export class BaselineService {
     ingestion: BaselineIngestionResult,
   ) {
     const ingestedAt = new Date().toISOString();
-    const parsedBaseline = BaselineSchema.parse({
-      ...ingestion.canonical,
-      baseline_id: baseline.id,
-      source_file_id: baseline.id,
-      source_format: ingestion.sourceFormat,
-      ingested_at: ingestedAt,
-      user_verified: false,
-    });
+    let parsedBaseline: any;
+    try {
+      parsedBaseline = BaselineSchema.parse({
+        ...ingestion.canonical,
+        baseline_id: baseline.id,
+        source_file_id: baseline.id,
+        source_format: ingestion.sourceFormat,
+        ingested_at: ingestedAt,
+        user_verified: false,
+      });
+    } catch (error) {
+      // Canonical parsed baseline must be valid for ResumeV2 generation; expose a stable typed error for repair flows.
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'baseline_reparse_invalid_parsed_baseline',
+          message:
+            'Your baseline could not be reprocessed because the parsed resume payload is invalid. Please re-upload your resume and try again.',
+          details: error instanceof Error ? error.message : String(error ?? 'unknown'),
+        },
+      });
+    }
 
     if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
       try {
@@ -1044,7 +1152,17 @@ export class BaselineService {
           // ignore
         }
       }
-      throw error;
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'baseline_reparse_resume_v2_invalid',
+          message:
+            'Your baseline could not be reprocessed into a usable Resume V2. Please re-upload your resume and try again.',
+          details: error instanceof Error ? error.message : String(error ?? 'unknown'),
+        },
+      });
     }
 
     const parsedRecord = manager.create(BaselineParsed, {
@@ -2023,6 +2141,7 @@ export class BaselineService {
   }
 
   async reparseBaselineForUser(baselineId: string, userId: string) {
+    this.logger.log('[BASELINE][REPARSE_START]', { baselineId, userId });
     const baseline = await this.baselineRepository.findOne({
       where: { id: baselineId, userId },
       relations: ['sections'],
@@ -2032,94 +2151,276 @@ export class BaselineService {
       throw new NotFoundException('Baseline not found');
     }
 
+    this.logger.debug('[BASELINE][REPARSE_BASELINE_LOADED]', {
+      baselineId: baseline.id,
+      userId,
+      sections: baseline.sections?.length ?? 0,
+      storagePath: baseline.storagePath ? 'present' : 'missing',
+      mimeType: baseline.mimeType ?? null,
+    });
+
+    const baselineSections = Array.isArray(baseline.sections) ? baseline.sections : [];
     const rawSection =
-      baseline.sections.find(
+      baselineSections.find(
         (section) => section.sectionType === BaselineSectionType.RAW,
-      ) ?? baseline.sections[0];
+      ) ?? baselineSections[0];
+
+    const fallbackRawText = (rawSection?.content ?? '').trim();
+    const hasStoredSourceFile = Boolean(baseline.storagePath?.trim());
+    if (!hasStoredSourceFile && !fallbackRawText) {
+      throw new ConflictException({
+        code: 'baseline_reparse_missing_source',
+        message:
+          'Your baseline cannot be reprocessed because the original resume content is missing. Please re-upload your resume and try again.',
+      });
+    }
 
     const sourceFormat = this.inferSourceFormat(baseline.mimeType);
-    const ingestion = await this.reingestFromSourceFileOrFallback(
-      baseline,
-      rawSection?.content ?? '',
+    this.logger.debug('[BASELINE][REPARSE_REINGEST_BEGIN]', {
+      baselineId: baseline.id,
+      userId,
       sourceFormat,
-    );
-    const rebuiltSections = this.buildSections(
-      ingestion.rawText,
-      ingestion.parsedSections,
-    );
-
-    return this.baselineRepository.manager.transaction(async (manager) => {
-      await manager.delete(BaselineSection, { baselineId: baseline.id });
-
-      const rebuiltEntities = rebuiltSections.map((section, index) =>
-        manager.create(BaselineSection, {
-          ...section,
-          baselineId: baseline.id,
-          order: section.order ?? index,
-        }),
-      );
-
-      await this.attachEmbeddingsToSections(rebuiltEntities);
-      await manager.save(rebuiltEntities);
-
-      baseline.sections = rebuiltEntities;
-
-      const latestVersion = await this.getLatestVersionForBaseline(baseline.id);
-      const nextVersionNumber =
-        (latestVersion?.versionNumber ?? baseline.version ?? 0) + 1;
-      const policyState = this.normalizePoliciesFromSections(
-        (baseline.sections ?? []) as PolicySectionInput[],
-      );
-      const versionHash = this.buildVersionHash(
-        baseline.hash,
-        policyState,
-        latestVersion?.verifiedAdditions ?? [],
-      );
-      const allowlistSnapshot = buildBaselineAllowlistSnapshot(
-        (baseline.sections ?? []).map((section) => ({
-          title: section.title,
-          content: section.content,
-          sectionType: section.sectionType ?? null,
-          sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
-        })),
-      );
-
-      const versionRecord = manager.create(BaselineVersion, {
-        baselineId: baseline.id,
-        versionNumber: nextVersionNumber,
-        fileHash: versionHash,
-        storagePath: baseline.storagePath,
-        verifiedAdditions: [],
-        additionDiff: null,
-        promotedFromInterviewId: null,
-        allowedCompanies: allowlistSnapshot.allowedCompanies,
-        allowedRoles: allowlistSnapshot.allowedRoles,
-        allowedTechnologies: allowlistSnapshot.allowedTechnologies,
-        allowedMetricTokens: allowlistSnapshot.allowedMetricTokens,
-      });
-
-      const savedVersion = await manager.save(versionRecord);
-
-      const policyEntities = policyState.map((policy) =>
-        manager.create(BaselineBlockPolicy, {
-          baselineVersionId: savedVersion.id,
-          baselineSectionId: policy.baselineSectionId,
-          includePolicy: policy.includePolicy,
-          order: policy.order,
-        }),
-      );
-
-      await manager.save(policyEntities);
-
-      baseline.version = nextVersionNumber;
-      baseline.versionNumber = nextVersionNumber;
-      baseline.isActive = true;
-      baseline.versions = [savedVersion];
-
-      await this.persistParsedBaseline(manager, baseline, ingestion);
-
-      return manager.save(baseline);
     });
+    let ingestion: BaselineIngestionResult;
+    try {
+      ingestion = await this.reingestFromSourceFileOrFallback(
+        baseline,
+        fallbackRawText,
+        sourceFormat,
+      );
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new UnprocessableEntityException({
+        code: 'baseline_reparse_ingestion_failed',
+        message:
+          'Reprocessing failed while re-ingesting your resume content. Please try again or re-upload your resume.',
+        details: error instanceof Error ? error.message : String(error ?? 'unknown'),
+      });
+    }
+    this.logger.debug('[BASELINE][REPARSE_REINGEST_DONE]', {
+      baselineId: baseline.id,
+      userId,
+      rawTextLength: ingestion.rawText?.length ?? 0,
+      parsedSections: ingestion.parsedSections?.length ?? 0,
+    });
+
+    if (!String(ingestion.rawText ?? '').trim()) {
+      throw new UnprocessableEntityException({
+        code: 'baseline_reparse_empty_content',
+        message:
+          'Reprocessing produced empty resume content. Please re-upload your resume and try again.',
+      });
+    }
+
+    let rebuiltSections: ReturnType<BaselineService['buildSections']>;
+    try {
+      rebuiltSections = this.buildSections(ingestion.rawText, ingestion.parsedSections);
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new UnprocessableEntityException({
+        code: 'baseline_reparse_section_rebuild_failed',
+        message:
+          'Reprocessing failed while rebuilding baseline sections from your resume. Please re-upload your resume and try again.',
+        details: error instanceof Error ? error.message : String(error ?? 'unknown'),
+      });
+    }
+    this.logger.debug('[BASELINE][REPARSE_SECTIONS_REBUILT]', {
+      baselineId: baseline.id,
+      userId,
+      rebuiltSections: rebuiltSections.length,
+    });
+
+    try {
+      return await this.baselineRepository.manager.transaction(async (manager) => {
+        this.logger.debug('[BASELINE][REPARSE_TX_BEGIN]', {
+          baselineId: baseline.id,
+          userId,
+        });
+
+        await manager.delete(BaselineSection, { baselineId: baseline.id });
+        this.logger.debug('[BASELINE][REPARSE_SECTIONS_DELETED]', {
+          baselineId: baseline.id,
+          userId,
+        });
+
+        const rebuiltEntities = rebuiltSections.map((section, index) =>
+          manager.create(BaselineSection, {
+            ...section,
+            baselineId: baseline.id,
+            order: section.order ?? index,
+          }),
+        );
+
+        this.logger.debug('[BASELINE][REPARSE_EMBEDDINGS_BEGIN]', {
+          baselineId: baseline.id,
+          userId,
+          sections: rebuiltEntities.length,
+        });
+        await this.attachEmbeddingsToSections(rebuiltEntities);
+        this.logger.debug('[BASELINE][REPARSE_EMBEDDINGS_DONE]', {
+          baselineId: baseline.id,
+          userId,
+        });
+
+        await manager.save(rebuiltEntities);
+        this.logger.debug('[BASELINE][REPARSE_SECTIONS_SAVED]', {
+          baselineId: baseline.id,
+          userId,
+          sections: rebuiltEntities.length,
+        });
+
+        baseline.sections = rebuiltEntities;
+
+        this.logger.debug('[BASELINE][REPARSE_VERSION_BEGIN]', {
+          baselineId: baseline.id,
+          userId,
+        });
+        const latestVersion = await this.getLatestVersionForBaseline(baseline.id);
+        const nextVersionNumber =
+          (latestVersion?.versionNumber ?? baseline.version ?? 0) + 1;
+        const policyState = this.normalizePoliciesFromSections(
+          (baseline.sections ?? []) as PolicySectionInput[],
+        );
+        const versionHash = this.buildVersionHash(
+          baseline.hash,
+          policyState,
+          latestVersion?.verifiedAdditions ?? [],
+        );
+        const allowlistSnapshot = buildBaselineAllowlistSnapshot(
+          (baseline.sections ?? []).map((section) => ({
+            title: section.title,
+            content: section.content,
+            sectionType: section.sectionType ?? null,
+            sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+          })),
+        );
+
+        const versionRecord = manager.create(BaselineVersion, {
+          baselineId: baseline.id,
+          versionNumber: nextVersionNumber,
+          fileHash: versionHash,
+          storagePath: baseline.storagePath,
+          verifiedAdditions: [],
+          additionDiff: null,
+          promotedFromInterviewId: null,
+          allowedCompanies: allowlistSnapshot.allowedCompanies,
+          allowedRoles: allowlistSnapshot.allowedRoles,
+          allowedTechnologies: allowlistSnapshot.allowedTechnologies,
+          allowedMetricTokens: allowlistSnapshot.allowedMetricTokens,
+        });
+
+        const savedVersion = await manager.save(versionRecord);
+        this.logger.log('[BASELINE][REPARSE_VERSION_SAVED]', {
+          baselineId: baseline.id,
+          userId,
+          baselineVersionId: savedVersion.id,
+          versionNumber: nextVersionNumber,
+        });
+
+        const policyEntities = policyState.map((policy) =>
+          manager.create(BaselineBlockPolicy, {
+            baselineVersionId: savedVersion.id,
+            baselineSectionId: policy.baselineSectionId,
+            includePolicy: policy.includePolicy,
+            order: policy.order,
+          }),
+        );
+
+        await manager.save(policyEntities);
+
+        baseline.version = nextVersionNumber;
+        baseline.versionNumber = nextVersionNumber;
+        baseline.isActive = true;
+
+        this.logger.debug('[BASELINE][REPARSE_RESUMEV2_BEGIN]', {
+          baselineId: baseline.id,
+          userId,
+          baselineVersionId: savedVersion.id,
+        });
+        try {
+          await this.persistParsedBaseline(manager, baseline, ingestion);
+        } catch (error) {
+          if (error instanceof HttpException) {
+            throw error;
+          }
+          throw new UnprocessableEntityException({
+            code: 'baseline_reparse_resume_v2_failed',
+            message:
+              'Reprocessing failed while generating the Resume V2 baseline required for document generation. Please re-upload your resume and try again.',
+            details: error instanceof Error ? error.message : String(error ?? 'unknown'),
+          });
+        }
+        this.logger.debug('[BASELINE][REPARSE_RESUMEV2_DONE]', {
+          baselineId: baseline.id,
+          userId,
+          baselineVersionId: savedVersion.id,
+        });
+
+        // Readiness recomputation is not performed directly in this endpoint today; it is evaluated downstream
+        // from persisted ResumeV2 state and/or scoring pipelines. This breadcrumb exists to make it explicit in logs.
+        this.logger.debug('[BASELINE][REPARSE_READINESS_RECOMPUTE_DEFERRED]', {
+          baselineId: baseline.id,
+          userId,
+          baselineVersionId: savedVersion.id,
+        });
+
+        await manager.update(
+          Baseline,
+          { id: baseline.id, userId },
+          {
+            version: nextVersionNumber,
+            versionNumber: nextVersionNumber,
+            isActive: true,
+            status: BaselineStatus.ACTIVE,
+            archivedAt: null,
+          },
+        );
+
+        const savedBaseline = {
+          ...baseline,
+          version: nextVersionNumber,
+          versionNumber: nextVersionNumber,
+          isActive: true,
+          status: BaselineStatus.ACTIVE,
+          archivedAt: null,
+          versions: [savedVersion],
+        } as Baseline;
+        this.logger.log('[BASELINE][REPARSE_SUCCESS]', {
+          baselineId: baseline.id,
+          userId,
+          baselineVersionId: savedVersion.id,
+          versionNumber: nextVersionNumber,
+        });
+        return savedBaseline;
+      });
+    } catch (error) {
+      this.logger.error('[BASELINE][REPARSE_FAILED]', {
+        baselineId,
+        userId,
+        error: error instanceof Error ? error.message : String(error ?? 'unknown'),
+        name:
+          error && typeof error === 'object' && 'name' in error
+            ? String((error as { name?: unknown }).name ?? 'Error')
+            : 'Error',
+        stack:
+          error && typeof error === 'object' && 'stack' in error
+            ? String((error as { stack?: unknown }).stack ?? '')
+            : '',
+      });
+      if (!(error instanceof HttpException)) {
+        throw new UnprocessableEntityException({
+          code: 'baseline_reparse_persistence_failed',
+          message:
+            'Reprocessing failed while saving your updated baseline. Please try again or re-upload your resume.',
+          details: error instanceof Error ? error.message : String(error ?? 'unknown'),
+        });
+      }
+      throw error;
+    }
   }
 
   private async reingestFromSourceFileOrFallback(
