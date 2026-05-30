@@ -12751,7 +12751,76 @@ export default function StudioPage() {
         >
           <summary className="cursor-pointer text-sm font-semibold text-slate-200">Guidance</summary>
           <div className="mt-3 space-y-3">
-<<<<<<< HEAD
+            {studioBlockedBaselineContract ? (
+              <div className="space-y-3" data-testid="studio-baseline-blocked-recovery">
+                <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
+                  Your baseline needs to be reprocessed before documents can be generated.
+                </p>
+                {baselineReprocessFailure?.message ? (
+                  <p className="text-sm text-slate-200" data-testid="studio-reprocess-failure-message">
+                    {baselineReprocessFailure.message}
+                  </p>
+                ) : null}
+                <div className="flex justify-end">
+                  <FormButton
+                    onClick={() => void handleReprocessBaseline()}
+                    disabled={baselineReprocessInFlight}
+                    data-testid="studio-resume-reprocess-baseline"
+                  >
+                    {baselineReprocessInFlight ? "Reprocessingâ€¦" : "Reprocess baseline"}
+                  </FormButton>
+                </div>
+              </div>
+	            ) : (
+	              <>
+	                <div className="space-y-3">
+                <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
+                  {activeGenerationReadiness.reasons[0]?.message ||
+                    activeGenerationReadiness.reasons[0]?.code ||
+                    canonicalStudioReadinessMessage}
+                </p>
+                {!hasRenderableResumeContent &&
+                !hasRenderableCoverLetterContent &&
+                (activeGenerationReadiness.blocked || !canGenerateDocuments) &&
+                studioCanonicalDecision.primaryAction.destination ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link
+                      href={studioCanonicalDecision.primaryAction.destination}
+                      className="text-sm font-semibold text-slate-100 underline decoration-slate-400/70 underline-offset-4 transition hover:decoration-slate-200"
+                      data-testid="studio-blocker-next-action"
+                    >
+                      {primaryNextAction.label}
+                    </Link>
+                  </div>
+	                ) : null}
+	                </div>
+	                {(() => {
+                  // Canonical rendered top-level state: do not allow readiness internal errors to coexist with READY/blocked UI.
+                  // Readiness errors are fail-closed and must suppress any "Ready to generate" state.
+                  const generationState = studioGenerationStateInfo.state;
+                  const renderedTopState: "loading" | "blocked" | "ready" = analysisLoading
+                    ? "loading"
+                    : readinessError
+                      ? "blocked"
+                      : studioBlockedBaselineContract ||
+                          workflowAuthorityReadiness.blocked ||
+                          !canGenerateDocuments
+                        ? "blocked"
+                        : generationState === "ready"
+                          ? "ready"
+                          : "blocked";
+
+                  const bannerIntent =
+                    renderedTopState === "ready" && !studioBlockedBaselineContract ? "info" : "warning";
+                  const bannerTitle = readinessError
+                    ? "Readiness error"
+                    : studioBlockedBaselineContract
+                      ? "Baseline repair required"
+                      : renderedTopState === "ready"
+                        ? "Ready to generate"
+                        : generationState === "degraded"
+                          ? "This role is a partial match"
+                          : "Review your fit";
             <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
               {activeGenerationReadiness.reasons[0]?.message ||
                 activeGenerationReadiness.reasons[0]?.code ||
@@ -12780,7 +12849,7 @@ export default function StudioPage() {
             : generationState === "degraded"
               ? "This role is a partial match"
               : "Review your fit";
-=======
+
              {studioBlockedBaselineContract ? (
                <div className="space-y-3" data-testid="studio-baseline-blocked-recovery">
                  <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
@@ -12822,35 +12891,30 @@ export default function StudioPage() {
                     </Link>
                   </div>
                 ) : null}
-                {(() => {
-        // Canonical rendered top-level state: do not allow readiness internal errors to coexist with READY/blocked UI.
-        // Readiness errors are fail-closed and must suppress any "Ready to generate" state.
-        const generationState = studioGenerationStateInfo.state;
-        const renderedTopState: "loading" | "blocked" | "ready" = analysisLoading
-          ? "loading"
-          : readinessError
-            ? "blocked"
-            : studioBlockedBaselineContract || workflowAuthorityReadiness.blocked || !canGenerateDocuments
-              ? "blocked"
-              : generationState === "ready"
-                ? "ready"
-                : "blocked";
+	                {(() => {
+	                  // Canonical rendered top-level state: do not allow readiness internal errors to coexist with READY/blocked UI.
+	                  // Readiness errors are fail-closed and must suppress any "Ready to generate" state.
+	                  const generationState = studioGenerationStateInfo.state;
+	                  const renderedTopState: "loading" | "blocked" | "ready" = analysisLoading
+	                    ? "loading"
+	                    : readinessError
+	                      ? "blocked"
+	                      : workflowAuthorityReadiness.blocked || !canGenerateDocuments
+	                        ? "blocked"
+	                        : generationState === "ready"
+	                          ? "ready"
+	                          : "blocked";
 
-        const bannerIntent =
-          renderedTopState === "ready" && !studioBlockedBaselineContract ? "info" : "warning";
-        const bannerTitle =
-          readinessError
-            ? "Readiness error"
-            : studioBlockedBaselineContract
-              ? "Baseline repair required"
-              : renderedTopState === "ready"
-                ? "Ready to generate"
-                : generationState === "degraded"
-                  ? "This role is a partial match"
-                  : "Review your fit";
->>>>>>> 8b795c54e09a34aa95f1be6432023a3a88cf1c24
+	                  const bannerIntent = renderedTopState === "ready" ? "info" : "warning";
+	                  const bannerTitle = readinessError
+	                    ? "Readiness error"
+	                    : renderedTopState === "ready"
+	                      ? "Ready to generate"
+	                      : generationState === "degraded"
+	                        ? "This role is a partial match"
+	                        : "Review your fit";
 
-        return (
+	                  return (
           <Alert intent={bannerIntent} title={bannerTitle}>
             <div data-testid="studio-generation-state-banner" className="space-y-2">
               {scoringReliability === "unreliable" && !readinessError ? (
@@ -12871,11 +12935,7 @@ export default function StudioPage() {
                 </p>
               ) : null}
 
-<<<<<<< HEAD
-              {generationState === "degraded" ? (
-=======
-              {!studioBlockedBaselineContract && generationState === "degraded" ? (
->>>>>>> 8b795c54e09a34aa95f1be6432023a3a88cf1c24
+	              {!studioBlockedBaselineContract && generationState === "degraded" ? (
                 <div data-testid="studio-generation-state-degraded" className="space-y-2">
                   <p className="text-sm text-slate-100">
                     Some requirements are not supported by your verified experience. You can continue, but results are limited.
@@ -12948,9 +13008,11 @@ export default function StudioPage() {
             </div>
           </Alert>
         );
-          })()}
-          </div>
-        </details>
+		          })()}
+	              </>
+		            )}
+		          </div>
+	        </details>
       ) : null}
       {showInstantDraftHeroSafe ? instantDraftHero : null}
       {preAnalysisPersistedResumePanel}
@@ -13594,19 +13656,14 @@ export default function StudioPage() {
       ) : null}
       {requestedAnalysisId &&
       // Unsupported requirements must not block/distract the primary generation path when generation is otherwise allowed.
-<<<<<<< HEAD
-      activeGenerationReadiness.blocked &&
-      canonicalUnverifiedRequirements.length &&
-      !structuralBaselineRepairActive &&
-=======
-      !studioBlockedBaselineContract &&
-      activeGenerationReadiness.blocked &&
-      canonicalUnverifiedRequirements.length &&
-      // Only show "Fix this in one step" for the unsupported-requirements readiness lane.
-      // Never render remediation CTAs for internal readiness failures (e.g. `readiness_error`).
-      (pairReadinessContractState.resume === "unsupported_input" ||
-        pairReadinessContractState.cover === "unsupported_input") &&
->>>>>>> 8b795c54e09a34aa95f1be6432023a3a88cf1c24
+	      !studioBlockedBaselineContract &&
+	      activeGenerationReadiness.blocked &&
+	      canonicalUnverifiedRequirements.length &&
+	      !structuralBaselineRepairActive &&
+	      // Only show "Fix this in one step" for the unsupported-requirements readiness lane.
+	      // Never render remediation CTAs for internal readiness failures (e.g. `readiness_error`).
+	      (pairReadinessContractState.resume === "unsupported_input" ||
+	        pairReadinessContractState.cover === "unsupported_input") &&
       !(studioGenerationStateInfo.state === "degraded" && studioGenerationStateInfo.hasUnsupportedRequirements) ? (
         <div 
           id="studio-auto-adjust-panel" 
@@ -13634,11 +13691,8 @@ export default function StudioPage() {
           </div>
         </div> 
       ) : null} 
-<<<<<<< HEAD
-      {showEvidenceExpansion ? (  
-=======
-      {!studioBlockedBaselineContract && showEvidenceExpansion ? (  
->>>>>>> 8b795c54e09a34aa95f1be6432023a3a88cf1c24
+	      {!studioBlockedBaselineContract && showEvidenceExpansion ? (  
+
         <section className="rounded-2xl border border-white/15 bg-slate-950/35 p-4" data-testid="studio-evidence-expansion">  
           <h2 className="text-base font-semibold text-slate-100">Prove this experience instead</h2>  
           <p className="mt-1 text-sm text-slate-300"> 
@@ -14839,11 +14893,8 @@ export default function StudioPage() {
                     {coverState.error}
                   </p>
                   <div className="flex justify-end">
-<<<<<<< HEAD
-                    {canRetryGeneration ? (
-=======
-                    {(canRetryGeneration || Boolean(coverState.artifactFailure?.retryable)) && !studioBlockedBaselineContract ? (
->>>>>>> 8b795c54e09a34aa95f1be6432023a3a88cf1c24
+	                    {(canRetryGeneration || Boolean(coverState.artifactFailure?.retryable)) &&
+	                    !studioBlockedBaselineContract ? (
                       <FormButton onClick={() => void handleCoverDraft()} disabled={coverGenerating}>
                         Retry generation
                       </FormButton>
@@ -14910,11 +14961,10 @@ export default function StudioPage() {
       </details>
       </>
 
-<<<<<<< HEAD
-      {!shouldShowRefinementAboveMaterials && hasAuthoritativeArtifacts && !studioCardsGenerationBlocked ? (
-=======
-      {!shouldShowRefinementAboveMaterials && hasAuthoritativeArtifacts && !studioCardsGenerationBlocked && !studioBlockedBaselineContract ? (
->>>>>>> 8b795c54e09a34aa95f1be6432023a3a88cf1c24
+	      {!shouldShowRefinementAboveMaterials &&
+	      hasAuthoritativeArtifacts &&
+	      !studioCardsGenerationBlocked &&
+	      !studioBlockedBaselineContract ? (
         <details className="rounded-2xl border border-white/10 bg-slate-950/35 p-4" data-testid="studio-refinement-details">
           <summary className="cursor-pointer text-sm font-semibold text-slate-100">
             Review & refine (optional)
@@ -14989,11 +15039,7 @@ export default function StudioPage() {
         </div>
       </div>
 
-<<<<<<< HEAD
-      {generateNowEligible && !structuralBaselineRepairActive ? (
-=======
-      {generateNowEligible && !studioBlockedBaselineContract ? (
->>>>>>> 8b795c54e09a34aa95f1be6432023a3a88cf1c24
+	      {generateNowEligible && !structuralBaselineRepairActive && !studioBlockedBaselineContract ? (
         <details className="rounded-2xl border border-white/10 bg-white/[0.03] p-4" data-testid="studio-document-strategy-details">
           <summary className="cursor-pointer text-sm font-semibold text-slate-200">
             Document strategy
@@ -15004,11 +15050,10 @@ export default function StudioPage() {
         </details>
       ) : null}
 
-<<<<<<< HEAD
-      {showOptionalEvidenceStrengthening && !structuralBaselineRepairActive ? (
-=======
-      {showOptionalEvidenceStrengthening && !studioBlockedBaselineContract ? (
->>>>>>> 8b795c54e09a34aa95f1be6432023a3a88cf1c24
+	      {showOptionalEvidenceStrengthening &&
+	      !structuralBaselineRepairActive &&
+	      !studioBlockedBaselineContract ? (
+
         <section
           className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
           data-testid="studio-optional-evidence-details"
@@ -15169,11 +15214,7 @@ export default function StudioPage() {
         </section>
       ) : null}
  
-<<<<<<< HEAD
-      {!structuralBaselineRepairActive ? (
-=======
-      {!studioBlockedBaselineContract ? (
->>>>>>> 8b795c54e09a34aa95f1be6432023a3a88cf1c24
+	      {!structuralBaselineRepairActive && !studioBlockedBaselineContract ? (
         <>
           <details className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4"> 
             <summary className="cursor-pointer text-sm font-semibold text-slate-200"> 
