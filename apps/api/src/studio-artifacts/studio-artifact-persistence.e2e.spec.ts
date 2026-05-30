@@ -21,7 +21,7 @@ import { Job, JobIngestionMethod } from '../jobs/job.entity';
 import { buildDalenDeterministicBaselineSections } from '../resume/__fixtures__/dalen-deterministic-baseline.fixture';
 import { validateNormalizedResumeDocument } from '../resume/resume-normalization';
 import { StudioArtifactsService } from './studio-artifacts.service';
-import { StudioArtifactLifecycleStatus } from './studio-artifact.entity';
+import { StudioArtifact, StudioArtifactLifecycleStatus } from './studio-artifact.entity';
 import path from 'node:path';
 
 type RegisterResponse = {
@@ -38,6 +38,7 @@ function expectObject(value: unknown): asserts value is Record<string, unknown> 
 describe('Studio artifact persistence contract (e2e)', () => {
   let app: INestApplication;
   let dataSource: DataSource;
+  let studioArtifactRepository: Repository<StudioArtifact>;
   let baselineRepository: Repository<Baseline>;
   let baselineVersionRepository: Repository<BaselineVersion>;
   let baselineSectionRepository: Repository<BaselineSection>;
@@ -57,6 +58,7 @@ describe('Studio artifact persistence contract (e2e)', () => {
     await app.init();
 
     dataSource = app.get(DataSource);
+    studioArtifactRepository = dataSource.getRepository(StudioArtifact);
     baselineRepository = dataSource.getRepository(Baseline);
     baselineVersionRepository = dataSource.getRepository(BaselineVersion);
     baselineSectionRepository = dataSource.getRepository(BaselineSection);
@@ -625,6 +627,113 @@ describe('Studio artifact persistence contract (e2e)', () => {
     expect(String(resume?.status ?? '')).not.toBe('MISSING');
     const preview = resume?.responseBody?.preview?.resume ?? null;
     expect(preview).toBeTruthy();
+  });
+
+  it('persists cover letter idempotently when two writes race for the same studio artifact scope (no UQ_studio_artifacts_scope violation)', async () => {
+    const baseline = await baselineRepository.save(
+      baselineRepository.create({
+        userId,
+        version: 1,
+        versionNumber: 1,
+        originalFilename: 'resume.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        storagePath: '/tmp/resume.docx',
+        hash: null,
+        isActive: true,
+        archivedAt: null,
+        preserveFromCleanup: true,
+      } as any),
+    );
+
+    await seedBaselineParsedWithResumeV2({ baselineId: baseline.id });
+
+    const baselineVersion = await baselineVersionRepository.save(
+      baselineVersionRepository.create({
+        baselineId: baseline.id,
+        versionNumber: 1,
+        fileHash: `file-hash-${Date.now()}`,
+        hash: `file-hash-${Date.now()}`,
+        storagePath: '/tmp/baseline-version-1',
+        preserveFromCleanup: true,
+      } as any),
+    );
+
+    const job = await jobRepository.save(
+      jobRepository.create({
+        userId,
+        title: 'Support Operations Lead',
+        company: 'ExampleCo',
+        rawDescription: 'Own support operations, build tooling, and partner with product/engineering.',
+        normalizedResponsibilities: [],
+        normalizedRequirements: [],
+        jdIngestionMethod: JobIngestionMethod.PASTE,
+        jdParsedAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        archivedAt: null,
+      } as any),
+    );
+
+    const studioArtifactsService = app.get(StudioArtifactsService);
+    const baselineVersionHash = baselineVersion.hash ?? baselineVersion.id ?? null;
+    const jobFingerprint = studioArtifactsService.computeJobFingerprint(job);
+    const inputsHash = studioArtifactsService.computeCoverLetterInputsHash({
+      baselineVersionHash,
+      jobFingerprint,
+    });
+
+    const responseBody = {
+      status: 'success',
+      generationStatus: 'success',
+      exportReady: true,
+      exports: { docx: true, pdf: true },
+      preview: { coverLetter: { paragraphs: ['Hello world.'] } },
+    } as any;
+
+    const results = await Promise.allSettled([
+      studioArtifactsService.recordCoverLetterSuccess({
+        userId,
+        baselineId: baseline.id,
+        jobId: job.id,
+        baselineVersionId: baselineVersion.id,
+        baselineVersionHash,
+        jobFingerprint,
+        inputsHash,
+        responseBody,
+        content: null,
+        metadata: { test: 'race-1' },
+        analysisId: null,
+      }),
+      studioArtifactsService.recordCoverLetterSuccess({
+        userId,
+        baselineId: baseline.id,
+        jobId: job.id,
+        baselineVersionId: baselineVersion.id,
+        baselineVersionHash,
+        jobFingerprint,
+        inputsHash,
+        responseBody,
+        content: null,
+        metadata: { test: 'race-2' },
+        analysisId: null,
+      }),
+    ]);
+
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        const message = String((result.reason as any)?.message ?? result.reason ?? '');
+        // Should not surface a unique constraint violation under concurrent writes.
+        expect(message).not.toMatch(/UQ_studio_artifacts_scope/i);
+        throw result.reason;
+      }
+    }
+
+    const rows = await studioArtifactRepository.find({
+      where: { userId, baselineId: baseline.id, jobId: job.id },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.coverLetterStatus).toBe(StudioArtifactLifecycleStatus.COMPLETED);
+    expect(Boolean(rows[0]?.coverLetterResponseBody)).toBe(true);
   });
 
   it('GET /studio/artifacts returns 422 for invalid analysisId (even when optional)', async () => {

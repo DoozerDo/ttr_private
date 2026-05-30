@@ -59,3 +59,76 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
   });
 });
 
+describe('StudioArtifactsService (unit): studio artifact scope upsert is idempotent', () => {
+  it('does insert-or-update without throwing UQ_studio_artifacts_scope and logs create vs update decisions', async () => {
+    const insertExecute = jest.fn();
+    const updateExecute = jest.fn();
+    const findOne = jest.fn();
+
+    const insertBuilder = {
+      insert: () => insertBuilder,
+      into: () => insertBuilder,
+      values: () => insertBuilder,
+      onConflict: () => insertBuilder,
+      returning: () => insertBuilder,
+      execute: insertExecute,
+    };
+
+    const updateBuilder = {
+      update: () => updateBuilder,
+      set: () => updateBuilder,
+      where: () => updateBuilder,
+      execute: updateExecute,
+    };
+
+    const createQueryBuilder = jest.fn(() => insertBuilder as any);
+
+    const repo = {
+      createQueryBuilder,
+      findOne,
+    } as any;
+
+    const service = new StudioArtifactsService(repo);
+
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // First call: insert wins.
+    insertExecute.mockResolvedValueOnce({ raw: [{ id: 'artifact-1' }] });
+    // Second call: insert does nothing, then update path runs.
+    insertExecute.mockResolvedValueOnce({ raw: [] });
+
+    // Swap to update builder for the update call.
+    createQueryBuilder.mockImplementationOnce(() => insertBuilder as any);
+    createQueryBuilder.mockImplementationOnce(() => insertBuilder as any);
+    createQueryBuilder.mockImplementationOnce(() => updateBuilder as any);
+
+    updateExecute.mockResolvedValueOnce({ affected: 1 });
+    findOne.mockResolvedValueOnce({ id: 'artifact-1' });
+
+    const patch = { coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED } as any;
+
+    const results = await Promise.allSettled([
+      (service as any).upsertArtifactRow('u-1', 'b-1', 'j-1', patch, 'cover_letter'),
+      (service as any).upsertArtifactRow('u-1', 'b-1', 'j-1', patch, 'cover_letter'),
+    ]);
+
+    for (const result of results) {
+      if (result.status === 'rejected') throw result.reason;
+      expect(result.value).toBe('artifact-1');
+    }
+
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(infoSpy).toHaveBeenCalledWith(
+      '[studio-artifacts][persist_decision]',
+      expect.objectContaining({ scopeKey: 'u-1:b-1:j-1', artifactType: 'cover_letter', decision: 'create' }),
+    );
+    expect(infoSpy).toHaveBeenCalledWith(
+      '[studio-artifacts][persist_decision]',
+      expect.objectContaining({ scopeKey: 'u-1:b-1:j-1', artifactType: 'cover_letter', decision: 'update' }),
+    );
+
+    infoSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
+});

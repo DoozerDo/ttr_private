@@ -1149,7 +1149,7 @@ export class StudioArtifactsService {
       resumeMetadata: input.metadata ?? {},
       resumeFailureCode: null,
       resumeFailureMessage: null,
-    });
+    }, 'resume');
   }
 
   async recordResumeSuccess(input: {
@@ -1209,7 +1209,7 @@ export class StudioArtifactsService {
       resumeFailureCode: null,
       resumeFailureMessage: null,
       resumeMetadata: input.metadata ?? {},
-    });
+    }, 'resume');
   }
 
   async recordResumeFailure(input: {
@@ -1252,7 +1252,7 @@ export class StudioArtifactsService {
       resumeFailureCode: input.failureCode,
       resumeFailureMessage: input.failureMessage,
       resumeMetadata: input.metadata ?? {},
-    });
+    }, 'resume');
   }
 
   async recordCoverLetterInProgress(input: {
@@ -1277,7 +1277,7 @@ export class StudioArtifactsService {
       coverLetterMetadata: input.metadata ?? {},
       coverLetterFailureCode: null,
       coverLetterFailureMessage: null,
-    });
+    }, 'cover_letter');
   }
 
   async recordCoverLetterSuccess(input: {
@@ -1314,7 +1314,7 @@ export class StudioArtifactsService {
       coverLetterFailureCode: null,
       coverLetterFailureMessage: null,
       coverLetterMetadata: input.metadata ?? {},
-    });
+    }, 'cover_letter');
   }
 
   async recordCoverLetterFailure(input: {
@@ -1342,7 +1342,7 @@ export class StudioArtifactsService {
       coverLetterFailureCode: input.failureCode,
       coverLetterFailureMessage: input.failureMessage,
       coverLetterMetadata: input.metadata ?? {},
-    });
+    }, 'cover_letter');
   }
 
   async seedResumeFromCompletedResponse(input: {
@@ -1550,7 +1550,10 @@ export class StudioArtifactsService {
     baselineId: string,
     jobId: string,
     patch: ArtifactPatch,
+    artifactTypeForLog: StudioArtifactKind,
   ): Promise<string> {
+    const scopeKey = `${userId}:${baselineId}:${jobId}`;
+
     if (shouldDebugDocgen()) {
       const resumeStatus = patch.resumeStatus ?? null;
       const coverLetterStatus = patch.coverLetterStatus ?? null;
@@ -1565,12 +1568,60 @@ export class StudioArtifactsService {
         });
       }
     }
-    const existing = await this.studioArtifactRepository.findOne({
-      where: { userId, baselineId, jobId },
+
+    // Contract: preserve UQ_studio_artifacts_scope and make writes idempotent under concurrency.
+    // Avoid a read-then-insert race by first attempting an atomic insert, then updating if needed.
+    try {
+      const insertResult = await this.studioArtifactRepository
+        .createQueryBuilder()
+        .insert()
+        .into(StudioArtifact)
+        .values({ userId, baselineId, jobId, ...patch })
+        .onConflict('("userId","baselineId","jobId") DO NOTHING')
+        .returning(['id'])
+        .execute();
+
+      const insertedId = insertResult?.raw?.[0]?.id ?? null;
+      if (insertedId) {
+        // eslint-disable-next-line no-console
+        console.info('[studio-artifacts][persist_decision]', {
+          scopeKey,
+          artifactType: artifactTypeForLog,
+          decision: 'create',
+        });
+        return String(insertedId);
+      }
+    } catch (error) {
+      // If something unexpected happens here, surface it; do not silently retry inserts.
+      // eslint-disable-next-line no-console
+      console.warn('[studio-artifacts][persist_insert_failed]', {
+        scopeKey,
+        artifactType: artifactTypeForLog,
+        error: (error as any)?.message ?? String(error),
+      });
+      throw error;
+    }
+
+    // Row already exists for this scope; update it.
+    // eslint-disable-next-line no-console
+    console.info('[studio-artifacts][persist_decision]', {
+      scopeKey,
+      artifactType: artifactTypeForLog,
+      decision: 'update',
     });
-    const next = existing ?? this.studioArtifactRepository.create({ userId, baselineId, jobId });
-    Object.assign(next, patch);
-    const saved = await this.studioArtifactRepository.save(next);
-    return String((saved as any)?.id ?? (next as any)?.id ?? '');
+
+    await this.studioArtifactRepository
+      .createQueryBuilder()
+      .update(StudioArtifact)
+      .set(patch)
+      .where('"userId" = :userId AND "baselineId" = :baselineId AND "jobId" = :jobId', {
+        userId,
+        baselineId,
+        jobId,
+      })
+      .execute();
+
+    const refreshed = await this.studioArtifactRepository.findOne({ where: { userId, baselineId, jobId } });
+    return String((refreshed as any)?.id ?? '');
   }
 }
