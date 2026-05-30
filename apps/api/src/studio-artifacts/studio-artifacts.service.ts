@@ -974,7 +974,57 @@ export class StudioArtifactsService {
       };
     }
 
+    const responseBody = record.responseBody;
+    const preview = responseBody && typeof responseBody.preview === 'object'
+      ? (responseBody.preview as Record<string, unknown>)
+      : null;
+    const previewModel =
+      artifact === 'resume'
+        ? preview?.resume ?? null
+        : preview?.coverLetter ?? null;
+
+    // Contract repair: a persisted artifact record can carry a stale FAILED lifecycle status even when the
+    // stored responseBody is a successful, renderable payload. In that case, the responseBody is the canonical
+    // authority for Studio hydration and must win over stale failure metadata.
     if (record.status === StudioArtifactLifecycleStatus.FAILED) {
+      const generationStatus = String((responseBody as any)?.generationStatus ?? (responseBody as any)?.status ?? '')
+        .trim()
+        .toLowerCase();
+      const hasRenderablePreview = Boolean(previewModel && typeof previewModel === 'object');
+
+      if (generationStatus === 'success' && hasRenderablePreview) {
+        const qualityGate =
+          responseBody && typeof (responseBody as any).qualityGate === 'object'
+            ? ((responseBody as any).qualityGate as Record<string, unknown>)
+            : null;
+        const qualityStatusRaw = String((qualityGate as any)?.status ?? '').trim();
+        const qualityStatus = qualityStatusRaw === 'pass' ? 'pass' : 'needs_refinement';
+
+        const exportReadyRaw =
+          responseBody && typeof (responseBody as any).exportReady === 'boolean' ? (responseBody as any).exportReady : false;
+        const exportReady = Boolean(exportReadyRaw) && qualityStatus === 'pass';
+        const exportsRaw =
+          responseBody && typeof (responseBody as any).exports === 'object' ? ((responseBody as any).exports as Record<string, unknown>) : null;
+        const exports = exportReady
+          ? { docx: Boolean(exportsRaw && exportsRaw.docx), pdf: Boolean(exportsRaw && exportsRaw.pdf) }
+          : { docx: false, pdf: false };
+
+        return {
+          artifactType,
+          generationState: qualityStatus === 'pass' ? 'generated_usable' : 'generated_needs_correction',
+          qualityStatus,
+          preview: previewModel,
+          correctionReasons: [],
+          exportReady,
+          exports,
+          actions: {
+            ...baseActions,
+            canExport: exportReady,
+            canSaveToOpportunities: exportReady,
+          },
+        };
+      }
+
       const correctionReasons: ArtifactCorrectionReason[] = [];
       if (record.failureCode || record.failureMessage) {
         correctionReasons.push({
@@ -994,15 +1044,6 @@ export class StudioArtifactsService {
         actions: baseActions,
       };
     }
-
-    const responseBody = record.responseBody;
-    const preview = responseBody && typeof responseBody.preview === 'object'
-      ? (responseBody.preview as Record<string, unknown>)
-      : null;
-    const previewModel =
-      artifact === 'resume'
-        ? preview?.resume ?? null
-        : preview?.coverLetter ?? null;
 
     const qualityGate =
       responseBody && typeof responseBody.qualityGate === 'object'
