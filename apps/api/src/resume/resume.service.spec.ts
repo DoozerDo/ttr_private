@@ -3864,6 +3864,36 @@ describe('ResumeService contract', () => {
     }
   });
 
+  it('does not terminate Studio eligible generation with unsupported_input when resume structure is empty (degrades to minimal baseline-only resume)', async () => {
+    const { service } = buildService();
+    const original = baseline.sections;
+    // Paragraph-only baseline can still be cover-letter-capable, but should not hard-stop resume generation.
+    baseline.sections = [
+      {
+        ...baseSection,
+        sectionType: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        order: 0,
+        // Header-like structure but no bullet lines; this can yield an empty/invalid assembled resume structure downstream.
+        content: ['Acme Corp', 'Senior Engineer', '2021 - 2024', ''].join('\n'),
+      },
+    ];
+
+    await expect(
+      service.generateResume(
+        'user-1',
+        { ...baseRequest, forceRegenerate: true },
+        { preflightOnly: false, skipReadinessGate: true, enforceOneTap: false },
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      status: 'success',
+      exportReady: true,
+    });
+
+    baseline.sections = original;
+  });
+
   it('does not collapse customer/support operations into a billing-operations archetype when billing evidence is isolated', () => {
     const apply = (ResumeService as any).prototype.applyJobAlignedPresentation as (payload: any) => any[];
 

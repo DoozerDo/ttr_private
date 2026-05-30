@@ -917,6 +917,9 @@ export class ResumeService {
 	    assessment: FitAssessment | null | undefined,
 	  ): boolean {
 	    if (!jobId || !analysisId) return false;
+	    const forceRegenerate =
+	      request.forceRegenerate === true ||
+	      String((request as any).forceRegenerate ?? '').toLowerCase() === 'true';
 	    // Internal Studio eligible-score verified-only fallback call (oneTap + enforceOneTap + skipReadinessGate).
 	    // Treat as Studio lane so baseline-only degradation paths can proceed without weakening user oneTap.
 	    if (Boolean(request.oneTap) && Boolean(opts?.enforceOneTap) && Boolean((opts as any)?.skipReadinessGate)) {
@@ -925,7 +928,7 @@ export class ResumeService {
 	    if (Boolean(request.oneTap) || Boolean(opts?.enforceOneTap)) return false;
 	    // Studio eligible generation lane: requires an explicit Studio generate intent.
 	    // (UI sends `forceRegenerate` for eligible-generate actions; readiness-only probing does not.)
-	    if (!Boolean(request.forceRegenerate)) return false;
+	    if (!forceRegenerate) return false;
 	    const score = typeof assessment?.overallScore === 'number' ? assessment.overallScore : null;
 	    // If scoring context is temporarily unavailable but Studio context is present, treat as eligible for
 	    // non-blocking baseline-only fallback. Compliance gates still apply downstream.
@@ -2202,8 +2205,9 @@ export class ResumeService {
 	      resumeV2UsableExperienceCount === 0
 	    ) {
 	      const readinessDetailsAny = templateReadinessForBaseline as any;
-	      if (Number(readinessDetailsAny?.totalExperience ?? 0) === 0 && Number(readinessDetailsAny?.validExperience ?? 0) === 0) {
-	        if (this.isStudioEligibleGenerationLane(request, options, jobId, analysisId, effectiveAssessment ?? null)) {
+              if (Number(readinessDetailsAny?.totalExperience ?? 0) === 0 && Number(readinessDetailsAny?.validExperience ?? 0) === 0) {
+                const studioEligibleLane = this.isStudioEligibleGenerationLane(request, options, jobId, analysisId, effectiveAssessment ?? null);
+                if (studioEligibleLane) {
 	          templateReadinessDegradedToBaselineOnly = {
 	            reason: 'authoritative_extraction_zero_roles',
 	            details: {
@@ -3372,10 +3376,77 @@ export class ResumeService {
       if (!preflightOnly) {
         const reason = experienceDiagnostics.resumeGenerationReason ?? 'resume_structure_empty';
         if (reason === 'resume_structure_empty') {
+          const studioEligibleForFallback = this.isStudioEligibleGenerationLane(
+            request,
+            options,
+            jobId,
+            analysisId,
+            effectiveAssessment ?? null,
+          );
+
+          // Diagnostics for runtime contract violations: scored + ready + cover-letter-capable baselines
+          // must not hard-stop resume generation as unsupported_input.
+          try {
+            const baselineSections = baseline.sections ?? [];
+            const baselineEvidenceCount = baselineSections.filter(
+              (section) => typeof section.content === 'string' && section.content.trim().length > 0,
+            ).length;
+            const baselineExperienceSectionCount = baselineSections.filter(
+              (section) => String(section.sectionType ?? '').toUpperCase() === 'EXPERIENCE',
+            ).length;
+            const resumeV2ExperienceCount = Array.isArray((normalizedDocument as any)?.experience)
+              ? (normalizedDocument as any).experience.length
+              : null;
+            const selectedEvidenceCount = Array.isArray(allowedSections) ? allowedSections.length : null;
+            // eslint-disable-next-line no-console
+            console.warn('[RESUME][UNSUPPORTED_INPUT_THRESHOLD]', {
+              baselineId: baseline.id,
+              baselineVersionId: baselineVersion.id,
+              jobId: job?.id ?? jobId ?? null,
+              analysisId: request.analysisId ?? analysisId ?? null,
+              studioEligibleForFallback,
+              baselineEvidenceCount,
+              baselineExperienceSectionCount,
+              resumeV2ExperienceCount,
+              selectedEvidenceCount,
+              thresholds: {
+                autoGenerateThreshold: AUTO_GENERATE_THRESHOLD,
+                verifiedOnlyThreshold: VERIFIED_ONLY_GENERATION_THRESHOLD,
+                templateAssemblyThreshold: TEMPLATE_ASSEMBLY_THRESHOLD,
+              },
+              failingThreshold: 'validateNormalizedResumeDocument:resume_structure_empty',
+              validationReasons: reasons.slice(0, 6),
+            });
+          } catch {
+            // ignore
+          }
+
+          if (studioEligibleForFallback) {
+            // Studio eligible-score lane contract: degrade to a minimal baseline-only resume instead of throwing unsupported_input.
+            sections = this.buildMinimalResumeSections(resumeInputSections);
+            normalizedDocument = buildNormalizedResumeDocument(
+              sections as ResumeExportSection[],
+              identity,
+              { documentStrategyPlan: request.documentStrategyPlan ?? undefined },
+            );
+            const fallbackValidation = validateNormalizedResumeDocument(normalizedDocument);
+            if (!fallbackValidation.valid) {
+              this.throwGenerationFailedError(
+                this.mapResumeFailureDescription(reason),
+                {
+                  stage: experienceDiagnostics.resumeGenerationStage ?? 'resume_structure_assembly',
+                  reason,
+                  blockers: [...reasons, ...fallbackValidation.reasons].slice(0, 6),
+                },
+              );
+            }
+            // Fallback recovered; continue pipeline with baseline-only document.
+          } else {
           this.throwUnsupportedResumeInput(
             this.mapResumeFailureDescription(reason),
             reason,
           );
+          }
         }
         this.throwGenerationFailedError(
           this.mapResumeFailureDescription(reason),
@@ -4064,6 +4135,13 @@ export class ResumeService {
     const isMinimalFallbackRuntime = Boolean((response as any)?.internal?.minimalFallback) || hasMinimalSummarySection;
     const isInternalStudioVerifiedOnlyFallbackCall =
       Boolean(request.oneTap) && Boolean(options?.enforceOneTap) && Boolean(options?.skipReadinessGate);
+    const isStudioEligibleLaneForPersistence = this.isStudioEligibleGenerationLane(
+      request,
+      options,
+      jobId,
+      analysisId,
+      effectiveAssessment ?? null,
+    );
     const isStudioEligibleZeroRoleFallback = (() => {
       // Narrow carve-out: allow persistence only for the Studio eligible-score lane's verified-only
       // fallback when structured extraction yields zero roles. Do not weaken the global guard.
@@ -4083,10 +4161,11 @@ export class ResumeService {
       }
     })();
     if (
-      (!isInternalStudioVerifiedOnlyFallbackCall && isMinimalFallbackRuntime) ||
+      (!isInternalStudioVerifiedOnlyFallbackCall && !isStudioEligibleLaneForPersistence && isMinimalFallbackRuntime) ||
       (!isInternalStudioVerifiedOnlyFallbackCall &&
         authoritativeExperienceCountForGuard === 0 &&
-        !isStudioEligibleZeroRoleFallback)
+        !isStudioEligibleZeroRoleFallback &&
+        !isStudioEligibleLaneForPersistence)
     ) {
       if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
         (response as any).internal = {
