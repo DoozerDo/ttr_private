@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -819,7 +819,7 @@ function trimString(value: unknown): string {
     endpoint: "studio-page",
     field: "value",
   });
-  return sanitized === "We couldn’t display this result. Please retry." ? "" : sanitized;
+  return sanitized === "We couldnâ€™t display this result. Please retry." ? "" : sanitized;
 }
 
 function trimId(value: unknown): string {
@@ -3206,6 +3206,7 @@ export default function StudioPage() {
     return Array.from(new Set(codes));
   }, [studioArtifactsPayload]);
   const structuralBaselineRepairActive = baselineResumeV2AuthorityBlockers.length > 0;
+  const studioBlockedBaselineContract = structuralBaselineRepairActive;
 
   const activeGenerationReadiness = useMemo(() => {
     const base = adjustedReadinessResult.readiness;
@@ -7121,7 +7122,7 @@ export default function StudioPage() {
     if (payload === null || payload === undefined) return payload;
     if (typeof payload === "string") {
       const trimmed = payload.trim();
-      return trimmed.length > 600 ? `${trimmed.slice(0, 600)}…` : trimmed;
+      return trimmed.length > 600 ? `${trimmed.slice(0, 600)}â€¦` : trimmed;
     }
     if (Array.isArray(payload)) return { type: "array", length: payload.length };
     if (typeof payload === "object") {
@@ -10311,7 +10312,7 @@ export default function StudioPage() {
             </h2>
             <p className="max-w-3xl text-base leading-7 text-slate-200">
               {isApplicationApplied
-                ? "Let’s find your next opportunity."
+                ? "Letâ€™s find your next opportunity."
                 : "Download your resume and cover letter, then apply to this role."}
             </p>
             {applicationActionMessage ? (
@@ -10417,7 +10418,7 @@ export default function StudioPage() {
                         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Excerpt</p>
                         <pre className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-100">
 {resumePreviewText.slice(0, 900)}
-{resumePreviewText.length > 900 ? "\n\n…(excerpt truncated)" : ""}
+{resumePreviewText.length > 900 ? "\n\nâ€¦(excerpt truncated)" : ""}
                         </pre>
                       </div>
                       <details className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
@@ -10453,7 +10454,7 @@ export default function StudioPage() {
                       <div className="space-y-1">
                         <p className="text-sm font-semibold text-slate-100">Resume preview unavailable.</p>
                         <p className="text-sm text-slate-300">
-                          Try regenerating it. If the issue continues, report it and we’ll review the artifact.
+                          Try regenerating it. If the issue continues, report it and weâ€™ll review the artifact.
                         </p>
                       </div>
                       <div className="flex justify-end">
@@ -10680,7 +10681,7 @@ export default function StudioPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Excerpt</p>
             <pre className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-100">
 {resumePreviewText.slice(0, 900)}
-{resumePreviewText.length > 900 ? "\n\nâ€¦(excerpt truncated)" : ""}
+{resumePreviewText.length > 900 ? "\n\nÃ¢â‚¬Â¦(excerpt truncated)" : ""}
             </pre>
           </div>
         </div>
@@ -12567,7 +12568,7 @@ export default function StudioPage() {
               {
                 outcomeState: "reanalysis_failed",
                 headline: "Re-evaluation failed.",
-                body: "We couldn’t confirm whether your new evidence changed readiness. Retry the re-evaluation to refresh your score and gating state.",
+                body: "We couldnâ€™t confirm whether your new evidence changed readiness. Retry the re-evaluation to refresh your score and gating state.",
                 primaryCta: { label: "Try re-evaluating again", action: "retry_reanalysis" },
                 secondaryCta: { label: "Add more evidence", href: "", action: "return_to_evidence" },
               }
@@ -12724,10 +12725,10 @@ export default function StudioPage() {
     <PageShell className="space-y-4 pb-4">
       <div data-testid="studio-invalid-state-fallback">
         <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
-        <Alert intent="warning" title="We couldn’t load your analysis">
+        <Alert intent="warning" title="We couldnâ€™t load your analysis">
           <div className="space-y-3">
             <p className="text-sm text-slate-100">
-              Something changed or couldn’t be verified. Reload your analysis to continue.
+              Something changed or couldnâ€™t be verified. Reload your analysis to continue.
             </p>
             <div>
               <FormButton onClick={() => void router.push("/analyze")}>Run Analyze again</FormButton>
@@ -12767,33 +12768,12 @@ export default function StudioPage() {
                     disabled={baselineReprocessInFlight}
                     data-testid="studio-resume-reprocess-baseline"
                   >
-                    {baselineReprocessInFlight ? "Reprocessingâ€¦" : "Reprocess baseline"}
+                    {baselineReprocessInFlight ? "ReprocessingÃ¢â‚¬Â¦" : "Reprocess baseline"}
                   </FormButton>
                 </div>
               </div>
-              ) : (
-                <React.Fragment>
-                <div className="space-y-3" data-testid="studio-baseline-blocked-recovery">
-                  <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
-                    Your baseline needs to be reprocessed before documents can be generated.
-                  </p>
-                  {baselineReprocessFailure?.message ? (
-                   <p className="text-sm text-slate-200" data-testid="studio-reprocess-failure-message">
-                     {baselineReprocessFailure.message}
-                   </p>
-                 ) : null}
-                 <div className="flex justify-end">
-                   <FormButton
-                     onClick={() => void handleReprocessBaseline()}
-                     disabled={baselineReprocessInFlight}
-                    data-testid="studio-resume-reprocess-baseline"
-                  >
-                    {baselineReprocessInFlight ? "Reprocessing…" : "Reprocess baseline"}
-                  </FormButton>
-                </div>
-                </div>
-              ) : (
-                <React.Fragment>
+            ) : (
+              <>
                   <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
                     {activeGenerationReadiness.reasons[0]?.message ||
                       activeGenerationReadiness.reasons[0]?.code ||
@@ -12846,7 +12826,7 @@ export default function StudioPage() {
                   data-reliability-reason={scoringReliabilityReason ?? undefined}
                 >
                   <p className="text-sm text-slate-100">
-                    Fit score may be unreliable because we couldn’t parse the job description well enough. You can still
+                    Fit score may be unreliable because we couldnâ€™t parse the job description well enough. You can still
                     generate drafts, but review the job description for best results.
                   </p>
                 </div>
@@ -12931,7 +12911,7 @@ export default function StudioPage() {
           </Alert>
                 );
               })()}
-                </React.Fragment>
+                </>
               )}
             </div>
           </details>
@@ -13189,7 +13169,7 @@ export default function StudioPage() {
               </h2>
               <p className="mt-2 text-sm text-slate-200">  
                 {readinessError
-                  ? "We couldn’t evaluate generation readiness from the current state. Refresh the page or try again from Analyze."
+                  ? "We couldnâ€™t evaluate generation readiness from the current state. Refresh the page or try again from Analyze."
                   : workflowSurfaceAuthorityHero.canonicalState === "generation_in_progress"
                   ? "We're building your tailored resume and cover letter now."
                   : hasCompletedGeneration  
@@ -13881,7 +13861,7 @@ export default function StudioPage() {
                 endpoint: "studio-page",
                 field: "analysis.compatibilityRationale",
               });
-              const clipped = sanitized.length > 160 ? `${sanitized.slice(0, 157).trimEnd()}…` : sanitized;
+              const clipped = sanitized.length > 160 ? `${sanitized.slice(0, 157).trimEnd()}â€¦` : sanitized;
               return (
                 <p className="text-xs text-slate-400" data-testid="studio-compatibility-rationale">
                   {clipped}
@@ -13911,7 +13891,7 @@ export default function StudioPage() {
             <h2 className="text-lg font-semibold text-slate-100">Resume</h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
               {studioCardsGenerationBlocked ? "Generation unavailable" : resumeAutoRepairing
-                ? "Repairing resume…"
+                ? "Repairing resumeâ€¦"
                 : (hasResumeDraft && (resumeNeedsRefinement || resumeRequiresCorrectionCopy))
                   ? studioEffectiveGenerationState === "generated_unusable"
                     ? studioRetryInProgress
@@ -14030,7 +14010,7 @@ export default function StudioPage() {
           >
             <p className="text-sm font-semibold text-slate-100">We hit an issue generating your resume.</p>
             <p className="text-sm text-slate-300">
-              Try regenerating it. If the issue continues, report it and we’ll review the artifact.
+              Try regenerating it. If the issue continues, report it and weâ€™ll review the artifact.
             </p>
             <div className="flex justify-end pt-1">
               <FormButton
@@ -14136,7 +14116,7 @@ export default function StudioPage() {
                 <div className="space-y-1">
                   <p className="text-sm font-semibold text-slate-100">We hit an issue generating your resume.</p>
                   <p className="text-sm text-slate-300">
-                    Try regenerating it. If the issue continues, report it and we’ll review the artifact.
+                    Try regenerating it. If the issue continues, report it and weâ€™ll review the artifact.
                   </p>
                 </div>
                 <div className="flex justify-end">
@@ -14244,7 +14224,7 @@ export default function StudioPage() {
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Excerpt</p>
                     <pre className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-100">
 {resumePreviewText.slice(0, 1200)}
-{resumePreviewText.length > 1200 ? "\n\n…(excerpt truncated)" : ""}
+{resumePreviewText.length > 1200 ? "\n\nâ€¦(excerpt truncated)" : ""}
                     </pre>
                   </div>
                   <details className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
@@ -14326,7 +14306,7 @@ export default function StudioPage() {
 
           </div>
         ) : resumeState.artifactFailure ? null : resumeAutoRepairing ? (
-          <EmptyState testId="studio-resume-auto-repairing" title="Repairing resume…" body="Regenerating the latest artifact." />
+          <EmptyState testId="studio-resume-auto-repairing" title="Repairing resumeâ€¦" body="Regenerating the latest artifact." />
         ) : !hasRenderableResumeContent && (resumeAutoGenerating || resumeGenerateNowPending) ? (
           <EmptyState
             testId="studio-resume-generating"
@@ -14403,7 +14383,7 @@ export default function StudioPage() {
             </h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
               {studioCardsGenerationBlocked ? "Generation unavailable" : coverAutoRepairing
-                ? "Repairing cover letter…"
+                ? "Repairing cover letterâ€¦"
                 : (hasCoverLetterDraft && (coverNeedsRefinement || coverRequiresCorrectionCopy))
                   ? studioEffectiveGenerationState === "generated_unusable"
                     ? studioRetryInProgress
@@ -14512,7 +14492,7 @@ export default function StudioPage() {
           >
             <p className="text-sm font-semibold text-slate-100">We hit an issue generating your cover letter.</p>
             <p className="text-sm text-slate-300">
-              Try regenerating it. If the issue continues, report it and we’ll review the artifact.
+              Try regenerating it. If the issue continues, report it and weâ€™ll review the artifact.
             </p>
             <div className="flex justify-end pt-1">
               <FormButton
@@ -14630,7 +14610,7 @@ export default function StudioPage() {
                     </p>
                   ) : null}
                   <p className="text-sm text-slate-300">
-                    Try regenerating it. If the issue continues, report it and we’ll review the artifact.
+                    Try regenerating it. If the issue continues, report it and weâ€™ll review the artifact.
                   </p>
                 </div>
                 <div className="flex justify-end">
@@ -14701,7 +14681,7 @@ export default function StudioPage() {
                   <div data-testid="studio-cover-export-blocked-message">
                     <p className="text-sm font-semibold text-slate-100">We hit an issue generating your cover letter.</p>
                     <p className="text-sm text-slate-300">
-                      Try regenerating it. If the issue continues, report it and we’ll review the artifact.
+                      Try regenerating it. If the issue continues, report it and weâ€™ll review the artifact.
                     </p>
                   </div>
                 </div>
