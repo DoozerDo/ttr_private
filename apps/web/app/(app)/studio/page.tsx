@@ -3195,6 +3195,17 @@ export default function StudioPage() {
     [reconciledGenerationReadiness, excludedTargetingLabels],
   );
   const baselineResumeV2AuthorityBlockers = useMemo(() => {
+    const resumeV2Readiness = (studioArtifactsPayload as any)?.diagnostics?.resumeV2Readiness as
+      | { hasResumeV2?: unknown; usableExperienceCount?: unknown }
+      | undefined;
+
+    // Contract: baseline repair required must only be derived from *current* baseline authority.
+    // Stale artifact error codes may exist in `errors` / `resume.failureCode` for a prior lane and must not
+    // force BASELINE_REPAIR_REQUIRED unless the current ResumeV2 readiness snapshot indicates structural failure.
+    const resumeV2StructurallyBlocked =
+      resumeV2Readiness?.hasResumeV2 === false || Number(resumeV2Readiness?.usableExperienceCount ?? NaN) <= 0;
+    if (!resumeV2StructurallyBlocked) return [];
+
     const codes: string[] = [];
     const errors = Array.isArray((studioArtifactsPayload as any)?.errors) ? ((studioArtifactsPayload as any).errors as any[]) : [];
     for (const err of errors) {
@@ -3490,10 +3501,19 @@ export default function StudioPage() {
     const errorCodes = Array.isArray((studioArtifactsPayload as any)?.errors)
       ? ((studioArtifactsPayload as any).errors as any[]).map((e) => String((e as any)?.code ?? "")).filter(Boolean)
       : [];
-    const hasResumeV2BlockingGuidance = errorCodes.some((code) => code.startsWith("baseline_resume_v2_"));
+    const rawHasResumeV2BlockingGuidance = errorCodes.some((code) => code.startsWith("baseline_resume_v2_"));
 
     const resumeFailureCode = String(((studioArtifactsPayload as any)?.resume as any)?.failureCode ?? "").trim();
-    const hasResumeFailureBaselineBlocker = resumeFailureCode.startsWith("baseline_resume_v2_");
+    const rawHasResumeFailureBaselineBlocker = resumeFailureCode.startsWith("baseline_resume_v2_");
+
+    const resumeV2StructurallyBlocked =
+      hasResumeV2 === false || (typeof usableExperienceCount === "number" && usableExperienceCount <= 0);
+
+    // Contract: do not treat baseline_resume_v2_* error codes as blocking unless the current readiness snapshot
+    // indicates a structural ResumeV2 failure for the active baseline.
+    const hasResumeV2BlockingGuidance =
+      resumeV2StructurallyBlocked && (rawHasResumeV2BlockingGuidance || rawHasResumeFailureBaselineBlocker);
+    const hasResumeFailureBaselineBlocker = resumeV2StructurallyBlocked && rawHasResumeFailureBaselineBlocker;
 
     // Single authoritative rule: ResumeV2 unusable experience blocks generation UI (no mixed "ready" states).
     const blocksGeneration =
@@ -3505,7 +3525,7 @@ export default function StudioPage() {
     return {
       hasResumeV2,
       usableExperienceCount,
-      hasResumeV2BlockingGuidance: hasResumeV2BlockingGuidance || hasResumeFailureBaselineBlocker,
+      hasResumeV2BlockingGuidance,
       blocksGeneration,
     };
   }, [studioArtifactsPayload]);

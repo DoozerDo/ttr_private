@@ -375,6 +375,148 @@ describe("Studio pair readiness blocking", () => {
     expect(screen.queryByTestId("studio-generation-ready-shell")).toBeNull();
   });
 
+  it("F. score 83 + stale baseline_resume_v2_* artifact errors do not force baseline repair required when ResumeV2 readiness is usable", async () => {
+    overrideSearchParams({
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      analysisId: "analysis-83-stale-resume-v2",
+    });
+
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+
+      if (url.includes("/api/analysis/fit-assessments/analysis-83-stale-resume-v2")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-83-stale-resume-v2",
+            scoring_v2: { score: 83 },
+            scoringV2: { score: 83 },
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            verification_coverage: { unverifiedRequirements: [] },
+          }),
+        );
+      }
+
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "completed",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            jobId: "job-1",
+            score: 83,
+            scoring_v2: { score: 83, generation_readiness: { status: "ready", blocked: false, reasonCodes: [] } },
+            // Stale: baseline_resume_v2_* error codes from a prior lane.
+            errors: [{ code: "baseline_resume_v2_missing", message: "Stale ResumeV2 missing error." }],
+            resume: { status: "missing", confidence: "LOW", failure: null, failureCode: "baseline_resume_v2_missing" },
+            coverLetter: { status: "missing", confidence: "LOW", failure: null },
+            artifact: { hasResume: false, hasCoverLetter: false, pairStatus: "missing", generating: false, failure: null },
+            // Current: readiness snapshot indicates usable baseline ResumeV2.
+            diagnostics: { resumeV2Readiness: { hasResumeV2: true, usableExperienceCount: 2 } },
+          }),
+        );
+      }
+
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+
+      return Promise.resolve(createResponse({ error: "not_found" }, false, 404));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await screen.findByTestId("studio-generation-readiness");
+
+    expect(screen.queryByTestId("studio-baseline-blocked-recovery")).toBeNull();
+    expect(
+      screen.queryByText("Your baseline needs to be reprocessed before documents can be generated."),
+    ).toBeNull();
+
+    // Generation remains available (either generate buttons or a retry action depending on lane).
+    await waitFor(() => {
+      const hasAnyGenerationAction =
+        Boolean(screen.queryByRole("button", { name: /generate resume/i })) ||
+        Boolean(screen.queryByRole("button", { name: /generate cover letter/i })) ||
+        Boolean(screen.queryByText(/retry generation/i));
+      expect(hasAnyGenerationAction).toBe(true);
+    });
+  });
+
+  it("G. score 83 + structurally unusable ResumeV2 readiness renders baseline repair required", async () => {
+    overrideSearchParams({
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      analysisId: "analysis-83-structural-resume-v2",
+    });
+
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+
+      if (url.includes("/api/analysis/fit-assessments/analysis-83-structural-resume-v2")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-83-structural-resume-v2",
+            scoring_v2: { score: 83 },
+            scoringV2: { score: 83 },
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            verification_coverage: { unverifiedRequirements: [] },
+          }),
+        );
+      }
+
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "failed",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            jobId: "job-1",
+            score: 83,
+            scoring_v2: {
+              score: 83,
+              generation_readiness: { status: "blocked", blocked: true, reasonCodes: ["baseline_resume_v2_missing"] },
+            },
+            errors: [{ code: "baseline_resume_v2_missing", message: "Current ResumeV2 missing." }],
+            resume: { status: "FAILED", confidence: "LOW", failure: null, failureCode: "baseline_resume_v2_missing" },
+            coverLetter: { status: "missing", confidence: "LOW", failure: null },
+            artifact: { hasResume: false, hasCoverLetter: false, pairStatus: "missing", generating: false, failure: null },
+            diagnostics: { resumeV2Readiness: { hasResumeV2: false, usableExperienceCount: 0 } },
+          }),
+        );
+      }
+
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+
+      return Promise.resolve(createResponse({ error: "not_found" }, false, 404));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await screen.findByTestId("studio-baseline-blocked-recovery");
+    expect(
+      screen.getAllByText("Your baseline needs to be reprocessed before documents can be generated.").length,
+    ).toBeGreaterThan(0);
+  });
+
   it("C. both artifacts non-blocking keeps generation-ready behavior", async () => {
     overrideSearchParams({
       jobId: "job-1",
