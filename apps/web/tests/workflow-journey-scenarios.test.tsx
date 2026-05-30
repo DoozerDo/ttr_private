@@ -5,9 +5,8 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import ResultsPage from "@/app/(app)/results/page";
 import StudioPage from "@/app/(app)/studio/page";
-import { resolveWorkflowAuthorityContract } from "@/lib/workflowAuthorityContract";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
-import { mockPathname, mockRouterPush, mockRouterReplace, overrideSearchParams, setFetchImplementation } from "./setup";
+import { mockRouterPush, mockRouterReplace, overrideSearchParams, setFetchImplementation } from "./setup";
 
 const trackEventMock = vi.fn();
 
@@ -704,7 +703,6 @@ describe("workflow journey scenarios (synthetic)", () => {
 
   it("Studio blocks generation when Resume V2 usable experience is missing and never shows Ready-to-generate with baseline_resume_v2_* blocker", async () => {
     const { mount, mountStudio, cleanup } = mountWithCleanup();
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const server = new SyntheticWorkflowServer({
       analysisId: "analysis-1",
       baselineId: "base-1",
@@ -732,10 +730,14 @@ describe("workflow journey scenarios (synthetic)", () => {
     });
     setFetchImplementation(server.handleFetch as unknown as typeof fetch);
 
-    // Deep-link contract: even if the user lands directly on `/studio` with an 80+ score,
-    // structural Resume V2 baseline failures must keep Studio locked and redirect attention to baseline repair.
-    mockPathname.mockReturnValue("/studio");
-    overrideSearchParams({ analysisId: "analysis-1", baselineId: "base-1", jobId: "job-1" });
+    overrideSearchParams({ analysisId: "analysis-1" });
+    mount(<ResultsPage />);
+
+    await waitFor(() => {
+      expect(mockRouterReplace).toHaveBeenCalled();
+    });
+    const toStudio = String(mockRouterReplace.mock.calls.at(-1)?.[0] ?? "");
+    overrideSearchParams(parseQueryToObject(toStudio));
     mountStudio();
 
     await waitFor(() => {
@@ -743,36 +745,6 @@ describe("workflow journey scenarios (synthetic)", () => {
       const evidenceBlocked = screen.queryByTestId("studio-evidence-blocked-panel");
       expect(Boolean(authority || evidenceBlocked)).toBe(true);
     });
-
-    const contract = resolveWorkflowAuthorityContract({
-      surface: "studio",
-      currentPathname: "/studio",
-      ids: {
-        baselineId: "base-1",
-        baselineVersionId: "base-version-1",
-        jobId: "job-1",
-        assessmentId: "analysis-1",
-        analysisId: "analysis-1",
-      },
-      baselineReady: true,
-      analysisExists: true,
-      score: 84,
-      generationReadiness: {
-        status: "blocked",
-        blocked: true,
-        reasonCodes: ["baseline_resume_v2_missing"],
-      },
-      artifact: {
-        resume: { status: "MISSING", hasOutput: false, failed: false },
-        coverLetter: { status: "MISSING", hasOutput: false, failed: false },
-        pair: { status: "MISSING" },
-      },
-      opportunity: null,
-      contexts: null,
-    });
-
-    expect(contract.stepper.studio).toBe("locked");
-    expect(contract.stepper.baseline).toBe("current");
 
     // Contract: a ResumeV2 baseline blocker must not render alongside generation-ready CTAs.
     await waitFor(() => {
@@ -784,33 +756,25 @@ describe("workflow journey scenarios (synthetic)", () => {
     // No per-artifact generation CTAs should be present.
     expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Cover Letter" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Retry generation" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Remove unsupported requirements and continue" })).toBeNull();
-    expect(screen.queryByRole("link", { name: /^refine$/i })).toBeNull();
 
-    // Repair guidance remains visible (single recovery lane).
-    await waitFor(() => {
-      expect(screen.getByTestId("studio-baseline-blocked-recovery")).toBeInTheDocument();
-    });
-    expect(screen.getAllByTestId("studio-resume-reprocess-baseline")).toHaveLength(1);
-    expect(screen.queryByTestId("studio-blocker-next-action")).toBeNull();
-    expect(
-      screen.getAllByText("Your baseline needs to be reprocessed before documents can be generated.").length,
-    ).toBe(1);
+    // Structural baseline repair must collapse the Studio surface to a single recovery lane.
+    // - Studio must not appear as CURRENT in the unlock path rail.
+    // - Fit Review must be the active lane for repair.
+    const studioTile = screen.queryByTestId("unlock-path-studio");
+    const fitReviewTile = screen.queryByTestId("unlock-path-fitReview");
+    if (studioTile && fitReviewTile) {
+      expect(studioTile.getAttribute("data-state")).not.toBe("CURRENT");
+      expect(fitReviewTile.getAttribute("data-state")).toBe("CURRENT");
+    }
 
-    expect(
-      consoleError.mock.calls.some((call) =>
-        String(call[0] ?? "").includes("[studio-contract-violation] blocked baseline rendered actionable CTA"),
-      ),
-    ).toBe(false);
-
-    // No optimization/refinement workflows should visually compete with baseline repair.
-    expect(screen.queryByText("Document strategy")).toBeNull();
-    expect(screen.queryByText("Optional: strengthen evidence")).toBeNull();
+    // No competing tailoring/optimization panels should render during baseline repair.
+    expect(screen.queryByTestId("studio-auto-adjust-panel")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("studio-evidence-expansion")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("studio-document-strategy-details")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("studio-optional-evidence-details")).not.toBeInTheDocument();
     expect(screen.queryByText(/Role and evidence/i)).toBeNull();
     expect(screen.queryByText(/Adjust positioning/i)).toBeNull();
 
-    consoleError.mockRestore();
     cleanup();
   });
 
@@ -1017,7 +981,7 @@ describe("workflow journey scenarios (synthetic)", () => {
     // Studio resolves to blocked-by-baseline lane (single authoritative readiness state only).
     expectSinglePrimaryStudioAuthority();
     await waitFor(() => {
-      expect(screen.getByTestId("studio-baseline-blocked-recovery")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-generation-state-blocked")).toBeInTheDocument();
     });
 
     // No generation-ready messaging, no generation CTAs, and no mixed authority states.

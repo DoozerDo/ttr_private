@@ -501,7 +501,6 @@ export class StudioArtifactsService {
         return null;
       }
     })();
-
     const baselineTextForInterpretation =
       resumeV2Diagnostics && (resumeV2Diagnostics as any).valid && typeof (resumeV2Diagnostics as any).plainText === 'string'
         ? String((resumeV2Diagnostics as any).plainText)
@@ -511,7 +510,9 @@ export class StudioArtifactsService {
     // If we can validate a non-empty ResumeV2 experience set now, suppress stale ResumeV2-ingestion failure banners
     // that may have been cached on previous artifacts or raised by earlier backfill attempts.
     const resumeV2UsableExperienceCount =
-      resumeV2Diagnostics && (resumeV2Diagnostics as any).valid ? Number((resumeV2Diagnostics as any).experienceCount ?? 0) : 0;
+      resumeV2Diagnostics && (resumeV2Diagnostics as any).valid
+        ? Number((resumeV2Diagnostics as any).experienceCount ?? 0)
+        : 0;
 
     const resumeV2Readiness = {
       hasResumeV2: Boolean(persisted && typeof persisted === 'object'),

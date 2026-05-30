@@ -3205,6 +3205,7 @@ export default function StudioPage() {
     if (resumeFailureCode.startsWith("baseline_resume_v2_")) codes.push(resumeFailureCode);
     return Array.from(new Set(codes));
   }, [studioArtifactsPayload]);
+  const structuralBaselineRepairActive = baselineResumeV2AuthorityBlockers.length > 0;
 
   const activeGenerationReadiness = useMemo(() => {
     const base = adjustedReadinessResult.readiness;
@@ -3288,12 +3289,17 @@ export default function StudioPage() {
     () => 
       shouldGenerateDocuments(analysisScore) && 
       canonicalUnverifiedRequirements.length > 0 &&
-      !generateNowEligible, 
-    [analysisScore, canonicalUnverifiedRequirements.length, generateNowEligible], 
+      !generateNowEligible &&
+      !structuralBaselineRepairActive, 
+    [analysisScore, canonicalUnverifiedRequirements.length, generateNowEligible, structuralBaselineRepairActive], 
   ); 
   const showOptionalEvidenceStrengthening = useMemo(
-    () => shouldGenerateDocuments(analysisScore) && canonicalUnverifiedRequirements.length > 0 && generateNowEligible,
-    [analysisScore, canonicalUnverifiedRequirements.length, generateNowEligible],
+    () =>
+      shouldGenerateDocuments(analysisScore) &&
+      canonicalUnverifiedRequirements.length > 0 &&
+      generateNowEligible &&
+      !structuralBaselineRepairActive,
+    [analysisScore, canonicalUnverifiedRequirements.length, generateNowEligible, structuralBaselineRepairActive],
   );
   const autoEvidenceSuggestions = useMemo(() => {
     const map = new Map<string, ReturnType<typeof buildEvidenceSuggestion>>();
@@ -3547,8 +3553,6 @@ export default function StudioPage() {
 
   const resumeV2FallbackAttemptable = resumeV2FallbackEvaluation.attemptable;
 
-  const baselineBlockedByResumeV2 = Boolean(resumeV2Authority.blocksGeneration);
-  const studioBlockedBaselineContract = baselineBlockedByResumeV2;
   const studioReadinessBlocksGeneration = Boolean(
     resumeV2Authority.blocksGeneration || (activeGenerationReadiness.blocked && !resumeV2FallbackAttemptable),
   );
@@ -8964,16 +8968,6 @@ export default function StudioPage() {
   const lifecycleArtifactFailure = resumeState.artifactFailure ?? coverState.artifactFailure ?? null;
   const suppressTopLevelFailureLanguage = hasCompletedGeneration;
   const topLevelArtifactFailure = suppressTopLevelFailureLanguage ? null : lifecycleArtifactFailure;
-  const canRetryTopLevelFailure = Boolean(topLevelArtifactFailure?.retryable) || canRetryGeneration;
-
-  const shouldRenderRefineCta = !studioBlockedBaselineContract;
-  const shouldRenderGenerateCtas = !studioBlockedBaselineContract;
-
-  if ((process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test") && studioBlockedBaselineContract) {
-    if (shouldRenderRefineCta || shouldRenderGenerateCtas) {
-      console.error("[studio-contract-violation] blocked baseline rendered actionable CTA");
-    }
-  }
   const showGenericRetry =
     !suppressTopLevelFailureLanguage &&
     !topLevelArtifactFailure &&
@@ -10061,39 +10055,34 @@ export default function StudioPage() {
 	          trustTone: workflowSurfaceAuthorityHero.trustTone,
 	        }}
 	        primaryAction={
-            !shouldRenderGenerateCtas
-              ? null
-              : isApplicationFullyReady && !isApplicationApplied
-                ? {
-                    label: "Apply to this role",
-                    onClick: handleApplyToThisRole,
-                    testId: "studio-primary-cta-apply",
-                  }
-                : shouldPrimaryCompleteCover
-                  ? {
-                      label: "Complete cover letter",
-                      onClick: handlePrimaryCoverAction,
-                      disabled:
-                        coverGenerating ||
-                        autoGenerationInFlight ||
-                        (generateNowEligible &&
-                          !isReadySuccessState &&
-                          !hasCoverLetterArtifact &&
-                          !coverState.artifactFailure),
-                      testId: "studio-primary-cta-complete-cover",
-                    }
-                  : shouldPrimaryCompleteResume
-                    ? {
-                        label: "Complete resume",
-                        onClick: handlePrimaryResumeAction,
-                        disabled:
-                          resumeGenerating ||
-                          autoGenerationInFlight ||
-                          (generateNowEligible && !isReadySuccessState && !hasResumeArtifact && !resumeState.artifactFailure),
-                        testId: "studio-primary-cta-complete-resume",
-                      }
-                    : null
-          }
+	          isApplicationFullyReady && !isApplicationApplied
+	            ? {
+	                label: "Apply to this role",
+	                onClick: handleApplyToThisRole,
+	                testId: "studio-primary-cta-apply",
+	              }
+	            : shouldPrimaryCompleteCover
+	              ? {
+	                  label: "Complete cover letter",
+	                  onClick: handlePrimaryCoverAction,
+	                  disabled:
+	                    coverGenerating ||
+	                    autoGenerationInFlight ||
+	                    (generateNowEligible && !isReadySuccessState && !hasCoverLetterArtifact && !coverState.artifactFailure),
+	                  testId: "studio-primary-cta-complete-cover",
+	                }
+	              : shouldPrimaryCompleteResume
+	                ? {
+	                    label: "Complete resume",
+	                    onClick: handlePrimaryResumeAction,
+	                    disabled:
+	                      resumeGenerating ||
+	                      autoGenerationInFlight ||
+	                      (generateNowEligible && !isReadySuccessState && !hasResumeArtifact && !resumeState.artifactFailure),
+	                    testId: "studio-primary-cta-complete-resume",
+	                  }
+	                : null
+	        }
 	        supporting={
 	          <div className="space-y-2">
 	            {isReadySuccessState && !isApplicationApplied && hasUsableResume && !hasUsableCoverLetter ? (
@@ -10121,7 +10110,7 @@ export default function StudioPage() {
 	        }
 	      />
 	      <div className="flex flex-wrap gap-3">
-          {shouldRenderGenerateCtas && !shouldPrimaryCompleteResume ? (
+	        {!shouldPrimaryCompleteResume ? (
 	          <FormButton
 	            variant={isApplicationFullyReady || isReadySuccessState || shouldPrimaryCompleteCover ? "secondary" : undefined}
 	            onClick={handlePrimaryResumeAction}
@@ -10134,7 +10123,7 @@ export default function StudioPage() {
             {hasResumeArtifact || generateNowEligible ? "Resume" : "Generate Resume"}
           </FormButton>
         ) : null}
-        {shouldRenderGenerateCtas && !shouldPrimaryCompleteCover ? (
+        {!shouldPrimaryCompleteCover ? (
           <FormButton
             variant={isApplicationFullyReady || isReadySuccessState || shouldPrimaryCompleteResume ? "secondary" : undefined}
             onClick={handlePrimaryCoverAction}
@@ -10147,16 +10136,14 @@ export default function StudioPage() {
             {hasCoverLetterArtifact || generateNowEligible ? "Cover Letter" : "Generate Cover Letter"}
           </FormButton>
         ) : null}
-        {shouldRenderRefineCta ? (
-          <Link
-            href={fitReviewHref}
-            className="inline-flex items-center justify-center px-1 py-2 text-sm font-semibold text-slate-100 underline decoration-slate-400/70 underline-offset-4 transition hover:decoration-slate-200"
-          >
-            Refine
-          </Link>
-        ) : null}
+        <Link
+          href={fitReviewHref}
+          className="inline-flex items-center justify-center px-1 py-2 text-sm font-semibold text-slate-100 underline decoration-slate-400/70 underline-offset-4 transition hover:decoration-slate-200"
+	        >
+	          Refine
+	        </Link>
 	      </div>
-	      {topLevelArtifactFailure && canRetryTopLevelFailure && !studioBlockedBaselineContract ? (
+	      {topLevelArtifactFailure && canRetryGeneration ? (
 	        <ArtifactFailureState
 	          failure={topLevelArtifactFailure}
 	          onRetry={
@@ -12764,6 +12751,105 @@ export default function StudioPage() {
         >
           <summary className="cursor-pointer text-sm font-semibold text-slate-200">Guidance</summary>
           <div className="mt-3 space-y-3">
+            {studioBlockedBaselineContract ? (
+              <div className="space-y-3" data-testid="studio-baseline-blocked-recovery">
+                <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
+                  Your baseline needs to be reprocessed before documents can be generated.
+                </p>
+                {baselineReprocessFailure?.message ? (
+                  <p className="text-sm text-slate-200" data-testid="studio-reprocess-failure-message">
+                    {baselineReprocessFailure.message}
+                  </p>
+                ) : null}
+                <div className="flex justify-end">
+                  <FormButton
+                    onClick={() => void handleReprocessBaseline()}
+                    disabled={baselineReprocessInFlight}
+                    data-testid="studio-resume-reprocess-baseline"
+                  >
+                    {baselineReprocessInFlight ? "Reprocessingâ€¦" : "Reprocess baseline"}
+                  </FormButton>
+                </div>
+              </div>
+	            ) : (
+	              <>
+	                <div className="space-y-3">
+                <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
+                  {activeGenerationReadiness.reasons[0]?.message ||
+                    activeGenerationReadiness.reasons[0]?.code ||
+                    canonicalStudioReadinessMessage}
+                </p>
+                {!hasRenderableResumeContent &&
+                !hasRenderableCoverLetterContent &&
+                (activeGenerationReadiness.blocked || !canGenerateDocuments) &&
+                studioCanonicalDecision.primaryAction.destination ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link
+                      href={studioCanonicalDecision.primaryAction.destination}
+                      className="text-sm font-semibold text-slate-100 underline decoration-slate-400/70 underline-offset-4 transition hover:decoration-slate-200"
+                      data-testid="studio-blocker-next-action"
+                    >
+                      {primaryNextAction.label}
+                    </Link>
+                  </div>
+	                ) : null}
+	                </div>
+	                {(() => {
+                  // Canonical rendered top-level state: do not allow readiness internal errors to coexist with READY/blocked UI.
+                  // Readiness errors are fail-closed and must suppress any "Ready to generate" state.
+                  const generationState = studioGenerationStateInfo.state;
+                  const renderedTopState: "loading" | "blocked" | "ready" = analysisLoading
+                    ? "loading"
+                    : readinessError
+                      ? "blocked"
+                      : studioBlockedBaselineContract ||
+                          workflowAuthorityReadiness.blocked ||
+                          !canGenerateDocuments
+                        ? "blocked"
+                        : generationState === "ready"
+                          ? "ready"
+                          : "blocked";
+
+                  const bannerIntent =
+                    renderedTopState === "ready" && !studioBlockedBaselineContract ? "info" : "warning";
+                  const bannerTitle = readinessError
+                    ? "Readiness error"
+                    : studioBlockedBaselineContract
+                      ? "Baseline repair required"
+                      : renderedTopState === "ready"
+                        ? "Ready to generate"
+                        : generationState === "degraded"
+                          ? "This role is a partial match"
+                          : "Review your fit";
+            <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
+              {activeGenerationReadiness.reasons[0]?.message ||
+                activeGenerationReadiness.reasons[0]?.code ||
+                canonicalStudioReadinessMessage}
+            </p>
+            {!hasRenderableResumeContent &&
+            !hasRenderableCoverLetterContent &&
+            (activeGenerationReadiness.blocked || !canGenerateDocuments) &&
+            studioCanonicalDecision.primaryAction.destination ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  href={studioCanonicalDecision.primaryAction.destination}
+                  className="text-sm font-semibold text-slate-100 underline decoration-slate-400/70 underline-offset-4 transition hover:decoration-slate-200"
+                  data-testid="studio-blocker-next-action"
+                >
+                  {primaryNextAction.label}
+                </Link>
+              </div>
+            ) : null}
+            {(() => {
+        const generationState = studioGenerationStateInfo.state;
+        const bannerIntent = generationState === "ready" ? "info" : "warning";
+        const bannerTitle =
+          generationState === "ready"
+            ? "Ready to generate"
+            : generationState === "degraded"
+              ? "This role is a partial match"
+              : "Review your fit";
+
              {studioBlockedBaselineContract ? (
                <div className="space-y-3" data-testid="studio-baseline-blocked-recovery">
                  <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
@@ -12805,34 +12891,30 @@ export default function StudioPage() {
                     </Link>
                   </div>
                 ) : null}
-                {(() => {
-        // Canonical rendered top-level state: do not allow readiness internal errors to coexist with READY/blocked UI.
-        // Readiness errors are fail-closed and must suppress any "Ready to generate" state.
-        const generationState = studioGenerationStateInfo.state;
-        const renderedTopState: "loading" | "blocked" | "ready" = analysisLoading
-          ? "loading"
-          : readinessError
-            ? "blocked"
-            : studioBlockedBaselineContract || workflowAuthorityReadiness.blocked || !canGenerateDocuments
-              ? "blocked"
-              : generationState === "ready"
-                ? "ready"
-                : "blocked";
+	                {(() => {
+	                  // Canonical rendered top-level state: do not allow readiness internal errors to coexist with READY/blocked UI.
+	                  // Readiness errors are fail-closed and must suppress any "Ready to generate" state.
+	                  const generationState = studioGenerationStateInfo.state;
+	                  const renderedTopState: "loading" | "blocked" | "ready" = analysisLoading
+	                    ? "loading"
+	                    : readinessError
+	                      ? "blocked"
+	                      : workflowAuthorityReadiness.blocked || !canGenerateDocuments
+	                        ? "blocked"
+	                        : generationState === "ready"
+	                          ? "ready"
+	                          : "blocked";
 
-        const bannerIntent =
-          renderedTopState === "ready" && !studioBlockedBaselineContract ? "info" : "warning";
-        const bannerTitle =
-          readinessError
-            ? "Readiness error"
-            : studioBlockedBaselineContract
-              ? "Baseline repair required"
-              : renderedTopState === "ready"
-                ? "Ready to generate"
-                : generationState === "degraded"
-                  ? "This role is a partial match"
-                  : "Review your fit";
+	                  const bannerIntent = renderedTopState === "ready" ? "info" : "warning";
+	                  const bannerTitle = readinessError
+	                    ? "Readiness error"
+	                    : renderedTopState === "ready"
+	                      ? "Ready to generate"
+	                      : generationState === "degraded"
+	                        ? "This role is a partial match"
+	                        : "Review your fit";
 
-        return (
+	                  return (
           <Alert intent={bannerIntent} title={bannerTitle}>
             <div data-testid="studio-generation-state-banner" className="space-y-2">
               {scoringReliability === "unreliable" && !readinessError ? (
@@ -12853,7 +12935,7 @@ export default function StudioPage() {
                 </p>
               ) : null}
 
-              {!studioBlockedBaselineContract && generationState === "degraded" ? (
+	              {!studioBlockedBaselineContract && generationState === "degraded" ? (
                 <div data-testid="studio-generation-state-degraded" className="space-y-2">
                   <p className="text-sm text-slate-100">
                     Some requirements are not supported by your verified experience. You can continue, but results are limited.
@@ -12918,14 +13000,19 @@ export default function StudioPage() {
                 </div>
               ) : null}
 
+              {generationState === "blocked" ? (
+                <p data-testid="studio-generation-state-blocked" className="text-sm text-slate-100">
+                  Document generation is unavailable for this role.
+                </p>
+              ) : null}
             </div>
           </Alert>
         );
-                })()}
-              </>
-            )}
-          </div>
-        </details>
+		          })()}
+	              </>
+		            )}
+		          </div>
+	        </details>
       ) : null}
       {showInstantDraftHeroSafe ? instantDraftHero : null}
       {preAnalysisPersistedResumePanel}
@@ -12940,7 +13027,7 @@ export default function StudioPage() {
           {autoGenerationLoadingMessage}
         </Alert>
       ) : null}
-      {pageTruth.state === "failed" && !workflowAuthority.suppressFailureMessaging && !studioBlockedBaselineContract ? (
+      {pageTruth.state === "failed" && !workflowAuthority.suppressFailureMessaging ? (
         <Alert intent="warning" title="Document generation needs attention">
           <div className="space-y-3">
             <div>
@@ -13569,13 +13656,14 @@ export default function StudioPage() {
       ) : null}
       {requestedAnalysisId &&
       // Unsupported requirements must not block/distract the primary generation path when generation is otherwise allowed.
-      !studioBlockedBaselineContract &&
-      activeGenerationReadiness.blocked &&
-      canonicalUnverifiedRequirements.length &&
-      // Only show "Fix this in one step" for the unsupported-requirements readiness lane.
-      // Never render remediation CTAs for internal readiness failures (e.g. `readiness_error`).
-      (pairReadinessContractState.resume === "unsupported_input" ||
-        pairReadinessContractState.cover === "unsupported_input") &&
+	      !studioBlockedBaselineContract &&
+	      activeGenerationReadiness.blocked &&
+	      canonicalUnverifiedRequirements.length &&
+	      !structuralBaselineRepairActive &&
+	      // Only show "Fix this in one step" for the unsupported-requirements readiness lane.
+	      // Never render remediation CTAs for internal readiness failures (e.g. `readiness_error`).
+	      (pairReadinessContractState.resume === "unsupported_input" ||
+	        pairReadinessContractState.cover === "unsupported_input") &&
       !(studioGenerationStateInfo.state === "degraded" && studioGenerationStateInfo.hasUnsupportedRequirements) ? (
         <div 
           id="studio-auto-adjust-panel" 
@@ -13603,7 +13691,8 @@ export default function StudioPage() {
           </div>
         </div> 
       ) : null} 
-      {!studioBlockedBaselineContract && showEvidenceExpansion ? (  
+	      {!studioBlockedBaselineContract && showEvidenceExpansion ? (  
+
         <section className="rounded-2xl border border-white/15 bg-slate-950/35 p-4" data-testid="studio-evidence-expansion">  
           <h2 className="text-base font-semibold text-slate-100">Prove this experience instead</h2>  
           <p className="mt-1 text-sm text-slate-300"> 
@@ -13885,7 +13974,6 @@ export default function StudioPage() {
           </p>
         ) : null}
       </section>
-      {studioBlockedBaselineContract ? null : (
       <>
       <section
         ref={(node) => {
@@ -14549,10 +14637,10 @@ export default function StudioPage() {
                 >
                   {coverLetterComplianceBlocked.cta.label}
                 </Link>
-                    ) : null}
-                  </div>
-                </div>
               ) : null}
+            </div>
+          </div>
+        ) : null}
 
         {coverGating.primaryBlocker === "tier_gate" && coverState.tierGateError ? (
           <section
@@ -14805,7 +14893,8 @@ export default function StudioPage() {
                     {coverState.error}
                   </p>
                   <div className="flex justify-end">
-                    {(canRetryGeneration || Boolean(coverState.artifactFailure?.retryable)) && !studioBlockedBaselineContract ? (
+	                    {(canRetryGeneration || Boolean(coverState.artifactFailure?.retryable)) &&
+	                    !studioBlockedBaselineContract ? (
                       <FormButton onClick={() => void handleCoverDraft()} disabled={coverGenerating}>
                         Retry generation
                       </FormButton>
@@ -14871,9 +14960,11 @@ export default function StudioPage() {
         </div>
       </details>
       </>
-      )}
 
-      {!shouldShowRefinementAboveMaterials && hasAuthoritativeArtifacts && !studioCardsGenerationBlocked && !studioBlockedBaselineContract ? (
+	      {!shouldShowRefinementAboveMaterials &&
+	      hasAuthoritativeArtifacts &&
+	      !studioCardsGenerationBlocked &&
+	      !studioBlockedBaselineContract ? (
         <details className="rounded-2xl border border-white/10 bg-slate-950/35 p-4" data-testid="studio-refinement-details">
           <summary className="cursor-pointer text-sm font-semibold text-slate-100">
             Review & refine (optional)
@@ -14948,7 +15039,7 @@ export default function StudioPage() {
         </div>
       </div>
 
-      {generateNowEligible && !studioBlockedBaselineContract ? (
+	      {generateNowEligible && !structuralBaselineRepairActive && !studioBlockedBaselineContract ? (
         <details className="rounded-2xl border border-white/10 bg-white/[0.03] p-4" data-testid="studio-document-strategy-details">
           <summary className="cursor-pointer text-sm font-semibold text-slate-200">
             Document strategy
@@ -14959,7 +15050,10 @@ export default function StudioPage() {
         </details>
       ) : null}
 
-      {showOptionalEvidenceStrengthening && !studioBlockedBaselineContract ? (
+	      {showOptionalEvidenceStrengthening &&
+	      !structuralBaselineRepairActive &&
+	      !studioBlockedBaselineContract ? (
+
         <section
           className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
           data-testid="studio-optional-evidence-details"
@@ -15120,7 +15214,7 @@ export default function StudioPage() {
         </section>
       ) : null}
  
-      {!studioBlockedBaselineContract ? (
+	      {!structuralBaselineRepairActive && !studioBlockedBaselineContract ? (
         <>
           <details className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4"> 
             <summary className="cursor-pointer text-sm font-semibold text-slate-200"> 
@@ -15201,7 +15295,7 @@ export default function StudioPage() {
         </>
       ) : null}
 
-      {selectedBaselineId && selectedBaselineVersionId && hasAuthoritativeArtifacts && !studioCardsGenerationBlocked ? (
+      {selectedBaselineId && selectedBaselineVersionId && hasAuthoritativeArtifacts && !studioCardsGenerationBlocked && !structuralBaselineRepairActive ? (
         <details className="space-y-4">
           <summary className="cursor-pointer list-none rounded-2xl border border-white/10 bg-white/5 p-4 text-sm font-semibold text-slate-200 shadow-sm">
             Customize content (advanced)

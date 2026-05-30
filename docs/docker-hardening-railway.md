@@ -1,5 +1,4 @@
 # Docker/Railway Build Hardening (2026-03-24)
-<!-- no-op change: trigger Railway deploy to surface build logs (2026-05-25) -->
 
 This pass hardens image build determinism and reduces noisy build context for Railway-style remote Docker builds.
 

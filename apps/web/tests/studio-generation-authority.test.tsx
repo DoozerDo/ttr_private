@@ -3649,10 +3649,9 @@ describe("Studio generation authority", () => {
       await waitFor(() => {
         const missing = screen.queryByTestId("studio-resume-missing");
         const issue = screen.queryByTestId("studio-resume-artifact-issue");
-        const baselineRecovery = screen.queryByTestId("studio-baseline-blocked-recovery");
         const authority = screen.queryByTestId("studio-workflow-authority");
         // Either the artifact issue panel or the workflow authority shell may surface the cached failure.
-        expect(Boolean(issue) || Boolean(authority) || Boolean(baselineRecovery)).toBe(true);
+        expect(Boolean(issue) || Boolean(authority)).toBe(true);
         // If cached snapshot hydration applied, we should not show the generic "missing" shell.
         expect(missing).toBeNull();
       }, { timeout: 6000 });
@@ -4068,8 +4067,13 @@ describe("Studio resume failure authority", () => {
 
     const enterWorkspace = screen.queryByTestId("studio-generation-ready-secondary");
     if (enterWorkspace) fireEvent.click(enterWorkspace);
-    await screen.findByTestId("studio-baseline-blocked-recovery");
+    await screen.findByTestId("studio-resume-artifact-issue");
     expect(screen.getAllByText(/Your baseline needs to be reprocessed before documents can be generated\./i).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(
+        /We need to rebuild your structured resume profile from your baseline resume\. This keeps generated resumes and cover letters accurate and grounded\./i,
+      ).length,
+    ).toBeGreaterThan(0);
     expect(await screen.findByTestId("studio-resume-reprocess-baseline")).toBeInTheDocument();
     expect(screen.queryByTestId("studio-resume-regenerate-cta")).toBeNull();
 
@@ -4077,7 +4081,7 @@ describe("Studio resume failure authority", () => {
     // surfaces do not leak internal implementation wording.
     const userFacingCopy = [
       screen.queryByTestId("studio-workflow-authority")?.textContent ?? "",
-      screen.getByTestId("studio-baseline-blocked-recovery").textContent ?? "",
+      screen.getByTestId("studio-resume-artifact-issue").textContent ?? "",
     ].join("\n");
     expect(userFacingCopy).not.toMatch(/\bResumeV2\b/i);
     expect(userFacingCopy).not.toMatch(/\bjson\b/i);
@@ -4091,14 +4095,19 @@ describe("Studio resume failure authority", () => {
 
     const enterWorkspace2 = screen.queryByTestId("studio-generation-ready-secondary");
     if (enterWorkspace2) fireEvent.click(enterWorkspace2);
-    await screen.findByTestId("studio-baseline-blocked-recovery");
+    await screen.findByTestId("studio-resume-artifact-issue");
     expect(screen.getAllByText(/Your baseline needs to be reprocessed before documents can be generated\./i).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(
+        /We need to rebuild your structured resume profile from your baseline resume\. This keeps generated resumes and cover letters accurate and grounded\./i,
+      ).length,
+    ).toBeGreaterThan(0);
     expect(await screen.findByTestId("studio-resume-reprocess-baseline")).toBeInTheDocument();
     expect(screen.queryByTestId("studio-resume-regenerate-cta")).toBeNull();
 
     const userFacingCopy = [
       screen.queryByTestId("studio-workflow-authority")?.textContent ?? "",
-      screen.getByTestId("studio-baseline-blocked-recovery").textContent ?? "",
+      screen.getByTestId("studio-resume-artifact-issue").textContent ?? "",
     ].join("\n");
     expect(userFacingCopy).not.toMatch(/\bResumeV2\b/i);
     expect(userFacingCopy).not.toMatch(/\bjson\b/i);
@@ -4135,7 +4144,7 @@ describe("Studio artifact authority boundary", () => {
     const enterWorkspace = screen.queryByTestId("studio-generation-ready-secondary");
     if (enterWorkspace) fireEvent.click(enterWorkspace);
 
-    await screen.findByTestId("studio-baseline-blocked-recovery");
+    await screen.findByTestId("studio-resume-artifact-issue");
   });
 });
 

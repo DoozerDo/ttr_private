@@ -352,22 +352,23 @@ export function resolveWorkflowAuthorityContract(input: {
         : input.analysisExists
           ? "complete"
           : "available";
+
+  const hasBaselineResumeV2Blocker = readiness.blockers.some((code) => code.startsWith("baseline_resume_v2_"));
   const fitReviewState: WorkflowModuleState =
     !input.analysisExists
       ? "locked"
       : routeModule === "fitReview"
         ? "current"
+        : routeModule === "studio" && hasBaselineResumeV2Blocker
+          ? "current"
         : readiness.status === "ready" && !readiness.blocked
           ? "complete"
           : "available";
 
-  const hasBaselineResumeV2Blocker = readiness.blockers.some((code) => String(code ?? "").startsWith("baseline_resume_v2_"));
   const studioEligible = workflowAuthority.canGenerate || hasAnyOutput;
   const studioState: WorkflowModuleState =
     routeModule === "studio"
-      ? // Contract guard: Studio must never be CURRENT when structural ResumeV2 authority is blocked
-        // (even if the user deep-links to `/studio`).
-        hasBaselineResumeV2Blocker
+      ? hasBaselineResumeV2Blocker
         ? "locked"
         : "current"
       : !studioEligible
@@ -396,15 +397,14 @@ export function resolveWorkflowAuthorityContract(input: {
     results: resultsState,
   };
 
-  // Deep-link friendliness: if the user lands on a locked route, reflect that module as CURRENT
-  // so the UI can explain the gate — except Studio, where structural ResumeV2 baseline failures
-  // must redirect attention back to baseline repair and must not advertise "current/unlocked" Studio.
-  if (routeModule && stepper[routeModule] === "locked" && routeModule !== "studio") {
+  if (routeModule && stepper[routeModule] === "locked") {
+    // Special case: Studio baseline repair must not present Studio as CURRENT in the rail when
+    // structural baseline ResumeV2 authority blocks generation. Promote Fit Review as the active lane instead.
+    if (routeModule === "studio" && hasBaselineResumeV2Blocker) {
+      // keep locked
+    } else {
     stepper[routeModule] = "current";
-  }
-
-  if (routeModule === "studio" && hasBaselineResumeV2Blocker) {
-    stepper.baseline = "current";
+    }
   }
 
   const surfaceCta = resolvePrimaryCtaFromSurface(surfaceAuthority);
