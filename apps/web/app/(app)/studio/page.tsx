@@ -5152,21 +5152,16 @@ export default function StudioPage() {
       }),
     [effectiveBaselineId, effectiveJobId, effectiveRequestedAnalysisId],
   );
-  const ignoreArtifactFailuresForAutoGeneration =
-    qualifiedForStudioOrchestration && !hasAnyArtifactPersisted && studioReadinessBlocksGeneration === false;
+  const eligibleForAutoGeneration =
+    generateNowEligible && qualifiedForStudioOrchestration && !studioReadinessBlocksGeneration;
+  const missingAutoGenerationOutput = !hasAnyArtifactPersisted;
   const needsAutoGeneration =
-    generateNowEligible &&
-    isInstantDraftExperience &&
-    qualifiedForStudioOrchestration &&
-    !hasCompletedGeneration &&
-    !hasAnyArtifactPersisted &&
-    studioArtifactPairStatus !== "in_progress" &&
-    !resumeState.response &&
-    !coverState.response &&
-    (ignoreArtifactFailuresForAutoGeneration ? true : !resumeState.artifactFailure) &&
-    (ignoreArtifactFailuresForAutoGeneration ? true : !coverState.artifactFailure) &&
-    !resumeSingleFlightInFlight &&
-    !coverSingleFlightInFlight;
+    eligibleForAutoGeneration &&
+    missingAutoGenerationOutput &&
+    studioArtifactsHydrated &&
+    !autoGenerationInFlight &&
+    !resumeGenerating &&
+    !coverGenerating;
   const autoGenerationSignature = useMemo(() => {
     if (!needsAutoGeneration) return null;
     return buildWorkflowRequestKey("auto_generation", generationWorkflowScope);
@@ -5239,9 +5234,7 @@ export default function StudioPage() {
     const orchestrationDecision = (() => {
       if (studioReadinessBlocksGeneration === true) return "blocked";
       if (hasAnyArtifactPersisted) return "hydrate_existing_artifacts";
-      if (needsAutoGeneration) {
-        return "should_auto_generate";
-      }
+      if (eligibleForAutoGeneration && missingAutoGenerationOutput) return "should_auto_generate";
       return "passive_empty_state";
     })();
 
@@ -5273,34 +5266,16 @@ export default function StudioPage() {
     };
 
     const usedForNeedsAutoGeneration = {
-      result: Boolean(
-        generateNowEligible &&
-          isInstantDraftExperience &&
-          qualifiedForStudioOrchestration &&
-          !hasCompletedGeneration &&
-          !hasAnyArtifactPersisted &&
-          studioArtifactPairStatus !== "in_progress" &&
-          !resumeState.response &&
-          !coverState.response &&
-          (ignoreArtifactFailuresForAutoGeneration ? true : !resumeState.artifactFailure) &&
-          (ignoreArtifactFailuresForAutoGeneration ? true : !coverState.artifactFailure) &&
-          !resumeSingleFlightInFlight &&
-          !coverSingleFlightInFlight,
-      ),
+      result: Boolean(needsAutoGeneration),
       inputs: {
-        generateNowEligible: Boolean(generateNowEligible),
-        isInstantDraftExperience: Boolean(isInstantDraftExperience),
         qualifiedForStudioOrchestration: Boolean(qualifiedForStudioOrchestration),
-        hasCompletedGeneration: Boolean(hasCompletedGeneration),
         hasAnyArtifactPersisted: Boolean(hasAnyArtifactPersisted),
-        ignoreArtifactFailuresForAutoGeneration: Boolean(ignoreArtifactFailuresForAutoGeneration),
-        studioArtifactPairStatus,
-        hasResumeResponse: Boolean(resumeState.response),
-        hasCoverResponse: Boolean(coverState.response),
-        hasResumeArtifactFailure: Boolean(resumeState.artifactFailure),
-        hasCoverArtifactFailure: Boolean(coverState.artifactFailure),
-        resumeSingleFlightInFlight: Boolean(resumeSingleFlightInFlight),
-        coverSingleFlightInFlight: Boolean(coverSingleFlightInFlight),
+        studioReadinessBlocksGeneration: Boolean(studioReadinessBlocksGeneration),
+        eligibleForAutoGeneration: Boolean(eligibleForAutoGeneration),
+        missingAutoGenerationOutput: Boolean(missingAutoGenerationOutput),
+        autoGenerationInFlight: Boolean(autoGenerationInFlight),
+        resumeGenerating: Boolean(resumeGenerating),
+        coverGenerating: Boolean(coverGenerating),
       },
     };
 
