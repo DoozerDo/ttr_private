@@ -119,7 +119,7 @@ function isLowQualityFragment(value: string): boolean {
   const hasVerbLikeSignal = BULLET_ACTION_VERB_PATTERN.test(normalized);
   if (words.length <= 3 && lowercaseOnly && !hasVerbLikeSignal) return true;
   if (/^\d+[a-zA-Z]*$/.test(normalized)) return true;
-  if (words.length === 1 && normalized.length < 12) return true;
+  if (words.length === 1 && normalized.length < 12 && lowercaseOnly) return true;
   return false;
 }
 
@@ -1736,5 +1736,5 @@ export function formatResumeV2InvalidMessage(input: {
   const suffix = paths.length ? ` Invalid fields: ${paths.join(', ')}.` : '';
   const reasons = (input.reasons ?? []).filter(Boolean);
   const reasonText = reasons.length ? ` ${reasons.slice(0, 3).join(' ')}` : '';
-  return `Resume V2 produced an invalid normalized resume model.${reasonText}${suffix}`.trim();
+  return `ResumeV2 produced an invalid normalized resume model.${reasonText}${suffix}`.trim();
 }

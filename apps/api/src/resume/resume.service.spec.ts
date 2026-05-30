@@ -419,6 +419,7 @@ describe('ResumeService contract', () => {
     const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
     process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
     const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
     try {
       const { service, studioArtifactsService } = buildService();
 
@@ -440,6 +441,18 @@ describe('ResumeService contract', () => {
           ].join('\n'),
         },
       ];
+      // Force canonical ResumeV2 invalid in v2 mode to simulate a v2-lane failure.
+      baseline.parsedRecords = [
+        {
+          id: 'parsed-1',
+          baselineVersionId: baselineVersion.id,
+          resumeV2Json: {
+            heading: { name: 'Test User', contactLine: '' },
+            experience: [],
+            education: [],
+          },
+        },
+      ] as any;
 
       await expect(
         service.generateResume('user-1', { ...baseRequest, forceRegenerate: true } as any),
@@ -453,6 +466,7 @@ describe('ResumeService contract', () => {
       );
     } finally {
       baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsed;
       if (typeof originalFlag === 'string') {
         process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
       } else {
@@ -2134,6 +2148,7 @@ describe('ResumeService contract', () => {
 	        jobId: job.id,
 	        analysisId: assessment.id,
 	        oneTap: false,
+	        forceRegenerate: true,
 	      } as any);
 	      expect(result.status).toBe('success');
 	      expect(result.blocked).toBe(false);

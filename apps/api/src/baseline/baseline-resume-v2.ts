@@ -23,11 +23,13 @@ export function evaluateResumeV2Usability(resumeV2Json: unknown): ResumeV2Usabil
   const normalized = normalizeNormalizedResumeDocument(resumeV2Json as NormalizedResumeDocument);
   const validation = validateNormalizedResumeDocument(normalized);
   const experienceCount = Array.isArray((normalized as any)?.experience) ? (normalized as any).experience.length : 0;
-  if (!validation.valid) {
-    return { usable: false, usableExperienceCount: 0, reasons: ['invalid_resume_v2', ...validation.reasons] };
-  }
   if (experienceCount <= 0) {
     return { usable: false, usableExperienceCount: 0, reasons: ['usable_experience_empty'] };
+  }
+  // Usability gate is intentionally looser than strict normalized validation: extremely short-but-meaningful
+  // bullets can still produce a persisted usable draft, even if some strict rules would fail.
+  if (!validation.valid) {
+    return { usable: true, usableExperienceCount: experienceCount, reasons: ['validation_warnings', ...validation.reasons] };
   }
   return { usable: true, usableExperienceCount: experienceCount, reasons: [] };
 }
