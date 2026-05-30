@@ -12771,91 +12771,13 @@ export default function StudioPage() {
                   </FormButton>
                 </div>
               </div>
-	            ) : (
-	              <>
-	                <div className="space-y-3">
-                <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
-                  {activeGenerationReadiness.reasons[0]?.message ||
-                    activeGenerationReadiness.reasons[0]?.code ||
-                    canonicalStudioReadinessMessage}
-                </p>
-                {!hasRenderableResumeContent &&
-                !hasRenderableCoverLetterContent &&
-                (activeGenerationReadiness.blocked || !canGenerateDocuments) &&
-                studioCanonicalDecision.primaryAction.destination ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Link
-                      href={studioCanonicalDecision.primaryAction.destination}
-                      className="text-sm font-semibold text-slate-100 underline decoration-slate-400/70 underline-offset-4 transition hover:decoration-slate-200"
-                      data-testid="studio-blocker-next-action"
-                    >
-                      {primaryNextAction.label}
-                    </Link>
-                  </div>
-	                ) : null}
-	                </div>
-	                {(() => {
-                  // Canonical rendered top-level state: do not allow readiness internal errors to coexist with READY/blocked UI.
-                  // Readiness errors are fail-closed and must suppress any "Ready to generate" state.
-                  const generationState = studioGenerationStateInfo.state;
-                  const renderedTopState: "loading" | "blocked" | "ready" = analysisLoading
-                    ? "loading"
-                    : readinessError
-                      ? "blocked"
-                      : studioBlockedBaselineContract ||
-                          workflowAuthorityReadiness.blocked ||
-                          !canGenerateDocuments
-                        ? "blocked"
-                        : generationState === "ready"
-                          ? "ready"
-                          : "blocked";
-
-                  const bannerIntent =
-                    renderedTopState === "ready" && !studioBlockedBaselineContract ? "info" : "warning";
-                  const bannerTitle = readinessError
-                    ? "Readiness error"
-                    : studioBlockedBaselineContract
-                      ? "Baseline repair required"
-                      : renderedTopState === "ready"
-                        ? "Ready to generate"
-                        : generationState === "degraded"
-                          ? "This role is a partial match"
-                          : "Review your fit";
-            <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
-              {activeGenerationReadiness.reasons[0]?.message ||
-                activeGenerationReadiness.reasons[0]?.code ||
-                canonicalStudioReadinessMessage}
-            </p>
-            {!hasRenderableResumeContent &&
-            !hasRenderableCoverLetterContent &&
-            (activeGenerationReadiness.blocked || !canGenerateDocuments) &&
-            studioCanonicalDecision.primaryAction.destination ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <Link
-                  href={studioCanonicalDecision.primaryAction.destination}
-                  className="text-sm font-semibold text-slate-100 underline decoration-slate-400/70 underline-offset-4 transition hover:decoration-slate-200"
-                  data-testid="studio-blocker-next-action"
-                >
-                  {primaryNextAction.label}
-                </Link>
-              </div>
-            ) : null}
-            {(() => {
-        const generationState = studioGenerationStateInfo.state;
-        const bannerIntent = generationState === "ready" ? "info" : "warning";
-        const bannerTitle =
-          generationState === "ready"
-            ? "Ready to generate"
-            : generationState === "degraded"
-              ? "This role is a partial match"
-              : "Review your fit";
-
-             {studioBlockedBaselineContract ? (
-               <div className="space-y-3" data-testid="studio-baseline-blocked-recovery">
-                 <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
-                   Your baseline needs to be reprocessed before documents can be generated.
-                 </p>
-                 {baselineReprocessFailure?.message ? (
+              ) : (
+                <React.Fragment>
+                <div className="space-y-3" data-testid="studio-baseline-blocked-recovery">
+                  <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
+                    Your baseline needs to be reprocessed before documents can be generated.
+                  </p>
+                  {baselineReprocessFailure?.message ? (
                    <p className="text-sm text-slate-200" data-testid="studio-reprocess-failure-message">
                      {baselineReprocessFailure.message}
                    </p>
@@ -12869,14 +12791,14 @@ export default function StudioPage() {
                     {baselineReprocessInFlight ? "Reprocessing…" : "Reprocess baseline"}
                   </FormButton>
                 </div>
-              </div>
-            ) : (
-              <>
-                <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
-                  {activeGenerationReadiness.reasons[0]?.message ||
-                    activeGenerationReadiness.reasons[0]?.code ||
-                    canonicalStudioReadinessMessage}
-                </p>
+                </div>
+              ) : (
+                <React.Fragment>
+                  <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
+                    {activeGenerationReadiness.reasons[0]?.message ||
+                      activeGenerationReadiness.reasons[0]?.code ||
+                      canonicalStudioReadinessMessage}
+                  </p>
                 {!hasRenderableResumeContent &&
                 !hasRenderableCoverLetterContent &&
                 (activeGenerationReadiness.blocked || !canGenerateDocuments) &&
@@ -12891,7 +12813,7 @@ export default function StudioPage() {
                     </Link>
                   </div>
                 ) : null}
-	                {(() => {
+                {(() => {
 	                  // Canonical rendered top-level state: do not allow readiness internal errors to coexist with READY/blocked UI.
 	                  // Readiness errors are fail-closed and must suppress any "Ready to generate" state.
 	                  const generationState = studioGenerationStateInfo.state;
@@ -13007,12 +12929,12 @@ export default function StudioPage() {
               ) : null}
             </div>
           </Alert>
-        );
-		          })()}
-	              </>
-		            )}
-		          </div>
-	        </details>
+                );
+              })()}
+                </React.Fragment>
+              )}
+            </div>
+          </details>
       ) : null}
       {showInstantDraftHeroSafe ? instantDraftHero : null}
       {preAnalysisPersistedResumePanel}
