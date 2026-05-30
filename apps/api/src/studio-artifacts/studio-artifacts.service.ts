@@ -2,6 +2,7 @@ import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
 import { Repository } from 'typeorm';
+import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { Baseline } from '../baseline/baseline.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
@@ -103,33 +104,7 @@ export type StudioArtifactsState = {
   };
 };
 
-type ArtifactPatch = Partial<Pick<
-  StudioArtifact,
-  | 'baselineVersionId'
-  | 'baselineVersionHash'
-  | 'jobFingerprint'
-  | 'generationContractVersion'
-  | 'resumeStatus'
-  | 'coverLetterStatus'
-  | 'resumeInputsHash'
-  | 'coverLetterInputsHash'
-  | 'resumeResponseBody'
-  | 'coverLetterResponseBody'
-  | 'resumeContent'
-  | 'coverLetterContent'
-  | 'resumeFailureCode'
-  | 'coverLetterFailureCode'
-  | 'resumeFailureMessage'
-  | 'coverLetterFailureMessage'
-  | 'resumeGenerationStartedAt'
-  | 'coverLetterGenerationStartedAt'
-  | 'resumeGeneratedAt'
-  | 'coverLetterGeneratedAt'
-  | 'resumeFailedAt'
-  | 'coverLetterFailedAt'
-  | 'resumeMetadata'
-  | 'coverLetterMetadata'
->>;
+type ArtifactPatch = QueryDeepPartialEntity<StudioArtifact>;
 
 const ARTIFACT_CONTRACT_VERSION = 'studio-artifacts-v1';
 // Bump this when composition rules change in a way that should invalidate previously-generated artifacts
@@ -1146,7 +1121,7 @@ export class StudioArtifactsService {
       resumeStatus: StudioArtifactLifecycleStatus.IN_PROGRESS,
       resumeInputsHash: input.inputsHash,
       resumeGenerationStartedAt: new Date(),
-      resumeMetadata: input.metadata ?? {},
+      resumeMetadata: (input.metadata ?? {}) as any,
       resumeFailureCode: null,
       resumeFailureMessage: null,
     }, 'resume');
@@ -1201,14 +1176,14 @@ export class StudioArtifactsService {
       generationContractVersion: ARTIFACT_CONTRACT_VERSION,
       resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
       resumeInputsHash: input.inputsHash,
-      resumeResponseBody: input.responseBody,
+      resumeResponseBody: input.responseBody as any,
       resumeContent: input.content,
       resumeGeneratedAt: new Date(),
       resumeGenerationStartedAt: null,
       resumeFailedAt: null,
       resumeFailureCode: null,
       resumeFailureMessage: null,
-      resumeMetadata: input.metadata ?? {},
+      resumeMetadata: (input.metadata ?? {}) as any,
     }, 'resume');
   }
 
@@ -1251,7 +1226,7 @@ export class StudioArtifactsService {
       resumeGenerationStartedAt: null,
       resumeFailureCode: input.failureCode,
       resumeFailureMessage: input.failureMessage,
-      resumeMetadata: input.metadata ?? {},
+      resumeMetadata: (input.metadata ?? {}) as any,
     }, 'resume');
   }
 
@@ -1274,7 +1249,7 @@ export class StudioArtifactsService {
       coverLetterStatus: StudioArtifactLifecycleStatus.IN_PROGRESS,
       coverLetterInputsHash: input.inputsHash,
       coverLetterGenerationStartedAt: new Date(),
-      coverLetterMetadata: input.metadata ?? {},
+      coverLetterMetadata: (input.metadata ?? {}) as any,
       coverLetterFailureCode: null,
       coverLetterFailureMessage: null,
     }, 'cover_letter');
@@ -1306,14 +1281,14 @@ export class StudioArtifactsService {
       generationContractVersion: ARTIFACT_CONTRACT_VERSION,
       coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
       coverLetterInputsHash: input.inputsHash,
-      coverLetterResponseBody: input.responseBody,
+      coverLetterResponseBody: input.responseBody as any,
       coverLetterContent: input.content,
       coverLetterGeneratedAt: new Date(),
       coverLetterGenerationStartedAt: null,
       coverLetterFailedAt: null,
       coverLetterFailureCode: null,
       coverLetterFailureMessage: null,
-      coverLetterMetadata: input.metadata ?? {},
+      coverLetterMetadata: (input.metadata ?? {}) as any,
     }, 'cover_letter');
   }
 
@@ -1341,7 +1316,7 @@ export class StudioArtifactsService {
       coverLetterGenerationStartedAt: null,
       coverLetterFailureCode: input.failureCode,
       coverLetterFailureMessage: input.failureMessage,
-      coverLetterMetadata: input.metadata ?? {},
+      coverLetterMetadata: (input.metadata ?? {}) as any,
     }, 'cover_letter');
   }
 
