@@ -12768,17 +12768,17 @@ export default function StudioPage() {
                     disabled={baselineReprocessInFlight}
                     data-testid="studio-resume-reprocess-baseline"
                   >
-                    {baselineReprocessInFlight ? "ReprocessingÃ¢â‚¬Â¦" : "Reprocess baseline"}
+                    {baselineReprocessInFlight ? "Reprocessing…" : "Reprocess baseline"}
                   </FormButton>
                 </div>
               </div>
             ) : (
               <>
-                  <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
-                    {activeGenerationReadiness.reasons[0]?.message ||
-                      activeGenerationReadiness.reasons[0]?.code ||
-                      canonicalStudioReadinessMessage}
-                  </p>
+                <p className="text-sm font-semibold text-slate-100" data-testid="studio-readiness-message">
+                  {activeGenerationReadiness.reasons[0]?.message ||
+                    activeGenerationReadiness.reasons[0]?.code ||
+                    canonicalStudioReadinessMessage}
+                </p>
                 {!hasRenderableResumeContent &&
                 !hasRenderableCoverLetterContent &&
                 (activeGenerationReadiness.blocked || !canGenerateDocuments) &&
@@ -12794,127 +12794,133 @@ export default function StudioPage() {
                   </div>
                 ) : null}
                 {(() => {
-	                  // Canonical rendered top-level state: do not allow readiness internal errors to coexist with READY/blocked UI.
-	                  // Readiness errors are fail-closed and must suppress any "Ready to generate" state.
-	                  const generationState = studioGenerationStateInfo.state;
-	                  const renderedTopState: "loading" | "blocked" | "ready" = analysisLoading
-	                    ? "loading"
-	                    : readinessError
-	                      ? "blocked"
-	                      : workflowAuthorityReadiness.blocked || !canGenerateDocuments
-	                        ? "blocked"
-	                        : generationState === "ready"
-	                          ? "ready"
-	                          : "blocked";
+                  const generationState = studioGenerationStateInfo.state;
+                  const renderedTopState: "loading" | "blocked" | "ready" = analysisLoading
+                    ? "loading"
+                    : readinessError
+                      ? "blocked"
+                      : workflowAuthorityReadiness.blocked || !canGenerateDocuments
+                        ? "blocked"
+                        : generationState === "ready"
+                          ? "ready"
+                          : "blocked";
 
-	                  const bannerIntent = renderedTopState === "ready" ? "info" : "warning";
-	                  const bannerTitle = readinessError
-	                    ? "Readiness error"
-	                    : renderedTopState === "ready"
-	                      ? "Ready to generate"
-	                      : generationState === "degraded"
-	                        ? "This role is a partial match"
-	                        : "Review your fit";
+                  const bannerIntent = renderedTopState === "ready" ? "info" : "warning";
+                  const bannerTitle = readinessError
+                    ? "Readiness error"
+                    : renderedTopState === "ready"
+                      ? "Ready to generate"
+                      : generationState === "degraded"
+                        ? "This role is a partial match"
+                        : "Review your fit";
 
-	                  return (
-          <Alert intent={bannerIntent} title={bannerTitle}>
-            <div data-testid="studio-generation-state-banner" className="space-y-2">
-              {scoringReliability === "unreliable" && !readinessError ? (
-                <div
-                  className="rounded-2xl border border-amber-300/25 bg-amber-500/10 p-4 text-slate-100"
-                  data-testid="studio-score-reliability-warning"
-                  data-reliability-reason={scoringReliabilityReason ?? undefined}
-                >
-                  <p className="text-sm text-slate-100">
-                    Fit score may be unreliable because we couldnâ€™t parse the job description well enough. You can still
-                    generate drafts, but review the job description for best results.
-                  </p>
-                </div>
-              ) : null}
-              {renderedTopState === "ready" ? (
-                <p data-testid="studio-generation-state-ready" className="text-sm text-slate-100">
-                  This role is ready for generation using your verified baseline.
-                </p>
-              ) : null}
-
-	              {!studioBlockedBaselineContract && generationState === "degraded" ? (
-                <div data-testid="studio-generation-state-degraded" className="space-y-2">
-                  <p className="text-sm text-slate-100">
-                    Some requirements are not supported by your verified experience. You can continue, but results are limited.
-                  </p>
-                  <div className="space-y-1 text-sm text-slate-100">
-                    {studioGenerationStateInfo.hasUnsupportedRequirements ? (
-                      <details
-                        className="rounded-xl border border-white/10 bg-slate-950/30 p-3"
-                        data-testid="studio-degraded-unsupported-requirements"
-                      >
-                        <summary className="cursor-pointer text-sm font-semibold text-slate-100">
-                          Unsupported requirements
-                        </summary>
-                        <div className="mt-2 space-y-2">
-                          <p>Remove unsupported requirements to continue with a partial match.</p>
-                          <ul className="list-disc space-y-1 pl-5 text-sm text-slate-100" data-testid="studio-degraded-unsupported-list">
-                            {studioGenerationStateInfo.unsupportedRequirements.map((requirement) => (
-                              <li key={`studio-degraded-unsupported-${requirement}`}>{requirement}</li>
-                            ))}
-                          </ul>
-                          <div>
-                            <FormButton onClick={handleAutoAdjustTargeting} disabled={!studioGenerationStateInfo.unsupportedRequirements.length}>
-                              Remove unsupported requirements and continue
-                            </FormButton>
+                  return (
+                    <Alert intent={bannerIntent} title={bannerTitle}>
+                      <div data-testid="studio-generation-state-banner" className="space-y-2">
+                        {scoringReliability === "unreliable" && !readinessError ? (
+                          <div
+                            className="rounded-2xl border border-amber-300/25 bg-amber-500/10 p-4 text-slate-100"
+                            data-testid="studio-score-reliability-warning"
+                            data-reliability-reason={scoringReliabilityReason ?? undefined}
+                          >
+                            <p className="text-sm text-slate-100">
+                              Fit score may be unreliable because we couldn’t parse the job description well enough. You can still
+                              generate drafts, but review the job description for best results.
+                            </p>
                           </div>
-                        </div>
-                      </details>
-                    ) : null}
-                    {studioGenerationStateInfo.hasScoreCapPenalty ? (
-                      <div data-testid="studio-score-cap-warning" className="space-y-1">
-                        <p>
-                          Score capped because the verified baseline does not show enough support for this role scope.
-                        </p>
-                        {studioGenerationStateInfo.capSignals ? (
-                          <ul className="list-disc space-y-1 pl-5 text-xs text-slate-200">
-                            {typeof studioGenerationStateInfo.capSignals.baselineRecall === "number" ? (
-                              <li>Baseline recall: {studioGenerationStateInfo.capSignals.baselineRecall.toFixed(1)}%</li>
-                            ) : null}
-                            {typeof studioGenerationStateInfo.capSignals.responsibilityOverlap === "number" ? (
-                              <li>Responsibility overlap: {studioGenerationStateInfo.capSignals.responsibilityOverlap.toFixed(1)}%</li>
-                            ) : null}
-                            {typeof studioGenerationStateInfo.capSignals.requiredToolCoverage === "number" ? (
-                              <li>Required tool coverage: {studioGenerationStateInfo.capSignals.requiredToolCoverage.toFixed(1)}%</li>
-                            ) : null}
-                          </ul>
+                        ) : null}
+                        {renderedTopState === "ready" ? (
+                          <p data-testid="studio-generation-state-ready" className="text-sm text-slate-100">
+                            This role is ready for generation using your verified baseline.
+                          </p>
+                        ) : null}
+
+                        {!studioBlockedBaselineContract && generationState === "degraded" ? (
+                          <div data-testid="studio-generation-state-degraded" className="space-y-2">
+                            <p className="text-sm text-slate-100">
+                              Some requirements are not supported by your verified experience. You can continue, but results are limited.
+                            </p>
+                            <div className="space-y-1 text-sm text-slate-100">
+                              {studioGenerationStateInfo.hasUnsupportedRequirements ? (
+                                <details
+                                  className="rounded-xl border border-white/10 bg-slate-950/30 p-3"
+                                  data-testid="studio-degraded-unsupported-requirements"
+                                >
+                                  <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+                                    Unsupported requirements
+                                  </summary>
+                                  <div className="mt-2 space-y-2">
+                                    <p>Remove unsupported requirements to continue with a partial match.</p>
+                                    <ul
+                                      className="list-disc space-y-1 pl-5 text-sm text-slate-100"
+                                      data-testid="studio-degraded-unsupported-list"
+                                    >
+                                      {studioGenerationStateInfo.unsupportedRequirements.map((requirement) => (
+                                        <li key={`studio-degraded-unsupported-${requirement}`}>{requirement}</li>
+                                      ))}
+                                    </ul>
+                                    <div>
+                                      <FormButton
+                                        onClick={handleAutoAdjustTargeting}
+                                        disabled={!studioGenerationStateInfo.unsupportedRequirements.length}
+                                      >
+                                        Remove unsupported requirements and continue
+                                      </FormButton>
+                                    </div>
+                                  </div>
+                                </details>
+                              ) : null}
+                              {studioGenerationStateInfo.hasScoreCapPenalty ? (
+                                <div data-testid="studio-score-cap-warning" className="space-y-1">
+                                  <p>Score capped because the verified baseline does not show enough support for this role scope.</p>
+                                  {studioGenerationStateInfo.capSignals ? (
+                                    <ul className="list-disc space-y-1 pl-5 text-xs text-slate-200">
+                                      {typeof studioGenerationStateInfo.capSignals.baselineRecall === "number" ? (
+                                        <li>Baseline recall: {studioGenerationStateInfo.capSignals.baselineRecall.toFixed(1)}%</li>
+                                      ) : null}
+                                      {typeof studioGenerationStateInfo.capSignals.responsibilityOverlap === "number" ? (
+                                        <li>
+                                          Responsibility overlap: {studioGenerationStateInfo.capSignals.responsibilityOverlap.toFixed(1)}%
+                                        </li>
+                                      ) : null}
+                                      {typeof studioGenerationStateInfo.capSignals.requiredToolCoverage === "number" ? (
+                                        <li>
+                                          Required tool coverage: {studioGenerationStateInfo.capSignals.requiredToolCoverage.toFixed(1)}%
+                                        </li>
+                                      ) : null}
+                                    </ul>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                              {studioGenerationStateInfo.hasArtifactRefinementRequired ? (
+                                <p>Some generated materials need correction before export.</p>
+                              ) : null}
+                              <div className="pt-1">
+                                <p>Improve your baseline to fully support this role.</p>
+                                <Link
+                                  href={strengthenPrimaryHref}
+                                  className="text-sm font-medium text-slate-200 underline underline-offset-4 transition hover:text-white"
+                                >
+                                  Improve in Fit Review
+                                </Link>
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {generationState === "blocked" ? (
+                          <p data-testid="studio-generation-state-blocked" className="text-sm text-slate-100">
+                            Document generation is unavailable for this role.
+                          </p>
                         ) : null}
                       </div>
-                    ) : null}
-                    {studioGenerationStateInfo.hasArtifactRefinementRequired ? (
-                      <p>Some generated materials need correction before export.</p>
-                    ) : null}
-                    <div className="pt-1">
-                      <p>Improve your baseline to fully support this role.</p>
-                      <Link
-                        href={strengthenPrimaryHref}
-                        className="text-sm font-medium text-slate-200 underline underline-offset-4 transition hover:text-white"
-                      >
-                        Improve in Fit Review
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-
-              {generationState === "blocked" ? (
-                <p data-testid="studio-generation-state-blocked" className="text-sm text-slate-100">
-                  Document generation is unavailable for this role.
-                </p>
-              ) : null}
-            </div>
-          </Alert>
-                );
-              })()}
-                </>
-              )}
-            </div>
-          </details>
+                    </Alert>
+                  );
+                })()}
+              </>
+            )}
+          </div>
+        </details>
       ) : null}
       {showInstantDraftHeroSafe ? instantDraftHero : null}
       {preAnalysisPersistedResumePanel}
