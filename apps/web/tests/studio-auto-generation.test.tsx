@@ -569,6 +569,139 @@ describe("Studio auto-generation", () => {
     expect(countPostCalls(fetchMock, "/api/cover-letters")).toBe(0);
   }, 15000);
 
+  it("auto-generates when orchestration is eligible and the artifact pair is failed but no usable artifacts are persisted", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+    const score = 83;
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/current")) {
+        return Promise.resolve(
+          createResponse({
+            id: "base-1",
+            currentVersionId: "base-version-1",
+            baselineVersionId: "base-version-1",
+            status: "ACTIVE",
+          }),
+        );
+      }
+      if (url.includes("/api/baselines/base-1") && !url.includes("/versions")) {
+        return Promise.resolve(
+          createResponse({
+            id: "base-1",
+            currentVersionId: "base-version-1",
+            baselineVersionId: "base-version-1",
+            status: "ACTIVE",
+          }),
+        );
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments")) {
+        const assessment = {
+          assessmentId: "analysis-1",
+          jobId: "job-1",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          company: "Acme Corp",
+          title: "Customer Operations Manager",
+          score,
+          scoring_v2: { score },
+          scoringV2: { score },
+          verification_coverage: {
+            totalClaims: 3,
+            verifiedClaims: 3,
+            inferredClaims: 0,
+            unverifiedClaims: 0,
+            unverifiedRequirements: [],
+          },
+        };
+        return Promise.resolve(
+          createResponse(url.includes("/api/analysis/fit-assessments/") ? assessment : [assessment]),
+        );
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(
+          createResponse({
+            status: "ready",
+            reasons: [],
+            blocked: false,
+            compliance_flags: [],
+          }),
+        );
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "failed",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            generationContractVersion: "studio-artifacts-v1",
+            artifact: {
+              hasResume: false,
+              hasCoverLetter: false,
+              pairStatus: "failed",
+              generating: false,
+              failure: { code: "generation_failed", message: "Failed pair." },
+            },
+            resume: {
+              status: "FAILED",
+              responseBody: null,
+              content: null,
+              failureCode: "generation_failed",
+              failureMessage: "Resume failed.",
+              confidence: "LOW",
+              failure: null,
+            },
+            coverLetter: {
+              status: "FAILED",
+              responseBody: null,
+              content: null,
+              failureCode: "generation_failed",
+              failureMessage: "Cover failed.",
+              confidence: "LOW",
+              failure: null,
+            },
+          }),
+        );
+      }
+      if (url.endsWith("/api/resume") && init?.method === "POST") {
+        return resolveAutoGenerationSuccess(input);
+      }
+      if (url.endsWith("/api/cover-letters") && init?.method === "POST") {
+        return resolveAutoGenerationSuccess(input);
+      }
+      if (url.includes("/api/opportunities") && init?.method === "POST") {
+        return Promise.resolve(
+          createResponse({
+            id: "opp-1",
+            status: "SAVED",
+            updatedAt: new Date().toISOString(),
+            jobId: "job-1",
+            baselineId: "base-1",
+          }),
+        );
+      }
+      return Promise.resolve(createResponse({}));
+    });
+
+    setFetchImplementation(fetchMock as any);
+    renderStudio();
+
+    await waitFor(() => {
+      const debug = screen.getByTestId("studio-orchestration-debug");
+      const raw = debug.querySelector("pre")?.textContent ?? "";
+      expect(raw).toContain("\"orchestrationDecision\": \"should_auto_generate\"");
+      expect(raw).toContain("\"needsAutoGeneration\": true");
+    }, { timeout: 15000 });
+  }, 15000);
+
   it("still auto-generates when verification confidence is limited", async () => {
     const fetchMock = installStrongFitFetches({ readinessStatus: "limited" });
 

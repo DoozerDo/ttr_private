@@ -2354,8 +2354,9 @@ export default function StudioPage() {
     if (pairStatus !== "missing" || !hasExistingPresenterResponses) {
       setStudioArtifactPairStatus(pairStatus);
     }
-    // If hydration confirms artifacts are missing, allow auto-generation to proceed afterwards.
-    suppressAutoGenerationRef.current = pairStatus !== "missing";
+    // If hydration confirms artifacts are missing (or only failed with no usable artifacts), allow auto-generation
+    // to proceed afterwards. Only suppress while artifacts are in-flight or completed.
+    suppressAutoGenerationRef.current = pairStatus === "in_progress" || pairStatus === "completed";
   }, [analysisError, readinessError]);
 
   function normalizeStudioArtifactsBackendPayload(payload: unknown): BackendStudioArtifactsResponse | null {
@@ -2756,8 +2757,9 @@ export default function StudioPage() {
       if (pairStatus !== "missing" || !hasExistingPresenterResponses) {
         setStudioArtifactPairStatus(pairStatus);
       }
-      // If hydration confirms artifacts are missing, allow auto-generation to proceed afterwards.
-      suppressAutoGenerationRef.current = pairStatus !== "missing";
+      // If hydration confirms artifacts are missing (or only failed with no usable persisted artifacts),
+      // allow auto-generation to proceed afterwards. Only suppress while artifacts are in-flight or completed.
+      suppressAutoGenerationRef.current = pairStatus === "in_progress" || pairStatus === "completed";
     };
 
     void (async () => {
@@ -5150,6 +5152,8 @@ export default function StudioPage() {
       }),
     [effectiveBaselineId, effectiveJobId, effectiveRequestedAnalysisId],
   );
+  const ignoreArtifactFailuresForAutoGeneration =
+    qualifiedForStudioOrchestration && !hasAnyArtifactPersisted && studioReadinessBlocksGeneration === false;
   const needsAutoGeneration =
     generateNowEligible &&
     isInstantDraftExperience &&
@@ -5159,8 +5163,8 @@ export default function StudioPage() {
     studioArtifactPairStatus !== "in_progress" &&
     !resumeState.response &&
     !coverState.response &&
-    !resumeState.artifactFailure &&
-    !coverState.artifactFailure &&
+    (ignoreArtifactFailuresForAutoGeneration ? true : !resumeState.artifactFailure) &&
+    (ignoreArtifactFailuresForAutoGeneration ? true : !coverState.artifactFailure) &&
     !resumeSingleFlightInFlight &&
     !coverSingleFlightInFlight;
   const autoGenerationSignature = useMemo(() => {
@@ -5278,8 +5282,8 @@ export default function StudioPage() {
           studioArtifactPairStatus !== "in_progress" &&
           !resumeState.response &&
           !coverState.response &&
-          !resumeState.artifactFailure &&
-          !coverState.artifactFailure &&
+          (ignoreArtifactFailuresForAutoGeneration ? true : !resumeState.artifactFailure) &&
+          (ignoreArtifactFailuresForAutoGeneration ? true : !coverState.artifactFailure) &&
           !resumeSingleFlightInFlight &&
           !coverSingleFlightInFlight,
       ),
@@ -5289,6 +5293,7 @@ export default function StudioPage() {
         qualifiedForStudioOrchestration: Boolean(qualifiedForStudioOrchestration),
         hasCompletedGeneration: Boolean(hasCompletedGeneration),
         hasAnyArtifactPersisted: Boolean(hasAnyArtifactPersisted),
+        ignoreArtifactFailuresForAutoGeneration: Boolean(ignoreArtifactFailuresForAutoGeneration),
         studioArtifactPairStatus,
         hasResumeResponse: Boolean(resumeState.response),
         hasCoverResponse: Boolean(coverState.response),
