@@ -30,6 +30,11 @@ import { BaselineResumeV2BackfillService } from '../baseline/baseline-resume-v2-
 export type StudioArtifactKind = 'resume' | 'cover_letter';
 
 export type StudioArtifactRecord = {
+  artifactId?: string;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  generationRunId?: string | null;
+  artifactSource?: 'persisted' | 'fresh_generation';
   status: StudioArtifactLifecycleStatus;
   inputsHash: string | null;
   inputsHashMatches: boolean;
@@ -1447,6 +1452,16 @@ export class StudioArtifactsService {
       artifact === 'resume' ? record.resumeFailedAt : record.coverLetterFailedAt;
     const metadata =
       artifact === 'resume' ? record.resumeMetadata : record.coverLetterMetadata;
+    const createdAt =
+      (record as any)?.createdAt && typeof (record as any).createdAt.toISOString === 'function'
+        ? (record as any).createdAt.toISOString()
+        : null;
+    const updatedAt =
+      (record as any)?.updatedAt && typeof (record as any).updatedAt.toISOString === 'function'
+        ? (record as any).updatedAt.toISOString()
+        : null;
+    const generationRunId =
+      metadata && typeof metadata === 'object' ? (metadata as any)?.auditId ?? null : null;
     const interpretedEvidenceAudit = extractInterpretedEvidenceAuditFromResponseBody(responseBody);
     const minimalResume = artifact === 'resume' ? detectMinimalResumeArtifact(responseBody) : null;
     const artifactCurrent = inputsHashMatches && !(minimalResume?.minimal ?? false);
@@ -1470,6 +1485,11 @@ export class StudioArtifactsService {
     }
 
     return {
+      artifactId: String((record as any)?.id ?? ''),
+      createdAt,
+      updatedAt,
+      generationRunId: generationRunId ? String(generationRunId) : null,
+      artifactSource: 'persisted',
       status,
       inputsHash,
       inputsHashMatches,

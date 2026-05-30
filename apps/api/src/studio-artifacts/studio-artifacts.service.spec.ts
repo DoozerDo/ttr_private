@@ -59,6 +59,38 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
   });
 });
 
+describe('StudioArtifactsService (unit): artifact record hydration metadata', () => {
+  it('exposes artifactId/createdAt/updatedAt/generationRunId on the hydrated resume record', () => {
+    const service = Object.create(StudioArtifactsService.prototype) as any;
+    const createdAt = new Date('2026-05-30T12:00:00.000Z');
+    const updatedAt = new Date('2026-05-30T12:05:00.000Z');
+
+    const record = {
+      id: 'artifact-123',
+      createdAt,
+      updatedAt,
+      resumeStatus: StudioArtifactLifecycleStatus.FAILED,
+      resumeInputsHash: 'hash-1',
+      resumeResponseBody: null,
+      resumeContent: null,
+      resumeFailureCode: 'unsupported_input',
+      resumeFailureMessage: 'Old failure.',
+      resumeGenerationStartedAt: null,
+      resumeGeneratedAt: null,
+      resumeFailedAt: new Date('2026-05-30T12:04:00.000Z'),
+      resumeMetadata: { auditId: 'run-abc' },
+    };
+
+    const hydrated = service.buildArtifactRecord(record, 'resume', 'hash-1');
+    expect(hydrated).toBeTruthy();
+    expect(hydrated.artifactId).toBe('artifact-123');
+    expect(hydrated.createdAt).toBe('2026-05-30T12:00:00.000Z');
+    expect(hydrated.updatedAt).toBe('2026-05-30T12:05:00.000Z');
+    expect(hydrated.generationRunId).toBe('run-abc');
+    expect(hydrated.artifactSource).toBe('persisted');
+  });
+});
+
 describe('StudioArtifactsService (unit): studio artifact scope upsert is idempotent', () => {
   it('does insert-or-update without throwing UQ_studio_artifacts_scope and logs create vs update decisions', async () => {
     const insertExecute = jest.fn();

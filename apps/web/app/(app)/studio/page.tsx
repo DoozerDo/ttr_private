@@ -5342,6 +5342,29 @@ export default function StudioPage() {
       resumeState,
       resumeFailureDiagnostics,
       coverLetterState: coverState,
+      resumeArtifactHydration: {
+        resumeArtifactId:
+          (typeof (resumeState.response as any)?.audit_id === "string" && (resumeState.response as any)?.audit_id) ||
+          (typeof (resumeState.response as any)?.auditId === "string" && (resumeState.response as any)?.auditId) ||
+          (typeof (resumeState.response as any)?.requestId === "string" && (resumeState.response as any)?.requestId) ||
+          (typeof (resumeState.response as any)?.id === "string" && (resumeState.response as any)?.id) ||
+          (typeof (studioArtifactsPayload as any)?.resume?.artifactId === "string"
+            ? String((studioArtifactsPayload as any)?.resume?.artifactId)
+            : null),
+        resumeArtifactCreatedAt:
+          typeof (studioArtifactsPayload as any)?.resume?.createdAt === "string"
+            ? String((studioArtifactsPayload as any)?.resume?.createdAt)
+            : null,
+        resumeArtifactUpdatedAt:
+          typeof (studioArtifactsPayload as any)?.resume?.updatedAt === "string"
+            ? String((studioArtifactsPayload as any)?.resume?.updatedAt)
+            : null,
+        resumeGenerationRunId:
+          typeof (studioArtifactsPayload as any)?.resume?.generationRunId === "string"
+            ? String((studioArtifactsPayload as any)?.resume?.generationRunId)
+            : null,
+        resumeArtifactSource: resumeState.response ? "fresh_generation" : "persisted",
+      },
       hydrationSignature: studioArtifactHydrationSignature,
       orchestrationDecision,
     };
@@ -5373,6 +5396,7 @@ export default function StudioPage() {
     resumeState,
     resumeFailureDiagnostics,
     resumeV2FallbackEvaluation.codes,
+    studioArtifactsPayload,
     resumeV2FallbackAttemptable,
     studioArtifactPairStatus,
     studioArtifactHydrationSignature,
