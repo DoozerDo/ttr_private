@@ -950,11 +950,28 @@ export class ResumeService {
 	    if (Boolean(request.oneTap) && Boolean(opts?.enforceOneTap) && Boolean((opts as any)?.skipReadinessGate)) {
 	      return true;
 	    }
-	    if (Boolean(request.oneTap) || Boolean(opts?.enforceOneTap)) return false;
-	    // Studio eligible generation lane: requires an explicit Studio generate intent.
-	    // (UI sends `forceRegenerate` for eligible-generate actions; readiness-only probing does not.)
-	    if (!forceRegenerate) return false;
 	    const score = typeof assessment?.overallScore === 'number' ? assessment.overallScore : null;
+	    // Studio may issue generation requests with `oneTap=true` (verified-only) when score is eligible.
+	    // In that case, allow baseline-only degradation paths when it is clearly a Studio regenerate intent.
+	    if (
+	      Boolean(request.oneTap) &&
+	      Boolean(forceRegenerate) &&
+	      typeof score === 'number' &&
+	      score >= AUTO_GENERATE_THRESHOLD &&
+	      !Boolean(opts?.enforceOneTap)
+	    ) {
+	      return true;
+	    }
+	    if (Boolean(request.oneTap) || Boolean(opts?.enforceOneTap)) return false;
+	    // Contract: for eligible-score Studio generation lanes (jobId + analysisId + score >= threshold),
+	    // non-blocking baseline-only fallback paths must be allowed even when the client omitted
+	    // `forceRegenerate` (e.g. strict trust-validation retries).
+	    if (typeof score === 'number' && score >= AUTO_GENERATE_THRESHOLD) {
+	      return true;
+	    }
+	    // Studio eligible generation lane: requires an explicit Studio generate intent when score context
+	    // is missing or below threshold.
+	    if (!forceRegenerate) return false;
 	    // If scoring context is temporarily unavailable but Studio context is present, treat as eligible for
 	    // non-blocking baseline-only fallback. Compliance gates still apply downstream.
 	    if (typeof score !== 'number') return true;

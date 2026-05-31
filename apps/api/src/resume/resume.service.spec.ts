@@ -3900,6 +3900,70 @@ describe('ResumeService contract', () => {
     baseline.sections = original;
   });
 
+  it('allows baseline-only resume fallback for eligible score lanes even when forceRegenerate is omitted', async () => {
+    const { service } = buildService();
+    const original = baseline.sections;
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 83;
+
+    baseline.sections = [
+      {
+        ...baseSection,
+        sectionType: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        order: 0,
+        content: ['Acme Corp', 'Senior Engineer', '2021 - 2024', ''].join('\n'),
+      },
+    ];
+
+    await expect(
+      service.generateResume(
+        'user-1',
+        { ...baseRequest, forceRegenerate: false },
+        { preflightOnly: false, skipReadinessGate: true, enforceOneTap: false },
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      status: 'success',
+      exportReady: true,
+    });
+
+    assessment.overallScore = originalScore;
+    baseline.sections = original;
+  });
+
+  it('allows baseline-only resume fallback for Studio generate intents even when oneTap is true (eligible score lane)', async () => {
+    const { service } = buildService();
+    const original = baseline.sections;
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 83;
+
+    baseline.sections = [
+      {
+        ...baseSection,
+        sectionType: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        order: 0,
+        content: ['Acme Corp', 'Senior Engineer', '2021 - 2024', ''].join('\n'),
+      },
+    ];
+
+    await expect(
+      service.generateResume(
+        'user-1',
+        { ...baseRequest, oneTap: true, forceRegenerate: true },
+        { preflightOnly: false, skipReadinessGate: true, enforceOneTap: false },
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      status: 'success',
+      exportReady: true,
+    });
+
+    assessment.overallScore = originalScore;
+    baseline.sections = original;
+  });
+
   it('attaches resumeFailureDiagnostics + fallbackPathExecuted to unsupported_input exceptions', () => {
     const { service } = buildService();
     const privateService = service as unknown as {
