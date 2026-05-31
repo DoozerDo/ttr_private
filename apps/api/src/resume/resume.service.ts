@@ -896,6 +896,7 @@ export class ResumeService {
       message: string,
       unsupportedEnvelope: string,
       resumeFailureDiagnostics?: NonNullable<Parameters<typeof buildArtifactFailurePayload>[0]['diagnostics']>['resumeFailureDiagnostics'],
+      fallbackPathExecuted?: boolean,
     ): never {
 	    throw new UnprocessableEntityException(buildArtifactFailurePayload({
       code: 'unsupported_input',
@@ -909,6 +910,7 @@ export class ResumeService {
       },
       diagnostics: {
         unsupportedEnvelope,
+        ...(typeof fallbackPathExecuted === 'boolean' ? { fallbackPathExecuted } : {}),
         ...(resumeFailureDiagnostics ? { resumeFailureDiagnostics } : {}),
       },
     }));
@@ -1802,6 +1804,7 @@ export class ResumeService {
     let minimalDraftSectionsForFailSafe: ResumeDraftSection[] | null = null;
     let jobIdForFailSafe: string | null = null;
     let analysisIdForFailSafe: string | null = null;
+    let fallbackPathExecutedForRequest = false;
     const recordResumeEvent = (success: boolean) => {
       void this.criticalFlowTrackerService?.recordCriticalFlowEvent({
         flow: success
@@ -3480,12 +3483,14 @@ export class ResumeService {
               );
             }
             resumeFailureDiagnostics.fallbackSucceeded = true;
+            fallbackPathExecutedForRequest = true;
             // Fallback recovered; continue pipeline with baseline-only document.
           } else {
           this.throwUnsupportedResumeInput(
             this.mapResumeFailureDescription(reason),
             reason,
             resumeFailureDiagnostics,
+            fallbackPathExecutedForRequest,
           );
           }
         }
@@ -4065,6 +4070,7 @@ export class ResumeService {
 	        resumeGenerationDiagnostics: experienceDiagnostics,
 	        normalizationDiagnostics: experienceDiagnostics,
 	        ...(tailoringLimitations ? { tailoringLimitations } : {}),
+	        fallbackPathExecuted: Boolean(fallbackPathExecutedForRequest),
 	        ...(usedInterpretedEvidenceInDraft
 	          ? {
 	              interpretedEvidenceSummary: interpretedEvidenceForBaseline.summary,

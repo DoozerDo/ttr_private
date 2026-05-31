@@ -56,6 +56,9 @@ export type ArtifactFailurePayload = {
         normalizedDocumentBulletCount?: number | null;
       };
     };
+
+    // Single contract flag: prove whether the Studio fallback path executed in this request.
+    fallbackPathExecuted?: boolean;
   };
 };
 
