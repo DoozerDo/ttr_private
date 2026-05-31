@@ -7641,6 +7641,7 @@ export default function StudioPage() {
         return false;
       }
       if (presenter.status === "error") {
+        captureResumeFailureDiagnostics({ force: true });
         trackEvent("resume_generation_limited", {
           source: "studio",
           analysisId: requestedAnalysisId || undefined,
