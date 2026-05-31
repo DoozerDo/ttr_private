@@ -7496,8 +7496,9 @@ export default function StudioPage() {
       });
       if (timeoutId !== null) window.clearTimeout(timeoutId);
       const responsePayload = await readResponsePayload(response);
-      const captureResumeFailureDiagnostics = () => {
-        if (response.ok) {
+      const captureResumeFailureDiagnostics = (opts?: { force?: boolean }) => {
+        const force = Boolean(opts?.force);
+        if (response.ok && !force) {
           setResumeFailureDiagnostics(null);
           return;
         }
@@ -7507,12 +7508,16 @@ export default function StudioPage() {
             ? payload.error.code
             : typeof payload?.errorCode === "string"
               ? payload.errorCode
+              : typeof payload?.code === "string"
+                ? payload.code
               : null;
         const backendMessage =
           typeof payload?.error?.message === "string"
             ? payload.error.message
             : typeof payload?.message === "string"
               ? payload.message
+              : typeof payload?.detail === "string"
+                ? payload.detail
               : typeof payload?.errorMessage === "string"
                 ? payload.errorMessage
                 : null;
@@ -7610,6 +7615,9 @@ export default function StudioPage() {
       const presenter = presentResumeGeneration(responsePayload);
       const failure = presenter.failure;
       if (failure) {
+        // Some backend responses return `200` with an ArtifactFailure envelope. Preserve the full
+        // payload so Studio orchestration debug can show `fallbackPathExecuted` + `resumeFailureDiagnostics`.
+        captureResumeFailureDiagnostics({ force: true });
         setResumeState((current) => ({
           ...current,
           artifactFailure: failure,
