@@ -147,6 +147,36 @@ describe("studio presenter helpers", () => {
     expect(presented.display?.title).toBe("Resume generation failed");
   });
 
+  it("preserves unsupported_input diagnostics for resume ArtifactFailure envelopes", () => {
+    const payload = {
+      status: "error",
+      code: "unsupported_input",
+      message: "Resume could not be generated.",
+      artifactType: "resume",
+      payload: {
+        code: "unsupported_input",
+        category: "unsupported_input",
+        message: "verified content was insufficient to build a valid resume structure",
+        retryable: false,
+        diagnostics: {
+          fallbackPathExecuted: true,
+          resumeFailureDiagnostics: {
+            validationReason: "resume_structure_empty",
+            validationReasons: ["resume_structure_empty"],
+          },
+        },
+      },
+    };
+
+    const presented = presentResumeGeneration(payload);
+    expect(presented.status).toBe("error");
+    expect(presented.failure?.code).toBe("unsupported_input");
+    expect(presented.failure?.diagnostics?.fallbackPathExecuted).toBe(true);
+    expect((presented.failure?.diagnostics as any)?.resumeFailureDiagnostics).toMatchObject({
+      validationReason: "resume_structure_empty",
+    });
+  });
+
   it("maps no-evidence resume payloads to explicit no-evidence state", () => {
     const payload = {
       status: "no_evidence",

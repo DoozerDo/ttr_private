@@ -377,6 +377,18 @@ export function readArtifactFailurePayload(payload: unknown): ArtifactFailurePay
                 .map((value) => trimToString(value))
                 .filter(Boolean)
             : undefined,
+          fallbackPathExecuted:
+            typeof (diagnosticsRaw as Record<string, unknown>).fallbackPathExecuted === "boolean"
+              ? ((diagnosticsRaw as Record<string, unknown>).fallbackPathExecuted as boolean)
+              : undefined,
+          resumeFailureDiagnostics:
+            (diagnosticsRaw as Record<string, unknown>).resumeFailureDiagnostics &&
+            typeof (diagnosticsRaw as Record<string, unknown>).resumeFailureDiagnostics === "object"
+              ? ((diagnosticsRaw as Record<string, unknown>).resumeFailureDiagnostics as Record<
+                  string,
+                  unknown
+                >)
+              : undefined,
         }
       : undefined;
 
