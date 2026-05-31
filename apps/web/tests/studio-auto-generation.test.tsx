@@ -670,6 +670,88 @@ describe("Studio auto-generation", () => {
     }, { timeout: 15000 });
   }, 20000);
 
+  it("does not allow persisted unsupported_input failure to override a usable resumeResponseWithResult during backend reconciliation", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const score = 84;
+    const fetchMock = installStrongFitFetches({
+      score,
+      readinessStatus: "ready",
+      studioArtifactsPayload: {
+        status: "failed",
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        generationContractVersion: "studio-artifacts-v1",
+        artifact: {
+          hasResume: true,
+          hasCoverLetter: true,
+          pairStatus: "failed",
+          generating: false,
+          failure: { code: "generation_failed", message: "Backend recorded a failure earlier." },
+        },
+        // Persisted record indicates failure...
+        resume: {
+          status: "FAILED",
+          responseBody: null,
+          content: null,
+          failureCode: "unsupported_input",
+          failureMessage: "verified content was insufficient to build a valid resume structure",
+          confidence: "LOW",
+          failure: null,
+        },
+        // ...but canonical result contains a usable success + generated_needs_correction state.
+        resumeResult: {
+          generationState: "generated_needs_correction",
+          qualityStatus: "pass",
+          preview: {
+            heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+            experience: [{ company: "Acme", roleTitle: "Manager", bullets: ["Did the work."] }],
+          },
+          display: { title: "Resume generated successfully" },
+        },
+        coverLetter: {
+          status: "COMPLETED",
+          usableCurrent: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: { coverLetter: { paragraphs: ["Hello"] } },
+          },
+          content: "Hello",
+          confidence: "HIGH",
+          failure: null,
+        },
+        coverLetterResult: {
+          generationState: "generated",
+          qualityStatus: "pass",
+          preview: { paragraphs: ["Hello"] },
+          display: { title: "Cover letter generated successfully" },
+        },
+      },
+    });
+
+    renderStudio();
+
+    await waitFor(() => {
+      const debug = screen.getByTestId("studio-orchestration-debug");
+      const raw = debug.querySelector("pre")?.textContent ?? "";
+      expect(raw).toContain("\"generationState\": \"generated_needs_correction\"");
+      expect(raw).toContain("\"status\": \"success\"");
+      expect(raw).toContain("\"artifactFailure\": null");
+    }, { timeout: 15000 });
+
+    // Sanity: hydration happened (no generation required for this test).
+    expect(countPostCalls(fetchMock, "/api/resume")).toBe(0);
+  }, 15000);
+
   it("does not let a persisted failed latch block auto-generation when the contract is READY", async () => {
     const originalLocalStorage = window.localStorage;
     const memoryStorage = (() => {

@@ -2707,7 +2707,26 @@ export default function StudioPage() {
       const coverFailure = normalizedBackendPayload
         ? buildFailureFromBackendRecord("cover_letter", normalizedBackendPayload.coverLetter)
         : null;
-      if (resumeFailure) {
+      const resumePresenterFromResult = resumeResponseWithResult
+        ? presentResumeGeneration(resumeResponseWithResult)
+        : null;
+      const resumeResponseIsUsableSuccess = resumePresenterFromResult?.status === "success";
+
+      // Ownership contract: a usable success response must win over any stale persisted failure codes.
+      if (resumeResponseWithResult && resumeResponseIsUsableSuccess) {
+        setResumeState((current) => ({
+          ...current,
+          response:
+            resumeResponseWithResult && typeof resumeResponseWithResult === "object"
+              ? ({ ...(resumeResponseWithResult as Record<string, unknown>) } as unknown)
+              : resumeResponseWithResult,
+          error: null,
+          tierGateError: null,
+          artifactFailure: null,
+        }));
+        setHasGeneratedOnce(true);
+        studioArtifactPresentationStateRef.current = "hydrated";
+      } else if (resumeFailure) {
         setResumeState((current) => ({
           ...current,
           artifactFailure: resumeFailure,
