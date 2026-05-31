@@ -898,6 +898,24 @@ export class ResumeService {
       resumeFailureDiagnostics?: NonNullable<Parameters<typeof buildArtifactFailurePayload>[0]['diagnostics']>['resumeFailureDiagnostics'],
       fallbackPathExecuted?: boolean,
     ): never {
+      const normalizedDiagnostics =
+        resumeFailureDiagnostics ??
+        ({
+          validationReason: unsupportedEnvelope,
+          validationReasons: [unsupportedEnvelope],
+          baselineEvidenceCount: null,
+          baselineExperienceSectionCount: null,
+          resumeV2ExperienceCount: null,
+          selectedEvidenceCount: null,
+          fallbackAttempted: false,
+          fallbackSucceeded: false,
+          fallbackFailureReason: null,
+          normalizedDocumentSectionCount: null,
+          normalizedDocumentBulletCount: null,
+        } satisfies NonNullable<
+          Parameters<typeof buildArtifactFailurePayload>[0]['diagnostics']
+        >['resumeFailureDiagnostics']);
+
 	    throw new UnprocessableEntityException(buildArtifactFailurePayload({
       code: 'unsupported_input',
       category: 'unsupported_input',
@@ -910,8 +928,8 @@ export class ResumeService {
       },
       diagnostics: {
         unsupportedEnvelope,
-        ...(typeof fallbackPathExecuted === 'boolean' ? { fallbackPathExecuted } : {}),
-        ...(resumeFailureDiagnostics ? { resumeFailureDiagnostics } : {}),
+        fallbackPathExecuted: typeof fallbackPathExecuted === 'boolean' ? fallbackPathExecuted : false,
+        resumeFailureDiagnostics: normalizedDiagnostics,
       },
     }));
 	  }

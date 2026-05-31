@@ -3534,6 +3534,12 @@ describe('ResumeService contract', () => {
         code: 'unsupported_input',
         category: 'unsupported_input',
         retryable: false,
+        diagnostics: {
+          fallbackPathExecuted: false,
+          resumeFailureDiagnostics: {
+            validationReason: 'resume_structure_empty',
+          },
+        },
       });
     }
   });
@@ -3892,6 +3898,45 @@ describe('ResumeService contract', () => {
     });
 
     baseline.sections = original;
+  });
+
+  it('attaches resumeFailureDiagnostics + fallbackPathExecuted to unsupported_input exceptions', () => {
+    const { service } = buildService();
+    const privateService = service as unknown as {
+      throwUnsupportedResumeInput: (
+        message: string,
+        unsupportedEnvelope: string,
+        resumeFailureDiagnostics?: any,
+        fallbackPathExecuted?: boolean,
+      ) => never;
+    };
+
+    try {
+      privateService.throwUnsupportedResumeInput(
+        'Resume could not be generated.',
+        'resume_structure_empty',
+        {
+          validationReason: 'resume_structure_empty',
+          validationReasons: ['resume_structure_empty'],
+          fallbackAttempted: false,
+          fallbackSucceeded: false,
+        },
+        false,
+      );
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnprocessableEntityException);
+      const response = (error as UnprocessableEntityException).getResponse() as any;
+      expect(response).toMatchObject({
+        code: 'unsupported_input',
+        category: 'unsupported_input',
+        diagnostics: {
+          fallbackPathExecuted: false,
+          resumeFailureDiagnostics: {
+            validationReason: 'resume_structure_empty',
+          },
+        },
+      });
+    }
   });
 
   it('does not collapse customer/support operations into a billing-operations archetype when billing evidence is isolated', () => {
