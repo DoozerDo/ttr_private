@@ -2331,7 +2331,12 @@ export default function StudioPage() {
       setHasGeneratedOnce(true);
       studioArtifactPresentationStateRef.current = "hydrated";
     } else if (resumeFailure) {
+      // If the user already has a successful generated resume response in memory, do not let a stale
+      // persisted failure record overwrite it during post-generate re-hydration.
+      const existingResumePresenter = presentResumeGeneration(resumeResponseRef.current);
+      if (existingResumePresenter.status !== "success") {
       setResumeState((current) => ({ ...current, artifactFailure: resumeFailure, error: null }));
+      }
     }
 
     if (coverResponseWithResult && !coverArtifactStale) {
