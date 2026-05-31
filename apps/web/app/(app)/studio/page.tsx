@@ -11206,7 +11206,9 @@ export default function StudioPage() {
               ? await handleResumeDraft({
                   sessionKey,
                   bypassReadinessGate: true,
-                  forceRegenerate: source === "manual_retry",
+                  // Studio eligible generation lane: always mark as an explicit generate intent so
+                  // backend non-blocking baseline-only fallback paths can apply when needed.
+                  forceRegenerate: true,
                   regenerationSource: source,
                   onAttempt: (next) => {
                     attempt = next;

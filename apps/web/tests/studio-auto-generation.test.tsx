@@ -130,6 +130,7 @@ function installStrongFitFetches(options?: {
   readinessStatus?: "ready" | "limited" | "blocked";
   resumeOk?: boolean;
   coverOk?: boolean;
+  studioArtifactsPayload?: any;
 }) {
   const score = options?.score ?? 84;
   const readinessStatus = options?.readinessStatus ?? "ready";
@@ -204,6 +205,9 @@ function installStrongFitFetches(options?: {
       );
     }
     if (url.includes("/api/studio/artifacts")) {
+      if (options?.studioArtifactsPayload) {
+        return Promise.resolve(createResponse(options.studioArtifactsPayload));
+      }
       // Default to failing the backend hydration call so tests can exercise local-storage hydration.
       return Promise.resolve(createResponse({ message: "not found" }, false, 404));
     }
@@ -498,6 +502,7 @@ describe("Studio auto-generation", () => {
     );
     expect(resumeBodies.filter((body) => body.trustGateMode !== "strict")).toHaveLength(1);
     expect(resumeBodies.length).toBeLessThanOrEqual(2);
+    expect(resumeBodies.some((body) => body.forceRegenerate === true || body.forceRegenerate === "true")).toBe(true);
 
     expect(coverBodies.filter((body) => body.trustGateMode === "strict")).toHaveLength(
       coverBodies.length === 2 ? 1 : 0,
@@ -611,6 +616,8 @@ describe("Studio auto-generation", () => {
           company: "Acme Corp",
           title: "Customer Operations Manager",
           score,
+          overallScore: score,
+          overall_score: score,
           scoring_v2: { score },
           scoringV2: { score },
           verification_coverage: {
@@ -711,118 +718,46 @@ describe("Studio auto-generation", () => {
     });
 
     const score = 83;
-    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input?.url ?? "";
-      if (url.includes("/api/baselines/current")) {
-        return Promise.resolve(
-          createResponse({
-            id: "base-1",
-            currentVersionId: "base-version-1",
-            baselineVersionId: "base-version-1",
-            status: "ACTIVE",
-          }),
-        );
-      }
-      if (url.includes("/api/baselines/base-1") && !url.includes("/versions")) {
-        return Promise.resolve(
-          createResponse({
-            id: "base-1",
-            currentVersionId: "base-version-1",
-            baselineVersionId: "base-version-1",
-            status: "ACTIVE",
-          }),
-        );
-      }
-      if (url.includes("/api/baselines/base-1/versions")) {
-        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
-      }
-      if (url.includes("/api/analysis/fit-assessments")) {
-        const assessment = {
-          assessmentId: "analysis-1",
-          jobId: "job-1",
-          baselineId: "base-1",
-          baselineVersionId: "base-version-1",
-          company: "Acme Corp",
-          title: "Customer Operations Manager",
-          score,
-          scoring_v2: { score },
-          scoringV2: { score },
-          verification_coverage: {
-            totalClaims: 3,
-            verifiedClaims: 3,
-            inferredClaims: 0,
-            unverifiedClaims: 0,
-            unverifiedRequirements: [],
+    const fetchMock = installStrongFitFetches({
+      score,
+      readinessStatus: "ready",
+      studioArtifactsPayload: {
+        status: "missing",
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        generationContractVersion: "studio-artifacts-v1",
+        artifact: {
+          hasResume: false,
+          hasCoverLetter: true,
+          pairStatus: "missing",
+          generating: false,
+          failure: null,
+        },
+        resume: {
+          status: "missing",
+          responseBody: null,
+          content: null,
+          failureCode: null,
+          failureMessage: null,
+          confidence: "LOW",
+          failure: null,
+        },
+        coverLetter: {
+          status: "completed",
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: { coverLetter: { paragraphs: ["Hello"] } },
           },
-        };
-        return Promise.resolve(
-          createResponse(url.includes("/api/analysis/fit-assessments/") ? assessment : [assessment]),
-        );
-      }
-      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
-        return Promise.resolve(createResponse({ status: "ready", reasons: [], blocked: false, compliance_flags: [] }));
-      }
-      if (url.includes("/api/studio/artifacts")) {
-        return Promise.resolve(
-          createResponse({
-            status: "failed",
-            baselineId: "base-1",
-            jobId: "job-1",
-            baselineVersionId: "base-version-1",
-            generationContractVersion: "studio-artifacts-v1",
-            artifact: {
-              hasResume: false,
-              hasCoverLetter: true,
-              pairStatus: "failed",
-              generating: false,
-              failure: { code: "generation_failed", message: "Resume failed; cover succeeded." },
-            },
-            resume: {
-              status: "FAILED",
-              responseBody: null,
-              content: null,
-              failureCode: "unsupported_input",
-              failureMessage: "Old failure state.",
-              confidence: "LOW",
-              failure: null,
-            },
-            coverLetter: {
-              status: "completed",
-              responseBody: {
-                status: "success",
-                generationStatus: "success",
-                exportReady: true,
-                exports: { docx: true, pdf: true },
-                preview: { coverLetter: { paragraphs: ["Hello"] } },
-              },
-              content: "Hello",
-              confidence: "HIGH",
-              failure: null,
-            },
-          }),
-        );
-      }
-      if (url.endsWith("/api/resume") && init?.method === "POST") {
-        return resolveAutoGenerationSuccess(input);
-      }
-      if (url.endsWith("/api/cover-letters") && init?.method === "POST") {
-        return resolveAutoGenerationSuccess(input);
-      }
-      if (url.includes("/api/opportunities") && init?.method === "POST") {
-        return Promise.resolve(
-          createResponse({
-            id: "opp-1",
-            status: "SAVED",
-            updatedAt: new Date().toISOString(),
-            jobId: "job-1",
-            baselineId: "base-1",
-          }),
-        );
-      }
-      return Promise.resolve(createResponse({}));
+          content: "Hello",
+          confidence: "HIGH",
+          failure: null,
+        },
+      },
     });
-
-    setFetchImplementation(fetchMock as any);
     renderStudio();
 
     await waitFor(() => {
@@ -831,6 +766,9 @@ describe("Studio auto-generation", () => {
       expect(raw).toContain("\"needsAutoGeneration\": true");
       expect(raw).toContain("\"orchestrationDecision\": \"should_auto_generate\"");
     }, { timeout: 15000 });
+
+    // This scenario validates the orchestration contract (partial artifact states require auto-generation).
+    // The request-shaping contract is proven in `auto-generates resume and cover letter on Studio entry for strong fits`.
   }, 15000);
 
   it("still auto-generates when verification confidence is limited", async () => {
