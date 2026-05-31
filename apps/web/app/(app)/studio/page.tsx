@@ -5154,10 +5154,11 @@ export default function StudioPage() {
   );
   const eligibleForAutoGeneration =
     generateNowEligible && qualifiedForStudioOrchestration && !studioReadinessBlocksGeneration;
-  const missingAutoGenerationOutput = !hasAnyArtifactPersisted;
+  const missingResumeOutput = !hasResumeArtifact;
+  const missingCoverOutput = !hasCoverLetterArtifact;
   const needsAutoGeneration =
     eligibleForAutoGeneration &&
-    missingAutoGenerationOutput &&
+    (missingResumeOutput || missingCoverOutput) &&
     studioArtifactsHydrated &&
     !autoGenerationInFlight &&
     !resumeGenerating &&
@@ -5233,8 +5234,9 @@ export default function StudioPage() {
   const orchestrationDebugSnapshot = useMemo(() => {
     const orchestrationDecision = (() => {
       if (studioReadinessBlocksGeneration === true) return "blocked";
-      if (hasAnyArtifactPersisted) return "hydrate_existing_artifacts";
-      if (eligibleForAutoGeneration && missingAutoGenerationOutput) return "should_auto_generate";
+      const hasAllOutputs = !missingResumeOutput && !missingCoverOutput;
+      if (hasAnyArtifactPersisted && hasAllOutputs) return "hydrate_existing_artifacts";
+      if (eligibleForAutoGeneration && (missingResumeOutput || missingCoverOutput)) return "should_auto_generate";
       return "passive_empty_state";
     })();
 
@@ -5272,7 +5274,8 @@ export default function StudioPage() {
         hasAnyArtifactPersisted: Boolean(hasAnyArtifactPersisted),
         studioReadinessBlocksGeneration: Boolean(studioReadinessBlocksGeneration),
         eligibleForAutoGeneration: Boolean(eligibleForAutoGeneration),
-        missingAutoGenerationOutput: Boolean(missingAutoGenerationOutput),
+        missingResumeOutput: Boolean(missingResumeOutput),
+        missingCoverOutput: Boolean(missingCoverOutput),
         autoGenerationInFlight: Boolean(autoGenerationInFlight),
         resumeGenerating: Boolean(resumeGenerating),
         coverGenerating: Boolean(coverGenerating),
