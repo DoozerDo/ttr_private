@@ -33,6 +33,29 @@ export type ArtifactFailurePayload = {
 
     // ResumeV2 authority diagnostics (safe metadata only; no raw text).
     resumeV2UsableExperienceCount?: number;
+
+    // Resume unsupported-input diagnostics (safe metadata only; no raw baseline text).
+    resumeFailureDiagnostics?: {
+      validationReason?: string | null;
+      validationReasons?: string[];
+      baselineEvidenceCount?: number | null;
+      baselineExperienceSectionCount?: number | null;
+      resumeV2ExperienceCount?: number | null;
+      selectedEvidenceCount?: number | null;
+      fallbackAttempted?: boolean;
+      fallbackSucceeded?: boolean;
+      fallbackFailureReason?: string | null;
+      normalizedDocumentSectionCount?: number | null;
+      normalizedDocumentBulletCount?: number | null;
+      afterFallback?: {
+        validationReason?: string | null;
+        validationReasons?: string[];
+        resumeV2ExperienceCount?: number | null;
+        selectedEvidenceCount?: number | null;
+        normalizedDocumentSectionCount?: number | null;
+        normalizedDocumentBulletCount?: number | null;
+      };
+    };
   };
 };
 

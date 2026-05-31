@@ -892,7 +892,11 @@ export class ResumeService {
     }));
   }
 
-	  private throwUnsupportedResumeInput(message: string, unsupportedEnvelope: string): never {
+	  private throwUnsupportedResumeInput(
+      message: string,
+      unsupportedEnvelope: string,
+      resumeFailureDiagnostics?: NonNullable<Parameters<typeof buildArtifactFailurePayload>[0]['diagnostics']>['resumeFailureDiagnostics'],
+    ): never {
 	    throw new UnprocessableEntityException(buildArtifactFailurePayload({
       code: 'unsupported_input',
       category: 'unsupported_input',
@@ -905,6 +909,7 @@ export class ResumeService {
       },
       diagnostics: {
         unsupportedEnvelope,
+        ...(resumeFailureDiagnostics ? { resumeFailureDiagnostics } : {}),
       },
     }));
 	  }
@@ -3384,45 +3389,68 @@ export class ResumeService {
             effectiveAssessment ?? null,
           );
 
-          // Diagnostics for runtime contract violations: scored + ready + cover-letter-capable baselines
-          // must not hard-stop resume generation as unsupported_input.
-          try {
-            const baselineSections = baseline.sections ?? [];
-            const baselineEvidenceCount = baselineSections.filter(
-              (section) => typeof section.content === 'string' && section.content.trim().length > 0,
-            ).length;
-            const baselineExperienceSectionCount = baselineSections.filter(
-              (section) => String(section.sectionType ?? '').toUpperCase() === 'EXPERIENCE',
-            ).length;
-            const resumeV2ExperienceCount = Array.isArray((normalizedDocument as any)?.experience)
-              ? (normalizedDocument as any).experience.length
+          const buildResumeUnsupportedDiagnostics = (doc: unknown) => {
+            const resumeV2ExperienceCount = Array.isArray((doc as any)?.experience)
+              ? Number((doc as any).experience.length)
               : null;
-            const selectedEvidenceCount = Array.isArray(allowedSections) ? allowedSections.length : null;
-            // eslint-disable-next-line no-console
-            console.warn('[RESUME][UNSUPPORTED_INPUT_THRESHOLD]', {
-              baselineId: baseline.id,
-              baselineVersionId: baselineVersion.id,
-              jobId: job?.id ?? jobId ?? null,
-              analysisId: request.analysisId ?? analysisId ?? null,
-              studioEligibleForFallback,
-              baselineEvidenceCount,
-              baselineExperienceSectionCount,
+            const normalizedDocumentSectionCount = (() => {
+              try {
+                const hasSummary = Boolean((doc as any)?.summary && String((doc as any)?.summary).trim().length > 0);
+                const hasEducation = Array.isArray((doc as any)?.education) && (doc as any).education.length > 0;
+                const hasCompetencies = Array.isArray((doc as any)?.competencies) && (doc as any).competencies.length > 0;
+                const experienceCount = resumeV2ExperienceCount ?? 0;
+                return Number(experienceCount) + (hasSummary ? 1 : 0) + (hasEducation ? 1 : 0) + (hasCompetencies ? 1 : 0);
+              } catch {
+                return null;
+              }
+            })();
+            const normalizedDocumentBulletCount = (() => {
+              try {
+                if (!Array.isArray((doc as any)?.experience)) return 0;
+                return (doc as any).experience.reduce((sum: number, role: any) => {
+                  const bullets = Array.isArray(role?.bullets) ? role.bullets : [];
+                  return sum + bullets.length;
+                }, 0);
+              } catch {
+                return null;
+              }
+            })();
+            return {
               resumeV2ExperienceCount,
-              selectedEvidenceCount,
-              thresholds: {
-                autoGenerateThreshold: AUTO_GENERATE_THRESHOLD,
-                verifiedOnlyThreshold: VERIFIED_ONLY_GENERATION_THRESHOLD,
-                templateAssemblyThreshold: TEMPLATE_ASSEMBLY_THRESHOLD,
-              },
-              failingThreshold: 'validateNormalizedResumeDocument:resume_structure_empty',
-              validationReasons: reasons.slice(0, 6),
-            });
-          } catch {
-            // ignore
-          }
+              normalizedDocumentSectionCount,
+              normalizedDocumentBulletCount,
+            };
+          };
+
+          const baselineSections = baseline.sections ?? [];
+          const baselineEvidenceCount = baselineSections.filter(
+            (section) => typeof section.content === 'string' && section.content.trim().length > 0,
+          ).length;
+          const baselineExperienceSectionCount = baselineSections.filter(
+            (section) => String(section.sectionType ?? '').toUpperCase() === 'EXPERIENCE',
+          ).length;
+          const selectedEvidenceCount = Array.isArray(allowedSections) ? allowedSections.length : null;
+
+          const pre = buildResumeUnsupportedDiagnostics(normalizedDocument as any);
+          const resumeFailureDiagnostics: NonNullable<
+            Parameters<typeof buildArtifactFailurePayload>[0]['diagnostics']
+          >['resumeFailureDiagnostics'] = {
+            validationReason: String(reason),
+            validationReasons: reasons.slice(0, 8),
+            baselineEvidenceCount,
+            baselineExperienceSectionCount,
+            resumeV2ExperienceCount: pre.resumeV2ExperienceCount,
+            selectedEvidenceCount,
+            fallbackAttempted: false,
+            fallbackSucceeded: false,
+            fallbackFailureReason: null,
+            normalizedDocumentSectionCount: pre.normalizedDocumentSectionCount,
+            normalizedDocumentBulletCount: pre.normalizedDocumentBulletCount,
+          };
 
           if (studioEligibleForFallback) {
             // Studio eligible-score lane contract: degrade to a minimal baseline-only resume instead of throwing unsupported_input.
+            resumeFailureDiagnostics.fallbackAttempted = true;
             sections = this.buildMinimalResumeSections(resumeInputSections);
             normalizedDocument = buildNormalizedResumeDocument(
               sections as ResumeExportSection[],
@@ -3430,7 +3458,18 @@ export class ResumeService {
               { documentStrategyPlan: request.documentStrategyPlan ?? undefined },
             );
             const fallbackValidation = validateNormalizedResumeDocument(normalizedDocument);
+            const post = buildResumeUnsupportedDiagnostics(normalizedDocument as any);
+            resumeFailureDiagnostics.afterFallback = {
+              validationReason: fallbackValidation.valid ? null : String(reason),
+              validationReasons: fallbackValidation.valid ? [] : fallbackValidation.reasons.slice(0, 8),
+              resumeV2ExperienceCount: post.resumeV2ExperienceCount,
+              selectedEvidenceCount,
+              normalizedDocumentSectionCount: post.normalizedDocumentSectionCount,
+              normalizedDocumentBulletCount: post.normalizedDocumentBulletCount,
+            };
             if (!fallbackValidation.valid) {
+              resumeFailureDiagnostics.fallbackSucceeded = false;
+              resumeFailureDiagnostics.fallbackFailureReason = 'fallback_rebuild_failed_validation';
               this.throwGenerationFailedError(
                 this.mapResumeFailureDescription(reason),
                 {
@@ -3440,11 +3479,13 @@ export class ResumeService {
                 },
               );
             }
+            resumeFailureDiagnostics.fallbackSucceeded = true;
             // Fallback recovered; continue pipeline with baseline-only document.
           } else {
           this.throwUnsupportedResumeInput(
             this.mapResumeFailureDescription(reason),
             reason,
+            resumeFailureDiagnostics,
           );
           }
         }
