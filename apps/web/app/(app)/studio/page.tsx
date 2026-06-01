@@ -12400,7 +12400,13 @@ export default function StudioPage() {
       return;
     }
 
-	    if (suppressAutoGenerationRef.current && !studioArtifactsHydrated) {
+	    if (
+	      suppressAutoGenerationRef.current &&
+	      !studioArtifactsHydrated &&
+	      // Narrow unblock: if we already know we need auto-generation and nothing exists/runs/blocks,
+	      // suppression must not prevent starting (prevents "should_auto_generate" deadlocks).
+	      !(needsAutoGeneration && !artifactsExist && !generatingNow && !shouldBlockFromLatch)
+	    ) {
 	      if (debugAutoGenerationEnabled) {
 	        console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "suppressed_by_artifact_hydration" });
 	      }

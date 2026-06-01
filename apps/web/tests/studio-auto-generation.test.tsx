@@ -1036,6 +1036,41 @@ describe("Studio auto-generation", () => {
     );
   }, 15000);
 
+  it("does not let suppressAutoGeneration block auto-start when needsAutoGeneration is true and no artifacts exist", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const delegate = installStrongFitFetches({ readinessStatus: "ready" });
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/studio/artifacts")) {
+        // Simulate a failed hydration response: suppression can be set true while hydrated stays false.
+        return Promise.resolve(createResponse({ message: "hydration failed" }, false, 500));
+      }
+      return delegate(input, init);
+    });
+
+    setFetchImplementation(fetchMock as any);
+    renderStudio();
+
+    await waitFor(() => {
+      const debug = screen.getByTestId("studio-orchestration-debug");
+      const raw = debug.querySelector("pre")?.textContent ?? "";
+      expect(raw).toContain("\"orchestrationDecision\": \"should_auto_generate\"");
+      expect(raw).toContain("\"needsAutoGeneration\": true");
+      // The suppression gate must not block auto-start in this state.
+      expect(raw).toContain("\"suppressAutoGeneration\": false");
+    }, { timeout: 15000 });
+
+    await waitFor(() => {
+      expect(countPostCalls(fetchMock, "/api/resume")).toBeGreaterThan(0);
+    }, { timeout: 15000 });
+  }, 15000);
+
   it("does not auto-generate below the generate-now floor (score 71)", async () => {
     const fetchMock = installStrongFitFetches({ score: 71, readinessStatus: "limited" });
 
