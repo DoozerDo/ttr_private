@@ -5015,15 +5015,76 @@ export class ResumeService {
 	            resumeGenerationMode: 'top_level_fail_safe_minimal',
 	            resumeFailSafeMinimalUsed: true,
 	            tailoringLimitations: (() => {
+	              const shouldTraceFailSafeLimitationRecompute =
+	                process.env.STRUCTURED_BASELINE_EXTRACTION_DEBUG === 'true' &&
+	                baselineForFailSafe?.id === '1ea19bc0-2066-41d4-93d8-21cf6117712d' &&
+	                baselineVersionForFailSafe?.id === 'bd33a0e4-5897-473b-b939-a167574b1014' &&
+	                jobIdForFailSafe === 'c330e981-3b25-4936-9a66-39954dc8116b' &&
+	                analysisIdForFailSafe === '2fdc890b-66c8-4f81-98a8-956cc81d31c7';
+	              const tracePayload: {
+	                ran: boolean;
+	                threw: boolean;
+	                experienceCount: number | null;
+	                missingEvidenceReasons: string[];
+	                sections: Array<{
+	                  id: string | null;
+	                  sectionType: string | null;
+	                  title: string | null;
+	                  order: number | null;
+	                  contentLen: number;
+	                }>;
+	                selectedReason: string | null;
+	                usedCatchFallback: boolean;
+	              } = {
+	                ran: false,
+	                threw: false,
+	                experienceCount: null,
+	                missingEvidenceReasons: [],
+	                sections: [],
+	                selectedReason: null,
+	                usedCatchFallback: false,
+	              };
 	              try {
-	                const structuredForLimitation = extractStructuredBaselineFromSections(
+	                tracePayload.ran = true;
+	                const sourceSections =
 	                  (resolveBaselineSectionsForGeneration(baselineForFailSafe) as any) ??
-	                    (baselineForFailSafe.sections as any),
+	                  (baselineForFailSafe.sections as any);
+	                tracePayload.sections = (Array.isArray(sourceSections) ? sourceSections : []).map((section: any) => {
+	                  const content = typeof section?.content === 'string' ? section.content : '';
+	                  return {
+	                    id: typeof section?.id === 'string' ? section.id : null,
+	                    sectionType: typeof section?.sectionType === 'string' ? section.sectionType : null,
+	                    title: typeof section?.title === 'string' ? section.title : null,
+	                    order: typeof section?.order === 'number' ? section.order : null,
+	                    contentLen: content.length,
+	                  };
+	                });
+
+	                const structuredForLimitation = extractStructuredBaselineFromSections(
+	                  sourceSections,
 	                );
 	                const experienceCount = Array.isArray((structuredForLimitation as any)?.experience)
 	                  ? (structuredForLimitation as any).experience.length
 	                  : 0;
-	                if (experienceCount > 0) return null;
+	                tracePayload.experienceCount = experienceCount;
+	                tracePayload.missingEvidenceReasons = Array.isArray((structuredForLimitation as any)?.missingEvidenceReasons)
+	                  ? (structuredForLimitation as any).missingEvidenceReasons.slice(0, 10)
+	                  : [];
+	                if (experienceCount > 0) {
+	                  tracePayload.selectedReason = null;
+	                  if (shouldTraceFailSafeLimitationRecompute) {
+	                    // eslint-disable-next-line no-console
+	                    console.log('[FAIL_SAFE_LIMITATION_RECOMPUTE_TRACE]', {
+	                      ...tracePayload,
+	                      baselineId: baselineForFailSafe.id,
+	                      baselineVersionId: baselineVersionForFailSafe.id,
+	                      jobId: jobIdForFailSafe,
+	                      analysisId: analysisIdForFailSafe,
+	                    });
+	                  }
+	                  return null;
+	                }
+	                tracePayload.selectedReason = 'zero_experience_headers';
 	                return {
 	                  structuredBaselineTemplate: {
 	                    reason: 'zero_experience_headers',
@@ -5033,12 +5094,36 @@ export class ResumeService {
 	                  },
 	                };
 	              } catch {
+	                tracePayload.threw = true;
+	                tracePayload.usedCatchFallback = true;
+	                tracePayload.selectedReason = 'zero_experience_headers';
+	                if (shouldTraceFailSafeLimitationRecompute) {
+	                  // eslint-disable-next-line no-console
+	                  console.log('[FAIL_SAFE_LIMITATION_RECOMPUTE_TRACE]', {
+	                    ...tracePayload,
+	                    baselineId: baselineForFailSafe?.id ?? null,
+	                    baselineVersionId: baselineVersionForFailSafe?.id ?? null,
+	                    jobId: jobIdForFailSafe ?? null,
+	                    analysisId: analysisIdForFailSafe ?? null,
+	                  });
+	                }
 	                return {
 	                  structuredBaselineTemplate: {
 	                    reason: 'zero_experience_headers',
 	                    missingEvidenceReasons: [],
 	                  },
 	                };
+	              } finally {
+	                if (shouldTraceFailSafeLimitationRecompute && !tracePayload.threw && tracePayload.selectedReason === 'zero_experience_headers') {
+	                  // eslint-disable-next-line no-console
+	                  console.log('[FAIL_SAFE_LIMITATION_RECOMPUTE_TRACE]', {
+	                    ...tracePayload,
+	                    baselineId: baselineForFailSafe.id,
+	                    baselineVersionId: baselineVersionForFailSafe.id,
+	                    jobId: jobIdForFailSafe,
+	                    analysisId: analysisIdForFailSafe,
+	                  });
+	                }
 	              }
 	            })(),
 	            interpretedEvidenceAuditUnavailableReason: 'minimal_fail_safe_no_trace_audit',
