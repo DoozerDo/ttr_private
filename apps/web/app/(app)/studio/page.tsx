@@ -5335,24 +5335,53 @@ export default function StudioPage() {
       },
     };
 
-    return {
-      qualifiedForGeneration,
-      qualifiedForStudioOrchestration,
-      activeGenerationReadiness,
+	    return {
+	      qualifiedForGeneration,
+	      qualifiedForStudioOrchestration,
+	      activeGenerationReadiness,
       resumeV2FallbackAttemptable,
       resolvedReadinessCodesForFallbackEligibility: resumeV2FallbackEvaluation.codes,
       studioReadinessBlocksGeneration,
       rawReadinessBlocked: activeGenerationReadiness.blocked,
       readinessReasonCodes: activeGenerationReadiness.reasonCodes,
-      blockerEvaluationTrace: {
-        usedForQualifiedForStudioOrchestration,
-        usedForCanProceedWithStudioDrafts,
-        usedForNeedsAutoGeneration,
-        usedForOrchestrationDecision,
-        usedForGenerateGuard,
-        usedForAutoStartGuard,
-      },
-      canProceedWithStudioDrafts,
+	      blockerEvaluationTrace: {
+	        usedForQualifiedForStudioOrchestration,
+	        usedForCanProceedWithStudioDrafts,
+	        usedForNeedsAutoGeneration,
+	        usedForOrchestrationDecision,
+	        usedForGenerateGuard,
+	        usedForAutoStartGuard,
+	      },
+	      autoGenerationTriggerGuards: (() => {
+	        // Observability-only mirror of the auto-generation effect guards; this is used to explain
+	        // why `needsAutoGeneration=true` does not result in POST /resume or POST /cover_letter.
+	        const signature = autoGenerationSignatureRef.current;
+	        const artifactsExist = hasAnyArtifactPersisted;
+	        const generatingNow = Boolean(autoGenerationInFlight || resumeGenerating || coverGenerating);
+	        let latch: string | null = null;
+	        try {
+	          const storage = typeof window !== "undefined" ? window.localStorage : null;
+	          const storageKey = signature ? `ttr:studio:auto-generate:${signature}` : null;
+	          latch =
+	            storageKey && storage && typeof storage.getItem === "function"
+	              ? storage.getItem(storageKey)
+	              : null;
+	        } catch {
+	          latch = null;
+	        }
+	        const shouldBlockFromLatch = latch === "succeeded" && artifactContract.hasUsableArtifacts;
+	        return {
+	          signature,
+	          latch,
+	          ready: Boolean(needsAutoGeneration),
+	          contractShouldStart: Boolean(needsAutoGeneration),
+	          suppressAutoGeneration: Boolean(suppressAutoGenerationRef.current),
+	          artifactsExist,
+	          generatingNow,
+	          shouldBlockFromLatch,
+	        };
+	      })(),
+	      canProceedWithStudioDrafts,
 	      needsAutoGeneration,
 	      autoGenerationInFlight,
 	      resumeGenerating,
