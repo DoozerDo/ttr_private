@@ -90,6 +90,28 @@ describe('structuredBaselineExtractor', () => {
     expect(ms?.dates).toBe('2006 – 2013');
   });
 
+  it('extracts experience from section.content.rawContent when section.bullets is empty', () => {
+    const sections: any[] = [
+      {
+        sectionType: 'EXPERIENCE',
+        bullets: [],
+        content: {
+          rawContent: [
+            'Acme Corp | Senior Software Engineer | 2021 – 2024',
+            'Led migration from monolith to services.',
+            'Reduced latency by 35%.',
+          ].join('\n'),
+        },
+      },
+    ];
+
+    const structured = extractStructuredBaselineFromSections(sections as any);
+    expect(structured.experience.length).toBeGreaterThan(0);
+    expect(structured.experience[0].company).toBe('Acme Corp');
+    expect(structured.experience[0].roleTitle).toBe('Senior Software Engineer');
+    expect(structured.experience[0].bullets.length).toBeGreaterThan(0);
+  });
+
   it('production-style resume extracts multiple authoritative experience groups', () => {
     const sections: any[] = [
       {

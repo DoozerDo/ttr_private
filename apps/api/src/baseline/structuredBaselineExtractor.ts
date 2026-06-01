@@ -38,6 +38,18 @@ function splitLines(value: string): string[] {
     .filter((line) => line.length > 0);
 }
 
+function getSectionText(section: BaselineSection): string {
+  const content = (section as any)?.content;
+  if (typeof content === 'string') return content;
+  if (content && typeof content === 'object') {
+    const rawContent = (content as any)?.rawContent;
+    if (typeof rawContent === 'string') return rawContent;
+    const innerContent = (content as any)?.content;
+    if (typeof innerContent === 'string') return innerContent;
+  }
+  return '';
+}
+
 function isBulletLine(line: string): boolean {
   return /^[-•*]\s+/.test(line);
 }
@@ -483,12 +495,12 @@ export function extractStructuredBaselineFromSections(
   const structuredExtractionStage = 'structured_baseline_extractor_v2';
 
   const summarySection = extractSectionByType(baselineSections, 'SUMMARY')[0];
-  const summary = summarySection ? trimToText((summarySection as any).content) : undefined;
+  const summary = summarySection ? trimToText(getSectionText(summarySection)) : undefined;
 
   const skills: string[] = [];
   const skillsSections = extractSectionByType(baselineSections, 'SKILLS');
   for (const section of skillsSections) {
-    const raw = String((section as any).content ?? '');
+    const raw = getSectionText(section);
     const lines = splitLines(raw);
     for (const line of lines) {
       if (isBulletLine(line)) {
@@ -516,7 +528,7 @@ export function extractStructuredBaselineFromSections(
   const education: string[] = [];
   const educationSections = extractSectionByType(baselineSections, 'EDUCATION');
   for (const section of educationSections) {
-    const raw = String((section as any).content ?? '');
+    const raw = getSectionText(section);
     const lines = splitLines(raw);
     for (const line of lines) {
       if (isBulletLine(line)) {
@@ -531,7 +543,7 @@ export function extractStructuredBaselineFromSections(
 	  const experience: StructuredBaseline['experience'] = [];
 	  const experienceSections = extractSectionByType(baselineSections, 'EXPERIENCE');
 	  for (const section of experienceSections) {
-	    const raw = String((section as any).content ?? '');
+	    const raw = getSectionText(section);
 	    // Normalize and drop empty lines so header reads (company/role/date) don't fail when
 	    // PDF-derived resumes insert blank spacer lines between header components.
 	    const lines = raw
