@@ -1,6 +1,6 @@
 import { BadRequestException, UnprocessableEntityException } from '@nestjs/common';
 import { Repository } from 'typeorm';
-import { ResumeService, GenerateResumeRequest } from './resume.service';
+import { ResumeService, GenerateResumeRequest, buildFailSafeExperienceContentFromStructuredAndBaseline } from './resume.service';
 import { RESUME_GENERATION_V2_FEATURE_FLAG } from './resume-generation-v2';
 import { UnprocessableEntityException } from '@nestjs/common';
 import { Baseline, BaselineStatus } from '../baseline/baseline.entity';
@@ -325,6 +325,47 @@ describe('ResumeService contract', () => {
         delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
       }
     }
+  });
+
+  it('fail-safe experience recovery attaches implicit action lines to each structured header block', () => {
+    const baselineSections: any[] = [
+      {
+        id: 'exp-1',
+        sectionType: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        order: 0,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        content: [
+          'PMB Performance | Senior Manager, Customer Operations | Dec 2022 – Aug 2025',
+          'Led incident triage and escalation management across support operations.',
+          'Built support playbooks and operating reviews to reduce escalations.',
+          '',
+          'Warner Bros. Discovery | Senior Program Manager | 2021 – 2022',
+          'Owned cross-functional delivery across stakeholders.',
+          '',
+          'CenturyLink | Manager | 2019 – 2020',
+          'Managed customer operations workflows and improved service reliability.',
+        ].join('\n'),
+      },
+    ];
+
+    const structuredExperience = [
+      { company: 'PMB Performance', roleTitle: 'Senior Manager, Customer Operations', dates: 'Dec 2022 – Aug 2025', bullets: [] },
+      { company: 'Warner Bros. Discovery', roleTitle: 'Senior Program Manager', dates: '2021 – 2022', bullets: [] },
+      { company: 'CenturyLink', roleTitle: 'Manager', dates: '2019 – 2020', bullets: [] },
+    ];
+
+    const content = buildFailSafeExperienceContentFromStructuredAndBaseline({
+      baselineSections: baselineSections as any,
+      structuredExperience: structuredExperience as any,
+    });
+
+    expect(content).toContain('PMB Performance | Senior Manager, Customer Operations | Dec 2022 – Aug 2025');
+    expect(content).toContain('- Led incident triage and escalation management across support operations.');
+    expect(content).toContain('Warner Bros. Discovery | Senior Program Manager | 2021 – 2022');
+    expect(content).toContain('- Owned cross-functional delivery across stakeholders.');
+    expect(content).toContain('CenturyLink | Manager | 2019 – 2020');
+    expect(content).toContain('- Managed customer operations workflows and improved service reliability.');
   });
 
   it('forces Studio regenerate to persist a fresh V2 artifact when RESUME_GENERATION_V2=true', async () => {

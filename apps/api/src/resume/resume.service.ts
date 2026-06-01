@@ -118,6 +118,96 @@ import { extractStructuredBaselineFromSections } from '../baseline/structuredBas
 import { evaluateBaselineTemplateReadiness } from '../baseline/baselineTemplateReadiness';
 import { interpretEvidenceFromResumeText } from '../evidence/evidence-interpreter';
 import { resolveEvidenceReadinessFromSummary } from '../evidence/readiness-thresholds';
+
+function readBaselineSectionTextForExtraction(section: unknown): string {
+  const anySection = section as any;
+  const content = anySection?.content;
+  if (typeof content === 'string') return content;
+  if (content && typeof content === 'object') {
+    const rawContent = (content as any)?.rawContent;
+    if (typeof rawContent === 'string') return rawContent;
+    const nestedContent = (content as any)?.content;
+    if (typeof nestedContent === 'string') return nestedContent;
+  }
+  return '';
+}
+
+export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: {
+  baselineSections: BaselineSection[];
+  structuredExperience: Array<{ company: string; roleTitle: string; dates?: string; bullets: string[] }>;
+}): string {
+  const experienceSections = (params.baselineSections ?? []).filter(
+    (s: any) => String(s?.sectionType ?? s?.type ?? '').toUpperCase() === 'EXPERIENCE',
+  );
+  const rawText = experienceSections.map(readBaselineSectionTextForExtraction).filter(Boolean).join('\n');
+  const lines = rawText
+    .split(/\r?\n/)
+    .map((l) => String(l ?? '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
+  const findHeaderIndex = (entry: { company: string; roleTitle: string }) => {
+    const company = String(entry.company ?? '').trim();
+    const roleTitle = String(entry.roleTitle ?? '').trim();
+    if (!company || !roleTitle) return -1;
+    return lines.findIndex((line) => line.includes(company) && line.includes(roleTitle));
+  };
+
+  const headerIndices = params.structuredExperience
+    .map((entry) => ({ idx: findHeaderIndex(entry), entry }))
+    .filter((x) => x.idx >= 0)
+    .sort((a, b) => a.idx - b.idx);
+
+  const collectRoleLinesAsBullets = (startExclusive: number, endExclusive: number) => {
+    const out: string[] = [];
+    const looksLikeDatesLine = (value: string) => {
+      const v = String(value ?? '').trim();
+      if (!v) return false;
+      const month = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+      const monthYear = new RegExp(`\\b${month}\\s+(?:19|20)\\d{2}\\b`, 'i');
+      return (
+        /\\b(19|20)\\d{2}\\b/.test(v) &&
+        (/[—–-]/.test(v) || /\\b(?:present|current)\\b/i.test(v) || monthYear.test(v))
+      );
+    };
+    for (let i = startExclusive; i < endExclusive; i += 1) {
+      const line = lines[i] ?? '';
+      if (!line) continue;
+      // Skip date-only lines to avoid turning dates into bullets.
+      if (looksLikeDatesLine(line)) continue;
+      // Skip obvious location-only lines (common between header and bullets).
+      if (/^(?:remote|hybrid|onsite)\b/i.test(line) && line.length <= 32) continue;
+      out.push(line.replace(/^[-•*]\s+/, '').trim());
+      if (out.length >= 14) break;
+    }
+    return out;
+  };
+
+  const blocks = params.structuredExperience.map((entry) => {
+    const company = String(entry?.company ?? '').trim();
+    const roleTitle = String(entry?.roleTitle ?? '').trim();
+    const dates = typeof entry?.dates === 'string' ? String(entry.dates).trim() : '';
+    const header = [company, roleTitle, dates].filter(Boolean).join(' | ').trim();
+    if (!header) return '';
+
+    let bullets: string[] = Array.isArray(entry?.bullets) ? entry.bullets.slice() : [];
+    const headerPos = headerIndices.findIndex((h) => h.entry === entry);
+    if (headerPos >= 0) {
+      const start = headerIndices[headerPos]!.idx;
+      const end = headerPos + 1 < headerIndices.length ? headerIndices[headerPos + 1]!.idx : lines.length;
+      const collected = collectRoleLinesAsBullets(start + 1, end);
+      if (collected.length) bullets = collected;
+    }
+
+    const bulletLines = (bullets ?? [])
+      .map((b) => String(b ?? '').trim())
+      .filter(Boolean)
+      .map((b) => `- ${b.replace(/^[-•*]\s+/, '')}`);
+
+    return [header, ...bulletLines].filter(Boolean).join('\n').trim();
+  });
+
+  return blocks.filter(Boolean).join('\n\n').trim();
+}
 import type { EvidenceItem } from '../evidence/evidence-model';
 import { resolveGenerationEvidence } from '../generation/generation-evidence-resolver';
 import { decideGenerationEligibility } from '../generation/generation-eligibility';
@@ -5125,14 +5215,20 @@ export class ResumeService {
                 .join('\n\n')
                 .trim();
 
-              if (experienceContent) {
+              const recoveredExperienceContent = buildFailSafeExperienceContentFromStructuredAndBaseline({
+                baselineSections: sourceSections as any,
+                structuredExperience: structuredExperience as any,
+              });
+              const finalExperienceContent = recoveredExperienceContent || experienceContent;
+
+              if (finalExperienceContent) {
                 const repairedSections: ResumeExportSection[] = [
                   {
                     id: 'fail-safe-structured-experience',
                     type: BaselineSectionType.EXPERIENCE,
                     title: 'Experience',
-                    content: experienceContent,
-                    rawContent: experienceContent,
+                    content: finalExperienceContent,
+                    rawContent: finalExperienceContent,
                     bullets: [],
                     order: 0,
                     includePolicy: BaselineIncludePolicy.OPTIONAL as any,
