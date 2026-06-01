@@ -4138,10 +4138,10 @@ export class ResumeService {
 	      }
 	      return Object.keys(result).length ? result : null;
 	    })();
-	    const response: ResumeGenerationResponse = {
-      ok: true,
-      status: 'success',
-      generationStatus: 'success',
+	        const response: ResumeGenerationResponse = {
+	          ok: true,
+	          status: 'success',
+	          generationStatus: 'success',
       exportReady: exportable,
       blocked: false,
       baselineId: baseline.id,
@@ -5009,20 +5009,41 @@ export class ResumeService {
           gapAnalysis: null,
           gapGuidance: null,
           display: this.buildSuccessDisplayPayload(),
-          safeDisplay: this.buildSuccessDisplayPayload(),
+	          safeDisplay: this.buildSuccessDisplayPayload(),
 	          internal: {
 	            minimalFallback: true,
 	            resumeGenerationMode: 'top_level_fail_safe_minimal',
 	            resumeFailSafeMinimalUsed: true,
-	            tailoringLimitations: {
-	              structuredBaselineTemplate: {
-	                reason: 'zero_experience_headers',
-	                missingEvidenceReasons: [],
-	              },
-	            },
+	            tailoringLimitations: (() => {
+	              try {
+	                const structuredForLimitation = extractStructuredBaselineFromSections(
+	                  (resolveBaselineSectionsForGeneration(baselineForFailSafe) as any) ??
+	                    (baselineForFailSafe.sections as any),
+	                );
+	                const experienceCount = Array.isArray((structuredForLimitation as any)?.experience)
+	                  ? (structuredForLimitation as any).experience.length
+	                  : 0;
+	                if (experienceCount > 0) return null;
+	                return {
+	                  structuredBaselineTemplate: {
+	                    reason: 'zero_experience_headers',
+	                    missingEvidenceReasons: Array.isArray((structuredForLimitation as any)?.missingEvidenceReasons)
+	                      ? (structuredForLimitation as any).missingEvidenceReasons.slice(0, 10)
+	                      : [],
+	                  },
+	                };
+	              } catch {
+	                return {
+	                  structuredBaselineTemplate: {
+	                    reason: 'zero_experience_headers',
+	                    missingEvidenceReasons: [],
+	                  },
+	                };
+	              }
+	            })(),
 	            interpretedEvidenceAuditUnavailableReason: 'minimal_fail_safe_no_trace_audit',
 	            ...(interpretedEvidenceAvailable
-              ? {
+	              ? {
                   interpretedEvidenceAvailable: true,
                   interpretedEvidenceSummary: interpretedEvidenceForFailSafe.summary,
                   interpretedEvidenceReadiness: interpretedEvidenceReadinessForFailSafe,

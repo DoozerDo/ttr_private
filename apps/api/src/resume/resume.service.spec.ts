@@ -3932,11 +3932,11 @@ describe('ResumeService contract', () => {
     baseline.sections = original;
   });
 
-  it('allows baseline-only resume fallback for Studio generate intents even when oneTap is true (eligible score lane)', async () => {
-    const { service, studioArtifactsService } = buildService();
-    const original = baseline.sections;
-    const originalScore = assessment.overallScore;
-    assessment.overallScore = 83;
+	  it('allows baseline-only resume fallback for Studio generate intents even when oneTap is true (eligible score lane)', async () => {
+	    const { service, studioArtifactsService } = buildService();
+	    const original = baseline.sections;
+	    const originalScore = assessment.overallScore;
+	    assessment.overallScore = 83;
     const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
     process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
 
@@ -3962,13 +3962,19 @@ describe('ResumeService contract', () => {
       generationStatus: 'success',
       exportReady: true,
     });
-    expect((result as any)?.preview?.resume).toBeTruthy();
-    expect(typeof (result as any)?.preview?.resume).toBe('object');
+	    expect((result as any)?.preview?.resume).toBeTruthy();
+	    expect(typeof (result as any)?.preview?.resume).toBe('object');
 
-    expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
-    expect(studioArtifactsService.recordResumeFailure).not.toHaveBeenCalled();
+	    // Regression: minimal fail-safe must not claim "zero_experience_headers" when structured extraction finds experience entries.
+	    // This fixture contains a valid company + role header, so structured experience count is non-zero.
+	    expect(
+	      (result as any)?.internal?.tailoringLimitations?.structuredBaselineTemplate?.reason ?? null,
+	    ).not.toBe('zero_experience_headers');
 
-    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+	    expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
+	    expect(studioArtifactsService.recordResumeFailure).not.toHaveBeenCalled();
+
+	    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
     assessment.overallScore = originalScore;
     baseline.sections = original;
   });
