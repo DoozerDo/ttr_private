@@ -1828,12 +1828,12 @@ export class ResumeService {
       .digest('hex');
   }
 
-  async generateResume(
-    userId: string,
-    request: GenerateResumeRequest,
-    options?: GenerateResumeOptions,
-    syntheticMetadata?: SyntheticMetadataInput,
-  ): Promise<ResumeGenerationResponse> {
+	  async generateResume(
+	    userId: string,
+	    request: GenerateResumeRequest,
+	    options?: GenerateResumeOptions,
+	    syntheticMetadata?: SyntheticMetadataInput,
+	  ): Promise<ResumeGenerationResponse> {
     // Avoid noisy runtime logs; diagnostics should be emitted only in synthetic/test harnesses.
     let forceTemplateRegen = false;
     let baselineForFailSafe: Baseline | null = null;
@@ -1862,31 +1862,89 @@ export class ResumeService {
     };
     let dedupeKey: string | undefined;
     let reservationRunId: string | undefined;
-    let isResumeV2 = false;
-    let resumeSuccessPersistenceFailed = false;
-    try {
+	    let isResumeV2 = false;
+	    let resumeSuccessPersistenceFailed = false;
+	    const structuredExtractionDebugEnabled =
+	      process.env.STRUCTURED_BASELINE_EXTRACTION_DEBUG === 'true';
+	    try {
       isResumeV2 = process.env[RESUME_GENERATION_V2_FEATURE_FLAG] === 'true';
       const shouldEnforceOneTap = options?.enforceOneTap ?? true;
       const preflightOnly = options?.preflightOnly ?? false;
-      const baselineId = request.baselineId?.trim();
-      const baselineVersionId = request.baselineVersionId?.trim() || null;
-      const jobId = request.jobId?.trim();
+	      const baselineId = request.baselineId?.trim();
+	      const baselineVersionId = request.baselineVersionId?.trim() || null;
+	      const jobId = request.jobId?.trim();
       const forceRegenerate =
         request.forceRegenerate === true ||
         String((request as any).forceRegenerate ?? '').toLowerCase() === 'true';
-      let analysisId = request.analysisId?.trim();
+	      let analysisId = request.analysisId?.trim();
       jobIdForFailSafe = jobId ?? null;
       analysisIdForFailSafe = analysisId ?? null;
 
       if (!baselineId) {
         throw new BadRequestException('baselineId is required');
       }
-      if (!jobId) {
-        throw new BadRequestException('jobId is required');
-      }
+	      if (!jobId) {
+	        throw new BadRequestException('jobId is required');
+	      }
 
-      // Ensure failure persistence always has stable identity, even if generation is blocked early.
-      studioArtifactContext.baselineId = baselineId;
+	      const shouldTraceStructuredBaselineExtraction =
+	        structuredExtractionDebugEnabled &&
+	        baselineId === '1ea19bc0-2066-41d4-93d8-21cf6117712d' &&
+	        baselineVersionId === 'bd33a0e4-5897-473b-b939-a167574b1014' &&
+	        jobId === 'c330e981-3b25-4936-9a66-39954dc8116b' &&
+	        analysisId === '2fdc890b-66c8-4f81-98a8-956cc81d31c7';
+
+	      const emitStructuredBaselineExtractionDebug = (
+	        point: string,
+	        sections: unknown[],
+	        structured: unknown,
+	      ) => {
+	        if (!shouldTraceStructuredBaselineExtraction) return;
+	        try {
+	          const needles = [
+	            'PMB Performance',
+	            'Warner Bros. Discovery',
+	            'CenturyLink Cloud',
+	            'Tier 3',
+	            'Evault',
+	          ];
+	          const sectionSummaries = (Array.isArray(sections) ? sections : []).map((section: any) => {
+	            const content = typeof section?.content === 'string' ? section.content : '';
+	            return {
+	              id: typeof section?.id === 'string' ? section.id : null,
+	              sectionType: typeof section?.sectionType === 'string' ? section.sectionType : null,
+	              title: typeof section?.title === 'string' ? section.title : null,
+	              order: typeof section?.order === 'number' ? section.order : null,
+	              contentLen: content.length,
+	              contains: needles.filter((needle) => content.includes(needle)),
+	            };
+	          });
+	          const experienceCount = Array.isArray((structured as any)?.experience)
+	            ? (structured as any).experience.length
+	            : null;
+	          const missingEvidenceReasons = Array.isArray((structured as any)?.missingEvidenceReasons)
+	            ? (structured as any).missingEvidenceReasons.slice(0, 10)
+	            : [];
+
+	          // eslint-disable-next-line no-console
+	          console.log('[STRUCTURED_BASELINE_EXTRACT_TRACE]', {
+	            point,
+	            baselineId,
+	            baselineVersionId,
+	            jobId,
+	            analysisId,
+	            sectionCount: sectionSummaries.length,
+	            sections: sectionSummaries,
+	            extractedExperienceCount: experienceCount,
+	            missingEvidenceReasons,
+	          });
+	        } catch {
+	          // ignore debug emission failures
+	        }
+	      };
+
+	      // Ensure failure persistence always has stable identity, even if generation is blocked early.
+	      studioArtifactContext.baselineId = baselineId;
       studioArtifactContext.jobId = jobId;
       studioArtifactContext.baselineVersionId = baselineVersionId ?? '';
       studioArtifactContext.analysisId = analysisId ?? '';
@@ -2155,18 +2213,23 @@ export class ResumeService {
       policies,
     );
 
-    const allowedSections = sectionsWithPolicies.filter(
-      (section) =>
-        (section.includePolicy ?? BaselineIncludePolicy.OPTIONAL) !==
-        BaselineIncludePolicy.NEVER,
-    );
-    let resumeInputSections =
-      this.promoteExperienceLikeSections(allowedSections);
+	    const allowedSections = sectionsWithPolicies.filter(
+	      (section) =>
+	        (section.includePolicy ?? BaselineIncludePolicy.OPTIONAL) !==
+	        BaselineIncludePolicy.NEVER,
+	    );
+	    let resumeInputSections =
+	      this.promoteExperienceLikeSections(allowedSections);
 
-    const structuredBaselineForAuthorityGate = extractStructuredBaselineFromSections(resumeInputSections as any);
-    const careerIdentitySnapshot: CareerIdentitySnapshot = deriveCareerIdentityFromStructuredBaseline(
-      structuredBaselineForAuthorityGate as any,
-    );
+	    const structuredBaselineForAuthorityGate = extractStructuredBaselineFromSections(resumeInputSections as any);
+	    emitStructuredBaselineExtractionDebug(
+	      'authority_gate',
+	      resumeInputSections as unknown[],
+	      structuredBaselineForAuthorityGate as unknown,
+	    );
+	    const careerIdentitySnapshot: CareerIdentitySnapshot = deriveCareerIdentityFromStructuredBaseline(
+	      structuredBaselineForAuthorityGate as any,
+	    );
     const templateReadinessForBaseline = evaluateBaselineTemplateReadiness(
       structuredBaselineForAuthorityGate as any,
     );
@@ -2852,10 +2915,15 @@ export class ResumeService {
           }
         }
       }
-      if (forceTemplateRegen) {
-        const structured = extractStructuredBaselineFromSections(resumeInputSections);
-        if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
-          try {
+	      if (forceTemplateRegen) {
+	        const structured = extractStructuredBaselineFromSections(resumeInputSections);
+	        emitStructuredBaselineExtractionDebug(
+	          'force_template_regen',
+	          resumeInputSections as unknown[],
+	          structured as unknown,
+	        );
+	        if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
+	          try {
             // eslint-disable-next-line no-console
             console.log('[RESUME_V2_INGEST][STRUCTURED_FROM_SECTIONS]', {
               baselineId: String((baseline as any)?.id ?? ''),
@@ -4032,18 +4100,23 @@ export class ResumeService {
 	    // Studio eligible-score verified-only fallback: even when the pipeline bypasses the structured template lane
 	    // (e.g. minimal fallback due to weak extraction), preserve the non-blocking "zero_experience_headers"
 	    // limitation if the baseline sections contain no valid company|role headers.
-	    if (
-	      Boolean(request.oneTap) &&
-	      Boolean(options?.enforceOneTap) &&
-	      Boolean(options?.skipReadinessGate) &&
-	      !structuredBaselineTemplateDegradedToBaselineOnly
-	    ) {
-	      try {
-	        const structuredForLimitation = extractStructuredBaselineFromSections(resumeInputSections as any);
-	        if (
-	          Array.isArray((structuredForLimitation as any)?.experience) &&
-	          (structuredForLimitation as any).experience.length === 0
-	        ) {
+		    if (
+		      Boolean(request.oneTap) &&
+		      Boolean(options?.enforceOneTap) &&
+		      Boolean(options?.skipReadinessGate) &&
+		      !structuredBaselineTemplateDegradedToBaselineOnly
+		    ) {
+		      try {
+		        const structuredForLimitation = extractStructuredBaselineFromSections(resumeInputSections as any);
+		        emitStructuredBaselineExtractionDebug(
+		          'verified_only_limitation_metadata',
+		          resumeInputSections as unknown[],
+		          structuredForLimitation as unknown,
+		        );
+		        if (
+		          Array.isArray((structuredForLimitation as any)?.experience) &&
+		          (structuredForLimitation as any).experience.length === 0
+		        ) {
 	          structuredBaselineTemplateDegradedToBaselineOnly = {
 	            reason: 'zero_experience_headers',
 	            missingEvidenceReasons: Array.isArray((structuredForLimitation as any)?.missingEvidenceReasons)
