@@ -1557,6 +1557,57 @@ describe('ResumeService contract', () => {
     }
   });
 
+  it('does not allow post-processing to invalidate a usable normalized document by stripping all bullets', async () => {
+    const { service } = buildService();
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+    const originalScore = assessment.overallScore;
+
+    // Ensure we take the non-ResumeV2 normalization lane so the second post-processing pass runs.
+    if (typeof originalFlag === 'string') delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    assessment.overallScore = 84;
+
+    try {
+      baseline.parsedRecords = [];
+      baseline.sections = [
+        {
+          ...baseSection,
+          id: 'experience-1',
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Professional Experience',
+          order: 1,
+          content: [
+            'Evault | Support Manager | 2016 - 2018',
+            '- Led support operations while collaborating with Tier 3 on incident response.',
+            '',
+            'Tier 3 | Support Lead | 2013 - 2016',
+            '- Partnered with Evault on escalations and improved SLA performance.',
+          ].join('\n'),
+        } as any,
+      ] as any;
+
+      const result = await service.generateResume('user-1', baseRequest as any);
+      expect(result.status).toBe('success');
+      const experience = (result as any)?.preview?.resume?.experience ?? [];
+      expect(Array.isArray(experience)).toBe(true);
+      expect(experience.length).toBeGreaterThan(0);
+      const totalBullets = experience.reduce(
+        (sum: number, entry: any) => sum + (Array.isArray(entry?.bullets) ? entry.bullets.length : 0),
+        0,
+      );
+      expect(totalBullets).toBeGreaterThan(0);
+      const internal = (result as any).internal ?? {};
+      expect(internal?.resumeGenerationMode).not.toBe('top_level_fail_safe_minimal');
+      expect(internal?.resumeFailSafeMinimalUsed).not.toBe(true);
+    } finally {
+      baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsed;
+      assessment.overallScore = originalScore;
+      if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+    }
+  });
+
   it('generates a real exportReady resume when Resume V2 is invalid and baseline work history is verified (omits unsupported requirements with warnings)', async () => {
     const { service } = buildService();
     const originalSections = baseline.sections;

@@ -3147,13 +3147,36 @@ export class ResumeService {
     })();
 
     if (!isResumeV2 && Array.isArray((normalizedDocument as any)?.experience)) {
-      const enforced = enforceEmployerRoleBulletProvenance({ experience: (normalizedDocument as any).experience });
-      (normalizedDocument as any).experience = enforced.experience as any;
+      const experienceBeforePostProcessing = (normalizedDocument as any).experience as any[];
+      const candidateDocument = structuredClone(normalizedDocument) as typeof normalizedDocument;
+
+      const enforced = enforceEmployerRoleBulletProvenance({ experience: (candidateDocument as any).experience });
+      (candidateDocument as any).experience = enforced.experience as any;
       crossCompanyEvidenceBlockedCount += enforced.blockedCount;
 
-      const stripped = stripCrossCompanyBullets({ experience: (normalizedDocument as any).experience });
-      (normalizedDocument as any).experience = stripped.experience as any;
+      const stripped = stripCrossCompanyBullets({ experience: (candidateDocument as any).experience });
+      (candidateDocument as any).experience = stripped.experience as any;
       crossCompanyEvidenceBlockedCount += stripped.blockedCount;
+
+      const candidateExperienceCount = Array.isArray((candidateDocument as any)?.experience)
+        ? (candidateDocument as any).experience.length
+        : 0;
+      const candidateValidation = validateNormalizedResumeDocument(candidateDocument);
+      if (candidateExperienceCount > 0 && candidateValidation.valid) {
+        (normalizedDocument as any).experience = (candidateDocument as any).experience as any;
+      } else {
+        (normalizedDocument as any).experience = experienceBeforePostProcessing as any;
+        // Narrow diagnostic warning: post-processing should never erase a usable experience list.
+        this.logger.warn('[resume-generation] post_processing_stripped_experience_restore', {
+          baselineId: baseline.id,
+          baselineVersionId: baselineVersion.id,
+          jobId: jobId ?? null,
+          analysisId: analysisId ?? null,
+          candidateExperienceCount,
+          candidateValid: candidateValidation.valid,
+          reasonCount: candidateValidation.reasons?.length ?? null,
+        });
+      }
     }
 
     // Positioning authority layer: ALWAYS compute and apply the authoritative assembler when possible.
