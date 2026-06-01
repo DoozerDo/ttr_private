@@ -1867,6 +1867,7 @@ export class ResumeService {
 	    const structuredExtractionDebugEnabled =
 	      process.env.STRUCTURED_BASELINE_EXTRACTION_DEBUG === 'true';
 	    let lastResumeGenerationCheckpoint: string | null = null;
+	    let topLevelFailSafeEntryTraceForResponse: Record<string, unknown> | null = null;
 	    try {
       isResumeV2 = process.env[RESUME_GENERATION_V2_FEATURE_FLAG] === 'true';
       const shouldEnforceOneTap = options?.enforceOneTap ?? true;
@@ -4921,8 +4922,7 @@ export class ResumeService {
 	            error instanceof Error && typeof error.stack === 'string'
 	              ? error.stack.split('\n').slice(0, 20)
 	              : [];
-	          // eslint-disable-next-line no-console
-	          console.log('[TOP_LEVEL_FAIL_SAFE_ENTRY_TRACE]', {
+	          const trace = {
 	            requestIds: {
 	              baselineId: String(request.baselineId ?? '').trim() || null,
 	              baselineVersionId: String(request.baselineVersionId ?? '').trim() || null,
@@ -4939,13 +4939,14 @@ export class ResumeService {
 	            errorMessage: error instanceof Error ? error.message : String(error),
 	            errorCode: errCode ? String(errCode) : null,
 	            errorStatus: errStatus !== null ? Number(errStatus) : null,
-	            stack: stackLines,
+	            stackFirst20: stackLines,
 	            generationModeBeforeException: {
 	              isResumeV2,
 	              forceTemplateRegen,
 	            },
 	            lastCheckpoint: lastResumeGenerationCheckpoint,
-	          });
+	          } satisfies Record<string, unknown>;
+	          topLevelFailSafeEntryTraceForResponse = trace;
 	        } catch {
 	          // ignore trace failures
 	        }
@@ -5050,7 +5051,7 @@ export class ResumeService {
           interpretedEvidenceForFailSafe.summary,
         );
 
-        const response: ResumeGenerationResponse = {
+	        const response: ResumeGenerationResponse = {
           ok: true,
           status: 'success',
           generationStatus: 'success',
@@ -5088,11 +5089,14 @@ export class ResumeService {
           gapGuidance: null,
           display: this.buildSuccessDisplayPayload(),
 	          safeDisplay: this.buildSuccessDisplayPayload(),
-	          internal: {
-	            minimalFallback: true,
-	            resumeGenerationMode: 'top_level_fail_safe_minimal',
-	            resumeFailSafeMinimalUsed: true,
-	            tailoringLimitations: (() => {
+		          internal: {
+		            minimalFallback: true,
+		            resumeGenerationMode: 'top_level_fail_safe_minimal',
+		            resumeFailSafeMinimalUsed: true,
+		            ...(topLevelFailSafeEntryTraceForResponse
+		              ? { topLevelFailSafeEntryTrace: topLevelFailSafeEntryTraceForResponse }
+		              : {}),
+		            tailoringLimitations: (() => {
 	              const shouldTraceFailSafeLimitationRecompute =
 	                process.env.STRUCTURED_BASELINE_EXTRACTION_DEBUG === 'true' &&
 	                baselineForFailSafe?.id === '1ea19bc0-2066-41d4-93d8-21cf6117712d' &&
