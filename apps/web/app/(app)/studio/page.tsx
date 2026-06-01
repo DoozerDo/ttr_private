@@ -13244,11 +13244,13 @@ export default function StudioPage() {
 
               <div className="space-y-2" data-testid="studio-ready-secondary-summary">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                {workflowAuthority.workflowState === "BLOCKED"
-                  ? "Blocked"
-                  : workflowAuthority.workflowState === "REVIEW_REQUIRED"
-                    ? "Draft"
-                    : "Ready"}
+                {uiHasRenderablePair || studioArtifactPairStatus === "completed"
+                  ? "Ready"
+                  : workflowAuthority.workflowState === "BLOCKED"
+                    ? "Blocked"
+                    : workflowAuthority.workflowState === "REVIEW_REQUIRED"
+                      ? "Draft"
+                      : "Ready"}
               </p>
               <p className="text-sm text-slate-300">
                 {typeof analysisScore === "number"
@@ -13625,7 +13627,9 @@ export default function StudioPage() {
         !showReadinessRecoveryExperience &&
         workflowAuthority.workflowState === "BLOCKED" &&
         !readinessError &&
-        !studioDraftMode ? (
+        !studioDraftMode &&
+        !uiHasRenderablePair &&
+        studioArtifactPairStatus !== "completed" ? (
         <RouteStateShell
           testId="studio-evidence-blocked-panel"
           tone="warning"

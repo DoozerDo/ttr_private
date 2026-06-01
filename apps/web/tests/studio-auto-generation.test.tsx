@@ -1356,6 +1356,9 @@ describe("Studio auto-generation", () => {
     await waitFor(() => {
       expect(screen.queryByText(/Generation unavailable/i)).toBeNull();
       expect(screen.queryByTestId("studio-guidance-details")).toBeNull();
+      expect(screen.queryByText("Why generation is blocked")).toBeNull();
+      expect(screen.queryByTestId("studio-evidence-blocked-panel")).toBeNull();
+      expect(screen.queryByText(/^Blocked$/i)).toBeNull();
     }, { timeout: 15000 });
   }, 15000);
 
