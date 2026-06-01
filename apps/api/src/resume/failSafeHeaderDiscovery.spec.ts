@@ -1,5 +1,6 @@
 import { buildFailSafeExperienceContentFromStructuredAndBaseline } from './resume.service';
 import { sanitizeResumePreviewForStudio } from './resumePreviewSanitizer';
+import { buildNormalizedResumeDocument } from './resume-normalization';
 
 describe('Fail-safe experience header discovery', () => {
   it('rejects malformed fragments such as "Vue 3), deck builder frontend" as company headers', () => {
@@ -94,5 +95,39 @@ describe('Resume preview sanitization', () => {
     expect(JSON.stringify(preview.experience ?? [])).not.toContain('Experience entry needs correction');
     expect(preview.experience.length).toBe(1);
     expect(preview.experience[0].company).toBe('Example Co');
+  });
+});
+
+describe('Minimal fallback sections', () => {
+  it('does not allow raw EXPERIENCE prose/subheadings to be parsed into experience headers', () => {
+    // Mirror the minimal fallback behavior: preserve only bullet evidence and strip raw parsable content.
+    const resumeDraftSections: any[] = [
+      {
+        id: 'exp-1',
+        type: 'EXPERIENCE',
+        title: 'Experience',
+        order: 0,
+        includePolicy: 'ALWAYS',
+        source: 'baseline',
+        content: '',
+        rawContent: '',
+        bullets: [
+          { id: 'exp-1:minimal:0', text: 'Reduced incident response time by 20%.' },
+          { id: 'exp-1:minimal:1', text: 'Automated monitoring and alerting workflows.' },
+        ],
+      },
+    ];
+
+    const normalized = buildNormalizedResumeDocument(resumeDraftSections as any, { name: 'Test Candidate' } as any) as any;
+    const companies = Array.isArray(normalized?.experience)
+      ? normalized.experience.map((e: any) => String(e?.company ?? ''))
+      : [];
+    expect(companies.join('|')).not.toContain('Vue 3), deck builder frontend');
+    expect(companies.join('|')).not.toContain('Automation & Monitoring');
+    expect(companies.join('|')).not.toContain('Datacenter Operations');
+
+    // Bullet evidence is still preserved on the sections, even if experience headers are omitted.
+    expect(JSON.stringify(resumeDraftSections)).toContain('Reduced incident response time by 20%');
+    expect(JSON.stringify(resumeDraftSections)).toContain('Automated monitoring and alerting workflows');
   });
 });

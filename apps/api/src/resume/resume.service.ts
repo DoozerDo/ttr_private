@@ -1492,9 +1492,20 @@ export class ResumeService {
           claimRisk: NO_CLAIM_RISK,
         }));
       }
+
+      // Minimal fallback must never allow raw experience prose/subheadings to be parsed as employer-role headers.
+      // Only safe bullet evidence is preserved; the parsable experience text is intentionally removed.
+      section.content = '';
+      section.rawContent = '';
     });
 
-    return sections;
+    // If no safe experience bullets exist, omit EXPERIENCE sections entirely in minimal fallback to avoid
+    // creating malformed experience entries from raw prose/subsection headings.
+    return sections.filter((section) => {
+      const upperType = String(section.type ?? '').toUpperCase();
+      if (upperType !== 'EXPERIENCE') return true;
+      return Array.isArray(section.bullets) && section.bullets.length > 0;
+    });
   }
 
   private applyJobAlignedPresentation(payload: {
