@@ -1387,6 +1387,7 @@ export default function StudioPage() {
   const hasResumeArtifact = hasResumeArtifactPersisted && !resumePersistedArtifactStale;
   const hasCoverLetterArtifact = hasCoverLetterArtifactPersisted && !coverPersistedArtifactStale;
   const hasAuthoritativeArtifacts = hasResumeArtifact || hasCoverLetterArtifact;
+  // (renderability is computed later via `hasRenderableResumeContent` / `hasRenderableCoverLetterContent`)
 
   const artifactAuthorityTrackedRef = useRef<string | null>(null);
   useEffect(() => {
@@ -5178,8 +5179,10 @@ export default function StudioPage() {
   );
   const eligibleForAutoGeneration =
     generateNowEligible && qualifiedForStudioOrchestration && !studioReadinessBlocksGeneration;
-  const missingResumeOutput = !hasResumeArtifact;
-  const missingCoverOutput = !hasCoverLetterArtifact;
+  // Orchestration output-missing authority must match renderability authority.
+  // A persisted-but-non-renderable record is still "missing output" for customer workflow purposes.
+  const missingResumeOutput = !hasRenderableResumeContent;
+  const missingCoverOutput = !hasRenderableCoverLetterContent;
   const needsAutoGeneration =
     eligibleForAutoGeneration &&
     (missingResumeOutput || missingCoverOutput) &&
@@ -5350,14 +5353,17 @@ export default function StudioPage() {
         usedForAutoStartGuard,
       },
       canProceedWithStudioDrafts,
-      needsAutoGeneration,
-      autoGenerationInFlight,
-      resumeGenerating,
-      coverGenerating,
-      hasResumeArtifact,
-      hasCoverLetterArtifact,
-      hasAnyArtifactPersisted,
-      studioArtifactPairStatus,
+	      needsAutoGeneration,
+	      autoGenerationInFlight,
+	      resumeGenerating,
+	      coverGenerating,
+	      // Debug payload: use the same authority source as missingOutput/UI renderability.
+	      hasResumeArtifact: hasRenderableResumeContent,
+	      hasCoverLetterArtifact: hasRenderableCoverLetterContent,
+	      hasResumeArtifactPersisted,
+	      hasCoverLetterArtifactPersisted,
+	      hasAnyArtifactPersisted,
+	      studioArtifactPairStatus,
       effectiveBaselineId,
       effectiveBaselineVersionId,
       effectiveJobId,
@@ -5369,29 +5375,27 @@ export default function StudioPage() {
       resumeState,
       resumeFailureDiagnostics,
       coverLetterState: coverState,
-      resumeArtifactHydration: {
-        resumeArtifactId:
-          (typeof (resumeState.response as any)?.audit_id === "string" && (resumeState.response as any)?.audit_id) ||
-          (typeof (resumeState.response as any)?.auditId === "string" && (resumeState.response as any)?.auditId) ||
-          (typeof (resumeState.response as any)?.requestId === "string" && (resumeState.response as any)?.requestId) ||
-          (typeof (resumeState.response as any)?.id === "string" && (resumeState.response as any)?.id) ||
-          (typeof (studioArtifactsPayload as any)?.resume?.artifactId === "string"
-            ? String((studioArtifactsPayload as any)?.resume?.artifactId)
-            : null),
-        resumeArtifactCreatedAt:
-          typeof (studioArtifactsPayload as any)?.resume?.createdAt === "string"
-            ? String((studioArtifactsPayload as any)?.resume?.createdAt)
-            : null,
+	      resumeArtifactHydration: {
+	        // Only surface persisted artifact identity here. Runtime `resumeState.response.*` fields are run/audit IDs,
+	        // and must not be treated as persisted artifact presence after reload.
+	        resumeArtifactId:
+	          typeof (studioArtifactsPayload as any)?.resume?.artifactId === "string"
+	            ? String((studioArtifactsPayload as any)?.resume?.artifactId)
+	            : null,
+	        resumeArtifactCreatedAt:
+	          typeof (studioArtifactsPayload as any)?.resume?.createdAt === "string"
+	            ? String((studioArtifactsPayload as any)?.resume?.createdAt)
+	            : null,
         resumeArtifactUpdatedAt:
           typeof (studioArtifactsPayload as any)?.resume?.updatedAt === "string"
             ? String((studioArtifactsPayload as any)?.resume?.updatedAt)
             : null,
-        resumeGenerationRunId:
-          typeof (studioArtifactsPayload as any)?.resume?.generationRunId === "string"
-            ? String((studioArtifactsPayload as any)?.resume?.generationRunId)
-            : null,
-        resumeArtifactSource: resumeState.response ? "fresh_generation" : "persisted",
-      },
+	        resumeGenerationRunId:
+	          typeof (studioArtifactsPayload as any)?.resume?.generationRunId === "string"
+	            ? String((studioArtifactsPayload as any)?.resume?.generationRunId)
+	            : null,
+	        resumeArtifactSource: resumeState.response ? "fresh_generation" : "persisted",
+	      },
       hydrationSignature: studioArtifactHydrationSignature,
       orchestrationDecision,
     };
