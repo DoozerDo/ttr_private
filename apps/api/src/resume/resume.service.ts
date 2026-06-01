@@ -4885,12 +4885,32 @@ export class ResumeService {
 	          throw error;
 	        }
 	      }
-	      const shouldTraceTopLevelFailSafeEntry =
-	        process.env.STRUCTURED_BASELINE_EXTRACTION_DEBUG === 'true' &&
-	        baselineForFailSafe?.id === '1ea19bc0-2066-41d4-93d8-21cf6117712d' &&
-	        baselineVersionForFailSafe?.id === 'bd33a0e4-5897-473b-b939-a167574b1014' &&
-	        jobIdForFailSafe === 'c330e981-3b25-4936-9a66-39954dc8116b' &&
-	        analysisIdForFailSafe === '2fdc890b-66c8-4f81-98a8-956cc81d31c7';
+	      const shouldTraceTopLevelFailSafeEntry = (() => {
+	        if (process.env.STRUCTURED_BASELINE_EXTRACTION_DEBUG !== 'true') return false;
+	        const reqBaselineId = String(request.baselineId ?? '').trim();
+	        const reqBaselineVersionId = String(request.baselineVersionId ?? '').trim();
+	        const reqJobId = String(request.jobId ?? '').trim();
+	        const reqAnalysisId = String(request.analysisId ?? '').trim();
+
+	        const targetBaselineId = '1ea19bc0-2066-41d4-93d8-21cf6117712d';
+	        const targetBaselineVersionId = 'bd33a0e4-5897-473b-b939-a167574b1014';
+	        const targetJobId = 'c330e981-3b25-4936-9a66-39954dc8116b';
+	        const targetAnalysisId = '2fdc890b-66c8-4f81-98a8-956cc81d31c7';
+
+	        const hasStrictRequestIds =
+	          Boolean(reqBaselineId) && Boolean(reqJobId) && Boolean(reqBaselineVersionId) && Boolean(reqAnalysisId);
+	        if (hasStrictRequestIds) {
+	          return (
+	            reqBaselineId === targetBaselineId &&
+	            reqBaselineVersionId === targetBaselineVersionId &&
+	            reqJobId === targetJobId &&
+	            reqAnalysisId === targetAnalysisId
+	          );
+	        }
+	        // Some Studio lanes can omit baselineVersionId/analysisId on the request; gate on baseline+job and
+	        // include both request-level and resolved IDs in the trace for disambiguation.
+	        return reqBaselineId === targetBaselineId && reqJobId === targetJobId;
+	      })();
 	      if (shouldTraceTopLevelFailSafeEntry) {
 	        try {
 	          const responseBody =
@@ -4903,10 +4923,18 @@ export class ResumeService {
 	              : [];
 	          // eslint-disable-next-line no-console
 	          console.log('[TOP_LEVEL_FAIL_SAFE_ENTRY_TRACE]', {
-	            baselineId: baselineForFailSafe?.id ?? null,
-	            baselineVersionId: baselineVersionForFailSafe?.id ?? null,
-	            jobId: jobIdForFailSafe ?? null,
-	            analysisId: analysisIdForFailSafe ?? null,
+	            requestIds: {
+	              baselineId: String(request.baselineId ?? '').trim() || null,
+	              baselineVersionId: String(request.baselineVersionId ?? '').trim() || null,
+	              jobId: String(request.jobId ?? '').trim() || null,
+	              analysisId: String(request.analysisId ?? '').trim() || null,
+	            },
+	            resolvedIds: {
+	              baselineId: baselineForFailSafe?.id ?? null,
+	              baselineVersionId: baselineVersionForFailSafe?.id ?? null,
+	              jobId: jobIdForFailSafe ?? null,
+	              analysisId: analysisIdForFailSafe ?? null,
+	            },
 	            errorClass: error instanceof Error ? error.name : typeof error,
 	            errorMessage: error instanceof Error ? error.message : String(error),
 	            errorCode: errCode ? String(errCode) : null,
