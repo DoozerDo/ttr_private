@@ -156,17 +156,72 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
     if (!v) return false;
     const month = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
     const monthYear = new RegExp(`\\b${month}\\s+(?:19|20)\\d{2}\\b`, 'i');
+    const monthYearRange = new RegExp(
+      `\\b${month}\\s+(?:19|20)\\d{2}\\b\\s*[\\u2013\\u2014—–-]\\s*(?:\\b${month}\\s+(?:19|20)\\d{2}\\b|present|current)\\b`,
+      'i',
+    );
     const hasYear = /\\b(19|20)\\d{2}\\b/.test(v);
     if (!hasYear) return false;
-    const hasRange = /\\b(19|20)\\d{2}\\b\\s*[—–-]\\s*(?:\\b(19|20)\\d{2}\\b|present|current)\\b/i.test(v);
+    const hasRange =
+      /\\b(19|20)\\d{2}\\b\\s*[\\u2013\\u2014—–-]\\s*(?:\\b(19|20)\\d{2}\\b|present|current)\\b/i.test(v);
     const hasMonthYear = monthYear.test(v);
-    return hasRange || /\\b(?:present|current)\\b/i.test(v) || hasMonthYear;
+    const hasMonthYearRange = monthYearRange.test(v);
+    const monthYearHits = v.match(new RegExp(`\\b${month}\\s+(?:19|20)\\d{2}\\b`, 'ig')) ?? [];
+    const hasTwoMonthYears = monthYearHits.length >= 2;
+    return hasRange || hasMonthYearRange || hasTwoMonthYears || /\\b(?:present|current)\\b/i.test(v) || hasMonthYear;
   };
 
   const looksLikeRoleTitle = (value: string) =>
     /\b(manager|director|engineer|lead|architect|administrator|developer|specialist|analyst|consultant|producer|coordinator|technician)\b/i.test(
       String(value ?? ''),
     );
+
+  const looksLikeSentence = (value: string) => {
+    const v = String(value ?? '').trim();
+    if (!v) return false;
+    if (/[.!?]$/.test(v)) return true;
+    const words = v.split(/\s+/).filter(Boolean);
+    if (words.length >= 14) return true;
+    // Bullet/action lines often start with verbs; titles/companies rarely do.
+    if (/^(?:led|lead|leading|managed|manage|managing|served|serving|participated|participate|partnered|partner|built|build|implemented|implement|designed|design|delivered|deliver|created|create|developed|develop|improved|improve|drove|drive|reduced|reduce|increased|increase|owned|own|supported|support|provided|provide)\b/i.test(v)) {
+      return true;
+    }
+    return false;
+  };
+
+  const looksLikeCompanyLine = (value: string) => {
+    const v = String(value ?? '').trim();
+    if (!v) return false;
+    if (isSectionHeading(v)) return false;
+    if (looksLikeDatesLine(v)) return false;
+    if (looksLikeSentence(v)) return false;
+    if (/^[-Ã¢â‚¬Â¢*]\s+/.test(v)) return false;
+
+    const words = v.split(/\s+/).filter(Boolean);
+    if (words.length === 0 || words.length > 6) return false;
+
+    const lowercaseOnly = words.every((w) => /^[a-z0-9&.'-]+$/.test(w));
+    if (lowercaseOnly) return false;
+
+    const capitalizedCount = words.filter((w) => /^[A-Z][A-Za-z0-9&.'-]*$/.test(w)).length;
+    if (capitalizedCount === 0) return false;
+
+    // Bullet tails / fragments.
+    if (/[.!?]$/.test(v)) return false;
+    if (/\b(?:across|with|including|overseeing|responsible for)\b/i.test(v)) return false;
+
+    return true;
+  };
+
+  const looksLikeHeaderLine = (value: string) => {
+    const v = String(value ?? '').trim();
+    if (!v) return false;
+    if (isSectionHeading(v)) return false;
+    if (looksLikeDatesLine(v)) return false;
+    if (looksLikeSentence(v)) return false;
+    if (/^[-â€¢*]\s+/.test(v)) return false;
+    return true;
+  };
 
   const parsePipeHeaderLine = (line: string): { company: string; roleTitle: string; dates?: string } | null => {
     const parts = line.split('|').map((p) => p.trim()).filter(Boolean);
@@ -192,8 +247,10 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
       const line = lines[i] ?? '';
       if (!line || isSectionHeading(line)) continue;
       if (line.includes('|')) {
+        if (!looksLikeHeaderLine(line)) continue;
         const parsed = parsePipeHeaderLine(line);
         if (parsed?.company && parsed?.roleTitle) {
+          if (!looksLikeHeaderLine(parsed.company) || !looksLikeHeaderLine(parsed.roleTitle)) continue;
           headers.push({ startIndex: i, ...parsed });
           continue;
         }
@@ -203,9 +260,15 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
       if (!next || isSectionHeading(next)) continue;
       if (looksLikeDatesLine(line) || looksLikeDatesLine(next)) continue;
       if (line.startsWith('-') || next.startsWith('-')) continue;
+      if (!looksLikeHeaderLine(line) || !looksLikeHeaderLine(next)) continue;
       const lineLooksRole = looksLikeRoleTitle(line);
       const nextLooksRole = looksLikeRoleTitle(next);
       if (lineLooksRole === nextLooksRole) continue;
+      // Tighten split-line header detection:
+      // Require the non-role line to look like a company name, otherwise action/bullet sentences
+      // containing title-like keywords ("lead", "administrator", etc.) can be misclassified as headers.
+      if (lineLooksRole && !looksLikeCompanyLine(next)) continue;
+      if (nextLooksRole && !looksLikeCompanyLine(line)) continue;
       const roleTitle = lineLooksRole ? line : next;
       const company = lineLooksRole ? next : line;
       // Dates can appear on the next one or two lines (blank spacers are already removed).
