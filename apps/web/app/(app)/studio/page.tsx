@@ -4099,18 +4099,20 @@ export default function StudioPage() {
   const studioCardsGenerationBlocked = Boolean(workflowAuthority.workflowState === "BLOCKED" || resumeV2Authority.blocksGeneration);
   const uiResumeCardGenerationUnavailable = Boolean(studioCardsGenerationBlocked && !uiHasRenderableResume);
   const uiCoverCardGenerationUnavailable = Boolean(studioCardsGenerationBlocked && !uiHasRenderableCoverLetter);
+  const hasResumeArtifactCanonical = Boolean(hasResumeArtifact || uiHasRenderableResume);
+  const hasCoverLetterArtifactCanonical = Boolean(hasCoverLetterArtifact || uiHasRenderableCoverLetter);
 
   const pairWorkflowState = useMemo(() => {
     const resumeStatus: PairWorkflowArtifactStatus = resumeGenerating || autoGenerationInFlight
       ? "generating"
-      : hasResumeArtifact
+      : hasResumeArtifactCanonical
         ? "ready"
       : resumePresenter.status === "blocked" || resumePresenter.status === "error"
         ? "failed"
         : "missing";
     const coverLetterStatus: PairWorkflowArtifactStatus = coverGenerating || autoGenerationInFlight
       ? "generating"
-      : hasCoverLetterArtifact
+      : hasCoverLetterArtifactCanonical
         ? "ready"
       : coverPresenter.status === "blocked" || coverPresenter.status === "error"
         ? "failed"
@@ -14299,7 +14301,7 @@ export default function StudioPage() {
           null
         ) : null}
 
-        {resumePresenter.status === "blocked" && !hasResumeArtifact ? (
+        {resumePresenter.status === "blocked" && !hasResumeArtifactCanonical ? (
           <div className="space-y-3 rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4">
             <p className="text-sm font-semibold text-amber-100">
               {resumePresenter.display?.title ?? "Resume blocked by compliance"}
@@ -14785,7 +14787,7 @@ export default function StudioPage() {
           </div>
         ) : null}
 
-        {!coverLetterComplianceBlocked && coverPresenter.status === "blocked" && !hasCoverLetterArtifact ? (
+        {!coverLetterComplianceBlocked && coverPresenter.status === "blocked" && !hasCoverLetterArtifactCanonical ? (
           <div className="space-y-3 rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4">
             <p className="text-sm font-semibold text-amber-100">
               {coverPresenter.display?.title ?? "Cover letter blocked by compliance"}

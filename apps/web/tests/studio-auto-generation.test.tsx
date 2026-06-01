@@ -1237,6 +1237,64 @@ describe("Studio auto-generation", () => {
     expect(fetchMock).toBeTruthy();
   }, 15000);
 
+  it("treats a stale/out-of-date resume artifact as present when its preview is renderable", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    installStrongFitFetches({
+      readinessStatus: "ready",
+      studioArtifactsPayload: {
+        status: "completed",
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        generationContractVersion: "studio-artifacts-v1",
+        artifact: { hasResume: true, hasCoverLetter: true, pairStatus: "completed", generating: false, failure: null },
+        resume: {
+          status: "completed",
+          usableCurrent: false,
+          inputsHash: false,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: false,
+            qualityGate: { status: "pass", reasons: [] },
+            preview: { resume: { heading: { name: "Alex" }, experience: [{ company: "Co", roleTitle: "Role", bullets: ["Did work."] }] } },
+          },
+          content: "Resume",
+          confidence: "HIGH",
+          failure: null,
+        },
+        coverLetter: {
+          status: "completed",
+          usableCurrent: true,
+          inputsHash: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            qualityGate: { status: "pass", reasons: [] },
+            preview: { coverLetter: { paragraphs: ["Hello"] } },
+          },
+          content: "Hello",
+          confidence: "HIGH",
+          failure: null,
+        },
+      },
+    });
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Resume not generated yet/i)).toBeNull();
+      expect(screen.queryByTestId("studio-resume-missing")).toBeNull();
+    }, { timeout: 15000 });
+  }, 15000);
+
   it("does not show blocked/unavailable messaging when both previews renderable even if readiness is blocked", async () => {
     overrideSearchParams({
       analysisId: "analysis-1",
