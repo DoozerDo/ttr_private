@@ -368,6 +368,72 @@ describe('ResumeService contract', () => {
     expect(content).toContain('- Managed customer operations workflows and improved service reliability.');
   });
 
+  it('fail-safe experience recovery matches split-line headers and stops before non-experience headings', () => {
+    const baselineSections: any[] = [
+      {
+        id: 'exp-1',
+        sectionType: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        order: 0,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        content: [
+          'Senior Manager, Customer Operations',
+          'PMB Performance',
+          'Dec 2022 – Aug 2025',
+          'Led incident triage and escalation management across support operations.',
+          '',
+          'Senior Program Manager',
+          'Warner Bros. Discovery',
+          '2021 – 2022',
+          'Owned cross-functional delivery across stakeholders.',
+          '',
+          'Service Engineering Team Lead',
+          'CenturyLink Cloud',
+          '2019 – 2020',
+          'Improved queue health reporting and response time visibility.',
+          '',
+          'Senior Systems Engineer',
+          'Tier 3',
+          '2014 – 2019',
+          'Troubleshot production incidents and automated common remediations.',
+          '',
+          'Evault',
+          'Fulfillment Engineer',
+          '2010 – 2011',
+          'Delivered storage provisioning and support workflows.',
+          '',
+          'Earlier Career',
+          'Technology & Tools',
+          'Linux, Windows',
+        ].join('\n'),
+      },
+    ];
+
+    const structuredExperience = [
+      { company: 'PMB Performance', roleTitle: 'Senior Manager, Customer Operations', dates: 'Dec 2022 – Aug 2025', bullets: [] },
+      { company: 'Warner Bros. Discovery', roleTitle: 'Senior Program Manager', dates: '2021 – 2022', bullets: [] },
+      { company: 'CenturyLink Cloud', roleTitle: 'Service Engineering Team Lead', dates: '2019 – 2020', bullets: [] },
+      { company: 'Tier 3', roleTitle: 'Senior Systems Engineer', dates: '2014 – 2019', bullets: [] },
+      { company: 'Evault', roleTitle: 'Fulfillment Engineer', dates: '2010 – 2011', bullets: [] },
+    ];
+
+    const content = buildFailSafeExperienceContentFromStructuredAndBaseline({
+      baselineSections: baselineSections as any,
+      structuredExperience: structuredExperience as any,
+    });
+
+    // Split-line headers should still be matched and get bullets.
+    expect(content).toContain('PMB Performance | Senior Manager, Customer Operations | Dec 2022 – Aug 2025');
+    expect(content).toContain('Warner Bros. Discovery | Senior Program Manager | 2021 – 2022');
+    expect(content).toContain('CenturyLink Cloud | Service Engineering Team Lead | 2019 – 2020');
+    expect(content).toContain('Tier 3 | Senior Systems Engineer | 2014 – 2019');
+    expect(content).toContain('Evault | Fulfillment Engineer | 2010 – 2011');
+
+    // Must not absorb later headings into Evault bullets.
+    expect(content).not.toMatch(/-\\s+Earlier Career/i);
+    expect(content).not.toMatch(/-\\s+Technology\\s*&\\s*Tools/i);
+  });
+
   it('forces Studio regenerate to persist a fresh V2 artifact when RESUME_GENERATION_V2=true', async () => {
     const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
     process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';

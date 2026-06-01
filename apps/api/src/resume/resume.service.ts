@@ -149,7 +149,35 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
     const company = String(entry.company ?? '').trim();
     const roleTitle = String(entry.roleTitle ?? '').trim();
     if (!company || !roleTitle) return -1;
-    return lines.findIndex((line) => line.includes(company) && line.includes(roleTitle));
+
+    // Best case: company + role title appear on the same physical line (pipe/dash layouts).
+    const sameLine = lines.findIndex((line) => line.includes(company) && line.includes(roleTitle));
+    if (sameLine >= 0) return sameLine;
+
+    // PDF-derived layout: role title line followed by company line (or vice versa).
+    // Find the closest pair within a small window and treat the first line of the pair as the "header start".
+    const companyHits: number[] = [];
+    const roleHits: number[] = [];
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i] ?? '';
+      if (!line) continue;
+      if (line.includes(company)) companyHits.push(i);
+      if (line.includes(roleTitle)) roleHits.push(i);
+    }
+    if (!companyHits.length || !roleHits.length) return -1;
+
+    let best: { start: number; distance: number } | null = null;
+    for (const ci of companyHits) {
+      for (const ri of roleHits) {
+        const distance = Math.abs(ci - ri);
+        if (distance > 4) continue;
+        const start = Math.min(ci, ri);
+        if (!best || distance < best.distance || (distance === best.distance && start < best.start)) {
+          best = { start, distance };
+        }
+      }
+    }
+    return best ? best.start : -1;
   };
 
   const headerIndices = params.structuredExperience
@@ -169,6 +197,11 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
         (/[—–-]/.test(v) || /\\b(?:present|current)\\b/i.test(v) || monthYear.test(v))
       );
     };
+    const isSectionHeading = (value: string) => {
+      const v = String(value ?? '').trim();
+      if (!v) return false;
+      return /^(?:earlier\s+career|technology\s*&\s*tools|technology\s+&\s+tools|operating\s+systems|monitoring|automation|skills|education|projects)\b/i.test(v);
+    };
     for (let i = startExclusive; i < endExclusive; i += 1) {
       const line = lines[i] ?? '';
       if (!line) continue;
@@ -176,6 +209,8 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
       if (looksLikeDatesLine(line)) continue;
       // Skip obvious location-only lines (common between header and bullets).
       if (/^(?:remote|hybrid|onsite)\b/i.test(line) && line.length <= 32) continue;
+      // Stop at non-experience section headings so roles cannot absorb unrelated sections.
+      if (isSectionHeading(line)) break;
       out.push(line.replace(/^[-•*]\s+/, '').trim());
       if (out.length >= 14) break;
     }

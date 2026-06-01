@@ -544,6 +544,24 @@ function parseExperienceHeader(line: string): Omit<NormalizedResumeExperienceEnt
     const secondLooksLocation = isLikelyLocation(second);
     const thirdDateInfo = parseDateRange(third || parts[parts.length - 1] || '');
 
+    // Two-part headers are common in fail-safe reconstruction when dates are embedded in the role title.
+    // Prefer company | role ordering when we can infer it; otherwise fall back to role | company.
+    if (parts.length === 2) {
+      const secondLooksRole = isLikelyRoleTitle(second);
+      if (!firstLooksRole && secondLooksRole) {
+        return {
+          roleTitle: second || 'Role',
+          company: first || 'Company',
+        };
+      }
+      if (firstLooksRole && !secondLooksRole) {
+        return {
+          roleTitle: first || 'Role',
+          company: second || 'Company',
+        };
+      }
+    }
+
     // Handle company|location|date layouts from parsed gaming baselines.
     if (!firstLooksRole && secondLooksLocation && thirdDateInfo.dateRange) {
       return {

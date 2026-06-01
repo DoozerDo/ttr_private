@@ -55,6 +55,23 @@ describe('resume-normalization', () => {
     ).not.toThrow();
   });
 
+  it('parses two-part pipe experience headers as company | role when role is clearly a role title', () => {
+    const document = buildNormalizedResumeDocument([
+      {
+        type: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        content: [
+          'PMB Performance | Service Delivery Manager (2024–Present)',
+          '- Led incident triage and improved operational outcomes.',
+        ].join('\n'),
+      },
+    ] as any);
+
+    expect(document.experience).toHaveLength(1);
+    expect(document.experience[0]?.company).toBe('PMB Performance');
+    expect(String(document.experience[0]?.roleTitle ?? '')).toMatch(/Service Delivery Manager/i);
+  });
+
   it('keeps bullets attached to the correct experience role', () => {
     const document = buildNormalizedResumeDocument([
       {
