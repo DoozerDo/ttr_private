@@ -5088,6 +5088,36 @@ export class ResumeService {
           interpretedEvidenceForFailSafe.summary,
         );
 
+        const failSafeExperienceCount = Array.isArray((normalizedDocument as any)?.experience)
+          ? (normalizedDocument as any).experience.length
+          : 0;
+        if (failSafeExperienceCount <= 0) {
+          throw new UnprocessableEntityException(buildArtifactFailurePayload({
+            code: 'unsupported_input',
+            category: 'unsupported_input',
+            message:
+              'Resume could not be generated because verified content was insufficient to build a valid resume structure.',
+            detail:
+              'We could not convert verified experience into a usable resume. Please reprocess or reupload your baseline with clearer experience headers and bullets.',
+            retryable: true,
+            diagnostics: {
+              generationTerminationStage: `top_level_fail_safe_minimal:empty_experience:${String(lastResumeGenerationCheckpoint ?? '')}`,
+              failureReasons: [
+                'top_level_fail_safe_minimal',
+                'empty_experience',
+                `lastCheckpoint:${String(lastResumeGenerationCheckpoint ?? '')}`,
+              ],
+              structuredBaselineExperienceCount: 0,
+              resumeV2UsableExperienceCount: 0,
+              resumeFailureDiagnostics: {
+                validationReason: 'resume_structure_empty',
+                validationReasons: ['experience_empty_after_fail_safe_normalization'],
+                resumeV2ExperienceCount: 0,
+              },
+            },
+          }));
+        }
+
 	        const response: ResumeGenerationResponse = {
           ok: true,
           status: 'success',

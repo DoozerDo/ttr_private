@@ -27,6 +27,7 @@ import { DataSource } from 'typeorm';
 import { NarrativeCompositionEngine } from '../composition/narrative-composition-engine';
 import * as ResumeAssembler from './resumeTemplateAssembler';
 import * as AuthoritativeRenderPlan from '../positioning/authoritative-render-plan';
+import * as ResumeNormalizer from './resume-normalization';
 
 type MockRepo<T> = Partial<Record<keyof Repository<T>, jest.Mock>> & {
   findOne: jest.Mock;
@@ -1607,6 +1608,7 @@ describe('ResumeService contract', () => {
       if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
     }
   });
+
 
   it('generates a real exportReady resume when Resume V2 is invalid and baseline work history is verified (omits unsupported requirements with warnings)', async () => {
     const { service } = buildService();
