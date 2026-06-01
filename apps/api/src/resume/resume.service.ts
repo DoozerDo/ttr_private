@@ -243,15 +243,96 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
 
   const discoverHeadersFromLines = () => {
     const headers: Array<{ startIndex: number; company: string; roleTitle: string; dates?: string }> = [];
+
+    const isPlaceholderHeader = (value: string) =>
+      /^(?:experience entry needs correction|professional experience|work experience|experience)\b/i.test(
+        String(value ?? '').trim(),
+      );
+
+    const hasDanglingPunctuation = (value: string) => {
+      const v = String(value ?? '').trim();
+      if (!v) return false;
+      if (/[,:;]$/.test(v)) return true;
+      if (/\(\s*$/.test(v)) return true;
+      if (/\)\s*,/.test(v)) return true;
+      if (/\)\s*$/.test(v) && !/\([^)]*\)\s*$/.test(v)) return true;
+      return false;
+    };
+
+    const isWrappedBulletContinuation = (value: string) => {
+      const v = String(value ?? '').trim();
+      if (!v) return false;
+      if (/^[-â€¢*]\s+/.test(v)) return false;
+      if (/^[,.)]/.test(v)) return true;
+      if (/^[a-z]/.test(v)) return true;
+      return false;
+    };
+
+    const looksLikeSubsectionHeading = (value: string) => {
+      const v = String(value ?? '').trim();
+      if (!v) return false;
+      if (isSectionHeading(v)) return true;
+      // Title-cased headings with "&" are very common in skills/tool subsections.
+      if (/\b&\b/.test(v)) {
+        const words = v.split(/\s+/).filter(Boolean);
+        if (words.length >= 2 && words.length <= 6 && words.every((w) => /^[A-Z][A-Za-z0-9.'-]*$/.test(w) || w === '&')) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const canBeCompanyHeader = (value: string) => {
+      const v = String(value ?? '').trim();
+      if (!v) return false;
+      if (isPlaceholderHeader(v)) return false;
+      if (looksLikeSubsectionHeading(v)) return false;
+      if (looksLikeDatesLine(v)) return false;
+      if (looksLikeSentence(v)) return false;
+      if (hasDanglingPunctuation(v)) return false;
+      if (isWrappedBulletContinuation(v)) return false;
+      return looksLikeCompanyLine(v);
+    };
+
+    const canBeRoleHeader = (value: string) => {
+      const v = String(value ?? '').trim();
+      if (!v) return false;
+      if (isPlaceholderHeader(v)) return false;
+      if (looksLikeSubsectionHeading(v)) return false;
+      if (looksLikeDatesLine(v)) return false;
+      if (looksLikeSentence(v)) return false;
+      if (hasDanglingPunctuation(v)) return false;
+      if (isWrappedBulletContinuation(v)) return false;
+      return looksLikeHeaderLine(v);
+    };
+
+    const readAdjacentDates = (startIndex: number) => {
+      const c1 = lines[startIndex + 1] ?? '';
+      const c2 = lines[startIndex + 2] ?? '';
+      const c3 = lines[startIndex + 3] ?? '';
+      if (looksLikeDatesLine(c1)) return { dates: c1, datesIndex: startIndex + 1 };
+      if (looksLikeDatesLine(c2)) return { dates: c2, datesIndex: startIndex + 2 };
+      if (looksLikeDatesLine(c3)) return { dates: c3, datesIndex: startIndex + 3 };
+      return { dates: undefined as string | undefined, datesIndex: -1 };
+    };
+
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i] ?? '';
       if (!line || isSectionHeading(line)) continue;
       if (line.includes('|')) {
-        if (!looksLikeHeaderLine(line)) continue;
         const parsed = parsePipeHeaderLine(line);
         if (parsed?.company && parsed?.roleTitle) {
-          if (!looksLikeHeaderLine(parsed.company) || !looksLikeHeaderLine(parsed.roleTitle)) continue;
-          headers.push({ startIndex: i, ...parsed });
+          if (!canBeCompanyHeader(parsed.company) || !canBeRoleHeader(parsed.roleTitle)) continue;
+          const inlineDates =
+            typeof (parsed as any)?.dates === 'string' && looksLikeDatesLine(String((parsed as any).dates).trim())
+              ? String((parsed as any).dates).trim()
+              : '';
+          const { dates: adjacentDates, datesIndex } = readAdjacentDates(i);
+          const dates = inlineDates || adjacentDates;
+          // Require a credible date range near the header so tool/section fragments cannot be promoted.
+          if (!dates) continue;
+          if (!inlineDates && (datesIndex < 0 || datesIndex - i > 3)) continue;
+          headers.push({ startIndex: i, ...parsed, dates });
           continue;
         }
       }
@@ -260,26 +341,22 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
       if (!next || isSectionHeading(next)) continue;
       if (looksLikeDatesLine(line) || looksLikeDatesLine(next)) continue;
       if (line.startsWith('-') || next.startsWith('-')) continue;
-      if (!looksLikeHeaderLine(line) || !looksLikeHeaderLine(next)) continue;
+      if (!canBeRoleHeader(line) || !canBeRoleHeader(next)) continue;
       const lineLooksRole = looksLikeRoleTitle(line);
       const nextLooksRole = looksLikeRoleTitle(next);
       if (lineLooksRole === nextLooksRole) continue;
       // Tighten split-line header detection:
       // Require the non-role line to look like a company name, otherwise action/bullet sentences
       // containing title-like keywords ("lead", "administrator", etc.) can be misclassified as headers.
-      if (lineLooksRole && !looksLikeCompanyLine(next)) continue;
-      if (nextLooksRole && !looksLikeCompanyLine(line)) continue;
+      if (lineLooksRole && !canBeCompanyHeader(next)) continue;
+      if (nextLooksRole && !canBeCompanyHeader(line)) continue;
       const roleTitle = lineLooksRole ? line : next;
       const company = lineLooksRole ? next : line;
       // Dates can appear on the next one or two lines (blank spacers are already removed).
-      const maybeDates1 = lines[i + 2] ?? '';
-      const maybeDates2 = lines[i + 3] ?? '';
-      const dates = looksLikeDatesLine(maybeDates1)
-        ? maybeDates1
-        : looksLikeDatesLine(maybeDates2)
-          ? maybeDates2
-          : undefined;
-      headers.push({ startIndex: i, company, roleTitle, ...(dates ? { dates } : {}) });
+      const { dates, datesIndex } = readAdjacentDates(i + 1);
+      // Require a date range adjacent to the company/title pair.
+      if (!dates || datesIndex < 0 || datesIndex - i > 3) continue;
+      headers.push({ startIndex: i, company, roleTitle, dates });
     }
     // Deduplicate by startIndex (keep first) and by normalized company+roleTitle.
     const seenKeys = new Set<string>();
@@ -350,11 +427,39 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
     return out;
   };
 
-  const discovered = discoverHeadersFromLines();
+  const collectFallbackBulletFromHeaderWindow = (startIndex: number, endExclusive: number) => {
+    // As a last resort, capture a short, non-heading line immediately after the header as a bullet
+    // so header-only experience blocks do not collapse to an empty experience array downstream.
+    for (let i = startIndex + 1; i < Math.min(endExclusive, startIndex + 6); i += 1) {
+      const line = String(lines[i] ?? '').trim();
+      if (!line) continue;
+      if (looksLikeDatesLine(line)) continue;
+      if (isSectionHeading(line)) break;
+      if (/^[-â€¢*]\s+/.test(line)) return [line.replace(/^[-â€¢*]\s+/, '').trim()];
+      // Avoid promoting obvious headers.
+      if (looksLikeHeaderLine(line) && !looksLikeSentence(line)) continue;
+      if (line.length <= 120) return [line];
+      return [];
+    }
+    return [];
+  };
+
+  const structuredHasUsableBullets =
+    params.structuredExperience?.some(
+      (entry) =>
+        String(entry?.company ?? '').trim().length > 0 &&
+        String(entry?.roleTitle ?? '').trim().length > 0 &&
+        Array.isArray(entry?.bullets) &&
+        entry.bullets.length > 0,
+    ) ?? false;
+
+  const discovered = structuredHasUsableBullets ? [] : discoverHeadersFromLines();
   const experienceEntries: Array<{ company: string; roleTitle: string; dates?: string; bullets: string[] }> =
-    discovered.length
-      ? discovered.map((h) => ({ company: h.company, roleTitle: h.roleTitle, dates: h.dates, bullets: [] }))
-      : (params.structuredExperience as any);
+    structuredHasUsableBullets
+      ? (params.structuredExperience as any)
+      : discovered.length
+        ? discovered.map((h) => ({ company: h.company, roleTitle: h.roleTitle, dates: h.dates, bullets: [] }))
+        : (params.structuredExperience as any);
 
   const discoveredIndices = discovered.length
     ? discovered.map((h) => ({ idx: h.startIndex, entry: h })).sort((a, b) => a.idx - b.idx)
@@ -373,6 +478,7 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
       const end = idx + 1 < discoveredIndices.length ? discoveredIndices[idx + 1]!.idx : lines.length;
       if (start >= 0) {
         bullets = collectRoleLinesAsBullets(start + 1, end);
+        if (!bullets.length) bullets = collectFallbackBulletFromHeaderWindow(start, end);
       }
     } else {
       const headerPos = headerIndices.findIndex((h) => h.entry === entry);
@@ -381,6 +487,7 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
         const end = headerPos + 1 < headerIndices.length ? headerIndices[headerPos + 1]!.idx : lines.length;
         const collected = collectRoleLinesAsBullets(start + 1, end);
         if (collected.length) bullets = collected;
+        if (!bullets.length) bullets = collectFallbackBulletFromHeaderWindow(start, end);
       }
     }
 

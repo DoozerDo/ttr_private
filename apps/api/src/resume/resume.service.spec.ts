@@ -540,6 +540,47 @@ describe('ResumeService contract', () => {
     expect(content).not.toContain('\nLead a team of six direct reports');
   });
 
+  it('fail-safe experience header discovery rejects subsection headings and malformed fragments even with dates', () => {
+    const baselineSections: any[] = [
+      {
+        id: 'exp-1',
+        sectionType: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        order: 0,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        content: [
+          'Role A',
+          'Company A',
+          '2022 â€“ 2025',
+          'Delivered outcomes.',
+          '',
+          // Malformed/fragment company candidate (dangling parenthesis + comma).
+          'Project',
+          'Vue 3), deck builder frontend',
+          '2020 â€“ 2021',
+          'Built a deck builder frontend.',
+          '',
+          // Subsection heading candidate (should never become company).
+          'Senior Systems Engineer',
+          'Automation & Monitoring',
+          '2018 â€“ 2019',
+          'Improved alert quality and response time.',
+          '',
+          'Earlier Career',
+        ].join('\n'),
+      },
+    ];
+
+    const content = buildFailSafeExperienceContentFromStructuredAndBaseline({
+      baselineSections: baselineSections as any,
+      structuredExperience: [] as any,
+    });
+
+    expect(content).toContain('Company A | Role A | 2022 â€“ 2025');
+    expect(content).not.toContain('Vue 3), deck builder frontend');
+    expect(content).not.toContain('Automation & Monitoring');
+  });
+
   it('forces Studio regenerate to persist a fresh V2 artifact when RESUME_GENERATION_V2=true', async () => {
     const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
     process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
@@ -2604,6 +2645,24 @@ describe('ResumeService contract', () => {
     });
 
     expect(preview.experience[0].roleTitle).toBe('');
+    expect(preview.experience[0].company).toBe('Example Co');
+  });
+
+  it('never emits placeholder company values like \"Experience entry needs correction\" (drops empty headers)', () => {
+    const { sanitizeResumePreviewForStudio } = require('./resumePreviewSanitizer');
+    const preview = sanitizeResumePreviewForStudio({
+      heading: { name: 'Test Candidate', contactLine: '' },
+      summary: 'Test summary',
+      experience: [
+        { company: '', roleTitle: '', bullets: [], dateRange: '2020 - 2024' },
+        { company: 'Example Co', roleTitle: 'Support Engineer', bullets: ['Did work.'], dateRange: '2020 - 2024' },
+      ],
+      education: [],
+      competencies: [],
+    });
+
+    expect(JSON.stringify(preview.experience ?? [])).not.toContain('Experience entry needs correction');
+    expect(preview.experience.length).toBe(1);
     expect(preview.experience[0].company).toBe('Example Co');
   });
 

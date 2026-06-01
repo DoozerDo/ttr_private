@@ -67,14 +67,13 @@ export function sanitizeResumePreviewForStudio(
 
     next.bullets = bullets;
 
-    const finalCompany = typeof next.company === 'string' ? String(next.company).trim() : '';
-    const finalRoleTitle = typeof next.roleTitle === 'string' ? String(next.roleTitle).trim() : '';
-    if (!finalCompany && !finalRoleTitle) {
-      next.company = 'Experience entry needs correction';
-      next.roleTitle = '';
-    }
-
     return next as unknown as typeof entry;
+  }).filter((entry) => {
+    const anyEntry = entry as unknown as Record<string, unknown>;
+    const finalCompany = typeof anyEntry.company === 'string' ? String(anyEntry.company).trim() : '';
+    const finalRoleTitle = typeof anyEntry.roleTitle === 'string' ? String(anyEntry.roleTitle).trim() : '';
+    // Never emit placeholder experience rows; if an entry cannot be rendered as a header, drop it.
+    return Boolean(finalCompany || finalRoleTitle);
   });
 
   return {
