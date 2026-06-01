@@ -293,6 +293,93 @@ describe('StudioArtifactsService (unit): readState surfaces renderable resume pr
   });
 });
 
+describe('StudioArtifactsService (unit): readState never erases renderable preview when export is ineligible', () => {
+  it('preserves resumeResult.preview when inputsHash mismatches but preview.resume exists', async () => {
+    const studioArtifactRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'artifact-1',
+        createdAt: new Date('2026-06-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-01T00:01:00.000Z'),
+        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        // Stored hash does not match derived hash => export ineligible, but preview is renderable.
+        resumeInputsHash: 'stored-hash',
+        resumeResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          qualityGate: { status: 'pass', reasons: [] },
+          preview: { resume: { heading: { name: 'Alex' }, experience: [{ company: 'Co', roleTitle: 'Role', bullets: ['Did work.'] }] } },
+        },
+        resumeContent: 'Resume content',
+        resumeFailureCode: null,
+        resumeFailureMessage: null,
+        resumeGenerationStartedAt: null,
+        resumeGeneratedAt: new Date('2026-06-01T00:01:00.000Z'),
+        resumeFailedAt: null,
+        resumeMetadata: {},
+        coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        coverLetterInputsHash: 'stored-hash',
+        coverLetterResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          qualityGate: { status: 'pass', reasons: [] },
+          preview: { coverLetter: { paragraphs: ['Hello'] } },
+        },
+        coverLetterContent: 'Hello',
+        coverLetterFailureCode: null,
+        coverLetterFailureMessage: null,
+        coverLetterGenerationStartedAt: null,
+        coverLetterGeneratedAt: new Date('2026-06-01T00:01:00.000Z'),
+        coverLetterFailedAt: null,
+        coverLetterMetadata: {},
+      } as any),
+    } as any;
+
+    const baselineRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+    } as any;
+    const baselineVersionRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }),
+    } as any;
+    const jobRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }),
+    } as any;
+    const fitAssessmentRepository = {
+      findOne: jest.fn().mockResolvedValue({ overallScore: 90 }),
+    } as any;
+    const baselineResumeV2BackfillService = {
+      backfillLatestIfMissing: jest.fn().mockResolvedValue(null),
+    } as any;
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository,
+      baselineRepository,
+      baselineVersionRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      baselineResumeV2BackfillService,
+    );
+    // Derived hashes intentionally do not match the stored ones.
+    jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('derived-hash');
+    jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('derived-hash');
+
+    const state = await service.readState({
+      userId: 'u-1',
+      baselineId: 'base-1',
+      baselineVersionId: 'base-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    } as any);
+
+    expect(state.resume?.inputsHashMatches).toBe(false);
+    expect(state.resumeResult).toBeTruthy();
+    expect((state.resumeResult as any)?.preview).toBeTruthy();
+    expect((state.resumeResult as any)?.generationState).toBe('generated_needs_correction');
+    expect((state.resumeResult as any)?.exportReady).toBe(false);
+  });
+});
+
 describe('StudioArtifactsService (unit): studio artifact scope upsert is idempotent', () => {
   it('does insert-or-update without throwing UQ_studio_artifacts_scope and logs create vs update decisions', async () => {
     const insertExecute = jest.fn();

@@ -680,7 +680,13 @@ export class StudioArtifactsService {
     const rejectedArtifactIds: string[] = [];
     const staleArtifactReasonCodes: string[] = [];
 
-    const resumePreviewAllowed = (() => {
+    const resumePreviewRenderable = (() => {
+      if (!resumeRecord) return false;
+      const previewResume = (resumeRecord.responseBody as any)?.preview?.resume ?? null;
+      return Boolean(previewResume && typeof previewResume === 'object');
+    })();
+
+    const resumeExportEligible = (() => {
       if (!resumeRecord) return false;
       // Prompt 18: minimal artifacts must be rejected deterministically (not reported as inputs mismatch).
       const minimalDetection = detectMinimalResumeArtifact(resumeRecord.responseBody);
@@ -708,10 +714,8 @@ export class StudioArtifactsService {
         staleArtifactReasonCodes.push('stale_legacy');
         return false;
       }
-      // Renderability contract: Studio needs a preview to hydrate after generation.
-      // Quality gates control exportability/usable state, but must not hide a renderable preview payload.
-      const previewResume = (resumeRecord.responseBody as any)?.preview?.resume ?? null;
-      if (!previewResume || typeof previewResume !== 'object') {
+      // Export eligibility additionally requires a renderable preview.
+      if (!resumePreviewRenderable) {
         staleArtifactReasonCodes.push('preview_missing');
         return false;
       }
@@ -730,14 +734,13 @@ export class StudioArtifactsService {
 	    // - Minimal artifacts keep `responseBody` for audit/diagnostics, but must not surface preview (Prompt 18).
 	    const resumeRecordForResult = (() => {
 	      if (!resumeRecord) return resumeRecord;
-	      // If the artifact is rejected from preview/use (minimal, stale, mismatched, failed quality, etc),
-	      // do not surface responseBody/content as "available" output on the readState payload.
-	      // This keeps existence signals aligned with renderability authority.
-	      if (!resumePreviewAllowed) return { ...resumeRecord, responseBody: null, content: null };
+	      // Never erase a renderable preview payload before canonical shaping.
+	      // Export eligibility is enforced at the resumeResult layer below.
+	      if (!resumePreviewRenderable) return { ...resumeRecord, responseBody: null, content: null };
 	      if (resumeIsStaleLegacy && !resumeIsMinimal) return { ...resumeRecord, responseBody: null, content: null };
 	      return resumeRecord;
 	    })();
-    if (resumeRecord && !resumePreviewAllowed) {
+    if (resumeRecord && !resumeExportEligible) {
       rejectedArtifactIds.push(authoritativeArtifactId ?? 'unknown');
     }
 
@@ -787,10 +790,11 @@ export class StudioArtifactsService {
         : resumeResultRaw;
 
     const resumeResult =
-      resumeResultBase && !resumePreviewAllowed
+      resumeResultBase && !resumeExportEligible
         ? {
             ...(resumeResultBase as any),
-            preview: null,
+            // Preserve renderable preview for display, but never allow export when ineligible.
+            ...(resumePreviewRenderable ? { generationState: 'generated_needs_correction' } : {}),
             exportReady: false,
             exports: { docx: false, pdf: false },
           }
@@ -909,11 +913,11 @@ export class StudioArtifactsService {
           ? {
               staleArtifactRejected: Boolean(rejectedArtifactIds.length),
               staleArtifactReasonCodes: [...new Set(staleArtifactReasonCodes)].slice(0, 12),
-              hydrationSource: resumePreviewAllowed ? 'authoritative_current_artifact' : 'blocked',
+              hydrationSource: resumeExportEligible ? 'authoritative_current_artifact' : 'blocked',
               authoritativeArtifactId,
               rejectedArtifactIds: rejectedArtifactIds.slice(0, 8),
-              retrievalDecisionPath: resumePreviewAllowed ? 'use_current_completed' : 'reject_preview_fail_closed',
-              hydrationRejected: Boolean(resumeRecord && !resumePreviewAllowed),
+              retrievalDecisionPath: resumeExportEligible ? 'use_current_completed' : 'reject_preview_fail_closed',
+              hydrationRejected: Boolean(resumeRecord && !resumeExportEligible),
               rejectedMinimalArtifact: Boolean(staleArtifactReasonCodes.some((c) => c === 'minimal_artifact_rejected' || String(c).startsWith('minimal:'))),
               rejectedMinimalArtifactReason: staleArtifactReasonCodes.find((c) => String(c).startsWith('minimal:')) ?? null,
             }
