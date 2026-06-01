@@ -2857,7 +2857,8 @@ export class ResumeService {
           const persisted = persistedResumeV2;
           // Canonical validity check (throws baseline_resume_v2_invalid with canonical message/details).
           assertUsableResumeV2(persisted);
-          const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
+          const normalizedBeforePostProcessing = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
+          const normalized = structuredClone(normalizedBeforePostProcessing) as typeof normalizedBeforePostProcessing;
           if (Array.isArray((normalized as any).experience)) {
             const enforced = enforceEmployerRoleBulletProvenance({ experience: (normalized as any).experience });
             (normalized as any).experience = enforced.experience as any;
@@ -2867,6 +2868,19 @@ export class ResumeService {
             (normalized as any).experience = stripped.experience as any;
             crossCompanyEvidenceBlockedCount += stripped.blockedCount;
           }
+
+          // ResumeV2 ingest safety: do not allow provenance / cross-company enforcement to silently
+          // reduce a previously-usable persisted ResumeV2 into an empty/invalid structure that later
+          // trips resume_structure_empty => unsupported_input.
+          const postProcessedValidation = validateNormalizedResumeDocument(normalized);
+          const postProcessedExperienceCount = Array.isArray((normalized as any)?.experience)
+            ? (normalized as any).experience.length
+            : 0;
+          if (!postProcessedValidation.valid || postProcessedExperienceCount <= 0) {
+            // `assertUsableResumeV2` already passed above; recover to the usable pre-processing document.
+            return normalizedBeforePostProcessing;
+          }
+
           v2QualityGate = validateResumeArtifactQualityStrict(normalized);
           if (shouldLogV2) {
             try {

@@ -1498,6 +1498,65 @@ describe('ResumeService contract', () => {
     }
   });
 
+  it('recovers ResumeV2 ingest when post-processing strips all experience (uses pre-processed usable ResumeV2, not minimal fail-safe)', async () => {
+    const { service } = buildService();
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+    const originalScore = assessment.overallScore;
+
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
+    assessment.overallScore = 84;
+
+    try {
+      baseline.parsedRecords = [
+        {
+          createdAt: new Date('2026-05-01T00:00:00.000Z'),
+          // Usable pre-processing ResumeV2 (experience exists) but lacks provenance, so post-processing can strip it.
+          resumeV2Json: {
+            heading: { name: 'Test Candidate', contactLine: '' },
+            summary: 'Support operations leader.',
+            experience: [
+              {
+                company: 'PMB Performance',
+                roleTitle: 'Director, Customer Operations',
+                bullets: ['Led support operations across global teams and improved SLA performance.'],
+                dateRange: '2023 - Present',
+              },
+            ],
+            education: [],
+          },
+        } as any,
+      ];
+      // Baseline sections include experience text but ResumeV2 lane should be used for generation in this mode.
+      baseline.sections = [
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Professional Experience',
+          order: 1,
+          content: [
+            'PMB Performance | Director, Customer Operations | 2023 - Present',
+            'Led support operations across global teams and improved SLA performance',
+          ].join('\n'),
+        } as any,
+      ] as any;
+
+      const result = await service.generateResume('user-1', baseRequest as any);
+      expect(result.status).toBe('success');
+      expect((result as any)?.preview?.resume?.experience?.length ?? 0).toBeGreaterThan(0);
+      const internal = (result as any).internal ?? {};
+      expect(internal?.resumeGenerationMode).not.toBe('top_level_fail_safe_minimal');
+      expect(internal?.resumeFailSafeMinimalUsed).not.toBe(true);
+    } finally {
+      baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsed;
+      assessment.overallScore = originalScore;
+      if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    }
+  });
+
   it('generates a real exportReady resume when Resume V2 is invalid and baseline work history is verified (omits unsupported requirements with warnings)', async () => {
     const { service } = buildService();
     const originalSections = baseline.sections;
