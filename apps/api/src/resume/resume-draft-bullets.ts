@@ -718,7 +718,7 @@ export function extractEvidenceUnitsFromLogicalUnits(
         sourceSpan: {
           startLine: unit.startLine,
           endLine: unit.endLine,
-          kind: unit.merged ? 'logical_bullet' : 'line',
+          kind: unit.merged ? 'logical_bullet' : 'bullet_line',
         },
         anchorKind: 'bullet_line',
         exactBaselineBullet: true,
