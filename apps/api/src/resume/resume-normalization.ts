@@ -164,6 +164,7 @@ function isLikelyRoleTitle(value: string): boolean {
   if (!normalized) return false;
   if (ROLE_HINT_PATTERN.test(normalized)) return true;
   if (/\bdesginer\b|\bdesinger\b/i.test(normalized)) return true;
+  if (/\bcontractor\b/i.test(normalized)) return true;
   return /\b(?:head|principal|senior|staff|intern|assistant)\b/i.test(normalized);
 }
 
@@ -207,7 +208,14 @@ function isLikelyCompany(value: string): boolean {
   const words = normalized.split(/\s+/).filter(Boolean);
   if (words.length === 0 || words.length > 6) return false;
   const capitalizedCount = words.filter((word) => /^[A-Z][A-Za-z0-9.'&-]*$/.test(word)).length;
-  if (capitalizedCount === 0) return false;
+  if (capitalizedCount === 0) {
+    // Some baselines contain lowercase single-token company names. Allow only when the token is
+    // long enough to be a name and does not match known fragment patterns.
+    if (words.length === 1 && /^[a-z0-9][a-z0-9.-]{3,}$/.test(normalized) && normalized.length >= 5) {
+      return true;
+    }
+    return false;
+  }
 
   return true;
 }
@@ -529,7 +537,10 @@ function parseDateRange(value?: string | null): {
   };
 }
 
-function parseExperienceHeader(line: string): Omit<NormalizedResumeExperienceEntry, 'bullets'> {
+function parseExperienceHeader(
+  line: string,
+  opts?: { adjacentDateRange?: string | null },
+): Omit<NormalizedResumeExperienceEntry, 'bullets'> {
   const sanitized = normalizeLine(line);
   if (!sanitized) {
     return { roleTitle: 'Role', company: 'Company' };
@@ -543,6 +554,15 @@ function parseExperienceHeader(line: string): Omit<NormalizedResumeExperienceEnt
     const firstLooksRole = isLikelyRoleTitle(first);
     const secondLooksLocation = isLikelyLocation(second);
     const thirdDateInfo = parseDateRange(third || parts[parts.length - 1] || '');
+    const adjacentDateInfo = opts?.adjacentDateRange
+      ? parseDateRange(String(opts.adjacentDateRange))
+      : ({} as ReturnType<typeof parseDateRange>);
+    const hasAnyCredibleDate = Boolean(thirdDateInfo.dateRange || adjacentDateInfo.dateRange);
+
+    // Guardrail: pipe fragments without a credible date signal are not experience headers.
+    if (!hasAnyCredibleDate) {
+      return { roleTitle: '', company: '' };
+    }
 
     // Two-part headers are common in fail-safe reconstruction when dates are embedded in the role title.
     // Prefer company | role ordering when we can infer it; otherwise fall back to role | company.
@@ -552,12 +572,14 @@ function parseExperienceHeader(line: string): Omit<NormalizedResumeExperienceEnt
         return {
           roleTitle: second || 'Role',
           company: first || 'Company',
+          ...(thirdDateInfo.dateRange ? thirdDateInfo : adjacentDateInfo.dateRange ? adjacentDateInfo : {}),
         };
       }
       if (firstLooksRole && !secondLooksRole) {
         return {
           roleTitle: first || 'Role',
           company: second || 'Company',
+          ...(thirdDateInfo.dateRange ? thirdDateInfo : adjacentDateInfo.dateRange ? adjacentDateInfo : {}),
         };
       }
     }
@@ -623,7 +645,7 @@ function parseExperienceHeader(line: string): Omit<NormalizedResumeExperienceEnt
       roleTitle,
       company: companyPart || 'Company',
       location: location || undefined,
-      ...(hasDateAtEnd ? dateInfo : {}),
+      ...(hasDateAtEnd ? dateInfo : adjacentDateInfo.dateRange ? adjacentDateInfo : {}),
     };
   }
 
@@ -795,7 +817,22 @@ function buildExperienceFromSection(section: ResumeExportSection): NormalizedRes
     }
   };
 
-  for (const lineEntry of lines) {
+  const readAdjacentDateRange = (idx: number): string | null => {
+    const candidates = [
+      lines[idx - 2]?.text,
+      lines[idx - 1]?.text,
+      lines[idx + 1]?.text,
+      lines[idx + 2]?.text,
+    ].filter(Boolean) as string[];
+    for (const candidate of candidates) {
+      const parsed = parseDateRange(candidate);
+      if (parsed.dateRange) return parsed.dateRange;
+    }
+    return null;
+  };
+
+  for (let idx = 0; idx < lines.length; idx += 1) {
+    const lineEntry = lines[idx]!;
     const line = lineEntry.text;
     const reconstructedFromAdjacentLines = lineEntry.reconstructed;
     const shouldTrace =
@@ -820,18 +857,21 @@ function buildExperienceFromSection(section: ResumeExportSection): NormalizedRes
       continue;
     }
 
-    const parsed = parseExperienceHeader(line);
-    const parsedCompany =
-      parsed.company &&
-      !/^company$/i.test(parsed.company) &&
-      !isDiscardableCompanyToken(parsed.company)
-        ? parsed.company
-        : undefined;
+    const adjacentDateRange = line.includes('|') ? readAdjacentDateRange(idx) : null;
+    const parsed = parseExperienceHeader(line, { adjacentDateRange });
     const parsedRole =
       parsed.roleTitle && !/^role$/i.test(parsed.roleTitle) ? parsed.roleTitle : undefined;
     const parsedDate = parsed.dateRange ? parsed : undefined;
+    const enforceCompanyHeuristics = line.includes('|') && !parsedDate;
+    const parsedCompany =
+      parsed.company &&
+      !/^company$/i.test(parsed.company) &&
+      !isDiscardableCompanyToken(parsed.company) &&
+      (!enforceCompanyHeuristics || isLikelyCompany(parsed.company))
+        ? parsed.company
+        : undefined;
 
-    if (parsedDate || line.includes('|')) {
+    if (parsedDate || (line.includes('|') && adjacentDateRange)) {
       const currentEntry = current as ExperienceCandidate | null;
       const roleNorm = parsedRole ? normalizeLine(parsedRole).toLowerCase() : '';
       const currentRoleNorm = currentEntry?.roleTitle

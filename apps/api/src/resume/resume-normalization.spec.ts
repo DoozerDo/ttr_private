@@ -360,6 +360,55 @@ describe('resume-normalization', () => {
     expect(companies).not.toContain('Vue 3), deck builder frontend');
   });
 
+  it('does not promote pipe fragments without credible dates into experience headers', () => {
+    const document = buildNormalizedResumeDocument([
+      {
+        type: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        content: [
+          'Vue 3), deck builder frontend | Project',
+          '- Built UI components.',
+          '',
+          'Automation & Monitoring | Responsibilities',
+          '- Improved alert quality.',
+          '',
+          'Datacenter Operations | Responsibilities',
+          '- Reduced downtime.',
+          '',
+          'Internal Web Applications | Responsibilities',
+          '- Shipped features.',
+        ].join('\n'),
+      },
+    ] as any);
+
+    const companies = document.experience.map((entry) => entry.company);
+    expect(companies).not.toContain('Vue 3), deck builder frontend');
+    expect(companies).not.toContain('Automation & Monitoring');
+    expect(companies).not.toContain('Datacenter Operations');
+    expect(companies).not.toContain('Internal Web Applications');
+  });
+
+  it('accepts pipe headers only when a credible date exists inline or adjacent', () => {
+    const document = buildNormalizedResumeDocument([
+      {
+        type: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        content: [
+          'AMS DataSerfs, Inc. | Linux System Administrator',
+          'July 2024 - April 2026',
+          '- Maintained systems.',
+          '',
+          'Of Fates Games LLC | Contractor | August 2024 - Present',
+          '- Built features.',
+        ].join('\n'),
+      },
+    ] as any);
+
+    const companies = document.experience.map((entry) => entry.company);
+    expect(companies).toContain('AMS DataSerfs, Inc.');
+    expect(companies).toContain('Of Fates Games LLC');
+  });
+
   it('does not fall back missing role titles to \"Professional Experience\"', () => {
     const document = buildNormalizedResumeDocument([
       {
