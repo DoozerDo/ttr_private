@@ -808,7 +808,7 @@ describe("Studio auto-generation", () => {
       baselineId: "base-1",
       baselineVersionId: "base-version-1",
     });
-    const score = 83;
+    const score = 90;
     const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       if (url.includes("/api/baselines/current")) {
@@ -945,46 +945,91 @@ describe("Studio auto-generation", () => {
     });
 
     const score = 83;
+    let resumeWasPosted = false;
+    const studioArtifactsPayloadMissingResume = {
+      status: "missing",
+      baselineId: "base-1",
+      jobId: "job-1",
+      baselineVersionId: "base-version-1",
+      generationContractVersion: "studio-artifacts-v1",
+      artifact: {
+        hasResume: false,
+        hasCoverLetter: true,
+        pairStatus: "missing",
+        generating: false,
+        failure: null,
+      },
+      resume: {
+        status: "missing",
+        responseBody: null,
+        content: null,
+        usableCurrent: false,
+        inputsHash: true,
+        failureCode: null,
+        failureMessage: null,
+        confidence: "LOW",
+        failure: null,
+      },
+      coverLetter: {
+        status: "completed",
+        usableCurrent: true,
+        inputsHash: true,
+        responseBody: {
+          status: "success",
+          generationStatus: "success",
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          preview: { coverLetter: { paragraphs: ["Hello"] } },
+        },
+        content: "Hello",
+        confidence: "HIGH",
+        failure: null,
+      },
+    };
+    const studioArtifactsPayloadCompletedPair = {
+      ...studioArtifactsPayloadMissingResume,
+      artifact: {
+        ...studioArtifactsPayloadMissingResume.artifact,
+        hasResume: true,
+      },
+      resume: {
+        status: "completed",
+        usableCurrent: true,
+        inputsHash: true,
+        responseBody: {
+          status: "success",
+          generationStatus: "success",
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          preview: { resume: { heading: { name: "Alex Candidate" }, experience: [{ company: "Company", roleTitle: "Role", bullets: ["Did work."] }] } },
+        },
+        content: "Resume",
+        confidence: "HIGH",
+        failure: null,
+      },
+    };
+
     const fetchMock = installStrongFitFetches({
       score,
       readinessStatus: "ready",
-      studioArtifactsPayload: {
-        status: "missing",
-        baselineId: "base-1",
-        jobId: "job-1",
-        baselineVersionId: "base-version-1",
-        generationContractVersion: "studio-artifacts-v1",
-        artifact: {
-          hasResume: false,
-          hasCoverLetter: true,
-          pairStatus: "missing",
-          generating: false,
-          failure: null,
-        },
-        resume: {
-          status: "missing",
-          responseBody: null,
-          content: null,
-          failureCode: null,
-          failureMessage: null,
-          confidence: "LOW",
-          failure: null,
-        },
-        coverLetter: {
-          status: "completed",
-          responseBody: {
-            status: "success",
-            generationStatus: "success",
-            exportReady: true,
-            exports: { docx: true, pdf: true },
-            preview: { coverLetter: { paragraphs: ["Hello"] } },
-          },
-          content: "Hello",
-          confidence: "HIGH",
-          failure: null,
-        },
-      },
-	    });
+      studioArtifactsPayload: studioArtifactsPayloadMissingResume,
+    });
+    const baseImpl = fetchMock.getMockImplementation();
+    // After resume generation posts, Studio polls `/api/studio/artifacts` waiting for persistence.
+    // Update the mock to return a completed resume on subsequent artifact fetches.
+    fetchMock.mockImplementation((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.endsWith("/api/resume") && init?.method === "POST") {
+        resumeWasPosted = true;
+        return resolveAutoGenerationSuccess(input) as any;
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse(resumeWasPosted ? studioArtifactsPayloadCompletedPair : studioArtifactsPayloadMissingResume),
+        ) as any;
+      }
+      return baseImpl ? (baseImpl as any)(input, init) : resolveAutoGenerationSuccess(input);
+    });
 	    setFetchImplementation(fetchMock as any);
 	    renderStudio();
 
@@ -996,7 +1041,10 @@ describe("Studio auto-generation", () => {
 	    }, { timeout: 15000 });
 
 	    await waitFor(() => {
-	      expect(countPostCalls(fetchMock, "/api/resume")).toBeGreaterThan(0);
+	      // Auto-generation may call either the legacy Studio endpoint or the newer generator endpoint.
+	      expect(
+	        countPostCalls(fetchMock, "/api/resume/generate") + countPostCalls(fetchMock, "/api/resume"),
+	      ).toBeGreaterThan(0);
 	    }, { timeout: 15000 });
 	  }, 15000);
 

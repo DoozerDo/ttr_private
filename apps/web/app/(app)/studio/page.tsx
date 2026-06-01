@@ -762,7 +762,9 @@ function getBackendPairStatus(payload: BackendStudioArtifactsResponse | null | u
   // "generation in progress" authority even when one artifact is already available.
   if (resumeStatus === "in_progress" || coverStatus === "in_progress") return "in_progress" as const;
   if (resumeStatus === "failed" || coverStatus === "failed") return "failed" as const;
-  if (resumeStatus === "completed" || coverStatus === "completed") return "completed" as const;
+  // Pair completion semantics: "completed" means both artifacts are complete.
+  // A partial state (resume-only or cover-only) must not suppress auto-generation of the missing output.
+  if (resumeStatus === "completed" && coverStatus === "completed") return "completed" as const;
   return "missing" as const;
 }
 
@@ -2776,7 +2778,9 @@ export default function StudioPage() {
         "status" in payload
           ? getBackendPairStatus(payload as BackendStudioArtifactsResponse)
           : ((resumeResponse || coverResponse)
-              ? "completed"
+              ? (resumeResponse && coverResponse)
+                ? "completed"
+                : "missing"
               : (resumeFailure || coverFailure)
                 ? "failed"
                 : "missing");
