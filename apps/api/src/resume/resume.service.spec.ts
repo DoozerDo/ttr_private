@@ -3933,10 +3933,12 @@ describe('ResumeService contract', () => {
   });
 
   it('allows baseline-only resume fallback for Studio generate intents even when oneTap is true (eligible score lane)', async () => {
-    const { service } = buildService();
+    const { service, studioArtifactsService } = buildService();
     const original = baseline.sections;
     const originalScore = assessment.overallScore;
     assessment.overallScore = 83;
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
 
     baseline.sections = [
       {
@@ -3948,21 +3950,30 @@ describe('ResumeService contract', () => {
       },
     ];
 
-    await expect(
-      service.generateResume(
-        'user-1',
-        { ...baseRequest, oneTap: true, forceRegenerate: true },
-        { preflightOnly: false, skipReadinessGate: true, enforceOneTap: false },
-      ),
-    ).resolves.toMatchObject({
+    const result = await service.generateResume(
+      'user-1',
+      { ...baseRequest, oneTap: true, forceRegenerate: true },
+      { preflightOnly: false, skipReadinessGate: true, enforceOneTap: false },
+    );
+
+    expect(result).toMatchObject({
       ok: true,
       status: 'success',
+      generationStatus: 'success',
       exportReady: true,
     });
+    expect((result as any)?.preview?.resume).toBeTruthy();
+    expect(typeof (result as any)?.preview?.resume).toBe('object');
 
+    expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
+    expect(studioArtifactsService.recordResumeFailure).not.toHaveBeenCalled();
+
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
     assessment.overallScore = originalScore;
     baseline.sections = original;
   });
+
+  // (covered above with persistence + preview assertions)
 
   it('attaches resumeFailureDiagnostics + fallbackPathExecuted to unsupported_input exceptions', () => {
     const { service } = buildService();

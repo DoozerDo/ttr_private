@@ -950,18 +950,20 @@ export class ResumeService {
 	    if (Boolean(request.oneTap) && Boolean(opts?.enforceOneTap) && Boolean((opts as any)?.skipReadinessGate)) {
 	      return true;
 	    }
-	    const score = typeof assessment?.overallScore === 'number' ? assessment.overallScore : null;
-	    // Studio may issue generation requests with `oneTap=true` (verified-only) when score is eligible.
-	    // In that case, allow baseline-only degradation paths when it is clearly a Studio regenerate intent.
-	    if (
-	      Boolean(request.oneTap) &&
-	      Boolean(forceRegenerate) &&
-	      typeof score === 'number' &&
-	      score >= AUTO_GENERATE_THRESHOLD &&
-	      !Boolean(opts?.enforceOneTap)
-	    ) {
-	      return true;
-	    }
+		    const score = typeof assessment?.overallScore === 'number' ? assessment.overallScore : null;
+		    // Studio may issue generation requests with `oneTap=true` (verified-only) when score is eligible.
+		    // In that case, allow baseline-only degradation paths when it is clearly a Studio regenerate intent.
+		    if (
+		      Boolean(request.oneTap) &&
+		      Boolean(forceRegenerate) &&
+		      !Boolean(opts?.enforceOneTap)
+		    ) {
+		      // Some lanes (e.g. readiness_error / ResumeV2 validation failures) can throw before the
+		      // fit assessment context is available in the generator call. When Studio is explicitly
+		      // regenerating, treat the lane as eligible even if `score` is temporarily unavailable.
+		      if (typeof score !== 'number') return true;
+		      return score >= AUTO_GENERATE_THRESHOLD;
+		    }
 	    if (Boolean(request.oneTap) || Boolean(opts?.enforceOneTap)) return false;
 	    // Contract: for eligible-score Studio generation lanes (jobId + analysisId + score >= threshold),
 	    // non-blocking baseline-only fallback paths must be allowed even when the client omitted
@@ -1839,6 +1841,7 @@ export class ResumeService {
     let minimalDraftSectionsForFailSafe: ResumeDraftSection[] | null = null;
     let jobIdForFailSafe: string | null = null;
     let analysisIdForFailSafe: string | null = null;
+    let effectiveAssessmentForFailSafe: FitAssessment | null = null;
     let fallbackPathExecutedForRequest = false;
     const recordResumeEvent = (success: boolean) => {
       void this.criticalFlowTrackerService?.recordCriticalFlowEvent({
@@ -1988,6 +1991,7 @@ export class ResumeService {
             order: { createdAt: 'DESC' },
           })
 	        : null);
+      effectiveAssessmentForFailSafe = effectiveAssessment ?? null;
 
 	    const isVerifiedOnlyRequest =
 	      Boolean(request.oneTap) || Boolean(options?.enforceOneTap);
@@ -3528,15 +3532,16 @@ export class ResumeService {
             fallbackPathExecutedForRequest,
           );
           }
+        } else {
+          this.throwGenerationFailedError(
+            this.mapResumeFailureDescription(reason),
+            {
+              stage: experienceDiagnostics.resumeGenerationStage ?? 'resume_structure_assembly',
+              reason,
+              blockers: reasons.slice(0, 4),
+            },
+          );
         }
-        this.throwGenerationFailedError(
-          this.mapResumeFailureDescription(reason),
-          {
-            stage: experienceDiagnostics.resumeGenerationStage ?? 'resume_structure_assembly',
-            reason,
-            blockers: reasons.slice(0, 4),
-          },
-        );
       }
     }
     experienceDiagnostics = {
@@ -4732,17 +4737,25 @@ export class ResumeService {
         // Contract: a resume that failed Studio persistence must not be treated as generated.
         throw error;
       }
-      if (isResumeV2) {
-        const responseBody =
-          error instanceof UnprocessableEntityException
-            ? (error.getResponse() as any)
-            : null;
+	      if (isResumeV2) {
+	        const responseBody =
+	          error instanceof UnprocessableEntityException
+	            ? (error.getResponse() as any)
+	            : null;
         const errorCode = responseBody?.error?.code ?? responseBody?.code ?? null;
         const errorMessage =
           responseBody?.error?.message ?? responseBody?.message ?? (error instanceof Error ? error.message : String(error));
-        this.logger.error('[resume-generation][v2] failed', {
-          userId,
-          baselineId: studioArtifactContext.baselineId || null,
+
+	        // ResumeV2 contract: do not persist failure artifacts for structured/validation failures here.
+	        // Let the unified failure handling below either:
+	        // - fail-safe degrade to a minimal baseline-only resume (Studio eligible lanes), or
+	        // - preserve fail-closed behavior (non-Studio/oneTap) via the existing top-level guardrails.
+	        //
+	        // Only persist a ResumeV2 failure artifact for non-HTTP/untyped failures.
+	        if (!(error instanceof UnprocessableEntityException)) {
+	        this.logger.error('[resume-generation][v2] failed', {
+	          userId,
+	          baselineId: studioArtifactContext.baselineId || null,
           baselineVersionId: studioArtifactContext.baselineVersionId || null,
           jobId: studioArtifactContext.jobId || null,
           analysisId: studioArtifactContext.analysisId || null,
@@ -4752,8 +4765,8 @@ export class ResumeService {
           stack: error instanceof Error ? error.stack : null,
         });
 
-        try {
-          await this.studioArtifactsService.recordResumeFailure({
+	        try {
+	          await this.studioArtifactsService.recordResumeFailure({
             userId,
             baselineId: studioArtifactContext.baselineId,
             jobId: studioArtifactContext.jobId,
@@ -4773,8 +4786,9 @@ export class ResumeService {
           // ignore persistence failures for failure artifacts
         }
 
-        throw error;
-      }
+	        throw error;
+	        }
+	      }
 
       if (error instanceof UnprocessableEntityException) {
         const responseBody = error.getResponse() as any;
