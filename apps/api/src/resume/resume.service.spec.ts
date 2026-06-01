@@ -434,6 +434,65 @@ describe('ResumeService contract', () => {
     expect(content).not.toMatch(/-\\s+Technology\\s*&\\s*Tools/i);
   });
 
+  it('fail-safe experience recovery preserves all discoverable headers (generic fixture)', () => {
+    const baselineSections: any[] = [
+      {
+        id: 'exp-1',
+        sectionType: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        order: 0,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        content: [
+          'Manager, Operations',
+          'Company A',
+          '2022 – 2025',
+          'Led incident triage and improved operational outcomes.',
+          '',
+          'Senior Program Manager',
+          'Company B',
+          '2021 – 2022',
+          'Owned cross-functional delivery across stakeholders.',
+          '',
+          'Service Engineering Team Lead',
+          'Company C',
+          '2019 – 2020',
+          'Improved queue health reporting and response time visibility.',
+          '',
+          'Senior Systems Engineer',
+          'Company D',
+          '2014 – 2019',
+          'Troubleshot production incidents and automated common remediations.',
+          '',
+          'Company E | Fulfillment Engineer | 2010 – 2011',
+          'Delivered storage provisioning and support workflows.',
+          '',
+          'Earlier Career',
+          'Technology & Tools',
+          'Linux, Windows',
+        ].join('\n'),
+      },
+    ];
+
+    // Intentionally incomplete structured list: discovery should still pick up missing headers from text.
+    const structuredExperience = [
+      { company: 'Company A', roleTitle: 'Manager, Operations', dates: '2022 – 2025', bullets: [] },
+      { company: 'Company E', roleTitle: 'Fulfillment Engineer', dates: '2010 – 2011', bullets: [] },
+    ];
+
+    const content = buildFailSafeExperienceContentFromStructuredAndBaseline({
+      baselineSections: baselineSections as any,
+      structuredExperience: structuredExperience as any,
+    });
+
+    expect(content).toContain('Company A | Manager, Operations');
+    expect(content).toContain('Company B | Senior Program Manager');
+    expect(content).toContain('Company C | Service Engineering Team Lead');
+    expect(content).toContain('Company D | Senior Systems Engineer');
+    expect(content).toContain('Company E | Fulfillment Engineer');
+    expect(content).not.toMatch(/-\\s+Earlier Career/i);
+    expect(content).not.toMatch(/-\\s+Technology\\s*&\\s*Tools/i);
+  });
+
   it('forces Studio regenerate to persist a fresh V2 artifact when RESUME_GENERATION_V2=true', async () => {
     const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
     process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';

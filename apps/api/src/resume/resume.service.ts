@@ -145,6 +145,91 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
     .map((l) => String(l ?? '').replace(/\s+/g, ' ').trim())
     .filter(Boolean);
 
+  const isSectionHeading = (value: string) => {
+    const v = String(value ?? '').trim();
+    if (!v) return false;
+    return /^(?:earlier\s+career|technology\s*&\s*tools|technology\s+&\s+tools|operating\s+systems|monitoring|automation|skills|education|projects)\b/i.test(v);
+  };
+
+  const looksLikeDatesLine = (value: string) => {
+    const v = String(value ?? '').trim();
+    if (!v) return false;
+    const month = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+    const monthYear = new RegExp(`\\b${month}\\s+(?:19|20)\\d{2}\\b`, 'i');
+    const hasYear = /\\b(19|20)\\d{2}\\b/.test(v);
+    if (!hasYear) return false;
+    const hasRange = /\\b(19|20)\\d{2}\\b\\s*[—–-]\\s*(?:\\b(19|20)\\d{2}\\b|present|current)\\b/i.test(v);
+    const hasMonthYear = monthYear.test(v);
+    return hasRange || /\\b(?:present|current)\\b/i.test(v) || hasMonthYear;
+  };
+
+  const looksLikeRoleTitle = (value: string) =>
+    /\b(manager|director|engineer|lead|architect|administrator|developer|specialist|analyst|consultant|producer|coordinator|technician)\b/i.test(
+      String(value ?? ''),
+    );
+
+  const parsePipeHeaderLine = (line: string): { company: string; roleTitle: string; dates?: string } | null => {
+    const parts = line.split('|').map((p) => p.trim()).filter(Boolean);
+    if (parts.length < 2) return null;
+    if (parts.length >= 3) {
+      const [a, b] = parts;
+      const dateCandidate = parts[parts.length - 1] ?? '';
+      const dates = looksLikeDatesLine(dateCandidate) ? dateCandidate : undefined;
+      return { company: a, roleTitle: b, ...(dates ? { dates } : {}) };
+    }
+    const [a, b] = parts;
+    const aLooksRole = looksLikeRoleTitle(a);
+    const bLooksRole = looksLikeRoleTitle(b);
+    if (!aLooksRole && bLooksRole) return { company: a, roleTitle: b };
+    if (aLooksRole && !bLooksRole) return { company: b, roleTitle: a };
+    // Default to company | role for two-part pipes in fail-safe recovery.
+    return { company: a, roleTitle: b };
+  };
+
+  const discoverHeadersFromLines = () => {
+    const headers: Array<{ startIndex: number; company: string; roleTitle: string; dates?: string }> = [];
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i] ?? '';
+      if (!line || isSectionHeading(line)) continue;
+      if (line.includes('|')) {
+        const parsed = parsePipeHeaderLine(line);
+        if (parsed?.company && parsed?.roleTitle) {
+          headers.push({ startIndex: i, ...parsed });
+          continue;
+        }
+      }
+      // Split-line header: role line + company line (+ optional date line)
+      const next = lines[i + 1] ?? '';
+      if (!next || isSectionHeading(next)) continue;
+      if (looksLikeDatesLine(line) || looksLikeDatesLine(next)) continue;
+      if (line.startsWith('-') || next.startsWith('-')) continue;
+      const lineLooksRole = looksLikeRoleTitle(line);
+      const nextLooksRole = looksLikeRoleTitle(next);
+      if (lineLooksRole === nextLooksRole) continue;
+      const roleTitle = lineLooksRole ? line : next;
+      const company = lineLooksRole ? next : line;
+      // Dates can appear on the next one or two lines (blank spacers are already removed).
+      const maybeDates1 = lines[i + 2] ?? '';
+      const maybeDates2 = lines[i + 3] ?? '';
+      const dates = looksLikeDatesLine(maybeDates1)
+        ? maybeDates1
+        : looksLikeDatesLine(maybeDates2)
+          ? maybeDates2
+          : undefined;
+      headers.push({ startIndex: i, company, roleTitle, ...(dates ? { dates } : {}) });
+    }
+    // Deduplicate by startIndex (keep first) and by normalized company+roleTitle.
+    const seenKeys = new Set<string>();
+    const deduped: typeof headers = [];
+    for (const h of headers) {
+      const key = `${h.company.toLowerCase()}::${h.roleTitle.toLowerCase()}`;
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      deduped.push(h);
+    }
+    return deduped.sort((a, b) => a.startIndex - b.startIndex);
+  };
+
   const findHeaderIndex = (entry: { company: string; roleTitle: string }) => {
     const company = String(entry.company ?? '').trim();
     const roleTitle = String(entry.roleTitle ?? '').trim();
@@ -187,21 +272,6 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
 
   const collectRoleLinesAsBullets = (startExclusive: number, endExclusive: number) => {
     const out: string[] = [];
-    const looksLikeDatesLine = (value: string) => {
-      const v = String(value ?? '').trim();
-      if (!v) return false;
-      const month = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
-      const monthYear = new RegExp(`\\b${month}\\s+(?:19|20)\\d{2}\\b`, 'i');
-      return (
-        /\\b(19|20)\\d{2}\\b/.test(v) &&
-        (/[—–-]/.test(v) || /\\b(?:present|current)\\b/i.test(v) || monthYear.test(v))
-      );
-    };
-    const isSectionHeading = (value: string) => {
-      const v = String(value ?? '').trim();
-      if (!v) return false;
-      return /^(?:earlier\s+career|technology\s*&\s*tools|technology\s+&\s+tools|operating\s+systems|monitoring|automation|skills|education|projects)\b/i.test(v);
-    };
     for (let i = startExclusive; i < endExclusive; i += 1) {
       const line = lines[i] ?? '';
       if (!line) continue;
@@ -217,7 +287,17 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
     return out;
   };
 
-  const blocks = params.structuredExperience.map((entry) => {
+  const discovered = discoverHeadersFromLines();
+  const experienceEntries: Array<{ company: string; roleTitle: string; dates?: string; bullets: string[] }> =
+    discovered.length
+      ? discovered.map((h) => ({ company: h.company, roleTitle: h.roleTitle, dates: h.dates, bullets: [] }))
+      : (params.structuredExperience as any);
+
+  const discoveredIndices = discovered.length
+    ? discovered.map((h) => ({ idx: h.startIndex, entry: h })).sort((a, b) => a.idx - b.idx)
+    : null;
+
+  const blocks = experienceEntries.map((entry: any, idx: number) => {
     const company = String(entry?.company ?? '').trim();
     const roleTitle = String(entry?.roleTitle ?? '').trim();
     const dates = typeof entry?.dates === 'string' ? String(entry.dates).trim() : '';
@@ -225,12 +305,20 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
     if (!header) return '';
 
     let bullets: string[] = Array.isArray(entry?.bullets) ? entry.bullets.slice() : [];
-    const headerPos = headerIndices.findIndex((h) => h.entry === entry);
-    if (headerPos >= 0) {
-      const start = headerIndices[headerPos]!.idx;
-      const end = headerPos + 1 < headerIndices.length ? headerIndices[headerPos + 1]!.idx : lines.length;
-      const collected = collectRoleLinesAsBullets(start + 1, end);
-      if (collected.length) bullets = collected;
+    if (discoveredIndices) {
+      const start = discoveredIndices[idx]?.idx ?? -1;
+      const end = idx + 1 < discoveredIndices.length ? discoveredIndices[idx + 1]!.idx : lines.length;
+      if (start >= 0) {
+        bullets = collectRoleLinesAsBullets(start + 1, end);
+      }
+    } else {
+      const headerPos = headerIndices.findIndex((h) => h.entry === entry);
+      if (headerPos >= 0) {
+        const start = headerIndices[headerPos]!.idx;
+        const end = headerPos + 1 < headerIndices.length ? headerIndices[headerPos + 1]!.idx : lines.length;
+        const collected = collectRoleLinesAsBullets(start + 1, end);
+        if (collected.length) bullets = collected;
+      }
     }
 
     const bulletLines = (bullets ?? [])
