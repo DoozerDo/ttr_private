@@ -13274,7 +13274,9 @@ export default function StudioPage() {
                     ? "Retry generation"
                   : workflowAuthority.primaryAction === "REVIEW"
                       ? "Review fit gaps"
-                      : "Resolve blockers"}
+                      : uiHasRenderablePair || studioArtifactPairStatus === "completed"
+                        ? "Ready"
+                        : "Resolve blockers"}
               </p>
               <p className="text-sm text-slate-400">
                 {workflowAuthority.workflowState === "READY"
@@ -13503,7 +13505,7 @@ export default function StudioPage() {
                     : "Generating your resume and cover letter..."}
                 </p>
               ) : null
-            ) : workflowAuthority.primaryAction === "BLOCKED" ? (
+            ) : workflowAuthority.primaryAction === "BLOCKED" && !uiHasRenderablePair && studioArtifactPairStatus !== "completed" ? (
               <Link
                 href={remediationHref}
                 className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
@@ -14305,7 +14307,10 @@ export default function StudioPage() {
           null
         ) : null}
 
-        {resumePresenter.status === "blocked" && !hasResumeArtifactCanonical ? (
+        {resumePresenter.status === "blocked" &&
+        !hasResumeArtifactCanonical &&
+        !uiHasRenderablePair &&
+        studioArtifactPairStatus !== "completed" ? (
           <div className="space-y-3 rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4">
             <p className="text-sm font-semibold text-amber-100">
               {resumePresenter.display?.title ?? "Resume blocked by compliance"}
@@ -14791,7 +14796,11 @@ export default function StudioPage() {
           </div>
         ) : null}
 
-        {!coverLetterComplianceBlocked && coverPresenter.status === "blocked" && !hasCoverLetterArtifactCanonical ? (
+        {!coverLetterComplianceBlocked &&
+        coverPresenter.status === "blocked" &&
+        !hasCoverLetterArtifactCanonical &&
+        !uiHasRenderablePair &&
+        studioArtifactPairStatus !== "completed" ? (
           <div className="space-y-3 rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4">
             <p className="text-sm font-semibold text-amber-100">
               {coverPresenter.display?.title ?? "Cover letter blocked by compliance"}

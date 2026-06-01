@@ -1359,6 +1359,8 @@ describe("Studio auto-generation", () => {
       expect(screen.queryByText("Why generation is blocked")).toBeNull();
       expect(screen.queryByTestId("studio-evidence-blocked-panel")).toBeNull();
       expect(screen.queryByText(/^Blocked$/i)).toBeNull();
+      expect(screen.queryByText(/Resume blocked by compliance/i)).toBeNull();
+      expect(screen.queryByText(/Resolve blockers/i)).toBeNull();
     }, { timeout: 15000 });
   }, 15000);
 
