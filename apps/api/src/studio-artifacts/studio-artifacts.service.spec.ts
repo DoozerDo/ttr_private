@@ -89,6 +89,40 @@ describe('StudioArtifactsService (unit): artifact record hydration metadata', ()
     expect(hydrated.generationRunId).toBe('run-abc');
     expect(hydrated.artifactSource).toBe('persisted');
   });
+
+  it('rejects minimal fail-safe resume artifacts from reuse/currentness when auditId is minimal:* and generationMode is top_level_fail_safe_minimal', () => {
+    const service = Object.create(StudioArtifactsService.prototype) as any;
+
+    const record = {
+      id: 'artifact-1',
+      createdAt: new Date('2026-05-31T00:00:00.000Z'),
+      updatedAt: new Date('2026-05-31T00:01:00.000Z'),
+      resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+      resumeInputsHash: 'hash-1',
+      resumeResponseBody: {
+        status: 'success',
+        generationStatus: 'success',
+        auditId: 'minimal:1780277132821',
+        preview: { resume: { heading: { name: 'Alex' }, experience: [] } },
+        internal: {
+          resumeGenerationMode: 'top_level_fail_safe_minimal',
+          resumeFailSafeMinimalUsed: true,
+        },
+      },
+      resumeContent: 'x'.repeat(318),
+      resumeFailureCode: null,
+      resumeFailureMessage: null,
+      resumeGenerationStartedAt: null,
+      resumeGeneratedAt: new Date('2026-05-31T00:01:00.000Z'),
+      resumeFailedAt: null,
+      resumeMetadata: {},
+    };
+
+    const hydrated = service.buildArtifactRecord(record, 'resume', 'hash-1');
+    expect(hydrated.inputsHashMatches).toBe(true);
+    expect(hydrated.artifactCurrent).toBe(false);
+    expect(hydrated.usableCurrent).toBe(false);
+  });
 });
 
 describe('StudioArtifactsService (unit): studio artifact scope upsert is idempotent', () => {

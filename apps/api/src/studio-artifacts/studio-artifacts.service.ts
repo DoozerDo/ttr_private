@@ -204,6 +204,20 @@ function detectMinimalResumeArtifact(responseBody: Record<string, unknown> | nul
   const minimalFallback = isTrue(internal?.minimalFallback);
   if (minimalFallback) reasons.push('internal.minimalFallback');
 
+  const auditId = safeText((responseBody as any)?.auditId);
+  const auditIdLegacy = safeText((responseBody as any)?.audit_id);
+  if (auditId.startsWith('minimal:') || auditIdLegacy.startsWith('minimal:')) {
+    reasons.push('auditId.minimal_prefix');
+  }
+
+  const generationMode = safeText((internal as any)?.resumeGenerationMode);
+  if (generationMode === 'top_level_fail_safe_minimal') {
+    reasons.push('internal.resumeGenerationMode.top_level_fail_safe_minimal');
+  }
+
+  const failSafeUsed = isTrue((internal as any)?.resumeFailSafeMinimalUsed);
+  if (failSafeUsed) reasons.push('internal.resumeFailSafeMinimalUsed');
+
   const resumeSections = (responseBody as any)?.preview?.resume?.sections;
   const hasMinimalSummary =
     Array.isArray(resumeSections) &&

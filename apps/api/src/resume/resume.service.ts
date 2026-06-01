@@ -1866,6 +1866,7 @@ export class ResumeService {
 	    let resumeSuccessPersistenceFailed = false;
 	    const structuredExtractionDebugEnabled =
 	      process.env.STRUCTURED_BASELINE_EXTRACTION_DEBUG === 'true';
+	    let lastResumeGenerationCheckpoint: string | null = null;
 	    try {
       isResumeV2 = process.env[RESUME_GENERATION_V2_FEATURE_FLAG] === 'true';
       const shouldEnforceOneTap = options?.enforceOneTap ?? true;
@@ -1950,12 +1951,13 @@ export class ResumeService {
       studioArtifactContext.analysisId = analysisId ?? '';
       // analysisId may be omitted by Studio generate buttons; resolve the latest assessment for this pair.
 
-      const baseline = await this.baselineRepository.findOne({
-      where: { id: baselineId, userId },
-      relations: ['sections', 'parsedRecords'],
-      order: { sections: { order: 'ASC' }, parsedRecords: { createdAt: 'DESC' } },
-    });
-      baselineForFailSafe = baseline ?? null;
+	      const baseline = await this.baselineRepository.findOne({
+	      where: { id: baselineId, userId },
+	      relations: ['sections', 'parsedRecords'],
+	      order: { sections: { order: 'ASC' }, parsedRecords: { createdAt: 'DESC' } },
+	    });
+	      lastResumeGenerationCheckpoint = 'baseline_loaded';
+	      baselineForFailSafe = baseline ?? null;
 
       if (!baseline) {
         throw new NotFoundException('Baseline not found');
@@ -1974,7 +1976,7 @@ export class ResumeService {
         }
       }
 
-    const baselineVersion = baselineVersionId
+	    const baselineVersion = baselineVersionId
       ? await this.baselineVersionRepository.findOne({
           where: { id: baselineVersionId, baselineId: baseline.id },
         })
@@ -1982,7 +1984,8 @@ export class ResumeService {
           where: { baselineId: baseline.id },
           order: { versionNumber: 'DESC' },
         });
-    baselineVersionForFailSafe = baselineVersion ?? null;
+	    baselineVersionForFailSafe = baselineVersion ?? null;
+	    lastResumeGenerationCheckpoint = 'baseline_version_loaded';
 
     if (!baselineVersion) {
       throw new NotFoundException('Baseline version not found');
@@ -2218,15 +2221,17 @@ export class ResumeService {
 	        (section.includePolicy ?? BaselineIncludePolicy.OPTIONAL) !==
 	        BaselineIncludePolicy.NEVER,
 	    );
-	    let resumeInputSections =
-	      this.promoteExperienceLikeSections(allowedSections);
+		    let resumeInputSections =
+		      this.promoteExperienceLikeSections(allowedSections);
+		    lastResumeGenerationCheckpoint = 'resume_input_sections_resolved';
 
-	    const structuredBaselineForAuthorityGate = extractStructuredBaselineFromSections(resumeInputSections as any);
-	    emitStructuredBaselineExtractionDebug(
-	      'authority_gate',
-	      resumeInputSections as unknown[],
-	      structuredBaselineForAuthorityGate as unknown,
-	    );
+		    const structuredBaselineForAuthorityGate = extractStructuredBaselineFromSections(resumeInputSections as any);
+		    emitStructuredBaselineExtractionDebug(
+		      'authority_gate',
+		      resumeInputSections as unknown[],
+		      structuredBaselineForAuthorityGate as unknown,
+		    );
+		    lastResumeGenerationCheckpoint = 'structured_baseline_authority_gate_extracted';
 	    const careerIdentitySnapshot: CareerIdentitySnapshot = deriveCareerIdentityFromStructuredBaseline(
 	      structuredBaselineForAuthorityGate as any,
 	    );
@@ -2812,11 +2817,12 @@ export class ResumeService {
         Boolean(request.forceRegenerate),
       )} score=${Number.isFinite(scoreForTemplate) ? String(scoreForTemplate) : 'nan'}`,
     );
-    forceTemplateRegen =
-      isResumeV2 ||
-      (!request.oneTap &&
-        Number.isFinite(scoreForTemplate) &&
-        scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD);
+	    forceTemplateRegen =
+	      isResumeV2 ||
+	      (!request.oneTap &&
+	        Number.isFinite(scoreForTemplate) &&
+	        scoreForTemplate >= TEMPLATE_ASSEMBLY_THRESHOLD);
+	    lastResumeGenerationCheckpoint = `template_regen_decided:${forceTemplateRegen ? 'true' : 'false'}`;
 	    let usedStructuredBaselineTemplate = false;
 	    let structuredBaselineTemplateDegradedToBaselineOnly: {
 	      missingEvidenceReasons: string[];
@@ -2842,9 +2848,10 @@ export class ResumeService {
       }
     }
 
-    let normalizedDocument = (() => {
-      if (isResumeV2) {
-        try {
+	    let normalizedDocument = (() => {
+	      if (isResumeV2) {
+	        lastResumeGenerationCheckpoint = 'resume_v2_ingest_start';
+	        try {
           const shouldLogV2 = process.env.RESUME_V2_INGEST_DEBUG === 'true';
           const persisted = persistedResumeV2;
           // Canonical validity check (throws baseline_resume_v2_invalid with canonical message/details).
@@ -2887,9 +2894,10 @@ export class ResumeService {
               // ignore
             }
           }
-          return normalized;
-        } catch (error) {
-          const response = (error as any)?.response as any;
+	          return normalized;
+	        } catch (error) {
+	          lastResumeGenerationCheckpoint = 'resume_v2_ingest_failed';
+	          const response = (error as any)?.response as any;
           const code = String(response?.error?.code ?? '');
           // Deterministic fallback: if ResumeV2 ingestion/validation is missing/failed for this baseline,
           // fall back to section-based structured extraction so qualified users can still generate a
@@ -2914,8 +2922,9 @@ export class ResumeService {
             throw error;
           }
         }
-      }
+	      }
 	      if (forceTemplateRegen) {
+	        lastResumeGenerationCheckpoint = 'structured_template_extract_start';
 	        const structured = extractStructuredBaselineFromSections(resumeInputSections);
 	        emitStructuredBaselineExtractionDebug(
 	          'force_template_regen',
@@ -3059,8 +3068,9 @@ export class ResumeService {
 	          score: scoreForTemplate,
 	          experienceCount: (structured.experience ?? []).length,
 	        });
-	        if ((structured.experience ?? []).length === 0) {
-	          if (this.isStudioEligibleGenerationLane(request, options, jobId, analysisId, effectiveAssessment ?? null)) {
+		        if ((structured.experience ?? []).length === 0) {
+		          lastResumeGenerationCheckpoint = 'structured_template_zero_experience';
+		          if (this.isStudioEligibleGenerationLane(request, options, jobId, analysisId, effectiveAssessment ?? null)) {
 	            // Studio eligible lane: degrade to a baseline-only resume draft (verified content only) and mark
 	            // limitations as non-blocking metadata.
 	            structuredBaselineExtractionMissingReasons = structured.missingEvidenceReasons.slice(0, 12);
@@ -3091,7 +3101,8 @@ export class ResumeService {
 	            },
 	          }));
 	        }
-	        usedStructuredBaselineTemplate = true;
+		        usedStructuredBaselineTemplate = true;
+		        lastResumeGenerationCheckpoint = 'structured_template_assemble_start';
         // `resolveBaselineIdentity` returns `BaselineIdentity` (`fullName`, etc). Use those fields
         // explicitly so template assembly always has a stable, verified name and doesn't depend on
         // any untyped/legacy identity shape.
@@ -3099,12 +3110,13 @@ export class ResumeService {
           identity && typeof identity === 'object'
             ? (identity as unknown as { fullName?: unknown; contactLine?: unknown; links?: unknown })
             : {};
-        return assembleResumeFromStructuredBaseline(structured, {
+		        return assembleResumeFromStructuredBaseline(structured, {
           name: identityRecord.fullName,
           contactLine: identityRecord.contactLine,
           links: identityRecord.links,
-        });
-      }
+		        });
+	      }
+	      lastResumeGenerationCheckpoint = 'legacy_normalize_from_sections_start';
       if (process.env.RESUME_NORM_TRACE === 'true') {
         // eslint-disable-next-line no-console
         console.log(
@@ -3112,7 +3124,7 @@ export class ResumeService {
           JSON.stringify({ forceTemplateRegen: false, scoreForTemplate, threshold: TEMPLATE_ASSEMBLY_THRESHOLD }),
         );
       }
-      return buildNormalizedResumeDocument(
+	      return buildNormalizedResumeDocument(
         sections as ResumeExportSection[],
         identity,
         { documentStrategyPlan: request.documentStrategyPlan ?? undefined },
@@ -4138,6 +4150,7 @@ export class ResumeService {
 	      }
 	      return Object.keys(result).length ? result : null;
 	    })();
+	    lastResumeGenerationCheckpoint = 'normalized_document_built';
 	        const response: ResumeGenerationResponse = {
 	          ok: true,
 	          status: 'success',
@@ -4863,16 +4876,53 @@ export class ResumeService {
 	        }
 	      }
 
-      if (error instanceof UnprocessableEntityException) {
-        const responseBody = error.getResponse() as any;
-        const category = responseBody?.category ?? responseBody?.error?.category ?? null;
-        const code = responseBody?.code ?? responseBody?.error?.code ?? null;
-        const artifactReadiness = responseBody?.diagnostics?.artifactReadiness ?? responseBody?.error?.diagnostics?.artifactReadiness ?? null;
-        if (category === 'generation_blocked' || code === 'generation_blocked' || artifactReadiness === 'blocked') {
-          throw error;
-        }
-      }
-	        const hasBaselineText =
+	      if (error instanceof UnprocessableEntityException) {
+	        const responseBody = error.getResponse() as any;
+	        const category = responseBody?.category ?? responseBody?.error?.category ?? null;
+	        const code = responseBody?.code ?? responseBody?.error?.code ?? null;
+	        const artifactReadiness = responseBody?.diagnostics?.artifactReadiness ?? responseBody?.error?.diagnostics?.artifactReadiness ?? null;
+	        if (category === 'generation_blocked' || code === 'generation_blocked' || artifactReadiness === 'blocked') {
+	          throw error;
+	        }
+	      }
+	      const shouldTraceTopLevelFailSafeEntry =
+	        process.env.STRUCTURED_BASELINE_EXTRACTION_DEBUG === 'true' &&
+	        baselineForFailSafe?.id === '1ea19bc0-2066-41d4-93d8-21cf6117712d' &&
+	        baselineVersionForFailSafe?.id === 'bd33a0e4-5897-473b-b939-a167574b1014' &&
+	        jobIdForFailSafe === 'c330e981-3b25-4936-9a66-39954dc8116b' &&
+	        analysisIdForFailSafe === '2fdc890b-66c8-4f81-98a8-956cc81d31c7';
+	      if (shouldTraceTopLevelFailSafeEntry) {
+	        try {
+	          const responseBody =
+	            error instanceof UnprocessableEntityException ? (error.getResponse() as any) : null;
+	          const errCode = responseBody?.error?.code ?? responseBody?.code ?? null;
+	          const errStatus = responseBody?.statusCode ?? responseBody?.error?.statusCode ?? null;
+	          const stackLines =
+	            error instanceof Error && typeof error.stack === 'string'
+	              ? error.stack.split('\n').slice(0, 20)
+	              : [];
+	          // eslint-disable-next-line no-console
+	          console.log('[TOP_LEVEL_FAIL_SAFE_ENTRY_TRACE]', {
+	            baselineId: baselineForFailSafe?.id ?? null,
+	            baselineVersionId: baselineVersionForFailSafe?.id ?? null,
+	            jobId: jobIdForFailSafe ?? null,
+	            analysisId: analysisIdForFailSafe ?? null,
+	            errorClass: error instanceof Error ? error.name : typeof error,
+	            errorMessage: error instanceof Error ? error.message : String(error),
+	            errorCode: errCode ? String(errCode) : null,
+	            errorStatus: errStatus !== null ? Number(errStatus) : null,
+	            stack: stackLines,
+	            generationModeBeforeException: {
+	              isResumeV2,
+	              forceTemplateRegen,
+	            },
+	            lastCheckpoint: lastResumeGenerationCheckpoint,
+	          });
+	        } catch {
+	          // ignore trace failures
+	        }
+	      }
+		        const hasBaselineText =
 	          Boolean(minimalDraftSectionsForFailSafe) &&
 	          (minimalDraftSectionsForFailSafe ?? []).some(
 	            (section) => (section.content ?? '').trim().length > 0,
@@ -5994,6 +6044,5 @@ export class ResumeService {
       });
       throw error;
     }
-  } 
 } 
-
+} 
