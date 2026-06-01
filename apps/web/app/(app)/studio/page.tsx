@@ -11290,7 +11290,8 @@ export default function StudioPage() {
                   bypassReadinessGate: true,
                   // Studio eligible generation lane: always mark as an explicit generate intent so
                   // backend non-blocking baseline-only fallback paths can apply when needed.
-                  forceRegenerate: true,
+                  forceRegenerate:
+                    source === "manual_retry" || (source === "shell_auto" && missingResumeOutput),
                   regenerationSource: source,
                   onAttempt: (next) => {
                     attempt = next;
@@ -11299,7 +11300,8 @@ export default function StudioPage() {
               : await handleCoverDraft({
                   sessionKey,
                   bypassReadinessGate: true,
-                  forceRegenerate: source === "manual_retry",
+                  forceRegenerate:
+                    source === "manual_retry" || (source === "shell_auto" && missingCoverOutput),
                   regenerationSource: source,
                   onAttempt: (next) => {
                     attempt = next;
@@ -11354,6 +11356,8 @@ export default function StudioPage() {
       scrollToStudioTop,
       setAutoGenerationInFlight,
       trackEvent,
+      missingResumeOutput,
+      missingCoverOutput,
     ],
   );
 
