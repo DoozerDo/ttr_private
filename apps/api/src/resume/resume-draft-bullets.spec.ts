@@ -678,6 +678,36 @@ describe('resume draft bullets', () => {
     expect(bulletTexts).toEqual([]);
   });
 
+  it('extracts experience bullets from header + implicit action lines even when section bullets are not prefixed', () => {
+    const section = {
+      id: 'section-experience',
+      sectionType: BaselineSectionType.EXPERIENCE,
+      order: 0,
+      title: 'Professional Experience',
+      includePolicy: BaselineIncludePolicy.ALWAYS,
+      content: [
+        'PMB Performance | Director, Customer Operations | 2023 - Present',
+        'Led support operations across global teams and improved SLA performance',
+        'Warner Bros. Discovery | Program Manager | 2021 - 2023',
+        'Built cross-functional playbooks and reduced incident response time by 35%',
+        'CenturyLink Cloud | Support Manager | 2018 - 2021',
+        'Managed escalations and delivered process improvements for enterprise customers',
+      ].join('\n'),
+    } as never;
+
+    const logicalUnits = reconstructLogicalTextUnits(section.content);
+    const evidenceUnits = extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits, { allowImplicitBullets: true });
+    expect(evidenceUnits.length).toBeGreaterThan(0);
+
+    const draft = buildResumeDraftSections([section], { jobText: 'support operations incident response leadership' });
+    const experienceDraft = draft.find((s) => String(s.type).toUpperCase() === 'EXPERIENCE');
+    expect(experienceDraft).toBeTruthy();
+    expect(experienceDraft?.bullets.length ?? 0).toBeGreaterThan(0);
+
+    const anchorValidation = validateResumeDraftBulletAnchors(draft, [section]);
+    expect(anchorValidation.valid).toBe(true);
+  });
+
   it('rejects bullets that end with dangling terminal words (ex: "The")', () => {
     const draft = buildResumeDraftSections(
       [

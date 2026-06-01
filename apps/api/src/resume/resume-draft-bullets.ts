@@ -331,11 +331,11 @@ function getLineIndent(rawLine: string) {
 }
 
 function startsWithContinuationCue(text: string) {
-  const normalized = normalizeLine(text).toLowerCase();
+  const normalized = normalizeLine(text);
   if (!normalized) return false;
   return (
     /^[a-z]/.test(normalized) ||
-    /^(?:and|or|but|as\s+well\s+as|well\s+as)\b/.test(normalized)
+    /^(?:and|or|but|as\s+well\s+as|well\s+as)\b/i.test(normalized)
   );
 }
 
@@ -613,6 +613,7 @@ function mapEvidenceUnitsToCandidates(units: ResumeEvidenceUnit[]): ResumeDraftB
 export function extractEvidenceUnitsFromLogicalUnits(
   sectionId: string,
   units: LogicalTextUnit[],
+  opts?: { allowImplicitBullets?: boolean },
 ): ResumeEvidenceUnit[] {
   const evidenceUnits: ResumeEvidenceUnit[] = [];
 
@@ -694,6 +695,30 @@ export function extractEvidenceUnitsFromLogicalUnits(
           startLine: unit.startLine,
           endLine: unit.endLine,
           kind: unit.merged ? 'logical_bullet' : 'bullet_line',
+        },
+        anchorKind: 'bullet_line',
+        exactBaselineBullet: true,
+      });
+    }
+
+    if (
+      opts?.allowImplicitBullets === true &&
+      !unit.explicitBullet &&
+      countTokens(normalizedUnitText) >= MIN_NON_BULLET_TOKENS &&
+      !isLowercaseStart(normalizedUnitText) &&
+      !/^(?:and|or|but|as\s+well\s+as|well\s+as)\b/i.test(normalizedUnitText) &&
+      !looksLikeExperienceHeader(normalizedUnitText) &&
+      isValidBulletCandidateText(normalizedUnitText, true)
+    ) {
+      evidenceUnits.push({
+        id: `${sectionId}:evidence:${index}:implicit`,
+        sectionId,
+        sourceText: normalizedUnitText,
+        normalizedText: normalizedUnitText,
+        sourceSpan: {
+          startLine: unit.startLine,
+          endLine: unit.endLine,
+          kind: unit.merged ? 'logical_bullet' : 'line',
         },
         anchorKind: 'bullet_line',
         exactBaselineBullet: true,
@@ -842,7 +867,9 @@ function parseExperienceEntries(
 ): ExperienceEntry[] {
   const logicalUnits = reconstructLogicalTextUnits(content);
   if (!logicalUnits.length) return [];
-  const sectionEvidenceUnits = extractEvidenceUnitsFromLogicalUnits(sectionId, logicalUnits);
+  const sectionEvidenceUnits = extractEvidenceUnitsFromLogicalUnits(sectionId, logicalUnits, {
+    allowImplicitBullets: true,
+  });
 
   const entries: ExperienceEntry[] = [];
   let active: ExperienceEntry = { entryIndex: 0, headerLines: [], bullets: [] };
