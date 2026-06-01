@@ -3928,6 +3928,12 @@ export default function StudioPage() {
     return typeof coverPreviewText === "string" && coverPreviewText.trim().length > 0;
   }, [coverBackendArtifactStale, coverLetterParagraphs.length, coverPreviewText]);
 
+  // Canonical UI authority: all visible Studio state must be driven by the artifact display contract.
+  // Renderability must follow concrete preview presence, not backend pair status or mixed legacy flags.
+  const displayContract = artifactContract.displayContract;
+  const uiHasRenderableResume = displayContract?.resumePreviewRenderable ?? hasRenderableResumeContent;
+  const uiHasRenderableCoverLetter = displayContract?.coverLetterPreviewRenderable ?? hasRenderableCoverLetterContent;
+
   const coverPresenter = artifactContract.presenters.coverLetter;
   const hasCoverLetterDraft = hasCoverLetterArtifact;
   const coverLetterQuality = artifactContract.quality.coverLetter;
@@ -5188,8 +5194,8 @@ export default function StudioPage() {
     generateNowEligible && qualifiedForStudioOrchestration && !studioReadinessBlocksGeneration;
   // Orchestration output-missing authority must match renderability authority.
   // A persisted-but-non-renderable record is still "missing output" for customer workflow purposes.
-  const missingResumeOutput = !hasRenderableResumeContent;
-  const missingCoverOutput = !hasRenderableCoverLetterContent;
+  const missingResumeOutput = !uiHasRenderableResume;
+  const missingCoverOutput = !uiHasRenderableCoverLetter;
   const needsAutoGeneration =
     eligibleForAutoGeneration &&
     (missingResumeOutput || missingCoverOutput) &&
@@ -9074,12 +9080,12 @@ export default function StudioPage() {
   // Once we have *any* usable output, we do not surface lifecycle failure language in the hero/top summary.
   // Failures still render at the specific artifact card level (resume/cover) where they govern the next action.
   const lifecycleArtifactFailure = resumeState.artifactFailure ?? coverState.artifactFailure ?? null;
-  const suppressTopLevelFailureLanguage = hasCompletedGeneration;
+  const suppressTopLevelFailureLanguage = uiHasRenderableResume && uiHasRenderableCoverLetter;
   const topLevelArtifactFailure = suppressTopLevelFailureLanguage ? null : lifecycleArtifactFailure;
   const showGenericRetry =
     !suppressTopLevelFailureLanguage &&
     !topLevelArtifactFailure &&
-    studioArtifactPairStatus === "failed";
+    displayContract?.generationFailed === true;
   const studioNextMove = useMemo(
     () =>
       resolveStudioNextMove({
@@ -10262,7 +10268,7 @@ export default function StudioPage() {
           retryLabel="Retry"
         />
       ) : null}
-      {!topLevelArtifactFailure && (autoGenerationInFlight || studioArtifactPairStatus === "in_progress") ? (
+      {!topLevelArtifactFailure && (displayContract?.generationRunning || autoGenerationInFlight) ? (
         <RouteStateShell
           tone="neutral"
           eyebrow="In progress"
@@ -12874,7 +12880,7 @@ export default function StudioPage() {
         <details
           className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
           data-testid="studio-guidance-details"
-          open={!hasRenderableResumeContent && !hasRenderableCoverLetterContent}
+          open={!uiHasRenderableResume && !uiHasRenderableCoverLetter}
         >
           <summary className="cursor-pointer text-sm font-semibold text-slate-200">Guidance</summary>
           <div className="mt-3 space-y-3">
@@ -12905,8 +12911,8 @@ export default function StudioPage() {
                     activeGenerationReadiness.reasons[0]?.code ||
                     canonicalStudioReadinessMessage}
                 </p>
-                {!hasRenderableResumeContent &&
-                !hasRenderableCoverLetterContent &&
+                {!uiHasRenderableResume &&
+                !uiHasRenderableCoverLetter &&
                 (activeGenerationReadiness.blocked || !canGenerateDocuments) &&
                 studioCanonicalDecision.primaryAction.destination ? (
                   <div className="flex flex-wrap items-center gap-2">
@@ -13368,7 +13374,7 @@ export default function StudioPage() {
             </div> 
             ) : null}
             {!generateNowEligible ? (
-              hasRenderableResumeContent || hasRenderableCoverLetterContent ? (
+              uiHasRenderableResume || uiHasRenderableCoverLetter ? (
                 <details
                   className="rounded-2xl border border-white/10 bg-slate-950/35 p-4"
                   data-testid="studio-artifact-quality-details"
@@ -13919,17 +13925,17 @@ export default function StudioPage() {
         <h2 className="text-xl font-semibold text-slate-100">
           Your application materials
         </h2>
-        {hasRenderableResumeContent || hasRenderableCoverLetterContent ? (
+        {uiHasRenderableResume || uiHasRenderableCoverLetter ? (
           <p className="text-xs text-slate-400" data-testid="studio-materials-completeness">
-            {hasRenderableResumeContent && hasRenderableCoverLetterContent
+            {uiHasRenderableResume && uiHasRenderableCoverLetter
               ? "Complete set: Resume + cover letter"
-              : hasRenderableResumeContent
+              : uiHasRenderableResume
                 ? "Partial: Resume ready. Cover letter not generated yet."
                 : "Partial: Cover letter ready. Resume not generated yet."}
           </p>
         ) : null}
-        {hasRenderableResumeContent &&
-        hasRenderableCoverLetterContent &&
+        {uiHasRenderableResume &&
+        uiHasRenderableCoverLetter &&
         resumePresenter.hasExportableContent &&
         coverPresenter.hasExportableContent &&
         !isResumeDownloadLocked ? (
@@ -14002,7 +14008,7 @@ export default function StudioPage() {
             })()}
           </div>
         ) : null}
-        {!studioBlockedBaselineContract && !hasRenderableResumeContent ? (
+        {!studioBlockedBaselineContract && !uiHasRenderableResume ? (
           <p className="text-sm text-slate-300">
             Generate, preview, and export your resume and cover letter.
           </p>
@@ -14216,7 +14222,7 @@ export default function StudioPage() {
           </Alert>
         ) : null}
 
-        {(!hasRenderableResumeContent && (resumeState.artifactFailure || resumeV2Authority.hasResumeV2BlockingGuidance)) ? (
+        {(!uiHasRenderableResume && (resumeState.artifactFailure || resumeV2Authority.hasResumeV2BlockingGuidance)) ? (
           <div
             className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
             data-testid="studio-resume-artifact-issue"
@@ -14313,7 +14319,7 @@ export default function StudioPage() {
               </Link>
             ) : null}
           </div>
-        ) : hasRenderableResumeContent ? (
+        ) : uiHasRenderableResume ? (
           <div
             className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
             data-testid={resumeQualityPass ? "studio-resume-ready-panel" : "studio-resume-correction-panel"}
@@ -14439,13 +14445,13 @@ export default function StudioPage() {
           </div>
         ) : resumeState.artifactFailure ? null : resumeAutoRepairing ? (
           <EmptyState testId="studio-resume-auto-repairing" title="Repairing resumeâ€¦" body="Regenerating the latest artifact." />
-        ) : !hasRenderableResumeContent && (resumeAutoGenerating || resumeGenerateNowPending) ? (
+        ) : !uiHasRenderableResume && (resumeAutoGenerating || resumeGenerateNowPending) ? (
           <EmptyState
             testId="studio-resume-generating"
             title="Generating your resume..."
             body="This usually finishes in a moment."
           />
-        ) : !hasRenderableResumeContent ? (
+        ) : !uiHasRenderableResume ? (
               <EmptyState
                 testId="studio-resume-missing"
                 title={
@@ -14492,7 +14498,7 @@ export default function StudioPage() {
       <details
         className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow"
         data-testid="studio-cover-letter-details"
-        open={!hasRenderableResumeContent || hasRenderableCoverLetterContent}
+        open={!uiHasRenderableResume || uiHasRenderableCoverLetter}
       >
         <summary className="cursor-pointer text-sm font-semibold text-slate-200">
           Cover letter{" "}
@@ -14508,7 +14514,7 @@ export default function StudioPage() {
           <div>
             <h2
               className={
-                hasRenderableResumeContent ? "text-base font-semibold text-slate-100" : "text-lg font-semibold text-slate-100"
+                uiHasRenderableResume ? "text-base font-semibold text-slate-100" : "text-lg font-semibold text-slate-100"
               }
             >
               Cover letter
@@ -14550,7 +14556,7 @@ export default function StudioPage() {
               : null}
           </div>
           <div className="flex flex-wrap gap-2">
-            {!hasRenderableCoverLetterContent && workflowContract.coverLetterGenerationAllowed ? (
+            {!uiHasRenderableCoverLetter && workflowContract.coverLetterGenerationAllowed ? (
               <FormButton
                 variant="secondary"
                 onClick={() => {
@@ -14795,7 +14801,7 @@ export default function StudioPage() {
         ) : null}
 
         {!coverLetterComplianceBlocked ? (
-          hasRenderableCoverLetterContent ? (
+          uiHasRenderableCoverLetter ? (
             <div
               className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
               data-testid={coverQualityPass ? "studio-cover-ready-panel" : "studio-cover-correction-panel"}
@@ -14943,7 +14949,7 @@ export default function StudioPage() {
                   </div>
                 </div>
               )
-            ) : coverState.artifactFailure ? null : !hasRenderableCoverLetterContent ? (
+            ) : coverState.artifactFailure ? null : !uiHasRenderableCoverLetter ? (
               <EmptyState
                 testId={
                   coverAutoGenerating || coverGenerateNowPending ? "studio-cover-generating" : "studio-cover-missing"

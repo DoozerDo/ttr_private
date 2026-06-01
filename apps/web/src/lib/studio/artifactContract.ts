@@ -63,6 +63,15 @@ export type StudioArtifactContractInput = {
   companyName?: string | null;
 };
 
+export type StudioArtifactDisplayContract = {
+  resumePreviewRenderable: boolean;
+  coverLetterPreviewRenderable: boolean;
+  generationRunning: boolean;
+  generationFailed: boolean;
+  generationComplete: boolean;
+  shouldAutoGenerateStart: boolean;
+};
+
 function toRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
 }
@@ -222,6 +231,22 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
   const hasResumeArtifact = hasRenderableResumeContent(normalizedResumeResponse, resumeModel);
   const hasCoverLetterArtifact = hasRenderableCoverLetterContent(normalizedCoverLetterResponse, coverParagraphs);
 
+  const resumeGenState = String((resumeResult as any)?.generationState ?? "").trim().toLowerCase();
+  const coverGenState = String((coverLetterResult as any)?.generationState ?? "").trim().toLowerCase();
+  const generationRunning = resumeGenState === "generating" || coverGenState === "generating";
+  const generationFailed = isFailedSingleArtifact(resumeReadinessArtifact) || isFailedSingleArtifact(coverReadinessArtifact);
+  const generationComplete = hasResumeArtifact && hasCoverLetterArtifact;
+  const shouldAutoGenerateStart = !generationRunning && (!hasResumeArtifact || !hasCoverLetterArtifact);
+
+  const displayContract: StudioArtifactDisplayContract = {
+    resumePreviewRenderable: hasResumeArtifact,
+    coverLetterPreviewRenderable: hasCoverLetterArtifact,
+    generationRunning,
+    generationFailed,
+    generationComplete,
+    shouldAutoGenerateStart,
+  };
+
   const hasUsableArtifacts =
     hasReusableArtifacts ||
     (Boolean(resumeModel) && resumeQuality.exportable) ||
@@ -292,5 +317,6 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
       resume: resumePresenter,
       coverLetter: coverPresenter,
     },
+    displayContract,
   };
 }

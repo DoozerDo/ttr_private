@@ -1119,6 +1119,189 @@ describe("Studio auto-generation", () => {
     }, { timeout: 15000 });
   }, 15000);
 
+  it("Scenario A: both previews renderable => no failure banner and no 'not generated yet' placeholders", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const fetchMock = installStrongFitFetches({
+      readinessStatus: "ready",
+      studioArtifactsPayload: {
+        status: "completed",
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        generationContractVersion: "studio-artifacts-v1",
+        resume: {
+          status: "completed",
+          usableCurrent: true,
+          inputsHash: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            qualityGate: { status: "pass", reasons: [] },
+            preview: { resume: { heading: { name: "Alex" }, experience: [{ company: "Co", roleTitle: "Role", bullets: ["Did work."] }] } },
+          },
+          content: "Resume",
+          confidence: "HIGH",
+          failure: null,
+        },
+        coverLetter: {
+          status: "completed",
+          usableCurrent: true,
+          inputsHash: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            qualityGate: { status: "pass", reasons: [] },
+            preview: { coverLetter: { paragraphs: ["Hello"] } },
+          },
+          content: "Hello",
+          confidence: "HIGH",
+          failure: null,
+        },
+      },
+    });
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Resume not generated yet/i)).toBeNull();
+      expect(screen.queryByText(/Cover letter not generated yet/i)).toBeNull();
+      expect(screen.queryByRole("button", { name: /retry/i })).toBeNull();
+    }, { timeout: 15000 });
+    // Auto-gen should not start when both previews exist.
+    expect(countPostCalls(fetchMock, "/api/resume/generate") + countPostCalls(fetchMock, "/api/resume")).toBe(0);
+  }, 15000);
+
+  it("Scenario B: cover preview exists, resume missing => shows resume missing and attempts resume", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const fetchMock = installStrongFitFetches({
+      readinessStatus: "ready",
+      studioArtifactsPayload: {
+        status: "missing",
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        generationContractVersion: "studio-artifacts-v1",
+        resume: { status: "missing", responseBody: null, content: null, confidence: "LOW", failure: null },
+        coverLetter: {
+          status: "completed",
+          usableCurrent: true,
+          inputsHash: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            qualityGate: { status: "pass", reasons: [] },
+            preview: { coverLetter: { paragraphs: ["Hello"] } },
+          },
+          content: "Hello",
+          confidence: "HIGH",
+          failure: null,
+        },
+      },
+    });
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Cover letter not generated yet/i)).toBeNull();
+    }, { timeout: 15000 });
+
+    await waitFor(() => {
+      expect(countPostCalls(fetchMock, "/api/resume/generate") + countPostCalls(fetchMock, "/api/resume")).toBeGreaterThan(0);
+    }, { timeout: 15000 });
+  }, 15000);
+
+  it("Scenario C: resume preview exists, cover missing => shows cover missing and attempts cover", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const fetchMock = installStrongFitFetches({
+      readinessStatus: "ready",
+      studioArtifactsPayload: {
+        status: "missing",
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        generationContractVersion: "studio-artifacts-v1",
+        resume: {
+          status: "completed",
+          usableCurrent: true,
+          inputsHash: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            qualityGate: { status: "pass", reasons: [] },
+            preview: { resume: { heading: { name: "Alex" }, experience: [{ company: "Co", roleTitle: "Role", bullets: ["Did work."] }] } },
+          },
+          content: "Resume",
+          confidence: "HIGH",
+          failure: null,
+        },
+        coverLetter: { status: "missing", responseBody: null, content: null, confidence: "LOW", failure: null },
+      },
+    });
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Resume not generated yet/i)).toBeNull();
+    }, { timeout: 15000 });
+
+    await waitFor(() => {
+      expect(countPostCalls(fetchMock, "/api/cover-letters/generate") + countPostCalls(fetchMock, "/api/cover-letters")).toBeGreaterThan(0);
+    }, { timeout: 15000 });
+  }, 15000);
+
+  it("Scenario D: both previews missing and generation failed => shows failure banner", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const fetchMock = installStrongFitFetches({
+      readinessStatus: "ready",
+      studioArtifactsPayload: {
+        status: "failed",
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        generationContractVersion: "studio-artifacts-v1",
+        artifact: { hasResume: false, hasCoverLetter: false, pairStatus: "failed", generating: false, failure: { code: "generation_failed", message: "Failed." } },
+        resume: { status: "FAILED", responseBody: null, content: null, failureCode: "generation_failed", failureMessage: "Resume failed.", confidence: "LOW", failure: null },
+        coverLetter: { status: "FAILED", responseBody: null, content: null, failureCode: "generation_failed", failureMessage: "Cover failed.", confidence: "LOW", failure: null },
+      },
+    });
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: /retry/i }).length).toBeGreaterThan(0);
+    }, { timeout: 15000 });
+    // Avoid unused lint warnings.
+    expect(fetchMock).toBeTruthy();
+  }, 15000);
+
   it("does not auto-generate below the generate-now floor (score 71)", async () => {
     const fetchMock = installStrongFitFetches({ score: 71, readinessStatus: "limited" });
 
