@@ -212,6 +212,27 @@ describe('structuredBaselineExtractor', () => {
     expect(structured.experience[0].bullets.length).toBeGreaterThan(0);
   });
 
+  it('parses company/role headers even with blank spacer lines between them', () => {
+    const sections: any[] = [
+      {
+        sectionType: 'EXPERIENCE',
+        content: [
+          'PMB Performance',
+          '',
+          'Senior Manager, Customer Operations',
+          'Dec 2022 – Aug 2025',
+          '- Led incident triage and escalation management across support operations.',
+        ].join('\n'),
+      },
+    ];
+
+    const structured = extractStructuredBaselineFromSections(sections as any);
+    expect(structured.experience.length).toBe(1);
+    expect(structured.experience[0].company).toBe('PMB Performance');
+    expect(structured.experience[0].roleTitle).toBe('Senior Manager, Customer Operations');
+    expect(structured.experience[0].dates).toBe('Dec 2022 – Aug 2025');
+  });
+
   it('parses split date range across two lines without treating end date as role title', () => {
     const sections: any[] = [
       {

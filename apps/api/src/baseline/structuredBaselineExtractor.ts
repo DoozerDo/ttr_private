@@ -520,11 +520,16 @@ export function extractStructuredBaselineFromSections(
     }
   }
 
-  const experience: StructuredBaseline['experience'] = [];
-  const experienceSections = extractSectionByType(baselineSections, 'EXPERIENCE');
-  for (const section of experienceSections) {
-    const raw = String((section as any).content ?? '');
-    const lines = raw.split(/\r?\n/).map((l) => l.replace(/\s+/g, ' ').trim());
+	  const experience: StructuredBaseline['experience'] = [];
+	  const experienceSections = extractSectionByType(baselineSections, 'EXPERIENCE');
+	  for (const section of experienceSections) {
+	    const raw = String((section as any).content ?? '');
+	    // Normalize and drop empty lines so header reads (company/role/date) don't fail when
+	    // PDF-derived resumes insert blank spacer lines between header components.
+	    const lines = raw
+	      .split(/\r?\n/)
+	      .map((l) => l.replace(/\s+/g, ' ').trim())
+	      .filter(Boolean);
 
     let idx = 0;
     while (idx < lines.length) {
