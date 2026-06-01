@@ -53,7 +53,7 @@ function renderStudio() {
 
 function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   const text = typeof body === "string" ? body : JSON.stringify(body ?? {});
-  return {
+  const response = {
     ok,
     status,
     headers: {
@@ -62,6 +62,11 @@ function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
     json: () => Promise.resolve(body),
     text: () => Promise.resolve(text),
     blob: () => Promise.resolve(new Blob([text], { type: "application/json" })),
+  } as const;
+
+  return {
+    ...response,
+    clone: () => createResponse(body, ok, status),
   };
 }
 
@@ -211,10 +216,16 @@ function installStrongFitFetches(options?: {
       // Default to failing the backend hydration call so tests can exercise local-storage hydration.
       return Promise.resolve(createResponse({ message: "not found" }, false, 404));
     }
+    if (url.endsWith("/api/resume/generate") && init?.method === "POST") {
+      return Promise.resolve(createResponse({}));
+    }
     if (url.endsWith("/api/resume") && init?.method === "POST") {
       return resumeOk
         ? resolveAutoGenerationSuccess(input)
         : Promise.resolve(createResponse({ message: "Resume generation failed." }, false, 500));
+    }
+    if (url.endsWith("/api/cover-letters/generate") && init?.method === "POST") {
+      return Promise.resolve(createResponse({}));
     }
     if (url.endsWith("/api/cover-letters") && init?.method === "POST") {
       return coverOk
@@ -436,8 +447,8 @@ describe("Studio auto-generation", () => {
 
     const rendered = renderStudio();
 
-    expect(countPostCalls(fetchMock, "/api/resume")).toBe(0);
-    expect(countPostCalls(fetchMock, "/api/cover-letters")).toBe(0);
+    expect(countPostCalls(fetchMock, "/api/resume/generate")).toBe(0);
+    expect(countPostCalls(fetchMock, "/api/cover-letters/generate")).toBe(0);
 
     await act(async () => {
       overrideSearchParams({
@@ -462,8 +473,8 @@ describe("Studio auto-generation", () => {
     });
 
     await waitFor(() => {
-      expect(countPostCalls(fetchMock, "/api/resume")).toBeGreaterThan(0);
-      expect(countPostCalls(fetchMock, "/api/cover-letters")).toBeGreaterThan(0);
+      expect(countPostCalls(fetchMock, "/api/resume/generate")).toBeGreaterThan(0);
+      expect(countPostCalls(fetchMock, "/api/cover-letters/generate")).toBeGreaterThan(0);
     }, { timeout: 6000 });
 
     const lastSignature = memoryStorage.getItem("ttr:studio:auto-generate:last-signature");
@@ -489,33 +500,21 @@ describe("Studio auto-generation", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(countPostCalls(fetchMock, "/api/resume")).toBeGreaterThan(0);
-      expect(countPostCalls(fetchMock, "/api/cover-letters")).toBeGreaterThan(0);
+      expect(countPostCalls(fetchMock, "/api/resume/generate")).toBeGreaterThan(0);
+      expect(countPostCalls(fetchMock, "/api/cover-letters/generate")).toBeGreaterThan(0);
     }, { timeout: 6000 });
 
-    const resumeBodies = readPostBodies(fetchMock, "/api/resume");
-    const coverBodies = readPostBodies(fetchMock, "/api/cover-letters");
-
-    // Single-flight contract: only one non-strict launch per artifact. A strict trust-validation retry is allowed.
-    expect(resumeBodies.filter((body) => body.trustGateMode === "strict")).toHaveLength(
-      resumeBodies.length === 2 ? 1 : 0,
-    );
-    expect(resumeBodies.filter((body) => body.trustGateMode !== "strict")).toHaveLength(1);
-    expect(resumeBodies.length).toBeLessThanOrEqual(2);
-    expect(resumeBodies.some((body) => body.forceRegenerate === true || body.forceRegenerate === "true")).toBe(true);
-
-    expect(coverBodies.filter((body) => body.trustGateMode === "strict")).toHaveLength(
-      coverBodies.length === 2 ? 1 : 0,
-    );
-    expect(coverBodies.filter((body) => body.trustGateMode !== "strict")).toHaveLength(1);
-    expect(coverBodies.length).toBeLessThanOrEqual(2);
+    const resumeBodies = readPostBodies(fetchMock, "/api/resume/generate");
+    const coverBodies = readPostBodies(fetchMock, "/api/cover-letters/generate");
+    expect(resumeBodies.length).toBe(1);
+    expect(coverBodies.length).toBe(1);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("/api/resume"),
+      expect.stringContaining("/api/resume/generate"),
       expect.objectContaining({ method: "POST" }),
     );
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("/api/cover-letters"),
+      expect.stringContaining("/api/cover-letters/generate"),
       expect.objectContaining({ method: "POST" }),
     );
     expect(fetchMock).toHaveBeenCalledWith(
@@ -679,7 +678,7 @@ describe("Studio auto-generation", () => {
     });
 
     const score = 84;
-    const fetchMock = installStrongFitFetches({
+	    const fetchMock = installStrongFitFetches({
       score,
       readinessStatus: "ready",
       studioArtifactsPayload: {
@@ -937,7 +936,7 @@ describe("Studio auto-generation", () => {
     }, { timeout: 15000 });
   }, 15000);
 
-  it("auto-generates the missing resume when cover letter is already persisted (partial artifact state must not block)", async () => {
+	  it("auto-generates the missing resume when cover letter is already persisted (partial artifact state must not block)", async () => {
     overrideSearchParams({
       analysisId: "analysis-1",
       jobId: "job-1",
@@ -985,19 +984,21 @@ describe("Studio auto-generation", () => {
           failure: null,
         },
       },
-    });
-    renderStudio();
+	    });
+	    setFetchImplementation(fetchMock as any);
+	    renderStudio();
 
-    await waitFor(() => {
-      const debug = screen.getByTestId("studio-orchestration-debug");
-      const raw = debug.querySelector("pre")?.textContent ?? "";
-      expect(raw).toContain("\"needsAutoGeneration\": true");
-      expect(raw).toContain("\"orchestrationDecision\": \"should_auto_generate\"");
-    }, { timeout: 15000 });
+	    await waitFor(() => {
+	      const debug = screen.getByTestId("studio-orchestration-debug");
+	      const raw = debug.querySelector("pre")?.textContent ?? "";
+	      expect(raw).toContain("\"needsAutoGeneration\": true");
+	      expect(raw).toContain("\"orchestrationDecision\": \"should_auto_generate\"");
+	    }, { timeout: 15000 });
 
-    // This scenario validates the orchestration contract (partial artifact states require auto-generation).
-    // The request-shaping contract is proven in `auto-generates resume and cover letter on Studio entry for strong fits`.
-  }, 15000);
+	    await waitFor(() => {
+	      expect(countPostCalls(fetchMock, "/api/resume")).toBeGreaterThan(0);
+	    }, { timeout: 15000 });
+	  }, 15000);
 
   it("still auto-generates when verification confidence is limited", async () => {
     const fetchMock = installStrongFitFetches({ readinessStatus: "limited" });
