@@ -13067,7 +13067,9 @@ export default function StudioPage() {
           {autoGenerationLoadingMessage}
         </Alert>
       ) : null}
-      {pageTruth.state === "failed" && !workflowAuthority.suppressFailureMessaging ? (
+      {pageTruth.state === "failed" &&
+      !workflowAuthority.suppressFailureMessaging &&
+      (!uiHasRenderableResume || !uiHasRenderableCoverLetter) ? (
         <Alert intent="warning" title="Document generation needs attention">
           <div className="space-y-3">
             <div>
