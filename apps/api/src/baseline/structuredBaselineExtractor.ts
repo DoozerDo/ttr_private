@@ -460,7 +460,15 @@ function readExperienceHeaderAt(
 }
 
 function extractSectionByType(sections: BaselineSection[], type: string): BaselineSection[] {
-  return sections.filter((section) => String((section as any).sectionType ?? '').toUpperCase() === type);
+  const normalized = type.toUpperCase();
+  const synonyms =
+    normalized === 'EXPERIENCE'
+      ? new Set(['EXPERIENCE', 'PROFESSIONAL_EXPERIENCE', 'WORK_EXPERIENCE'])
+      : new Set([normalized]);
+  return sections.filter((section) => {
+    const sectionType = String((section as any).sectionType ?? '').toUpperCase();
+    return synonyms.has(sectionType);
+  });
 }
 
 export function extractStructuredBaselineFromSections(

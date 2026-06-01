@@ -233,6 +233,25 @@ describe('structuredBaselineExtractor', () => {
     expect(structured.experience[0].dates).toBe('Dec 2022 – Aug 2025');
   });
 
+  it('treats PROFESSIONAL_EXPERIENCE sections as EXPERIENCE for structured extraction', () => {
+    const sections: any[] = [
+      {
+        sectionType: 'PROFESSIONAL_EXPERIENCE',
+        content: [
+          'Warner Bros. Discovery',
+          'Senior Program Manager',
+          '2021 – 2024',
+          '- Led cross-functional delivery across stakeholders.',
+        ].join('\n'),
+      },
+    ];
+
+    const structured = extractStructuredBaselineFromSections(sections as any);
+    expect(structured.experience.length).toBe(1);
+    expect(structured.experience[0].company).toBe('Warner Bros. Discovery');
+    expect(structured.experience[0].roleTitle).toBe('Senior Program Manager');
+  });
+
   it('parses split date range across two lines without treating end date as role title', () => {
     const sections: any[] = [
       {
