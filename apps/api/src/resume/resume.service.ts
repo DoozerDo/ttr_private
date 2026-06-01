@@ -2914,10 +2914,19 @@ export class ResumeService {
 	          lastResumeGenerationCheckpoint = 'resume_v2_ingest_failed';
 	          const response = (error as any)?.response as any;
           const code = String(response?.error?.code ?? '');
+          const resumeV2InvalidReasons = Array.isArray(response?.error?.details?.reasons)
+            ? (response.error.details.reasons as unknown[]).map((r: unknown) => String(r ?? '')).filter(Boolean)
+            : [];
           // Deterministic fallback: if ResumeV2 ingestion/validation is missing/failed for this baseline,
           // fall back to section-based structured extraction so qualified users can still generate a
           // truthful draft from their baseline text.
-          if (code === 'baseline_resume_v2_missing' || code === 'baseline_resume_v2_ingestion_failed') {
+          if (
+            code === 'baseline_resume_v2_missing' ||
+            code === 'baseline_resume_v2_ingestion_failed' ||
+            // Recovery path: a persisted ResumeV2 exists but is unusable due to empty experience.
+            // Do not require the user to reprocess/reupload; derive a truthful draft from baseline sections.
+            (code === 'baseline_resume_v2_invalid' && resumeV2InvalidReasons.includes('usable_experience_empty'))
+          ) {
             if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
               try {
                 // eslint-disable-next-line no-console
@@ -2926,6 +2935,7 @@ export class ResumeService {
                   baselineRecordId: String((baseline.parsedRecords?.[0] as any)?.id ?? ''),
                   baselineVersionId: String((baseline.parsedRecords?.[0] as any)?.baselineVersionId ?? ''),
                   failureCode: code,
+                  invalidReasons: resumeV2InvalidReasons,
                   hasPersistedResumeV2: Boolean(persistedResumeV2 && typeof persistedResumeV2 === 'object'),
                 });
               } catch {

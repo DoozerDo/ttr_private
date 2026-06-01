@@ -292,6 +292,41 @@ describe('ResumeService contract', () => {
     }
   });
 
+  it('recovers from persisted ResumeV2 with empty usable experience by extracting from baseline sections', async () => {
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
+    const originalParsedRecords = baseline.parsedRecords;
+    try {
+      const { service } = buildService();
+
+      baseline.parsedRecords = [
+        {
+          id: 'parsed-1',
+          baselineId: baseline.id,
+          baselineVersionId: baselineVersion.id,
+          createdAt: new Date(),
+          // Valid-ish ResumeV2 shape but with empty experience => baseline_resume_v2_invalid (usable_experience_empty).
+          resumeV2Json: {
+            heading: { name: 'Test User', contactLine: 'test@example.com' },
+            experience: [],
+          },
+        } as any,
+      ] as any;
+
+      const result = await service.generateResume('user-1', baseRequest as any);
+      expect(result.status).toBe('success');
+      expect(Array.isArray((result as any)?.preview?.resume?.experience)).toBe(true);
+      expect((result as any).preview.resume.experience.length).toBeGreaterThan(0);
+    } finally {
+      baseline.parsedRecords = originalParsedRecords;
+      if (typeof originalFlag === 'string') {
+        process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      } else {
+        delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+      }
+    }
+  });
+
   it('forces Studio regenerate to persist a fresh V2 artifact when RESUME_GENERATION_V2=true', async () => {
     const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
     process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
