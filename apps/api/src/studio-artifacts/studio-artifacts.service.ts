@@ -709,12 +709,10 @@ export class StudioArtifactsService {
         return false;
       }
       // Renderability contract: Studio needs a preview to hydrate after generation.
-      // Export readiness is an output-quality concern and must not hide an otherwise renderable preview.
-      // (Export gating is handled separately by export endpoints / UI affordances.)
-      const gate = (resumeRecord.responseBody as any)?.qualityGate;
-      const gateStatus = gate && typeof gate === 'object' ? String((gate as any).status ?? '') : '';
-      if (gateStatus === 'failed' || gateStatus === 'blocked') {
-        staleArtifactReasonCodes.push('quality_not_pass');
+      // Quality gates control exportability/usable state, but must not hide a renderable preview payload.
+      const previewResume = (resumeRecord.responseBody as any)?.preview?.resume ?? null;
+      if (!previewResume || typeof previewResume !== 'object') {
+        staleArtifactReasonCodes.push('preview_missing');
         return false;
       }
       return true;

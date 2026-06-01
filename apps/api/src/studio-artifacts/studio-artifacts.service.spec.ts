@@ -205,6 +205,94 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
   });
 });
 
+describe('StudioArtifactsService (unit): readState surfaces renderable resume previews even when quality gates fail', () => {
+  it('keeps resume.responseBody and resumeResult.preview when preview.resume exists and artifact is current', async () => {
+    const studioArtifactRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'artifact-1',
+        createdAt: new Date('2026-06-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-01T00:01:00.000Z'),
+        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        resumeInputsHash: 'hash-1',
+        resumeResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: false,
+          qualityGate: { status: 'failed', reasons: ['quality_failed_fixture'] },
+          preview: { resume: { heading: { name: 'Alex' }, experience: [{ company: 'Co', roleTitle: 'Role', bullets: ['Did work.'] }] } },
+        },
+        resumeContent: 'Resume content',
+        resumeFailureCode: null,
+        resumeFailureMessage: null,
+        resumeGenerationStartedAt: null,
+        resumeGeneratedAt: new Date('2026-06-01T00:01:00.000Z'),
+        resumeFailedAt: null,
+        resumeMetadata: {},
+        coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        coverLetterInputsHash: 'hash-1',
+        coverLetterResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          qualityGate: { status: 'pass', reasons: [] },
+          preview: { coverLetter: { paragraphs: ['Hello'] } },
+        },
+        coverLetterContent: 'Hello',
+        coverLetterFailureCode: null,
+        coverLetterFailureMessage: null,
+        coverLetterGenerationStartedAt: null,
+        coverLetterGeneratedAt: new Date('2026-06-01T00:01:00.000Z'),
+        coverLetterFailedAt: null,
+        coverLetterMetadata: {},
+      } as any),
+    } as any;
+
+    const baselineRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+    } as any;
+    const baselineVersionRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }),
+    } as any;
+    const jobRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }),
+    } as any;
+    const fitAssessmentRepository = {
+      findOne: jest.fn().mockResolvedValue({ overallScore: 90 }),
+    } as any;
+    const baselineResumeV2BackfillService = {
+      backfillLatestIfMissing: jest.fn().mockResolvedValue(null),
+    } as any;
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository,
+      baselineRepository,
+      baselineVersionRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      baselineResumeV2BackfillService,
+    );
+    // Make the artifact "current" for this test by forcing the derived inputsHash to match the stored one.
+    jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('hash-1');
+    jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('hash-1');
+
+    const state = await service.readState({
+      userId: 'u-1',
+      baselineId: 'base-1',
+      baselineVersionId: 'base-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    } as any);
+
+    expect(state.resume?.artifactCurrent).toBe(true);
+    expect(state.resume?.responseBody).toBeTruthy();
+    expect(state.resumeResult).toBeTruthy();
+    expect((state.resumeResult as any)?.preview).toBeTruthy();
+    expect((state.resumeResult as any)?.generationState).toBe('generated_needs_correction');
+    expect((state.resumeResult as any)?.qualityStatus).toBe('failed');
+    expect((state.resumeResult as any)?.exportReady).toBe(false);
+  });
+});
+
 describe('StudioArtifactsService (unit): studio artifact scope upsert is idempotent', () => {
   it('does insert-or-update without throwing UQ_studio_artifacts_scope and logs create vs update decisions', async () => {
     const insertExecute = jest.fn();
