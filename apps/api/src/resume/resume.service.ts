@@ -5102,6 +5102,64 @@ export class ResumeService {
           ? (normalizedDocument as any).experience.length
           : 0;
         if (failSafeExperienceCount <= 0) {
+          // Narrow recovery: if minimal fail-safe normalization produced an empty experience array,
+          // attempt to rebuild experience from current baseline sections using structured extraction.
+          try {
+            const sourceSections =
+              (resolveBaselineSectionsForGeneration(baselineForFailSafe) as any) ??
+              (baselineForFailSafe.sections as any);
+            const structured = extractStructuredBaselineFromSections(sourceSections as any) as any;
+            const structuredExperience = Array.isArray(structured?.experience) ? structured.experience : [];
+            if (structuredExperience.length > 0) {
+              const experienceContent = structuredExperience
+                .map((entry: any) => {
+                  const company = String(entry?.company ?? '').trim();
+                  const roleTitle = String(entry?.roleTitle ?? '').trim();
+                  const dates = typeof entry?.dates === 'string' ? String(entry.dates).trim() : '';
+                  const header = [company, roleTitle, dates].filter(Boolean).join(' | ').trim();
+                  const bullets = Array.isArray(entry?.bullets) ? (entry.bullets as unknown[]).map((b) => String(b ?? '').trim()).filter(Boolean) : [];
+                  const bulletLines = bullets.map((b) => `- ${b.replace(/^[-*•]\s+/, '')}`);
+                  return [header, ...bulletLines].filter(Boolean).join('\n').trim();
+                })
+                .filter(Boolean)
+                .join('\n\n')
+                .trim();
+
+              if (experienceContent) {
+                const repairedSections: ResumeExportSection[] = [
+                  {
+                    id: 'fail-safe-structured-experience',
+                    type: BaselineSectionType.EXPERIENCE,
+                    title: 'Experience',
+                    content: experienceContent,
+                    rawContent: experienceContent,
+                    bullets: [],
+                    order: 0,
+                    includePolicy: BaselineIncludePolicy.OPTIONAL as any,
+                    source: 'baseline' as any,
+                  } as any,
+                ];
+                const rebuilt = buildNormalizedResumeDocument(
+                  repairedSections as any,
+                  identity,
+                ) as any;
+                const rebuiltCount = Array.isArray(rebuilt?.experience) ? rebuilt.experience.length : 0;
+                if (rebuiltCount > 0) {
+                  normalizedDocument = rebuilt as any;
+                }
+              }
+            }
+          } catch {
+            // ignore; recovery is best-effort and must preserve honest failure when empty
+          }
+
+          const recoveredExperienceCount = Array.isArray((normalizedDocument as any)?.experience)
+            ? (normalizedDocument as any).experience.length
+            : 0;
+          if (recoveredExperienceCount > 0) {
+            // Success is allowed only when experience is non-empty.
+            // Continue to return the minimal fail-safe response shape below.
+          } else {
           throw new UnprocessableEntityException(buildArtifactFailurePayload({
             code: 'unsupported_input',
             category: 'unsupported_input',
@@ -5126,6 +5184,7 @@ export class ResumeService {
               },
             },
           }));
+          }
         }
 
 	        const response: ResumeGenerationResponse = {
