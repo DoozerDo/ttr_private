@@ -726,14 +726,19 @@ export class StudioArtifactsService {
       (isTrue(((resumeRecord ? resumeRecord.metadata : null) as any)?.staleLegacy) || isTrue(resumeInternal?.staleLegacy));
     const resumeIsMinimal = Boolean(resumeRecord) && detectMinimalResumeArtifact(resumeRecord?.responseBody ?? null).minimal;
 
-    // Hydration contract:
-    // - Never mutate persisted artifact fields.
-    // - Do not surface stale legacy artifacts as the active preview payload (Prompt 15) => null responseBody/content.
-    // - Minimal artifacts keep `responseBody` for audit/diagnostics, but must not surface preview (Prompt 18).
-    const resumeRecordForResult =
-      resumeRecord && resumeIsStaleLegacy && !resumeIsMinimal
-        ? { ...resumeRecord, responseBody: null, content: null }
-        : resumeRecord;
+	    // Hydration contract:
+	    // - Never mutate persisted artifact fields.
+	    // - Do not surface stale legacy artifacts as the active preview payload (Prompt 15) => null responseBody/content.
+	    // - Minimal artifacts keep `responseBody` for audit/diagnostics, but must not surface preview (Prompt 18).
+	    const resumeRecordForResult = (() => {
+	      if (!resumeRecord) return resumeRecord;
+	      // If the artifact is rejected from preview/use (minimal, stale, mismatched, failed quality, etc),
+	      // do not surface responseBody/content as "available" output on the readState payload.
+	      // This keeps existence signals aligned with renderability authority.
+	      if (!resumePreviewAllowed) return { ...resumeRecord, responseBody: null, content: null };
+	      if (resumeIsStaleLegacy && !resumeIsMinimal) return { ...resumeRecord, responseBody: null, content: null };
+	      return resumeRecord;
+	    })();
     if (resumeRecord && !resumePreviewAllowed) {
       rejectedArtifactIds.push(authoritativeArtifactId ?? 'unknown');
     }

@@ -125,6 +125,86 @@ describe('StudioArtifactsService (unit): artifact record hydration metadata', ()
   });
 });
 
+describe('StudioArtifactsService (unit): readState suppresses rejected resume artifacts', () => {
+  it('returns null resume.responseBody/content when a minimal resume artifact is rejected from preview/use', async () => {
+    const studioArtifactRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'artifact-1',
+        createdAt: new Date('2026-05-31T00:00:00.000Z'),
+        updatedAt: new Date('2026-05-31T00:01:00.000Z'),
+        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        resumeInputsHash: 'hash-1',
+        resumeResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          auditId: 'minimal:1780277132821',
+          preview: { resume: { heading: { name: 'Alex' }, experience: [] } },
+          internal: {
+            resumeGenerationMode: 'top_level_fail_safe_minimal',
+            resumeFailSafeMinimalUsed: true,
+          },
+          qualityGate: { status: 'pass', reasons: [] },
+        },
+        resumeContent: 'x'.repeat(318),
+        resumeFailureCode: null,
+        resumeFailureMessage: null,
+        resumeGenerationStartedAt: null,
+        resumeGeneratedAt: new Date('2026-05-31T00:01:00.000Z'),
+        resumeFailedAt: null,
+        resumeMetadata: { auditId: 'minimal:1780277132821' },
+        coverLetterStatus: StudioArtifactLifecycleStatus.MISSING,
+        coverLetterInputsHash: null,
+        coverLetterResponseBody: null,
+        coverLetterContent: null,
+        coverLetterFailureCode: null,
+        coverLetterFailureMessage: null,
+        coverLetterGenerationStartedAt: null,
+        coverLetterGeneratedAt: null,
+        coverLetterFailedAt: null,
+        coverLetterMetadata: {},
+      } as any),
+    } as any;
+
+    const baselineRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+    } as any;
+    const baselineVersionRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }),
+    } as any;
+    const jobRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }),
+    } as any;
+    const fitAssessmentRepository = {
+      findOne: jest.fn().mockResolvedValue({ overallScore: 90 }),
+    } as any;
+    const baselineResumeV2BackfillService = {
+      backfillLatestIfMissing: jest.fn().mockResolvedValue(null),
+    } as any;
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository,
+      baselineRepository,
+      baselineVersionRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      baselineResumeV2BackfillService,
+    );
+
+    const state = await service.readState({
+      userId: 'u-1',
+      baselineId: 'base-1',
+      baselineVersionId: 'base-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    });
+
+    expect(state.resume).toBeTruthy();
+    expect(state.resume?.artifactCurrent).toBe(false);
+    expect(state.resume?.responseBody).toBeNull();
+    expect(state.resume?.content).toBeNull();
+  });
+});
+
 describe('StudioArtifactsService (unit): studio artifact scope upsert is idempotent', () => {
   it('does insert-or-update without throwing UQ_studio_artifacts_scope and logs create vs update decisions', async () => {
     const insertExecute = jest.fn();
