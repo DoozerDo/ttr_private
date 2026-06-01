@@ -2436,6 +2436,9 @@ export default function StudioPage() {
 
     return () => {
       cancelled = true;
+      // Ensure a cancelled hydration attempt cannot permanently suppress READY-shell auto-generation.
+      // If a new hydration run starts, it will set suppression again for the new signature.
+      suppressAutoGenerationRef.current = false;
     };
   }, [
     applyStudioArtifactsPayload,
