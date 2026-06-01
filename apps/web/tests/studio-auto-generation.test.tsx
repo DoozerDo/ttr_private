@@ -1237,6 +1237,73 @@ describe("Studio auto-generation", () => {
     expect(fetchMock).toBeTruthy();
   }, 15000);
 
+  it("does not show blocked/unavailable messaging when both previews renderable even if readiness is blocked", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    installStrongFitFetches({
+      readinessStatus: "blocked",
+      studioArtifactsPayload: {
+        status: "failed",
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        generationContractVersion: "studio-artifacts-v1",
+        artifact: {
+          hasResume: true,
+          hasCoverLetter: true,
+          pairStatus: "failed",
+          generating: false,
+          failure: { code: "generation_failed", message: "Failed." },
+        },
+        resume: {
+          status: "completed",
+          usableCurrent: true,
+          inputsHash: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: false,
+            qualityGate: { status: "pass", reasons: [] },
+            preview: { resume: { heading: { name: "Alex" }, experience: [{ company: "Co", roleTitle: "Role", bullets: ["Did work."] }] } },
+          },
+          content: "Resume",
+          confidence: "HIGH",
+          failure: null,
+        },
+        coverLetter: {
+          status: "completed",
+          usableCurrent: true,
+          inputsHash: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: false,
+            qualityGate: { status: "pass", reasons: [] },
+            preview: { coverLetter: { paragraphs: ["Hello"] } },
+          },
+          content: "Hello",
+          confidence: "HIGH",
+          failure: null,
+        },
+      },
+    });
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Generation unavailable/i)).toBeNull();
+      expect(screen.queryByTestId("studio-guidance-details")).toBeNull();
+    }, { timeout: 15000 });
+  }, 15000);
+
+  // Note: we avoid simulating hard backend analysis/baseline outages here because canonicalDecision
+  // intentionally fails on certain product-readiness vs analysis mismatches in test mode.
+
   it("Scenario B: cover preview exists, resume missing => shows resume missing and attempts resume", async () => {
     overrideSearchParams({
       analysisId: "analysis-1",

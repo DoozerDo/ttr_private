@@ -3933,6 +3933,7 @@ export default function StudioPage() {
   const displayContract = artifactContract.displayContract;
   const uiHasRenderableResume = displayContract?.resumePreviewRenderable ?? hasRenderableResumeContent;
   const uiHasRenderableCoverLetter = displayContract?.coverLetterPreviewRenderable ?? hasRenderableCoverLetterContent;
+  const uiHasRenderablePair = uiHasRenderableResume && uiHasRenderableCoverLetter;
 
   const coverPresenter = artifactContract.presenters.coverLetter;
   const hasCoverLetterDraft = hasCoverLetterArtifact;
@@ -4096,6 +4097,8 @@ export default function StudioPage() {
   );
 
   const studioCardsGenerationBlocked = Boolean(workflowAuthority.workflowState === "BLOCKED" || resumeV2Authority.blocksGeneration);
+  const uiResumeCardGenerationUnavailable = Boolean(studioCardsGenerationBlocked && !uiHasRenderableResume);
+  const uiCoverCardGenerationUnavailable = Boolean(studioCardsGenerationBlocked && !uiHasRenderableCoverLetter);
 
   const pairWorkflowState = useMemo(() => {
     const resumeStatus: PairWorkflowArtifactStatus = resumeGenerating || autoGenerationInFlight
@@ -12876,7 +12879,7 @@ export default function StudioPage() {
       <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
       <div className="flex flex-col gap-4">
         <div className="order-2 space-y-4" data-testid="studio-secondary-systems">
-      {!generateNowEligible || activeGenerationReadiness.blocked || !canGenerateDocuments ? (
+      {!uiHasRenderablePair && (!generateNowEligible || activeGenerationReadiness.blocked || !canGenerateDocuments) ? (
         <details
           className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
           data-testid="studio-guidance-details"
@@ -13885,31 +13888,31 @@ export default function StudioPage() {
           {jobsError}
         </Alert>
       ) : null}
-      {baselinesError && !qualifiedForStudioOrchestration ? (
+      {baselinesError && !qualifiedForStudioOrchestration && !uiHasRenderablePair ? (
         <Alert intent="warning" title="Baseline source unavailable">
           {baselinesError}
         </Alert>
       ) : null}
-      {!requestedAnalysisId && !hasResumeArtifact && !hasCoverLetterArtifact ? (
+      {!requestedAnalysisId && !uiHasRenderablePair ? (
         <Alert intent="info" title="Role analysis required">
           Select a role from Results to generate documents.
         </Alert>
       ) : null}
-      {requestedAnalysisId && analysisError && !hasResumeArtifact && !hasCoverLetterArtifact ? (
+      {requestedAnalysisId && analysisError && !uiHasRenderablePair ? (
         <Alert intent="warning" title="Role analysis unavailable">
           {analysisError}
         </Alert>
       ) : null}
-      {versionsError && !qualifiedForStudioOrchestration ? (
+      {versionsError && !qualifiedForStudioOrchestration && !uiHasRenderablePair ? (
         <Alert intent="warning" title="Resume snapshot unavailable">
           {versionsError}
         </Alert>
       ) : null} 
  
-      {!hasResumeArtifact && !hasCoverLetterArtifact && !generateNowEligible && !isReadySuccessState ? (
+      {!uiHasRenderablePair && !generateNowEligible && !isReadySuccessState ? (
         <StudioNextMove move={studioNextMove} />
       ) : null}
-      {!hasResumeArtifact && !hasCoverLetterArtifact && !generateNowEligible && !isReadySuccessState ? (
+      {!uiHasRenderablePair && !generateNowEligible && !isReadySuccessState ? (
         <details className="rounded-2xl border border-white/10 bg-white/[0.03] p-4" data-testid="studio-document-strategy-details">
           <summary className="cursor-pointer text-sm font-semibold text-slate-200">
             Document strategy
@@ -14030,7 +14033,7 @@ export default function StudioPage() {
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Resume</h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-              {studioCardsGenerationBlocked ? "Generation unavailable" : resumeAutoRepairing
+              {uiResumeCardGenerationUnavailable ? "Generation unavailable" : resumeAutoRepairing
                 ? "Repairing resumeâ€¦"
                 : (hasResumeDraft && (resumeNeedsRefinement || resumeRequiresCorrectionCopy))
                   ? studioEffectiveGenerationState === "generated_unusable"
@@ -14504,7 +14507,7 @@ export default function StudioPage() {
       >
         <summary className="cursor-pointer text-sm font-semibold text-slate-200">
           Cover letter{" "}
-          {!studioCardsGenerationBlocked && !hasCoverLetterArtifact ? "(not generated yet)" : ""}
+          {!studioCardsGenerationBlocked && !uiHasRenderableCoverLetter ? "(not generated yet)" : ""}
         </summary>
         <div
           className="mt-3 space-y-3"
@@ -14522,7 +14525,7 @@ export default function StudioPage() {
               Cover letter
             </h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-              {studioCardsGenerationBlocked ? "Generation unavailable" : coverAutoRepairing
+              {uiCoverCardGenerationUnavailable ? "Generation unavailable" : coverAutoRepairing
                 ? "Repairing cover letterâ€¦"
                 : (hasCoverLetterDraft && (coverNeedsRefinement || coverRequiresCorrectionCopy))
                   ? studioEffectiveGenerationState === "generated_unusable"
