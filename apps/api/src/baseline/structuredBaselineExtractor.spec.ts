@@ -399,6 +399,34 @@ describe('structuredBaselineExtractor', () => {
     expect(companies).toContain('AMS DataSerfs');
   });
 
+  it('rejects subsection headings and wrapped fragments as company values', () => {
+    const sections: any[] = [
+      {
+        sectionType: 'EXPERIENCE',
+        content: [
+          'Automation & Monitoring',
+          'Datacenter Operations',
+          'Internal Web Applications',
+          'Vue 3), deck builder frontend',
+          '',
+          'Of Fates Games LLC | Technical Architect & Full-Stack Engineer | May 2021 - Present',
+          '- Built backend services and deployment automation.',
+          '',
+          'AMS DataSerfs, Inc. | Linux System Administrator | July 2024 - April 2026',
+          '- Maintained Linux infrastructure and incident response.',
+        ].join('\n'),
+      },
+    ];
+
+    const structured = extractStructuredBaselineFromSections(sections as any);
+    const companies = structured.experience.map((e) => e.company);
+    expect(companies).toEqual(expect.arrayContaining(['Of Fates Games LLC', 'AMS DataSerfs, Inc.']));
+    expect(companies).not.toContain('Vue 3), deck builder frontend');
+    expect(companies).not.toContain('Automation & Monitoring');
+    expect(companies).not.toContain('Datacenter Operations');
+    expect(companies).not.toContain('Internal Web Applications');
+  });
+
   it('parses role-first PDF ordering and preserves hybrid technical roles (Dalen-style fixture)', () => {
     const sections: any[] = [
       {

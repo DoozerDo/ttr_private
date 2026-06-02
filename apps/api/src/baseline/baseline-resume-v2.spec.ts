@@ -202,4 +202,65 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
       expect.arrayContaining(['CenturyLink Business for Enterprise']),
     );
   });
+
+  it('does not persist subsection headings or wrapped fragments as ResumeV2 company values', () => {
+    const parsedBaseline: Record<string, unknown> = {
+      baseline_id: 'baseline-persist-filter-1',
+      identity: { full_name: 'Filter Person', location: 'Filter City' },
+      experience: [
+        {
+          company: 'Of Fates Games LLC',
+          role: 'Technical Architect & Full-Stack Engineer',
+          start_date: 'May 2021',
+          end_date: 'Present',
+          details_text: 'Built backend services and deployment automation',
+        },
+      ],
+    };
+
+    const baselineSections: any[] = [
+      {
+        id: 'exp',
+        baselineId: 'baseline-persist-filter-1',
+        sectionType: 'EXPERIENCE',
+        title: 'Experience',
+        order: 0,
+        includePolicy: 'ALWAYS',
+        content: [
+          'Vue 3), deck builder frontend',
+          'Automation & Monitoring',
+          'Datacenter Operations',
+          'Internal Web Applications',
+          '',
+          'Of Fates Games LLC | Technical Architect & Full-Stack Engineer | May 2021 - Present',
+          '- Built backend services and deployment automation.',
+          '',
+          'AMS DataSerfs, Inc. | Linux System Administrator | July 2024 - April 2026',
+          '- Maintained Linux infrastructure and incident response.',
+          '',
+          'Biblioso | Senior Systems Engineer | 2017 - 2019',
+          '- Improved deployment reliability and tooling.',
+          '',
+          'Wowrack | Platform Engineer | 2014 - 2016',
+          '- Built internal tooling and support automation.',
+        ].join('\n'),
+      },
+    ];
+
+    const resumeV2 = buildValidatedResumeV2FromParsedBaseline(parsedBaseline, baselineSections);
+    const companies = ((resumeV2 as any).experience as any[]).map((entry) => String(entry?.company ?? ''));
+    expect(companies).toEqual(
+      expect.arrayContaining([
+        'Of Fates Games LLC',
+        'AMS DataSerfs, Inc.',
+        'Biblioso',
+        'Wowrack',
+      ]),
+    );
+    expect(companies).not.toContain('Vue 3), deck builder frontend');
+    expect(companies).not.toContain('Automation & Monitoring');
+    expect(companies).not.toContain('Datacenter Operations');
+    expect(companies).not.toContain('Internal Web Applications');
+    expect(validateNormalizedResumeDocument(resumeV2 as any).valid).toBe(true);
+  });
 });

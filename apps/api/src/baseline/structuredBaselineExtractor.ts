@@ -143,9 +143,28 @@ function isLikelyCompanyName(value: string): boolean {
     return false;
   }
 
+  // Reject subsection labels and other non-employer headings that frequently leak out of PDF layouts.
+  if (
+    /\b(?:automation\s*&\s*monitoring|datacenter\s+operations|internal\s+web\s+applications|internal\s+tooling\s*&\s*software\s+development|earlier\s+career)\b/i.test(
+      text,
+    )
+  ) {
+    return false;
+  }
+
   // Reject technology / fragment-like "companies" that commonly appear in project bullets.
   // Keep this narrow and conservative to avoid false positives on real company names.
   if (/\b(?:vue|react|angular|frontend|back\s*end|full[-\s]*stack|builder)\b/i.test(text)) {
+    return false;
+  }
+
+  // Reject wrapped bullet fragments / dangling continuation text.
+  if (
+    /^\p{Ll}[\s\S]*$/u.test(text) ||
+    /^[,;:)\-]/.test(text) ||
+    /[,:;]\s*$/.test(text) ||
+    /(?:\bVue\s+3\)\s*,?\s*deck\s+builder\s+frontend\b)/i.test(text)
+  ) {
     return false;
   }
 

@@ -10,6 +10,31 @@ import {
 import { BaselineIncludePolicy, BaselineSectionType } from './baseline-section.entity';
 import { extractStructuredBaselineFromSections } from './structuredBaselineExtractor';
 
+function trimToText(value: unknown): string {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function isPersistableEmployerName(value: string): boolean {
+  const text = trimToText(value);
+  if (!text) return false;
+  if (
+    /\b(?:automation\s*&\s*monitoring|datacenter\s+operations|internal\s+web\s+applications|internal\s+tooling\s*&\s*software\s+development|earlier\s+career)\b/i.test(
+      text,
+    )
+  ) {
+    return false;
+  }
+  if (/\b(?:vue|react|angular|frontend|back\s*end|full[-\s]*stack|builder)\b/i.test(text)) {
+    return false;
+  }
+  if (/^[,;:)\-]/.test(text) || /[,:;]\s*$/.test(text)) return false;
+  if (text.includes(')') && !text.includes('(')) return false;
+  if (text.split(/\s+/).length > 10) return false;
+  if (!/[A-Za-z]/.test(text)) return false;
+  if (/^\p{Ll}/u.test(text)) return false;
+  return true;
+}
+
 export type ResumeV2Usability = {
   usable: boolean;
   usableExperienceCount: number;
@@ -130,6 +155,7 @@ export function buildValidatedResumeV2FromParsedBaseline(
           const roleTitle = typeof entry?.roleTitle === 'string' ? entry.roleTitle.trim() : '';
           const dates = typeof entry?.dates === 'string' ? entry.dates.trim() : '';
           if (!company || !roleTitle) return '';
+          if (!isPersistableEmployerName(company)) return '';
           const header = [company, roleTitle, dates].filter(Boolean).join(' | ');
           const bullets = Array.isArray(entry?.bullets) ? (entry.bullets as unknown[]).map((b) => String(b ?? '').trim()).filter(Boolean) : [];
           const bulletLines = bullets.map((b) => `- ${b.replace(/^[-*Ã¢â‚¬Â¢]\s*/, '')}`);
@@ -261,6 +287,11 @@ export function buildValidatedResumeV2FromParsedBaseline(
           entry['organization_name'],
           entry['org'],
         );
+        if (!isPersistableEmployerName(company)) {
+          rejectedMissingHeaderCount += 1;
+          recordRejection('company_not_persistable', entry);
+          return '';
+        }
         const role = readString(
           entry['role_title'],
           entry['roleTitle'],
