@@ -136,6 +136,29 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
   baselineSections: BaselineSection[];
   structuredExperience: Array<{ company: string; roleTitle: string; dates?: string; bullets: string[] }>;
 }): string {
+  const sourceExperience = (params.structuredExperience ?? [])
+    .map((entry) => ({
+      company: String(entry?.company ?? '').trim(),
+      roleTitle: String(entry?.roleTitle ?? '').trim(),
+      dates: String(entry?.dates ?? '').trim(),
+      bullets: Array.isArray(entry?.bullets)
+        ? (entry.bullets as unknown[]).map((bullet) => String(bullet ?? '').trim()).filter(Boolean)
+        : [],
+    }))
+    .filter((entry) => entry.company && entry.roleTitle);
+
+  if (sourceExperience.length === 0) return '';
+
+  return sourceExperience
+    .map((entry) => {
+      const headerLine = [entry.company, entry.roleTitle, entry.dates].filter(Boolean).join(' | ');
+      const bullets = entry.bullets.map((bullet) => `- ${bullet.replace(/^[-*â€¢]\s+/, '').trim()}`).filter(Boolean);
+      return [headerLine, ...bullets].filter(Boolean).join('\n').trim();
+    })
+    .filter(Boolean)
+    .join('\n\n')
+    .trim();
+
   const experienceSections = (params.baselineSections ?? []).filter(
     (s: any) => String(s?.sectionType ?? s?.type ?? '').toUpperCase() === 'EXPERIENCE',
   );
