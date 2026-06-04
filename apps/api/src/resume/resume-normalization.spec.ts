@@ -388,6 +388,63 @@ describe('resume-normalization', () => {
     expect(companies).not.toContain('Internal Web Applications');
   });
 
+  it('does not assign malformed raw lines directly to company during normalization', () => {
+    const document = buildNormalizedResumeDocument([
+      {
+        type: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        content: [
+          'Project',
+          'Vue 3), deck builder frontend',
+          '2024 - 2025',
+          '- Built UI components.',
+          '',
+          'Of Fates Games LLC',
+          'Senior Developer',
+          '2021 - 2024',
+          '- Built backend services.',
+          '',
+          'Automation & Monitoring',
+          '2019 - 2020',
+          '- Improved alert quality.',
+          '',
+          'AMS DataSerfs, Inc.',
+          'Linux System Administrator',
+          'July 2024 - April 2026',
+          '- Maintained systems.',
+          '',
+          'Datacenter Operations',
+          '2018 - 2019',
+          '- Reduced downtime.',
+          '',
+          'Internal Web Applications',
+          '2017 - 2018',
+          '- Shipped features.',
+          '',
+          'Biblioso',
+          'Staff Program Manager',
+          '2016 - 2017',
+          '- Managed programs.',
+          '',
+          'Wowrack',
+          'Platform Engineer',
+          '2014 - 2016',
+          '- Automated workflows.',
+        ].join('\n'),
+      },
+    ] as any);
+
+    const companies = document.experience.map((entry) => entry.company);
+    expect(companies).toContain('Of Fates Games LLC');
+    expect(companies).toContain('AMS DataSerfs, Inc.');
+    expect(companies).toContain('Biblioso');
+    expect(companies).toContain('Wowrack');
+    expect(companies).not.toContain('Vue 3), deck builder frontend');
+    expect(companies).not.toContain('Automation & Monitoring');
+    expect(companies).not.toContain('Datacenter Operations');
+    expect(companies).not.toContain('Internal Web Applications');
+  });
+
   it('accepts pipe headers only when a credible date exists inline or adjacent', () => {
     const document = buildNormalizedResumeDocument([
       {
