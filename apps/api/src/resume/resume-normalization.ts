@@ -651,6 +651,13 @@ function parseExperienceHeader(
 
   const dateInfo = parseDateRange(sanitized);
   const withoutDate = sanitized.replace(DATE_RANGE_PATTERN, '').replace(/[,-]+$/g, '').trim();
+  if (isLikelyLocation(withoutDate)) {
+    return {
+      roleTitle: '',
+      company: '',
+      ...dateInfo,
+    };
+  }
   if (withoutDate.includes(',')) {
     const [company, roleTitle] = withoutDate.split(',').map(normalizeLine).filter(Boolean);
     return {

@@ -472,6 +472,32 @@ describe('resume-normalization', () => {
     expect(companies).toContain('Of Fates Games LLC');
   });
 
+  it('ignores location-plus-date lines and still parses valid comma employer headers', () => {
+    const document = buildNormalizedResumeDocument([
+      {
+        type: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        content: [
+          'Seattle, WA Dec 2018 – Oct 2019',
+          '- Owned operational support.',
+          '',
+          'Seattle, WA',
+          '- Not a header.',
+          '',
+          'Biblioso, Senior Program Manager',
+          '2016 - 2017',
+          '- Managed programs.',
+        ].join('\n'),
+      },
+    ] as any);
+
+    const companies = document.experience.map((entry) => entry.company);
+    expect(companies).not.toContain('Seattle');
+    expect(companies).not.toContain('Seattle, WA');
+    expect(companies).toContain('Biblioso');
+    expect(document.experience.some((entry) => entry.roleTitle === 'Senior Program Manager')).toBe(true);
+  });
+
   it('does not fall back missing role titles to \"Professional Experience\"', () => {
     const document = buildNormalizedResumeDocument([
       {
