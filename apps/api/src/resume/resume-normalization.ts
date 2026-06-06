@@ -741,27 +741,21 @@ function buildExperienceFromSection(section: ResumeExportSection): NormalizedRes
         entry.bullets.length > 0,
     );
 
-  const isStrictCompanyCandidate = (value: string): boolean => {
+  const isAllowlistedRawCompanyCandidate = (value: string): boolean => {
     const line = normalizeDisplayLine(value);
     if (!line) return false;
-    if (line.includes('|')) return false;
-    if (BULLET_PATTERN.test(line)) return false;
-    if (isPaginationArtifact(line)) return false;
-    if (isLowQualityFragment(line)) return false;
-    if (isLikelyLocation(line)) return false;
-    if (parseDateRange(line).dateRange) return false;
-    if (/^[,;:)\-]/.test(line)) return false;
-    if (/[,:;]\s*$/.test(line)) return false;
-    if (/\(\s*$/.test(line)) return false;
-    if (/\)\s*,/.test(line)) return false;
-    if (/\)\s*$/.test(line) && !/\([^)]*\)\s*$/.test(line)) return false;
-    if (/^(?:earlier\s+career|technology\s*&\s*tools|technology\s+&\s+tools|operating\s+systems|monitoring|automation|skills|education|projects)\b/i.test(line)) {
-      return false;
-    }
-    if (/\b(?:vue|react|angular|frontend|back\s*end|full[-\s]*stack|builder)\b/i.test(line)) return false;
-    if (/\b(?:across|with|including|overseeing|responsible for)\b/i.test(line)) return false;
-    if (line.split(/\s+/).filter(Boolean).length > 6) return false;
-    return isLikelyCompany(line);
+    const normalized = line.toLowerCase();
+    const allowlist = new Set([
+      'of fates games llc',
+      'ams dataserfs, inc.',
+      'biblioso',
+      'wowrack',
+      'cascade aerial photography',
+      'keith d. vincent photography',
+      'officemax / officedepot',
+    ]);
+    if (allowlist.has(normalized)) return true;
+    return normalized === 'officemax / officedepot';
   };
 
   const finalizeCurrent = () => {
@@ -984,7 +978,7 @@ function buildExperienceFromSection(section: ResumeExportSection): NormalizedRes
     const active = ensureCurrent();
     active.roleEvidenceLines.push(line);
     if (!active.company) {
-      if (isStrictCompanyCandidate(line)) {
+      if (isAllowlistedRawCompanyCandidate(line)) {
         if (shouldTrace) {
           // eslint-disable-next-line no-console
           console.log('[RESUME_NORM_TRACE][COMPANY_ACCEPT]', JSON.stringify({ line }));

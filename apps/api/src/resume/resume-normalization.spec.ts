@@ -430,6 +430,11 @@ describe('resume-normalization', () => {
           'Platform Engineer',
           '2014 - 2016',
           '- Automated workflows.',
+          '',
+          'OfficeMax / OfficeDepot',
+          'Operations Manager',
+          '2012 - 2014',
+          '- Managed store operations.',
         ].join('\n'),
       },
     ] as any);
@@ -439,6 +444,7 @@ describe('resume-normalization', () => {
     expect(companies).toContain('AMS DataSerfs, Inc.');
     expect(companies).toContain('Biblioso');
     expect(companies).toContain('Wowrack');
+    expect(companies).toContain('OfficeMax / OfficeDepot');
     expect(companies).not.toContain('Vue 3), deck builder frontend');
     expect(companies).not.toContain('Automation & Monitoring');
     expect(companies).not.toContain('Datacenter Operations');
