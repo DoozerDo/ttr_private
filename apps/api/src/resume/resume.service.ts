@@ -4802,11 +4802,7 @@ export class ResumeService {
       (isMinimalFallbackRuntime && isStudioEligibleLaneForPersistence) ||
       (!isInternalStudioVerifiedOnlyFallbackCall &&
         !isStudioEligibleLaneForPersistence &&
-        isMinimalFallbackRuntime) ||
-      (!isInternalStudioVerifiedOnlyFallbackCall &&
-        authoritativeExperienceCountForGuard === 0 &&
-        !isStudioEligibleZeroRoleFallback &&
-        !isStudioEligibleLaneForPersistence)
+        isMinimalFallbackRuntime)
     ) {
       if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
         (response as any).internal = {

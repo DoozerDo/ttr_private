@@ -28,6 +28,7 @@ import { NarrativeCompositionEngine } from '../composition/narrative-composition
 import * as ResumeAssembler from './resumeTemplateAssembler';
 import * as AuthoritativeRenderPlan from '../positioning/authoritative-render-plan';
 import * as ResumeNormalizer from './resume-normalization';
+import * as BaselineTemplateReadiness from '../baseline/baselineTemplateReadiness';
 
 type MockRepo<T> = Partial<Record<keyof Repository<T>, jest.Mock>> & {
   findOne: jest.Mock;
@@ -284,7 +285,7 @@ describe('ResumeService contract', () => {
     ];
 
     try {
-      const result = await service.generateResume('user-1', baseRequest as any);
+      const result = await service.generateResume('user-1', { ...baseRequest, forceRegenerate: true } as any);
       expect(result.status).toBe('success');
       expect(String((result as any).content ?? '')).not.toContain(poison);
     } finally {
@@ -313,7 +314,7 @@ describe('ResumeService contract', () => {
         } as any,
       ] as any;
 
-      const result = await service.generateResume('user-1', baseRequest as any);
+      const result = await service.generateResume('user-1', { ...baseRequest, oneTap: true } as any);
       expect(result.status).toBe('success');
       expect(Array.isArray((result as any)?.preview?.resume?.experience)).toBe(true);
       expect((result as any).preview.resume.experience.length).toBeGreaterThan(0);
@@ -1674,7 +1675,7 @@ describe('ResumeService contract', () => {
       } as any);
 
       expect(studioArtifactsService.recordResumeSuccess).not.toHaveBeenCalled();
-    } finally {
+  } finally {
       baseline.sections = originalSections;
       baseline.parsedRecords = originalParsed;
       assessment.overallScore = originalScore;
@@ -1682,6 +1683,97 @@ describe('ResumeService contract', () => {
       else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
       if (typeof originalDiagnostics === 'string') process.env.DOCGEN_DIAGNOSTICS = originalDiagnostics;
       else delete process.env.DOCGEN_DIAGNOSTICS;
+    }
+  });
+
+  it('does not block persistence when authoritative experience count is zero but the baseline-produced document is non-minimal', async () => {
+    const { service, studioArtifactsService } = buildService();
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+    const originalScore = assessment.overallScore;
+    const normalizedDocumentSpy = jest.spyOn(ResumeNormalizer, 'buildNormalizedResumeDocument');
+    const readinessSpy = jest.spyOn(service, 'getGenerationReadiness').mockResolvedValue({
+      status: 'ready',
+      blocked: false,
+      compliance_flags: [],
+      reasons: [],
+    } as any);
+    const templateReadinessSpy = jest.spyOn(BaselineTemplateReadiness, 'evaluateBaselineTemplateReadiness').mockReturnValue({
+      canGenerateResume: true,
+      totalExperience: 0,
+      validExperience: 0,
+      missingEvidenceReasons: [],
+    } as any);
+
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
+    assessment.overallScore = 90;
+
+    try {
+      baseline.parsedRecords = [];
+      baseline.sections = [
+        {
+          ...baseSection,
+          id: 'section-summary',
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          order: 0,
+          content: 'Seasoned operations leader focused on service quality and delivery.',
+        } as any,
+        {
+          ...baseSection,
+          id: 'section-skills',
+          sectionType: BaselineSectionType.SKILLS,
+          title: 'Skills',
+          order: 1,
+          content: ['- SQL', '- Excel', '- Stakeholder management'].join('\n'),
+        } as any,
+        {
+          ...baseSection,
+          id: 'section-education',
+          sectionType: BaselineSectionType.EDUCATION,
+          title: 'Education',
+          order: 2,
+          content: 'B.S. Business Administration',
+        } as any,
+      ] as any;
+      normalizedDocumentSpy.mockReturnValue({
+        heading: { name: 'Test Candidate', contactLine: 'test@example.com' },
+        summary: 'Seasoned operations leader focused on service quality and delivery.',
+        experience: [
+          {
+            company: 'Acme',
+            roleTitle: 'Operations Lead',
+            bullets: [
+              'Improved service quality across teams.',
+              'Reduced escalations through process improvements.',
+            ],
+            dateRange: '2022 - Present',
+          },
+        ],
+        education: [],
+        competencies: [],
+        coreCompetencies: [],
+        sections: [
+          { type: 'summary', content: 'Seasoned operations leader focused on service quality and delivery.' },
+          { type: 'experience', content: 'Acme | Operations Lead | 2022 - Present' },
+        ],
+      } as any);
+
+      const result = await service.generateResume('user-1', baseRequest as any);
+
+      expect(result.ok).toBe(true);
+      expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
+      expect(studioArtifactsService.recordResumeFailure).not.toHaveBeenCalled();
+    } finally {
+      baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsed;
+      assessment.overallScore = originalScore;
+      normalizedDocumentSpy.mockRestore();
+      readinessSpy.mockRestore();
+      templateReadinessSpy.mockRestore();
+      if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
     }
   });
 
