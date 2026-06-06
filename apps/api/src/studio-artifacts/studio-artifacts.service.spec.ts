@@ -38,6 +38,98 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
     expect(result.exports).toEqual({ docx: true, pdf: true });
   });
 
+  it('keeps a renderable resume preview visible when export is ineligible and qualityGate is absent', async () => {
+    const studioArtifactRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'artifact-3',
+        createdAt: new Date('2026-06-03T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-03T00:01:00.000Z'),
+        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        resumeInputsHash: 'stored-hash',
+        resumeResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: false,
+          preview: {
+            resume: {
+              heading: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
+              summary: 'Renderable preview should remain visible.',
+              experience: [{ company: 'Co', roleTitle: 'Role', bullets: ['Did work.'] }],
+            },
+          },
+          internal: { resumeGenerationMode: 'baseline_verified_generation' },
+        },
+        resumeContent: 'Resume content',
+        resumeFailureCode: null,
+        resumeFailureMessage: null,
+        resumeGenerationStartedAt: null,
+        resumeGeneratedAt: new Date('2026-06-03T00:01:00.000Z'),
+        resumeFailedAt: null,
+        resumeMetadata: {},
+        coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        coverLetterInputsHash: 'stored-hash',
+        coverLetterResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          qualityGate: { status: 'pass', reasons: [] },
+          preview: { coverLetter: { paragraphs: ['Hello'] } },
+        },
+        coverLetterContent: 'Hello',
+        coverLetterFailureCode: null,
+        coverLetterFailureMessage: null,
+        coverLetterGenerationStartedAt: null,
+        coverLetterGeneratedAt: new Date('2026-06-03T00:01:00.000Z'),
+        coverLetterFailedAt: null,
+        coverLetterMetadata: {},
+      } as any),
+    } as any;
+
+    const baselineRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+    } as any;
+    const baselineVersionRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }),
+    } as any;
+    const jobRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }),
+    } as any;
+    const fitAssessmentRepository = {
+      findOne: jest.fn().mockResolvedValue({ overallScore: 90 }),
+    } as any;
+    const baselineResumeV2BackfillService = {
+      backfillLatestIfMissing: jest.fn().mockResolvedValue(null),
+    } as any;
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository,
+      baselineRepository,
+      baselineVersionRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      baselineResumeV2BackfillService,
+    );
+    jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('derived-hash');
+    jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('derived-hash');
+
+    const state = await service.readState({
+      userId: 'u-1',
+      baselineId: 'base-1',
+      baselineVersionId: 'base-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    } as any);
+
+    expect(state.resume?.responseBody).toBeTruthy();
+    expect(state.resumeResult).toBeTruthy();
+    expect((state.resumeResult as any)?.preview).toBeTruthy();
+    expect((state.resumeResult as any)?.generationState).toBe('generated_needs_correction');
+    expect((state.resumeResult as any)?.qualityStatus).toBe('needs_refinement');
+    expect((state.resumeResult as any)?.exportReady).toBe(false);
+    expect(state.coverLetterResult).toBeTruthy();
+    expect((state.coverLetterResult as any)?.generationState).toBe('generated_usable');
+  });
+
   it('preserves failed resumeResult when record.status is FAILED and responseBody is not renderable', () => {
     const result = buildResult({
       status: StudioArtifactLifecycleStatus.FAILED,
@@ -288,7 +380,7 @@ describe('StudioArtifactsService (unit): readState surfaces renderable resume pr
     expect(state.resumeResult).toBeTruthy();
     expect((state.resumeResult as any)?.preview).toBeTruthy();
     expect((state.resumeResult as any)?.generationState).toBe('generated_needs_correction');
-    expect((state.resumeResult as any)?.qualityStatus).toBe('failed');
+    expect((state.resumeResult as any)?.qualityStatus).toBe('needs_refinement');
     expect((state.resumeResult as any)?.exportReady).toBe(false);
   });
 });

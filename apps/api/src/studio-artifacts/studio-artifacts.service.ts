@@ -1059,7 +1059,9 @@ export class StudioArtifactsService {
           ? 'needs_refinement'
           : qualityStatusRaw === 'blocked'
             ? 'blocked'
-            : 'failed';
+            : artifact === 'resume' && Boolean(previewModel)
+              ? 'needs_refinement'
+              : 'failed';
 
     const correctionReasons: ArtifactCorrectionReason[] = Array.isArray(qualityGate?.reasons)
       ? (qualityGate?.reasons as unknown[])
