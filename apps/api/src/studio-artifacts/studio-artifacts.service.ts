@@ -732,14 +732,15 @@ export class StudioArtifactsService {
 	    // - Never mutate persisted artifact fields.
 	    // - Do not surface stale legacy artifacts as the active preview payload (Prompt 15) => null responseBody/content.
 	    // - Minimal artifacts keep `responseBody` for audit/diagnostics, but must not surface preview (Prompt 18).
-	    const resumeRecordForResult = (() => {
-	      if (!resumeRecord) return resumeRecord;
-	      // Never erase a renderable preview payload before canonical shaping.
-	      // Export eligibility is enforced at the resumeResult layer below.
-	      if (!resumePreviewRenderable) return { ...resumeRecord, responseBody: null, content: null };
-	      if (resumeIsStaleLegacy && !resumeIsMinimal) return { ...resumeRecord, responseBody: null, content: null };
-	      return resumeRecord;
-	    })();
+    const resumeRecordForResult = (() => {
+      if (!resumeRecord) return resumeRecord;
+      // Never erase a renderable preview payload before canonical shaping.
+      // Export eligibility is enforced at the resumeResult layer below.
+      if (!resumePreviewRenderable) return { ...resumeRecord, responseBody: null, content: null };
+      if (resumeIsMinimal) return { ...resumeRecord, responseBody: null, content: null };
+      if (resumeIsStaleLegacy && !resumeIsMinimal) return { ...resumeRecord, responseBody: null, content: null };
+      return resumeRecord;
+    })();
     if (resumeRecord && !resumeExportEligible) {
       rejectedArtifactIds.push(authoritativeArtifactId ?? 'unknown');
     }

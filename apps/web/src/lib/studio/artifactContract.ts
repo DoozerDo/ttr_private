@@ -122,6 +122,28 @@ function hasNonEmptySectionText(sections: unknown): boolean {
 }
 
 function hasRenderableResumeContent(payload: unknown, model: ResumeModel | null): boolean {
+  const record = toRecord(payload);
+  const resumeResult = record ? toRecord(record.resumeResult) : null;
+  const internal = record ? toRecord(record.internal) : null;
+  const resumeInternal = resumeResult ? toRecord(resumeResult.internal) : null;
+  const minimalIndicators = [
+    internal?.minimalFallback,
+    internal?.resumeFailSafeMinimalUsed,
+    internal?.resumeGenerationMode,
+    resumeInternal?.minimalFallback,
+    resumeInternal?.resumeFailSafeMinimalUsed,
+    resumeInternal?.resumeGenerationMode,
+    record?.auditId,
+    record?.audit_id,
+    resumeResult?.auditId,
+    resumeResult?.audit_id,
+  ];
+  const isMinimalFallback =
+    minimalIndicators.some((value) => value === true || String(value ?? '').toLowerCase() === 'true') ||
+    String(internal?.resumeGenerationMode ?? resumeInternal?.resumeGenerationMode ?? '').trim() === 'top_level_fail_safe_minimal' ||
+    String(record?.auditId ?? record?.audit_id ?? resumeResult?.auditId ?? resumeResult?.audit_id ?? '').startsWith('minimal:');
+
+  if (isMinimalFallback) return false;
   return Boolean(model && estimateResumeModelBodyLength(model) > 0);
 }
 

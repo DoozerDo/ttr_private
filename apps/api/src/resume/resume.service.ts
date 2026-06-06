@@ -4799,7 +4799,10 @@ export class ResumeService {
       }
     })();
     if (
-      (!isInternalStudioVerifiedOnlyFallbackCall && !isStudioEligibleLaneForPersistence && isMinimalFallbackRuntime) ||
+      (isMinimalFallbackRuntime && isStudioEligibleLaneForPersistence) ||
+      (!isInternalStudioVerifiedOnlyFallbackCall &&
+        !isStudioEligibleLaneForPersistence &&
+        isMinimalFallbackRuntime) ||
       (!isInternalStudioVerifiedOnlyFallbackCall &&
         authoritativeExperienceCountForGuard === 0 &&
         !isStudioEligibleZeroRoleFallback &&

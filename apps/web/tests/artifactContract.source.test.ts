@@ -99,5 +99,53 @@ describe("Studio artifact contract resume source", () => {
 
     expect(contract.resumeModel).toBeNull();
   });
-});
 
+  it("treats minimal fallback resume payloads as non-renderable even when preview text exists", () => {
+    const contract = buildStudioArtifactContract({
+      resumeResponse: {
+        status: "success",
+        exportReady: false,
+        content: "Minimal fallback content",
+        preview: {
+          resume: {
+            heading: { name: "Alex" },
+            summary: "Fallback resume should not count as renderable.",
+            experience: [{ company: "Example", roleTitle: "Role", bullets: ["x"] }],
+          },
+        },
+        internal: {
+          minimalFallback: true,
+          resumeGenerationMode: "top_level_fail_safe_minimal",
+          resumeFailSafeMinimalUsed: true,
+        },
+        resumeResult: {
+          artifactType: "resume",
+          generationState: "generated_unusable",
+          qualityStatus: "failed",
+          preview: {
+            heading: { name: "Alex" },
+            summary: "Fallback resume should not count as renderable.",
+            experience: [{ company: "Example", roleTitle: "Role", bullets: ["x"] }],
+          },
+          correctionReasons: [],
+          exportReady: false,
+          exports: { docx: false, pdf: false },
+          actions: { canEdit: true, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
+          internal: {
+            minimalFallback: true,
+            resumeGenerationMode: "top_level_fail_safe_minimal",
+            resumeFailSafeMinimalUsed: true,
+          },
+          auditId: "minimal:1776648116795",
+        },
+      },
+      coverLetterResponse: null,
+      canExportDocuments: true,
+      isPro: true,
+    });
+
+    expect(contract.resumePreviewRenderable).toBe(false);
+    expect(contract.hasResumeArtifact).toBe(false);
+    expect(contract.shouldAutoGenerateStart).toBe(true);
+  });
+});
