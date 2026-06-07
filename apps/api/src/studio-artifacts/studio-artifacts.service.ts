@@ -995,7 +995,13 @@ export class StudioArtifactsService {
           }
         : resumeResultBase;
     const resumeFailureDiagnostics = (() => {
-      const metadata = normalizeRecord((resumeRecord as any)?.resumeMetadata);
+      const metadata = normalizeRecord(
+        (resumeRecord as any)?.resumeMetadata ??
+          (resumeRecord as any)?.metadata ??
+          (record as any)?.resumeMetadata ??
+          (record as any)?.metadata ??
+          null,
+      );
       const diagnostics = normalizeRecord(metadata?.resumeArtifactInvalidDiagnostics);
       return diagnostics && Object.keys(diagnostics).length > 0 ? diagnostics : null;
     })();

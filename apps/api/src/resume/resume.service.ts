@@ -5866,6 +5866,19 @@ export class ResumeService {
               },
 	            });
 	          } else {
+	            try {
+	              // eslint-disable-next-line no-console
+	              console.log('[RESUME_ARTIFACT_INVALID_DIAGNOSTICS]', {
+	                qualityGateStatus: resumeArtifactInvalidDiagnostics.qualityGateStatus,
+	                normalizedDocumentPresent: resumeArtifactInvalidDiagnostics.normalizedDocumentPresent,
+	                validationExceptionName: resumeArtifactInvalidDiagnostics.validationExceptionName,
+	                validationExceptionMessage: resumeArtifactInvalidDiagnostics.validationExceptionMessage,
+	                normalizedExperienceCount: resumeArtifactInvalidDiagnostics.normalizedExperienceCount,
+	                normalizedExperienceSummary: resumeArtifactInvalidDiagnostics.normalizedExperienceSummary,
+	              });
+	            } catch {
+	              // ignore diagnostics logging failures
+	            }
 	            await this.studioArtifactsService.recordResumeFailure({
 	              userId,
 	              baselineId: studioArtifactContext.baselineId,
