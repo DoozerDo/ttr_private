@@ -736,9 +736,85 @@ export class StudioArtifactsService {
       if (!resumeRecord) return resumeRecord;
       // Never erase a renderable preview payload before canonical shaping.
       // Export eligibility is enforced at the resumeResult layer below.
-      if (!resumePreviewRenderable) return { ...resumeRecord, responseBody: null, content: null };
-      if (resumeIsMinimal) return { ...resumeRecord, responseBody: null, content: null };
-      if (resumeIsStaleLegacy && !resumeIsMinimal) return { ...resumeRecord, responseBody: null, content: null };
+      if (!resumePreviewRenderable) {
+        if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
+          (resumeRecord as any).diagnostics = {
+            ...(normalizeRecord((resumeRecord as any)?.diagnostics) ?? {}),
+            resumeHydration: {
+              resumePreviewRenderable,
+              resumeIsMinimal,
+              resumeIsStaleLegacy,
+              resumeExportEligible,
+              qualityGatePresent: Boolean((resumeRecord as any)?.responseBody?.qualityGate),
+              qualityGateStatus: String((resumeRecord as any)?.responseBody?.qualityGate?.status ?? ''),
+              responseBodyPresent: Boolean((resumeRecord as any)?.responseBody),
+              previewPresentBeforeCanonicalization: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
+              previewPresentAfterCanonicalization: false,
+              hydrationBranchTaken: 'nulled_non_renderable_resume',
+            },
+          };
+        }
+        return { ...resumeRecord, responseBody: null, content: null };
+      }
+      if (resumeIsMinimal) {
+        if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
+          (resumeRecord as any).diagnostics = {
+            ...(normalizeRecord((resumeRecord as any)?.diagnostics) ?? {}),
+            resumeHydration: {
+              resumePreviewRenderable,
+              resumeIsMinimal,
+              resumeIsStaleLegacy,
+              resumeExportEligible,
+              qualityGatePresent: Boolean((resumeRecord as any)?.responseBody?.qualityGate),
+              qualityGateStatus: String((resumeRecord as any)?.responseBody?.qualityGate?.status ?? ''),
+              responseBodyPresent: Boolean((resumeRecord as any)?.responseBody),
+              previewPresentBeforeCanonicalization: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
+              previewPresentAfterCanonicalization: false,
+              hydrationBranchTaken: 'nulled_minimal_resume',
+            },
+          };
+        }
+        return { ...resumeRecord, responseBody: null, content: null };
+      }
+      if (resumeIsStaleLegacy && !resumeIsMinimal) {
+        if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
+          (resumeRecord as any).diagnostics = {
+            ...(normalizeRecord((resumeRecord as any)?.diagnostics) ?? {}),
+            resumeHydration: {
+              resumePreviewRenderable,
+              resumeIsMinimal,
+              resumeIsStaleLegacy,
+              resumeExportEligible,
+              qualityGatePresent: Boolean((resumeRecord as any)?.responseBody?.qualityGate),
+              qualityGateStatus: String((resumeRecord as any)?.responseBody?.qualityGate?.status ?? ''),
+              responseBodyPresent: Boolean((resumeRecord as any)?.responseBody),
+              previewPresentBeforeCanonicalization: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
+              previewPresentAfterCanonicalization: false,
+              hydrationBranchTaken: 'nulled_stale_legacy_resume',
+            },
+          };
+        }
+        return { ...resumeRecord, responseBody: null, content: null };
+      }
+      if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
+        (resumeRecord as any).diagnostics = {
+          ...(normalizeRecord((resumeRecord as any)?.diagnostics) ?? {}),
+          resumeHydration: {
+            resumePreviewRenderable,
+            resumeIsMinimal,
+            resumeIsStaleLegacy,
+            resumeExportEligible,
+            qualityGatePresent: Boolean((resumeRecord as any)?.responseBody?.qualityGate),
+            qualityGateStatus: String((resumeRecord as any)?.responseBody?.qualityGate?.status ?? ''),
+            responseBodyPresent: Boolean((resumeRecord as any)?.responseBody),
+            previewPresentBeforeCanonicalization: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
+            previewPresentAfterCanonicalization: true,
+            hydrationBranchTaken: resumeExportEligible
+              ? 'preserved_renderable_resume'
+              : 'export_ineligible_overlay',
+          },
+        };
+      }
       return resumeRecord;
     })();
     if (resumeRecord && !resumeExportEligible) {
