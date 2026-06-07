@@ -827,9 +827,9 @@ export class StudioArtifactsService {
           resumeRecordForResultResponseBodyPresent: responseBodyPresent,
           resumeRecordForResultPreviewResumePresent: previewResumePresent,
           resumeRecordForResultHasResponseBody: responseBodyPresent,
-          resumeRecordForResultHasContent: Boolean(String((resumeRecordForResult as any)?.content ?? '').trim()),
-        resumeRecordForResultPreviewKeys: safeObjectKeys(normalizeRecord((resumeRecordForResult as any)?.responseBody?.preview)).slice(0, 24),
-          resumeRecordForResultHasPreviewResume: Boolean((resumeRecordForResult as any)?.responseBody?.preview?.resume),
+          resumeRecordForResultHasContent: false,
+          resumeRecordForResultPreviewKeys: [],
+          resumeRecordForResultHasPreviewResume: false,
           canonicalResumeResultPreviewPresent: false,
         };
       };
