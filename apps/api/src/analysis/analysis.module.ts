@@ -5,8 +5,10 @@ import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { BaselineSection } from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { ComplianceModule } from '../compliance/compliance.module';
+import { CoverLettersModule } from '../cover-letters/cover-letters.module';
 import { Interview } from '../interviews/interview.entity';
 import { Job } from '../jobs/job.entity';
+import { ResumeModule } from '../resume/resume.module';
 import { User } from '../users/user.entity';
 import { FitAssessment } from './fit-assessment.entity';
 import { ExpandedFitAssessment } from './expanded-fit-assessment.entity';
@@ -36,6 +38,8 @@ import { WorkflowIdempotencyModule } from '../common/workflow-idempotency.module
       User,
     ]),
     ComplianceModule,
+    ResumeModule,
+    CoverLettersModule,
     SupportModule,
     WorkflowIdempotencyModule,
   ],
