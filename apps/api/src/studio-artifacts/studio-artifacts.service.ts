@@ -837,7 +837,7 @@ export class StudioArtifactsService {
         emitResumeHydrationDebug('nulled_non_renderable', false, false);
         return { ...resumeRecord, responseBody: null, content: null };
       }
-      if (!resumeIsMinimal && !resumeIsStaleLegacy && resumeHasRecoverablePayload) {
+      if (!resumeIsMinimal && resumeHasRecoverablePayload) {
         const responseBody = normalizeRecord(resumeRecord.responseBody);
         const canonicalPreviewResume = resumeRecoverablePreviewModel;
         const canonicalResponseBody =
