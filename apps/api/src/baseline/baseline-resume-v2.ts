@@ -46,6 +46,23 @@ function shouldKeepStructuredExperienceEntry(input: {
   return true;
 }
 
+function classifyStructuredExperienceKeepDrop(input: {
+  company: string;
+  roleTitle: string;
+  detailLines: string[];
+}): {
+  kept: boolean;
+  dropReason: 'missing_company_or_role' | 'obvious_non_work_history_company' | 'obvious_non_work_history_role' | 'missing_detail_lines' | 'kept';
+} {
+  const company = trimToText(input.company);
+  const roleTitle = trimToText(input.roleTitle);
+  if (!company || !roleTitle) return { kept: false, dropReason: 'missing_company_or_role' };
+  if (isObviousNonWorkHistoryCompany(company)) return { kept: false, dropReason: 'obvious_non_work_history_company' };
+  if (isObviousNonWorkHistoryCompany(roleTitle)) return { kept: false, dropReason: 'obvious_non_work_history_role' };
+  if (!Array.isArray(input.detailLines) || input.detailLines.length === 0) return { kept: false, dropReason: 'missing_detail_lines' };
+  return { kept: true, dropReason: 'kept' };
+}
+
 export type ResumeV2Usability = {
   usable: boolean;
   usableExperienceCount: number;
@@ -112,6 +129,15 @@ export function buildValidatedResumeV2FromParsedBaseline(
         survivingBlocks: number;
         rejectionReasons: Array<{ reason: string; count: number; sampleKeys: string[] }>;
       }
+    | null = null;
+  let resumeV2CandidateKeepDrop:
+    | Array<{
+        company: string;
+        roleTitle: string;
+        detailLinesCount: number;
+        kept: boolean;
+        dropReason: 'missing_company_or_role' | 'obvious_non_work_history_company' | 'obvious_non_work_history_role' | 'missing_detail_lines' | 'kept';
+      }>
     | null = null;
   if (shouldLog) {
     try {
@@ -332,7 +358,18 @@ export function buildValidatedResumeV2FromParsedBaseline(
           : scopeSummary
             ? [`- ${String(scopeSummary).trim()}`]
             : [];
-        if (!shouldKeepStructuredExperienceEntry({ company, roleTitle: role, detailLines })) {
+        const keepDrop = classifyStructuredExperienceKeepDrop({ company, roleTitle: role, detailLines });
+        if (shouldLog) {
+          resumeV2CandidateKeepDrop = resumeV2CandidateKeepDrop ?? [];
+          resumeV2CandidateKeepDrop.push({
+            company,
+            roleTitle: role,
+            detailLinesCount: detailLines.length,
+            kept: keepDrop.kept,
+            dropReason: keepDrop.dropReason,
+          });
+        }
+        if (!keepDrop.kept) {
           rejectedMissingHeaderCount += 1;
           recordRejection('company_not_persistable', entry);
           return '';
@@ -387,6 +424,11 @@ export function buildValidatedResumeV2FromParsedBaseline(
         entriesMissingHeader: rejectedMissingHeaderCount,
         entriesMissingDetails: rejectedMissingDetailsCount,
         survivingBlocks: blocks.length,
+      });
+      // eslint-disable-next-line no-console
+      console.log('[RESUME_V2_INGEST][CANDIDATE_KEEP_DROP]', {
+        baselineId,
+        resumeV2CandidateKeepDrop: resumeV2CandidateKeepDrop ?? [],
       });
       if (rejectionReasons.size) {
         // eslint-disable-next-line no-console
