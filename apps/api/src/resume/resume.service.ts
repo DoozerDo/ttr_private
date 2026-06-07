@@ -5786,6 +5786,41 @@ export class ResumeService {
             : { qualityGate }),
         };
 
+        const resumeArtifactInvalidDiagnostics = (() => {
+          const normalized = normalizedDocument ? normalizeNormalizedResumeDocument(normalizedDocument) : null;
+          let validationExceptionName = '';
+          let validationExceptionMessage = '';
+          let valid = false;
+          if (qualityGate.status === 'pass' && normalized) {
+            try {
+              validateNormalizedResumeDocument(normalized);
+              valid = true;
+            } catch (error) {
+              validationExceptionName = error instanceof Error ? error.name : 'Error';
+              validationExceptionMessage = error instanceof Error ? error.message : String(error);
+            }
+          }
+          return {
+            qualityGateStatus: qualityGate.status,
+            normalizedDocumentPresent: Boolean(normalizedDocument),
+            normalizedHeadingNamePresent: Boolean((normalized as any)?.heading?.name),
+            normalizedHeadingContactLinePresent: Boolean((normalized as any)?.heading?.contactLine),
+            normalizedExperienceCount: Array.isArray((normalized as any)?.experience) ? (normalized as any).experience.length : 0,
+            normalizedExperienceSummary: Array.isArray((normalized as any)?.experience)
+              ? (normalized as any).experience.map((entry: any, index: number) => ({
+                  index,
+                  company: String(entry?.company ?? ''),
+                  roleTitle: String(entry?.roleTitle ?? ''),
+                  bulletCount: Array.isArray(entry?.bullets) ? entry.bullets.length : 0,
+                  companyPresent: Boolean(String(entry?.company ?? '').trim()),
+                  roleTitlePresent: Boolean(String(entry?.roleTitle ?? '').trim()),
+                  bulletsPresent: Array.isArray(entry?.bullets) && entry.bullets.length > 0,
+                }))
+              : [],
+            validationExceptionName,
+            validationExceptionMessage,
+          };
+        })();
         const failSafeSucceeded = (() => {
           if (qualityGate.status !== 'pass' || !normalizedDocument) return false;
           try {
@@ -5848,6 +5883,7 @@ export class ResumeService {
                 resumeGenerationMode: 'top_level_fail_safe_minimal',
                 resumeFailSafeMinimalUsed: true,
                 qualityGateStatus: qualityGate.status,
+                resumeArtifactInvalidDiagnostics,
               },
 	            });
 	          }
