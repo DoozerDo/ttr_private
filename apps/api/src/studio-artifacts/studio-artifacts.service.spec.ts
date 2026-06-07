@@ -295,6 +295,93 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
     expect(state.resume?.responseBody).toBeNull();
     expect(state.resume?.content).toBeNull();
   });
+
+  it('preserves a fresh non-minimal resume payload even when preview.resume is absent', async () => {
+    const studioArtifactRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'artifact-2',
+        createdAt: new Date('2026-06-04T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-04T00:01:00.000Z'),
+        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        resumeInputsHash: 'hash-2',
+        resumeResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: false,
+          internal: { resumeGenerationMode: 'baseline_verified_generation' },
+          preview: { coverLetter: { paragraphs: ['not-a-resume-preview'] } },
+          content: 'Resume content already persisted in responseBody.',
+        },
+        resumeContent: 'Resume content already persisted in record.',
+        resumeFailureCode: null,
+        resumeFailureMessage: null,
+        resumeGenerationStartedAt: null,
+        resumeGeneratedAt: new Date('2026-06-04T00:01:00.000Z'),
+        resumeFailedAt: null,
+        resumeMetadata: {},
+        coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        coverLetterInputsHash: 'hash-2',
+        coverLetterResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          qualityGate: { status: 'pass', reasons: [] },
+          preview: { coverLetter: { paragraphs: ['Hello'] } },
+        },
+        coverLetterContent: 'Hello',
+        coverLetterFailureCode: null,
+        coverLetterFailureMessage: null,
+        coverLetterGenerationStartedAt: null,
+        coverLetterGeneratedAt: new Date('2026-06-04T00:01:00.000Z'),
+        coverLetterFailedAt: null,
+        coverLetterMetadata: {},
+      } as any),
+    } as any;
+
+    const baselineRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+    } as any;
+    const baselineVersionRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }),
+    } as any;
+    const jobRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }),
+    } as any;
+    const fitAssessmentRepository = {
+      findOne: jest.fn().mockResolvedValue({ overallScore: 90 }),
+    } as any;
+    const baselineResumeV2BackfillService = {
+      backfillLatestIfMissing: jest.fn().mockResolvedValue(null),
+    } as any;
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository,
+      baselineRepository,
+      baselineVersionRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      baselineResumeV2BackfillService,
+    );
+    jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('hash-2');
+    jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('hash-2');
+
+    const state = await service.readState({
+      userId: 'u-1',
+      baselineId: 'base-1',
+      baselineVersionId: 'base-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    } as any);
+
+    expect(state.resume?.responseBody).toBeTruthy();
+    expect(String(state.resume?.content ?? '')).toContain('Resume content already persisted');
+    expect(state.resume?.artifactCurrent).toBe(true);
+    expect(state.resumeResult).toBeTruthy();
+    expect((state.resumeResult as any)?.preview).toBeNull();
+    expect((state.resumeResult as any)?.generationState).toBe('generated_unusable');
+    expect((state.resumeResult as any)?.qualityStatus).toBe('failed');
+    expect(state.coverLetterResult).toBeTruthy();
+  });
 });
 
 describe('StudioArtifactsService (unit): readState surfaces renderable resume previews even when quality gates fail', () => {

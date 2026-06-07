@@ -727,6 +727,12 @@ export class StudioArtifactsService {
       Boolean(resumeRecord) &&
       (isTrue(((resumeRecord ? resumeRecord.metadata : null) as any)?.staleLegacy) || isTrue(resumeInternal?.staleLegacy));
     const resumeIsMinimal = Boolean(resumeRecord) && detectMinimalResumeArtifact(resumeRecord?.responseBody ?? null).minimal;
+    const resumeHasRecoverablePayload = (() => {
+      if (!resumeRecord) return false;
+      const responseBodyPresent = Boolean(resumeRecord.responseBody && Object.keys(resumeRecord.responseBody).length > 0);
+      const contentPresent = Boolean(String(resumeRecord.content ?? '').trim());
+      return responseBodyPresent || contentPresent;
+    })();
 
 	    // Hydration contract:
 	    // - Never mutate persisted artifact fields.
@@ -736,7 +742,7 @@ export class StudioArtifactsService {
       if (!resumeRecord) return resumeRecord;
       // Never erase a renderable preview payload before canonical shaping.
       // Export eligibility is enforced at the resumeResult layer below.
-      if (!resumePreviewRenderable) {
+      if (!resumePreviewRenderable && !resumeHasRecoverablePayload) {
         if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
           (resumeRecord as any).diagnostics = {
             ...(normalizeRecord((resumeRecord as any)?.diagnostics) ?? {}),
@@ -755,6 +761,26 @@ export class StudioArtifactsService {
           };
         }
         return { ...resumeRecord, responseBody: null, content: null };
+      }
+      if (!resumePreviewRenderable && resumeHasRecoverablePayload) {
+        if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
+          (resumeRecord as any).diagnostics = {
+            ...(normalizeRecord((resumeRecord as any)?.diagnostics) ?? {}),
+            resumeHydration: {
+              resumePreviewRenderable,
+              resumeIsMinimal,
+              resumeIsStaleLegacy,
+              resumeExportEligible,
+              qualityGatePresent: Boolean((resumeRecord as any)?.responseBody?.qualityGate),
+              qualityGateStatus: String((resumeRecord as any)?.responseBody?.qualityGate?.status ?? ''),
+              responseBodyPresent: Boolean((resumeRecord as any)?.responseBody),
+              previewPresentBeforeCanonicalization: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
+              previewPresentAfterCanonicalization: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
+              hydrationBranchTaken: 'preserved_recoverable_resume_without_preview',
+            },
+          };
+        }
+        return resumeRecord;
       }
       if (resumeIsMinimal) {
         if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
