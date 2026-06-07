@@ -61,24 +61,43 @@ export class StudioArtifactsController {
       jobId: jobId.trim(),
     });
 
-    const state = await this.studioArtifactsService.readState({
-      userId,
-      baselineId: baselineId.trim(),
-      baselineVersionId: baselineVersionId.trim(),
-      jobId: jobId.trim(),
-      analysisId: analysisIdValue,
-    });
+    try {
+      const state = await this.studioArtifactsService.readState({
+        userId,
+        baselineId: baselineId.trim(),
+        baselineVersionId: baselineVersionId.trim(),
+        jobId: jobId.trim(),
+        analysisId: analysisIdValue,
+      });
 
-    // eslint-disable-next-line no-console
-    console.log('[STUDIO_ARTIFACTS_RESULT]', {
-      hasResume: Boolean(state.resume?.responseBody),
-      hasCoverLetter: Boolean(state.coverLetter?.responseBody),
-      hasResumeContent: Boolean(state.resume?.content),
-      hasCoverLetterContent: Boolean(state.coverLetter?.content),
-      resumeContentLength: state.resume?.content?.length ?? 0,
-      coverLetterContentLength: state.coverLetter?.content?.length ?? 0,
-    });
+      // eslint-disable-next-line no-console
+      console.log('[STUDIO_ARTIFACTS_RESULT]', {
+        hasResume: Boolean(state.resume?.responseBody),
+        hasCoverLetter: Boolean(state.coverLetter?.responseBody),
+        hasResumeContent: Boolean(state.resume?.content),
+        hasCoverLetterContent: Boolean(state.coverLetter?.content),
+        resumeContentLength: state.resume?.content?.length ?? 0,
+        coverLetterContentLength: state.coverLetter?.content?.length ?? 0,
+      });
 
-    return state;
+      return state;
+    } catch (error) {
+      const exception = error as { name?: unknown; message?: unknown; stack?: unknown };
+      const stackFirst10Lines =
+        typeof exception.stack === 'string'
+          ? exception.stack.split('\n').slice(0, 10).join('\n')
+          : null;
+      // eslint-disable-next-line no-console
+      console.error('[STUDIO_ARTIFACTS_GET_STATE_ERROR]', {
+        route: 'GET /studio/artifacts',
+        baselineId: baselineId.trim(),
+        baselineVersionId: baselineVersionId.trim(),
+        jobId: jobId.trim(),
+        exceptionName: typeof exception.name === 'string' ? exception.name : null,
+        exceptionMessage: typeof exception.message === 'string' ? exception.message : String(error),
+        stackFirst10Lines,
+      });
+      throw error;
+    }
   }
 }
