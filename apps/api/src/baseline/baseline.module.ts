@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { BadRequestException, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MulterModule } from '@nestjs/platform-express';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -68,7 +68,7 @@ import { SupportModule } from '../support/support.module';
 
           if (!allowedMimes.includes(file.mimetype)) {
             return cb(
-              new Error('Only PDF and DOCX uploads are supported for baselines'),
+              new BadRequestException('Only PDF and DOCX uploads are supported for baselines'),
               false,
             );
           }

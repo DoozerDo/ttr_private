@@ -1,4 +1,4 @@
-﻿import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, vi } from "vitest";
 
 import StudioPage from "@/app/(app)/studio/page";
@@ -51,6 +51,72 @@ function renderStudio() {
   );
 }
 
+function expectCanonicalGeneratedArtifactArea() {
+  const primaryArtifacts = screen.getByTestId("studio-primary-artifacts");
+  const area = within(primaryArtifacts);
+
+  const resumePanel = area.queryByTestId("studio-resume-ready-panel") ?? area.queryByTestId("studio-resume-correction-panel");
+  const coverPanel = area.queryByTestId("studio-cover-ready-panel") ?? area.queryByTestId("studio-cover-correction-panel");
+  expect(resumePanel).not.toBeNull();
+  expect(coverPanel).not.toBeNull();
+  expect(area.getByTestId("studio-resume-export")).toBeInTheDocument();
+  expect(area.getByTestId("studio-cover-letter-preview-body")).toBeInTheDocument();
+  expect(area.getByTestId("studio-materials-completeness")).toHaveTextContent(
+    "Complete set: Resume + cover letter",
+  );
+
+  [
+    "studio-resume-missing",
+    "studio-resume-generating",
+    "studio-resume-auto-repairing",
+    "studio-resume-artifact-issue",
+    "studio-resume-generated-unusable",
+    "studio-resume-preview-unavailable",
+    "studio-resume-quality-warning",
+    "studio-cover-missing",
+    "studio-cover-generating",
+    "studio-cover-artifact-issue",
+    "studio-cover-generated-unusable",
+    "studio-cover-tier-gate",
+    "studio-cover-preview-unavailable",
+    "studio-cover-quality-warning",
+  ].forEach((testId) => {
+    expect(area.queryByTestId(testId)).toBeNull();
+  });
+
+  [
+    "studio-invalid-state-fallback",
+    "studio-guidance-details",
+    "studio-evidence-blocked-panel",
+    "studio-generation-state-banner",
+    "studio-generation-state-ready",
+    "studio-generation-state-blocked",
+    "studio-blocked-primary-action",
+    "studio-artifact-truth",
+  ].forEach((testId) => {
+    expect(screen.queryByTestId(testId)).toBeNull();
+  });
+
+  [
+    /Resume not generated yet/i,
+    /Cover letter not generated yet/i,
+    /Generation unavailable/i,
+    /Repairing resume/i,
+    /Repairing cover letter/i,
+    /blocked by compliance/i,
+    /generation is blocked/i,
+    /generation is currently limited/i,
+    /reprocess baseline/i,
+    /Retry generation/i,
+    /pending/i,
+    /fallback/i,
+    /presenter/i,
+    /compliance/i,
+    /pair status/i,
+  ].forEach((pattern) => {
+    expect(area.queryByText(pattern)).toBeNull();
+  });
+}
 function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   const text = typeof body === "string" ? body : JSON.stringify(body ?? {});
   const response = {
@@ -1238,20 +1304,7 @@ describe("Studio auto-generation", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByTestId("studio-resume-export")).toBeInTheDocument();
-      expect(screen.getByTestId("studio-cover-letter-preview-body")).toBeInTheDocument();
-      expect(screen.queryByText(/Resume not generated yet/i)).toBeNull();
-      expect(screen.queryByText(/Cover letter not generated yet/i)).toBeNull();
-      expect(screen.queryByTestId("studio-invalid-state-fallback")).toBeNull();
-      expect(screen.queryByTestId("studio-guidance-details")).toBeNull();
-      expect(screen.queryByTestId("studio-evidence-blocked-panel")).toBeNull();
-      expect(screen.queryByText(/Document generation needs attention/i)).toBeNull();
-      expect(screen.queryByText(/Generation unavailable/i)).toBeNull();
-      expect(screen.queryByText(/Resume blocked by compliance/i)).toBeNull();
-      expect(screen.queryByText(/Cover letter blocked by compliance/i)).toBeNull();
-      expect(screen.queryByTestId("studio-cover-artifact-issue")).toBeNull();
-      expect(screen.queryByTestId("studio-cover-tier-gate")).toBeNull();
-      expect(screen.queryByTestId("studio-cover-generated-unusable")).toBeNull();
+      expectCanonicalGeneratedArtifactArea();
     }, { timeout: 15000 });
   }, 15000);
 
@@ -1854,4 +1907,8 @@ describe("Studio auto-generation", () => {
     second.unmount();
   });
 });
+
+
+
+
 

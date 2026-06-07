@@ -148,6 +148,70 @@ describe('BaselineController - strengthening additions', () => {
   });
 });
 
+describe('BaselineController - uploadBaseline', () => {
+  const baselineVersionService = {
+    promoteBaselineVersion: jest.fn(),
+  } as any;
+
+  it('returns a successful upload response when canonical tooling data is absent', async () => {
+    const baselineService = {
+      buildSectionsFromFile: jest.fn().mockResolvedValue({
+        sections: [],
+        ingestion: {
+          canonical: {
+            schema_version: 'baseline_schema_v1',
+            user_verified: true,
+            experience: [{ id: 'exp-1' }],
+            tooling_and_platforms: {},
+            system_generated_read_only: {},
+          },
+        },
+      }),
+      createBaseline: jest.fn().mockResolvedValue({
+        baseline: {
+          id: 'baseline-1',
+          version: 1,
+          versions: [],
+          schema_version: 'baseline_schema_v1',
+        },
+        baselineId: 'baseline-1',
+        ingestion: {
+          canonical: {
+            schema_version: 'baseline_schema_v1',
+            user_verified: true,
+            experience: [{ id: 'exp-1' }],
+            tooling_and_platforms: {},
+            system_generated_read_only: {},
+          },
+        },
+      }),
+    } as any;
+    const controller = new BaselineController(
+      baselineService,
+      baselineVersionService,
+    );
+
+    const result = await controller.uploadBaseline(
+      { originalname: 'resume.pdf', mimetype: 'application/pdf', path: '/tmp/resume.pdf' } as any,
+      { user: { id: 'user-1' } } as any,
+    );
+
+    expect(baselineService.buildSectionsFromFile).toHaveBeenCalled();
+    expect(baselineService.createBaseline).toHaveBeenCalled();
+    expect(result).toMatchObject({
+      baselineId: 'baseline-1',
+      schemaVersion: 'baseline_schema_v1',
+      userVerified: true,
+      rolesCount: 1,
+      toolsCount: 0,
+      flagsSummary: {
+        missingFields: 0,
+        lowConfidence: 0,
+      },
+    });
+  });
+});
+
 describe('BaselineController - listBaselines', () => {
   const baselineVersionService = {
     promoteBaselineVersion: jest.fn(),

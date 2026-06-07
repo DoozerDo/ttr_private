@@ -183,11 +183,11 @@ export class BaselineController {
       baselineId: result.baseline.id,
       schemaVersion: canonical?.schema_version ?? 'baseline_schema_v1',
       userVerified: canonical?.user_verified ?? false,
-      rolesCount: canonical?.experience.length ?? 0,
-      toolsCount: canonical?.tooling_and_platforms?.tools.length ?? 0,
+      rolesCount: canonical?.experience?.length ?? 0,
+      toolsCount: canonical?.tooling_and_platforms?.tools?.length ?? 0,
       flagsSummary: {
-        missingFields: systemFlags?.missing_fields.length ?? 0,
-        lowConfidence: systemFlags?.low_confidence_extractions.length ?? 0,
+        missingFields: systemFlags?.missing_fields?.length ?? 0,
+        lowConfidence: systemFlags?.low_confidence_extractions?.length ?? 0,
       },
     };
   }

@@ -3931,12 +3931,12 @@ export default function StudioPage() {
   // Canonical UI authority: all visible Studio state must be driven by the artifact display contract.
   // Renderability must follow concrete preview presence, not backend pair status or mixed legacy flags.
   const displayContract = artifactContract.displayContract;
-  const hasCanonicalResumeArtifact = Boolean(artifactContract.hasResumeArtifact);
-  const hasCanonicalCoverLetterArtifact = Boolean(artifactContract.hasCoverLetterArtifact);
-  const uiHasRenderableResume = hasCanonicalResumeArtifact;
-  const uiHasRenderableCoverLetter = hasCanonicalCoverLetterArtifact;
-  const uiHasRenderablePair = uiHasRenderableResume && uiHasRenderableCoverLetter;
-  const hasCanonicalReloadedArtifactPair = uiHasRenderablePair;
+  const hasCanonicalResumeArtifact = displayContract.resumePreviewRenderable;
+  const hasCanonicalCoverLetterArtifact = displayContract.coverLetterPreviewRenderable;
+  const uiHasRenderableResume = displayContract.resumePreviewRenderable;
+  const uiHasRenderableCoverLetter = displayContract.coverLetterPreviewRenderable;
+  const uiHasRenderablePair = displayContract.generationComplete;
+  const hasCanonicalReloadedArtifactPair = displayContract.generationComplete;
 
   const coverPresenter = artifactContract.presenters.coverLetter;
   const hasCoverLetterDraft = hasCoverLetterArtifact;
@@ -9100,7 +9100,7 @@ export default function StudioPage() {
   // Once we have *any* usable output, we do not surface lifecycle failure language in the hero/top summary.
   // Failures still render at the specific artifact card level (resume/cover) where they govern the next action.
   const lifecycleArtifactFailure = resumeState.artifactFailure ?? coverState.artifactFailure ?? null;
-  const suppressTopLevelFailureLanguage = uiHasRenderableResume && uiHasRenderableCoverLetter;
+  const suppressTopLevelFailureLanguage = displayContract.generationComplete;
   const topLevelArtifactFailure = suppressTopLevelFailureLanguage ? null : lifecycleArtifactFailure;
   const showGenericRetry =
     !suppressTopLevelFailureLanguage &&
