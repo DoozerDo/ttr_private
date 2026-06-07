@@ -296,7 +296,7 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
     expect(state.resume?.content).toBeNull();
   });
 
-  it('preserves a fresh non-minimal resume payload even when preview.resume is absent', async () => {
+  it('hydrates a fresh non-minimal resume payload from an equivalent normalized model even when preview.resume is absent', async () => {
     const studioArtifactRepository = {
       findOne: jest.fn().mockResolvedValue({
         id: 'artifact-2',
@@ -309,7 +309,11 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
           generationStatus: 'success',
           exportReady: false,
           internal: { resumeGenerationMode: 'baseline_verified_generation' },
-          preview: { coverLetter: { paragraphs: ['not-a-resume-preview'] } },
+          normalizedDocument: {
+            heading: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
+            summary: 'Recoverable normalized resume model.',
+            experience: [{ company: 'Co', roleTitle: 'Role', bullets: ['Did work.'] }],
+          },
           content: 'Resume content already persisted in responseBody.',
         },
         resumeContent: 'Resume content already persisted in record.',
@@ -377,9 +381,10 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
     expect(String(state.resume?.content ?? '')).toContain('Resume content already persisted');
     expect(state.resume?.artifactCurrent).toBe(true);
     expect(state.resumeResult).toBeTruthy();
-    expect((state.resumeResult as any)?.preview).toBeNull();
-    expect((state.resumeResult as any)?.generationState).toBe('generated_unusable');
-    expect((state.resumeResult as any)?.qualityStatus).toBe('failed');
+    expect((state.resumeResult as any)?.preview).toBeTruthy();
+    expect((state.resumeResult as any)?.preview?.heading?.name).toBe('Alex Candidate');
+    expect((state.resumeResult as any)?.generationState).toBe('generated_needs_correction');
+    expect((state.resumeResult as any)?.qualityStatus).toBe('needs_refinement');
     expect(state.coverLetterResult).toBeTruthy();
   });
 });

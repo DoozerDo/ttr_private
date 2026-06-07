@@ -143,6 +143,44 @@ function sanitizeStoredResumeResponseBody(value: Record<string, unknown> | null)
   };
 }
 
+function extractCanonicalResumePreviewModel(
+  responseBody: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!responseBody) return null;
+
+  const preview = normalizeRecord((responseBody as any).preview);
+  const previewResume = normalizeRecord(preview?.resume);
+  if (previewResume) return previewResume;
+
+  const candidateSources = [
+    (responseBody as any).previewResume,
+    (responseBody as any).normalizedDocument,
+    (responseBody as any).normalizedResume,
+    (responseBody as any).resume,
+    (responseBody as any).canonicalResume,
+    (responseBody as any).model,
+  ];
+
+  for (const candidateSource of candidateSources) {
+    const candidate = normalizeRecord(candidateSource);
+    if (!candidate) continue;
+
+    const nestedPreview = normalizeRecord(candidate.preview);
+    const nestedPreviewResume = normalizeRecord(nestedPreview?.resume);
+    if (nestedPreviewResume) return nestedPreviewResume;
+
+    const candidateResume = normalizeRecord(candidate.resume);
+    if (candidateResume) return candidateResume;
+
+    const hasCanonicalResumeShape =
+      Boolean(candidate.heading && typeof candidate.heading === 'object') &&
+      Array.isArray((candidate as any).experience);
+    if (hasCanonicalResumeShape) return candidate;
+  }
+
+  return null;
+}
+
 function shouldDebugDocgen() {
   return process.env.NODE_ENV !== 'production' || process.env.DEBUG_DOCGEN === 'true';
 }
@@ -680,11 +718,18 @@ export class StudioArtifactsService {
     const rejectedArtifactIds: string[] = [];
     const staleArtifactReasonCodes: string[] = [];
 
-    const resumePreviewRenderable = (() => {
-      if (!resumeRecord) return false;
-      const previewResume = (resumeRecord.responseBody as any)?.preview?.resume ?? null;
-      return Boolean(previewResume && typeof previewResume === 'object');
+    const resumeRenderablePreviewModel = (() => {
+      if (!resumeRecord) return null;
+      const previewResume = normalizeRecord((resumeRecord.responseBody as any)?.preview?.resume ?? null);
+      return previewResume;
     })();
+
+    const resumeRecoverablePreviewModel = (() => {
+      if (!resumeRecord) return null;
+      return extractCanonicalResumePreviewModel(resumeRecord.responseBody);
+    })();
+
+    const resumePreviewRenderable = Boolean(resumeRenderablePreviewModel);
 
     const resumeExportEligible = (() => {
       if (!resumeRecord) return false;
@@ -762,7 +807,19 @@ export class StudioArtifactsService {
         }
         return { ...resumeRecord, responseBody: null, content: null };
       }
-      if (!resumePreviewRenderable && resumeHasRecoverablePayload) {
+      if (!resumePreviewRenderable && resumeHasRecoverablePayload && resumeRecoverablePreviewModel) {
+        const responseBody = normalizeRecord(resumeRecord.responseBody);
+        const canonicalPreviewResume = resumeRecoverablePreviewModel;
+        const canonicalResponseBody =
+          responseBody && canonicalPreviewResume
+            ? {
+                ...responseBody,
+                preview: {
+                  ...(normalizeRecord((responseBody as any).preview) ?? {}),
+                  resume: canonicalPreviewResume,
+                },
+              }
+            : responseBody;
         if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
           (resumeRecord as any).diagnostics = {
             ...(normalizeRecord((resumeRecord as any)?.diagnostics) ?? {}),
@@ -775,12 +832,17 @@ export class StudioArtifactsService {
               qualityGateStatus: String((resumeRecord as any)?.responseBody?.qualityGate?.status ?? ''),
               responseBodyPresent: Boolean((resumeRecord as any)?.responseBody),
               previewPresentBeforeCanonicalization: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
-              previewPresentAfterCanonicalization: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
-              hydrationBranchTaken: 'preserved_recoverable_resume_without_preview',
+              previewPresentAfterCanonicalization: Boolean(canonicalPreviewResume),
+              hydrationBranchTaken: canonicalPreviewResume
+                ? 'preserved_recoverable_resume_without_preview'
+                : 'preserved_recoverable_resume_without_preview_noop',
             },
           };
         }
-        return resumeRecord;
+        return {
+          ...resumeRecord,
+          responseBody: canonicalResponseBody,
+        };
       }
       if (resumeIsMinimal) {
         if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
