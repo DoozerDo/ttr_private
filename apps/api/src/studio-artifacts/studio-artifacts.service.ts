@@ -26,6 +26,7 @@ import {
   validateNormalizedResumeDocument,
 } from '../resume/resume-normalization';
 import { BaselineResumeV2BackfillService } from '../baseline/baseline-resume-v2-backfill.service';
+import type { CustomerWorkflowState } from '../workflow/customer-workflow.service';
 
 export type StudioArtifactKind = 'resume' | 'cover_letter';
 
@@ -89,6 +90,7 @@ export type StudioArtifactsState = {
   resumeResult?: ArtifactGenerationResult<unknown>;
   coverLetterResult?: ArtifactGenerationResult<unknown>;
   resumeFailureDiagnostics?: Record<string, unknown> | null;
+  workflowState?: CustomerWorkflowState | null;
   diagnostics?: {
     staleArtifactRejected?: boolean;
     staleArtifactReasonCodes?: string[];

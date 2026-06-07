@@ -1,5 +1,6 @@
 import { StudioArtifactLifecycleStatus } from './studio-artifact.entity';
 import { StudioArtifactsService } from './studio-artifacts.service';
+import type { CustomerWorkflowState } from '../workflow/customer-workflow.service';
 
 describe('StudioArtifactsService (unit): resumeResult contract', () => {
   const buildResult = (
@@ -128,6 +129,74 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
     expect((state.resumeResult as any)?.exportReady).toBe(false);
     expect(state.coverLetterResult).toBeTruthy();
     expect((state.coverLetterResult as any)?.generationState).toBe('generated_usable');
+  });
+
+  it('types the readState workflowState slot with the canonical CustomerWorkflowState shape', async () => {
+    const studioArtifactRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'artifact-3',
+        createdAt: new Date('2026-06-03T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-03T00:01:00.000Z'),
+        resumeStatus: StudioArtifactLifecycleStatus.MISSING,
+        resumeInputsHash: null,
+        resumeResponseBody: null,
+        resumeContent: null,
+        resumeFailureCode: null,
+        resumeFailureMessage: null,
+        resumeGenerationStartedAt: null,
+        resumeGeneratedAt: null,
+        resumeFailedAt: null,
+        resumeMetadata: {},
+        coverLetterStatus: StudioArtifactLifecycleStatus.MISSING,
+        coverLetterInputsHash: null,
+        coverLetterResponseBody: null,
+        coverLetterContent: null,
+        coverLetterFailureCode: null,
+        coverLetterFailureMessage: null,
+        coverLetterGenerationStartedAt: null,
+        coverLetterGeneratedAt: null,
+        coverLetterFailedAt: null,
+        coverLetterMetadata: {},
+      } as any),
+    } as any;
+
+    const baselineRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+    } as any;
+    const baselineVersionRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }),
+    } as any;
+    const jobRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }),
+    } as any;
+    const fitAssessmentRepository = {
+      findOne: jest.fn().mockResolvedValue({ overallScore: 90 }),
+    } as any;
+    const baselineResumeV2BackfillService = {
+      backfillLatestIfMissing: jest.fn().mockResolvedValue(null),
+    } as any;
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository,
+      baselineRepository,
+      baselineVersionRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      baselineResumeV2BackfillService,
+    );
+    jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('derived-hash');
+    jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('derived-hash');
+
+    const state = await service.readState({
+      userId: 'u-1',
+      baselineId: 'base-1',
+      baselineVersionId: 'base-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    } as any);
+
+    const workflowState: CustomerWorkflowState | null | undefined = state.workflowState;
+    expect(workflowState).toBeUndefined();
   });
 
   it('preserves failed resumeResult when record.status is FAILED and responseBody is not renderable', () => {

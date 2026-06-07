@@ -313,4 +313,55 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
     ]));
     expect(validateNormalizedResumeDocument(resumeV2 as any).valid).toBe(true);
   });
+
+  it('preserves structured experience entries when bullets are empty and still rejects obvious non-work-history labels', () => {
+    const parsedBaseline: Record<string, unknown> = {
+      baseline_id: 'baseline-empty-bullets-structured-1',
+      identity: { full_name: 'Empty Bullets Structured', location: 'Preserve City' },
+      experience: [
+        {
+          company: 'Of Fates Games LLC',
+          role_title: 'Technical Architect & Full-Stack Engineer',
+          start_date: 'May 2021',
+          end_date: 'Present',
+        },
+        {
+          company: 'AMS DataSerfs, Inc.',
+          role_title: 'Linux System Administrator',
+          start_date: 'July 2024',
+          end_date: 'April 2026',
+        },
+        {
+          company: 'Biblioso',
+          role_title: 'Senior Systems Engineer',
+          start_date: '2017',
+          end_date: '2019',
+        },
+        {
+          company: 'TECHNOLOGY & TOOLS',
+          role_title: 'Platform Engineer',
+          start_date: '2020',
+          end_date: '2021',
+        },
+      ],
+    };
+
+    const resumeV2 = buildValidatedResumeV2FromParsedBaseline(parsedBaseline);
+    const experience = ((resumeV2 as any).experience as any[]).map((entry) => ({
+      company: String(entry?.company ?? ''),
+      roleTitle: String(entry?.roleTitle ?? ''),
+      bullets: Array.isArray(entry?.bullets) ? entry.bullets : [],
+    }));
+
+    expect(experience).toHaveLength(3);
+    expect(experience.map((entry) => entry.company)).toEqual(
+      expect.arrayContaining([
+        'Of Fates Games LLC',
+        'AMS DataSerfs, Inc.',
+        'Biblioso',
+      ]),
+    );
+    expect(experience.some((entry) => entry.company.includes('TECHNOLOGY & TOOLS'))).toBe(false);
+    expect(validateNormalizedResumeDocument(resumeV2 as any).valid).toBe(true);
+  });
 });

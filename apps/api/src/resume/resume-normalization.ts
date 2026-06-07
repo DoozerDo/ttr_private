@@ -1329,8 +1329,7 @@ function sanitizeNormalizedResumeDocument(
         bullets: mergedBullets,
       };
     })
-    .filter((entry) => entry.company.length > 0 && !isDiscardableCompanyToken(entry.company))
-    .filter((entry) => entry.bullets.length > 0);
+    .filter((entry) => entry.company.length > 0 && !isDiscardableCompanyToken(entry.company));
 
   const sanitizedEducation = dedupeEducationEntries((document.education ?? [])
     .map((entry) => ({
@@ -1629,7 +1628,6 @@ export function validateNormalizedResumeDocument(document: NormalizedResumeDocum
 
   const hasMalformedExperienceBlob = document.experience.some((entry) => {
     const bullets = entry.bullets ?? [];
-    if (bullets.length === 0) return true;
     if (bullets.length > 30) return true;
     return bullets.some((bullet) => {
       const normalized = normalizeLine(bullet);
@@ -1690,7 +1688,6 @@ export function validateNormalizedResumeDocument(document: NormalizedResumeDocum
     (entry) =>
       entry.company?.trim().length > 0 &&
       !/^company$/i.test(entry.company.trim()) &&
-      entry.bullets.length > 0 &&
       entry.bullets.every((bullet) => !isLowQualityFragment(bullet)),
   );
   if (!validExperience.length) {

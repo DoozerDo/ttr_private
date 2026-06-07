@@ -4,6 +4,7 @@ import {
   Controller,
   HttpCode,
   HttpStatus,
+  GoneException,
   Logger,
   Param,
   Post,
@@ -112,9 +113,13 @@ export class ResumeController {
     @Body() body: ResumeRequestBody,
     @Req() request: TieredResumeRequest,
   ): Promise<GenerationOutcome<ResumeGenerationResponse> & ResumeGenerationResponse> {
-    return this.executeGenerationOutcome('resume.create', body, () =>
-      this.handleGenerate(body, request),
-    );
+    throw new GoneException({
+      code: 'legacy_resume_entrypoint_quarantined',
+      message: 'POST /resume is quarantined. Use POST /resume/generate.',
+      details: {
+        canonicalRoute: 'POST /resume/generate',
+      },
+    });
   }
 
   @Post('export')

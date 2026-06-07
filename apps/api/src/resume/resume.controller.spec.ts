@@ -1,5 +1,5 @@
-import { ForbiddenException, HttpStatus, StreamableFile } from '@nestjs/common';
-import { UnprocessableEntityException } from '@nestjs/common';
+import { ForbiddenException, GoneException, HttpStatus, StreamableFile } from '@nestjs/common';
+import { GoneException, UnprocessableEntityException } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { ResumeController } from './resume.controller';
 import { ResumeService } from './resume.service';
@@ -165,59 +165,27 @@ describe('ResumeController tier gating', () => {
     expect(result.debugTrace.selectedEvidence).toEqual(['e1']);
   });
 
-  it('routes POST /resume (alias) through the same generation service handler as POST /resume/generate', async () => {
+  it('quarantines POST /resume (alias) so only POST /resume/generate owns resume generation', async () => {
     const request = buildRequest(SubscriptionTier.FREE);
 
-    resumeService.generateResume.mockResolvedValueOnce({
-      ok: true,
-      status: 'success',
-      generationStatus: 'success',
-      exportReady: true,
-      blocked: false,
-      baselineId: 'baseline-1',
-      baselineVersionId: 'version-1',
-      jobId: 'job-1',
-      sections: [],
-      compliance_flags: [],
-      compliance_blocked: false,
-      audit_id: 'audit-1',
-      auditId: 'audit-1',
-      baseline_version_hash: 'hash-1',
-      quality: 'draft',
-      traceMap: { opening: ['e1'] },
-      debugTrace: {
-        passed: true,
-        failures: [],
-        traceCoverage: 100,
-        unusedEvidence: [],
-        selectedEvidence: ['e1'],
-      },
-      exports: { docx: false, pdf: false },
-      preview: { resume: null },
-      trackerEntryId: null,
-      trackerStatus: null,
-      opportunityId: null,
-      claimRiskSummary: null,
-      gapAnalysis: null,
-      gapGuidance: null,
-      display: { title: '', description: '', reasons: [], cta: { label: '', href: '' } },
-      safeDisplay: { title: '', description: '', reasons: [], cta: { label: '', href: '' } },
-      internal: {},
-    });
+    await expect(
+      controller.createResumeRequest(
+        {
+          baselineId: 'baseline-1',
+          baselineVersionId: 'version-1',
+          jobId: 'job-1',
+          analysisId: 'analysis-1',
+        },
+        request,
+      ),
+    ).rejects.toBeInstanceOf(GoneException);
+    expect(resumeService.generateResume).not.toHaveBeenCalled();
+  });
 
-    const result = await controller.createResumeRequest(
-      {
-        baselineId: 'baseline-1',
-        baselineVersionId: 'version-1',
-        jobId: 'job-1',
-        analysisId: 'analysis-1',
-      },
-      request,
-    );
-
-    expect(resumeService.generateResume).toHaveBeenCalledTimes(1);
-    expect(result.traceMap).toEqual({ opening: ['e1'] });
-    expect(result.debugTrace.selectedEvidence).toEqual(['e1']);
+  it('does not describe POST /resume/generate as the workflow owner', async () => {
+    const controllerSource = ResumeController.toString();
+    expect(controllerSource).toContain('POST /resume/generate');
+    expect(controllerSource).not.toContain('workflow owner');
   });
 
   it('blocks FREE tier resume export with TIER_REQUIRED', async () => {

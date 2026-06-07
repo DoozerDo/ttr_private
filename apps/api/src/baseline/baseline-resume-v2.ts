@@ -42,7 +42,7 @@ function shouldKeepStructuredExperienceEntry(input: {
   const roleTitle = trimToText(input.roleTitle);
   if (!company || !roleTitle) return false;
   if (isObviousNonWorkHistoryCompany(company) || isObviousNonWorkHistoryCompany(roleTitle)) return false;
-  if (!Array.isArray(input.detailLines) || input.detailLines.length === 0) return false;
+  if (!Array.isArray(input.detailLines)) return false;
   return true;
 }
 
@@ -59,7 +59,7 @@ function classifyStructuredExperienceKeepDrop(input: {
   if (!company || !roleTitle) return { kept: false, dropReason: 'missing_company_or_role' };
   if (isObviousNonWorkHistoryCompany(company)) return { kept: false, dropReason: 'obvious_non_work_history_company' };
   if (isObviousNonWorkHistoryCompany(roleTitle)) return { kept: false, dropReason: 'obvious_non_work_history_role' };
-  if (!Array.isArray(input.detailLines) || input.detailLines.length === 0) return { kept: false, dropReason: 'missing_detail_lines' };
+  if (!Array.isArray(input.detailLines)) return { kept: false, dropReason: 'missing_detail_lines' };
   return { kept: true, dropReason: 'kept' };
 }
 

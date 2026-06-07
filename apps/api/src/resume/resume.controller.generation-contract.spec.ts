@@ -1,6 +1,11 @@
 import { UnprocessableEntityException } from '@nestjs/common';
 import { ResumeController } from './resume.controller';
 import { ResumeService } from './resume.service';
+import {
+  CUSTOMER_WORKFLOW_STEPS,
+  type CustomerWorkflowState,
+} from '../workflow/customer-workflow.service';
+import { CustomerWorkflowService } from '../workflow/customer-workflow.service';
 
 describe('ResumeController generation contract', () => {
   it('returns a typed generation_blocked outcome', async () => {
@@ -85,5 +90,23 @@ describe('ResumeController generation contract', () => {
       },
     });
   });
-});
 
+  it('models the full customer workflow state shape across the canonical eight steps', () => {
+    const workflowState = {
+      currentStep: 'studio_reload_shows_both',
+      completedSteps: [...CUSTOMER_WORKFLOW_STEPS],
+      resumeArtifactId: 'resume-artifact-1',
+      coverLetterArtifactId: 'cover-artifact-1',
+    } satisfies CustomerWorkflowState;
+
+    expect(workflowState.completedSteps).toEqual(CUSTOMER_WORKFLOW_STEPS);
+    expect(workflowState.completedSteps).toHaveLength(CUSTOMER_WORKFLOW_STEPS.length);
+    expect(new Set(workflowState.completedSteps).size).toBe(CUSTOMER_WORKFLOW_STEPS.length);
+    expect(workflowState.currentStep).toBe('studio_reload_shows_both');
+  });
+
+  it('exposes the canonical workflow vocabulary from the CustomerWorkflowService owned module', () => {
+    const workflowService = new CustomerWorkflowService();
+    expect(workflowService.getWorkflowSteps()).toEqual(CUSTOMER_WORKFLOW_STEPS);
+  });
+});
