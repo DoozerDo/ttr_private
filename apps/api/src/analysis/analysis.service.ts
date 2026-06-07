@@ -105,6 +105,10 @@ import { SyntheticMetadataInput } from '../synthetic/synthetic-metadata.types';
 import { applySyntheticMetadata } from '../synthetic/synthetic-metadata.util';
 import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
 import { findUserByIdSchemaSafe } from '../users/beta-access-schema-compat';
+import { ResumeService } from '../resume/resume.service';
+import { CoverLettersService } from '../cover-letters/cover-letters.service';
+import { VERIFIED_ONLY_GENERATION_THRESHOLD } from '../config/verifiedOnlyGenerationThreshold';
+import { StudioArtifact, StudioArtifactLifecycleStatus } from '../studio-artifacts/studio-artifact.entity';
 
 export type AnalysisRequest = {
   baselineId: string;
@@ -524,6 +528,8 @@ export class AnalysisService {
     private readonly complianceService: ComplianceService,
     private readonly gapAnalysisService: GapAnalysisService,
     private readonly workflowIdempotencyService: WorkflowIdempotencyService,
+    private readonly resumeService: ResumeService,
+    private readonly coverLettersService: CoverLettersService,
   ) {}
 
   private readonly logger = new Logger(AnalysisService.name);
@@ -546,6 +552,50 @@ export class AnalysisService {
 
   private clearShortTextWarningKey(key: string) {
     this.shortTextWarningKeys.delete(key);
+  }
+
+  private async triggerDownstreamDocumentGeneration(
+    userId: string,
+    assessment: FitAssessment,
+  ) {
+    const persistedScore = assessment.fitScore?.score ?? assessment.overallScore ?? null;
+    if (
+      typeof persistedScore !== 'number' ||
+      persistedScore < VERIFIED_ONLY_GENERATION_THRESHOLD
+    ) {
+      return;
+    }
+
+    const studioArtifactRepository = this.fitAssessmentRepository.manager.getRepository(StudioArtifact);
+    const artifactRecord = await studioArtifactRepository.findOne({
+      where: {
+        userId,
+        baselineId: assessment.baselineId,
+        jobId: assessment.jobId,
+      },
+    });
+    const resumeAlreadyExists =
+      artifactRecord?.resumeStatus === StudioArtifactLifecycleStatus.COMPLETED &&
+      (artifactRecord.resumeMetadata as any)?.analysisId === assessment.id;
+    const coverLetterAlreadyExists =
+      artifactRecord?.coverLetterStatus === StudioArtifactLifecycleStatus.COMPLETED &&
+      (artifactRecord.coverLetterMetadata as any)?.analysisId === assessment.id;
+
+    if (resumeAlreadyExists && coverLetterAlreadyExists) {
+      return;
+    }
+
+    const generationRequest = {
+      baselineId: assessment.baselineId,
+      baselineVersionId: assessment.baselineVersion?.toString() ?? null,
+      jobId: assessment.jobId,
+      analysisId: assessment.id,
+    };
+
+    await Promise.all([
+      this.resumeService.generateResume(userId, generationRequest),
+      this.coverLettersService.generateCoverLetter(userId, generationRequest),
+    ]);
   }
 
   private readonly defaultCalibration = {
@@ -3523,6 +3573,8 @@ export class AnalysisService {
           'Persisted assessment linkage does not match requested user/baseline',
         );
       }
+
+      await this.triggerDownstreamDocumentGeneration(userId, savedAssessment);
 
       const lastAnalyzedAt = new Date();
       try {

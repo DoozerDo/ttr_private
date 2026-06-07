@@ -29,6 +29,8 @@ import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
 import { FitScoringService } from './fit-scoring.service';
 import { GapAnalysisService } from './gap-analysis.service';
 import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
+import { ResumeService } from '../resume/resume.service';
+import { CoverLettersService } from '../cover-letters/cover-letters.service';
 import type { CalibrationProfile } from './calibration-profiles';
 import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
 import { scoreCxFitV2, type CxFitV2Result } from './cx-fit-scoring-v2';
@@ -49,9 +51,13 @@ describe('AnalysisService - fit scores contract', () => {
     create: jest.Mock;
     save: jest.Mock;
     findOne: jest.Mock;
+    manager: { getRepository: jest.Mock };
   };
+  let studioArtifactRepositoryMock: { findOne: jest.Mock };
   let jobRepository: { findOne: jest.Mock };
   let fitScoringServiceMock: { score: jest.Mock };
+  let resumeServiceMock: { generateResume: jest.Mock };
+  let coverLettersServiceMock: { generateCoverLetter: jest.Mock };
 
   const baselineVersion: Partial<BaselineVersion> = {
     id: 'bv-1',
@@ -257,6 +263,12 @@ const sampleScoringV2: CxFitV2Result = {
         complianceFlags: [],
       }),
     };
+    resumeServiceMock = {
+      generateResume: jest.fn().mockResolvedValue({ status: 'success' }),
+    };
+    coverLettersServiceMock = {
+      generateCoverLetter: jest.fn().mockResolvedValue({ status: 'success' }),
+    };
 
     const module = await Test.createTestingModule({
       providers: [
@@ -314,6 +326,14 @@ const sampleScoringV2: CxFitV2Result = {
           },
         },
         {
+          provide: ResumeService,
+          useValue: resumeServiceMock,
+        },
+        {
+          provide: CoverLettersService,
+          useValue: coverLettersServiceMock,
+        },
+        {
           provide: getRepositoryToken(Baseline),
           useValue: baselineRepository,
         },
@@ -348,15 +368,20 @@ const sampleScoringV2: CxFitV2Result = {
         {
           provide: getRepositoryToken(FitAssessment),
           useValue: (() => {
-            fitAssessmentRepository = {
-              create: jest.fn((payload) => payload),
-              save: jest.fn(async (payload) => ({
-                ...payload,
-                id: 'fit-1',
-                createdAt: new Date(),
-              })),
-              findOne: jest.fn(),
-            };
+    fitAssessmentRepository = {
+      create: jest.fn((payload) => payload),
+      save: jest.fn(async (payload) => ({
+        ...payload,
+        id: 'fit-1',
+        createdAt: new Date(),
+      })),
+      findOne: jest.fn(),
+      manager: {
+        getRepository: jest.fn(),
+      },
+    };
+    studioArtifactRepositoryMock = { findOne: jest.fn() };
+    fitAssessmentRepository.manager.getRepository.mockReturnValue(studioArtifactRepositoryMock);
 
             return fitAssessmentRepository;
           })(),
@@ -1273,6 +1298,499 @@ const sampleScoringV2: CxFitV2Result = {
         }),
       }),
     );
+  });
+
+  it('reloads persisted jobAnalysis and fitScore from the saved fit assessment', async () => {
+    const persistedJobAnalysis = {
+      jobText: 'persisted canonical job analysis',
+      responsibilities: ['persisted responsibility'],
+      requirements: ['persisted requirement'],
+      skills: ['persisted skill'],
+      sourceEvidence: ['persisted evidence'],
+    };
+    const persistedFitScore = {
+      score: 77,
+      verdict: 'Apply',
+      matchedSignals: ['persisted matched signal'],
+      gapSignals: ['persisted gap signal'],
+      sourceEvidence: ['persisted fit evidence'],
+    };
+    const savedAssessment = {
+      id: 'fit-1',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: 2,
+      overallScore: 77,
+      verdict: 'APPLY',
+      dimensionScores: {
+        experienceAlignment: 10,
+        leadershipLevel: 10,
+        technicalPlatformFit: 10,
+        industryContext: 10,
+        strategicTacticalFit: 10,
+      },
+      strengths: [],
+      gaps: [],
+      complianceFlags: [],
+      scoringV2: null,
+      jobAnalysis: persistedJobAnalysis,
+      fitScore: persistedFitScore,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    fitAssessmentRepository.findOne.mockResolvedValue(savedAssessment);
+    baselineVersionRepository.findOne.mockResolvedValue({
+      ...baselineVersion,
+      id: 'bv-1',
+      baselineId: 'b-1',
+      versionNumber: 2,
+    });
+
+    const result = await service.getFitAssessmentById('user-1', 'fit-1');
+
+    expect(result.jobAnalysis).toBe(persistedJobAnalysis);
+    expect(result.fitScore).toBe(persistedFitScore);
+    expect(result.jobAnalysis?.jobText).toBe('persisted canonical job analysis');
+  });
+
+  it('does not trigger document generation below the fit threshold', async () => {
+    fitAssessmentRepository.save.mockResolvedValueOnce({
+      id: 'fit-low',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: 2,
+      overallScore: 90,
+      verdict: 'APPLY',
+      dimensionScores: {
+        experienceAlignment: 10,
+        leadershipLevel: 10,
+        technicalPlatformFit: 10,
+        industryContext: 10,
+        strategicTacticalFit: 10,
+      },
+      strengths: [],
+      gaps: [],
+      complianceFlags: [],
+      scoringV2: null,
+      jobAnalysis: {
+        jobText: 'persisted canonical job analysis',
+        responsibilities: ['persisted responsibility'],
+        requirements: ['persisted requirement'],
+        skills: ['persisted skill'],
+        sourceEvidence: ['persisted evidence'],
+      },
+      fitScore: {
+        score: 69,
+        verdict: 'consider',
+        matchedSignals: [],
+        gapSignals: [],
+        sourceEvidence: [],
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await service.runFitAssessment('user-1', {
+      baselineId: 'b-1',
+      jobId: 'job-1',
+      baselineVersion: 2,
+    });
+
+    expect(resumeServiceMock.generateResume).not.toHaveBeenCalled();
+    expect(coverLettersServiceMock.generateCoverLetter).not.toHaveBeenCalled();
+  });
+
+  it('triggers both document generators once when the persisted fit score qualifies', async () => {
+    fitAssessmentRepository.save.mockResolvedValueOnce({
+      id: 'fit-high',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: 2,
+      overallScore: 90,
+      verdict: 'APPLY',
+      dimensionScores: {
+        experienceAlignment: 10,
+        leadershipLevel: 10,
+        technicalPlatformFit: 10,
+        industryContext: 10,
+        strategicTacticalFit: 10,
+      },
+      strengths: [],
+      gaps: [],
+      complianceFlags: [],
+      scoringV2: null,
+      jobAnalysis: {
+        jobText: 'persisted canonical job analysis',
+        responsibilities: ['persisted responsibility'],
+        requirements: ['persisted requirement'],
+        skills: ['persisted skill'],
+        sourceEvidence: ['persisted evidence'],
+      },
+      fitScore: {
+        score: 70,
+        verdict: 'apply',
+        matchedSignals: [],
+        gapSignals: [],
+        sourceEvidence: [],
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await service.runFitAssessment('user-1', {
+      baselineId: 'b-1',
+      jobId: 'job-1',
+      baselineVersion: 2,
+    });
+
+    expect(resumeServiceMock.generateResume).toHaveBeenCalledTimes(1);
+    expect(coverLettersServiceMock.generateCoverLetter).toHaveBeenCalledTimes(1);
+    expect(resumeServiceMock.generateResume).toHaveBeenCalledWith(
+      'user-1',
+      expect.objectContaining({
+        baselineId: 'b-1',
+        jobId: 'job-1',
+        analysisId: 'fit-high',
+      }),
+    );
+    expect(coverLettersServiceMock.generateCoverLetter).toHaveBeenCalledWith(
+      'user-1',
+      expect.objectContaining({
+        baselineId: 'b-1',
+        jobId: 'job-1',
+        analysisId: 'fit-high',
+      }),
+    );
+  });
+
+  it('skips automatic generation when both persisted artifacts already exist for the same assessment context', async () => {
+    studioArtifactRepositoryMock.findOne.mockResolvedValueOnce({
+      resumeStatus: 'COMPLETED',
+      coverLetterStatus: 'COMPLETED',
+      resumeMetadata: { analysisId: 'fit-skip' },
+      coverLetterMetadata: { analysisId: 'fit-skip' },
+    });
+    fitAssessmentRepository.save.mockResolvedValueOnce({
+      id: 'fit-skip',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: 2,
+      overallScore: 90,
+      verdict: 'APPLY',
+      dimensionScores: {
+        experienceAlignment: 10,
+        leadershipLevel: 10,
+        technicalPlatformFit: 10,
+        industryContext: 10,
+        strategicTacticalFit: 10,
+      },
+      strengths: [],
+      gaps: [],
+      complianceFlags: [],
+      scoringV2: null,
+      jobAnalysis: {
+        jobText: 'persisted canonical job analysis',
+        responsibilities: ['persisted responsibility'],
+        requirements: ['persisted requirement'],
+        skills: ['persisted skill'],
+        sourceEvidence: ['persisted evidence'],
+      },
+      fitScore: {
+        score: 90,
+        verdict: 'apply',
+        matchedSignals: [],
+        gapSignals: [],
+        sourceEvidence: [],
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await service.runFitAssessment('user-1', {
+      baselineId: 'b-1',
+      jobId: 'job-1',
+      baselineVersion: 2,
+    });
+
+    expect(resumeServiceMock.generateResume).not.toHaveBeenCalled();
+    expect(coverLettersServiceMock.generateCoverLetter).not.toHaveBeenCalled();
+  });
+
+  it('triggers automatic generation when either persisted artifact is missing', async () => {
+    studioArtifactRepositoryMock.findOne.mockResolvedValueOnce({
+      resumeStatus: 'COMPLETED',
+      coverLetterStatus: 'FAILED',
+      resumeMetadata: { analysisId: 'fit-missing' },
+      coverLetterMetadata: { analysisId: 'fit-other' },
+    });
+    fitAssessmentRepository.save.mockResolvedValueOnce({
+      id: 'fit-missing',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: 2,
+      overallScore: 90,
+      verdict: 'APPLY',
+      dimensionScores: {
+        experienceAlignment: 10,
+        leadershipLevel: 10,
+        technicalPlatformFit: 10,
+        industryContext: 10,
+        strategicTacticalFit: 10,
+      },
+      strengths: [],
+      gaps: [],
+      complianceFlags: [],
+      scoringV2: null,
+      jobAnalysis: {
+        jobText: 'persisted canonical job analysis',
+        responsibilities: ['persisted responsibility'],
+        requirements: ['persisted requirement'],
+        skills: ['persisted skill'],
+        sourceEvidence: ['persisted evidence'],
+      },
+      fitScore: {
+        score: 80,
+        verdict: 'apply',
+        matchedSignals: [],
+        gapSignals: [],
+        sourceEvidence: [],
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await service.runFitAssessment('user-1', {
+      baselineId: 'b-1',
+      jobId: 'job-1',
+      baselineVersion: 2,
+    });
+
+    expect(resumeServiceMock.generateResume).toHaveBeenCalledTimes(1);
+    expect(coverLettersServiceMock.generateCoverLetter).toHaveBeenCalledTimes(1);
+  });
+
+  it('awaits both generation service calls before resolving a qualifying run', async () => {
+    const resumeDeferred = {
+      resolve: undefined as undefined | (() => void),
+      promise: Promise<void>,
+    } as { resolve?: () => void; promise: Promise<void> };
+    resumeDeferred.promise = new Promise<void>((resolve) => {
+      resumeDeferred.resolve = resolve;
+    });
+    const coverDeferred = {
+      resolve: undefined as undefined | (() => void),
+      promise: Promise<void>,
+    } as { resolve?: () => void; promise: Promise<void> };
+    coverDeferred.promise = new Promise<void>((resolve) => {
+      coverDeferred.resolve = resolve;
+    });
+    const persistedArtifacts: Array<{ kind: string; baselineId: string; jobId: string; analysisId: string }> = [];
+
+    studioArtifactRepositoryMock.findOne.mockResolvedValueOnce(null);
+    resumeServiceMock.generateResume.mockImplementation(async (_userId: string, input: { baselineId: string; jobId: string; analysisId: string }) => {
+      persistedArtifacts.push({
+        kind: 'resume',
+        baselineId: input.baselineId,
+        jobId: input.jobId,
+        analysisId: input.analysisId,
+      });
+      await resumeDeferred.promise;
+      return { status: 'success' };
+    });
+    coverLettersServiceMock.generateCoverLetter.mockImplementation(async (_userId: string, input: { baselineId: string; jobId: string; analysisId: string }) => {
+      persistedArtifacts.push({
+        kind: 'cover_letter',
+        baselineId: input.baselineId,
+        jobId: input.jobId,
+        analysisId: input.analysisId,
+      });
+      await coverDeferred.promise;
+      return { status: 'success' };
+    });
+    fitAssessmentRepository.save.mockResolvedValueOnce({
+      id: 'fit-await',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: 2,
+      overallScore: 90,
+      verdict: 'APPLY',
+      dimensionScores: {
+        experienceAlignment: 10,
+        leadershipLevel: 10,
+        technicalPlatformFit: 10,
+        industryContext: 10,
+        strategicTacticalFit: 10,
+      },
+      strengths: [],
+      gaps: [],
+      complianceFlags: [],
+      scoringV2: null,
+      jobAnalysis: {
+        jobText: 'persisted canonical job analysis',
+        responsibilities: ['persisted responsibility'],
+        requirements: ['persisted requirement'],
+        skills: ['persisted skill'],
+        sourceEvidence: ['persisted evidence'],
+      },
+      fitScore: {
+        score: 80,
+        verdict: 'apply',
+        matchedSignals: [],
+        gapSignals: [],
+        sourceEvidence: [],
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const runPromise = service.runFitAssessment('user-1', {
+      baselineId: 'b-1',
+      jobId: 'job-1',
+      baselineVersion: 2,
+    });
+
+    await Promise.resolve();
+    expect(resumeServiceMock.generateResume).toHaveBeenCalledTimes(1);
+    expect(coverLettersServiceMock.generateCoverLetter).toHaveBeenCalledTimes(1);
+
+    resumeDeferred.resolve?.();
+    coverDeferred.resolve?.();
+    await runPromise;
+
+    expect(persistedArtifacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'resume', baselineId: 'b-1', jobId: 'job-1', analysisId: 'fit-await' }),
+        expect.objectContaining({ kind: 'cover_letter', baselineId: 'b-1', jobId: 'job-1', analysisId: 'fit-await' }),
+      ]),
+    );
+  });
+
+  it('persists both generated artifacts with the same baseline, job, and analysisId', async () => {
+    const persistedArtifacts: Array<{ kind: string; baselineId: string; jobId: string; analysisId: string }> = [];
+
+    studioArtifactRepositoryMock.findOne.mockResolvedValueOnce(null);
+    resumeServiceMock.generateResume.mockImplementation(async (_userId: string, input: { baselineId: string; jobId: string; analysisId: string }) => {
+      persistedArtifacts.push({
+        kind: 'resume',
+        baselineId: input.baselineId,
+        jobId: input.jobId,
+        analysisId: input.analysisId,
+      });
+      return { status: 'success' };
+    });
+    coverLettersServiceMock.generateCoverLetter.mockImplementation(async (_userId: string, input: { baselineId: string; jobId: string; analysisId: string }) => {
+      persistedArtifacts.push({
+        kind: 'cover_letter',
+        baselineId: input.baselineId,
+        jobId: input.jobId,
+        analysisId: input.analysisId,
+      });
+      return { status: 'success' };
+    });
+    fitAssessmentRepository.save.mockResolvedValueOnce({
+      id: 'fit-persist',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: 2,
+      overallScore: 90,
+      verdict: 'APPLY',
+      dimensionScores: {
+        experienceAlignment: 10,
+        leadershipLevel: 10,
+        technicalPlatformFit: 10,
+        industryContext: 10,
+        strategicTacticalFit: 10,
+      },
+      strengths: [],
+      gaps: [],
+      complianceFlags: [],
+      scoringV2: null,
+      jobAnalysis: {
+        jobText: 'persisted canonical job analysis',
+        responsibilities: ['persisted responsibility'],
+        requirements: ['persisted requirement'],
+        skills: ['persisted skill'],
+        sourceEvidence: ['persisted evidence'],
+      },
+      fitScore: {
+        score: 80,
+        verdict: 'apply',
+        matchedSignals: [],
+        gapSignals: [],
+        sourceEvidence: [],
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await service.runFitAssessment('user-1', {
+      baselineId: 'b-1',
+      jobId: 'job-1',
+      baselineVersion: 2,
+    });
+
+    expect(persistedArtifacts).toEqual([
+      { kind: 'resume', baselineId: 'b-1', jobId: 'job-1', analysisId: 'fit-persist' },
+      { kind: 'cover_letter', baselineId: 'b-1', jobId: 'job-1', analysisId: 'fit-persist' },
+    ]);
+  });
+
+  it('fails the automatic generation flow when a downstream generation call rejects', async () => {
+    studioArtifactRepositoryMock.findOne.mockResolvedValueOnce(null);
+    resumeServiceMock.generateResume.mockResolvedValueOnce({ status: 'success' });
+    coverLettersServiceMock.generateCoverLetter.mockRejectedValueOnce(new Error('cover generation failed'));
+    fitAssessmentRepository.save.mockResolvedValueOnce({
+      id: 'fit-fail',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: 2,
+      overallScore: 90,
+      verdict: 'APPLY',
+      dimensionScores: {
+        experienceAlignment: 10,
+        leadershipLevel: 10,
+        technicalPlatformFit: 10,
+        industryContext: 10,
+        strategicTacticalFit: 10,
+      },
+      strengths: [],
+      gaps: [],
+      complianceFlags: [],
+      scoringV2: null,
+      jobAnalysis: {
+        jobText: 'persisted canonical job analysis',
+        responsibilities: ['persisted responsibility'],
+        requirements: ['persisted requirement'],
+        skills: ['persisted skill'],
+        sourceEvidence: ['persisted evidence'],
+      },
+      fitScore: {
+        score: 80,
+        verdict: 'apply',
+        matchedSignals: [],
+        gapSignals: [],
+        sourceEvidence: [],
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await expect(
+      service.runFitAssessment('user-1', {
+        baselineId: 'b-1',
+        jobId: 'job-1',
+        baselineVersion: 2,
+      }),
+    ).rejects.toThrow('cover generation failed');
   });
 
   it('creates a compliance audit for fit score requests', async () => {
