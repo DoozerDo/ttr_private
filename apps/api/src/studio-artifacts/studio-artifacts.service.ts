@@ -787,24 +787,33 @@ export class StudioArtifactsService {
       if (!resumeRecord) return resumeRecord;
       // Never erase a renderable preview payload before canonical shaping.
       // Export eligibility is enforced at the resumeResult layer below.
+      const debugTargetArtifactId = 'c3696092-8b36-468e-b0f7-54e19e666ea4';
+      const shouldEmitResumeHydrationDebug = String((resumeRecord as any)?.artifactId ?? '') === debugTargetArtifactId;
+      const emitResumeHydrationDebug = (branchTaken: string, responseBodyPresent: boolean, previewResumePresent: boolean) => {
+        if (!shouldEmitResumeHydrationDebug) return;
+        (resumeRecord as any).diagnostics = {
+          ...(normalizeRecord((resumeRecord as any)?.diagnostics) ?? {}),
+          resumeHydration: {
+            loadedRecordId: String((resumeRecord as any)?.artifactId ?? ''),
+            loadedResumeStatus: String((resumeRecord as any)?.status ?? ''),
+            loadedResumeContentLength: String((resumeRecord as any)?.content ?? '').length,
+            loadedResumeResponseBodyPresent: Boolean((resumeRecord as any)?.responseBody),
+            loadedResumePreviewPresent: Boolean((resumeRecord as any)?.responseBody?.preview),
+            loadedResumePreviewResumePresent: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
+            resumePreviewRenderable,
+            resumeIsMinimal,
+            resumeIsStaleLegacy,
+            resumeRecordForResultBranchTaken: branchTaken,
+            resumeRecordForResultResponseBodyPresent: responseBodyPresent,
+            resumeRecordForResultPreviewResumePresent: previewResumePresent,
+            canonicalResumeResultPreviewPresent: Boolean(
+              (this.buildCanonicalResultFromRecord('resume', resumeRecord) as any)?.preview,
+            ),
+          },
+        };
+      };
       if (!resumePreviewRenderable && !resumeHasRecoverablePayload) {
-        if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
-          (resumeRecord as any).diagnostics = {
-            ...(normalizeRecord((resumeRecord as any)?.diagnostics) ?? {}),
-            resumeHydration: {
-              resumePreviewRenderable,
-              resumeIsMinimal,
-              resumeIsStaleLegacy,
-              resumeExportEligible,
-              qualityGatePresent: Boolean((resumeRecord as any)?.responseBody?.qualityGate),
-              qualityGateStatus: String((resumeRecord as any)?.responseBody?.qualityGate?.status ?? ''),
-              responseBodyPresent: Boolean((resumeRecord as any)?.responseBody),
-              previewPresentBeforeCanonicalization: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
-              previewPresentAfterCanonicalization: false,
-              hydrationBranchTaken: 'nulled_non_renderable_resume',
-            },
-          };
-        }
+        emitResumeHydrationDebug('nulled_non_renderable', false, false);
         return { ...resumeRecord, responseBody: null, content: null };
       }
       if (!resumePreviewRenderable && resumeHasRecoverablePayload && resumeRecoverablePreviewModel) {
@@ -820,89 +829,29 @@ export class StudioArtifactsService {
                 },
               }
             : responseBody;
-        if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
-          (resumeRecord as any).diagnostics = {
-            ...(normalizeRecord((resumeRecord as any)?.diagnostics) ?? {}),
-            resumeHydration: {
-              resumePreviewRenderable,
-              resumeIsMinimal,
-              resumeIsStaleLegacy,
-              resumeExportEligible,
-              qualityGatePresent: Boolean((resumeRecord as any)?.responseBody?.qualityGate),
-              qualityGateStatus: String((resumeRecord as any)?.responseBody?.qualityGate?.status ?? ''),
-              responseBodyPresent: Boolean((resumeRecord as any)?.responseBody),
-              previewPresentBeforeCanonicalization: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
-              previewPresentAfterCanonicalization: Boolean(canonicalPreviewResume),
-              hydrationBranchTaken: canonicalPreviewResume
-                ? 'preserved_recoverable_resume_without_preview'
-                : 'preserved_recoverable_resume_without_preview_noop',
-            },
-          };
-        }
+        emitResumeHydrationDebug(
+          'preserved_recoverable',
+          Boolean(canonicalResponseBody),
+          Boolean(canonicalPreviewResume),
+        );
         return {
           ...resumeRecord,
           responseBody: canonicalResponseBody,
         };
       }
       if (resumeIsMinimal) {
-        if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
-          (resumeRecord as any).diagnostics = {
-            ...(normalizeRecord((resumeRecord as any)?.diagnostics) ?? {}),
-            resumeHydration: {
-              resumePreviewRenderable,
-              resumeIsMinimal,
-              resumeIsStaleLegacy,
-              resumeExportEligible,
-              qualityGatePresent: Boolean((resumeRecord as any)?.responseBody?.qualityGate),
-              qualityGateStatus: String((resumeRecord as any)?.responseBody?.qualityGate?.status ?? ''),
-              responseBodyPresent: Boolean((resumeRecord as any)?.responseBody),
-              previewPresentBeforeCanonicalization: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
-              previewPresentAfterCanonicalization: false,
-              hydrationBranchTaken: 'nulled_minimal_resume',
-            },
-          };
-        }
+        emitResumeHydrationDebug('nulled_minimal', Boolean((resumeRecord as any)?.responseBody), Boolean((resumeRecord as any)?.responseBody?.preview?.resume));
         return { ...resumeRecord, responseBody: null, content: null };
       }
       if (resumeIsStaleLegacy && !resumeIsMinimal) {
-        if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
-          (resumeRecord as any).diagnostics = {
-            ...(normalizeRecord((resumeRecord as any)?.diagnostics) ?? {}),
-            resumeHydration: {
-              resumePreviewRenderable,
-              resumeIsMinimal,
-              resumeIsStaleLegacy,
-              resumeExportEligible,
-              qualityGatePresent: Boolean((resumeRecord as any)?.responseBody?.qualityGate),
-              qualityGateStatus: String((resumeRecord as any)?.responseBody?.qualityGate?.status ?? ''),
-              responseBodyPresent: Boolean((resumeRecord as any)?.responseBody),
-              previewPresentBeforeCanonicalization: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
-              previewPresentAfterCanonicalization: false,
-              hydrationBranchTaken: 'nulled_stale_legacy_resume',
-            },
-          };
-        }
+        emitResumeHydrationDebug('nulled_stale_legacy', Boolean((resumeRecord as any)?.responseBody), Boolean((resumeRecord as any)?.responseBody?.preview?.resume));
         return { ...resumeRecord, responseBody: null, content: null };
       }
-      if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
-        (resumeRecord as any).diagnostics = {
-          ...(normalizeRecord((resumeRecord as any)?.diagnostics) ?? {}),
-          resumeHydration: {
-            resumePreviewRenderable,
-            resumeIsMinimal,
-            resumeIsStaleLegacy,
-            resumeExportEligible,
-            qualityGatePresent: Boolean((resumeRecord as any)?.responseBody?.qualityGate),
-            qualityGateStatus: String((resumeRecord as any)?.responseBody?.qualityGate?.status ?? ''),
-            responseBodyPresent: Boolean((resumeRecord as any)?.responseBody),
-            previewPresentBeforeCanonicalization: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
-            previewPresentAfterCanonicalization: true,
-            hydrationBranchTaken: resumeExportEligible
-              ? 'preserved_renderable_resume'
-              : 'export_ineligible_overlay',
-          },
-        };
-      }
+      emitResumeHydrationDebug(
+        resumeExportEligible ? 'preserved_renderable' : 'preserved_recoverable',
+        Boolean((resumeRecord as any)?.responseBody),
+        Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
+      );
       return resumeRecord;
     })();
     if (resumeRecord && !resumeExportEligible) {
