@@ -10,6 +10,7 @@ import { AnalysisService } from '../analysis/analysis.service';
 import { FitScoringService } from '../analysis/fit-scoring.service';
 import { GapAnalysisService } from '../analysis/gap-analysis.service';
 import { ComplianceModule } from '../compliance/compliance.module';
+import { CoverLettersModule } from '../cover-letters/cover-letters.module';
 import { Job } from '../jobs/job.entity';
 import { User } from '../users/user.entity';
 import { Interview } from './interview.entity';
@@ -29,6 +30,7 @@ import { StarStory } from '../star-stories/star-story.entity';
 import { BaselineVersionService } from '../baseline/baseline-version.service';
 import { SupportModule } from '../support/support.module';
 import { WorkflowIdempotencyModule } from '../common/workflow-idempotency.module';
+import { ResumeModule } from '../resume/resume.module';
 
 @Module({
   imports: [
@@ -48,6 +50,8 @@ import { WorkflowIdempotencyModule } from '../common/workflow-idempotency.module
       StarStory,
     ]),
     ComplianceModule,
+    ResumeModule,
+    CoverLettersModule,
     SupportModule,
     WorkflowIdempotencyModule,
   ],
