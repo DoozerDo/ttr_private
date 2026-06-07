@@ -2641,8 +2641,7 @@ export class ResumeService {
 	    );
 	    try {
 	      const baselineProofStructured = extractStructuredBaselineFromSections(allowedSections as any);
-	      // eslint-disable-next-line no-console
-	      console.log('[RESUME_GENERATE_BASELINE_SECTION_PROOF]', {
+	      const proofPayload = {
 	        baselineId: baseline.id,
 	        baselineVersionId: baselineVersion.id,
 	        jobId: jobId ?? null,
@@ -2668,7 +2667,9 @@ export class ResumeService {
 	        structuredBaselineMissingEvidenceReasons: Array.isArray((baselineProofStructured as any)?.missingEvidenceReasons)
 	          ? (baselineProofStructured as any).missingEvidenceReasons
 	          : [],
-	      });
+	      };
+	      // eslint-disable-next-line no-console
+	      console.log('[RESUME_GENERATE_BASELINE_SECTION_PROOF]', JSON.stringify(proofPayload));
 	    } catch {
 	      // ignore proof logging failures
 	    }
