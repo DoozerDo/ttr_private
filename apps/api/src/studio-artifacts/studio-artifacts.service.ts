@@ -851,12 +851,20 @@ export class StudioArtifactsService {
       return resumeRecord;
     })();
     if (resumeHydrationDebug) {
+      const resumeHydrationDebugObject =
+        typeof resumeHydrationDebug === 'object' &&
+        resumeHydrationDebug !== null &&
+        !Array.isArray(resumeHydrationDebug)
+          ? (resumeHydrationDebug as Record<string, unknown>)
+          : null;
+      if (resumeHydrationDebugObject) {
       resumeHydrationDebug = {
-        ...resumeHydrationDebug,
+        ...resumeHydrationDebugObject,
         canonicalResumeResultPreviewPresent: Boolean(
           (this.buildCanonicalResultFromRecord('resume', resumeRecordForResult) as any)?.preview,
         ),
       };
+      }
     } else if (shouldEmitResumeHydrationDebug) {
       resumeHydrationDebug = {
         loadedRecordId: String((resumeRecord as any)?.artifactId ?? ''),
@@ -1043,7 +1051,13 @@ export class StudioArtifactsService {
       ...(errors.length ? { errors } : {}),
       diagnostics: {
         resumeV2Readiness,
-        ...(resumeHydrationDebug ? { resumeHydration: resumeHydrationDebug } : {}),
+        ...(
+          resumeHydrationDebug &&
+          typeof resumeHydrationDebug === 'object' &&
+          !Array.isArray(resumeHydrationDebug)
+            ? { resumeHydration: resumeHydrationDebug }
+            : {}
+        ),
         ...(process.env.DOCGEN_DIAGNOSTICS === 'true'
           ? {
               staleArtifactRejected: Boolean(rejectedArtifactIds.length),
