@@ -123,6 +123,89 @@ export type VerifiedBaseline = {
   rejectionReasons: string[];
 };
 
+type VerifiedBaselineEvidence = VerifiedBaseline['evidence'][number];
+
+function normalizeVerifiedBaselineEvidence(
+  value: unknown,
+  index: number,
+): VerifiedBaselineEvidence | null {
+  const record = value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+  const text = String(record?.text ?? '').trim();
+  if (!text) return null;
+  const metrics = Array.isArray(record?.metrics)
+    ? (record?.metrics as Array<Record<string, unknown>>)
+        .map((metric) => ({
+          type:
+            metric?.type === 'percentage' || metric?.type === 'currency' || metric?.type === 'count'
+              ? metric.type
+              : null,
+          value: String(metric?.value ?? '').trim(),
+        }))
+        .filter((metric) => Boolean(metric.type && metric.value))
+    : [];
+  const tags = Array.isArray(record?.tags)
+    ? (record?.tags as unknown[]).map((tag) => String(tag ?? '').trim()).filter(Boolean)
+    : [];
+  return {
+    id: String(record?.id ?? `verified-baseline-evidence-${index}`),
+    text,
+    metrics: metrics as VerifiedBaselineEvidence['metrics'],
+    tags,
+  };
+}
+
+function normalizeVerifiedBaselineExperience(
+  entries: unknown,
+): BaselineSchemaCoreShape['experience'] {
+  if (!Array.isArray(entries)) return [];
+
+  return entries
+    .map((entry, index) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+      const record = entry as Record<string, unknown>;
+      const company = String(record.company ?? record.company_name ?? record.companyName ?? '').trim();
+      const role = String(record.role ?? record.role_title ?? record.roleTitle ?? '').trim();
+      if (!company || !role) return null;
+      const startDate =
+        typeof record.start_date === 'string' && record.start_date.trim().length > 0
+          ? record.start_date.trim()
+          : typeof record.startDate === 'string' && record.startDate.trim().length > 0
+            ? record.startDate.trim()
+            : null;
+      const endDate =
+        typeof record.end_date === 'string' && record.end_date.trim().length > 0
+          ? record.end_date.trim()
+          : typeof record.endDate === 'string' && record.endDate.trim().length > 0
+            ? record.endDate.trim()
+            : null;
+      const existingEvidence = Array.isArray(record.evidence)
+        ? record.evidence
+            .map((evidence, evidenceIndex) => normalizeVerifiedBaselineEvidence(evidence, evidenceIndex))
+            .filter((value): value is VerifiedBaselineEvidence => Boolean(value))
+        : [];
+      const bulletTexts = Array.isArray(record.bullets)
+        ? record.bullets.map((bullet) => String(bullet ?? '').trim()).filter(Boolean)
+        : [];
+      const fallbackEvidence = !existingEvidence.length
+        ? bulletTexts.map((text, evidenceIndex) => ({
+            id: `verified-baseline-experience-${index}-evidence-${evidenceIndex}`,
+            text,
+            metrics: [],
+            tags: [],
+          }))
+        : [];
+      const evidence = existingEvidence.length ? existingEvidence : fallbackEvidence;
+      return {
+        company,
+        role,
+        start_date: startDate,
+        end_date: endDate,
+        evidence,
+      };
+    })
+    .filter((entry): entry is BaselineSchemaCoreShape['experience'][number] => Boolean(entry));
+}
+
 export const BASELINE_LIBRARY_CAP = 3;
 export const BASELINE_LIBRARY_CAP_ERROR_CODE = 'BASELINE_LIBRARY_CAP_REACHED';
 
@@ -308,7 +391,7 @@ export class BaselineService {
     const structured = extractStructuredBaselineFromSections(input.sections as any);
     const sourceText =
       input.sourceText || (input.sections ?? []).map((section) => section.content ?? '').join('\n');
-    const experience = canonical?.experience ?? structured.experience;
+    const experience = normalizeVerifiedBaselineExperience(canonical?.experience ?? structured.experience);
     const skills = canonical?.skills ?? structured.skills.map((name) => ({ name, category: null }));
     const education = canonical?.education ?? structured.education.map((school) => ({
       school,
