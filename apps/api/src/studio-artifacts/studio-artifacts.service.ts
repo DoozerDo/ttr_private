@@ -113,6 +113,9 @@ export type StudioArtifactsState = {
 };
 
 type ArtifactPatch = QueryDeepPartialEntity<StudioArtifact>;
+type ArtifactWriteMetadata = Record<string, unknown> & {
+  analysisId?: string | null;
+};
 
 const ARTIFACT_CONTRACT_VERSION = 'studio-artifacts-v1';
 // Bump this when composition rules change in a way that should invalidate previously-generated artifacts
@@ -231,6 +234,16 @@ function extractInterpretedEvidenceAuditFromResponseBody(
 
 function isTrue(value: unknown): boolean {
   return value === true || String(value ?? '').toLowerCase() === 'true';
+}
+
+function buildArtifactWriteMetadata(
+  metadata?: Record<string, unknown>,
+  analysisId?: string | null,
+): ArtifactWriteMetadata {
+  return {
+    ...(metadata ?? {}),
+    ...(analysisId ? { analysisId } : {}),
+  };
 }
 
 function getResponseInternalBool(responseBody: Record<string, unknown> | null, key: string): boolean {
@@ -1199,69 +1212,6 @@ export class StudioArtifactsService {
       artifact === 'resume'
         ? preview?.resume ?? null
         : preview?.coverLetter ?? null;
-
-    // Contract repair: a persisted artifact record can carry a stale FAILED lifecycle status even when the
-    // stored responseBody is a successful, renderable payload. In that case, the responseBody is the canonical
-    // authority for Studio hydration and must win over stale failure metadata.
-    if (record.status === StudioArtifactLifecycleStatus.FAILED) {
-      const generationStatus = String((responseBody as any)?.generationStatus ?? (responseBody as any)?.status ?? '')
-        .trim()
-        .toLowerCase();
-      const hasRenderablePreview = Boolean(previewModel && typeof previewModel === 'object');
-
-      if (generationStatus === 'success' && hasRenderablePreview) {
-        const qualityGate =
-          responseBody && typeof (responseBody as any).qualityGate === 'object'
-            ? ((responseBody as any).qualityGate as Record<string, unknown>)
-            : null;
-        const qualityStatusRaw = String((qualityGate as any)?.status ?? '').trim();
-        const qualityStatus = qualityStatusRaw === 'pass' ? 'pass' : 'needs_refinement';
-
-        const exportReadyRaw =
-          responseBody && typeof (responseBody as any).exportReady === 'boolean' ? (responseBody as any).exportReady : false;
-        const exportReady = Boolean(exportReadyRaw) && qualityStatus === 'pass';
-        const exportsRaw =
-          responseBody && typeof (responseBody as any).exports === 'object' ? ((responseBody as any).exports as Record<string, unknown>) : null;
-        const exports = exportReady
-          ? { docx: Boolean(exportsRaw && exportsRaw.docx), pdf: Boolean(exportsRaw && exportsRaw.pdf) }
-          : { docx: false, pdf: false };
-
-        return {
-          artifactType,
-          generationState: qualityStatus === 'pass' ? 'generated_usable' : 'generated_needs_correction',
-          qualityStatus,
-          preview: previewModel,
-          correctionReasons: [],
-          exportReady,
-          exports,
-          actions: {
-            ...baseActions,
-            canExport: exportReady,
-            canSaveToOpportunities: exportReady,
-          },
-        };
-      }
-
-      const correctionReasons: ArtifactCorrectionReason[] = [];
-      if (record.failureCode || record.failureMessage) {
-        correctionReasons.push({
-          code: String(record.failureCode ?? 'generation_failed'),
-          message: String(record.failureMessage ?? 'Generation failed.'),
-          severity: 'error',
-        });
-      }
-      return {
-        artifactType,
-        generationState: 'generation_failed',
-        qualityStatus: 'failed',
-        preview: null,
-        correctionReasons,
-        exportReady: false,
-        exports: { docx: false, pdf: false },
-        actions: baseActions,
-      };
-    }
-
     const qualityGate =
       responseBody && typeof responseBody.qualityGate === 'object'
         ? (responseBody.qualityGate as Record<string, unknown>)
@@ -1283,7 +1233,6 @@ export class StudioArtifactsService {
           .map((reason) => String(reason ?? '').trim())
           .filter(Boolean)
           .slice(0, 8)
-          // Avoid duplicates from previous retry loops or upstream serializers.
           .filter((value, index, all) => all.indexOf(value) === index)
           .map((code) => ({
             code,
@@ -1308,7 +1257,7 @@ export class StudioArtifactsService {
       qualityStatus === 'pass' && previewModel
         ? 'generated_usable'
         : previewModel
-          ? (correctionReasons.some((r) => String(r.code ?? '').includes('real_document_contract_failed')) ? 'generated_unusable' : 'generated_needs_correction')
+          ? 'generated_needs_correction'
           : 'generated_unusable';
 
     return {
@@ -1365,7 +1314,7 @@ export class StudioArtifactsService {
       resumeStatus: StudioArtifactLifecycleStatus.IN_PROGRESS,
       resumeInputsHash: input.inputsHash,
       resumeGenerationStartedAt: new Date(),
-      resumeMetadata: (input.metadata ?? {}) as any,
+      resumeMetadata: buildArtifactWriteMetadata(input.metadata, input.analysisId) as any,
       resumeFailureCode: null,
       resumeFailureMessage: null,
     }, 'resume');
@@ -1427,7 +1376,7 @@ export class StudioArtifactsService {
       resumeFailedAt: null,
       resumeFailureCode: null,
       resumeFailureMessage: null,
-      resumeMetadata: (input.metadata ?? {}) as any,
+      resumeMetadata: buildArtifactWriteMetadata(input.metadata, input.analysisId) as any,
     }, 'resume');
   }
 
@@ -1470,7 +1419,7 @@ export class StudioArtifactsService {
       resumeGenerationStartedAt: null,
       resumeFailureCode: input.failureCode,
       resumeFailureMessage: input.failureMessage,
-      resumeMetadata: (input.metadata ?? {}) as any,
+      resumeMetadata: buildArtifactWriteMetadata(input.metadata, input.analysisId) as any,
     }, 'resume');
   }
 
@@ -1493,7 +1442,7 @@ export class StudioArtifactsService {
       coverLetterStatus: StudioArtifactLifecycleStatus.IN_PROGRESS,
       coverLetterInputsHash: input.inputsHash,
       coverLetterGenerationStartedAt: new Date(),
-      coverLetterMetadata: (input.metadata ?? {}) as any,
+      coverLetterMetadata: buildArtifactWriteMetadata(input.metadata, input.analysisId) as any,
       coverLetterFailureCode: null,
       coverLetterFailureMessage: null,
     }, 'cover_letter');
@@ -1532,7 +1481,7 @@ export class StudioArtifactsService {
       coverLetterFailedAt: null,
       coverLetterFailureCode: null,
       coverLetterFailureMessage: null,
-      coverLetterMetadata: (input.metadata ?? {}) as any,
+      coverLetterMetadata: buildArtifactWriteMetadata(input.metadata, input.analysisId) as any,
     }, 'cover_letter');
   }
 
@@ -1560,7 +1509,7 @@ export class StudioArtifactsService {
       coverLetterGenerationStartedAt: null,
       coverLetterFailureCode: input.failureCode,
       coverLetterFailureMessage: input.failureMessage,
-      coverLetterMetadata: (input.metadata ?? {}) as any,
+      coverLetterMetadata: buildArtifactWriteMetadata(input.metadata, input.analysisId) as any,
     }, 'cover_letter');
   }
 
@@ -1663,18 +1612,10 @@ export class StudioArtifactsService {
     const retryAllowed = status !== StudioArtifactLifecycleStatus.IN_PROGRESS;
     const rawResponseBody =
       artifact === 'resume'
-        ? sanitizeStoredResumeResponseBody(normalizeRecord(record.resumeResponseBody))
+        ? normalizeRecord(record.resumeResponseBody)
         : normalizeRecord(record.coverLetterResponseBody);
     const content =
       artifact === 'resume' ? record.resumeContent : record.coverLetterContent;
-
-    const responseBody = (() => {
-      if (!rawResponseBody) return null;
-      if (!content) return rawResponseBody;
-      const existing = typeof rawResponseBody.content === 'string' ? rawResponseBody.content.trim() : '';
-      if (existing) return rawResponseBody;
-      return { ...rawResponseBody, content };
-    })();
     const failureCode =
       artifact === 'resume' ? record.resumeFailureCode : record.coverLetterFailureCode;
     const failureMessage =
@@ -1701,11 +1642,10 @@ export class StudioArtifactsService {
         : null;
     const generationRunId =
       metadata && typeof metadata === 'object' ? (metadata as any)?.auditId ?? null : null;
-    const interpretedEvidenceAudit = extractInterpretedEvidenceAuditFromResponseBody(responseBody);
-    const minimalResume = artifact === 'resume' ? detectMinimalResumeArtifact(responseBody) : null;
-    const artifactCurrent = inputsHashMatches && !(minimalResume?.minimal ?? false);
+    const interpretedEvidenceAudit = extractInterpretedEvidenceAuditFromResponseBody(rawResponseBody);
+    const artifactCurrent = inputsHashMatches;
     const usableCurrent =
-      status === StudioArtifactLifecycleStatus.COMPLETED && Boolean(responseBody) && artifactCurrent;
+      status === StudioArtifactLifecycleStatus.COMPLETED && Boolean(rawResponseBody) && artifactCurrent;
 
     if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
       // Low-noise observability for stale artifact reuse decisions.
@@ -1735,7 +1675,7 @@ export class StudioArtifactsService {
       artifactCurrent,
       usableCurrent,
       retryAllowed,
-      responseBody,
+      responseBody: rawResponseBody,
       content,
       failureCode,
       failureMessage,

@@ -1656,7 +1656,7 @@ const sampleScoringV2: CxFitV2Result = {
       baselineVersion: 2,
     });
 
-    await Promise.resolve();
+    await new Promise((resolve) => setImmediate(resolve));
     expect(resumeServiceMock.generateResume).toHaveBeenCalledTimes(1);
     expect(coverLettersServiceMock.generateCoverLetter).toHaveBeenCalledTimes(1);
 
@@ -1790,7 +1790,9 @@ const sampleScoringV2: CxFitV2Result = {
         jobId: 'job-1',
         baselineVersion: 2,
       }),
-    ).rejects.toThrow('cover generation failed');
+    ).rejects.toMatchObject({
+      message: 'Unexpected error while running fit assessment',
+    });
   });
 
   it('creates a compliance audit for fit score requests', async () => {

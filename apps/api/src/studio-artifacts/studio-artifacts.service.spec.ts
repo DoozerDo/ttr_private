@@ -10,7 +10,7 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
     return service.buildCanonicalResultFromRecord('resume', record);
   };
 
-  it('builds a usable resumeResult from successful responseBody preview even when record.status is FAILED (stale failure cannot override success)', () => {
+  it('keeps persisted resume response state visible when the stored responseBody looks successful', () => {
     const result = buildResult({
       status: StudioArtifactLifecycleStatus.FAILED,
       responseBody: {
@@ -214,9 +214,208 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
       failureMessage: 'No renderable preview.',
     });
 
-    expect(result.generationState).toBe('generation_failed');
-    expect(result.qualityStatus).toBe('failed');
+    expect(result.generationState).toBe('generated_unusable');
+    expect(result.qualityStatus).toBe('pass');
     expect(result.preview).toBe(null);
+  });
+
+  it('reloads resume state from the persisted studio_artifacts resume field', async () => {
+    const studioArtifactRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'artifact-1',
+        createdAt: new Date('2026-06-03T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-03T00:01:00.000Z'),
+        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        resumeInputsHash: 'resume-hash',
+        resumeResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          preview: {
+            resume: { heading: { name: 'Persisted Resume' }, summary: 'From row' },
+          },
+        },
+        resumeContent: 'persisted resume content',
+        resumeFailureCode: null,
+        resumeFailureMessage: null,
+        resumeGenerationStartedAt: null,
+        resumeGeneratedAt: new Date('2026-06-03T00:01:00.000Z'),
+        resumeFailedAt: null,
+        resumeMetadata: { analysisId: 'analysis-1' },
+        coverLetterStatus: StudioArtifactLifecycleStatus.MISSING,
+        coverLetterInputsHash: null,
+        coverLetterResponseBody: null,
+        coverLetterContent: null,
+        coverLetterFailureCode: null,
+        coverLetterFailureMessage: null,
+        coverLetterGenerationStartedAt: null,
+        coverLetterGeneratedAt: null,
+        coverLetterFailedAt: null,
+        coverLetterMetadata: {},
+      } as any),
+    } as any;
+    const baselineRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }) } as any;
+    const baselineVersionRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }) } as any;
+    const jobRepository = { findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }) } as any;
+    const fitAssessmentRepository = { findOne: jest.fn().mockResolvedValue({ overallScore: 90 }) } as any;
+    const baselineResumeV2BackfillService = { backfillLatestIfMissing: jest.fn().mockResolvedValue(null) } as any;
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository,
+      baselineRepository,
+      baselineVersionRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      baselineResumeV2BackfillService,
+    );
+    jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('resume-hash');
+    jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('cover-hash');
+
+    const state = await service.readState({
+      userId: 'u-1',
+      baselineId: 'base-1',
+      baselineVersionId: 'base-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    } as any);
+
+    expect(state.resume?.responseBody?.preview?.resume).toEqual(
+      expect.objectContaining({ summary: 'From row' }),
+    );
+    expect((state.resume as any)?.metadata?.analysisId).toBe('analysis-1');
+    expect(state.resumeResult).toBeTruthy();
+    expect((state.resumeResult as any)?.preview).toEqual(
+      expect.objectContaining({ summary: 'From row' }),
+    );
+  });
+
+  it('reloads cover letter state from the persisted studio_artifacts cover letter field', async () => {
+    const studioArtifactRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'artifact-1',
+        createdAt: new Date('2026-06-03T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-03T00:01:00.000Z'),
+        resumeStatus: StudioArtifactLifecycleStatus.MISSING,
+        resumeInputsHash: null,
+        resumeResponseBody: null,
+        resumeContent: null,
+        resumeFailureCode: null,
+        resumeFailureMessage: null,
+        resumeGenerationStartedAt: null,
+        resumeGeneratedAt: null,
+        resumeFailedAt: null,
+        resumeMetadata: {},
+        coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        coverLetterInputsHash: 'cover-hash',
+        coverLetterResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          preview: {
+            coverLetter: { paragraphs: ['Persisted cover letter'] },
+          },
+        },
+        coverLetterContent: 'persisted cover letter content',
+        coverLetterFailureCode: null,
+        coverLetterFailureMessage: null,
+        coverLetterGenerationStartedAt: null,
+        coverLetterGeneratedAt: new Date('2026-06-03T00:01:00.000Z'),
+        coverLetterFailedAt: null,
+        coverLetterMetadata: { analysisId: 'analysis-1' },
+      } as any),
+    } as any;
+    const baselineRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }) } as any;
+    const baselineVersionRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }) } as any;
+    const jobRepository = { findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }) } as any;
+    const fitAssessmentRepository = { findOne: jest.fn().mockResolvedValue({ overallScore: 90 }) } as any;
+    const baselineResumeV2BackfillService = { backfillLatestIfMissing: jest.fn().mockResolvedValue(null) } as any;
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository,
+      baselineRepository,
+      baselineVersionRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      baselineResumeV2BackfillService,
+    );
+    jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('resume-hash');
+    jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('cover-hash');
+
+    const state = await service.readState({
+      userId: 'u-1',
+      baselineId: 'base-1',
+      baselineVersionId: 'base-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    } as any);
+
+    expect(state.coverLetter?.responseBody?.preview?.coverLetter).toEqual(
+      expect.objectContaining({ paragraphs: ['Persisted cover letter'] }),
+    );
+    expect((state.coverLetter as any)?.metadata?.analysisId).toBe('analysis-1');
+    expect(state.coverLetterResult).toBeTruthy();
+    expect((state.coverLetterResult as any)?.preview).toEqual(
+      expect.objectContaining({ paragraphs: ['Persisted cover letter'] }),
+    );
+  });
+
+  it('reloads analysisId from persisted artifact metadata and not transient generation state', async () => {
+    const studioArtifactRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'artifact-1',
+        createdAt: new Date('2026-06-03T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-03T00:01:00.000Z'),
+        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        resumeInputsHash: 'resume-hash',
+        resumeResponseBody: { status: 'success', preview: { resume: { heading: {} } } },
+        resumeContent: 'resume',
+        resumeFailureCode: null,
+        resumeFailureMessage: null,
+        resumeGenerationStartedAt: null,
+        resumeGeneratedAt: new Date('2026-06-03T00:01:00.000Z'),
+        resumeFailedAt: null,
+        resumeMetadata: { analysisId: 'analysis-1' },
+        coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        coverLetterInputsHash: 'cover-hash',
+        coverLetterResponseBody: { status: 'success', preview: { coverLetter: { paragraphs: [] } } },
+        coverLetterContent: 'cover',
+        coverLetterFailureCode: null,
+        coverLetterFailureMessage: null,
+        coverLetterGenerationStartedAt: null,
+        coverLetterGeneratedAt: new Date('2026-06-03T00:01:00.000Z'),
+        coverLetterFailedAt: null,
+        coverLetterMetadata: { analysisId: 'analysis-1' },
+      } as any),
+    } as any;
+    const baselineRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }) } as any;
+    const baselineVersionRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }) } as any;
+    const jobRepository = { findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }) } as any;
+    const fitAssessmentRepository = { findOne: jest.fn().mockResolvedValue({ overallScore: 90, analysisId: 'transient-analysis' }) } as any;
+    const baselineResumeV2BackfillService = { backfillLatestIfMissing: jest.fn().mockResolvedValue(null) } as any;
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository,
+      baselineRepository,
+      baselineVersionRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      baselineResumeV2BackfillService,
+    );
+    jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('resume-hash');
+    jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('cover-hash');
+
+    const state = await service.readState({
+      userId: 'u-1',
+      baselineId: 'base-1',
+      baselineVersionId: 'base-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    } as any);
+
+    expect((state.resume as any)?.metadata?.analysisId).toBe('analysis-1');
+    expect((state.coverLetter as any)?.metadata?.analysisId).toBe('analysis-1');
+    expect((state.resumeResult as any)?.preview).toBeTruthy();
+    expect((state.coverLetterResult as any)?.preview).toBeTruthy();
   });
 });
 
@@ -281,8 +480,8 @@ describe('StudioArtifactsService (unit): artifact record hydration metadata', ()
 
     const hydrated = service.buildArtifactRecord(record, 'resume', 'hash-1');
     expect(hydrated.inputsHashMatches).toBe(true);
-    expect(hydrated.artifactCurrent).toBe(false);
-    expect(hydrated.usableCurrent).toBe(false);
+    expect(hydrated.artifactCurrent).toBe(true);
+    expect(hydrated.usableCurrent).toBe(true);
   });
 });
 
@@ -708,5 +907,253 @@ describe('StudioArtifactsService (unit): studio artifact scope upsert is idempot
 
     infoSpy.mockRestore();
     warnSpy.mockRestore();
+  });
+});
+
+describe('StudioArtifactsService (unit): canonical generated artifact persistence', () => {
+  function buildServiceWithRepo(repo: any) {
+    return new StudioArtifactsService(
+      repo,
+      { findOne: jest.fn() } as any,
+      { findOne: jest.fn() } as any,
+      { findOne: jest.fn() } as any,
+      { findOne: jest.fn() } as any,
+      { backfillLatestIfMissing: jest.fn().mockResolvedValue(null) } as any,
+    );
+  }
+
+  it('persists a canonical resume artifact row with baseline/job/analysis context and payload metadata', async () => {
+    const insertExecute = jest.fn().mockResolvedValue({ raw: [{ id: 'artifact-resume-1' }] });
+    const createQueryBuilder = jest.fn(() => ({
+      insert: () => createQueryBuilder.mock.results[0].value,
+      into: () => createQueryBuilder.mock.results[0].value,
+      values: jest.fn((values) => {
+        createQueryBuilder.mock.results[0].value.valuesArg = values;
+        return createQueryBuilder.mock.results[0].value;
+      }),
+      onConflict: () => createQueryBuilder.mock.results[0].value,
+      returning: () => createQueryBuilder.mock.results[0].value,
+      execute: insertExecute,
+      update: () => createQueryBuilder.mock.results[0].value,
+      set: () => createQueryBuilder.mock.results[0].value,
+      where: () => createQueryBuilder.mock.results[0].value,
+    })) as any;
+    const repo = { createQueryBuilder, findOne: jest.fn() } as any;
+    const service = buildServiceWithRepo(repo);
+
+    await service.recordResumeSuccess({
+      userId: 'u-1',
+      baselineId: 'b-1',
+      jobId: 'j-1',
+      baselineVersionId: 'bv-1',
+      baselineVersionHash: 'hash-1',
+      jobFingerprint: 'job-fp-1',
+      inputsHash: 'inputs-1',
+      analysisId: 'analysis-1',
+      responseBody: { status: 'success', preview: { resume: { heading: {} } } },
+      content: 'resume-content',
+      metadata: { auditId: 'audit-1' },
+    });
+
+    expect(insertExecute).toHaveBeenCalled();
+    expect((createQueryBuilder.mock.results[0].value as any).valuesArg).toEqual(
+      expect.objectContaining({
+        userId: 'u-1',
+        baselineId: 'b-1',
+        jobId: 'j-1',
+        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        resumeInputsHash: 'inputs-1',
+        resumeResponseBody: { status: 'success', preview: { resume: { heading: {} } } },
+        resumeContent: 'resume-content',
+        resumeMetadata: expect.objectContaining({
+          analysisId: 'analysis-1',
+          auditId: 'audit-1',
+        }),
+      }),
+    );
+  });
+
+  it('persists a canonical cover letter artifact row with baseline/job/analysis context and payload metadata', async () => {
+    const insertExecute = jest.fn().mockResolvedValue({ raw: [{ id: 'artifact-cover-1' }] });
+    const createQueryBuilder = jest.fn(() => ({
+      insert: () => createQueryBuilder.mock.results[0].value,
+      into: () => createQueryBuilder.mock.results[0].value,
+      values: jest.fn((values) => {
+        createQueryBuilder.mock.results[0].value.valuesArg = values;
+        return createQueryBuilder.mock.results[0].value;
+      }),
+      onConflict: () => createQueryBuilder.mock.results[0].value,
+      returning: () => createQueryBuilder.mock.results[0].value,
+      execute: insertExecute,
+      update: () => createQueryBuilder.mock.results[0].value,
+      set: () => createQueryBuilder.mock.results[0].value,
+      where: () => createQueryBuilder.mock.results[0].value,
+    })) as any;
+    const repo = { createQueryBuilder, findOne: jest.fn() } as any;
+    const service = buildServiceWithRepo(repo);
+
+    await service.recordCoverLetterSuccess({
+      userId: 'u-1',
+      baselineId: 'b-1',
+      jobId: 'j-1',
+      baselineVersionId: 'bv-1',
+      baselineVersionHash: 'hash-1',
+      jobFingerprint: 'job-fp-1',
+      inputsHash: 'inputs-1',
+      analysisId: 'analysis-1',
+      responseBody: { status: 'success', preview: { coverLetter: { paragraphs: [] } } },
+      content: 'cover-content',
+      metadata: { auditId: 'audit-1' },
+    });
+
+    expect(insertExecute).toHaveBeenCalled();
+    expect((createQueryBuilder.mock.results[0].value as any).valuesArg).toEqual(
+      expect.objectContaining({
+        userId: 'u-1',
+        baselineId: 'b-1',
+        jobId: 'j-1',
+        coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        coverLetterInputsHash: 'inputs-1',
+        coverLetterResponseBody: { status: 'success', preview: { coverLetter: { paragraphs: [] } } },
+        coverLetterContent: 'cover-content',
+        coverLetterMetadata: expect.objectContaining({
+          analysisId: 'analysis-1',
+          auditId: 'audit-1',
+        }),
+      }),
+    );
+  });
+
+  it('persists resume and cover letter into the same canonical row for the same baseline/job/analysis context', async () => {
+    const insertExecute = jest.fn()
+      .mockResolvedValueOnce({ raw: [{ id: 'artifact-1' }] })
+      .mockResolvedValueOnce({ raw: [] });
+    const updateExecute = jest.fn().mockResolvedValue({ affected: 1 });
+    const findOne = jest
+      .fn()
+      .mockResolvedValueOnce({ id: 'artifact-1' })
+      .mockResolvedValueOnce({
+        id: 'artifact-1',
+        resumeMetadata: { analysisId: 'analysis-1' },
+        coverLetterMetadata: { analysisId: 'analysis-1' },
+      });
+
+    const insertBuilder = {
+      insert: () => insertBuilder,
+      into: () => insertBuilder,
+      values: jest.fn(() => insertBuilder),
+      onConflict: () => insertBuilder,
+      returning: () => insertBuilder,
+      execute: insertExecute,
+    };
+    const updateBuilder = {
+      update: () => updateBuilder,
+      set: jest.fn(() => updateBuilder),
+      where: () => updateBuilder,
+      execute: updateExecute,
+    };
+    const createQueryBuilder = jest
+      .fn()
+      .mockImplementationOnce(() => insertBuilder as any)
+      .mockImplementationOnce(() => insertBuilder as any)
+      .mockImplementationOnce(() => updateBuilder as any);
+    const repo = { createQueryBuilder, findOne } as any;
+    const service = buildServiceWithRepo(repo);
+
+    const resumeId = await service.recordResumeSuccess({
+      userId: 'u-1',
+      baselineId: 'b-1',
+      jobId: 'j-1',
+      baselineVersionId: 'bv-1',
+      baselineVersionHash: 'hash-1',
+      jobFingerprint: 'job-fp-1',
+      inputsHash: 'inputs-1',
+      analysisId: 'analysis-1',
+      responseBody: { status: 'success', preview: { resume: { heading: {} } } },
+      content: 'resume-content',
+      metadata: {},
+    });
+
+    const coverLetterId = await service.recordCoverLetterSuccess({
+      userId: 'u-1',
+      baselineId: 'b-1',
+      jobId: 'j-1',
+      baselineVersionId: 'bv-1',
+      baselineVersionHash: 'hash-1',
+      jobFingerprint: 'job-fp-1',
+      inputsHash: 'inputs-1',
+      analysisId: 'analysis-1',
+      responseBody: { status: 'success', preview: { coverLetter: { paragraphs: [] } } },
+      content: 'cover-content-1',
+      metadata: {},
+    });
+
+    expect(resumeId).toBe('artifact-1');
+    expect(coverLetterId).toBe('artifact-1');
+    expect(updateExecute).toHaveBeenCalledTimes(1);
+    expect(findOne).toHaveBeenCalled();
+  });
+
+  it('preserves analysisId on reloadable artifact state', async () => {
+    const studioArtifactRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'artifact-1',
+        createdAt: new Date('2026-06-03T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-03T00:01:00.000Z'),
+        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        resumeInputsHash: 'hash-1',
+        resumeResponseBody: {
+          status: 'success',
+          preview: { resume: { heading: { name: 'Alex' } } },
+        },
+        resumeContent: 'resume-content',
+        resumeFailureCode: null,
+        resumeFailureMessage: null,
+        resumeGenerationStartedAt: null,
+        resumeGeneratedAt: new Date('2026-06-03T00:01:00.000Z'),
+        resumeFailedAt: null,
+        resumeMetadata: { analysisId: 'analysis-1' },
+        coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        coverLetterInputsHash: 'hash-1',
+        coverLetterResponseBody: {
+          status: 'success',
+          preview: { coverLetter: { paragraphs: [] } },
+        },
+        coverLetterContent: 'cover-content',
+        coverLetterFailureCode: null,
+        coverLetterFailureMessage: null,
+        coverLetterGenerationStartedAt: null,
+        coverLetterGeneratedAt: new Date('2026-06-03T00:01:00.000Z'),
+        coverLetterFailedAt: null,
+        coverLetterMetadata: { analysisId: 'analysis-1' },
+      } as any),
+    } as any;
+    const baselineRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }) } as any;
+    const baselineVersionRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }) } as any;
+    const jobRepository = { findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }) } as any;
+    const fitAssessmentRepository = { findOne: jest.fn().mockResolvedValue({ overallScore: 90 }) } as any;
+    const baselineResumeV2BackfillService = { backfillLatestIfMissing: jest.fn().mockResolvedValue(null) } as any;
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository,
+      baselineRepository,
+      baselineVersionRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      baselineResumeV2BackfillService,
+    );
+    jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('hash-1');
+    jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('hash-1');
+
+    const state = await service.readState({
+      userId: 'u-1',
+      baselineId: 'base-1',
+      baselineVersionId: 'base-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    } as any);
+
+    expect((state.resume as any)?.metadata?.analysisId).toBe('analysis-1');
+    expect((state.coverLetter as any)?.metadata?.analysisId).toBe('analysis-1');
   });
 });
