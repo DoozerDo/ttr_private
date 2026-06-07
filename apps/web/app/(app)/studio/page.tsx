@@ -3931,9 +3931,12 @@ export default function StudioPage() {
   // Canonical UI authority: all visible Studio state must be driven by the artifact display contract.
   // Renderability must follow concrete preview presence, not backend pair status or mixed legacy flags.
   const displayContract = artifactContract.displayContract;
-  const uiHasRenderableResume = displayContract?.resumePreviewRenderable ?? hasRenderableResumeContent;
-  const uiHasRenderableCoverLetter = displayContract?.coverLetterPreviewRenderable ?? hasRenderableCoverLetterContent;
+  const hasCanonicalResumeArtifact = Boolean(artifactContract.hasResumeArtifact);
+  const hasCanonicalCoverLetterArtifact = Boolean(artifactContract.hasCoverLetterArtifact);
+  const uiHasRenderableResume = hasCanonicalResumeArtifact;
+  const uiHasRenderableCoverLetter = hasCanonicalCoverLetterArtifact;
   const uiHasRenderablePair = uiHasRenderableResume && uiHasRenderableCoverLetter;
+  const hasCanonicalReloadedArtifactPair = uiHasRenderablePair;
 
   const coverPresenter = artifactContract.presenters.coverLetter;
   const hasCoverLetterDraft = hasCoverLetterArtifact;
@@ -6004,6 +6007,11 @@ export default function StudioPage() {
     const hasPersistedResumeTruth = hasResumeArtifact || Boolean(resumeState.response) || hasRenderableResumeContent;
     if (resumeGenerating) return "generating";
     if (resumeV2Authority.blocksGeneration) return "needs_more_baseline_detail";
+    if (hasResumeArtifactCanonical) {
+      if (workflowAuthority.workflowState === "BLOCKED") return resumeQualityPass ? "generated_successfully" : "needs_correction";
+      if (resumePresenter.status === "blocked") return resumeQualityPass ? "generated_successfully" : "needs_correction";
+      if (resumePresenter.status === "error") return resumeQualityPass ? "generated_successfully" : "needs_correction";
+    }
     if (workflowAuthority.workflowState === "BLOCKED") return "blocked_by_compliance";
     if (resumePresenter.status === "blocked") return "blocked_by_compliance";
     if (resumePersistedArtifactSyncPending && !hasResumeArtifact) return "syncing_persisted_artifact";
@@ -6041,6 +6049,12 @@ export default function StudioPage() {
   const coverCardStatus: StudioCardStatus = useMemo(() => {
     if (coverGenerating) return "generating";
     if (resumeV2Authority.blocksGeneration) return "not_generated_yet";
+    if (hasCoverLetterArtifactCanonical) {
+      if (workflowAuthority.workflowState === "BLOCKED") return coverQualityPass ? "generated_successfully" : "needs_correction";
+      if (coverLetterComplianceBlocked || coverPresenter.status === "blocked" || coverPresenter.status === "error") {
+        return coverQualityPass ? "generated_successfully" : "needs_correction";
+      }
+    }
     if (workflowAuthority.workflowState === "BLOCKED") return "blocked_by_compliance";
     if (coverLetterComplianceBlocked || coverPresenter.status === "blocked") {
       return "blocked_by_compliance";
@@ -6061,6 +6075,7 @@ export default function StudioPage() {
     coverPresenter.status,
     coverState.error,
     hasCoverLetterArtifact,
+    hasCoverLetterArtifactCanonical,
     coverPersistedArtifactSyncPending,
     coverQualityPass,
     resumeV2Authority.blocksGeneration,
@@ -10821,7 +10836,7 @@ export default function StudioPage() {
             coverAutoRepairing ||
             autoGenerationInFlight,
         ),
-    hasAnyArtifacts: Boolean(hasCompletedGeneration || resumeState.response || coverState.response),
+    hasAnyArtifacts: hasCanonicalReloadedArtifactPair,
     resumeState,
     coverState,
   });
@@ -12836,6 +12851,9 @@ export default function StudioPage() {
   );
 
   const isStateInvalid = (() => {
+    if (hasCanonicalReloadedArtifactPair) {
+      return false;
+    }
     const jobCompanyRaw = selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "";
     const jobTitleRaw = selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "";
     const jobCompany = trimString(jobCompanyRaw);
@@ -12885,7 +12903,11 @@ export default function StudioPage() {
       <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
       <div className="flex flex-col gap-4">
         <div className="order-2 space-y-4" data-testid="studio-secondary-systems">
-      {!uiHasRenderablePair && (!generateNowEligible || activeGenerationReadiness.blocked || !canGenerateDocuments) ? (
+      {!hasCanonicalReloadedArtifactPair &&
+      !resumeState.response &&
+      !coverState.response &&
+      !uiHasRenderablePair &&
+      (!generateNowEligible || activeGenerationReadiness.blocked || !canGenerateDocuments) ? (
         <details
           className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
           data-testid="studio-guidance-details"
@@ -13065,7 +13087,9 @@ export default function StudioPage() {
       ) : null}
       {showInstantDraftHeroSafe ? instantDraftHero : null}
       {preAnalysisPersistedResumePanel}
-      {showReadinessRecoveryExperience && !activeGenerationReadiness.blocked ? unlockEntryPanel : null}
+      {showReadinessRecoveryExperience && !activeGenerationReadiness.blocked && !hasCanonicalReloadedArtifactPair
+        ? unlockEntryPanel
+        : null}
       {unlockGenerationLoadingMessage && showPrimaryGeneratingNotice ? (
         <Alert intent="info" title="Verified evidence in use">
           {unlockGenerationLoadingMessage}
@@ -13078,6 +13102,9 @@ export default function StudioPage() {
       ) : null}
       {pageTruth.state === "failed" &&
       !workflowAuthority.suppressFailureMessaging &&
+      !hasCanonicalReloadedArtifactPair &&
+      !resumeState.response &&
+      !coverState.response &&
       (!uiHasRenderableResume || !uiHasRenderableCoverLetter) ? (
         <Alert intent="warning" title="Document generation needs attention">
           <div className="space-y-3">
@@ -13156,7 +13183,11 @@ export default function StudioPage() {
                 : "Generated from partially verified evidence. Add verified examples to strengthen it."}
           </div>
         ) : null}
-        {showReadinessRecoveryExperience && !studioDraftMode ? (
+      {showReadinessRecoveryExperience &&
+      !studioDraftMode &&
+      !hasCanonicalReloadedArtifactPair &&
+      !resumeState.response &&
+      !coverState.response ? (
           <>
             {highestImpactEvidenceActions.filter((action) => String(action ?? "").trim().toLowerCase() !== "next").length ? (
               <section className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4" data-testid="studio-blocked-primary-action">
@@ -13634,6 +13665,9 @@ export default function StudioPage() {
         workflowAuthority.workflowState === "BLOCKED" &&
         !readinessError &&
         !studioDraftMode &&
+        !hasCanonicalReloadedArtifactPair &&
+        !resumeState.response &&
+        !coverState.response &&
         !uiHasRenderablePair &&
         studioArtifactPairStatus !== "completed" ? (
         <RouteStateShell
@@ -13649,6 +13683,9 @@ export default function StudioPage() {
         />
       ) : null}
       {!showReadinessRecoveryExperience && 
+      !resumeState.response &&
+      !coverState.response &&
+      !hasCanonicalReloadedArtifactPair &&
       prioritizedStrengtheningSuggestions.length > 0 && 
       !generateNowEligible &&
       (workflowAuthority.workflowState !== "READY" || 
@@ -14311,35 +14348,7 @@ export default function StudioPage() {
           null
         ) : null}
 
-        {resumePresenter.status === "blocked" &&
-        !hasResumeArtifactCanonical &&
-        !uiHasRenderablePair &&
-        studioArtifactPairStatus !== "completed" ? (
-          <div className="space-y-3 rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4">
-            <p className="text-sm font-semibold text-amber-100">
-              {resumePresenter.display?.title ?? "Resume blocked by compliance"}
-            </p>
-            <p className="text-sm text-slate-200">
-              {resumePresenter.display?.description ??
-                "Some generated statements could not be verified against your baseline."}
-            </p>
-            {resumePresenter.display?.reasons?.length ? (
-              <ul className="list-disc space-y-1 pl-5 text-sm text-slate-200">
-                {resumePresenter.display.reasons.map((reason, index) => (
-                  <li key={`resume-block-reason-${index}`}>{reason}</li>
-                ))}
-              </ul>
-            ) : null}
-            {resumePresenter.display?.cta ? (
-              <Link
-                href={resumePresenter.display.cta.href}
-                className="text-sm font-semibold text-slate-100 underline decoration-slate-300/70 underline-offset-4 transition hover:text-white"
-              >
-                {resumePresenter.display.cta.label}
-              </Link>
-            ) : null}
-          </div>
-        ) : uiHasRenderableResume ? (
+        {uiHasRenderableResume ? (
           <div
             className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
             data-testid={resumeQualityPass ? "studio-resume-ready-panel" : "studio-resume-correction-panel"}
@@ -14665,7 +14674,7 @@ export default function StudioPage() {
           </div>
         ) : null}
 
-        {coverLetterComplianceBlocked ? (
+        {!hasCoverLetterArtifactCanonical && coverLetterComplianceBlocked ? (
           <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4 text-sm text-slate-200 shadow-sm">
             <div className="space-y-2">
               <div className="flex items-center gap-2">
@@ -14787,7 +14796,7 @@ export default function StudioPage() {
               </>
             )}
           </div>
-        ) : coverPresenter.display &&
+        ) : !hasCoverLetterArtifactCanonical && coverPresenter.display &&
         coverQualityPass &&
         !coverLetterComplianceBlocked &&
         coverPresenter.status !== "blocked" &&
@@ -14800,7 +14809,8 @@ export default function StudioPage() {
           </div>
         ) : null}
 
-        {!coverLetterComplianceBlocked &&
+        {!hasCoverLetterArtifactCanonical &&
+        !coverLetterComplianceBlocked &&
         coverPresenter.status === "blocked" &&
         !hasCoverLetterArtifactCanonical &&
         !uiHasRenderablePair &&
@@ -14931,7 +14941,7 @@ export default function StudioPage() {
               </div>
             </div>
           ) : (
-            coverState.error ? (
+            !hasCanonicalCoverLetterArtifact && coverState.error ? (
               coverGating.primaryBlocker === "readiness_block" ? (
                 <div className="space-y-3 rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4">
                   <p className="text-sm font-semibold text-amber-100">Cover letter generation is blocked</p>
@@ -14973,7 +14983,7 @@ export default function StudioPage() {
                   </div>
                 </div>
               )
-            ) : coverState.artifactFailure ? null : !uiHasRenderableCoverLetter ? (
+            ) : !hasCanonicalCoverLetterArtifact && coverState.artifactFailure ? null : !uiHasRenderableCoverLetter ? (
               <EmptyState
                 testId={
                   coverAutoGenerating || coverGenerateNowPending ? "studio-cover-generating" : "studio-cover-missing"

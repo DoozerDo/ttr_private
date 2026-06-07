@@ -1179,6 +1179,82 @@ describe("Studio auto-generation", () => {
     expect(countPostCalls(fetchMock, "/api/resume/generate") + countPostCalls(fetchMock, "/api/resume")).toBe(0);
   }, 15000);
 
+  it("uses persisted artifacts as the canonical display state even when readiness and legacy pair flags are stale", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    installStrongFitFetches({
+      readinessStatus: "blocked",
+      studioArtifactsPayload: {
+        status: "failed",
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        generationContractVersion: "studio-artifacts-v1",
+        artifact: {
+          hasResume: true,
+          hasCoverLetter: true,
+          pairStatus: "failed",
+          generating: false,
+          failure: { code: "generation_failed", message: "Failed." },
+        },
+        resume: {
+          status: "completed",
+          usableCurrent: true,
+          inputsHash: false,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            qualityGate: { status: "pass", reasons: [] },
+            preview: { resume: { heading: { name: "Alex" }, experience: [{ company: "Co", roleTitle: "Role", bullets: ["Did work."] }] } },
+          },
+          content: "Resume",
+          confidence: "HIGH",
+          failure: null,
+        },
+        coverLetter: {
+          status: "completed",
+          usableCurrent: true,
+          inputsHash: false,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            qualityGate: { status: "pass", reasons: [] },
+            preview: { coverLetter: { paragraphs: ["Hello"] } },
+          },
+          content: "Hello",
+          confidence: "HIGH",
+          failure: null,
+        },
+      },
+    });
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-resume-export")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-cover-letter-preview-body")).toBeInTheDocument();
+      expect(screen.queryByText(/Resume not generated yet/i)).toBeNull();
+      expect(screen.queryByText(/Cover letter not generated yet/i)).toBeNull();
+      expect(screen.queryByTestId("studio-invalid-state-fallback")).toBeNull();
+      expect(screen.queryByTestId("studio-guidance-details")).toBeNull();
+      expect(screen.queryByTestId("studio-evidence-blocked-panel")).toBeNull();
+      expect(screen.queryByText(/Document generation needs attention/i)).toBeNull();
+      expect(screen.queryByText(/Generation unavailable/i)).toBeNull();
+      expect(screen.queryByText(/Resume blocked by compliance/i)).toBeNull();
+      expect(screen.queryByText(/Cover letter blocked by compliance/i)).toBeNull();
+      expect(screen.queryByTestId("studio-cover-artifact-issue")).toBeNull();
+      expect(screen.queryByTestId("studio-cover-tier-gate")).toBeNull();
+      expect(screen.queryByTestId("studio-cover-generated-unusable")).toBeNull();
+    }, { timeout: 15000 });
+  }, 15000);
+
   it("suppresses the failure banner when both previews renderable even if pairStatus is failed", async () => {
     overrideSearchParams({
       analysisId: "analysis-1",
@@ -1360,6 +1436,7 @@ describe("Studio auto-generation", () => {
       expect(screen.queryByTestId("studio-evidence-blocked-panel")).toBeNull();
       expect(screen.queryByText(/^Blocked$/i)).toBeNull();
       expect(screen.queryByText(/Resume blocked by compliance/i)).toBeNull();
+      expect(screen.queryByText(/Cover letter blocked by compliance/i)).toBeNull();
       expect(screen.queryByText(/Resolve blockers/i)).toBeNull();
     }, { timeout: 15000 });
   }, 15000);
