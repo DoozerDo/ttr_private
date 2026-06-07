@@ -717,6 +717,9 @@ export class StudioArtifactsService {
     const authoritativeArtifactId = record ? String((record as any)?.id ?? '') : null;
     const rejectedArtifactIds: string[] = [];
     const staleArtifactReasonCodes: string[] = [];
+    let resumeHydrationDebug: Record<string, unknown> | null = null;
+    const debugTargetArtifactId = 'c3696092-8b36-468e-b0f7-54e19e666ea4';
+    const shouldEmitResumeHydrationDebug = String(authoritativeArtifactId ?? '') === debugTargetArtifactId;
 
     const resumeRenderablePreviewModel = (() => {
       if (!resumeRecord) return null;
@@ -787,29 +790,22 @@ export class StudioArtifactsService {
       if (!resumeRecord) return resumeRecord;
       // Never erase a renderable preview payload before canonical shaping.
       // Export eligibility is enforced at the resumeResult layer below.
-      const debugTargetArtifactId = 'c3696092-8b36-468e-b0f7-54e19e666ea4';
-      const shouldEmitResumeHydrationDebug = String((resumeRecord as any)?.artifactId ?? '') === debugTargetArtifactId;
       const emitResumeHydrationDebug = (branchTaken: string, responseBodyPresent: boolean, previewResumePresent: boolean) => {
         if (!shouldEmitResumeHydrationDebug) return;
-        (resumeRecord as any).diagnostics = {
-          ...(normalizeRecord((resumeRecord as any)?.diagnostics) ?? {}),
-          resumeHydration: {
-            loadedRecordId: String((resumeRecord as any)?.artifactId ?? ''),
-            loadedResumeStatus: String((resumeRecord as any)?.status ?? ''),
-            loadedResumeContentLength: String((resumeRecord as any)?.content ?? '').length,
-            loadedResumeResponseBodyPresent: Boolean((resumeRecord as any)?.responseBody),
-            loadedResumePreviewPresent: Boolean((resumeRecord as any)?.responseBody?.preview),
-            loadedResumePreviewResumePresent: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
-            resumePreviewRenderable,
-            resumeIsMinimal,
-            resumeIsStaleLegacy,
-            resumeRecordForResultBranchTaken: branchTaken,
-            resumeRecordForResultResponseBodyPresent: responseBodyPresent,
-            resumeRecordForResultPreviewResumePresent: previewResumePresent,
-            canonicalResumeResultPreviewPresent: Boolean(
-              (this.buildCanonicalResultFromRecord('resume', resumeRecord) as any)?.preview,
-            ),
-          },
+        resumeHydrationDebug = {
+          loadedRecordId: String((resumeRecord as any)?.artifactId ?? ''),
+          loadedResumeStatus: String((resumeRecord as any)?.status ?? ''),
+          loadedResumeContentLength: String((resumeRecord as any)?.content ?? '').length,
+          loadedResumeResponseBodyPresent: Boolean((resumeRecord as any)?.responseBody),
+          loadedResumePreviewPresent: Boolean((resumeRecord as any)?.responseBody?.preview),
+          loadedResumePreviewResumePresent: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
+          resumePreviewRenderable,
+          resumeIsMinimal,
+          resumeIsStaleLegacy,
+          resumeRecordForResultBranchTaken: branchTaken,
+          resumeRecordForResultResponseBodyPresent: responseBodyPresent,
+          resumeRecordForResultPreviewResumePresent: previewResumePresent,
+          canonicalResumeResultPreviewPresent: false,
         };
       };
       if (!resumePreviewRenderable && !resumeHasRecoverablePayload) {
@@ -854,6 +850,30 @@ export class StudioArtifactsService {
       );
       return resumeRecord;
     })();
+    if (resumeHydrationDebug) {
+      resumeHydrationDebug = {
+        ...resumeHydrationDebug,
+        canonicalResumeResultPreviewPresent: Boolean(
+          (this.buildCanonicalResultFromRecord('resume', resumeRecordForResult) as any)?.preview,
+        ),
+      };
+    } else if (shouldEmitResumeHydrationDebug) {
+      resumeHydrationDebug = {
+        loadedRecordId: String((resumeRecord as any)?.artifactId ?? ''),
+        loadedResumeStatus: String((resumeRecord as any)?.status ?? ''),
+        loadedResumeContentLength: String((resumeRecord as any)?.content ?? '').length,
+        loadedResumeResponseBodyPresent: Boolean((resumeRecord as any)?.responseBody),
+        loadedResumePreviewPresent: Boolean((resumeRecord as any)?.responseBody?.preview),
+        loadedResumePreviewResumePresent: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
+        resumePreviewRenderable,
+        resumeIsMinimal,
+        resumeIsStaleLegacy,
+        resumeRecordForResultBranchTaken: 'no_resume_record',
+        resumeRecordForResultResponseBodyPresent: false,
+        resumeRecordForResultPreviewResumePresent: false,
+        canonicalResumeResultPreviewPresent: false,
+      };
+    }
     if (resumeRecord && !resumeExportEligible) {
       rejectedArtifactIds.push(authoritativeArtifactId ?? 'unknown');
     }
@@ -1023,6 +1043,7 @@ export class StudioArtifactsService {
       ...(errors.length ? { errors } : {}),
       diagnostics: {
         resumeV2Readiness,
+        ...(resumeHydrationDebug ? { resumeHydration: resumeHydrationDebug } : {}),
         ...(process.env.DOCGEN_DIAGNOSTICS === 'true'
           ? {
               staleArtifactRejected: Boolean(rejectedArtifactIds.length),

@@ -296,10 +296,10 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
     expect(state.resume?.content).toBeNull();
   });
 
-  it('hydrates a fresh non-minimal resume payload from an equivalent normalized model even when preview.resume is absent', async () => {
+  it('hydrates a fresh non-minimal resume payload from an equivalent normalized model even when preview.resume is absent and emits targeted resumeHydration diagnostics', async () => {
     const studioArtifactRepository = {
       findOne: jest.fn().mockResolvedValue({
-        id: 'artifact-2',
+        id: 'c3696092-8b36-468e-b0f7-54e19e666ea4',
         createdAt: new Date('2026-06-04T00:00:00.000Z'),
         updatedAt: new Date('2026-06-04T00:01:00.000Z'),
         resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
@@ -380,6 +380,10 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
     expect(state.resume?.responseBody).toBeTruthy();
     expect(String(state.resume?.content ?? '')).toContain('Resume content already persisted');
     expect(state.resume?.artifactCurrent).toBe(true);
+    expect((state.diagnostics as any)?.resumeHydration).toBeTruthy();
+    expect((state.diagnostics as any)?.resumeHydration?.loadedRecordId).toBe('c3696092-8b36-468e-b0f7-54e19e666ea4');
+    expect((state.diagnostics as any)?.resumeHydration?.resumeRecordForResultBranchTaken).toBe('preserved_recoverable');
+    expect((state.diagnostics as any)?.resumeHydration?.canonicalResumeResultPreviewPresent).toBe(true);
     expect(state.resumeResult).toBeTruthy();
     expect((state.resumeResult as any)?.preview).toBeTruthy();
     expect((state.resumeResult as any)?.preview?.heading?.name).toBe('Alex Candidate');
