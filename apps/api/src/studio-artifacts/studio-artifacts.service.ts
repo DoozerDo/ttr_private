@@ -376,6 +376,9 @@ export class StudioArtifactsService {
         jobId: input.jobId,
       },
     });
+    const rawResumeResponseBody = normalizeRecord((record as any)?.resumeResponseBody);
+    const rawResumePreview = normalizeRecord(rawResumeResponseBody?.preview);
+    const rawResumePreviewResume = normalizeRecord(rawResumePreview?.resume);
 
     if (shouldLogIngest) {
       try {
@@ -703,7 +706,7 @@ export class StudioArtifactsService {
     const shouldMarkLegacyStale =
       Boolean(artifactReadiness) && typeof score === 'number' && score >= 80;
 
-    const resumeRecord =
+    const resumeRecord = 
       shouldMarkLegacyStale && resumeRecordRaw && !isStructuredTemplateResult(resumeRecordRaw.responseBody)
         ? { ...resumeRecordRaw, metadata: { ...(resumeRecordRaw.metadata ?? {}), staleLegacy: true } }
         : resumeRecordRaw;
@@ -782,6 +785,10 @@ export class StudioArtifactsService {
       return responseBodyPresent || contentPresent;
     })();
 
+    const debugResumeRecordResponseBody = normalizeRecord((resumeRecordRaw as any)?.responseBody);
+    const debugResumeRecordPreview = normalizeRecord(debugResumeRecordResponseBody?.preview);
+    const debugResumeRecordPreviewResume = normalizeRecord(debugResumeRecordPreview?.resume);
+
 	    // Hydration contract:
 	    // - Never mutate persisted artifact fields.
 	    // - Do not surface stale legacy artifacts as the active preview payload (Prompt 15) => null responseBody/content.
@@ -799,12 +806,29 @@ export class StudioArtifactsService {
           loadedResumeResponseBodyPresent: Boolean((resumeRecord as any)?.responseBody),
           loadedResumePreviewPresent: Boolean((resumeRecord as any)?.responseBody?.preview),
           loadedResumePreviewResumePresent: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
+          rawRowHasResumeResponseBody: Boolean(rawResumeResponseBody),
+          rawRowHasResumeContent: Boolean(String((record as any)?.resumeContent ?? '').trim()),
+          rawRowResumeResponseBodyTopLevelKeys: rawResumeResponseBody ? Object.keys(rawResumeResponseBody).slice(0, 24) : [],
+          rawRowResumePreviewKeys: rawResumePreview ? Object.keys(rawResumePreview).slice(0, 24) : [],
+          rawRowHasPreviewResume: Boolean(rawResumePreviewResume),
+          buildArtifactRecordHasResponseBody: Boolean((resumeRecordRaw as any)?.responseBody),
+          buildArtifactRecordHasContent: Boolean(String((resumeRecordRaw as any)?.content ?? '').trim()),
+          buildArtifactRecordPreviewKeys: normalizeRecord((resumeRecordRaw as any)?.responseBody?.preview)
+            ? Object.keys(normalizeRecord((resumeRecordRaw as any)?.responseBody?.preview) as Record<string, unknown>).slice(0, 24)
+            : [],
+          buildArtifactRecordHasPreviewResume: Boolean((resumeRecordRaw as any)?.responseBody?.preview?.resume),
           resumePreviewRenderable,
           resumeIsMinimal,
           resumeIsStaleLegacy,
           resumeRecordForResultBranchTaken: branchTaken,
           resumeRecordForResultResponseBodyPresent: responseBodyPresent,
           resumeRecordForResultPreviewResumePresent: previewResumePresent,
+          resumeRecordForResultHasResponseBody: responseBodyPresent,
+          resumeRecordForResultHasContent: Boolean(String((resumeRecordForResult as any)?.content ?? '').trim()),
+          resumeRecordForResultPreviewKeys: normalizeRecord((resumeRecordForResult as any)?.responseBody?.preview)
+            ? Object.keys(normalizeRecord((resumeRecordForResult as any)?.responseBody?.preview) as Record<string, unknown>).slice(0, 24)
+            : [],
+          resumeRecordForResultHasPreviewResume: Boolean((resumeRecordForResult as any)?.responseBody?.preview?.resume),
           canonicalResumeResultPreviewPresent: false,
         };
       };
@@ -874,12 +898,27 @@ export class StudioArtifactsService {
         loadedResumeResponseBodyPresent: Boolean((resumeRecord as any)?.responseBody),
         loadedResumePreviewPresent: Boolean((resumeRecord as any)?.responseBody?.preview),
         loadedResumePreviewResumePresent: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
+        rawRowHasResumeResponseBody: Boolean(rawResumeResponseBody),
+        rawRowHasResumeContent: Boolean(String((record as any)?.resumeContent ?? '').trim()),
+        rawRowResumeResponseBodyTopLevelKeys: rawResumeResponseBody ? Object.keys(rawResumeResponseBody).slice(0, 24) : [],
+        rawRowResumePreviewKeys: rawResumePreview ? Object.keys(rawResumePreview).slice(0, 24) : [],
+        rawRowHasPreviewResume: Boolean(rawResumePreviewResume),
+        buildArtifactRecordHasResponseBody: Boolean((resumeRecordRaw as any)?.responseBody),
+        buildArtifactRecordHasContent: Boolean(String((resumeRecordRaw as any)?.content ?? '').trim()),
+        buildArtifactRecordPreviewKeys: normalizeRecord((resumeRecordRaw as any)?.responseBody?.preview)
+          ? Object.keys(normalizeRecord((resumeRecordRaw as any)?.responseBody?.preview) as Record<string, unknown>).slice(0, 24)
+          : [],
+        buildArtifactRecordHasPreviewResume: Boolean((resumeRecordRaw as any)?.responseBody?.preview?.resume),
         resumePreviewRenderable,
         resumeIsMinimal,
         resumeIsStaleLegacy,
         resumeRecordForResultBranchTaken: 'no_resume_record',
         resumeRecordForResultResponseBodyPresent: false,
+        resumeRecordForResultHasResponseBody: false,
+        resumeRecordForResultHasContent: false,
+        resumeRecordForResultPreviewKeys: [],
         resumeRecordForResultPreviewResumePresent: false,
+        resumeRecordForResultHasPreviewResume: false,
         canonicalResumeResultPreviewPresent: false,
       };
     }
