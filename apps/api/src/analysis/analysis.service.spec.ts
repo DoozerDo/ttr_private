@@ -103,6 +103,24 @@ describe('AnalysisService - fit scores contract', () => {
     updatedAt: new Date(),
   };
 
+  const canonicalResumeV2 = {
+    heading: {
+      name: 'Test User',
+      contactLine: 'test@example.com',
+    },
+    summary: 'Test',
+    experience: [
+      {
+        company: 'ExampleCo',
+        roleTitle: 'Engineer',
+        startDate: '2020-01',
+        endDate: '2021-01',
+        bullets: ['Led ops.'],
+      },
+    ],
+    education: [],
+  };
+
   /**
    * IMPORTANT:
    * AnalysisService now enforces "exactly one of raw JD text or parsed_jd".
@@ -210,6 +228,13 @@ const sampleScoringV2: CxFitV2Result = {
     jobRepository = { findOne: jest.fn().mockResolvedValue(defaultJobRecord) };
     fitScoringServiceMock = {
       buildComplianceFlags: jest.fn().mockReturnValue([]),
+      scoreCxFitV2Authenticated: jest.fn((input, options) =>
+        scoreCxFitV2(input, options),
+      ),
+      computeCxFitV2ConfidenceScore: jest.fn().mockReturnValue({
+        confidenceScore: 0.86,
+        confidenceReasons: [],
+      }),
       score: jest.fn().mockResolvedValue({
         overallScore: 82,
         rawScore: 82,
@@ -416,6 +441,20 @@ const sampleScoringV2: CxFitV2Result = {
       strengths: ['aws'],
       gaps: ['golang'],
       complianceFlags: [],
+      jobAnalysis: {
+        jobText: 'Lead support operations.',
+        responsibilities: ['Lead support operations.'],
+        requirements: ['AWS expertise required.'],
+        skills: ['lead'],
+        sourceEvidence: ['Lead support operations.'],
+      },
+      fitScore: {
+        score: 68,
+        verdict: 'consider',
+        matchedSignals: ['aws'],
+        gapSignals: ['golang'],
+        sourceEvidence: ['Lead support operations.', 'aws', 'golang'],
+      },
       scoringV2: {
         ...sampleScoringV2,
         score: 68,
@@ -439,6 +478,17 @@ const sampleScoringV2: CxFitV2Result = {
       expect.objectContaining({
         requiredCoverage: expect.any(Number),
         preferredCoverage: expect.any(Number),
+      }),
+    );
+    expect(result.jobAnalysis).toEqual(
+      expect.objectContaining({
+        jobText: 'Lead support operations.',
+      }),
+    );
+    expect(result.fitScore).toEqual(
+      expect.objectContaining({
+        score: 68,
+        verdict: 'consider',
       }),
     );
   });
@@ -1105,6 +1155,106 @@ const sampleScoringV2: CxFitV2Result = {
     expect(result.auditId).toBe('audit-1');
   });
 
+  it('returns canonical JobAnalysis from the existing analysis path', async () => {
+    const rawDescription = [
+      'Responsibilities:',
+      '- Lead platform operations and incident response.',
+      '- Partner with engineering and support leaders.',
+      'Requirements:',
+      '- AWS expertise required.',
+      '- Kubernetes experience required.',
+      '- Incident management and observability.',
+    ].join('\n');
+
+    jobRepository.findOne.mockResolvedValue({
+      ...defaultJobRecord,
+      rawDescription,
+    });
+
+    const result = await service.analyzeForUser('user-1', {
+      baselineId: 'b-1',
+      jobId: 'job-1',
+    });
+
+    expect(result.jobAnalysis).toEqual(
+      expect.objectContaining({
+        jobText: rawDescription,
+        responsibilities: expect.arrayContaining([
+          'Lead platform operations and incident response.',
+        ]),
+        requirements: expect.arrayContaining([
+          'AWS expertise required.',
+          'Kubernetes experience required.',
+        ]),
+        skills: expect.any(Array),
+        sourceEvidence: expect.arrayContaining([
+          'Lead platform operations and incident response.',
+        ]),
+      }),
+    );
+    expect(result.jobAnalysis.sourceEvidence.length).toBeGreaterThan(0);
+    expect(result.fitScore).toEqual(
+      expect.objectContaining({
+        score: expect.any(Number),
+        verdict: expect.any(String),
+        matchedSignals: expect.any(Array),
+        gapSignals: expect.any(Array),
+        sourceEvidence: expect.any(Array),
+      }),
+    );
+    expect(result.fitScore.sourceEvidence.length).toBeGreaterThan(0);
+  });
+
+  it('persists canonical jobAnalysis and fitScore on fit assessment saves', async () => {
+    const rawDescription = [
+      'Responsibilities:',
+      '- Lead platform operations and incident response.',
+      'Requirements:',
+      '- AWS expertise required.',
+    ].join('\n');
+
+    jobRepository.findOne.mockResolvedValue({
+      ...defaultJobRecord,
+      rawDescription,
+    });
+
+    const result = await service.runFitAssessment('user-1', {
+      baselineId: 'b-1',
+      jobId: 'job-1',
+      baselineVersion: 2,
+    });
+
+    expect(result.jobAnalysis).toEqual(
+      expect.objectContaining({
+        jobText: rawDescription,
+      }),
+    );
+    expect(result.fitScore).toEqual(
+      expect.objectContaining({
+        score: expect.any(Number),
+        verdict: expect.any(String),
+      }),
+    );
+    expect(fitAssessmentRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jobAnalysis: expect.objectContaining({
+          jobText: rawDescription,
+          responsibilities: expect.any(Array),
+          requirements: expect.any(Array),
+          skills: expect.any(Array),
+          sourceEvidence: expect.any(Array),
+        }),
+        fitScore: expect.objectContaining({
+          score: expect.any(Number),
+          verdict: expect.any(String),
+          matchedSignals: expect.any(Array),
+          gapSignals: expect.any(Array),
+          sourceEvidence: expect.any(Array),
+        }),
+      }),
+    );
+  });
+
   it('creates a compliance audit for fit score requests', async () => {
     await service.scoreCompatibility('user-1', {
       baseline_version_id: 'bv-1',
@@ -1160,7 +1310,7 @@ const sampleScoringV2: CxFitV2Result = {
   it('blocks analysis.run when Resume V2 is invalid even if fallback canonical baseline sections exist', async () => {
     // Force parsed canonical baseline JSON to exist but ResumeV2 to be unusable.
     baselineRepository.findOne.mockResolvedValue({
-      ...defaultBaselineRecord,
+      ...baseline,
       sections: [
         {
           id: 's-1',
@@ -1351,16 +1501,17 @@ const sampleScoringV2: CxFitV2Result = {
     ];
 
     const parsedRecord = {
-      parsedJson: {
-        ...canonicalBaseline,
-        baseline_id: '11111111-1111-4111-8111-111111111111',
-        source_file_id: '22222222-2222-4222-8222-222222222222',
-        source_format: 'pdf',
-        ingested_at: '2026-04-01T00:00:00.000Z',
-      },
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    } as BaselineParsed;
+          parsedJson: {
+            ...canonicalBaseline,
+            baseline_id: '11111111-1111-4111-8111-111111111111',
+            source_file_id: '22222222-2222-4222-8222-222222222222',
+            source_format: 'pdf',
+            ingested_at: '2026-04-01T00:00:00.000Z',
+          },
+          resumeV2Json: canonicalResumeV2,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        } as BaselineParsed;
     const orderedBaseline = {
       ...baseline,
       parsedRecords: [parsedRecord],
@@ -1461,6 +1612,7 @@ const sampleScoringV2: CxFitV2Result = {
               low_confidence_extractions: [],
             },
           } as BaselineSchemaCoreShape,
+          resumeV2Json: canonicalResumeV2,
           createdAt: new Date(),
           updatedAt: new Date(),
         } as BaselineParsed,
@@ -1615,6 +1767,7 @@ const sampleScoringV2: CxFitV2Result = {
         source_format: 'pdf',
         ingested_at: '2026-04-01T00:00:00.000Z',
       },
+      resumeV2Json: canonicalResumeV2,
       createdAt: new Date(),
       updatedAt: new Date(),
     } as BaselineParsed;

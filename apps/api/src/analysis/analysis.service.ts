@@ -121,6 +121,8 @@ export type AnalysisResult = {
   strengths: string[];
   gaps: string[];
   summary: string;
+  jobAnalysis: JobAnalysis;
+  fitScore: FitScore;
   scoringReliability?: 'ok' | 'unreliable';
   scoringReliabilityReason?: 'job_description_terms_empty' | 'job_description_empty' | 'unknown';
   compliance_flags?: Array<{ code: string; message?: string }>;
@@ -170,6 +172,22 @@ export type JobTextForScoring = {
   jobRawTextSha256: string;
   jobRawTextTooShort: boolean;
   jobRawTextWarning?: string;
+};
+
+export type JobAnalysis = {
+  jobText: string;
+  responsibilities: string[];
+  requirements: string[];
+  skills: string[];
+  sourceEvidence: string[];
+};
+
+export type FitScore = {
+  score: number;
+  verdict: 'skip' | 'consider' | 'apply';
+  matchedSignals: string[];
+  gapSignals: string[];
+  sourceEvidence: string[];
 };
 
 const RAW_TEXT_WARNING_THRESHOLD = 3000;
@@ -984,6 +1002,65 @@ export class AnalysisService {
       canonicalJobForScoring,
       canonicalJobForHash,
       jobTextForScoring,
+    };
+  }
+
+  private buildJobAnalysis(jobProps: {
+    rawDescription?: string | null;
+    normalizedResponsibilities?: string[] | null;
+    normalizedRequirements?: string[] | null;
+  }): JobAnalysis {
+    const canonicalInputs = this.buildCanonicalJobInputs(jobProps);
+    const jobTextForScoring = buildJobTextForScoring({
+      rawDescription: canonicalInputs.rawDescription,
+      normalizedResponsibilities: canonicalInputs.normalizedResponsibilities,
+      normalizedRequirements: canonicalInputs.normalizedRequirements,
+    });
+    const normalizedJob = normalizeJobDescription(jobTextForScoring.jobText).normalized;
+    const skills = Array.from(
+      new Set([
+        ...normalizedJob.signals.leadership,
+        ...normalizedJob.signals.strategic,
+        ...normalizedJob.signals.tactical,
+        ...normalizedJob.signals.technical,
+        ...normalizedJob.signals.domain,
+      ]),
+    );
+    const sourceEvidence =
+      canonicalInputs.normalizedResponsibilities.length ||
+      canonicalInputs.normalizedRequirements.length
+        ? [
+            ...canonicalInputs.normalizedResponsibilities,
+            ...canonicalInputs.normalizedRequirements,
+          ]
+        : [jobTextForScoring.jobText].filter(Boolean);
+
+    return {
+      jobText: jobTextForScoring.jobText,
+      responsibilities: canonicalInputs.normalizedResponsibilities,
+      requirements: canonicalInputs.normalizedRequirements,
+      skills,
+      sourceEvidence,
+    };
+  }
+
+  private buildFitScore(input: {
+    score: number;
+    matchedSignals: string[];
+    gapSignals: string[];
+    sourceEvidence: string[];
+  }): FitScore {
+    return {
+      score: input.score,
+      verdict:
+        input.score >= 80
+          ? 'apply'
+          : input.score >= 60
+            ? 'consider'
+            : 'skip',
+      matchedSignals: input.matchedSignals,
+      gapSignals: input.gapSignals,
+      sourceEvidence: input.sourceEvidence,
     };
   }
 
@@ -2300,7 +2377,6 @@ export class AnalysisService {
     const gaps = gapInsights.criticalGaps.map((gap) => gap.title);
     const complianceFlags = scoring?.complianceFlags ?? [];
     const finalScore = scoringV2.score;
-
     const generatedSectionsForCompliance = normalizedJobDescription
       ? [{ title: 'Job Description', content: normalizedJobDescription }]
       : undefined;
@@ -2347,6 +2423,8 @@ export class AnalysisService {
         inputsHash,
         confidenceScore: confidenceResult.confidenceScore,
         confidenceReasons: confidenceResult.confidenceReasons,
+        jobAnalysis,
+        fitScore,
       });
 
       savedAssessment = await this.fitAssessmentRepository.save(assessment);
@@ -2472,7 +2550,7 @@ export class AnalysisService {
       scoreSanityFlags: scoringV2.scoreSanityFlags,
       likelyUnderestimatedFit: scoringV2.likelyUnderestimatedFit,
       scorePresentationMode: scoringV2.scorePresentationMode,
-    };
+      };
     } finally {
       this.clearShortTextWarningKey(shortTextWarningKey);
     }
@@ -2591,6 +2669,22 @@ export class AnalysisService {
           ? 'No keywords found in the job description.'
           : `Matched ${matched} of ${total} key terms from the job description.`;
 
+      const jobAnalysis = this.buildJobAnalysis({
+        rawDescription: jobDescription,
+        normalizedResponsibilities: job?.normalizedResponsibilities ?? [],
+        normalizedRequirements: job?.normalizedRequirements ?? [],
+      });
+      const fitScore = this.buildFitScore({
+        score,
+        matchedSignals: strengths,
+        gapSignals: gapList,
+        sourceEvidence: [
+          ...jobAnalysis.sourceEvidence,
+          ...strengths,
+          ...gapList,
+        ],
+      });
+
       const generatedSectionsForCompliance = normalizedJobDescription
         ? [{ title: 'Job Description', content: normalizedJobDescription }]
         : undefined;
@@ -2627,6 +2721,8 @@ export class AnalysisService {
         strengths,
         gaps: gapList,
         summary,
+        jobAnalysis,
+        fitScore,
         compliance_flags: this.coerceComplianceFlags(compliance.complianceFlags),
         ...(compliance.debugTrace ? { compliance_debug: compliance.debugTrace } : {}),
         audit_id: compliance.audit.id,
@@ -3050,6 +3146,20 @@ export class AnalysisService {
       const gaps = gapInsights.criticalGaps.map((gap) => gap.title);
       const complianceFlags = debugScoring?.complianceFlags ?? [];
       const finalScore = scoringV2.score;
+      const jobAnalysis = this.buildJobAnalysis({
+        rawDescription: job?.rawDescription ?? '',
+        normalizedResponsibilities: job?.normalizedResponsibilities ?? [],
+        normalizedRequirements: job?.normalizedRequirements ?? [],
+      });
+      const fitScore = this.buildFitScore({
+        score: finalScore,
+        matchedSignals: strengths,
+        gapSignals: gaps,
+        sourceEvidence:
+          strengths.length || gaps.length
+            ? [...strengths, ...gaps]
+            : [job?.rawDescription ?? ''],
+      });
       const scoringReliability =
         jobTextForScoring.jobRawTextCharCount > 0 &&
         jobNormDebug.responsibilitiesCount === 0 &&
@@ -3347,6 +3457,8 @@ export class AnalysisService {
         confidenceScore: confidenceResult.confidenceScore,
         confidenceReasons: confidenceResult.confidenceReasons,
         scoringReliability,
+        jobAnalysis,
+        fitScore,
         ...(scoringReliabilityReason ? { scoringReliabilityReason } : {}),
       });
       if (syntheticMetadata?.isSynthetic) {
@@ -3548,6 +3660,8 @@ export class AnalysisService {
         scoreSanityFlags: scoringV2.scoreSanityFlags,
         likelyUnderestimatedFit: scoringV2.likelyUnderestimatedFit,
         scorePresentationMode: scoringV2.scorePresentationMode,
+        jobAnalysis,
+        fitScore,
         baseline_version_hash:
           compliance.audit.baselineVersionHash ?? baselineVersionHash,
         latestAssessmentSummary: {
@@ -4075,6 +4189,8 @@ export class AnalysisService {
       confidenceScore: assessment.confidenceScore ?? null,
       confidenceReasons: assessment.confidenceReasons ?? [],
       createdAt: assessment.createdAt,
+      jobAnalysis: assessment.jobAnalysis ?? null,
+      fitScore: assessment.fitScore ?? null,
       scoring_v2: refreshedScoringV2,
       supportingSignals,
       baselineEvidence,

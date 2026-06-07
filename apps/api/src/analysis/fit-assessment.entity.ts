@@ -7,6 +7,7 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import type { CxFitV2Result } from './cx-fit-scoring-v2';
+import type { FitScore, JobAnalysis } from './analysis.service';
 
 export enum FitAssessmentVerdict {
   APPLY = 'APPLY',
@@ -93,6 +94,12 @@ export class FitAssessment {
 
   @Column({ type: 'jsonb', nullable: true })
   scoringV2!: CxFitV2Result | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  jobAnalysis!: JobAnalysis | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  fitScore!: FitScore | null;
 
   /**
    * Deterministic hash of the scoring inputs (job + baseline sections + weights).
