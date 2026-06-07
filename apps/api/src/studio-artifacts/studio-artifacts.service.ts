@@ -812,7 +812,7 @@ export class StudioArtifactsService {
         emitResumeHydrationDebug('nulled_non_renderable', false, false);
         return { ...resumeRecord, responseBody: null, content: null };
       }
-      if (!resumePreviewRenderable && resumeHasRecoverablePayload && resumeRecoverablePreviewModel) {
+      if (!resumeIsMinimal && !resumeIsStaleLegacy && resumeHasRecoverablePayload) {
         const responseBody = normalizeRecord(resumeRecord.responseBody);
         const canonicalPreviewResume = resumeRecoverablePreviewModel;
         const canonicalResponseBody =
@@ -833,6 +833,7 @@ export class StudioArtifactsService {
         return {
           ...resumeRecord,
           responseBody: canonicalResponseBody,
+          content: resumeRecord.content,
         };
       }
       if (resumeIsMinimal) {
