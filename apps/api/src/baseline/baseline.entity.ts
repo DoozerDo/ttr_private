@@ -84,6 +84,9 @@ export class Baseline {
   @Column({ type: 'boolean', default: false })
   preserveFromCleanup!: boolean;
 
+  @Column({ type: 'jsonb', nullable: true })
+  verifiedBaseline?: Record<string, unknown> | null;
+
   @OneToMany(() => BaselineSection, (section) => section.baseline, {
     cascade: true,
   })

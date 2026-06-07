@@ -12,7 +12,7 @@ import { BaselineParsed } from './baseline-parsed.entity';
 import { validateNormalizedResumeDocument } from '../resume/resume-normalization';
 import { BaselineVersion } from './baseline-version.entity';
 import { BaselineIngestionService } from './baseline-ingestion.service';
-import { BaselineService } from './baseline.service';
+import { BaselineService, type VerifiedBaseline } from './baseline.service';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
 import { EmbeddingService } from '../ai/embedding.service';
 
@@ -774,6 +774,174 @@ describe('BaselineService - library capacity', () => {
     expect(result.baselineId).toBeDefined();
     expect(transactionManager.count).toHaveBeenCalledWith(Baseline, {
       where: { userId: 'user-1', status: BaselineStatus.ACTIVE },
+    });
+  });
+
+  it('returns a populated VerifiedBaseline from the baseline ingestion path', async () => {
+    const result = await service.createBaseline(
+      'user-1',
+      { originalname: 'resume.pdf', mimetype: 'application/pdf', path: '/tmp/resume.pdf' },
+      parseResult as any,
+    );
+
+    expect(result.verifiedBaseline).toBeTruthy();
+    expect(result.verifiedBaseline).toMatchObject({
+      sourceText: 'raw',
+      experience: expect.any(Array),
+      skills: expect.any(Array),
+      education: expect.any(Array),
+      certifications: expect.any(Array),
+      evidence: expect.any(Array),
+      usabilityStatus: 'valid',
+      rejectionReasons: expect.any(Array),
+    });
+    expect(result.baseline.verifiedBaseline).toEqual(result.verifiedBaseline);
+    expect(transactionManager.save).toHaveBeenCalled();
+    expect(transactionManager.save.mock.calls[0][0]).toMatchObject({
+      verifiedBaseline: expect.objectContaining({
+        sourceText: 'raw',
+        experience: expect.any(Array),
+        skills: expect.any(Array),
+        education: expect.any(Array),
+        certifications: expect.any(Array),
+        evidence: expect.any(Array),
+        usabilityStatus: 'valid',
+        rejectionReasons: expect.any(Array),
+      }),
+    });
+  });
+
+  it('returns the persisted verifiedBaseline from BaselineService retrieval', async () => {
+    const created = await service.createBaseline(
+      'user-1',
+      { originalname: 'resume.pdf', mimetype: 'application/pdf', path: '/tmp/resume.pdf' },
+      parseResult as any,
+    );
+
+    baselineRepository.findOne.mockResolvedValueOnce({
+      ...created.baseline,
+      verifiedBaseline: created.baseline.verifiedBaseline,
+    });
+    const fetched = await service.getBaselineByIdForUser(created.baselineId, 'user-1');
+    expect(fetched.verifiedBaseline).toEqual(created.baseline.verifiedBaseline);
+    expect(fetched.verifiedBaseline).toMatchObject({
+      sourceText: 'raw',
+      experience: expect.any(Array),
+      skills: expect.any(Array),
+      education: expect.any(Array),
+      certifications: expect.any(Array),
+      evidence: expect.any(Array),
+      usabilityStatus: 'valid',
+      rejectionReasons: expect.any(Array),
+    });
+  });
+
+  it('returns a canonical VerifiedBaseline shape from BaselineService', async () => {
+    const result = await service.createBaseline(
+      'user-1',
+      { originalname: 'resume.pdf', mimetype: 'application/pdf', path: '/tmp/resume.pdf' },
+      parseResult as any,
+    );
+
+    const verifiedBaseline: VerifiedBaseline | null | undefined = result.verifiedBaseline;
+    expect(verifiedBaseline).toBeTruthy();
+    expect(verifiedBaseline).toMatchObject({
+      sourceText: 'raw',
+      experience: expect.any(Array),
+      skills: expect.any(Array),
+      education: expect.any(Array),
+      certifications: expect.any(Array),
+      evidence: expect.any(Array),
+      usabilityStatus: 'valid',
+      rejectionReasons: [],
+    });
+  });
+
+  it('marks a structurally malformed baseline as invalid without changing resume content handling', () => {
+    const verifiedBaseline = (service as any).buildVerifiedBaseline({
+      sourceText: '',
+      ingestion: null,
+      sections: [],
+    });
+
+    expect(verifiedBaseline).toMatchObject({
+      usabilityStatus: 'invalid',
+      rejectionReasons: ['baseline_unreadable_or_unmappable'],
+    });
+  });
+
+  it('does not invalidate a baseline solely because resume content is missing', () => {
+    const verifiedBaseline = (service as any).buildVerifiedBaseline({
+      sourceText: '',
+      ingestion: {
+        rawText: '',
+        parsedSections: [],
+        canonical: {
+          identity: {
+            full_name: 'Test User',
+            summary: null,
+            current_title: null,
+            current_company: null,
+            location: null,
+          },
+          experience: [],
+          education: [],
+          skills: [],
+          people_leadership: {
+            direct_reports: null,
+            managers_led: null,
+            global_teams: null,
+          },
+          operational_ownership: {
+            functions_owned: [],
+            process_design: null,
+            process_scaling: null,
+          },
+          tooling_and_platforms: {
+            tools: [],
+            ownership_level: 'unknown',
+          },
+          cross_functional_partnership: {
+            product: null,
+            engineering: null,
+            sales_cs: null,
+            executive: null,
+          },
+          customer_advocacy: {
+            executive_escalations: null,
+            voice_of_customer: null,
+            post_incident_rca: null,
+          },
+          scale_and_scope: {
+            customer_segment: 'unknown',
+            geo_scope: 'unknown',
+            org_stage: 'unknown',
+          },
+          metrics_and_outcomes: {
+            metrics_present: false,
+            metrics: [],
+          },
+          skills_and_tools: {
+            tools: [],
+            methodologies: [],
+            domains: [],
+          },
+          system_generated_read_only: {
+            missing_fields: [],
+            ambiguity_flags: [],
+            low_confidence_extractions: [],
+          },
+          schema_version: 'baseline_schema_v1',
+          user_verified: false,
+        },
+        sourceFormat: 'docx',
+      } as any,
+      sections: [],
+    });
+
+    expect(verifiedBaseline).toMatchObject({
+      usabilityStatus: 'valid',
+      rejectionReasons: [],
     });
   });
 

@@ -104,6 +104,23 @@ export type BaselineCreationResult = {
   baseline: Baseline;
   ingestion?: BaselineIngestionResult;
   normalization?: CanonicalNormalizationResult;
+  verifiedBaseline?: VerifiedBaseline | null;
+};
+
+export type VerifiedBaseline = {
+  sourceText: string;
+  experience: BaselineSchemaCoreShape['experience'];
+  skills: BaselineSchemaCoreShape['skills'];
+  education: BaselineSchemaCoreShape['education'];
+  certifications: string[];
+  evidence: Array<{
+    id: string;
+    text: string;
+    metrics: Array<{ type: 'percentage' | 'currency' | 'count'; value: string }>;
+    tags: string[];
+  }>;
+  usabilityStatus: 'valid' | 'invalid';
+  rejectionReasons: string[];
 };
 
 export const BASELINE_LIBRARY_CAP = 3;
@@ -279,6 +296,47 @@ export class BaselineService {
         hasJobAssessment: input.hasJobAssessment,
         templateReadiness: input.templateReadiness,
       },
+    };
+  }
+
+  private buildVerifiedBaseline(input: {
+    sourceText: string;
+    ingestion: BaselineIngestionResult | null | undefined;
+    sections: BaselineSection[];
+  }): VerifiedBaseline | null {
+    const canonical = input.ingestion?.canonical;
+    const structured = extractStructuredBaselineFromSections(input.sections as any);
+    const sourceText =
+      input.sourceText || (input.sections ?? []).map((section) => section.content ?? '').join('\n');
+    const experience = canonical?.experience ?? structured.experience;
+    const skills = canonical?.skills ?? structured.skills.map((name) => ({ name, category: null }));
+    const education = canonical?.education ?? structured.education.map((school) => ({
+      school,
+      degree: null,
+      startDate: null,
+      endDate: null,
+      evidence: [],
+    }));
+    const pipelineComplete = Boolean(input.ingestion);
+    const rejectionReasons = pipelineComplete ? [] : ['baseline_unreadable_or_unmappable'];
+    const evidence = [
+      ...(Array.isArray(canonical?.experience)
+        ? canonical.experience.flatMap((entry) => (Array.isArray((entry as any)?.evidence) ? (entry as any).evidence : []))
+        : []),
+      ...(Array.isArray(canonical?.education)
+        ? canonical.education.flatMap((entry) => (Array.isArray((entry as any)?.evidence) ? (entry as any).evidence : []))
+        : []),
+    ];
+
+    return {
+      sourceText,
+      experience,
+      skills,
+      education,
+      certifications: [],
+      evidence,
+      usabilityStatus: pipelineComplete ? 'valid' : 'invalid',
+      rejectionReasons,
     };
   }
 
@@ -687,9 +745,23 @@ export class BaselineService {
             return {
               baseline:
                 revived ??
-                ({ ...existingByHash, status: BaselineStatus.ACTIVE, archivedAt: null } as Baseline),
+                ({
+                  ...existingByHash,
+                  status: BaselineStatus.ACTIVE,
+                  archivedAt: null,
+                  verifiedBaseline: this.buildVerifiedBaseline({
+                    sourceText: parseResult?.ingestion?.rawText ?? '',
+                    ingestion: parseResult?.ingestion,
+                    sections: existingByHash.sections ?? [],
+                  }),
+                } as Baseline),
               baselineId: existingByHash.id,
               ingestion: parseResult?.ingestion,
+              verifiedBaseline: this.buildVerifiedBaseline({
+                sourceText: parseResult?.ingestion?.rawText ?? '',
+                ingestion: parseResult?.ingestion,
+                sections: revived?.sections ?? existingByHash.sections ?? [],
+              }),
             } as BaselineCreationResult;
           });
         }
@@ -719,12 +791,17 @@ export class BaselineService {
         if (this.isPostgresUniqueViolation(error, 'UQ_baselines_user_hash')) {
           const existing = await this.findBaselineByUserAndHash(userId, fileHash);
           if (existing) {
-            return {
-              baseline: existing,
-              baselineId: existing.id,
+          return {
+            baseline: existing,
+            baselineId: existing.id,
+            ingestion: parseResult?.ingestion,
+            verifiedBaseline: this.buildVerifiedBaseline({
+              sourceText: parseResult?.ingestion?.rawText ?? '',
               ingestion: parseResult?.ingestion,
-            } as BaselineCreationResult;
-          }
+              sections: existing.sections ?? [],
+            }),
+          } as BaselineCreationResult;
+        }
         }
         throw error;
       }
@@ -953,6 +1030,11 @@ export class BaselineService {
       ];
 
     await this.attachEmbeddingsToSections(sectionPayloads);
+    const verifiedBaseline = this.buildVerifiedBaseline({
+      sourceText: parseResult?.ingestion?.rawText ?? '',
+      ingestion: parseResult?.ingestion,
+      sections: sectionPayloads as unknown as BaselineSection[],
+    });
 
     const baseline = manager.create(Baseline, {
       userId,
@@ -964,6 +1046,7 @@ export class BaselineService {
       archivedAt: null,
       isActive: shouldBecomeActive,
       sections: sectionPayloads,
+      verifiedBaseline,
     });
 
     const savedBaseline = await manager.save(baseline);
@@ -1050,6 +1133,7 @@ export class BaselineService {
       archivedAt: null,
       isActive: shouldBecomeActive,
       versions: [savedVersion],
+      verifiedBaseline: savedBaseline.verifiedBaseline ?? verifiedBaseline,
     } as Baseline;
 
     if (process.env.NODE_ENV !== 'production') {
@@ -1066,6 +1150,11 @@ export class BaselineService {
       baseline: finalBaseline,
       normalization,
       ingestion: parseResult?.ingestion,
+      verifiedBaseline: this.buildVerifiedBaseline({
+        sourceText: parseResult?.ingestion?.rawText ?? '',
+        ingestion: parseResult?.ingestion,
+        sections: (savedBaseline.sections ?? []) as BaselineSection[],
+      }),
     };
   }
 
@@ -1670,6 +1759,16 @@ export class BaselineService {
 
     if (!baseline) {
       throw new NotFoundException('Baseline not found');
+    }
+
+    const persistedVerifiedBaseline =
+      (baseline as any).verifiedBaseline &&
+      typeof (baseline as any).verifiedBaseline === 'object' &&
+      !Array.isArray((baseline as any).verifiedBaseline)
+        ? ((baseline as any).verifiedBaseline as Record<string, unknown>)
+        : null;
+    if (persistedVerifiedBaseline) {
+      (baseline as any).verifiedBaseline = persistedVerifiedBaseline;
     }
 
     let summary: BaselineAssessmentSummary | undefined;
