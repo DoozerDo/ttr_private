@@ -88,6 +88,7 @@ export type StudioArtifactsState = {
   coverLetter: StudioArtifactRecord | null;
   resumeResult?: ArtifactGenerationResult<unknown>;
   coverLetterResult?: ArtifactGenerationResult<unknown>;
+  resumeFailureDiagnostics?: Record<string, unknown> | null;
   diagnostics?: {
     staleArtifactRejected?: boolean;
     staleArtifactReasonCodes?: string[];
@@ -993,6 +994,11 @@ export class StudioArtifactsService {
             exports: { docx: false, pdf: false },
           }
         : resumeResultBase;
+    const resumeFailureDiagnostics = (() => {
+      const metadata = normalizeRecord((resumeRecord as any)?.resumeMetadata);
+      const diagnostics = normalizeRecord(metadata?.resumeArtifactInvalidDiagnostics);
+      return diagnostics && Object.keys(diagnostics).length > 0 ? diagnostics : null;
+    })();
 
     if (shouldLogIngest) {
       try {
@@ -1135,6 +1141,7 @@ export class StudioArtifactsService {
       coverLetter: coverRecord,
       resumeResult,
       coverLetterResult,
+      ...(resumeFailureDiagnostics ? { resumeFailureDiagnostics } : {}),
     };
   }
 
