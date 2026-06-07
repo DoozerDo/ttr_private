@@ -14,24 +14,35 @@ function trimToText(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
-function isPersistableEmployerName(value: string): boolean {
+function isObviousNonWorkHistoryCompany(value: string): boolean {
   const text = trimToText(value);
-  if (!text) return false;
+  if (!text) return true;
   if (
-    /\b(?:automation\s*&\s*monitoring|datacenter\s+operations|internal\s+web\s+applications|internal\s+tooling\s*&\s*software\s+development|earlier\s+career)\b/i.test(
+    /\b(?:technology\s*&\s*tools|operating\s+systems|service\s*&\s*workflow|certifications\s*&\s*development|core\s+areas\s+of\s+expertise|skills|tooling|automation\s*&\s*monitoring|datacenter\s+operations|internal\s+web\s+applications|internal\s+tooling\s*&\s*software\s+development|earlier\s+career)\b/i.test(
       text,
     )
   ) {
-    return false;
+    return true;
   }
   if (/\b(?:vue|react|angular|frontend|back\s*end|full[-\s]*stack|builder)\b/i.test(text)) {
-    return false;
+    return true;
   }
-  if (/^[,;:)\-]/.test(text) || /[,:;]\s*$/.test(text)) return false;
-  if (text.includes(')') && !text.includes('(')) return false;
-  if (text.split(/\s+/).length > 10) return false;
-  if (!/[A-Za-z]/.test(text)) return false;
-  if (/^\p{Ll}/u.test(text)) return false;
+  if (/^[,;:)\-]/.test(text) || /[,:;]\s*$/.test(text)) return true;
+  if (text.includes(')') && !text.includes('(')) return true;
+  if (!/[A-Za-z]/.test(text)) return true;
+  return false;
+}
+
+function shouldKeepStructuredExperienceEntry(input: {
+  company: string;
+  roleTitle: string;
+  detailLines: string[];
+}): boolean {
+  const company = trimToText(input.company);
+  const roleTitle = trimToText(input.roleTitle);
+  if (!company || !roleTitle) return false;
+  if (isObviousNonWorkHistoryCompany(company) || isObviousNonWorkHistoryCompany(roleTitle)) return false;
+  if (!Array.isArray(input.detailLines) || input.detailLines.length === 0) return false;
   return true;
 }
 
@@ -154,11 +165,10 @@ export function buildValidatedResumeV2FromParsedBaseline(
           const company = typeof entry?.company === 'string' ? entry.company.trim() : '';
           const roleTitle = typeof entry?.roleTitle === 'string' ? entry.roleTitle.trim() : '';
           const dates = typeof entry?.dates === 'string' ? entry.dates.trim() : '';
-          if (!company || !roleTitle) return '';
-          if (!isPersistableEmployerName(company)) return '';
-          const header = [company, roleTitle, dates].filter(Boolean).join(' | ');
           const bullets = Array.isArray(entry?.bullets) ? (entry.bullets as unknown[]).map((b) => String(b ?? '').trim()).filter(Boolean) : [];
           const bulletLines = bullets.map((b) => `- ${b.replace(/^[-*Ã¢â‚¬Â¢]\s*/, '')}`);
+          if (!shouldKeepStructuredExperienceEntry({ company, roleTitle, detailLines: bulletLines })) return '';
+          const header = [company, roleTitle, dates].filter(Boolean).join(' | ');
           return [header, ...bulletLines].join('\n').trim();
         })
         .filter(Boolean);
@@ -287,11 +297,6 @@ export function buildValidatedResumeV2FromParsedBaseline(
           entry['organization_name'],
           entry['org'],
         );
-        if (!isPersistableEmployerName(company)) {
-          rejectedMissingHeaderCount += 1;
-          recordRejection('company_not_persistable', entry);
-          return '';
-        }
         const role = readString(
           entry['role_title'],
           entry['roleTitle'],
@@ -327,6 +332,11 @@ export function buildValidatedResumeV2FromParsedBaseline(
           : scopeSummary
             ? [`- ${String(scopeSummary).trim()}`]
             : [];
+        if (!shouldKeepStructuredExperienceEntry({ company, roleTitle: role, detailLines })) {
+          rejectedMissingHeaderCount += 1;
+          recordRejection('company_not_persistable', entry);
+          return '';
+        }
         if (!header && detailLines.length === 0) {
           droppedEmptyCount += 1;
           recordRejection('empty_header_and_details', entry);
@@ -514,3 +524,5 @@ export function buildValidatedResumeV2FromParsedBaseline(
 
   return normalized;
 }
+
+

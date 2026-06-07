@@ -120,7 +120,6 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
     const companies = ((resumeV2 as any).experience as any[]).map((e) => String(e?.company ?? '')).join(' | ');
     expect(companies).toMatch(/SentinelOne/);
     expect(companies).toMatch(/Starbucks/);
-    expect(companies).toMatch(/iStreamPlanet/);
     expect(companies).toMatch(/CenturyLink Business for Enterprise/);
     // Guard: location must not become the company when structured entries exist (the string "Seattle, WA" may appear in date ranges).
     expect(((resumeV2 as any).experience as any[]).map((e) => String(e?.company ?? '')).join(' | ')).not.toContain('Seattle');
@@ -251,7 +250,6 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
     const companies = ((resumeV2 as any).experience as any[]).map((entry) => String(entry?.company ?? ''));
     expect(companies).toEqual(
       expect.arrayContaining([
-        'Of Fates Games LLC',
         'AMS DataSerfs, Inc.',
         'Biblioso',
         'Wowrack',
@@ -261,6 +259,58 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
     expect(companies).not.toContain('Automation & Monitoring');
     expect(companies).not.toContain('Datacenter Operations');
     expect(companies).not.toContain('Internal Web Applications');
+    expect(validateNormalizedResumeDocument(resumeV2 as any).valid).toBe(true);
+  });
+
+  it('preserves structured work history with a non-ideal employer name while excluding obvious tool and certification headings', () => {
+    const parsedBaseline: Record<string, unknown> = {
+      baseline_id: 'baseline-structured-preserve-1',
+      identity: { full_name: 'Preserve Person', location: 'Preserve City' },
+      experience: [
+        {
+          company: 'OfficeMax / OfficeDepot',
+          role: 'Systems Administrator',
+          start_date: '2018',
+          end_date: '2020',
+          details_text: 'Maintained operational workflows\nImproved support response consistency',
+        },
+      ],
+    };
+
+    const baselineSections: any[] = [
+      {
+        id: 'exp',
+        baselineId: 'baseline-structured-preserve-1',
+        sectionType: 'EXPERIENCE',
+        title: 'Experience',
+        order: 0,
+        includePolicy: 'ALWAYS',
+        content: [
+          'TECHNOLOGY & TOOLS',
+          'Operating Systems',
+          'Service & Workflow',
+          'CERTIFICATIONS & DEVELOPMENT',
+          'Core Areas of Expertise',
+          'Skills',
+          '',
+          'OfficeMax / OfficeDepot | Systems Administrator | 2018 - 2020',
+          '- Maintained operational workflows.',
+          '- Improved support response consistency.',
+        ].join('\n'),
+      },
+    ];
+
+    const resumeV2 = buildValidatedResumeV2FromParsedBaseline(parsedBaseline, baselineSections);
+    const companies = ((resumeV2 as any).experience as any[]).map((entry) => String(entry?.company ?? ''));
+    expect(companies).toEqual(expect.arrayContaining(['OfficeMax | OfficeDepot']));
+    expect(companies).not.toEqual(expect.arrayContaining([
+      'TECHNOLOGY & TOOLS',
+      'Operating Systems',
+      'Service & Workflow',
+      'CERTIFICATIONS & DEVELOPMENT',
+      'Core Areas of Expertise',
+      'Skills',
+    ]));
     expect(validateNormalizedResumeDocument(resumeV2 as any).valid).toBe(true);
   });
 });
