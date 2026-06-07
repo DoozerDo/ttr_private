@@ -126,6 +126,11 @@ function normalizeRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+function safeObjectKeys(value: unknown): string[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  return Object.keys(value as Record<string, unknown>);
+}
+
 function sanitizeStoredResumeResponseBody(value: Record<string, unknown> | null): Record<string, unknown> | null {
   if (!value) return null;
   const preview = value.preview;
@@ -808,14 +813,12 @@ export class StudioArtifactsService {
           loadedResumePreviewResumePresent: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
           rawRowHasResumeResponseBody: Boolean(rawResumeResponseBody),
           rawRowHasResumeContent: Boolean(String((record as any)?.resumeContent ?? '').trim()),
-          rawRowResumeResponseBodyTopLevelKeys: rawResumeResponseBody ? Object.keys(rawResumeResponseBody).slice(0, 24) : [],
-          rawRowResumePreviewKeys: rawResumePreview ? Object.keys(rawResumePreview).slice(0, 24) : [],
+          rawRowResumeResponseBodyTopLevelKeys: safeObjectKeys(rawResumeResponseBody).slice(0, 24),
+          rawRowResumePreviewKeys: safeObjectKeys(rawResumePreview).slice(0, 24),
           rawRowHasPreviewResume: Boolean(rawResumePreviewResume),
           buildArtifactRecordHasResponseBody: Boolean((resumeRecordRaw as any)?.responseBody),
           buildArtifactRecordHasContent: Boolean(String((resumeRecordRaw as any)?.content ?? '').trim()),
-          buildArtifactRecordPreviewKeys: normalizeRecord((resumeRecordRaw as any)?.responseBody?.preview)
-            ? Object.keys(normalizeRecord((resumeRecordRaw as any)?.responseBody?.preview) as Record<string, unknown>).slice(0, 24)
-            : [],
+          buildArtifactRecordPreviewKeys: safeObjectKeys(normalizeRecord((resumeRecordRaw as any)?.responseBody?.preview)).slice(0, 24),
           buildArtifactRecordHasPreviewResume: Boolean((resumeRecordRaw as any)?.responseBody?.preview?.resume),
           resumePreviewRenderable,
           resumeIsMinimal,
@@ -825,9 +828,7 @@ export class StudioArtifactsService {
           resumeRecordForResultPreviewResumePresent: previewResumePresent,
           resumeRecordForResultHasResponseBody: responseBodyPresent,
           resumeRecordForResultHasContent: Boolean(String((resumeRecordForResult as any)?.content ?? '').trim()),
-          resumeRecordForResultPreviewKeys: normalizeRecord((resumeRecordForResult as any)?.responseBody?.preview)
-            ? Object.keys(normalizeRecord((resumeRecordForResult as any)?.responseBody?.preview) as Record<string, unknown>).slice(0, 24)
-            : [],
+        resumeRecordForResultPreviewKeys: safeObjectKeys(normalizeRecord((resumeRecordForResult as any)?.responseBody?.preview)).slice(0, 24),
           resumeRecordForResultHasPreviewResume: Boolean((resumeRecordForResult as any)?.responseBody?.preview?.resume),
           canonicalResumeResultPreviewPresent: false,
         };
@@ -883,12 +884,10 @@ export class StudioArtifactsService {
           ? (resumeHydrationDebug as Record<string, unknown>)
           : null;
       if (resumeHydrationDebugObject) {
-      resumeHydrationDebug = {
-        ...resumeHydrationDebugObject,
-        canonicalResumeResultPreviewPresent: Boolean(
-          (this.buildCanonicalResultFromRecord('resume', resumeRecordForResult) as any)?.preview,
-        ),
-      };
+        resumeHydrationDebug = {
+          ...resumeHydrationDebugObject,
+          canonicalResumeResultPreviewPresent: false,
+        };
       }
     } else if (shouldEmitResumeHydrationDebug) {
       resumeHydrationDebug = {
@@ -900,14 +899,12 @@ export class StudioArtifactsService {
         loadedResumePreviewResumePresent: Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
         rawRowHasResumeResponseBody: Boolean(rawResumeResponseBody),
         rawRowHasResumeContent: Boolean(String((record as any)?.resumeContent ?? '').trim()),
-        rawRowResumeResponseBodyTopLevelKeys: rawResumeResponseBody ? Object.keys(rawResumeResponseBody).slice(0, 24) : [],
-        rawRowResumePreviewKeys: rawResumePreview ? Object.keys(rawResumePreview).slice(0, 24) : [],
+        rawRowResumeResponseBodyTopLevelKeys: safeObjectKeys(rawResumeResponseBody).slice(0, 24),
+        rawRowResumePreviewKeys: safeObjectKeys(rawResumePreview).slice(0, 24),
         rawRowHasPreviewResume: Boolean(rawResumePreviewResume),
         buildArtifactRecordHasResponseBody: Boolean((resumeRecordRaw as any)?.responseBody),
         buildArtifactRecordHasContent: Boolean(String((resumeRecordRaw as any)?.content ?? '').trim()),
-        buildArtifactRecordPreviewKeys: normalizeRecord((resumeRecordRaw as any)?.responseBody?.preview)
-          ? Object.keys(normalizeRecord((resumeRecordRaw as any)?.responseBody?.preview) as Record<string, unknown>).slice(0, 24)
-          : [],
+        buildArtifactRecordPreviewKeys: safeObjectKeys(normalizeRecord((resumeRecordRaw as any)?.responseBody?.preview)).slice(0, 24),
         buildArtifactRecordHasPreviewResume: Boolean((resumeRecordRaw as any)?.responseBody?.preview?.resume),
         resumePreviewRenderable,
         resumeIsMinimal,
@@ -954,6 +951,21 @@ export class StudioArtifactsService {
 
     const resumeResultRaw = this.buildCanonicalResultFromRecord('resume', resumeRecordForResult);
     const coverLetterResult = this.buildCanonicalResultFromRecord('cover_letter', coverRecord);
+
+    if (resumeHydrationDebug) {
+      const resumeHydrationDebugObject =
+        typeof resumeHydrationDebug === 'object' &&
+        resumeHydrationDebug !== null &&
+        !Array.isArray(resumeHydrationDebug)
+          ? (resumeHydrationDebug as Record<string, unknown>)
+          : null;
+      if (resumeHydrationDebugObject) {
+        resumeHydrationDebug = {
+          ...resumeHydrationDebugObject,
+          canonicalResumeResultPreviewPresent: Boolean((resumeResultRaw as any)?.preview),
+        };
+      }
+    }
 
     // Note: we intentionally avoid mutating persisted artifact fields (failure codes, response bodies, etc.)
     // during readState. Any guidance suppression must be handled via non-authoritative `errors` shaping only.
