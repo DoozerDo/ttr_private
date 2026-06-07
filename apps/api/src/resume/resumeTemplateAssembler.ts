@@ -259,8 +259,8 @@ export function assembleResumeFromStructuredBaseline(
     });
 
     const strongRoles = expanded.filter((entry) => (entry.bullets ?? []).filter((b) => trimToText(b).length >= 20).length >= 2);
-    const filtered = strongRoles.length > 0 ? strongRoles : expanded;
-    // Prefer fewer strong roles with complete bullets.
+    const filtered = strongRoles.length >= 2 ? strongRoles : expanded;
+    // Prefer fewer strong roles only when that still preserves a multi-role verified baseline.
     return filtered.slice(0, 4);
   })();
 

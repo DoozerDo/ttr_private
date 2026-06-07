@@ -1777,6 +1777,45 @@ describe('ResumeService contract', () => {
     }
   });
 
+  it('preserves at least two verified experience entries and four verified bullets when assembling structured baseline output', () => {
+    const normalized = ResumeAssembler.assembleResumeFromStructuredBaseline(
+      {
+        summary: 'Operations leader with verified baseline experience.',
+        skills: ['SQL', 'Excel'],
+        education: [],
+        missingEvidenceReasons: [],
+        experience: [
+          {
+            company: 'Of Fates Games LLC',
+            roleTitle: 'Operations Manager',
+            dates: '2022 - Present',
+            bullets: [
+              'Improved release coordination across support and product teams.',
+              'Reduced incident response friction through better runbooks and escalation routing.',
+            ],
+          },
+          {
+            company: 'AMS DataSerfs, Inc.',
+            roleTitle: 'Senior Data Analyst',
+            dates: '2020 - 2022',
+            bullets: [
+              'Built reporting workflows that improved accuracy and visibility.',
+              'Created repeatable checks that reduced manual follow-up.',
+            ],
+          },
+        ],
+      } as any,
+      {
+        name: 'Test Candidate',
+        contactLine: 'test@example.com',
+      },
+    );
+
+    expect(normalized.experience).toHaveLength(2);
+    expect(normalized.experience.reduce((count, entry) => count + entry.bullets.length, 0)).toBeGreaterThanOrEqual(4);
+    expect(ResumeNormalizer.validateNormalizedResumeDocument(normalized).valid).toBe(true);
+  });
+
   it('does not block resume generation when structured extraction yields zero experience but ResumeV2 experience is usable', async () => {
     const { service, studioArtifactsService } = buildService();
     const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
