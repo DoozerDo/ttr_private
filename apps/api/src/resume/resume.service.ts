@@ -2639,6 +2639,39 @@ export class ResumeService {
 	        (section.includePolicy ?? BaselineIncludePolicy.OPTIONAL) !==
 	        BaselineIncludePolicy.NEVER,
 	    );
+	    try {
+	      const baselineProofStructured = extractStructuredBaselineFromSections(allowedSections as any);
+	      // eslint-disable-next-line no-console
+	      console.log('[RESUME_GENERATE_BASELINE_SECTION_PROOF]', {
+	        baselineId: baseline.id,
+	        baselineVersionId: baselineVersion.id,
+	        jobId: jobId ?? null,
+	        sectionsLoadedCount: allowedSections.length,
+	        sectionSummaries: allowedSections.map((section) => ({
+	          id: String((section as any)?.id ?? ''),
+	          type: String((section as any)?.sectionType ?? ''),
+	          title: String((section as any)?.title ?? ''),
+	          order: Number((section as any)?.order ?? 0),
+	          contentLength: String((section as any)?.content ?? '').length,
+	          first120Chars: String((section as any)?.content ?? '').slice(0, 120),
+	        })),
+	        parsedRecordsCount: Array.isArray(baseline.parsedRecords) ? baseline.parsedRecords.length : null,
+	        parsedJsonExperienceLength: Array.isArray((baseline.parsedRecords?.[0] as any)?.parsedJson?.experience)
+	          ? ((baseline.parsedRecords?.[0] as any)?.parsedJson?.experience as unknown[]).length
+	          : null,
+	        parsedJsonWorkHistoryLength: Array.isArray((baseline.parsedRecords?.[0] as any)?.parsedJson?.work_history)
+	          ? ((baseline.parsedRecords?.[0] as any)?.parsedJson?.work_history as unknown[]).length
+	          : null,
+	        structuredBaselineExperienceCount: Array.isArray((baselineProofStructured as any)?.experience)
+	          ? (baselineProofStructured as any).experience.length
+	          : 0,
+	        structuredBaselineMissingEvidenceReasons: Array.isArray((baselineProofStructured as any)?.missingEvidenceReasons)
+	          ? (baselineProofStructured as any).missingEvidenceReasons
+	          : [],
+	      });
+	    } catch {
+	      // ignore proof logging failures
+	    }
 		    let resumeInputSections =
 		      this.promoteExperienceLikeSections(allowedSections);
 		    lastResumeGenerationCheckpoint = 'resume_input_sections_resolved';
