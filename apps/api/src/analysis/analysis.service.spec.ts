@@ -1212,10 +1212,34 @@ const sampleScoringV2: CxFitV2Result = {
       'Requirements:',
       '- AWS expertise required.',
     ].join('\n');
+    const persistedJobAnalysis = {
+      jobText: 'persisted canonical job analysis',
+      responsibilities: ['persisted responsibility'],
+      requirements: ['persisted requirement'],
+      skills: ['persisted skill'],
+      sourceEvidence: ['persisted evidence'],
+    };
+    const persistedFitScore = {
+      score: 77,
+      verdict: 'Apply',
+      matchedSignals: ['persisted matched signal'],
+      gapSignals: ['persisted gap signal'],
+      sourceEvidence: ['persisted fit evidence'],
+    };
 
     jobRepository.findOne.mockResolvedValue({
       ...defaultJobRecord,
       rawDescription,
+    });
+    fitAssessmentRepository.save.mockResolvedValueOnce({
+      id: 'fit-1',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: 2,
+      createdAt: new Date(),
+      jobAnalysis: persistedJobAnalysis,
+      fitScore: persistedFitScore,
     });
 
     const result = await service.runFitAssessment('user-1', {
@@ -1224,15 +1248,11 @@ const sampleScoringV2: CxFitV2Result = {
       baselineVersion: 2,
     });
 
-    expect(result.jobAnalysis).toEqual(
+    expect(result.jobAnalysis).toBe(persistedJobAnalysis);
+    expect(result.fitScore).toBe(persistedFitScore);
+    expect(result.jobAnalysis).not.toEqual(
       expect.objectContaining({
         jobText: rawDescription,
-      }),
-    );
-    expect(result.fitScore).toEqual(
-      expect.objectContaining({
-        score: expect.any(Number),
-        verdict: expect.any(String),
       }),
     );
     expect(fitAssessmentRepository.save).toHaveBeenCalledWith(

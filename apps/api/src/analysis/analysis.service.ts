@@ -318,6 +318,8 @@ type FitScoreResponse = {
   overallScore?: number;
   dimensionScores?: FitAssessment['dimensionScores'];
   complianceFlags?: FitAssessment['complianceFlags'];
+  jobAnalysis?: FitAssessment['jobAnalysis'];
+  fitScore?: FitAssessment['fitScore'];
   compliance_debug?: ComplianceDebugTrace;
   summary?: string;
   fit_score_debug?: FitScoreDebugBundle;
@@ -2423,8 +2425,6 @@ export class AnalysisService {
         inputsHash,
         confidenceScore: confidenceResult.confidenceScore,
         confidenceReasons: confidenceResult.confidenceReasons,
-        jobAnalysis,
-        fitScore,
       });
 
       savedAssessment = await this.fitAssessmentRepository.save(assessment);
@@ -3660,8 +3660,8 @@ export class AnalysisService {
         scoreSanityFlags: scoringV2.scoreSanityFlags,
         likelyUnderestimatedFit: scoringV2.likelyUnderestimatedFit,
         scorePresentationMode: scoringV2.scorePresentationMode,
-        jobAnalysis,
-        fitScore,
+        jobAnalysis: savedAssessment.jobAnalysis ?? null,
+        fitScore: savedAssessment.fitScore ?? null,
         baseline_version_hash:
           compliance.audit.baselineVersionHash ?? baselineVersionHash,
         latestAssessmentSummary: {
