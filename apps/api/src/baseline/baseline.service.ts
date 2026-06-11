@@ -277,7 +277,6 @@ export type BaselineLibraryRow = Pick<
   | 'syntheticRunId'
   | 'syntheticCreatedAt'
   | 'preserveFromCleanup'
-  | 'verifiedBaseline'
   | 'createdAt'
   | 'updatedAt'
 >;
@@ -1468,19 +1467,43 @@ export class BaselineService {
     userId: string,
     includeArchived = false,
   ): Promise<BaselineLibraryRow[]> {
-    const statusFilter = includeArchived
-      ? {}
-      : { status: BaselineStatus.ACTIVE };
+    const safeSelectColumns = [
+      'baseline.id',
+      'baseline.userId',
+      'baseline.versionNumber',
+      'baseline.isActive',
+      'baseline.originalFilename',
+      'baseline.mimeType',
+      'baseline.storagePath',
+      'baseline.hash',
+      'baseline.status',
+      'baseline.archivedAt',
+      'baseline.originalBaselineScore',
+      'baseline.latestBaselineScore',
+      'baseline.latestAssessmentId',
+      'baseline.firstAnalyzedAt',
+      'baseline.lastAnalyzedAt',
+      'baseline.isSynthetic',
+      'baseline.syntheticScenarioKey',
+      'baseline.syntheticRunId',
+      'baseline.syntheticCreatedAt',
+      'baseline.preserveFromCleanup',
+      'baseline.createdAt',
+      'baseline.updatedAt',
+    ] as const;
 
-    const baselines = await this.baselineRepository.find({
-      where: {
-        userId,
-        ...statusFilter,
-      },
-      order: {
-        updatedAt: 'DESC',
-      },
-    });
+    const query = this.baselineRepository
+      .createQueryBuilder('baseline')
+      .select([...safeSelectColumns])
+      .where('baseline.userId = :userId', { userId });
+
+    if (!includeArchived) {
+      query.andWhere('baseline.status = :status', {
+        status: BaselineStatus.ACTIVE,
+      });
+    }
+
+    const baselines = await query.orderBy('baseline.updatedAt', 'DESC').getMany();
 
     return baselines.map((baseline) => ({
       id: baseline.id,
@@ -1503,7 +1526,6 @@ export class BaselineService {
       syntheticRunId: baseline.syntheticRunId,
       syntheticCreatedAt: baseline.syntheticCreatedAt,
       preserveFromCleanup: baseline.preserveFromCleanup,
-      verifiedBaseline: baseline.verifiedBaseline ?? null,
       createdAt: baseline.createdAt,
       updatedAt: baseline.updatedAt,
     }));

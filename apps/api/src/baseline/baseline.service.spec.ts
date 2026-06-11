@@ -319,14 +319,50 @@ const ingestionResult = {
   });
 
   it('returns canonical baseline library rows from the baselines repository only', async () => {
-    baselineRepository.find = jest.fn().mockResolvedValue([baseline]);
+    const queryBuilder = {
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([baseline]),
+    };
+    baselineRepository.createQueryBuilder = jest.fn().mockReturnValue(queryBuilder);
 
     const result = await service.listBaselinesForUser('user-1');
 
-    expect(baselineRepository.find).toHaveBeenCalledWith({
-      where: { userId: 'user-1', status: BaselineStatus.ACTIVE },
-      order: { updatedAt: 'DESC' },
+    expect(baselineRepository.createQueryBuilder).toHaveBeenCalledWith('baseline');
+    expect(queryBuilder.select).toHaveBeenCalledWith([
+      'baseline.id',
+      'baseline.userId',
+      'baseline.versionNumber',
+      'baseline.isActive',
+      'baseline.originalFilename',
+      'baseline.mimeType',
+      'baseline.storagePath',
+      'baseline.hash',
+      'baseline.status',
+      'baseline.archivedAt',
+      'baseline.originalBaselineScore',
+      'baseline.latestBaselineScore',
+      'baseline.latestAssessmentId',
+      'baseline.firstAnalyzedAt',
+      'baseline.lastAnalyzedAt',
+      'baseline.isSynthetic',
+      'baseline.syntheticScenarioKey',
+      'baseline.syntheticRunId',
+      'baseline.syntheticCreatedAt',
+      'baseline.preserveFromCleanup',
+      'baseline.createdAt',
+      'baseline.updatedAt',
+    ]);
+    expect(queryBuilder.where).toHaveBeenCalledWith('baseline.userId = :userId', {
+      userId: 'user-1',
     });
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      'baseline.status = :status',
+      { status: BaselineStatus.ACTIVE },
+    );
+    expect(queryBuilder.orderBy).toHaveBeenCalledWith('baseline.updatedAt', 'DESC');
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual(
       expect.objectContaining({
@@ -341,10 +377,12 @@ const ingestionResult = {
         updatedAt: expect.any(Date),
       }),
     );
+    expect(queryBuilder.select.mock.calls[0][0]).not.toContain('baseline.verifiedBaseline');
     expect(result[0]).not.toHaveProperty('latestAssessmentSummary');
     expect(result[0]).not.toHaveProperty('capability');
     expect(result[0]).not.toHaveProperty('versions');
     expect(result[0]).not.toHaveProperty('sections');
+    expect(result[0]).not.toHaveProperty('verifiedBaseline');
   });
 
   it('returns analyzed assessment summary on baseline detail when completed assessment exists', async () => {
@@ -381,16 +419,24 @@ const ingestionResult = {
       status: BaselineStatus.ARCHIVED,
       archivedAt: new Date(),
     } as any;
-    baselineRepository.find = jest.fn().mockResolvedValue([baseline, archivedBaseline]);
+    const queryBuilder = {
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([baseline, archivedBaseline]),
+    };
+    baselineRepository.createQueryBuilder = jest.fn().mockReturnValue(queryBuilder);
 
     const result = await service.listBaselinesForUser('user-1', true);
 
     expect(result).toHaveLength(2);
     expect(result.map((row) => row.id)).toEqual(['b-1', 'b-arch']);
-    expect(baselineRepository.find).toHaveBeenCalledWith({
-      where: { userId: 'user-1' },
-      order: { updatedAt: 'DESC' },
+    expect(queryBuilder.where).toHaveBeenCalledWith('baseline.userId = :userId', {
+      userId: 'user-1',
     });
+    expect(queryBuilder.andWhere).not.toHaveBeenCalled();
+    expect(queryBuilder.select.mock.calls[0][0]).not.toContain('baseline.verifiedBaseline');
   });
 
   it('does not call parsed, extractor, capability, assessment, version, or cap logic', async () => {
@@ -400,7 +446,14 @@ const ingestionResult = {
       status: BaselineStatus.ARCHIVED,
       archivedAt: new Date(),
     } as any;
-    baselineRepository.find = jest.fn().mockResolvedValue([baseline, archivedBaseline]);
+    const queryBuilder = {
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([baseline, archivedBaseline]),
+    };
+    baselineRepository.createQueryBuilder = jest.fn().mockReturnValue(queryBuilder);
     baselineParsedRepository.createQueryBuilder = jest.fn(() => {
       throw new Error('parsed repo should not be used');
     });
@@ -438,6 +491,7 @@ const ingestionResult = {
 
       expect(result).toHaveLength(2);
       expect(result.map((row) => row.id)).toEqual(['b-1', 'b-arch']);
+      expect(queryBuilder.select.mock.calls[0][0]).not.toContain('baseline.verifiedBaseline');
       expect(baselineParsedRepository.createQueryBuilder).not.toHaveBeenCalled();
       expect(fitAssessmentRepository.createQueryBuilder).not.toHaveBeenCalled();
       expect(baselineSectionRepository.find).not.toHaveBeenCalled();
@@ -563,13 +617,21 @@ const ingestionResult = {
   });
 
   it('does not load assessment summaries when listing baselines', async () => {
-    baselineRepository.find = jest.fn().mockResolvedValue([baseline]);
+    const queryBuilder = {
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([baseline]),
+    };
+    baselineRepository.createQueryBuilder = jest.fn().mockReturnValue(queryBuilder);
     fitAssessmentRepository.createQueryBuilder = jest.fn(() => {
       throw new Error('assessment summary loader should not be used');
     });
 
     await service.listBaselinesForUser('user-1');
 
+    expect(queryBuilder.select.mock.calls[0][0]).not.toContain('baseline.verifiedBaseline');
     expect(fitAssessmentRepository.createQueryBuilder).not.toHaveBeenCalled();
   });
 
