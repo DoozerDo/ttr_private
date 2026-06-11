@@ -224,8 +224,8 @@ describe('BaselineController - listBaselines', () => {
         {
           id: 'base-1',
           userId,
-          version: 3,
-          versions: [],
+          versionNumber: 3,
+          isActive: true,
           status: 'ACTIVE',
           originalFilename: 'resume.pdf',
           mimeType: 'application/pdf',
@@ -234,12 +234,6 @@ describe('BaselineController - listBaselines', () => {
           archivedAt: null,
           createdAt: new Date(),
           updatedAt: new Date(),
-          latestAssessmentSummary: {
-            latestAssessmentId: null,
-            latestAssessmentCreatedAt: null,
-            latestFitScore: null,
-            hasCompletedAssessment: false,
-          },
         },
       ]),
     } as any;
@@ -264,6 +258,8 @@ describe('BaselineController - listBaselines', () => {
     });
     expect(result[0]).not.toHaveProperty('version');
     expect(result[0]).not.toHaveProperty('versions');
+    expect(result[0]).not.toHaveProperty('latestAssessmentSummary');
+    expect(result[0]).not.toHaveProperty('capability');
   });
 
   it('propagates includeArchived when requested', async () => {
