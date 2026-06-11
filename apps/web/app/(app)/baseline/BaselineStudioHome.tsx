@@ -45,7 +45,7 @@ import {
   type SignalGraphViewModel,
 } from "@/lib/professionalSignals";
 import { publishBaselineUpdated, subscribeBaselineUpdated } from "@/src/lib/baseline-sync";
-import { BASELINE_USABLE_MIN_PERCENT, BETA_BASELINE_UPLOAD_LIMIT } from "@/src/features/baseline/constants";
+import { BASELINE_USABLE_MIN_PERCENT } from "@/src/features/baseline/constants";
 import {
   assertCanonicalRouteHref,
   getBaselineDetailsHref,
@@ -222,7 +222,7 @@ function getLibraryCapMessage(data: unknown): string | null {
           endpoint: "baseline-studio-home",
           field: "error.message",
         })
-      : null) ?? `Maximum of ${BETA_BASELINE_UPLOAD_LIMIT} active baselines reached.`
+      : null) ?? "Upload unavailable."
   );
 }
 
@@ -449,7 +449,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   );
   const activeBaselines = baselinePartition.activeBaselines;
   const libraryBaselines = baselinePartition.libraryBaselines;
-  const uploadLimitReached = activeBaselines.length >= BETA_BASELINE_UPLOAD_LIMIT;
   const isEditableLibrary = libraryMode === "editable";
   const baselineDebugEnabled = useMemo(() => {
     if (process.env.NODE_ENV !== "production") return true;
@@ -586,7 +585,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     return "analysis_exists";
   }, [hasBaseline, hasCompletedAnalysis]);
   const isValidatedBaselineState = heroState === "analysis_exists";
-  const canReplaceActiveBaseline = isValidatedBaselineState || !uploadLimitReached;
+  const canReplaceActiveBaseline = true;
   const baselineLibrarySectionTitle = "Other baselines";
   const activeBaselineVersionLabel = `Version ${primaryBaseline?.versionNumber ?? primaryBaseline?.version ?? 1} (current)`;
   const baselineReadinessDataSource = primaryBaselineReadiness.dataSource;
@@ -1095,7 +1094,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
 
   const handleUpload = useCallback(
     async (file: File) => {
-      if (isUploading || (!canReplaceActiveBaseline && uploadLimitReached)) return;
+      if (isUploading) return;
       const shouldPromoteToCurrent = !primaryBaselineId;
 
       if (baselineDebugEnabled) {
@@ -1103,7 +1102,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           filename: file.name,
           size: file.size,
           isUploading,
-          uploadLimitReached,
           canReplaceActiveBaseline,
         });
       }
@@ -1293,7 +1291,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
       isUploading,
       primaryBaselineId,
       refreshBaselineLibrary,
-      uploadLimitReached,
     ],
   );
 
@@ -1414,12 +1411,10 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
 
   const triggerUploadClick = useCallback(() => {
     if (isUploading || !isEditableLibrary) return;
-    if (!canReplaceActiveBaseline && uploadLimitReached) return;
     if (baselineDebugEnabled) {
       console.debug("[BaselineStudioHome] upload CTA clicked", {
         isUploading,
         isEditableLibrary,
-        uploadLimitReached,
         canReplaceActiveBaseline,
       });
     }
@@ -1429,13 +1424,12 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     canReplaceActiveBaseline,
     isEditableLibrary,
     isUploading,
-    uploadLimitReached,
   ]);
 
   const onDrop = useCallback(
     async (event: DragEvent<HTMLDivElement>) => {
       event.preventDefault();
-      if ((!canReplaceActiveBaseline && uploadLimitReached) || isUploading) return;
+      if (isUploading) return;
       const file = event.dataTransfer.files?.[0];
       if (!file) return;
       if (baselineDebugEnabled) {
@@ -1447,7 +1441,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
       }
       await handleUpload(file);
     },
-    [baselineDebugEnabled, canReplaceActiveBaseline, handleUpload, isUploading, uploadLimitReached],
+    [baselineDebugEnabled, canReplaceActiveBaseline, handleUpload, isUploading],
   );
 
   const onFileChange = useCallback(
@@ -1532,7 +1526,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         className="hidden"
         onChange={onFileChange}
-        disabled={isUploading || (!canReplaceActiveBaseline && uploadLimitReached)}
+        disabled={isUploading || !canReplaceActiveBaseline}
         data-testid="baseline-upload-input"
       />
       <div className="flex flex-col gap-6">
@@ -1584,11 +1578,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 <p className="text-sm leading-6 text-slate-400">Upload your resume to create your baseline.</p>
               </div>
               <div
-                className={`rounded-[18px] border px-4 py-4 transition ${
-                  uploadLimitReached
-                    ? "border-white/10 bg-slate-950/25"
-                    : "border-dashed border-white/20 bg-slate-950/35"
-                }`}
+                className="rounded-[18px] border border-dashed border-white/20 bg-slate-950/35 px-4 py-4 transition"
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={onDrop}
                 data-testid="baseline-upload-surface"
@@ -1597,7 +1587,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 <div className="space-y-3">
                   <FormButton
                     onClick={triggerUploadClick}
-                    disabled={isUploading || (!canReplaceActiveBaseline && uploadLimitReached) || !isEditableLibrary}
+                    disabled={isUploading || !canReplaceActiveBaseline || !isEditableLibrary}
                     className="bg-indigo-600 text-white hover:bg-indigo-500"
                   >
                     {isEditableLibrary
@@ -1615,13 +1605,8 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   </p>
                   <p className="text-sm text-slate-400">Accepted file types: PDF and DOCX</p>
                   <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
-                    {activeBaselines.length} of {BETA_BASELINE_UPLOAD_LIMIT} active baselines
+                    {activeBaselines.length} active baselines
                   </p>
-                  {uploadLimitReached ? (
-                    <p className="text-sm text-slate-300">
-                      Maximum of {BETA_BASELINE_UPLOAD_LIMIT} active baselines reached.
-                    </p>
-                  ) : null}
                 </div>
               </div>
             </div>
@@ -1687,7 +1672,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   <FormButton
                     variant="ghost"
                     onClick={triggerUploadClick}
-                    disabled={isUploading || (!canReplaceActiveBaseline && uploadLimitReached) || !isEditableLibrary}
+                    disabled={isUploading || !canReplaceActiveBaseline || !isEditableLibrary}
                     className="uppercase border-white/10 bg-transparent text-slate-300 hover:border-white/20 hover:text-slate-100"
                   >
                     {isEditableLibrary ? "Upload another resume" : "Upload unavailable"}
@@ -1736,7 +1721,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
               </p>
             </header>
             <div className="space-y-3" data-testid="baseline-library-section">
-              {libraryBaselines.slice(0, 3).map((baseline) => {
+              {libraryBaselines.map((baseline) => {
                 const isArchived = baseline.status === "ARCHIVED";
                 const isCurrentBaseline = baseline.isActive === true;
 

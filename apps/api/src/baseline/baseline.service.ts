@@ -206,7 +206,6 @@ function normalizeVerifiedBaselineExperience(
     .filter((entry): entry is BaselineSchemaCoreShape['experience'][number] => Boolean(entry));
 }
 
-export const BASELINE_LIBRARY_CAP = 3;
 export const BASELINE_LIBRARY_CAP_ERROR_CODE = 'BASELINE_LIBRARY_CAP_REACHED';
 
 const BASELINE_CAPABILITY_THRESHOLDS = {
@@ -428,18 +427,9 @@ export class BaselineService {
       where: { userId, status: BaselineStatus.ACTIVE },
     });
 
-    if (baselineCount >= BASELINE_LIBRARY_CAP) {
-      throw new ConflictException({
-        error: {
-          code: BASELINE_LIBRARY_CAP_ERROR_CODE,
-          message: `You can store up to ${BASELINE_LIBRARY_CAP} active resumes in your library.`,
-          details: {
-            activeCount: baselineCount,
-            maxCount: BASELINE_LIBRARY_CAP,
-          },
-        },
-      });
-    }
+    this.logger.debug(
+      `enforceBaselineLimit userId=${userId} activeCount=${baselineCount} canonicalLimitDisabled=true`,
+    );
   }
 
   private extractUnmetRequirements(latestAssessment: FitAssessment | null) {

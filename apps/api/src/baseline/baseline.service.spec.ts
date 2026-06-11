@@ -740,30 +740,8 @@ describe('BaselineService - library capacity', () => {
     });
   });
 
-  it('blocks a fourth upload with a structured cap error', async () => {
-    transactionManager.count.mockResolvedValue(3);
-
-    await expect(
-      service.createBaseline(
-        'user-1',
-        { originalname: 'resume.pdf', mimetype: 'application/pdf', path: '/tmp/resume.pdf' },
-        parseResult as any,
-      ),
-    ).rejects.toMatchObject({
-      response: {
-        error: {
-          code: 'BASELINE_LIBRARY_CAP_REACHED',
-          details: {
-            activeCount: 3,
-            maxCount: 3,
-          },
-        },
-      },
-    });
-  });
-
-  it('allows uploads when archived baselines exist but active count stays under the cap', async () => {
-    transactionManager.count.mockResolvedValue(2);
+  it('allows uploads regardless of the active baseline count limit', async () => {
+    transactionManager.count.mockResolvedValue(19);
 
     const result = await service.createBaseline(
       'user-1',
