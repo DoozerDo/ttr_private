@@ -1484,17 +1484,37 @@ export class BaselineService {
       baselineIds.length &&
       typeof this.baselineParsedRepository?.createQueryBuilder === 'function'
     ) {
-      const parsedRows = await this.baselineParsedRepository
-        .createQueryBuilder('parsed')
-        .distinctOn(['parsed."baselineId"'])
-        .where('parsed."baselineId" IN (:...baselineIds)', { baselineIds })
-        .orderBy('parsed."baselineId"', 'ASC')
-        .addOrderBy('parsed."createdAt"', 'DESC')
-        .addOrderBy('parsed.id', 'DESC')
-        .getMany();
-      parsedRows.forEach((row) =>
-        latestParsedByBaselineId.set(row.baselineId, row),
-      );
+      try {
+        const parsedQuery = this.baselineParsedRepository
+          .createQueryBuilder('parsed')
+          .where('parsed."baselineId" IN (:...baselineIds)', { baselineIds })
+          .orderBy('parsed."baselineId"', 'ASC')
+          .addOrderBy('parsed."createdAt"', 'DESC')
+          .addOrderBy('parsed.id', 'DESC');
+
+        const parsedRows =
+          typeof (parsedQuery as { distinctOn?: unknown }).distinctOn === 'function'
+            ? await (parsedQuery as {
+                distinctOn: (fields: string[]) => typeof parsedQuery;
+                getMany: () => Promise<BaselineParsed[]>;
+              })
+                .distinctOn(['parsed."baselineId"'])
+                .getMany()
+            : await parsedQuery.getMany();
+
+        parsedRows.forEach((row) => {
+          if (!latestParsedByBaselineId.has(row.baselineId)) {
+            latestParsedByBaselineId.set(row.baselineId, row);
+          }
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const stack = error instanceof Error ? error.stack : undefined;
+        this.logger.error(
+          `Failed to load parsed baseline presence for baseline list userId=${userId}; returning baselines without parsed-record capability enrichment. message=${message}`,
+          stack,
+        );
+      }
     }
 
     const sectionsByBaselineId = new Map<string, BaselineSection[]>();

@@ -481,6 +481,60 @@ const ingestionResult = {
     });
   });
 
+  it('returns repository rows for includeArchived=true when parsed baseline lookup fails', async () => {
+    const archivedBaseline = {
+      ...baseline,
+      id: 'b-arch',
+      status: BaselineStatus.ARCHIVED,
+      archivedAt: new Date(),
+    } as any;
+    baselineRepository.find = jest.fn().mockResolvedValue([baseline, archivedBaseline]);
+
+    const summaryQb = {
+      distinctOn: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([]),
+    };
+    const jobAssessQb = {
+      distinctOn: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([]),
+    };
+    fitAssessmentRepository.createQueryBuilder
+      .mockImplementationOnce(() => summaryQb)
+      .mockImplementationOnce(() => jobAssessQb);
+
+    baselineParsedRepository.createQueryBuilder = jest.fn().mockImplementation(() => ({
+      where: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockRejectedValue(new Error('relation "baseline_parsed" does not exist')),
+    }));
+
+    const result = await service.listBaselinesForUser('user-1', true);
+
+    expect(result).toHaveLength(2);
+    expect(result.map((row) => row.id)).toEqual(['b-1', 'b-arch']);
+    expect(result[0]).toMatchObject({
+      id: 'b-1',
+      userId: 'user-1',
+    });
+    expect(result[1]).toMatchObject({
+      id: 'b-arch',
+      userId: 'user-1',
+      status: BaselineStatus.ARCHIVED,
+    });
+  });
+
   it('persists a validated ResumeV2 model during baseline ingestion', async () => {
     const baselineForTest = { ...baseline, id: '00000000-0000-0000-0000-000000000000' };
     const manager = {
