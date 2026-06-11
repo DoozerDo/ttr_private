@@ -13,6 +13,7 @@ import { validateNormalizedResumeDocument } from '../resume/resume-normalization
 import { BaselineVersion } from './baseline-version.entity';
 import { BaselineIngestionService } from './baseline-ingestion.service';
 import { BaselineService, type VerifiedBaseline } from './baseline.service';
+import * as structuredBaselineExtractor from './structuredBaselineExtractor';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
 import { EmbeddingService } from '../ai/embedding.service';
 
@@ -317,79 +318,33 @@ const ingestionResult = {
     expect(result.hash).toBeDefined();
   });
 
-  it('returns hasCompletedAssessment false when no fit assessments exist', async () => {
+  it('returns canonical baseline library rows from the baselines repository only', async () => {
     baselineRepository.find = jest.fn().mockResolvedValue([baseline]);
-    const qb = {
-      distinctOn: jest.fn().mockReturnThis(),
-      select: jest.fn().mockReturnThis(),
-      addSelect: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      addOrderBy: jest.fn().mockReturnThis(),
-      getRawMany: jest.fn().mockResolvedValue([]),
-    };
-    fitAssessmentRepository.createQueryBuilder.mockReturnValue(qb);
 
     const result = await service.listBaselinesForUser('user-1');
 
-    expect(result[0].latestAssessmentSummary.hasCompletedAssessment).toBe(false);
-    expect(result[0].latestAssessmentSummary.latestFitScore).toBeNull();
-  });
-
-  it('returns latest fit assessment summary keyed by exact baseline id', async () => {
-    baselineRepository.find = jest.fn().mockResolvedValue([baseline]);
-    const qb = {
-      distinctOn: jest.fn().mockReturnThis(),
-      select: jest.fn().mockReturnThis(),
-      addSelect: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      addOrderBy: jest.fn().mockReturnThis(),
-      getRawMany: jest.fn().mockResolvedValue([
-        {
-          baselineId: 'b-1',
-          id: 'assessment-2',
-          createdAt: '2026-03-25T10:00:00.000Z',
-          overallScore: 84,
-        },
-      ]),
-    };
-    fitAssessmentRepository.createQueryBuilder.mockReturnValue(qb);
-
-    const result = await service.listBaselinesForUser('user-1');
-
-    expect(result[0].latestAssessmentSummary.hasCompletedAssessment).toBe(true);
-    expect(result[0].latestAssessmentSummary.latestAssessmentId).toBe('assessment-2');
-    expect(result[0].latestAssessmentSummary.latestFitScore).toBe(84);
-    expect(result[0].latestAssessmentSummary.latestAssessmentCreatedAt).toBeInstanceOf(Date);
-  });
-
-  it('returns baselines with default assessment summary when assessment lookup fails', async () => {
-    baselineRepository.find = jest.fn().mockResolvedValue([baseline]);
-    const qb = {
-      distinctOn: jest.fn().mockReturnThis(),
-      select: jest.fn().mockReturnThis(),
-      addSelect: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      addOrderBy: jest.fn().mockReturnThis(),
-      getRawMany: jest.fn().mockRejectedValue(new Error('relation "fit_assessments" does not exist')),
-    };
-    fitAssessmentRepository.createQueryBuilder.mockReturnValue(qb);
-
-    const result = await service.listBaselinesForUser('user-1');
-
-    expect(result).toHaveLength(1);
-    expect(result[0].id).toBe('b-1');
-    expect(result[0].latestAssessmentSummary).toEqual({
-      latestAssessmentId: null,
-      latestAssessmentCreatedAt: null,
-      latestFitScore: null,
-      hasCompletedAssessment: false,
+    expect(baselineRepository.find).toHaveBeenCalledWith({
+      where: { userId: 'user-1', status: BaselineStatus.ACTIVE },
+      order: { updatedAt: 'DESC' },
     });
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual(
+      expect.objectContaining({
+        id: 'b-1',
+        userId: 'user-1',
+        versionNumber: expect.any(Number),
+        originalFilename: 'resume.pdf',
+        mimeType: 'application/pdf',
+        storagePath: '/tmp/resume.pdf',
+        hash: 'hash',
+        createdAt: expect.any(Date),
+        updatedAt: expect.any(Date),
+      }),
+    );
+    expect(result[0]).not.toHaveProperty('latestAssessmentSummary');
+    expect(result[0]).not.toHaveProperty('capability');
+    expect(result[0]).not.toHaveProperty('versions');
+    expect(result[0]).not.toHaveProperty('sections');
   });
 
   it('returns analyzed assessment summary on baseline detail when completed assessment exists', async () => {
@@ -419,69 +374,7 @@ const ingestionResult = {
     expect(result.latestAssessmentSummary.latestFitScore).toBe(91);
   });
 
-  it('derives baseline capability from persisted readiness score and parsed/template qualifiers (independent of archived/current)', async () => {
-    const archivedBaseline = { ...baseline, id: 'b-arch', status: BaselineStatus.ARCHIVED, archivedAt: new Date() } as any;
-    const activeBaseline = { ...baseline, id: 'b-act', status: BaselineStatus.ACTIVE, archivedAt: null } as any;
-    activeBaseline.latestBaselineScore = 90;
-    archivedBaseline.latestBaselineScore = 90;
-
-    baselineRepository.find = jest.fn().mockResolvedValue([activeBaseline, archivedBaseline]);
-
-    baselineSectionRepository.find = jest.fn().mockResolvedValue([
-      ...sections.map((s) => ({ ...s, baselineId: activeBaseline.id })),
-      ...sections.map((s) => ({ ...s, baselineId: archivedBaseline.id })),
-    ]);
-
-    const parsedQb = {
-      distinctOn: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      addOrderBy: jest.fn().mockReturnThis(),
-      getMany: jest.fn().mockResolvedValue([
-        { id: 'p1', baselineId: activeBaseline.id, createdAt: new Date() },
-        { id: 'p2', baselineId: archivedBaseline.id, createdAt: new Date() },
-      ]),
-    };
-    const jobAssessQb = {
-      distinctOn: jest.fn().mockReturnThis(),
-      select: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      addOrderBy: jest.fn().mockReturnThis(),
-      getRawMany: jest.fn().mockResolvedValue([{ baselineId: activeBaseline.id }, { baselineId: archivedBaseline.id }]),
-    };
-    const summaryQb = {
-      distinctOn: jest.fn().mockReturnThis(),
-      select: jest.fn().mockReturnThis(),
-      addSelect: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      addOrderBy: jest.fn().mockReturnThis(),
-      getRawMany: jest.fn().mockResolvedValue([]),
-    };
-
-    // createQueryBuilder is used for:
-    // 1) latest assessment summary
-    // 2) job assessment existence
-    fitAssessmentRepository.createQueryBuilder.mockImplementationOnce(() => summaryQb);
-    fitAssessmentRepository.createQueryBuilder.mockImplementationOnce(() => jobAssessQb);
-    baselineParsedRepository.createQueryBuilder = jest.fn().mockReturnValue(parsedQb);
-
-    const result = await service.listBaselinesForUser('user-1', true);
-    expect(result).toHaveLength(2);
-    result.forEach((row) => {
-      expect(row.capability?.accepted).toBe(true);
-      expect(row.capability?.targetReady).toBe(true);
-      expect(row.capability?.highConfidence).toBe(true);
-      // Studio readiness is a composite qualifier (readiness + template readiness + job assessment).
-      // This test asserts archived/current independence for baseline readiness capability, not Studio gating.
-      expect(typeof row.capability?.studioReady).toBe('boolean');
-    });
-  });
-
-  it('returns repository rows for includeArchived=true when parsed baseline lookup fails', async () => {
+  it('returns archived and active rows for includeArchived=true', async () => {
     const archivedBaseline = {
       ...baseline,
       id: 'b-arch',
@@ -490,49 +383,75 @@ const ingestionResult = {
     } as any;
     baselineRepository.find = jest.fn().mockResolvedValue([baseline, archivedBaseline]);
 
-    const summaryQb = {
-      distinctOn: jest.fn().mockReturnThis(),
-      select: jest.fn().mockReturnThis(),
-      addSelect: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      addOrderBy: jest.fn().mockReturnThis(),
-      getRawMany: jest.fn().mockResolvedValue([]),
-    };
-    const jobAssessQb = {
-      distinctOn: jest.fn().mockReturnThis(),
-      select: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      addOrderBy: jest.fn().mockReturnThis(),
-      getRawMany: jest.fn().mockResolvedValue([]),
-    };
-    fitAssessmentRepository.createQueryBuilder
-      .mockImplementationOnce(() => summaryQb)
-      .mockImplementationOnce(() => jobAssessQb);
-
-    baselineParsedRepository.createQueryBuilder = jest.fn().mockImplementation(() => ({
-      where: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      addOrderBy: jest.fn().mockReturnThis(),
-      getMany: jest.fn().mockRejectedValue(new Error('relation "baseline_parsed" does not exist')),
-    }));
-
     const result = await service.listBaselinesForUser('user-1', true);
 
     expect(result).toHaveLength(2);
     expect(result.map((row) => row.id)).toEqual(['b-1', 'b-arch']);
-    expect(result[0]).toMatchObject({
-      id: 'b-1',
-      userId: 'user-1',
+    expect(baselineRepository.find).toHaveBeenCalledWith({
+      where: { userId: 'user-1' },
+      order: { updatedAt: 'DESC' },
     });
-    expect(result[1]).toMatchObject({
+  });
+
+  it('does not call parsed, extractor, capability, assessment, version, or cap logic', async () => {
+    const archivedBaseline = {
+      ...baseline,
       id: 'b-arch',
-      userId: 'user-1',
       status: BaselineStatus.ARCHIVED,
+      archivedAt: new Date(),
+    } as any;
+    baselineRepository.find = jest.fn().mockResolvedValue([baseline, archivedBaseline]);
+    baselineParsedRepository.createQueryBuilder = jest.fn(() => {
+      throw new Error('parsed repo should not be used');
     });
+    fitAssessmentRepository.createQueryBuilder = jest.fn(() => {
+      throw new Error('assessment repo should not be used');
+    });
+    baselineSectionRepository.find = jest.fn(() => {
+      throw new Error('section repo should not be used');
+    });
+    baselineVersionRepository.find = jest.fn(() => {
+      throw new Error('version repo should not be used');
+    });
+    const summarySpy = jest
+      .spyOn(service as any, 'buildLatestAssessmentSummaryByBaselineId')
+      .mockImplementation(() => {
+        throw new Error('assessment summary should not be used');
+      });
+    const capabilitySpy = jest
+      .spyOn(service as any, 'deriveCapabilityState')
+      .mockImplementation(() => {
+        throw new Error('capability should not be used');
+      });
+    const limitSpy = jest
+      .spyOn(service as any, 'enforceBaselineLimit')
+      .mockImplementation(async () => {
+        throw new Error('legacy cap should not be used');
+      });
+    const extractorSpy = jest
+      .spyOn(structuredBaselineExtractor, 'extractStructuredBaselineFromSections')
+      .mockImplementation(() => {
+        throw new Error('structured extractor should not be used');
+      });
+    try {
+      const result = await service.listBaselinesForUser('user-1', true);
+
+      expect(result).toHaveLength(2);
+      expect(result.map((row) => row.id)).toEqual(['b-1', 'b-arch']);
+      expect(baselineParsedRepository.createQueryBuilder).not.toHaveBeenCalled();
+      expect(fitAssessmentRepository.createQueryBuilder).not.toHaveBeenCalled();
+      expect(baselineSectionRepository.find).not.toHaveBeenCalled();
+      expect(baselineVersionRepository.find).not.toHaveBeenCalled();
+      expect(summarySpy).not.toHaveBeenCalled();
+      expect(capabilitySpy).not.toHaveBeenCalled();
+      expect(limitSpy).not.toHaveBeenCalled();
+      expect(extractorSpy).not.toHaveBeenCalled();
+    } finally {
+      extractorSpy.mockRestore();
+      summarySpy.mockRestore();
+      capabilitySpy.mockRestore();
+      limitSpy.mockRestore();
+    }
   });
 
   it('persists a validated ResumeV2 model during baseline ingestion', async () => {
@@ -643,24 +562,15 @@ const ingestionResult = {
     });
   });
 
-  it('uses distinctOn when loading the latest assessment summary', async () => {
+  it('does not load assessment summaries when listing baselines', async () => {
     baselineRepository.find = jest.fn().mockResolvedValue([baseline]);
-    const qb = {
-      distinctOn: jest.fn().mockReturnThis(),
-      select: jest.fn().mockReturnThis(),
-      addSelect: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      addOrderBy: jest.fn().mockReturnThis(),
-      getRawMany: jest.fn().mockResolvedValue([]),
-    };
-    fitAssessmentRepository.createQueryBuilder.mockReturnValue(qb);
+    fitAssessmentRepository.createQueryBuilder = jest.fn(() => {
+      throw new Error('assessment summary loader should not be used');
+    });
 
     await service.listBaselinesForUser('user-1');
 
-    expect(qb.distinctOn).toHaveBeenCalledWith(['assessment.baselineId']);
-    expect(qb.select).toHaveBeenCalledWith('assessment."baselineId"', 'baselineId');
+    expect(fitAssessmentRepository.createQueryBuilder).not.toHaveBeenCalled();
   });
 
   it('returns default not analyzed summary on baseline detail when no completed assessment exists', async () => {

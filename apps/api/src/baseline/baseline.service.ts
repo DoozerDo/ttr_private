@@ -255,6 +255,33 @@ export type BaselineAssessmentDebugState = {
   summary: BaselineAssessmentSummary;
 };
 
+export type BaselineLibraryRow = Pick<
+  Baseline,
+  | 'id'
+  | 'userId'
+  | 'versionNumber'
+  | 'isActive'
+  | 'originalFilename'
+  | 'mimeType'
+  | 'storagePath'
+  | 'hash'
+  | 'status'
+  | 'archivedAt'
+  | 'originalBaselineScore'
+  | 'latestBaselineScore'
+  | 'latestAssessmentId'
+  | 'firstAnalyzedAt'
+  | 'lastAnalyzedAt'
+  | 'isSynthetic'
+  | 'syntheticScenarioKey'
+  | 'syntheticRunId'
+  | 'syntheticCreatedAt'
+  | 'preserveFromCleanup'
+  | 'verifiedBaseline'
+  | 'createdAt'
+  | 'updatedAt'
+>;
+
 export type BaselineAnalysisTrace = {
   baselineId: string;
   userId: string;
@@ -1440,7 +1467,7 @@ export class BaselineService {
   async listBaselinesForUser(
     userId: string,
     includeArchived = false,
-  ): Promise<BaselineWithAssessmentSummary[]> {
+  ): Promise<BaselineLibraryRow[]> {
     const statusFilter = includeArchived
       ? {}
       : { status: BaselineStatus.ACTIVE };
@@ -1451,174 +1478,35 @@ export class BaselineService {
         ...statusFilter,
       },
       order: {
-        createdAt: 'DESC',
+        updatedAt: 'DESC',
       },
     });
 
-    this.logger.debug(
-      `listBaselinesForUser userId=${userId} includeArchived=${includeArchived} repositoryCount=${baselines.length}`,
-    );
-
-    let summaries: Map<string, BaselineAssessmentSummary> = new Map();
-    try {
-      summaries = await this.buildLatestAssessmentSummaryByBaselineId(
-        userId,
-        baselines.map((baseline) => baseline.id),
-      );
-      this.logger.debug(
-        `listBaselinesForUser userId=${userId} receivedAssessments=${summaries.size}`,
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const stack = error instanceof Error ? error.stack : undefined;
-      this.logger.error(
-        `Failed to load fit_assessments summary for baseline list userId=${userId}; returning baselines without assessment summary. message=${message}`,
-        stack,
-      );
-    }
-
-    const baselineIds = baselines.map((baseline) => baseline.id);
-
-    const latestParsedByBaselineId = new Map<string, BaselineParsed>();
-    if (
-      baselineIds.length &&
-      typeof this.baselineParsedRepository?.createQueryBuilder === 'function'
-    ) {
-      try {
-        const parsedQuery = this.baselineParsedRepository
-          .createQueryBuilder('parsed')
-          .where('parsed."baselineId" IN (:...baselineIds)', { baselineIds })
-          .orderBy('parsed."baselineId"', 'ASC')
-          .addOrderBy('parsed."createdAt"', 'DESC')
-          .addOrderBy('parsed.id', 'DESC');
-
-        const parsedRows =
-          typeof (parsedQuery as { distinctOn?: unknown }).distinctOn === 'function'
-            ? await (parsedQuery as {
-                distinctOn: (fields: string[]) => typeof parsedQuery;
-                getMany: () => Promise<BaselineParsed[]>;
-              })
-                .distinctOn(['parsed."baselineId"'])
-                .getMany()
-            : await parsedQuery.getMany();
-
-        parsedRows.forEach((row) => {
-          if (!latestParsedByBaselineId.has(row.baselineId)) {
-            latestParsedByBaselineId.set(row.baselineId, row);
-          }
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const stack = error instanceof Error ? error.stack : undefined;
-        this.logger.error(
-          `Failed to load parsed baseline presence for baseline list userId=${userId}; returning baselines without parsed-record capability enrichment. message=${message}`,
-          stack,
-        );
-      }
-    }
-
-    const sectionsByBaselineId = new Map<string, BaselineSection[]>();
-    if (baselineIds.length) {
-      const sections = await this.baselineSectionRepository.find({
-        where: { baselineId: In(baselineIds) },
-        order: { order: 'ASC' },
-      });
-      for (const section of sections) {
-        const existing = sectionsByBaselineId.get(section.baselineId) ?? [];
-        existing.push(section);
-        sectionsByBaselineId.set(section.baselineId, existing);
-      }
-    }
-
-    // Studio qualifier: require at least one non-readiness job assessment for this baseline.
-    const hasJobAssessmentByBaselineId = new Map<string, boolean>();
-    if (
-      baselineIds.length &&
-      typeof this.fitAssessmentRepository?.createQueryBuilder === 'function'
-    ) {
-      try {
-        const jobAssessments = await this.fitAssessmentRepository
-          .createQueryBuilder('assessment')
-          .distinctOn(['assessment."baselineId"'])
-          .select('assessment."baselineId"', 'baselineId')
-          .where('assessment."userId" = :userId', { userId })
-          .andWhere('assessment."baselineId" IN (:...baselineIds)', { baselineIds })
-          .andWhere('assessment."jobId" <> assessment."baselineId"')
-          .orderBy('assessment."baselineId"', 'ASC')
-          .addOrderBy('assessment."createdAt"', 'DESC')
-          .addOrderBy('assessment.id', 'DESC')
-          .getRawMany<{ baselineId: string }>();
-        jobAssessments.forEach((row) =>
-          hasJobAssessmentByBaselineId.set(row.baselineId, true),
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const stack = error instanceof Error ? error.stack : undefined;
-        this.logger.error(
-          `Failed to load job assessment presence for baselines userId=${userId}; returning baselines with hasJobAssessment=false. message=${message}`,
-          stack,
-        );
-      }
-    }
-
-    const rows = baselines.map((baseline) => {
-      const latestAssessmentSummary =
-        summaries.get(baseline.id)?.hasCompletedAssessment
-          ? (summaries.get(baseline.id) as BaselineAssessmentSummary)
-          : this.toBaselineReadinessSummary(baseline);
-
-      const hasParsedRecord = latestParsedByBaselineId.has(baseline.id);
-      const sections = sectionsByBaselineId.get(baseline.id) ?? [];
-      const structured = sections.length
-        ? extractStructuredBaselineFromSections(sections as any)
-        : null;
-      const templateReadiness = structured
-        ? evaluateBaselineTemplateReadiness(structured as any)
-        : null;
-
-      const capability = this.deriveCapabilityState({
-        baseline,
-        readinessScore:
-          typeof baseline.latestBaselineScore === 'number'
-            ? baseline.latestBaselineScore
-            : null,
-        hasParsedRecord,
-        hasJobAssessment: hasJobAssessmentByBaselineId.get(baseline.id) === true,
-        templateReadiness: templateReadiness
-          ? {
-              canGenerateResume: templateReadiness.canGenerateResume,
-              evidenceThreshold: templateReadiness.evidence.threshold,
-              degraded: templateReadiness.evidence.degraded,
-            }
-          : null,
-      });
-
-      return {
-        ...baseline,
-        latestAssessmentSummary,
-        capability,
-      };
-    });
-
-    this.logger.debug(
-      `listBaselinesForUser userId=${userId} mappedRows=${rows.length}`,
-    );
-    rows.forEach((baseline) => {
-      const summary = baseline.latestAssessmentSummary;
-      this.logger.debug(
-        `baseline summary userId=${userId} baselineId=${baseline.id} hasCompletedAssessment=${summary.hasCompletedAssessment} latestFitScore=${summary.latestFitScore ?? 'null'}`,
-      );
-    });
-
-    if (process.env.NODE_ENV !== 'production') {
-      rows.forEach((baseline) => {
-        this.logger.log(
-          `baselines.summary userId=${userId} baselineId=${baseline.id} latestAssessmentId=${baseline.latestAssessmentSummary.latestAssessmentId ?? 'null'} hasCompletedAssessment=${baseline.latestAssessmentSummary.hasCompletedAssessment} latestFitScore=${baseline.latestAssessmentSummary.latestFitScore ?? 'null'}`,
-        );
-      });
-    }
-
-    return rows;
+    return baselines.map((baseline) => ({
+      id: baseline.id,
+      userId: baseline.userId,
+      versionNumber: baseline.versionNumber,
+      isActive: baseline.isActive,
+      originalFilename: baseline.originalFilename,
+      mimeType: baseline.mimeType,
+      storagePath: baseline.storagePath,
+      hash: baseline.hash,
+      status: baseline.status,
+      archivedAt: baseline.archivedAt,
+      originalBaselineScore: baseline.originalBaselineScore,
+      latestBaselineScore: baseline.latestBaselineScore,
+      latestAssessmentId: baseline.latestAssessmentId ?? null,
+      firstAnalyzedAt: baseline.firstAnalyzedAt,
+      lastAnalyzedAt: baseline.lastAnalyzedAt,
+      isSynthetic: baseline.isSynthetic,
+      syntheticScenarioKey: baseline.syntheticScenarioKey,
+      syntheticRunId: baseline.syntheticRunId,
+      syntheticCreatedAt: baseline.syntheticCreatedAt,
+      preserveFromCleanup: baseline.preserveFromCleanup,
+      verifiedBaseline: baseline.verifiedBaseline ?? null,
+      createdAt: baseline.createdAt,
+      updatedAt: baseline.updatedAt,
+    }));
   }
 
   async getBaselineAssessmentDebugState(
