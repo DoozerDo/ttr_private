@@ -1723,6 +1723,12 @@ describe('BaselineService - score history persistence', () => {
       }),
       update: jest.fn(async () => ({ affected: 1 })),
       delete: jest.fn(),
+      createQueryBuilder: jest.fn(() => ({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      })),
     };
 
     baselineRepository = {
@@ -1949,7 +1955,6 @@ describe('BaselineService - score history persistence', () => {
         const value = store.get(id);
         return value && value.userId === userId ? value : null;
       }),
-      find: jest.fn(),
       update: jest.fn(async (_entity: any, criteria: any, partial: any) => {
         let affected = 0;
         for (const baseline of store.values()) {
@@ -1960,6 +1965,12 @@ describe('BaselineService - score history persistence', () => {
         }
         return { affected };
       }),
+      createQueryBuilder: jest.fn(() => ({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockImplementation(async () => store.get('b-2')),
+      })),
     };
 
     baselineRepository.manager.transaction.mockImplementation(async (cb: any) => cb(manager));
@@ -1967,9 +1978,174 @@ describe('BaselineService - score history persistence', () => {
     const updated = await service.setCurrentBaseline('user-1', 'b-2');
 
     expect(updated.isActive).toBe(true);
+    expect(updated.id).toBe('b-2');
     expect(store.get('b-1')?.isActive).toBe(false);
     expect(store.get('b-2')?.isActive).toBe(true);
     expect(manager.update).toHaveBeenCalledTimes(2);
+    expect(manager.createQueryBuilder).toHaveBeenCalledWith(Baseline, 'baseline');
+  });
+
+  it('returns the safe library row shape when setting current baseline', async () => {
+    const selected = {
+      id: 'b-2',
+      userId: 'user-1',
+      versionNumber: 2,
+      status: BaselineStatus.ACTIVE,
+      isActive: true,
+      originalFilename: 'resume-2.pdf',
+      mimeType: 'application/pdf',
+      storagePath: '/tmp/resume-2.pdf',
+      hash: 'hash-2',
+      archivedAt: null,
+      originalBaselineScore: null,
+      latestBaselineScore: null,
+      latestAssessmentId: null,
+      firstAnalyzedAt: null,
+      lastAnalyzedAt: null,
+      isSynthetic: false,
+      syntheticScenarioKey: null,
+      syntheticRunId: null,
+      syntheticCreatedAt: null,
+      preserveFromCleanup: false,
+      createdAt: new Date('2026-03-02T00:00:00.000Z'),
+      updatedAt: new Date('2026-03-02T00:00:00.000Z'),
+    } as any;
+    const select = jest.fn().mockReturnThis();
+    const where = jest.fn().mockReturnThis();
+    const andWhere = jest.fn().mockReturnThis();
+    const getOne = jest.fn().mockResolvedValue(selected);
+    const manager = {
+      findOne: jest.fn().mockResolvedValue(selected),
+      update: jest.fn(async () => ({ affected: 1 })),
+      createQueryBuilder: jest.fn(() => ({
+        select,
+        where,
+        andWhere,
+        getOne,
+      })),
+    };
+    baselineRepository.manager.transaction.mockImplementation(async (cb: any) => cb(manager));
+
+    const result = await service.setCurrentBaseline('user-1', 'b-2');
+
+    expect(select).toHaveBeenCalledWith([
+      'baseline.id',
+      'baseline.userId',
+      'baseline.versionNumber',
+      'baseline.isActive',
+      'baseline.originalFilename',
+      'baseline.mimeType',
+      'baseline.storagePath',
+      'baseline.hash',
+      'baseline.status',
+      'baseline.archivedAt',
+      'baseline.originalBaselineScore',
+      'baseline.latestBaselineScore',
+      'baseline.latestAssessmentId',
+      'baseline.firstAnalyzedAt',
+      'baseline.lastAnalyzedAt',
+      'baseline.isSynthetic',
+      'baseline.syntheticScenarioKey',
+      'baseline.syntheticRunId',
+      'baseline.syntheticCreatedAt',
+      'baseline.preserveFromCleanup',
+      'baseline.createdAt',
+      'baseline.updatedAt',
+    ]);
+    expect(select.mock.calls[0][0]).not.toContain('baseline.verifiedBaseline');
+    expect(result).not.toHaveProperty('verifiedBaseline');
+    expect(result).not.toHaveProperty('latestAssessmentSummary');
+    expect(result).not.toHaveProperty('capability');
+    expect(result).not.toHaveProperty('versions');
+  });
+
+  it('does not call parsed, extractor, capability, assessment, version, or cap logic when setting current baseline', async () => {
+    const selected = {
+      id: 'b-2',
+      userId: 'user-1',
+      versionNumber: 2,
+      status: BaselineStatus.ACTIVE,
+      isActive: false,
+      originalFilename: 'resume-2.pdf',
+      mimeType: 'application/pdf',
+      storagePath: '/tmp/resume-2.pdf',
+      hash: 'hash-2',
+      archivedAt: null,
+      originalBaselineScore: null,
+      latestBaselineScore: null,
+      latestAssessmentId: null,
+      firstAnalyzedAt: null,
+      lastAnalyzedAt: null,
+      isSynthetic: false,
+      syntheticScenarioKey: null,
+      syntheticRunId: null,
+      syntheticCreatedAt: null,
+      preserveFromCleanup: false,
+      createdAt: new Date('2026-03-02T00:00:00.000Z'),
+      updatedAt: new Date('2026-03-02T00:00:00.000Z'),
+    } as any;
+    const manager = {
+      findOne: jest.fn().mockResolvedValue(selected),
+      update: jest.fn(async () => ({ affected: 1 })),
+      createQueryBuilder: jest.fn(() => ({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ ...selected, isActive: true }),
+      })),
+    };
+    baselineRepository.manager.transaction.mockImplementation(async (cb: any) => cb(manager));
+    (service as any).baselineParsedRepository.createQueryBuilder = jest.fn(() => {
+      throw new Error('parsed repo should not be used');
+    });
+    fitAssessmentRepository.createQueryBuilder = jest.fn(() => {
+      throw new Error('assessment repo should not be used');
+    });
+    (service as any).baselineSectionRepository.find = jest.fn(() => {
+      throw new Error('section repo should not be used');
+    });
+    (service as any).baselineVersionRepository.find = jest.fn(() => {
+      throw new Error('version repo should not be used');
+    });
+    const summarySpy = jest
+      .spyOn(service as any, 'buildLatestAssessmentSummaryByBaselineId')
+      .mockImplementation(() => {
+        throw new Error('assessment summary should not be used');
+      });
+    const capabilitySpy = jest
+      .spyOn(service as any, 'deriveCapabilityState')
+      .mockImplementation(() => {
+        throw new Error('capability should not be used');
+      });
+    const limitSpy = jest
+      .spyOn(service as any, 'enforceBaselineLimit')
+      .mockImplementation(async () => {
+        throw new Error('legacy cap should not be used');
+      });
+    const extractorSpy = jest
+      .spyOn(structuredBaselineExtractor, 'extractStructuredBaselineFromSections')
+      .mockImplementation(() => {
+        throw new Error('structured extractor should not be used');
+      });
+
+    try {
+      const result = await service.setCurrentBaseline('user-1', 'b-2');
+
+      expect(result.id).toBe('b-2');
+      expect((service as any).baselineParsedRepository.createQueryBuilder).not.toHaveBeenCalled();
+      expect(fitAssessmentRepository.createQueryBuilder).not.toHaveBeenCalled();
+      expect((service as any).baselineSectionRepository.find).not.toHaveBeenCalled();
+      expect((service as any).baselineVersionRepository.find).not.toHaveBeenCalled();
+      expect(summarySpy).not.toHaveBeenCalled();
+      expect(capabilitySpy).not.toHaveBeenCalled();
+      expect(limitSpy).not.toHaveBeenCalled();
+      expect(extractorSpy).not.toHaveBeenCalled();
+    } finally {
+      extractorSpy.mockRestore();
+      summarySpy.mockRestore();
+      capabilitySpy.mockRestore();
+      limitSpy.mockRestore();
+    }
   });
 
   it('allows archiving a former current baseline immediately after switching current baseline', async () => {
@@ -2021,6 +2197,12 @@ describe('BaselineService - score history persistence', () => {
         }
         return { affected };
       }),
+      createQueryBuilder: jest.fn(() => ({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockImplementation(async () => store.get('b-2')),
+      })),
     };
 
     baselineRepository.manager.transaction.mockImplementation(async (cb: any) => cb(manager));

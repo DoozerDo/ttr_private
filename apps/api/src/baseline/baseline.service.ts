@@ -281,6 +281,31 @@ export type BaselineLibraryRow = Pick<
   | 'updatedAt'
 >;
 
+const BASELINE_LIBRARY_SAFE_SELECT_COLUMNS = [
+  'baseline.id',
+  'baseline.userId',
+  'baseline.versionNumber',
+  'baseline.isActive',
+  'baseline.originalFilename',
+  'baseline.mimeType',
+  'baseline.storagePath',
+  'baseline.hash',
+  'baseline.status',
+  'baseline.archivedAt',
+  'baseline.originalBaselineScore',
+  'baseline.latestBaselineScore',
+  'baseline.latestAssessmentId',
+  'baseline.firstAnalyzedAt',
+  'baseline.lastAnalyzedAt',
+  'baseline.isSynthetic',
+  'baseline.syntheticScenarioKey',
+  'baseline.syntheticRunId',
+  'baseline.syntheticCreatedAt',
+  'baseline.preserveFromCleanup',
+  'baseline.createdAt',
+  'baseline.updatedAt',
+] as const;
+
 export type BaselineAnalysisTrace = {
   baselineId: string;
   userId: string;
@@ -684,6 +709,33 @@ export class BaselineService {
       { id: activeBaselineId, userId },
       { isActive: true },
     );
+  }
+
+  private mapBaselineToLibraryRow(baseline: Baseline): BaselineLibraryRow {
+    return {
+      id: baseline.id,
+      userId: baseline.userId,
+      versionNumber: baseline.versionNumber,
+      isActive: baseline.isActive,
+      originalFilename: baseline.originalFilename,
+      mimeType: baseline.mimeType,
+      storagePath: baseline.storagePath,
+      hash: baseline.hash,
+      status: baseline.status,
+      archivedAt: baseline.archivedAt,
+      originalBaselineScore: baseline.originalBaselineScore,
+      latestBaselineScore: baseline.latestBaselineScore,
+      latestAssessmentId: baseline.latestAssessmentId ?? null,
+      firstAnalyzedAt: baseline.firstAnalyzedAt,
+      lastAnalyzedAt: baseline.lastAnalyzedAt,
+      isSynthetic: baseline.isSynthetic,
+      syntheticScenarioKey: baseline.syntheticScenarioKey,
+      syntheticRunId: baseline.syntheticRunId,
+      syntheticCreatedAt: baseline.syntheticCreatedAt,
+      preserveFromCleanup: baseline.preserveFromCleanup,
+      createdAt: baseline.createdAt,
+      updatedAt: baseline.updatedAt,
+    };
   }
 
   async getLatestParsedBaseline(baselineId: string) {
@@ -1467,34 +1519,9 @@ export class BaselineService {
     userId: string,
     includeArchived = false,
   ): Promise<BaselineLibraryRow[]> {
-    const safeSelectColumns = [
-      'baseline.id',
-      'baseline.userId',
-      'baseline.versionNumber',
-      'baseline.isActive',
-      'baseline.originalFilename',
-      'baseline.mimeType',
-      'baseline.storagePath',
-      'baseline.hash',
-      'baseline.status',
-      'baseline.archivedAt',
-      'baseline.originalBaselineScore',
-      'baseline.latestBaselineScore',
-      'baseline.latestAssessmentId',
-      'baseline.firstAnalyzedAt',
-      'baseline.lastAnalyzedAt',
-      'baseline.isSynthetic',
-      'baseline.syntheticScenarioKey',
-      'baseline.syntheticRunId',
-      'baseline.syntheticCreatedAt',
-      'baseline.preserveFromCleanup',
-      'baseline.createdAt',
-      'baseline.updatedAt',
-    ] as const;
-
     const query = this.baselineRepository
       .createQueryBuilder('baseline')
-      .select([...safeSelectColumns])
+      .select([...BASELINE_LIBRARY_SAFE_SELECT_COLUMNS])
       .where('baseline.userId = :userId', { userId });
 
     if (!includeArchived) {
@@ -1505,30 +1532,7 @@ export class BaselineService {
 
     const baselines = await query.orderBy('baseline.updatedAt', 'DESC').getMany();
 
-    return baselines.map((baseline) => ({
-      id: baseline.id,
-      userId: baseline.userId,
-      versionNumber: baseline.versionNumber,
-      isActive: baseline.isActive,
-      originalFilename: baseline.originalFilename,
-      mimeType: baseline.mimeType,
-      storagePath: baseline.storagePath,
-      hash: baseline.hash,
-      status: baseline.status,
-      archivedAt: baseline.archivedAt,
-      originalBaselineScore: baseline.originalBaselineScore,
-      latestBaselineScore: baseline.latestBaselineScore,
-      latestAssessmentId: baseline.latestAssessmentId ?? null,
-      firstAnalyzedAt: baseline.firstAnalyzedAt,
-      lastAnalyzedAt: baseline.lastAnalyzedAt,
-      isSynthetic: baseline.isSynthetic,
-      syntheticScenarioKey: baseline.syntheticScenarioKey,
-      syntheticRunId: baseline.syntheticRunId,
-      syntheticCreatedAt: baseline.syntheticCreatedAt,
-      preserveFromCleanup: baseline.preserveFromCleanup,
-      createdAt: baseline.createdAt,
-      updatedAt: baseline.updatedAt,
-    }));
+    return baselines.map((baseline) => this.mapBaselineToLibraryRow(baseline));
   }
 
   async getBaselineAssessmentDebugState(
@@ -1623,7 +1627,10 @@ export class BaselineService {
     return this.updateBaselineStatus(userId, baselineId, BaselineStatus.ACTIVE);
   }
 
-  async setCurrentBaseline(userId: string, baselineId: string) {
+  async setCurrentBaseline(
+    userId: string,
+    baselineId: string,
+  ): Promise<BaselineLibraryRow> {
     if (process.env.NODE_ENV !== 'production') {
       // eslint-disable-next-line no-console
       console.log('[BASELINE][SET_CURRENT]', { baselineId, userId });
@@ -1642,14 +1649,21 @@ export class BaselineService {
         throw new BadRequestException('Cannot set an archived baseline as current');
       }
 
-      // Single source of truth for "current baseline" is `Baseline.isActive`.
-      await this.setSingleActiveBaseline(manager, userId, baseline.id);
+      await manager.update(Baseline, { userId }, { isActive: false });
+      await manager.update(Baseline, { id: baseline.id, userId }, { isActive: true });
 
-      const updated = await manager.findOne(Baseline, {
-        where: { id: baseline.id, userId },
-      });
+      const updated = await manager
+        .createQueryBuilder(Baseline, 'baseline')
+        .select([...BASELINE_LIBRARY_SAFE_SELECT_COLUMNS])
+        .where('baseline.id = :baselineId', { baselineId: baseline.id })
+        .andWhere('baseline.userId = :userId', { userId })
+        .getOne();
 
-      return updated ?? ({ ...baseline, isActive: true } as Baseline);
+      if (!updated) {
+        throw new NotFoundException('Baseline not found');
+      }
+
+      return this.mapBaselineToLibraryRow(updated);
     });
   }
 

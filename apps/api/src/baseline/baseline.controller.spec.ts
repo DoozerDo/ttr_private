@@ -300,3 +300,52 @@ describe('BaselineController - listBaselines', () => {
     expect(result).toEqual([]);
   });
 });
+
+describe('BaselineController - setCurrentBaseline', () => {
+  const baselineVersionService = {
+    promoteBaselineVersion: jest.fn(),
+  } as any;
+
+  it('delegates to the canonical set-current service path for the authenticated user', async () => {
+    const userId = 'user-1';
+    const baselineService = {
+      setCurrentBaseline: jest.fn().mockResolvedValue({
+        id: 'base-2',
+        userId,
+        versionNumber: 2,
+        isActive: true,
+        status: 'ACTIVE',
+        originalFilename: 'resume-2.pdf',
+        mimeType: 'application/pdf',
+        storagePath: '/tmp/resume-2.pdf',
+        hash: 'hash-2',
+        archivedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    } as any;
+    const controller = new BaselineController(
+      baselineService,
+      baselineVersionService,
+    );
+
+    const result = await controller.setCurrentBaseline(
+      'base-2',
+      { user: { id: userId } } as any,
+    );
+
+    expect(baselineService.setCurrentBaseline).toHaveBeenCalledWith(
+      userId,
+      'base-2',
+    );
+    expect(result).toMatchObject({
+      id: 'base-2',
+      userId,
+      isActive: true,
+      status: 'ACTIVE',
+    });
+    expect(result).not.toHaveProperty('version');
+    expect(result).not.toHaveProperty('versions');
+    expect(result).not.toHaveProperty('verifiedBaseline');
+  });
+});
