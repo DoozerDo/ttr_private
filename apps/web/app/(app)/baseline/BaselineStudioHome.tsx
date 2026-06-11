@@ -1301,18 +1301,36 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
       setPageError(null);
 
       try {
-        await setCurrentBaseline(baselineId);
+        const updatedBaseline = await setCurrentBaseline(baselineId);
 
-        // Make the switch visible immediately, then rehydrate from the server for canonical truth.
+        // Reconcile from the canonical backend response, then rehydrate from the server.
         setBaselineList((current) =>
           current.map((item) =>
-            item.id === baselineId
-              ? { ...item, isActive: true, status: "ACTIVE", archivedAt: null }
-              : { ...item, isActive: false },
+            item.id === updatedBaseline.id
+              ? {
+                  ...item,
+                  ...updatedBaseline,
+                  isActive: true,
+                  status: "ACTIVE",
+                  archivedAt: null,
+                }
+              : item.status === "ARCHIVED"
+                ? item
+                : { ...item, isActive: false },
           ),
         );
-        setPrimaryBaselineId(baselineId);
-        publishBaselineUpdated({ baselineId, source: "baseline" });
+        setBaselineDetails((current) => ({
+          ...current,
+          [updatedBaseline.id]: {
+            ...(current[updatedBaseline.id] ?? {}),
+            ...updatedBaseline,
+            isActive: true,
+            status: "ACTIVE",
+            archivedAt: null,
+          },
+        }));
+        setPrimaryBaselineId(updatedBaseline.id);
+        publishBaselineUpdated({ baselineId: updatedBaseline.id, source: "baseline" });
 
         try {
           await refreshBaselineLibrary();
