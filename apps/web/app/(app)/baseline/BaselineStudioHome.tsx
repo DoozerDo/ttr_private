@@ -1669,7 +1669,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             </header>
             <article
               className="rounded-[16px] border border-white/10 bg-slate-950/30 p-4"
-              data-testid={`baseline-current-card:${primaryBaseline.id}`}
+              data-testid={`baseline-current-card:${currentActiveBaseline.id}`}
             >
               <ResumeWithBaselineStatus
                 filename={currentActiveBaseline.originalFilename}
@@ -1803,16 +1803,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                         >
                           {formatCardActionLabel("View baseline details")}
                         </Link>
-                        {isReadyBaseline ? (
-                          <FormButton
-                            variant="ghost"
-                            onClick={() => handleSetCurrentBaseline(baseline.id)}
-                            disabled={setActiveDisabled}
-                            className="uppercase"
-                          >
-                            {formatCardActionLabel("Set current")}
-                          </FormButton>
-                        ) : null}
                         {actionFlags.showArchive ? (
                           <FormButton
                             variant="ghost"
