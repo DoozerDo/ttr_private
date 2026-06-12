@@ -66,7 +66,6 @@ type ErrorPayload = {
 };
 
 const TARGET_ROLE_CTA_LABEL = "TARGET A ROLE";
-const REVIEW_BASELINE_CTA_LABEL = "REVIEW BASELINE";
 const BASELINE_NEEDS_REVIEW_EXPLANATION =
   "You need to complete baseline verification before targeting roles.";
 
@@ -508,6 +507,29 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     };
   }, [allBaselines, baselineDetails, primaryBaselineId]);
 
+  const currentActiveBaseline = useMemo(() => {
+    if (!currentBaselineId) return null;
+    const listBaseline =
+      allBaselines.find(
+        (item) => item.id === currentBaselineId && item.status === "ACTIVE" && item.isActive === true,
+      ) ?? null;
+    const detailBaseline = baselineDetails[currentBaselineId] ?? null;
+
+    if (!listBaseline) return null;
+    if (!detailBaseline) return listBaseline;
+
+    return {
+      ...listBaseline,
+      ...detailBaseline,
+      latestAssessmentSummary: resolveCanonicalAssessmentSummary(
+        detailBaseline.latestAssessmentSummary,
+        listBaseline.latestAssessmentSummary,
+      ),
+    };
+  }, [allBaselines, baselineDetails, currentBaselineId]);
+
+  const hasCurrentActiveBaseline = currentActiveBaseline?.status === "ACTIVE" && currentActiveBaseline?.isActive === true;
+
   const primaryBaselineReadiness = useMemo(
     () =>
       buildBaselineReadinessContract({
@@ -576,15 +598,19 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   const analysisReady = baselineStrengthState === "ready";
   const latestAssessmentSummary = primaryBaseline?.latestAssessmentSummary ?? null;
   const hasBaseline = activeBaselines.length > 0;
-  const hasCompletedAnalysis = primaryBaselineReadiness.hasCompletedAssessment;
-  const baselineDetailsHref = primaryBaselineId ? getBaselineDetailsHref(primaryBaselineId) : "/baseline";
-  const targetRoleHref = primaryBaselineId ? `/target?baselineId=${encodeURIComponent(primaryBaselineId)}` : "/target";
-  const heroState: "no_baseline" | "no_analysis" | "analysis_exists" = useMemo(() => {
+  const baselineDetailsHref = currentActiveBaseline?.id
+    ? getBaselineDetailsHref(currentActiveBaseline.id)
+    : primaryBaselineId
+      ? getBaselineDetailsHref(primaryBaselineId)
+      : "/baseline";
+  const targetRoleHref = currentActiveBaseline?.id
+    ? `/target?baselineId=${encodeURIComponent(currentActiveBaseline.id)}`
+    : "/target";
+  const heroState: "no_baseline" | "has_current_active" | "has_no_current" = useMemo(() => {
     if (!hasBaseline) return "no_baseline";
-    if (!hasCompletedAnalysis) return "no_analysis";
-    return "analysis_exists";
-  }, [hasBaseline, hasCompletedAnalysis]);
-  const isValidatedBaselineState = heroState === "analysis_exists";
+    if (hasCurrentActiveBaseline) return "has_current_active";
+    return "has_no_current";
+  }, [hasBaseline, hasCurrentActiveBaseline]);
   const canReplaceActiveBaseline = true;
   const baselineLibrarySectionTitle = "Other baselines";
   const activeBaselineVersionLabel = `Version ${primaryBaseline?.versionNumber ?? primaryBaseline?.version ?? 1} (current)`;
@@ -1583,7 +1609,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             <p className="text-sm text-current">{pageError}</p>
           </Alert>
         ) : null}
-        {!isValidatedBaselineState ? (
+        {!hasCurrentActiveBaseline ? (
           <section className="rounded-[28px] bg-slate-900/40 p-6 md:p-8">
             <div className="max-w-3xl space-y-5">
               <div className="space-y-2">
@@ -1630,7 +1656,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             </div>
           </section>
         ) : null}
-        {primaryBaseline ? (
+        {currentActiveBaseline ? (
           <section
             className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/25 p-5"
             data-testid="baseline-current-section"
@@ -1646,41 +1672,27 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
               data-testid={`baseline-current-card:${primaryBaseline.id}`}
             >
               <ResumeWithBaselineStatus
-                filename={primaryBaseline.originalFilename}
-                isReadyForTargeting={primaryBaseline.capability?.targetReady === true}
+                filename={currentActiveBaseline.originalFilename}
+                isReadyForTargeting
                 isActiveBaseline
-                showNeedsReviewBadge={primaryBaseline.capability?.targetReady !== true}
-                readinessScore={primaryBaseline.capability?.readinessScore ?? primaryBaseline.latestBaselineScore ?? null}
-                accepted={primaryBaseline.capability?.accepted ?? false}
-                targetReady={primaryBaseline.capability?.targetReady ?? false}
-                studioReady={primaryBaseline.capability?.studioReady ?? false}
-                highConfidence={primaryBaseline.capability?.highConfidence ?? false}
+                showNeedsReviewBadge={false}
+                readinessScore={currentActiveBaseline.latestBaselineScore ?? null}
+                accepted={true}
+                targetReady={true}
+                studioReady={false}
+                highConfidence={false}
               />
                 <p className="mt-1 text-xs text-slate-400">{activeBaselineVersionLabel}</p>
                 <p className="mt-1 text-xs text-slate-500">
-                  Created from: {primaryBaseline.originalFilename}
+                  Created from: {currentActiveBaseline.originalFilename}
                 </p>
-                {primaryBaseline.capability?.targetReady !== true ? (
-                  <p className="mt-3 text-sm text-slate-300">
-                    {BASELINE_NEEDS_REVIEW_EXPLANATION}
-                  </p>
-                ) : null}
                 <div className="mt-4 flex flex-wrap gap-2">
-                  {primaryBaseline.capability?.targetReady === true ? (
-                    <FormButton
-                      onClick={() => router.push(targetRoleHref)}
-                      className="bg-cyan-400/10 uppercase text-cyan-50 hover:bg-cyan-400/15"
-                    >
-                      {TARGET_ROLE_CTA_LABEL}
-                    </FormButton>
-                  ) : (
-                    <Link
-                      href={baselineDetailsHref}
-                      className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-4 py-2.5 text-sm font-semibold uppercase text-white transition hover:bg-indigo-500"
-                    >
-                      {REVIEW_BASELINE_CTA_LABEL}
-                    </Link>
-                  )}
+                  <FormButton
+                    onClick={() => router.push(targetRoleHref)}
+                    className="bg-cyan-400/10 uppercase text-cyan-50 hover:bg-cyan-400/15"
+                  >
+                    {TARGET_ROLE_CTA_LABEL}
+                  </FormButton>
                   <Link
                     href={baselineDetailsHref}
                     className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold uppercase text-slate-100 transition hover:bg-white/10"
@@ -1743,24 +1755,14 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 const isArchived = baseline.status === "ARCHIVED";
                 const isCurrentBaseline = baseline.isActive === true;
 
-                const baselineReadiness = buildBaselineReadinessContract({
-                  baseline,
-                  isAnalyzing: loadingBaselineId === baseline.id,
-                });
                 const isLoading = loadingBaselineId === baseline.id;
-                const readinessState = baselineReadiness.readinessState;
-                const canTargetJob = baseline.capability?.targetReady === true;
                 const setActiveDisabled = isLoading || isArchived || !isHydrated;
-                // Capability eligibility is baseline-owned authority and is independent of archived/current.
-                // Fail-safe: if capability is missing, treat as not ready.
-                const isReadyBaseline = baseline.capability?.targetReady === true;
                 const actionFlags = getBaselineCardActionFlags({
                   isCurrentBaseline,
                   isEditable: isEditableLibrary,
-                  targetReady: baseline.capability?.targetReady === true,
+                  targetReady: false,
                   isArchived,
                 });
-                const baselineTargetRoleHref = `/target?baselineId=${encodeURIComponent(baseline.id)}`;
                 const baselineDetailsHref = getBaselineDetailsHref(baseline.id);
 
                 return (
@@ -1776,11 +1778,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   >
                     <ResumeWithBaselineStatus
                       filename={baseline.originalFilename}
-                      isReadyForTargeting={isReadyBaseline}
-                      showNeedsReviewBadge={!isReadyBaseline}
-                      readinessScore={baseline.capability?.readinessScore ?? baseline.latestBaselineScore ?? null}
+                      isReadyForTargeting={false}
+                      showNeedsReviewBadge={true}
+                      readinessScore={baseline.latestBaselineScore ?? null}
                       accepted={baseline.capability?.accepted ?? false}
-                      targetReady={baseline.capability?.targetReady ?? false}
+                      targetReady={false}
                       studioReady={baseline.capability?.studioReady ?? false}
                       highConfidence={baseline.capability?.highConfidence ?? false}
                     />
@@ -1788,22 +1790,13 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                     <p className="mt-2 text-xs text-slate-400">Uploaded {formatDateTime(baseline.createdAt)}</p>
                     <div className="mt-4 space-y-3">
                       <div className="flex flex-wrap gap-2">
-                        {isReadyBaseline ? (
-                          <FormButton
-                            onClick={() => router.push(baselineTargetRoleHref)}
-                            className="bg-cyan-400/10 uppercase text-cyan-50 hover:bg-cyan-400/15"
-                          >
-                            {TARGET_ROLE_CTA_LABEL}
-                          </FormButton>
-                        ) : (
-                          <FormButton
-                            onClick={() => handleSetCurrentBaseline(baseline.id)}
-                            disabled={setActiveDisabled}
-                            className="bg-indigo-600 uppercase text-white hover:bg-indigo-500"
-                          >
-                            {formatCardActionLabel("Set current")}
-                          </FormButton>
-                        )}
+                        <FormButton
+                          onClick={() => handleSetCurrentBaseline(baseline.id)}
+                          disabled={setActiveDisabled}
+                          className="bg-indigo-600 uppercase text-white hover:bg-indigo-500"
+                        >
+                          {formatCardActionLabel("Set current")}
+                        </FormButton>
                         <Link
                           href={baselineDetailsHref}
                           className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--button-radius)] border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold uppercase text-slate-100 transition hover:bg-white/10"

@@ -244,6 +244,70 @@ describe("BaselineStudioHome", () => {
     expect(mockRouterPush).toHaveBeenCalledWith("/target?baselineId=base-1");
   });
 
+  it("makes Target actionable from a loaded ACTIVE current baseline even without readiness, review, or verification state", async () => {
+    setFetchImplementation(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(
+      <BaselineStudioHome
+        baselines={[
+          createBaseline(
+            "base-1",
+            "2026-01-01T00:00:00.000Z",
+            "resume-1.pdf",
+            {
+              latestAssessmentId: null,
+              latestAssessmentCreatedAt: null,
+              latestFitScore: null,
+              hasCompletedAssessment: false,
+            },
+            null,
+            true,
+          ),
+        ]}
+      />,
+    );
+
+    await screen.findByRole("heading", { name: "Current baseline" });
+    expect(screen.getByRole("button", { name: "TARGET A ROLE" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "REVIEW BASELINE" })).toBeNull();
+    expect(screen.queryByText("Upload your resume to get started")).toBeNull();
+    expect(
+      screen.queryByText("You need to complete baseline verification before targeting roles."),
+    ).toBeNull();
+  });
+
+  it("shows exactly one visible Target primary action when a loaded ACTIVE current baseline exists", async () => {
+    setFetchImplementation(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(
+      <BaselineStudioHome
+        baselines={[
+          createBaseline("base-current", "2026-01-01T00:00:00.000Z", "resume-current.pdf", undefined, null, true),
+          createAnalyzedBaseline("base-secondary", "resume-secondary.pdf", 84, false),
+        ]}
+      />,
+    );
+
+    await screen.findByRole("heading", { name: "Current baseline" });
+    const targetButtons = screen.getAllByRole("button", { name: "TARGET A ROLE" });
+    expect(targetButtons).toHaveLength(1);
+
+    fireEvent.click(targetButtons[0]);
+    expect(mockRouterPush).toHaveBeenCalledWith("/target?baselineId=base-current");
+  });
+
   it("clicking TARGET A ROLE on a secondary baseline triggers navigation with that baselineId", async () => {
     setFetchImplementation(async (input: RequestInfo) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
