@@ -9,7 +9,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, In, Not, Repository } from 'typeorm';
+import { EntityManager, In, Not, Repository, SelectQueryBuilder } from 'typeorm';
 import type { Express } from 'express';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -305,6 +305,31 @@ const BASELINE_LIBRARY_SAFE_SELECT_COLUMNS = [
   'baseline.createdAt',
   'baseline.updatedAt',
 ] as const;
+
+type BaselineLibraryRowRaw = {
+  id: string;
+  userId: string;
+  versionNumber: number | null;
+  isActive: boolean | null;
+  originalFilename: string;
+  mimeType: string;
+  storagePath: string;
+  hash: string | null;
+  status: BaselineStatus;
+  archivedAt: Date | null;
+  originalBaselineScore: number | null;
+  latestBaselineScore: number | null;
+  latestAssessmentId: string | null;
+  firstAnalyzedAt: Date | null;
+  lastAnalyzedAt: Date | null;
+  isSynthetic: boolean | null;
+  syntheticScenarioKey: string | null;
+  syntheticRunId: string | null;
+  syntheticCreatedAt: Date | null;
+  preserveFromCleanup: boolean | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
 
 export type BaselineAnalysisTrace = {
   baselineId: string;
@@ -735,6 +760,61 @@ export class BaselineService {
       preserveFromCleanup: baseline.preserveFromCleanup,
       createdAt: baseline.createdAt,
       updatedAt: baseline.updatedAt,
+    };
+  }
+
+  private applyBaselineLibrarySafeSelect(
+    query: SelectQueryBuilder<Baseline>,
+  ): SelectQueryBuilder<Baseline> {
+    return query
+      .select('baseline.id', 'id')
+      .addSelect('baseline.userId', 'userId')
+      .addSelect('baseline.versionNumber', 'versionNumber')
+      .addSelect('baseline.isActive', 'isActive')
+      .addSelect('baseline.originalFilename', 'originalFilename')
+      .addSelect('baseline.mimeType', 'mimeType')
+      .addSelect('baseline.storagePath', 'storagePath')
+      .addSelect('baseline.hash', 'hash')
+      .addSelect('baseline.status', 'status')
+      .addSelect('baseline.archivedAt', 'archivedAt')
+      .addSelect('baseline.originalBaselineScore', 'originalBaselineScore')
+      .addSelect('baseline.latestBaselineScore', 'latestBaselineScore')
+      .addSelect('baseline.latestAssessmentId', 'latestAssessmentId')
+      .addSelect('baseline.firstAnalyzedAt', 'firstAnalyzedAt')
+      .addSelect('baseline.lastAnalyzedAt', 'lastAnalyzedAt')
+      .addSelect('baseline.isSynthetic', 'isSynthetic')
+      .addSelect('baseline.syntheticScenarioKey', 'syntheticScenarioKey')
+      .addSelect('baseline.syntheticRunId', 'syntheticRunId')
+      .addSelect('baseline.syntheticCreatedAt', 'syntheticCreatedAt')
+      .addSelect('baseline.preserveFromCleanup', 'preserveFromCleanup')
+      .addSelect('baseline.createdAt', 'createdAt')
+      .addSelect('baseline.updatedAt', 'updatedAt');
+  }
+
+  private mapRawBaselineLibraryRow(raw: BaselineLibraryRowRaw): BaselineLibraryRow {
+    return {
+      id: raw.id,
+      userId: raw.userId,
+      versionNumber: raw.versionNumber ?? 0,
+      isActive: raw.isActive ?? false,
+      originalFilename: raw.originalFilename,
+      mimeType: raw.mimeType,
+      storagePath: raw.storagePath,
+      hash: raw.hash ?? null,
+      status: raw.status,
+      archivedAt: raw.archivedAt ?? null,
+      originalBaselineScore: raw.originalBaselineScore ?? null,
+      latestBaselineScore: raw.latestBaselineScore ?? null,
+      latestAssessmentId: raw.latestAssessmentId ?? null,
+      firstAnalyzedAt: raw.firstAnalyzedAt ?? null,
+      lastAnalyzedAt: raw.lastAnalyzedAt ?? null,
+      isSynthetic: raw.isSynthetic ?? false,
+      syntheticScenarioKey: raw.syntheticScenarioKey ?? null,
+      syntheticRunId: raw.syntheticRunId ?? null,
+      syntheticCreatedAt: raw.syntheticCreatedAt ?? null,
+      preserveFromCleanup: raw.preserveFromCleanup ?? false,
+      createdAt: raw.createdAt,
+      updatedAt: raw.updatedAt,
     };
   }
 
@@ -1637,9 +1717,18 @@ export class BaselineService {
     }
 
     return this.baselineRepository.manager.transaction(async (manager) => {
-      const baseline = await manager.findOne(Baseline, {
-        where: { id: baselineId, userId },
-      });
+      const baseline = await manager
+        .createQueryBuilder(Baseline, 'baseline')
+        .select('baseline.id', 'id')
+        .addSelect('baseline.userId', 'userId')
+        .addSelect('baseline.status', 'status')
+        .where('baseline.id = :baselineId', { baselineId })
+        .andWhere('baseline.userId = :userId', { userId })
+        .getRawOne<{
+          id: string;
+          userId: string;
+          status: BaselineStatus;
+        }>();
 
       if (!baseline) {
         throw new NotFoundException('Baseline not found');
@@ -1652,18 +1741,18 @@ export class BaselineService {
       await manager.update(Baseline, { userId }, { isActive: false });
       await manager.update(Baseline, { id: baseline.id, userId }, { isActive: true });
 
-      const updated = await manager
-        .createQueryBuilder(Baseline, 'baseline')
-        .select([...BASELINE_LIBRARY_SAFE_SELECT_COLUMNS])
+      const updated = await this.applyBaselineLibrarySafeSelect(
+        manager.createQueryBuilder(Baseline, 'baseline'),
+      )
         .where('baseline.id = :baselineId', { baselineId: baseline.id })
         .andWhere('baseline.userId = :userId', { userId })
-        .getOne();
+        .getRawOne<BaselineLibraryRowRaw>();
 
       if (!updated) {
         throw new NotFoundException('Baseline not found');
       }
 
-      return this.mapBaselineToLibraryRow(updated);
+      return this.mapRawBaselineLibraryRow(updated);
     });
   }
 
