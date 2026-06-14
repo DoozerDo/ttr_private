@@ -357,7 +357,7 @@ export type BaselineAnalysisTrace = {
 };
 
 export type BaselineStrengtheningResult = {
-  baseline: Baseline;
+  baseline: BaselineLibraryRow;
   impactType: StrengtheningImpactResult['impactType'];
   changeClassification: 'no_change_duplicate' | 'refined_existing_signal' | 'new_signal_added';
   scoreDelta: number;
@@ -739,33 +739,6 @@ export class BaselineService {
       { id: activeBaselineId, userId },
       { isActive: true },
     );
-  }
-
-  private mapRawBaselineLibraryRow(raw: BaselineLibraryRowRaw): BaselineLibraryRow {
-    return {
-      id: raw.id,
-      userId: raw.userId,
-      versionNumber: raw.versionNumber,
-      isActive: raw.isActive,
-      originalFilename: raw.originalFilename,
-      mimeType: raw.mimeType,
-      storagePath: raw.storagePath,
-      hash: raw.hash,
-      status: raw.status,
-      archivedAt: raw.archivedAt,
-      originalBaselineScore: raw.originalBaselineScore,
-      latestBaselineScore: raw.latestBaselineScore,
-      latestAssessmentId: raw.latestAssessmentId ?? null,
-      firstAnalyzedAt: raw.firstAnalyzedAt,
-      lastAnalyzedAt: raw.lastAnalyzedAt,
-      isSynthetic: raw.isSynthetic,
-      syntheticScenarioKey: raw.syntheticScenarioKey,
-      syntheticRunId: raw.syntheticRunId,
-      syntheticCreatedAt: raw.syntheticCreatedAt,
-      preserveFromCleanup: raw.preserveFromCleanup,
-      createdAt: raw.createdAt,
-      updatedAt: raw.updatedAt,
-    };
   }
 
   async getLatestParsedBaseline(baselineId: string) {
@@ -1555,8 +1528,8 @@ export class BaselineService {
     return {
       id: row.id,
       userId: row.userId,
-      versionNumber: row.versionNumber,
-      isActive: row.isActive,
+      versionNumber: row.versionNumber ?? 0,
+      isActive: row.isActive ?? false,
       originalFilename: row.originalFilename,
       mimeType: row.mimeType,
       storagePath: row.storagePath,
@@ -1568,11 +1541,11 @@ export class BaselineService {
       latestAssessmentId: row.latestAssessmentId ?? null,
       firstAnalyzedAt: row.firstAnalyzedAt,
       lastAnalyzedAt: row.lastAnalyzedAt,
-      isSynthetic: row.isSynthetic,
+      isSynthetic: row.isSynthetic ?? false,
       syntheticScenarioKey: row.syntheticScenarioKey,
       syntheticRunId: row.syntheticRunId,
       syntheticCreatedAt: row.syntheticCreatedAt,
-      preserveFromCleanup: row.preserveFromCleanup,
+      preserveFromCleanup: row.preserveFromCleanup ?? false,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
