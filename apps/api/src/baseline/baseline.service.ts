@@ -1852,91 +1852,19 @@ export class BaselineService {
   async getBaselineByIdForUser(
     id: string,
     userId: string,
-  ): Promise<BaselineWithAssessmentSummary> {
-    const baseline = await this.baselineRepository.findOne({
-      where: { id, userId },
-      relations: ['sections'],
-      order: {
-        sections: {
-          order: 'ASC',
-        },
-      },
-    });
+  ): Promise<BaselineLibraryRow> {
+    const baseline = await this.applyBaselineLibrarySafeSelect(
+      this.baselineRepository.createQueryBuilder('baseline'),
+    )
+      .where('baseline.id = :id', { id })
+      .andWhere('baseline.userId = :userId', { userId })
+      .getRawOne<BaselineLibraryRowRaw>();
 
     if (!baseline) {
       throw new NotFoundException('Baseline not found');
     }
 
-    const persistedVerifiedBaseline =
-      (baseline as any).verifiedBaseline &&
-      typeof (baseline as any).verifiedBaseline === 'object' &&
-      !Array.isArray((baseline as any).verifiedBaseline)
-        ? ((baseline as any).verifiedBaseline as Record<string, unknown>)
-        : null;
-    if (persistedVerifiedBaseline) {
-      (baseline as any).verifiedBaseline = persistedVerifiedBaseline;
-    }
-
-    let summary: BaselineAssessmentSummary | undefined;
-    try {
-      summary = (
-        await this.buildLatestAssessmentSummaryByBaselineId(userId, [baseline.id])
-      ).get(baseline.id);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const stack = error instanceof Error ? error.stack : undefined;
-      this.logger.error(
-        `Failed to load fit_assessments summary for baseline detail userId=${userId} baselineId=${id}; returning baseline detail with default summary. message=${message}`,
-        stack,
-      );
-    }
-
-    const readinessScore =
-      typeof baseline.latestBaselineScore === 'number'
-        ? baseline.latestBaselineScore
-        : null;
-
-    const structured = (baseline.sections ?? []).length
-      ? extractStructuredBaselineFromSections(baseline.sections as any)
-      : null;
-    const templateReadinessEvaluation = structured
-      ? evaluateBaselineTemplateReadiness(structured as any)
-      : null;
-
-    const [latestParsed, jobAssessment] = await Promise.all([
-      this.getLatestParsedBaseline(baseline.id),
-      typeof this.fitAssessmentRepository?.findOne === 'function'
-        ? this.fitAssessmentRepository.findOne({
-            where: {
-              userId,
-              baselineId: baseline.id,
-              jobId: Not(baseline.id),
-            } as any,
-            order: { createdAt: 'DESC', id: 'DESC' },
-          })
-        : Promise.resolve(null),
-    ]);
-
-    return {
-      ...baseline,
-      latestAssessmentSummary:
-        summary?.hasCompletedAssessment
-          ? summary
-          : this.toBaselineReadinessSummary(baseline),
-      capability: this.deriveCapabilityState({
-        baseline,
-        readinessScore,
-        hasParsedRecord: Boolean(latestParsed),
-        hasJobAssessment: Boolean(jobAssessment),
-        templateReadiness: templateReadinessEvaluation
-          ? {
-              canGenerateResume: templateReadinessEvaluation.canGenerateResume,
-              evidenceThreshold: templateReadinessEvaluation.evidence.threshold,
-              degraded: templateReadinessEvaluation.evidence.degraded,
-            }
-          : null,
-      }),
-    };
+    return this.mapRawBaselineLibraryRow(baseline);
   }
 
   private deriveBaselineReadinessScore(baseline: Baseline): number {
@@ -2032,7 +1960,19 @@ export class BaselineService {
       );
     }
 
-    const result = await this.getBaselineByIdForUser(baselineId, userId);
+    const baselineRow = await this.getBaselineByIdForUser(baselineId, userId);
+    const result = {
+      ...baselineRow,
+      latestAssessmentSummary: {
+        latestAssessmentId: persistedAssessment.id,
+        latestAssessmentCreatedAt: persistedAssessment.createdAt,
+        latestFitScore:
+          typeof persistedAssessment.overallScore === 'number'
+            ? persistedAssessment.overallScore
+            : null,
+        hasCompletedAssessment: true,
+      },
+    };
     if (process.env.NODE_ENV !== 'production') {
       this.logger.log(
         `analyzeBaselineReadiness mapped summary baselineId=${baselineId} latestAssessmentId=${result.latestAssessmentSummary.latestAssessmentId ?? 'null'} hasCompletedAssessment=${result.latestAssessmentSummary.hasCompletedAssessment} latestFitScore=${result.latestAssessmentSummary.latestFitScore ?? 'null'}`,
