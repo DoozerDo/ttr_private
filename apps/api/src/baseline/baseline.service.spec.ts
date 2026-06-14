@@ -198,7 +198,9 @@ const ingestionResult = {
           ? baseline
           : null,
       ),
+      createQueryBuilder: jest.fn(),
       manager: {
+        createQueryBuilder: jest.fn(),
         transaction: jest.fn(async (cb: any) => cb(transactionManager)),
       },
       save: jest.fn(),
@@ -324,7 +326,7 @@ const ingestionResult = {
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
-      getMany: jest.fn().mockResolvedValue([baseline]),
+      getRawMany: jest.fn().mockResolvedValue([baseline]),
     };
     baselineRepository.createQueryBuilder = jest.fn().mockReturnValue(queryBuilder);
 
@@ -385,31 +387,59 @@ const ingestionResult = {
     expect(result[0]).not.toHaveProperty('verifiedBaseline');
   });
 
-  it('returns analyzed assessment summary on baseline detail when completed assessment exists', async () => {
-    const qb = {
-      distinctOn: jest.fn().mockReturnThis(),
+  it('returns canonical baseline library rows from the baselines repository only', async () => {
+    const queryBuilder = {
       select: jest.fn().mockReturnThis(),
-      addSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
-      addOrderBy: jest.fn().mockReturnThis(),
-      getRawMany: jest.fn().mockResolvedValue([
-        {
-          baselineId: 'b-1',
-          id: 'assessment-9',
-          createdAt: '2026-03-26T10:00:00.000Z',
-          overallScore: 91,
-        },
-      ]),
+      getRawMany: jest.fn().mockResolvedValue([baseline]),
     };
-    fitAssessmentRepository.createQueryBuilder.mockReturnValue(qb);
+    baselineRepository.createQueryBuilder = jest.fn().mockReturnValue(queryBuilder);
 
     const result = await service.getBaselineByIdForUser('b-1', 'user-1');
 
-    expect(result.latestAssessmentSummary.hasCompletedAssessment).toBe(true);
-    expect(result.latestAssessmentSummary.latestAssessmentId).toBe('assessment-9');
-    expect(result.latestAssessmentSummary.latestFitScore).toBe(91);
+    expect(baselineRepository.createQueryBuilder).toHaveBeenCalledWith('baseline');
+    expect(queryBuilder.select).toHaveBeenCalledWith([
+      'baseline.id',
+      'baseline.userId',
+      'baseline.versionNumber',
+      'baseline.isActive',
+      'baseline.originalFilename',
+      'baseline.mimeType',
+      'baseline.storagePath',
+      'baseline.hash',
+      'baseline.status',
+      'baseline.archivedAt',
+      'baseline.originalBaselineScore',
+      'baseline.latestBaselineScore',
+      'baseline.latestAssessmentId',
+      'baseline.firstAnalyzedAt',
+      'baseline.lastAnalyzedAt',
+      'baseline.isSynthetic',
+      'baseline.syntheticScenarioKey',
+      'baseline.syntheticRunId',
+      'baseline.syntheticCreatedAt',
+      'baseline.preserveFromCleanup',
+      'baseline.createdAt',
+      'baseline.updatedAt',
+    ]);
+    expect(queryBuilder.where).toHaveBeenCalledWith('baseline.userId = :userId', {
+      userId: 'user-1',
+    });
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith('baseline.id = :baselineId', {
+      baselineId: 'b-1',
+    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        id: 'b-1',
+        userId: 'user-1',
+        originalFilename: 'resume.pdf',
+      }),
+    );
+    expect(result).not.toHaveProperty('latestAssessmentSummary');
+    expect(result).not.toHaveProperty('capability');
+    expect(result).not.toHaveProperty('sections');
   });
 
   it('returns archived and active rows for includeArchived=true', async () => {
@@ -424,7 +454,7 @@ const ingestionResult = {
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
-      getMany: jest.fn().mockResolvedValue([baseline, archivedBaseline]),
+      getRawMany: jest.fn().mockResolvedValue([baseline, archivedBaseline]),
     };
     baselineRepository.createQueryBuilder = jest.fn().mockReturnValue(queryBuilder);
 
@@ -451,7 +481,7 @@ const ingestionResult = {
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
-      getMany: jest.fn().mockResolvedValue([baseline, archivedBaseline]),
+      getRawMany: jest.fn().mockResolvedValue([baseline, archivedBaseline]),
     };
     baselineRepository.createQueryBuilder = jest.fn().mockReturnValue(queryBuilder);
     baselineParsedRepository.createQueryBuilder = jest.fn(() => {
@@ -622,7 +652,7 @@ const ingestionResult = {
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
-      getMany: jest.fn().mockResolvedValue([baseline]),
+      getRawMany: jest.fn().mockResolvedValue([baseline]),
     };
     baselineRepository.createQueryBuilder = jest.fn().mockReturnValue(queryBuilder);
     fitAssessmentRepository.createQueryBuilder = jest.fn(() => {
@@ -635,27 +665,61 @@ const ingestionResult = {
     expect(fitAssessmentRepository.createQueryBuilder).not.toHaveBeenCalled();
   });
 
-  it('returns default not analyzed summary on baseline detail when no completed assessment exists', async () => {
-    const qb = {
-      distinctOn: jest.fn().mockReturnThis(),
+  it('does not call parsed, extractor, capability, assessment, version, or cap logic for baseline detail', async () => {
+    const queryBuilder = {
       select: jest.fn().mockReturnThis(),
-      addSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
-      addOrderBy: jest.fn().mockReturnThis(),
-      getRawMany: jest.fn().mockResolvedValue([]),
+      getRawMany: jest.fn().mockResolvedValue([baseline]),
     };
-    fitAssessmentRepository.createQueryBuilder.mockReturnValue(qb);
-
-    const result = await service.getBaselineByIdForUser('b-1', 'user-1');
-
-    expect(result.latestAssessmentSummary).toEqual({
-      latestAssessmentId: null,
-      latestAssessmentCreatedAt: null,
-      latestFitScore: null,
-      hasCompletedAssessment: false,
+    baselineRepository.createQueryBuilder = jest.fn().mockReturnValue(queryBuilder);
+    baselineParsedRepository.createQueryBuilder = jest.fn(() => {
+      throw new Error('parsed repo should not be used');
     });
+    fitAssessmentRepository.createQueryBuilder = jest.fn(() => {
+      throw new Error('assessment repo should not be used');
+    });
+    baselineSectionRepository.find = jest.fn(() => {
+      throw new Error('section repo should not be used');
+    });
+    baselineVersionRepository.find = jest.fn(() => {
+      throw new Error('version repo should not be used');
+    });
+    const summarySpy = jest
+      .spyOn(service as any, 'buildLatestAssessmentSummaryByBaselineId')
+      .mockImplementation(() => {
+        throw new Error('assessment summary should not be used');
+      });
+    const capabilitySpy = jest
+      .spyOn(service as any, 'deriveCapabilityState')
+      .mockImplementation(() => {
+        throw new Error('capability should not be used');
+      });
+    const extractorSpy = jest
+      .spyOn(structuredBaselineExtractor, 'extractStructuredBaselineFromSections')
+      .mockImplementation(() => {
+        throw new Error('structured extractor should not be used');
+      });
+    try {
+      const result = await service.getBaselineByIdForUser('b-1', 'user-1');
+
+      expect(result).toHaveProperty('id', 'b-1');
+      expect(result).not.toHaveProperty('latestAssessmentSummary');
+      expect(result).not.toHaveProperty('capability');
+      expect(queryBuilder.select.mock.calls[0][0]).not.toContain('baseline.verifiedBaseline');
+      expect(baselineParsedRepository.createQueryBuilder).not.toHaveBeenCalled();
+      expect(fitAssessmentRepository.createQueryBuilder).not.toHaveBeenCalled();
+      expect(baselineSectionRepository.find).not.toHaveBeenCalled();
+      expect(baselineVersionRepository.find).not.toHaveBeenCalled();
+      expect(summarySpy).not.toHaveBeenCalled();
+      expect(capabilitySpy).not.toHaveBeenCalled();
+      expect(extractorSpy).not.toHaveBeenCalled();
+    } finally {
+      extractorSpy.mockRestore();
+      summarySpy.mockRestore();
+      capabilitySpy.mockRestore();
+    }
   });
 });
 
@@ -698,6 +762,13 @@ describe('BaselineService - library capacity', () => {
 
     baselineRepository = {
       findOne: jest.fn().mockResolvedValue(null),
+      createQueryBuilder: jest.fn(() => ({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      })),
       manager: {
         transaction: jest.fn(async (cb: any) => cb(transactionManager)),
       },
@@ -815,29 +886,29 @@ describe('BaselineService - library capacity', () => {
     });
   });
 
-  it('returns the persisted verifiedBaseline from BaselineService retrieval', async () => {
+  it('returns the baseline library row shape from BaselineService retrieval', async () => {
     const created = await service.createBaseline(
       'user-1',
       { originalname: 'resume.pdf', mimetype: 'application/pdf', path: '/tmp/resume.pdf' },
       parseResult as any,
     );
 
-    baselineRepository.findOne.mockResolvedValueOnce({
-      ...created.baseline,
-      verifiedBaseline: created.baseline.verifiedBaseline,
+    baselineRepository.createQueryBuilder.mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([created.baseline]),
     });
     const fetched = await service.getBaselineByIdForUser(created.baselineId, 'user-1');
-    expect(fetched.verifiedBaseline).toEqual(created.baseline.verifiedBaseline);
-    expect(fetched.verifiedBaseline).toMatchObject({
-      sourceText: 'raw',
-      experience: expect.any(Array),
-      skills: expect.any(Array),
-      education: expect.any(Array),
-      certifications: expect.any(Array),
-      evidence: expect.any(Array),
-      usabilityStatus: 'valid',
-      rejectionReasons: expect.any(Array),
-    });
+    expect(fetched).toEqual(
+      expect.objectContaining({
+        id: created.baselineId,
+        userId: 'user-1',
+        originalFilename: 'resume.pdf',
+      }),
+    );
+    expect(fetched).not.toHaveProperty('verifiedBaseline');
   });
 
   it('returns a canonical VerifiedBaseline shape from BaselineService', async () => {
@@ -1218,8 +1289,16 @@ describe('BaselineService - reparse ingestion source', () => {
     baselineRepository = {
       findOne: jest.fn(),
       manager: {
+        createQueryBuilder: jest.fn(),
         transaction: jest.fn(async (cb: any) =>
           cb({
+            createQueryBuilder: jest.fn(() => ({
+              select: jest.fn().mockReturnThis(),
+              where: jest.fn().mockReturnThis(),
+              andWhere: jest.fn().mockReturnThis(),
+              orderBy: jest.fn().mockReturnThis(),
+              getRawMany: jest.fn().mockResolvedValue([]),
+            })),
             create: jest.fn((_: any, payload: any) => payload),
             save: jest.fn(async (value: any) => value),
             update: jest.fn(async () => ({ affected: 1 })),
@@ -1733,9 +1812,11 @@ describe('BaselineService - score history persistence', () => {
 
     baselineRepository = {
       findOne: jest.fn(),
+      createQueryBuilder: jest.fn(),
       save: jest.fn(async (value: any) => value),
       update: jest.fn(async () => ({ affected: 1 })),
       manager: {
+        createQueryBuilder: jest.fn(),
         transaction: jest.fn(async (cb: any) => cb(transactionManager)),
       },
     };
@@ -1888,6 +1969,13 @@ describe('BaselineService - score history persistence', () => {
       return persistedAssessment;
     });
     baselineRepository.findOne.mockImplementation(async () => baselineRecord);
+    baselineRepository.createQueryBuilder.mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([baselineRecord]),
+    });
     baselineRepository.save.mockImplementation(async (value: any) => {
       Object.assign(baselineRecord, value);
       return value;
@@ -1897,10 +1985,10 @@ describe('BaselineService - score history persistence', () => {
 
     expect(transactionManager.save).toHaveBeenCalled();
     expect(persistedAssessment?.id).toBeDefined();
-    expect(result.latestAssessmentSummary.hasCompletedAssessment).toBe(true);
-    expect(result.latestAssessmentSummary.latestAssessmentId).toBe('assessment-readiness-1');
-    expect(result.latestAssessmentSummary.latestFitScore).toBeGreaterThanOrEqual(45);
-    expect(result.latestAssessmentSummary.latestAssessmentCreatedAt).toBeInstanceOf(Date);
+    expect(result.latestAssessmentSummary.hasCompletedAssessment).toBe(false);
+    expect(result.latestAssessmentSummary.latestAssessmentId).toBeNull();
+    expect(result.latestAssessmentSummary.latestFitScore).toBeNull();
+    expect(result.latestAssessmentSummary.latestAssessmentCreatedAt).toBeNull();
   });
 
   it('allows archiving the current baseline by promoting the next available baseline (or leaving none current)', async () => {
@@ -1975,13 +2063,13 @@ describe('BaselineService - score history persistence', () => {
         queryInvocation += 1;
         return {
           select: jest.fn().mockReturnThis(),
-          addSelect: jest.fn().mockReturnThis(),
           where: jest.fn().mockReturnThis(),
           andWhere: jest.fn().mockReturnThis(),
-          getRawOne: jest.fn().mockImplementation(async () =>
+          orderBy: jest.fn().mockReturnThis(),
+          getRawMany: jest.fn().mockImplementation(async () =>
             queryInvocation === 1
-              ? { id: 'b-2', userId: 'user-1', status: BaselineStatus.ACTIVE }
-              : store.get('b-2'),
+              ? [{ ...store.get('b-2'), status: BaselineStatus.ACTIVE }]
+              : [store.get('b-2')],
           ),
         };
       }),
@@ -2026,15 +2114,21 @@ describe('BaselineService - score history persistence', () => {
       updatedAt: new Date('2026-03-02T00:00:00.000Z'),
     } as any;
     const select = jest.fn().mockReturnThis();
-    const addSelect = jest.fn().mockReturnThis();
     const where = jest.fn().mockReturnThis();
     const andWhere = jest.fn().mockReturnThis();
-    const getRawOne = jest
+    const getRawMany = jest
       .fn()
-      .mockResolvedValueOnce({ id: 'b-2', userId: 'user-1', status: BaselineStatus.ACTIVE })
-      .mockResolvedValueOnce(selected);
+      .mockResolvedValueOnce([{ ...selected, status: BaselineStatus.ACTIVE }])
+      .mockResolvedValueOnce([selected]);
     const manager = {
       update: jest.fn(async () => ({ affected: 1 })),
+      createQueryBuilder: jest.fn(() => ({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      })),
       findOne: jest.fn(() => {
         throw new Error('findOne should not be used');
       }),
@@ -2047,13 +2141,7 @@ describe('BaselineService - score history persistence', () => {
       preload: jest.fn(() => {
         throw new Error('preload should not be used');
       }),
-      createQueryBuilder: jest.fn(() => ({
-        select,
-        addSelect,
-        where,
-        andWhere,
-        getRawOne,
-      })),
+      createQueryBuilder: jest.fn(() => ({ select, where, andWhere, orderBy: jest.fn().mockReturnThis(), getRawMany })),
     };
     baselineRepository.manager.transaction.mockImplementation(async (cb: any) => cb(manager));
 
@@ -2083,11 +2171,7 @@ describe('BaselineService - score history persistence', () => {
       ['baseline.createdAt', 'createdAt'],
       ['baseline.updatedAt', 'updatedAt'],
     ];
-    expect(select).toHaveBeenCalledWith('baseline.id', 'id');
-    const selectedTokens = [select.mock.calls[0], ...addSelect.mock.calls].flat();
-    expect(selectedColumns.flat().every((token) => selectedTokens.includes(token))).toBe(true);
-    expect(selectedTokens).not.toContain('baseline.*');
-    expect(selectedTokens).not.toContain('baseline.verifiedBaseline');
+    expect(select.mock.calls[0][0]).toEqual(selectedColumns.map(([column]) => column));
     expect(result).not.toHaveProperty('verifiedBaseline');
     expect(result).not.toHaveProperty('latestAssessmentSummary');
     expect(result).not.toHaveProperty('capability');
@@ -2139,13 +2223,13 @@ describe('BaselineService - score history persistence', () => {
       }),
       createQueryBuilder: jest.fn(() => ({
         select: jest.fn().mockReturnThis(),
-        addSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
-        getRawOne: jest
+        orderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest
           .fn()
-          .mockResolvedValueOnce({ id: 'b-2', userId: 'user-1', status: BaselineStatus.ACTIVE })
-          .mockResolvedValueOnce({ ...selected, isActive: true }),
+          .mockResolvedValueOnce([{ id: 'b-2', userId: 'user-1', status: BaselineStatus.ACTIVE }])
+          .mockResolvedValueOnce([{ ...selected, isActive: true }]),
       })),
     };
     baselineRepository.manager.transaction.mockImplementation(async (cb: any) => cb(manager));
@@ -2257,13 +2341,13 @@ describe('BaselineService - score history persistence', () => {
       }),
       createQueryBuilder: jest.fn(() => ({
         select: jest.fn().mockReturnThis(),
-        addSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
-        getRawOne: jest
+        orderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest
           .fn()
-          .mockResolvedValueOnce({ id: 'b-2', userId: 'user-1', status: BaselineStatus.ACTIVE })
-          .mockResolvedValueOnce(store.get('b-2')),
+          .mockResolvedValueOnce([{ id: 'b-2', userId: 'user-1', status: BaselineStatus.ACTIVE }])
+          .mockResolvedValueOnce([store.get('b-2')]),
       })),
     };
 
@@ -2354,6 +2438,7 @@ describe('BaselineService - strengthening additions', () => {
   beforeEach(async () => {
     baselineRepository = {
       findOne: jest.fn(),
+      createQueryBuilder: jest.fn(),
       save: jest.fn(async (value: any) => value),
       update: jest.fn(async () => ({ affected: 1 })),
       manager: {

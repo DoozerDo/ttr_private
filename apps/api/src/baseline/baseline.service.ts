@@ -331,6 +331,11 @@ type BaselineLibraryRowRaw = {
   updatedAt: Date;
 };
 
+type BaselineLibraryRowSelectQueryBuilder = Pick<
+  SelectQueryBuilder<Baseline>,
+  'select' | 'where' | 'andWhere' | 'orderBy' | 'getRawMany' | 'getRawOne'
+>;
+
 export type BaselineAnalysisTrace = {
   baselineId: string;
   userId: string;
@@ -736,83 +741,28 @@ export class BaselineService {
     );
   }
 
-  private mapBaselineToLibraryRow(baseline: Baseline): BaselineLibraryRow {
-    return {
-      id: baseline.id,
-      userId: baseline.userId,
-      versionNumber: baseline.versionNumber,
-      isActive: baseline.isActive,
-      originalFilename: baseline.originalFilename,
-      mimeType: baseline.mimeType,
-      storagePath: baseline.storagePath,
-      hash: baseline.hash,
-      status: baseline.status,
-      archivedAt: baseline.archivedAt,
-      originalBaselineScore: baseline.originalBaselineScore,
-      latestBaselineScore: baseline.latestBaselineScore,
-      latestAssessmentId: baseline.latestAssessmentId ?? null,
-      firstAnalyzedAt: baseline.firstAnalyzedAt,
-      lastAnalyzedAt: baseline.lastAnalyzedAt,
-      isSynthetic: baseline.isSynthetic,
-      syntheticScenarioKey: baseline.syntheticScenarioKey,
-      syntheticRunId: baseline.syntheticRunId,
-      syntheticCreatedAt: baseline.syntheticCreatedAt,
-      preserveFromCleanup: baseline.preserveFromCleanup,
-      createdAt: baseline.createdAt,
-      updatedAt: baseline.updatedAt,
-    };
-  }
-
-  private applyBaselineLibrarySafeSelect(
-    query: SelectQueryBuilder<Baseline>,
-  ): SelectQueryBuilder<Baseline> {
-    return query
-      .select('baseline.id', 'id')
-      .addSelect('baseline.userId', 'userId')
-      .addSelect('baseline.versionNumber', 'versionNumber')
-      .addSelect('baseline.isActive', 'isActive')
-      .addSelect('baseline.originalFilename', 'originalFilename')
-      .addSelect('baseline.mimeType', 'mimeType')
-      .addSelect('baseline.storagePath', 'storagePath')
-      .addSelect('baseline.hash', 'hash')
-      .addSelect('baseline.status', 'status')
-      .addSelect('baseline.archivedAt', 'archivedAt')
-      .addSelect('baseline.originalBaselineScore', 'originalBaselineScore')
-      .addSelect('baseline.latestBaselineScore', 'latestBaselineScore')
-      .addSelect('baseline.latestAssessmentId', 'latestAssessmentId')
-      .addSelect('baseline.firstAnalyzedAt', 'firstAnalyzedAt')
-      .addSelect('baseline.lastAnalyzedAt', 'lastAnalyzedAt')
-      .addSelect('baseline.isSynthetic', 'isSynthetic')
-      .addSelect('baseline.syntheticScenarioKey', 'syntheticScenarioKey')
-      .addSelect('baseline.syntheticRunId', 'syntheticRunId')
-      .addSelect('baseline.syntheticCreatedAt', 'syntheticCreatedAt')
-      .addSelect('baseline.preserveFromCleanup', 'preserveFromCleanup')
-      .addSelect('baseline.createdAt', 'createdAt')
-      .addSelect('baseline.updatedAt', 'updatedAt');
-  }
-
   private mapRawBaselineLibraryRow(raw: BaselineLibraryRowRaw): BaselineLibraryRow {
     return {
       id: raw.id,
       userId: raw.userId,
-      versionNumber: raw.versionNumber ?? 0,
-      isActive: raw.isActive ?? false,
+      versionNumber: raw.versionNumber,
+      isActive: raw.isActive,
       originalFilename: raw.originalFilename,
       mimeType: raw.mimeType,
       storagePath: raw.storagePath,
-      hash: raw.hash ?? null,
+      hash: raw.hash,
       status: raw.status,
-      archivedAt: raw.archivedAt ?? null,
-      originalBaselineScore: raw.originalBaselineScore ?? null,
-      latestBaselineScore: raw.latestBaselineScore ?? null,
+      archivedAt: raw.archivedAt,
+      originalBaselineScore: raw.originalBaselineScore,
+      latestBaselineScore: raw.latestBaselineScore,
       latestAssessmentId: raw.latestAssessmentId ?? null,
-      firstAnalyzedAt: raw.firstAnalyzedAt ?? null,
-      lastAnalyzedAt: raw.lastAnalyzedAt ?? null,
-      isSynthetic: raw.isSynthetic ?? false,
-      syntheticScenarioKey: raw.syntheticScenarioKey ?? null,
-      syntheticRunId: raw.syntheticRunId ?? null,
-      syntheticCreatedAt: raw.syntheticCreatedAt ?? null,
-      preserveFromCleanup: raw.preserveFromCleanup ?? false,
+      firstAnalyzedAt: raw.firstAnalyzedAt,
+      lastAnalyzedAt: raw.lastAnalyzedAt,
+      isSynthetic: raw.isSynthetic,
+      syntheticScenarioKey: raw.syntheticScenarioKey,
+      syntheticRunId: raw.syntheticRunId,
+      syntheticCreatedAt: raw.syntheticCreatedAt,
+      preserveFromCleanup: raw.preserveFromCleanup,
       createdAt: raw.createdAt,
       updatedAt: raw.updatedAt,
     };
@@ -1595,14 +1545,48 @@ export class BaselineService {
     };
   }
 
-  async listBaselinesForUser(
+  private applyBaselineLibrarySafeSelect(
+    query: BaselineLibraryRowSelectQueryBuilder,
+  ): BaselineLibraryRowSelectQueryBuilder {
+    return query.select([...BASELINE_LIBRARY_SAFE_SELECT_COLUMNS]);
+  }
+
+  private mapRawBaselineLibraryRow(row: BaselineLibraryRowRaw): BaselineLibraryRow {
+    return {
+      id: row.id,
+      userId: row.userId,
+      versionNumber: row.versionNumber,
+      isActive: row.isActive,
+      originalFilename: row.originalFilename,
+      mimeType: row.mimeType,
+      storagePath: row.storagePath,
+      hash: row.hash,
+      status: row.status,
+      archivedAt: row.archivedAt,
+      originalBaselineScore: row.originalBaselineScore,
+      latestBaselineScore: row.latestBaselineScore,
+      latestAssessmentId: row.latestAssessmentId ?? null,
+      firstAnalyzedAt: row.firstAnalyzedAt,
+      lastAnalyzedAt: row.lastAnalyzedAt,
+      isSynthetic: row.isSynthetic,
+      syntheticScenarioKey: row.syntheticScenarioKey,
+      syntheticRunId: row.syntheticRunId,
+      syntheticCreatedAt: row.syntheticCreatedAt,
+      preserveFromCleanup: row.preserveFromCleanup,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  private async readBaselineLibraryRowsForUser(
+    buildQuery: () => SelectQueryBuilder<Baseline>,
     userId: string,
     includeArchived = false,
+    baselineId?: string,
   ): Promise<BaselineLibraryRow[]> {
-    const query = this.baselineRepository
-      .createQueryBuilder('baseline')
-      .select([...BASELINE_LIBRARY_SAFE_SELECT_COLUMNS])
-      .where('baseline.userId = :userId', { userId });
+    const query = this.applyBaselineLibrarySafeSelect(buildQuery())
+      .where('baseline.userId = :userId', { userId })
+      .orderBy('baseline.updatedAt', 'DESC');
 
     if (!includeArchived) {
       query.andWhere('baseline.status = :status', {
@@ -1610,9 +1594,42 @@ export class BaselineService {
       });
     }
 
-    const baselines = await query.orderBy('baseline.updatedAt', 'DESC').getMany();
+    if (baselineId) {
+      query.andWhere('baseline.id = :baselineId', { baselineId });
+    }
 
-    return baselines.map((baseline) => this.mapBaselineToLibraryRow(baseline));
+    const baselines = await query.getRawMany<BaselineLibraryRowRaw>();
+    return baselines.map((baseline) => this.mapRawBaselineLibraryRow(baseline));
+  }
+
+  private async readBaselineLibraryRowForUser(
+    buildQuery: () => SelectQueryBuilder<Baseline>,
+    userId: string,
+    baselineId: string,
+  ): Promise<BaselineLibraryRow> {
+    const [baseline] = await this.readBaselineLibraryRowsForUser(
+      buildQuery,
+      userId,
+      true,
+      baselineId,
+    );
+
+    if (!baseline) {
+      throw new NotFoundException('Baseline not found');
+    }
+
+    return baseline;
+  }
+
+  async listBaselinesForUser(
+    userId: string,
+    includeArchived = false,
+  ): Promise<BaselineLibraryRow[]> {
+    return this.readBaselineLibraryRowsForUser(
+      () => this.baselineRepository.createQueryBuilder('baseline'),
+      userId,
+      includeArchived,
+    );
   }
 
   async getBaselineAssessmentDebugState(
@@ -1717,22 +1734,11 @@ export class BaselineService {
     }
 
     return this.baselineRepository.manager.transaction(async (manager) => {
-      const baseline = await manager
-        .createQueryBuilder(Baseline, 'baseline')
-        .select('baseline.id', 'id')
-        .addSelect('baseline.userId', 'userId')
-        .addSelect('baseline.status', 'status')
-        .where('baseline.id = :baselineId', { baselineId })
-        .andWhere('baseline.userId = :userId', { userId })
-        .getRawOne<{
-          id: string;
-          userId: string;
-          status: BaselineStatus;
-        }>();
-
-      if (!baseline) {
-        throw new NotFoundException('Baseline not found');
-      }
+      const baseline = await this.readBaselineLibraryRowForUser(
+        () => manager.createQueryBuilder(Baseline, 'baseline'),
+        userId,
+        baselineId,
+      );
 
       if (baseline.status === BaselineStatus.ARCHIVED) {
         throw new BadRequestException('Cannot set an archived baseline as current');
@@ -1741,18 +1747,11 @@ export class BaselineService {
       await manager.update(Baseline, { userId }, { isActive: false });
       await manager.update(Baseline, { id: baseline.id, userId }, { isActive: true });
 
-      const updated = await this.applyBaselineLibrarySafeSelect(
-        manager.createQueryBuilder(Baseline, 'baseline'),
-      )
-        .where('baseline.id = :baselineId', { baselineId: baseline.id })
-        .andWhere('baseline.userId = :userId', { userId })
-        .getRawOne<BaselineLibraryRowRaw>();
-
-      if (!updated) {
-        throw new NotFoundException('Baseline not found');
-      }
-
-      return this.mapRawBaselineLibraryRow(updated);
+      return this.readBaselineLibraryRowForUser(
+        () => manager.createQueryBuilder(Baseline, 'baseline'),
+        userId,
+        baseline.id,
+      );
     });
   }
 
@@ -1852,91 +1851,14 @@ export class BaselineService {
   async getBaselineByIdForUser(
     id: string,
     userId: string,
-  ): Promise<BaselineWithAssessmentSummary> {
-    const baseline = await this.baselineRepository.findOne({
-      where: { id, userId },
-      relations: ['sections'],
-      order: {
-        sections: {
-          order: 'ASC',
-        },
-      },
-    });
-
-    if (!baseline) {
-      throw new NotFoundException('Baseline not found');
-    }
-
-    const persistedVerifiedBaseline =
-      (baseline as any).verifiedBaseline &&
-      typeof (baseline as any).verifiedBaseline === 'object' &&
-      !Array.isArray((baseline as any).verifiedBaseline)
-        ? ((baseline as any).verifiedBaseline as Record<string, unknown>)
-        : null;
-    if (persistedVerifiedBaseline) {
-      (baseline as any).verifiedBaseline = persistedVerifiedBaseline;
-    }
-
-    let summary: BaselineAssessmentSummary | undefined;
-    try {
-      summary = (
-        await this.buildLatestAssessmentSummaryByBaselineId(userId, [baseline.id])
-      ).get(baseline.id);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const stack = error instanceof Error ? error.stack : undefined;
-      this.logger.error(
-        `Failed to load fit_assessments summary for baseline detail userId=${userId} baselineId=${id}; returning baseline detail with default summary. message=${message}`,
-        stack,
-      );
-    }
-
-    const readinessScore =
-      typeof baseline.latestBaselineScore === 'number'
-        ? baseline.latestBaselineScore
-        : null;
-
-    const structured = (baseline.sections ?? []).length
-      ? extractStructuredBaselineFromSections(baseline.sections as any)
-      : null;
-    const templateReadinessEvaluation = structured
-      ? evaluateBaselineTemplateReadiness(structured as any)
-      : null;
-
-    const [latestParsed, jobAssessment] = await Promise.all([
-      this.getLatestParsedBaseline(baseline.id),
-      typeof this.fitAssessmentRepository?.findOne === 'function'
-        ? this.fitAssessmentRepository.findOne({
-            where: {
-              userId,
-              baselineId: baseline.id,
-              jobId: Not(baseline.id),
-            } as any,
-            order: { createdAt: 'DESC', id: 'DESC' },
-          })
-        : Promise.resolve(null),
-    ]);
-
-    return {
-      ...baseline,
-      latestAssessmentSummary:
-        summary?.hasCompletedAssessment
-          ? summary
-          : this.toBaselineReadinessSummary(baseline),
-      capability: this.deriveCapabilityState({
-        baseline,
-        readinessScore,
-        hasParsedRecord: Boolean(latestParsed),
-        hasJobAssessment: Boolean(jobAssessment),
-        templateReadiness: templateReadinessEvaluation
-          ? {
-              canGenerateResume: templateReadinessEvaluation.canGenerateResume,
-              evidenceThreshold: templateReadinessEvaluation.evidence.threshold,
-              degraded: templateReadinessEvaluation.evidence.degraded,
-            }
-          : null,
-      }),
-    };
+  ): Promise<BaselineLibraryRow> {
+    return this.readBaselineLibraryRowForUser(
+      () =>
+        (this.baselineRepository as any).createQueryBuilder?.('baseline') ??
+        this.baselineRepository.manager.createQueryBuilder(Baseline, 'baseline'),
+      userId,
+      id,
+    );
   }
 
   private deriveBaselineReadinessScore(baseline: Baseline): number {
@@ -2033,12 +1955,13 @@ export class BaselineService {
     }
 
     const result = await this.getBaselineByIdForUser(baselineId, userId);
+    const latestAssessmentSummary = this.toBaselineReadinessSummary(result as any);
     if (process.env.NODE_ENV !== 'production') {
       this.logger.log(
-        `analyzeBaselineReadiness mapped summary baselineId=${baselineId} latestAssessmentId=${result.latestAssessmentSummary.latestAssessmentId ?? 'null'} hasCompletedAssessment=${result.latestAssessmentSummary.hasCompletedAssessment} latestFitScore=${result.latestAssessmentSummary.latestFitScore ?? 'null'}`,
+        `analyzeBaselineReadiness mapped summary baselineId=${baselineId} latestAssessmentId=${latestAssessmentSummary.latestAssessmentId ?? 'null'} hasCompletedAssessment=${latestAssessmentSummary.hasCompletedAssessment} latestFitScore=${latestAssessmentSummary.latestFitScore ?? 'null'}`,
       );
     }
-    return result;
+    return { ...result, latestAssessmentSummary };
   }
 
   async recordBaselineAnalysisScore(
