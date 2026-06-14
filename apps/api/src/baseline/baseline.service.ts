@@ -282,35 +282,35 @@ export type BaselineLibraryRow = Pick<
 >;
 
 const BASELINE_LIBRARY_SAFE_SELECT_COLUMNS = [
-  'baseline.id',
-  'baseline.userId',
-  'baseline.versionNumber',
-  'baseline.isActive',
-  'baseline.originalFilename',
-  'baseline.mimeType',
-  'baseline.storagePath',
-  'baseline.hash',
-  'baseline.status',
-  'baseline.archivedAt',
-  'baseline.originalBaselineScore',
-  'baseline.latestBaselineScore',
-  'baseline.latestAssessmentId',
-  'baseline.firstAnalyzedAt',
-  'baseline.lastAnalyzedAt',
-  'baseline.isSynthetic',
-  'baseline.syntheticScenarioKey',
-  'baseline.syntheticRunId',
-  'baseline.syntheticCreatedAt',
-  'baseline.preserveFromCleanup',
-  'baseline.createdAt',
-  'baseline.updatedAt',
+  ['baseline.id', 'id'],
+  ['baseline.userId', 'userId'],
+  ['baseline.versionNumber', 'versionNumber'],
+  ['baseline.isActive', 'isActive'],
+  ['baseline.originalFilename', 'originalFilename'],
+  ['baseline.mimeType', 'mimeType'],
+  ['baseline.storagePath', 'storagePath'],
+  ['baseline.hash', 'hash'],
+  ['baseline.status', 'status'],
+  ['baseline.archivedAt', 'archivedAt'],
+  ['baseline.originalBaselineScore', 'originalBaselineScore'],
+  ['baseline.latestBaselineScore', 'latestBaselineScore'],
+  ['baseline.latestAssessmentId', 'latestAssessmentId'],
+  ['baseline.firstAnalyzedAt', 'firstAnalyzedAt'],
+  ['baseline.lastAnalyzedAt', 'lastAnalyzedAt'],
+  ['baseline.isSynthetic', 'isSynthetic'],
+  ['baseline.syntheticScenarioKey', 'syntheticScenarioKey'],
+  ['baseline.syntheticRunId', 'syntheticRunId'],
+  ['baseline.syntheticCreatedAt', 'syntheticCreatedAt'],
+  ['baseline.preserveFromCleanup', 'preserveFromCleanup'],
+  ['baseline.createdAt', 'createdAt'],
+  ['baseline.updatedAt', 'updatedAt'],
 ] as const;
 
 type BaselineLibraryRowRaw = {
   id: string;
   userId: string;
-  versionNumber: number | null;
-  isActive: boolean | null;
+  versionNumber: number;
+  isActive: boolean;
   originalFilename: string;
   mimeType: string;
   storagePath: string;
@@ -322,18 +322,18 @@ type BaselineLibraryRowRaw = {
   latestAssessmentId: string | null;
   firstAnalyzedAt: Date | null;
   lastAnalyzedAt: Date | null;
-  isSynthetic: boolean | null;
+  isSynthetic: boolean;
   syntheticScenarioKey: string | null;
   syntheticRunId: string | null;
   syntheticCreatedAt: Date | null;
-  preserveFromCleanup: boolean | null;
+  preserveFromCleanup: boolean;
   createdAt: Date;
   updatedAt: Date;
 };
 
 type BaselineLibraryRowSelectQueryBuilder = Pick<
   SelectQueryBuilder<Baseline>,
-  'select' | 'where' | 'andWhere' | 'orderBy' | 'getRawMany' | 'getRawOne'
+  'select' | 'addSelect' | 'where' | 'andWhere' | 'orderBy' | 'getRawMany' | 'getRawOne'
 >;
 
 export type BaselineAnalysisTrace = {
@@ -1521,15 +1521,20 @@ export class BaselineService {
   private applyBaselineLibrarySafeSelect(
     query: BaselineLibraryRowSelectQueryBuilder,
   ): BaselineLibraryRowSelectQueryBuilder {
-    return query.select([...BASELINE_LIBRARY_SAFE_SELECT_COLUMNS]);
+    const [firstColumn, ...otherColumns] = BASELINE_LIBRARY_SAFE_SELECT_COLUMNS;
+    query.select(firstColumn[0], firstColumn[1]);
+    for (const [column, alias] of otherColumns) {
+      query.addSelect(column, alias);
+    }
+    return query;
   }
 
   private mapRawBaselineLibraryRow(row: BaselineLibraryRowRaw): BaselineLibraryRow {
     return {
       id: row.id,
       userId: row.userId,
-      versionNumber: row.versionNumber ?? 0,
-      isActive: row.isActive ?? false,
+      versionNumber: row.versionNumber,
+      isActive: row.isActive,
       originalFilename: row.originalFilename,
       mimeType: row.mimeType,
       storagePath: row.storagePath,
@@ -1541,11 +1546,11 @@ export class BaselineService {
       latestAssessmentId: row.latestAssessmentId ?? null,
       firstAnalyzedAt: row.firstAnalyzedAt,
       lastAnalyzedAt: row.lastAnalyzedAt,
-      isSynthetic: row.isSynthetic ?? false,
+      isSynthetic: row.isSynthetic,
       syntheticScenarioKey: row.syntheticScenarioKey,
       syntheticRunId: row.syntheticRunId,
       syntheticCreatedAt: row.syntheticCreatedAt,
-      preserveFromCleanup: row.preserveFromCleanup ?? false,
+      preserveFromCleanup: row.preserveFromCleanup,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

@@ -323,6 +323,7 @@ const ingestionResult = {
   it('returns canonical baseline library rows from the baselines repository only', async () => {
     const queryBuilder = {
       select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
@@ -333,30 +334,8 @@ const ingestionResult = {
     const result = await service.listBaselinesForUser('user-1');
 
     expect(baselineRepository.createQueryBuilder).toHaveBeenCalledWith('baseline');
-    expect(queryBuilder.select).toHaveBeenCalledWith([
-      'baseline.id',
-      'baseline.userId',
-      'baseline.versionNumber',
-      'baseline.isActive',
-      'baseline.originalFilename',
-      'baseline.mimeType',
-      'baseline.storagePath',
-      'baseline.hash',
-      'baseline.status',
-      'baseline.archivedAt',
-      'baseline.originalBaselineScore',
-      'baseline.latestBaselineScore',
-      'baseline.latestAssessmentId',
-      'baseline.firstAnalyzedAt',
-      'baseline.lastAnalyzedAt',
-      'baseline.isSynthetic',
-      'baseline.syntheticScenarioKey',
-      'baseline.syntheticRunId',
-      'baseline.syntheticCreatedAt',
-      'baseline.preserveFromCleanup',
-      'baseline.createdAt',
-      'baseline.updatedAt',
-    ]);
+    expect(queryBuilder.select).toHaveBeenCalledWith('baseline.id', 'id');
+    expect(queryBuilder.addSelect).toHaveBeenCalledWith('baseline.userId', 'userId');
     expect(queryBuilder.where).toHaveBeenCalledWith('baseline.userId = :userId', {
       userId: 'user-1',
     });
@@ -390,6 +369,7 @@ const ingestionResult = {
   it('returns canonical baseline library rows from the baselines repository only', async () => {
     const queryBuilder = {
       select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
@@ -400,30 +380,8 @@ const ingestionResult = {
     const result = await service.getBaselineByIdForUser('b-1', 'user-1');
 
     expect(baselineRepository.createQueryBuilder).toHaveBeenCalledWith('baseline');
-    expect(queryBuilder.select).toHaveBeenCalledWith([
-      'baseline.id',
-      'baseline.userId',
-      'baseline.versionNumber',
-      'baseline.isActive',
-      'baseline.originalFilename',
-      'baseline.mimeType',
-      'baseline.storagePath',
-      'baseline.hash',
-      'baseline.status',
-      'baseline.archivedAt',
-      'baseline.originalBaselineScore',
-      'baseline.latestBaselineScore',
-      'baseline.latestAssessmentId',
-      'baseline.firstAnalyzedAt',
-      'baseline.lastAnalyzedAt',
-      'baseline.isSynthetic',
-      'baseline.syntheticScenarioKey',
-      'baseline.syntheticRunId',
-      'baseline.syntheticCreatedAt',
-      'baseline.preserveFromCleanup',
-      'baseline.createdAt',
-      'baseline.updatedAt',
-    ]);
+    expect(queryBuilder.select).toHaveBeenCalledWith('baseline.id', 'id');
+    expect(queryBuilder.addSelect).toHaveBeenCalledWith('baseline.userId', 'userId');
     expect(queryBuilder.where).toHaveBeenCalledWith('baseline.userId = :userId', {
       userId: 'user-1',
     });
@@ -451,6 +409,7 @@ const ingestionResult = {
     } as any;
     const queryBuilder = {
       select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
@@ -478,6 +437,7 @@ const ingestionResult = {
     } as any;
     const queryBuilder = {
       select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
@@ -649,6 +609,7 @@ const ingestionResult = {
   it('does not load assessment summaries when listing baselines', async () => {
     const queryBuilder = {
       select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
