@@ -1683,9 +1683,7 @@ export class AnalysisService {
       );
     }
 
-    return this.getFitAssessmentById(userId, result.assessmentId, {
-      skipFreshRecompute: true,
-    });
+    return this.getFitAssessmentById(userId, result.assessmentId);
   }
 
   private buildCompatibilityDebugPayload({
@@ -4447,39 +4445,123 @@ export class AnalysisService {
   async getFitAssessmentById(
     userId: string,
     assessmentId: string,
-    options?: { forceFreshRecompute?: boolean; skipFreshRecompute?: boolean },
   ) {
-    const assessment = await this.fitAssessmentRepository.findOne({
-      where: { id: assessmentId, userId },
-    });
+    const assessment = await this.fitAssessmentRepository
+      .createQueryBuilder('assessment')
+      .select([
+        'assessment.id',
+        'assessment.userId',
+        'assessment.jobId',
+        'assessment.baselineId',
+        'assessment.baselineVersion',
+        'assessment.overallScore',
+        'assessment.verdict',
+        'assessment.dimensionScores',
+        'assessment.strengths',
+        'assessment.gaps',
+        'assessment.complianceFlags',
+        'assessment.confidenceScore',
+        'assessment.confidenceReasons',
+        'assessment.scoringReliability',
+        'assessment.scoringReliabilityReason',
+        'assessment.scoringV2',
+        'assessment.jobAnalysis',
+        'assessment.fitScore',
+        'assessment.inputsHash',
+        'assessment.createdAt',
+      ])
+      .where('assessment.id = :assessmentId', { assessmentId })
+      .andWhere('assessment.userId = :userId', { userId })
+      .getOne();
 
     if (!assessment) {
       throw new NotFoundException('Fit assessment not found');
     }
 
-    if (options?.forceFreshRecompute && !options?.skipFreshRecompute) {
-      // Intentional beta stabilization:
-      // Studio fetches run a full live recompute to guarantee canonical, current claim status truth.
-      // Reintroduce caching/persistence optimizations only after stale-read invalidation is proven reliable.
-      const freshRun = await this.runFitAssessment(userId, {
-        jobId: assessment.jobId,
-        baselineId: assessment.baselineId,
-        baselineVersion: assessment.baselineVersion ?? undefined,
-      });
+    const requiredFields: Array<[keyof FitAssessment, string]> = [
+      ['jobId', 'jobId'],
+      ['baselineId', 'baselineId'],
+      ['overallScore', 'overallScore'],
+      ['verdict', 'verdict'],
+      ['dimensionScores', 'dimensionScores'],
+      ['strengths', 'strengths'],
+      ['gaps', 'gaps'],
+      ['complianceFlags', 'complianceFlags'],
+      ['createdAt', 'createdAt'],
+    ];
 
-      if (freshRun.status === 'ok' && freshRun.assessmentId) {
-        return this.getFitAssessmentById(userId, freshRun.assessmentId, {
-          skipFreshRecompute: true,
-        });
-      }
+    const missingField = requiredFields.find(([property]) => {
+      const value = assessment[property];
+      return value === null || value === undefined;
+    });
+
+    if (missingField) {
+      throw new ConflictException({
+        message: 'Persisted fit assessment is missing a required field',
+        missingField: missingField[1],
+        assessmentId,
+      });
     }
 
     if (this.isDevMode()) {
       this.logger.log(
-        `[fit-score] assessment_rehydrated assessmentId=${assessmentId} forceFreshRecompute=${Boolean(options?.forceFreshRecompute)} skipFreshRecompute=${Boolean(options?.skipFreshRecompute)} score=${assessment.overallScore}`,
+        `[fit-score] assessment_rehydrated assessmentId=${assessmentId} score=${assessment.overallScore}`,
       );
     }
-    return this.buildLatestAssessmentPayload(assessment);
+    const fallbackDimensionScores = {
+      role_scope_and_seniority: assessment.dimensionScores?.experienceAlignment ?? 0,
+      support_operations_and_process_rigor: assessment.dimensionScores?.leadershipLevel ?? 0,
+      tooling_and_platform_experience: assessment.dimensionScores?.technicalPlatformFit ?? 0,
+      domain_and_business_context: assessment.dimensionScores?.industryContext ?? 0,
+      change_leadership_and_customer_advocacy:
+        assessment.dimensionScores?.strategicTacticalFit ?? 0,
+    };
+    const latestScore = assessment.scoringV2?.score ?? assessment.overallScore;
+    return {
+      ok: true,
+      assessmentId: assessment.id,
+      jobId: assessment.jobId,
+      baselineId: assessment.baselineId,
+      baselineVersionId: null,
+      baselineVersion: assessment.baselineVersion,
+      fit_score: latestScore,
+      overall_score: latestScore,
+      overallScore: latestScore,
+      score: latestScore,
+      verdict: assessment.verdict,
+      dimensionScores: assessment.scoringV2
+        ? this.mapCxFitV2ToLegacyDimensionScores(assessment.scoringV2)
+        : assessment.dimensionScores,
+      strengths: assessment.strengths ?? [],
+      gaps: assessment.gaps ?? [],
+      criticalGaps: (assessment.gaps ?? []).map((gap, index) => ({
+        gapId: `persisted_gap_${index + 1}`,
+        title: gap,
+        description: `Coverage is limited for ${gap}.`,
+        severityScore: 0.5,
+        requirementEvidence: gap,
+        baselineEvidence: null,
+        reasoning: 'Derived from persisted fit assessment.',
+      })),
+      recommendedActions: [],
+      complianceFlags: assessment.complianceFlags ?? [],
+      summary: null,
+      scoringReliability: assessment.scoringReliability ?? 'ok',
+      ...(assessment.scoringReliabilityReason
+        ? { scoringReliabilityReason: assessment.scoringReliabilityReason }
+        : {}),
+      confidenceScore: assessment.confidenceScore ?? null,
+      confidenceReasons: assessment.confidenceReasons ?? [],
+      createdAt: assessment.createdAt,
+      jobAnalysis: assessment.jobAnalysis ?? null,
+      fitScore: assessment.fitScore ?? null,
+      scoring_v2: assessment.scoringV2,
+      supportingSignals: [],
+      baselineEvidence: [],
+      verification_coverage: null,
+      score_breakdown: this.buildScoreBreakdown(assessment),
+      narrative: null,
+    };
   }
 
   async getLatestAssessmentForBaseline(

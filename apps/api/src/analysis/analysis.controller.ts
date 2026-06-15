@@ -168,11 +168,7 @@ export class AnalysisController {
     }
 
     return withTimeout('analysis', () =>
-      this.analysisService.getFitAssessmentById(userId, assessmentId, {
-        // AUTHORITY: Canonical-truth lane.
-        // Studio consumers require a fresh recompute to guarantee up-to-date claim status truth.
-        forceFreshRecompute: true,
-      }),
+      this.analysisService.getFitAssessmentById(userId, assessmentId),
     );
   }
 
