@@ -7127,48 +7127,6 @@ export default function StudioPage() {
   }, [effectiveRequestedAnalysisId]);
 
   useEffect(() => {
-    if (!requestedAnalysisId) return;
-    if (!analysis) return;
-    if (baselinesLoading) return;
-    // If the user updated their current baseline but is returning to Studio via a stale pinned
-    // analysisId (e.g. old results link), do not keep hydrating Studio against the old lineage
-    // unless the URL explicitly pins a baselineId.
-    if (requestedBaselineId) return;
-    const currentBaseline =
-      baselines.find((baseline) => baseline.isActive === true && baseline.status !== "ARCHIVED") ??
-      baselines.find((baseline) => baseline.status !== "ARCHIVED") ??
-      null;
-    if (!currentBaseline?.id) return;
-    const analysisBaselineId = trimId((analysis as { baselineId?: unknown } | null)?.baselineId);
-    if (!analysisBaselineId) return;
-    if (analysisBaselineId === currentBaseline.id) return;
-
-    if (process.env.NODE_ENV !== "production" || window.localStorage.getItem("studio_debug") === "true") {
-      console.warn("[studio][stale_analysis_lineage_redirect]", {
-        requestedAnalysisId,
-        analysisBaselineId,
-        currentBaselineId: currentBaseline.id,
-      });
-    }
-
-    const params = new URLSearchParams(searchParamValue);
-    params.delete("analysisId");
-    params.delete("assessmentId");
-    params.delete("baselineId");
-    params.delete("baselineVersionId");
-    const next = params.toString();
-    void router.replace(next ? `/studio?${next}` : "/studio");
-  }, [
-    analysis,
-    baselines,
-    baselinesLoading,
-    requestedAnalysisId,
-    requestedBaselineId,
-    router,
-    searchParamValue,
-  ]);
-
-  useEffect(() => {
     if (!requestedAnalysisId) {
       setContextHydrationMessage(null);
       return;
@@ -9129,7 +9087,7 @@ export default function StudioPage() {
             void router.push(fitReviewHref);
           },
           analyzeAnotherRole: () => {
-            void router.push("/analyze");
+            void router.push(resultsHref);
           },
           learnSupportedInputs: () => {
             void router.push(resultsHref);
@@ -12890,7 +12848,7 @@ export default function StudioPage() {
               Something changed or couldnâ€™t be verified. Reload your analysis to continue.
             </p>
             <div>
-              <FormButton onClick={() => void router.push("/analyze")}>Run Analyze again</FormButton>
+              <FormButton onClick={() => void router.push(resultsHref)}>Run Analyze again</FormButton>
             </div>
           </div>
         </Alert>

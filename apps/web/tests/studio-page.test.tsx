@@ -744,6 +744,7 @@ describe("Studio page UX", () => {
       baselineId: "base-1",
       baselineVersionId: "base-version-1",
     });
+    mockRouterPush.mockClear();
     mockRouterReplace.mockClear();
   });
 
@@ -778,6 +779,21 @@ describe("Studio page UX", () => {
     expect(
       screen.getAllByText("I bring verified leadership and operational experience aligned to this role.").length,
     ).toBeGreaterThan(0);
+  }, 20000);
+
+  it("hydrates from the persisted assessment id and never redirects to Analyze", async () => {
+    const fetchMock = installCompletedArtifactFetches();
+
+    renderStudio();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => {
+      const urls = fetchMock.mock.calls.map(([input]) => rawFetchUrl(input));
+      expect(urls.some((url) => url.includes("/api/analysis/fit-assessments/analysis-1"))).toBe(true);
+    });
+
+    expect(mockRouterPush).not.toHaveBeenCalledWith("/analyze");
+    expect(mockRouterPush.mock.calls.some(([href]) => String(href).includes("/analyze"))).toBe(false);
   }, 20000);
 
   it("treats stale completed artifacts as requiring regeneration and does not render their content as current output", async () => {
