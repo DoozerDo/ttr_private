@@ -58,19 +58,17 @@ import { BetaOpsController } from './ops/beta-ops.controller';
 
         if (isProd && !databaseUrl) {
           throw new Error(
-            'Missing DATABASE_URL environment variable for production startup.',
+            'DATABASE_URL is required for production startup.',
           );
         }
 
         return {
-        type: 'postgres',
-        url:
-          databaseUrl ||
-          'postgresql://postgres:postgres@db:5432/targetthisrole',
-        entities: [User],
-        synchronize:
-          configService.get<string>('TYPEORM_SYNCHRONIZE') === 'true',
-        autoLoadEntities: true,
+          type: 'postgres',
+          url: isProd ? databaseUrl : databaseUrl || 'postgresql://postgres:postgres@db:5432/targetthisrole',
+          entities: [User],
+          synchronize:
+            configService.get<string>('TYPEORM_SYNCHRONIZE') === 'true',
+          autoLoadEntities: true,
         };
       },
     }),
