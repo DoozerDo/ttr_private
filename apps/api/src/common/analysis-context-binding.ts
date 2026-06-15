@@ -26,6 +26,79 @@ type ContextDetails = {
   };
 };
 
+export type PersistedFitAssessmentReadModel = Pick<
+  FitAssessment,
+  | 'id'
+  | 'userId'
+  | 'jobId'
+  | 'baselineId'
+  | 'baselineVersion'
+  | 'overallScore'
+  | 'verdict'
+  | 'dimensionScores'
+  | 'strengths'
+  | 'gaps'
+  | 'complianceFlags'
+  | 'confidenceScore'
+  | 'confidenceReasons'
+  | 'scoringReliability'
+  | 'scoringReliabilityReason'
+  | 'scoringV2'
+  | 'fitScore'
+  | 'inputsHash'
+  | 'createdAt'
+> & {
+  jobAnalysis: null;
+};
+
+const persistedFitAssessmentReadModelSelect: string[] = [
+  'assessment.id',
+  'assessment.userId',
+  'assessment.jobId',
+  'assessment.baselineId',
+  'assessment.baselineVersion',
+  'assessment.overallScore',
+  'assessment.verdict',
+  'assessment.dimensionScores',
+  'assessment.strengths',
+  'assessment.gaps',
+  'assessment.complianceFlags',
+  'assessment.confidenceScore',
+  'assessment.confidenceReasons',
+  'assessment.scoringReliability',
+  'assessment.scoringReliabilityReason',
+  'assessment.scoringV2',
+  'assessment.fitScore',
+  'assessment.inputsHash',
+  'assessment.createdAt',
+] as const;
+
+export function buildPersistedFitAssessmentReadModelQuery(
+  repository: Repository<FitAssessment>,
+  assessmentId: string,
+  userId: string,
+) {
+  return repository
+    .createQueryBuilder('assessment')
+    .select(persistedFitAssessmentReadModelSelect)
+    .where('assessment.id = :assessmentId', { assessmentId })
+    .andWhere('assessment.userId = :userId', { userId });
+}
+
+export async function loadPersistedFitAssessmentReadModel(
+  repository: Repository<FitAssessment>,
+  assessmentId: string,
+  userId: string,
+): Promise<PersistedFitAssessmentReadModel | null> {
+  const assessment = await buildPersistedFitAssessmentReadModelQuery(
+    repository,
+    assessmentId,
+    userId,
+  ).getOne();
+
+  return assessment ? { ...assessment, jobAnalysis: null } : null;
+}
+
 function throwTypedError(
   code:
     | 'analysis_context_mismatch'
@@ -90,22 +163,16 @@ export async function validateAnalysisContext({
     );
   }
 
-  const assessment = await analysisRepository.findOne({
-    where: { id: normalizedAnalysisId },
-  });
+  const assessment = await loadPersistedFitAssessmentReadModel(
+    analysisRepository,
+    normalizedAnalysisId,
+    userId,
+  );
 
   if (!assessment) {
     throwTypedError(
       'analysis_not_found',
       'Referenced analysis was not found.',
-      { analysisId: normalizedAnalysisId },
-    );
-  }
-
-  if (assessment.userId !== userId) {
-    throwTypedError(
-      'analysis_not_owned',
-      'Referenced analysis does not belong to this user.',
       { analysisId: normalizedAnalysisId },
     );
   }
@@ -148,5 +215,5 @@ export async function validateAnalysisContext({
     );
   }
 
-  return assessment;
+  return assessment as FitAssessment;
 }

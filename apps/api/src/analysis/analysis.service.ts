@@ -109,6 +109,7 @@ import { ResumeService } from '../resume/resume.service';
 import { CoverLettersService } from '../cover-letters/cover-letters.service';
 import { VERIFIED_ONLY_GENERATION_THRESHOLD } from '../config/verifiedOnlyGenerationThreshold';
 import { StudioArtifact, StudioArtifactLifecycleStatus } from '../studio-artifacts/studio-artifact.entity';
+import { loadPersistedFitAssessmentReadModel } from '../common/analysis-context-binding';
 
 export type AnalysisRequest = {
   baselineId: string;
@@ -4446,33 +4447,11 @@ export class AnalysisService {
     userId: string,
     assessmentId: string,
   ) {
-    const assessment = await this.fitAssessmentRepository
-      .createQueryBuilder('assessment')
-      .select([
-        'assessment.id',
-        'assessment.userId',
-        'assessment.jobId',
-        'assessment.baselineId',
-        'assessment.baselineVersion',
-        'assessment.overallScore',
-        'assessment.verdict',
-        'assessment.dimensionScores',
-        'assessment.strengths',
-        'assessment.gaps',
-        'assessment.complianceFlags',
-        'assessment.confidenceScore',
-        'assessment.confidenceReasons',
-        'assessment.scoringReliability',
-        'assessment.scoringReliabilityReason',
-        'assessment.scoringV2',
-        'assessment.jobAnalysis',
-        'assessment.fitScore',
-        'assessment.inputsHash',
-        'assessment.createdAt',
-      ])
-      .where('assessment.id = :assessmentId', { assessmentId })
-      .andWhere('assessment.userId = :userId', { userId })
-      .getOne();
+    const assessment = await loadPersistedFitAssessmentReadModel(
+      this.fitAssessmentRepository,
+      assessmentId,
+      userId,
+    );
 
     if (!assessment) {
       throw new NotFoundException('Fit assessment not found');
@@ -4553,13 +4532,13 @@ export class AnalysisService {
       confidenceScore: assessment.confidenceScore ?? null,
       confidenceReasons: assessment.confidenceReasons ?? [],
       createdAt: assessment.createdAt,
-      jobAnalysis: assessment.jobAnalysis ?? null,
+      jobAnalysis: null,
       fitScore: assessment.fitScore ?? null,
       scoring_v2: assessment.scoringV2,
       supportingSignals: [],
       baselineEvidence: [],
       verification_coverage: null,
-      score_breakdown: this.buildScoreBreakdown(assessment),
+      score_breakdown: this.buildScoreBreakdown(assessment as FitAssessment),
       narrative: null,
     };
   }
