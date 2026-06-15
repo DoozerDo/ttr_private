@@ -45,7 +45,11 @@ describe('AnalysisService - fit scores contract', () => {
   let service: AnalysisService;
   let complianceService: ComplianceService;
   let baselineVersionRepository: { findOne: jest.Mock };
-  let baselineRepository: { findOne: jest.Mock; update: jest.Mock };
+  let baselineRepository: {
+    findOne: jest.Mock;
+    update: jest.Mock;
+    createQueryBuilder: jest.Mock;
+  };
   let usersRepository: { findOne: jest.Mock; update: jest.Mock; save: jest.Mock };
   let fitAssessmentRepository: {
     create: jest.Mock;
@@ -104,6 +108,95 @@ describe('AnalysisService - fit scores contract', () => {
     storagePath: '/tmp/resume.pdf',
     hash: 'hash',
     sections: baselineSections,
+    parsedRecords: [
+      {
+        id: 'parsed-1',
+        baselineId: 'b-1',
+        parsedJson: {
+          schema_version: 'baseline_schema_v1',
+          user_verified: true,
+          identity: {
+            full_name: 'Test User',
+            summary: 'Test',
+            current_title: 'Engineer',
+            current_company: 'ExampleCo',
+            location: 'Remote',
+          },
+          experience: [
+            {
+              company: 'ExampleCo',
+              role: 'Engineer',
+              company_name: 'ExampleCo',
+              role_title: 'Engineer',
+              start_date: '2020-01',
+              end_date: '2021-01',
+              evidence: [],
+              details_text: 'Led ops.',
+            },
+          ],
+          education: [],
+          skills: [],
+          people_leadership: {
+            direct_reports: null,
+            managers_led: null,
+            global_teams: null,
+          },
+          operational_ownership: {
+            functions_owned: [],
+            process_design: null,
+            process_scaling: null,
+          },
+          tooling_and_platforms: {
+            tools: [],
+            ownership_level: 'unknown',
+          },
+          cross_functional_partnership: {
+            product: null,
+            engineering: null,
+            sales_cs: null,
+            executive: null,
+          },
+          customer_advocacy: {
+            executive_escalations: null,
+            voice_of_customer: null,
+            post_incident_rca: null,
+          },
+          scale_and_scope: {
+            customer_segment: 'unknown',
+            geo_scope: 'unknown',
+            org_stage: 'unknown',
+          },
+          metrics_and_outcomes: {
+            metrics_present: false,
+            metrics: [],
+          },
+          skills_and_tools: {
+            tools: [],
+            methodologies: [],
+            domains: [],
+          },
+          system_generated_read_only: {
+            missing_fields: [],
+            ambiguity_flags: [],
+            low_confidence_extractions: [],
+          },
+        },
+        resumeV2Json: {
+          heading: { name: 'Test User', contactLine: 'test@example.com' },
+          summary: 'Test',
+          experience: [
+            {
+              company: 'ExampleCo',
+              roleTitle: 'Engineer',
+              startDate: '2020-01',
+              endDate: '2021-01',
+              bullets: ['Led ops.'],
+            },
+          ],
+        },
+        createdAt: new Date(),
+      } as any,
+    ],
     versions: [],
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -217,6 +310,95 @@ const sampleScoringV2: CxFitV2Result = {
     baselineRepository = {
       findOne: jest.fn().mockResolvedValue(baseline),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({
+          ...baseline,
+          sections: baselineSections,
+          parsedRecords: [
+            {
+              id: 'parsed-1',
+              baselineId: 'b-1',
+              parsedJson: {
+                schema_version: 'baseline_schema_v1',
+                user_verified: true,
+                identity: {
+                  full_name: 'Test User',
+                  summary: 'Test',
+                  current_title: 'Engineer',
+                  current_company: 'ExampleCo',
+                  location: 'Remote',
+                },
+                experience: [],
+                education: [],
+                skills: [],
+                people_leadership: {
+                  direct_reports: null,
+                  managers_led: null,
+                  global_teams: null,
+                },
+                operational_ownership: {
+                  functions_owned: [],
+                  process_design: null,
+                  process_scaling: null,
+                },
+                tooling_and_platforms: {
+                  tools: [],
+                  ownership_level: 'unknown',
+                },
+                cross_functional_partnership: {
+                  product: null,
+                  engineering: null,
+                  sales_cs: null,
+                  executive: null,
+                },
+                customer_advocacy: {
+                  executive_escalations: null,
+                  voice_of_customer: null,
+                  post_incident_rca: null,
+                },
+                scale_and_scope: {
+                  customer_segment: 'unknown',
+                  geo_scope: 'unknown',
+                  org_stage: 'unknown',
+                },
+                metrics_and_outcomes: {
+                  metrics_present: false,
+                  metrics: [],
+                },
+                skills_and_tools: {
+                  tools: [],
+                  methodologies: [],
+                  domains: [],
+                },
+                system_generated_read_only: {
+                  missing_fields: [],
+                  ambiguity_flags: [],
+                  low_confidence_extractions: [],
+                },
+              },
+              resumeV2Json: {
+                heading: { name: 'Test User', contactLine: 'test@example.com' },
+                summary: 'Test',
+                experience: [
+                  {
+                    company: 'ExampleCo',
+                    roleTitle: 'Engineer',
+                    startDate: '2020-01',
+                    endDate: '2021-01',
+                    bullets: ['Led ops.'],
+                  },
+                ],
+              },
+              createdAt: new Date(),
+            },
+          ],
+        }),
+      }),
     };
     usersRepository = {
       findOne: jest.fn().mockResolvedValue({
@@ -1301,6 +1483,50 @@ const sampleScoringV2: CxFitV2Result = {
     );
   });
 
+  it('loads the canonical baseline for runFitAssessment without verifiedBaseline and scores once', async () => {
+    await service.runFitAssessment('user-1', {
+      baselineId: 'b-1',
+      jobId: 'job-1',
+      baselineVersion: 2,
+    });
+
+    const queryBuilder = baselineRepository.createQueryBuilder.mock.results[0]?.value;
+    expect(baselineRepository.createQueryBuilder).toHaveBeenCalledWith('baseline');
+    expect(queryBuilder.select).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        'baseline.id',
+        'baseline.userId',
+        'baseline.version',
+        'baseline.versionNumber',
+        'baseline.originalFilename',
+        'baseline.mimeType',
+        'baseline.storagePath',
+        'baseline.hash',
+        'baseline.status',
+        'baseline.isActive',
+        'baseline.archivedAt',
+        'baseline.originalBaselineScore',
+        'baseline.latestBaselineScore',
+        'baseline.latestAssessmentId',
+        'baseline.firstAnalyzedAt',
+        'baseline.lastAnalyzedAt',
+        'baseline.isSynthetic',
+        'baseline.syntheticScenarioKey',
+        'baseline.syntheticRunId',
+        'baseline.syntheticCreatedAt',
+        'baseline.preserveFromCleanup',
+        'baseline.createdAt',
+        'baseline.updatedAt',
+      ]),
+    );
+    expect(
+      (queryBuilder.select.mock.calls[0][0] as string[]).some((value) =>
+        value.includes('verifiedBaseline'),
+      ),
+    ).toBe(false);
+    expect(fitScoringServiceMock.scoreCxFitV2Authenticated).toHaveBeenCalledTimes(1);
+  });
+
   it('reloads persisted jobAnalysis and fitScore from the saved fit assessment', async () => {
     const persistedJobAnalysis = {
       jobText: 'persisted canonical job analysis',
@@ -2070,6 +2296,14 @@ const sampleScoringV2: CxFitV2Result = {
     baselineRepo.findOne
       .mockResolvedValueOnce(orderedBaseline)
       .mockResolvedValueOnce(orderedBaseline);
+    (baselineRepo as any).createQueryBuilder = jest.fn().mockReturnValue({
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(orderedBaseline),
+    });
     const baselineSectionRepo = service['baselineSectionRepository'] as {
       find: jest.Mock;
     };
@@ -2170,6 +2404,14 @@ const sampleScoringV2: CxFitV2Result = {
     baselineRepo.findOne
       .mockResolvedValueOnce(semanticBaseline)
       .mockResolvedValueOnce(semanticBaseline);
+    (baselineRepo as any).createQueryBuilder = jest.fn().mockReturnValue({
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(semanticBaseline),
+    });
 
     jobRepository.findOne
       .mockResolvedValueOnce(initialJob)
@@ -2213,6 +2455,14 @@ const sampleScoringV2: CxFitV2Result = {
       findOne: jest.Mock;
     };
     baselineRepo.findOne.mockResolvedValue(fallbackBaseline);
+    (baselineRepo as any).createQueryBuilder = jest.fn().mockReturnValue({
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(fallbackBaseline),
+    });
     jobRepository.findOne.mockResolvedValue({
       ...defaultJobRecord,
       id: 'job-1',
@@ -2325,6 +2575,18 @@ const sampleScoringV2: CxFitV2Result = {
       ...baseline,
       hash: null,
       parsedRecords: [parsedRecord],
+    });
+    (baselineRepo as any).createQueryBuilder = jest.fn().mockReturnValue({
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue({
+        ...baseline,
+        hash: null,
+        parsedRecords: [parsedRecord],
+      }),
     });
     const baselineSectionRepo = service['baselineSectionRepository'] as {
       find: jest.Mock;

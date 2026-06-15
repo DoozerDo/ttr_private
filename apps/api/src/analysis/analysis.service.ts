@@ -1496,6 +1496,57 @@ export class AnalysisService {
     return baseline;
   }
 
+  private async loadCanonicalBaselineForRun(userId: string, baselineId: string) {
+    const baseline = await this.baselineRepository
+      .createQueryBuilder('baseline')
+      .leftJoinAndSelect('baseline.sections', 'sections')
+      .leftJoinAndSelect('baseline.parsedRecords', 'parsedRecords')
+      .select([
+        'baseline.id',
+        'baseline.userId',
+        'baseline.version',
+        'baseline.versionNumber',
+        'baseline.originalFilename',
+        'baseline.mimeType',
+        'baseline.storagePath',
+        'baseline.hash',
+        'baseline.status',
+        'baseline.isActive',
+        'baseline.archivedAt',
+        'baseline.originalBaselineScore',
+        'baseline.latestBaselineScore',
+        'baseline.latestAssessmentId',
+        'baseline.firstAnalyzedAt',
+        'baseline.lastAnalyzedAt',
+        'baseline.isSynthetic',
+        'baseline.syntheticScenarioKey',
+        'baseline.syntheticRunId',
+        'baseline.syntheticCreatedAt',
+        'baseline.preserveFromCleanup',
+        'baseline.createdAt',
+        'baseline.updatedAt',
+        'sections',
+        'parsedRecords',
+      ])
+      .where('baseline.id = :baselineId', { baselineId })
+      .andWhere('baseline.userId = :userId', { userId })
+      .orderBy('sections.order', 'ASC')
+      .getOne();
+
+    if (!baseline) {
+      throw new NotFoundException('Baseline not found');
+    }
+
+    if (!baseline.sections?.length) {
+      baseline.sections = await this.baselineSectionRepository.find({
+        where: { baselineId: baseline.id },
+        order: { order: 'ASC' },
+      });
+    }
+
+    return baseline;
+  }
+
   private async fetchJobForUser(jobId: string, userId: string) {
     const job = await this.jobRepository.findOne({
       where: { id: jobId, userId },
@@ -2883,22 +2934,10 @@ export class AnalysisService {
         triggerType,
       });
 
-      const baseline = await this.baselineRepository.findOne({
-        where: { id: resolvedBaselineId, userId },
-        relations: ['sections', 'parsedRecords'],
-        order: { sections: { order: 'ASC' } },
-      });
-
-      if (!baseline) {
-        throw new NotFoundException('Baseline not found');
-      }
-
-      if (!baseline.sections?.length) {
-        baseline.sections = await this.baselineSectionRepository.find({
-          where: { baselineId: baseline.id },
-          order: { order: 'ASC' },
-        });
-      }
+      const baseline = await this.loadCanonicalBaselineForRun(
+        userId,
+        resolvedBaselineId,
+      );
       await this.ensureBaselineHasContent(baseline.id);
 
       const job = await this.jobRepository.findOne({
