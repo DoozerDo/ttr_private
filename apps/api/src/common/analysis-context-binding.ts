@@ -44,7 +44,6 @@ export type PersistedFitAssessmentReadModel = Pick<
   | 'scoringReliability'
   | 'scoringReliabilityReason'
   | 'scoringV2'
-  | 'fitScore'
   | 'inputsHash'
   | 'createdAt'
 > & {
@@ -68,7 +67,6 @@ const persistedFitAssessmentReadModelSelect: string[] = [
   'assessment.scoringReliability',
   'assessment.scoringReliabilityReason',
   'assessment.scoringV2',
-  'assessment.fitScore',
   'assessment.inputsHash',
   'assessment.createdAt',
 ] as const;
