@@ -3167,21 +3167,6 @@ export class AnalysisService {
       const persistenceVerdict =
         this.deriveFitAssessmentVerdictFromScore(scoringV2.score);
 
-      const debugScoring =
-        allowDebug
-          ? await this.fitScoringService.score(
-              {
-                job: canonicalJobForScoring,
-              baseline: {
-                version: baseline.version ?? null,
-                sections: sectionPayload,
-              },
-              },
-              dimensionWeights,
-              { debug: allowDebug },
-            )
-          : undefined;
-
       const gapInsights = this.gapAnalysisService.analyze({
         baselineSections: sectionPayload,
         validatedRequirements: this.gapAnalysisService.validateRequirements(
@@ -3194,7 +3179,6 @@ export class AnalysisService {
       });
       const strengths = gapInsights.strengths;
       const gaps = gapInsights.criticalGaps.map((gap) => gap.title);
-      const complianceFlags = debugScoring?.complianceFlags ?? [];
       const finalScore = scoringV2.score;
       const jobAnalysis = this.buildJobAnalysis({
         rawDescription: job?.rawDescription ?? '',
@@ -3309,9 +3293,7 @@ export class AnalysisService {
         baselineSections: complianceBaselineSections,
         generatedSections: generatedSectionsForCompliance,
         debugCompliance: Boolean(normalizedPayload.debugCompliance),
-        extraFlags: debugScoring
-          ? this.mapComplianceStringsToFlags(debugScoring.complianceFlags)
-          : undefined,
+        extraFlags: undefined,
       });
 
       logAttemptEvent?.("compliance_checked", {
@@ -3341,7 +3323,7 @@ export class AnalysisService {
         });
 
       const blockedSummary =
-        debugScoring?.summary ?? this.buildSummaryFromTerms(strengths, gaps);
+        this.buildSummaryFromTerms(strengths, gaps);
       const blockedJobDescriptionNonEmpty =
         jobTextForScoring.jobRawTextCharCount > 0;
       const blockedJobDescriptionTermsEmpty =
@@ -3490,6 +3472,10 @@ export class AnalysisService {
           },
         });
       }
+
+      const complianceFlags = (compliance.complianceFlags ?? []).map((flag) =>
+        typeof flag === 'string' ? flag : flag.code,
+      );
 
       const assessment = this.fitAssessmentRepository.create({
         userId,
@@ -3690,7 +3676,6 @@ export class AnalysisService {
         dimensionScores: legacyDimensionScores,
         complianceFlags,
         summary:
-          debugScoring?.summary ??
           this.buildSummaryFromTerms(strengths, gaps),
         scoringReliability:
           jobTextForScoring.jobRawTextCharCount > 0 &&

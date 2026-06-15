@@ -1280,6 +1280,7 @@ const sampleScoringV2: CxFitV2Result = {
         jobText: rawDescription,
       }),
     );
+    expect(fitScoringServiceMock.score).not.toHaveBeenCalled();
     expect(fitAssessmentRepository.save).toHaveBeenCalledWith(
       expect.objectContaining({
         jobAnalysis: expect.objectContaining({

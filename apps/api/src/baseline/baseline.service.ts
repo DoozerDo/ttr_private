@@ -352,7 +352,7 @@ export type BaselineAnalysisTrace = {
 };
 
 export type BaselineStrengtheningResult = {
-  baseline: Baseline;
+  baseline: BaselineLibraryRow;
   impactType: StrengtheningImpactResult['impactType'];
   changeClassification: 'no_change_duplicate' | 'refined_existing_signal' | 'new_signal_added';
   scoreDelta: number;
