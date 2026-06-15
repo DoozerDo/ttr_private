@@ -75,23 +75,44 @@ export function buildPersistedFitAssessmentReadModelQuery(
   repository: Repository<FitAssessment>,
   assessmentId: string,
   userId: string,
+  jobId?: string,
+  baselineId?: string,
 ) {
-  return repository
+  const query = repository
     .createQueryBuilder('assessment')
     .select(persistedFitAssessmentReadModelSelect)
-    .where('assessment.id = :assessmentId', { assessmentId })
-    .andWhere('assessment.userId = :userId', { userId });
+    .where('assessment.userId = :userId', { userId });
+
+  if (assessmentId?.trim()) {
+    query.andWhere('assessment.id = :assessmentId', { assessmentId });
+  } else {
+    query.orderBy('assessment.createdAt', 'DESC');
+  }
+
+  if (jobId) {
+    query.andWhere('assessment.jobId = :jobId', { jobId });
+  }
+
+  if (baselineId) {
+    query.andWhere('assessment.baselineId = :baselineId', { baselineId });
+  }
+
+  return query;
 }
 
 export async function loadPersistedFitAssessmentReadModel(
   repository: Repository<FitAssessment>,
   assessmentId: string,
   userId: string,
+  jobId?: string,
+  baselineId?: string,
 ): Promise<PersistedFitAssessmentReadModel | null> {
   const assessment = await buildPersistedFitAssessmentReadModelQuery(
     repository,
     assessmentId,
     userId,
+    jobId,
+    baselineId,
   ).getOne();
 
   return assessment ? { ...assessment, jobAnalysis: null } : null;

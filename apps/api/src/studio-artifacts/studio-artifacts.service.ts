@@ -6,6 +6,7 @@ import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialE
 import { Baseline } from '../baseline/baseline.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
+import { loadPersistedFitAssessmentReadModel } from '../common/analysis-context-binding';
 import { Job } from '../jobs/job.entity';
 import { StudioArtifact, StudioArtifactLifecycleStatus } from './studio-artifact.entity';
 import type { NormalizedResumeDocument } from '../documents/normalized-document.models';
@@ -347,23 +348,13 @@ export class StudioArtifactsService {
       this.jobRepository.findOne({
         where: { id: input.jobId, userId: input.userId },
       }),
-      input.analysisId
-        ? this.fitAssessmentRepository.findOne({
-            where: {
-              id: input.analysisId,
-              userId: input.userId,
-              jobId: input.jobId,
-              baselineId: input.baselineId,
-            },
-          })
-        : this.fitAssessmentRepository.findOne({
-            where: {
-              userId: input.userId,
-              jobId: input.jobId,
-              baselineId: input.baselineId,
-            },
-            order: { createdAt: 'DESC' },
-          }),
+      loadPersistedFitAssessmentReadModel(
+        this.fitAssessmentRepository,
+        input.analysisId ?? '',
+        input.userId,
+        input.jobId,
+        input.baselineId,
+      ),
       this.baselineRepository.findOne({
         where: { id: input.baselineId, userId: input.userId },
         relations: { sections: true, parsedRecords: true },
