@@ -3761,20 +3761,26 @@ export class AnalysisService {
         throw error;
       }
 
-      // Preserve the underlying failure in server logs. `runFitAssessment` has a
-      // user-facing generic 500 message by design, but we should never lose the
-      // original exception message/stack in production debugging.
-      const innerMessage =
+      const exceptionName =
+        error instanceof Error ? error.name : 'Error';
+      const exceptionMessage =
         error instanceof Error ? error.message : String(error);
-      const innerStack = error instanceof Error ? error.stack : undefined;
       this.logger.error(
-        `[fit-score] analysis.run unhandled_exception stage=${currentStage} baselineId=${context.baselineId} jobId=${context.jobId} triggerType=${context.triggerType} message=${innerMessage}`,
-        innerStack,
+        `[fit-score] analysis.run unhandled_exception stage=${currentStage} baselineId=${context.baselineId} jobId=${context.jobId} triggerType=${context.triggerType} exceptionName=${exceptionName} exceptionMessage=${exceptionMessage}`,
+        error instanceof Error ? error.stack : undefined,
       );
 
-      throw new InternalServerErrorException(
-        'Unexpected error while running fit assessment',
-      );
+      throw new InternalServerErrorException({
+        error: {
+          code: 'analysis_run_unhandled_exception',
+          message: 'Analysis run failed unexpectedly.',
+          exceptionName,
+          exceptionMessage,
+          failingFunction: 'AnalysisService.runFitAssessment',
+          baselineId: context.baselineId,
+          jobId: context.jobId,
+        },
+      });
     } finally {
       if (shortTextWarningKey) {
         this.clearShortTextWarningKey(shortTextWarningKey);

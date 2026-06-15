@@ -1792,7 +1792,14 @@ const sampleScoringV2: CxFitV2Result = {
         baselineVersion: 2,
       }),
     ).rejects.toMatchObject({
-      message: 'Unexpected error while running fit assessment',
+      response: expect.objectContaining({
+        error: expect.objectContaining({
+          code: 'analysis_run_unhandled_exception',
+          failingFunction: 'AnalysisService.runFitAssessment',
+          baselineId: 'b-1',
+          jobId: 'job-1',
+        }),
+      }),
     });
   });
 
@@ -2454,7 +2461,14 @@ const sampleScoringV2: CxFitV2Result = {
         jobId: 'job-1',
         baselineVersion: 2,
       }),
-    ).rejects.toThrow('Unexpected error while running fit assessment');
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        error: expect.objectContaining({
+          code: 'analysis_run_unhandled_exception',
+          failingFunction: 'AnalysisService.runFitAssessment',
+        }),
+      }),
+    });
 
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining('db write failed'),
