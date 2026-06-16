@@ -1,4 +1,14 @@
-import { BadRequestException, Controller, Get, Query, Req, UnprocessableEntityException, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  HttpException,
+  HttpStatus,
+  Query,
+  Req,
+  UnprocessableEntityException,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
 import { StudioArtifactsService } from './studio-artifacts.service';
@@ -11,6 +21,12 @@ type UserRequest = Request & {
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function getStackFirstFrame(stack: unknown): string | null {
+  if (typeof stack !== 'string') return null;
+  const frame = stack.split('\n').find((line) => line.trim().startsWith('at '));
+  return frame?.trim() ?? null;
 }
 
 @Controller('studio/artifacts')
@@ -83,21 +99,19 @@ export class StudioArtifactsController {
       return state;
     } catch (error) {
       const exception = error as { name?: unknown; message?: unknown; stack?: unknown };
-      const stackFirst10Lines =
-        typeof exception.stack === 'string'
-          ? exception.stack.split('\n').slice(0, 10).join('\n')
-          : null;
-      // eslint-disable-next-line no-console
-      console.error('[STUDIO_ARTIFACTS_GET_STATE_ERROR]', {
-        route: 'GET /studio/artifacts',
-        baselineId: baselineId.trim(),
-        baselineVersionId: baselineVersionId.trim(),
-        jobId: jobId.trim(),
-        exceptionName: typeof exception.name === 'string' ? exception.name : null,
-        exceptionMessage: typeof exception.message === 'string' ? exception.message : String(error),
-        stackFirst10Lines,
-      });
-      throw error;
+      throw new HttpException(
+        {
+          error: {
+            code: 'studio_artifacts_read_state_failed',
+            exceptionName: typeof exception.name === 'string' ? exception.name : 'Error',
+            exceptionMessage:
+              typeof exception.message === 'string' ? exception.message : String(error),
+            failingFunction: 'StudioArtifactsService.readState',
+            stackFirstFrame: getStackFirstFrame(exception.stack),
+          },
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
     }
   }
 }
