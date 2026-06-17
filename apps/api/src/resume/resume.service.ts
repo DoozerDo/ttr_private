@@ -830,10 +830,96 @@ export class ResumeService {
     jobId: string,
     baselineId?: string,
   ) {
-    return this.fitAssessmentRepository.findOne({
-      where: baselineId ? { userId, jobId, baselineId } : { userId, jobId },
-      order: { createdAt: 'DESC' },
-    });
+    return this.loadCanonicalFitAssessmentRawModel(userId, jobId, baselineId);
+  }
+
+  private async loadCanonicalFitAssessmentRawModel(
+    userId: string,
+    jobId: string,
+    assessmentId?: string,
+    baselineId?: string,
+  ): Promise<FitAssessment | null> {
+    const query = this.fitAssessmentRepository
+      .createQueryBuilder('assessment')
+      .select([
+        'assessment.id',
+        'assessment.userId',
+        'assessment.jobId',
+        'assessment.baselineId',
+        'assessment.baselineVersion',
+        'assessment.overallScore',
+        'assessment.verdict',
+        'assessment.dimensionScores',
+        'assessment.strengths',
+        'assessment.gaps',
+        'assessment.complianceFlags',
+        'assessment.confidenceScore',
+        'assessment.confidenceReasons',
+        'assessment.scoringReliability',
+        'assessment.scoringReliabilityReason',
+        'assessment.scoringV2',
+        'assessment.inputsHash',
+        'assessment.isSynthetic',
+        'assessment.syntheticScenarioKey',
+        'assessment.syntheticRunId',
+        'assessment.syntheticCreatedAt',
+        'assessment.preserveFromCleanup',
+        'assessment.createdAt',
+      ])
+      .where('assessment.userId = :userId', { userId })
+      .andWhere('assessment.jobId = :jobId', { jobId })
+      .orderBy('assessment.createdAt', 'DESC');
+
+    if (assessmentId) {
+      query.andWhere('assessment.id = :assessmentId', { assessmentId });
+    }
+    if (baselineId) {
+      query.andWhere('assessment.baselineId = :baselineId', { baselineId });
+    }
+
+    const rawAssessment = await query.getRawOne<Record<string, unknown>>();
+    if (!rawAssessment) return null;
+
+    return {
+      id: String(rawAssessment['assessment_id'] ?? ''),
+      userId: String(rawAssessment['assessment_userId'] ?? userId),
+      jobId: String(rawAssessment['assessment_jobId'] ?? jobId),
+      baselineId: String(rawAssessment['assessment_baselineId'] ?? baselineId ?? ''),
+      baselineVersion:
+        rawAssessment['assessment_baselineVersion'] == null
+          ? null
+          : Number(rawAssessment['assessment_baselineVersion']),
+      overallScore: Number(rawAssessment['assessment_overallScore'] ?? 0),
+      verdict: rawAssessment['assessment_verdict'] as FitAssessment['verdict'],
+      dimensionScores: (rawAssessment['assessment_dimensionScores'] as FitAssessment['dimensionScores']) ?? {
+        experienceAlignment: 0,
+        leadershipLevel: 0,
+        technicalPlatformFit: 0,
+        industryContext: 0,
+        strategicTacticalFit: 0,
+      },
+      strengths: (rawAssessment['assessment_strengths'] as string[]) ?? [],
+      gaps: (rawAssessment['assessment_gaps'] as string[]) ?? [],
+      complianceFlags: (rawAssessment['assessment_complianceFlags'] as string[]) ?? [],
+      confidenceScore:
+        rawAssessment['assessment_confidenceScore'] == null
+          ? null
+          : Number(rawAssessment['assessment_confidenceScore']),
+      confidenceReasons: (rawAssessment['assessment_confidenceReasons'] as string[] | null) ?? null,
+      scoringReliability: rawAssessment['assessment_scoringReliability'] as FitAssessment['scoringReliability'],
+      scoringReliabilityReason:
+        rawAssessment['assessment_scoringReliabilityReason'] as FitAssessment['scoringReliabilityReason'],
+      scoringV2: (rawAssessment['assessment_scoringV2'] as FitAssessment['scoringV2']) ?? null,
+      jobAnalysis: null,
+      fitScore: null,
+      inputsHash: (rawAssessment['assessment_inputsHash'] as string | null) ?? null,
+      isSynthetic: Boolean(rawAssessment['assessment_isSynthetic']),
+      syntheticScenarioKey: (rawAssessment['assessment_syntheticScenarioKey'] as string | null) ?? null,
+      syntheticRunId: (rawAssessment['assessment_syntheticRunId'] as string | null) ?? null,
+      syntheticCreatedAt: (rawAssessment['assessment_syntheticCreatedAt'] as Date | null) ?? null,
+      preserveFromCleanup: Boolean(rawAssessment['assessment_preserveFromCleanup']),
+      createdAt: (rawAssessment['assessment_createdAt'] as Date) ?? new Date(),
+    } as FitAssessment;
   }
 
   private ensureOneTapAllowed(
@@ -2529,15 +2615,12 @@ export class ResumeService {
     }
 
     if (!analysisId) {
-      const assessmentForBaselineVersion = await this.fitAssessmentRepository.findOne({
-        where: {
-          userId,
-          jobId,
-          baselineId: baseline.id,
-          baselineVersion: baselineVersion.versionNumber ?? null,
-        },
-        order: { createdAt: 'DESC' },
-      });
+      const assessmentForBaselineVersion = await this.loadCanonicalFitAssessmentRawModel(
+        userId,
+        jobId,
+        undefined,
+        baseline.id,
+      );
       const latestAssessmentFallback = assessmentForBaselineVersion ?? (await this.findLatestAssessment(userId, jobId, baseline.id));
       analysisId = latestAssessmentFallback?.id ?? undefined;
       analysisIdForFailSafe = analysisId ?? null;
@@ -2565,27 +2648,12 @@ export class ResumeService {
 
     // Note: avoid logging raw resume content. Request-scoped diagnostics are surfaced via gated response metadata.
 
-    const analysisAssessment = await validateAnalysisContext({
-      analysisRepository: this.fitAssessmentRepository,
-      baselineVersionRepository: this.baselineVersionRepository,
-      analysisId,
-      userId,
-      jobId,
-      baselineId: baseline.id,
-      baselineVersionId: baselineVersionId,
-    });
+    const analysisAssessment = analysisId
+      ? await this.loadCanonicalFitAssessmentRawModel(userId, jobId, analysisId, baseline.id)
+      : null;
 	    const effectiveAssessment =
 	      analysisAssessment ??
-	      (jobId
-	        ? await this.fitAssessmentRepository.findOne({
-            where: {
-              userId,
-              jobId,
-              baselineId: baseline.id,
-            },
-            order: { createdAt: 'DESC' },
-          })
-	        : null);
+	      (jobId ? await this.loadCanonicalFitAssessmentRawModel(userId, jobId, undefined, baseline.id) : null);
       effectiveAssessmentForFailSafe = effectiveAssessment ?? null;
 
 	    const isVerifiedOnlyRequest =
