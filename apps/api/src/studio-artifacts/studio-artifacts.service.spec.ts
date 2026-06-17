@@ -94,6 +94,31 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          {
+            baseline_id: 'base-1',
+            baseline_userId: 'u-1',
+            baseline_version: 0,
+            baseline_versionNumber: 1,
+            baseline_originalFilename: 'resume.pdf',
+            baseline_mimeType: 'application/pdf',
+            baseline_storagePath: '/tmp/resume.pdf',
+            baseline_hash: null,
+            baseline_status: 'ACTIVE',
+            baseline_isActive: true,
+            baseline_archivedAt: null,
+            baseline_originalBaselineScore: null,
+            baseline_latestBaselineScore: null,
+            baseline_latestAssessmentId: null,
+            baseline_firstAnalyzedAt: null,
+            baseline_lastAnalyzedAt: null,
+            baseline_isSynthetic: false,
+            baseline_syntheticScenarioKey: null,
+            baseline_syntheticRunId: null,
+            baseline_syntheticCreatedAt: null,
+            baseline_preserveFromCleanup: false,
+          },
+        ]),
         getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
       }),
     } as any;
@@ -178,6 +203,7 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ baseline_id: 'base-1', baseline_userId: 'u-1', baseline_version: 0, baseline_versionNumber: 1, baseline_originalFilename: 'resume.pdf', baseline_mimeType: 'application/pdf', baseline_storagePath: '/tmp/resume.pdf', baseline_hash: null, baseline_status: 'ACTIVE', baseline_isActive: true, baseline_archivedAt: null, baseline_originalBaselineScore: null, baseline_latestBaselineScore: null, baseline_latestAssessmentId: null, baseline_firstAnalyzedAt: null, baseline_lastAnalyzedAt: null, baseline_isSynthetic: false, baseline_syntheticScenarioKey: null, baseline_syntheticRunId: null, baseline_syntheticCreatedAt: null, baseline_preserveFromCleanup: false }]),
         getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
       }),
     } as any;
@@ -282,6 +308,7 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ baseline_id: 'base-1', baseline_userId: 'u-1', baseline_version: 0, baseline_versionNumber: 1, baseline_originalFilename: 'resume.pdf', baseline_mimeType: 'application/pdf', baseline_storagePath: '/tmp/resume.pdf', baseline_hash: null, baseline_status: 'ACTIVE', baseline_isActive: true, baseline_archivedAt: null, baseline_originalBaselineScore: null, baseline_latestBaselineScore: null, baseline_latestAssessmentId: null, baseline_firstAnalyzedAt: null, baseline_lastAnalyzedAt: null, baseline_isSynthetic: false, baseline_syntheticScenarioKey: null, baseline_syntheticRunId: null, baseline_syntheticCreatedAt: null, baseline_preserveFromCleanup: false }]),
         getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
       }),
     } as any;
@@ -294,6 +321,7 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ baseline_id: 'base-1', baseline_userId: 'u-1', baseline_version: 0, baseline_versionNumber: 1, baseline_originalFilename: 'resume.pdf', baseline_mimeType: 'application/pdf', baseline_storagePath: '/tmp/resume.pdf', baseline_hash: null, baseline_status: 'ACTIVE', baseline_isActive: true, baseline_archivedAt: null, baseline_originalBaselineScore: null, baseline_latestBaselineScore: null, baseline_latestAssessmentId: null, baseline_firstAnalyzedAt: null, baseline_lastAnalyzedAt: null, baseline_isSynthetic: false, baseline_syntheticScenarioKey: null, baseline_syntheticRunId: null, baseline_syntheticCreatedAt: null, baseline_preserveFromCleanup: false }]),
         getOne: jest.fn().mockResolvedValue({ overallScore: 90, inputsHash: 'inputs-1' }),
       }),
     } as any;
@@ -373,6 +401,7 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ baseline_id: 'base-1', baseline_userId: 'u-1', baseline_version: 0, baseline_versionNumber: 1, baseline_originalFilename: 'resume.pdf', baseline_mimeType: 'application/pdf', baseline_storagePath: '/tmp/resume.pdf', baseline_hash: null, baseline_status: 'ACTIVE', baseline_isActive: true, baseline_archivedAt: null, baseline_originalBaselineScore: null, baseline_latestBaselineScore: null, baseline_latestAssessmentId: null, baseline_firstAnalyzedAt: null, baseline_lastAnalyzedAt: null, baseline_isSynthetic: false, baseline_syntheticScenarioKey: null, baseline_syntheticRunId: null, baseline_syntheticCreatedAt: null, baseline_preserveFromCleanup: false }]),
         getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
       }),
     } as any;
@@ -385,6 +414,7 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ baseline_id: 'base-1', baseline_userId: 'u-1', baseline_version: 0, baseline_versionNumber: 1, baseline_originalFilename: 'resume.pdf', baseline_mimeType: 'application/pdf', baseline_storagePath: '/tmp/resume.pdf', baseline_hash: null, baseline_status: 'ACTIVE', baseline_isActive: true, baseline_archivedAt: null, baseline_originalBaselineScore: null, baseline_latestBaselineScore: null, baseline_latestAssessmentId: null, baseline_firstAnalyzedAt: null, baseline_lastAnalyzedAt: null, baseline_isSynthetic: false, baseline_syntheticScenarioKey: null, baseline_syntheticRunId: null, baseline_syntheticCreatedAt: null, baseline_preserveFromCleanup: false }]),
         getOne: jest.fn().mockResolvedValue({ overallScore: 90, inputsHash: 'inputs-1' }),
       }),
     } as any;
@@ -457,6 +487,7 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ baseline_id: 'base-1', baseline_userId: 'u-1', baseline_version: 0, baseline_versionNumber: 1, baseline_originalFilename: 'resume.pdf', baseline_mimeType: 'application/pdf', baseline_storagePath: '/tmp/resume.pdf', baseline_hash: null, baseline_status: 'ACTIVE', baseline_isActive: true, baseline_archivedAt: null, baseline_originalBaselineScore: null, baseline_latestBaselineScore: null, baseline_latestAssessmentId: null, baseline_firstAnalyzedAt: null, baseline_lastAnalyzedAt: null, baseline_isSynthetic: false, baseline_syntheticScenarioKey: null, baseline_syntheticRunId: null, baseline_syntheticCreatedAt: null, baseline_preserveFromCleanup: false }]),
         getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
       }),
     } as any;
@@ -607,6 +638,7 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ baseline_id: 'base-1', baseline_userId: 'u-1', baseline_version: 0, baseline_versionNumber: 1, baseline_originalFilename: 'resume.pdf', baseline_mimeType: 'application/pdf', baseline_storagePath: '/tmp/resume.pdf', baseline_hash: null, baseline_status: 'ACTIVE', baseline_isActive: true, baseline_archivedAt: null, baseline_originalBaselineScore: null, baseline_latestBaselineScore: null, baseline_latestAssessmentId: null, baseline_firstAnalyzedAt: null, baseline_lastAnalyzedAt: null, baseline_isSynthetic: false, baseline_syntheticScenarioKey: null, baseline_syntheticRunId: null, baseline_syntheticCreatedAt: null, baseline_preserveFromCleanup: false }]),
         getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
       }),
     } as any;
@@ -702,6 +734,7 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ baseline_id: 'base-1', baseline_userId: 'u-1', baseline_version: 0, baseline_versionNumber: 1, baseline_originalFilename: 'resume.pdf', baseline_mimeType: 'application/pdf', baseline_storagePath: '/tmp/resume.pdf', baseline_hash: null, baseline_status: 'ACTIVE', baseline_isActive: true, baseline_archivedAt: null, baseline_originalBaselineScore: null, baseline_latestBaselineScore: null, baseline_latestAssessmentId: null, baseline_firstAnalyzedAt: null, baseline_lastAnalyzedAt: null, baseline_isSynthetic: false, baseline_syntheticScenarioKey: null, baseline_syntheticRunId: null, baseline_syntheticCreatedAt: null, baseline_preserveFromCleanup: false }]),
         getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
       }),
     } as any;
@@ -805,6 +838,7 @@ describe('StudioArtifactsService (unit): readState surfaces renderable resume pr
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ baseline_id: 'base-1', baseline_userId: 'u-1', baseline_version: 0, baseline_versionNumber: 1, baseline_originalFilename: 'resume.pdf', baseline_mimeType: 'application/pdf', baseline_storagePath: '/tmp/resume.pdf', baseline_hash: null, baseline_status: 'ACTIVE', baseline_isActive: true, baseline_archivedAt: null, baseline_originalBaselineScore: null, baseline_latestBaselineScore: null, baseline_latestAssessmentId: null, baseline_firstAnalyzedAt: null, baseline_lastAnalyzedAt: null, baseline_isSynthetic: false, baseline_syntheticScenarioKey: null, baseline_syntheticRunId: null, baseline_syntheticCreatedAt: null, baseline_preserveFromCleanup: false }]),
         getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
       }),
     } as any;
@@ -904,6 +938,7 @@ describe('StudioArtifactsService (unit): readState never erases renderable previ
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ baseline_id: 'base-1', baseline_userId: 'u-1', baseline_version: 0, baseline_versionNumber: 1, baseline_originalFilename: 'resume.pdf', baseline_mimeType: 'application/pdf', baseline_storagePath: '/tmp/resume.pdf', baseline_hash: null, baseline_status: 'ACTIVE', baseline_isActive: true, baseline_archivedAt: null, baseline_originalBaselineScore: null, baseline_latestBaselineScore: null, baseline_latestAssessmentId: null, baseline_firstAnalyzedAt: null, baseline_lastAnalyzedAt: null, baseline_isSynthetic: false, baseline_syntheticScenarioKey: null, baseline_syntheticRunId: null, baseline_syntheticCreatedAt: null, baseline_preserveFromCleanup: false }]),
         getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
       }),
     } as any;
@@ -1473,6 +1508,7 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ baseline_id: 'base-1', baseline_userId: 'u-1', baseline_version: 0, baseline_versionNumber: 1, baseline_originalFilename: 'resume.pdf', baseline_mimeType: 'application/pdf', baseline_storagePath: '/tmp/resume.pdf', baseline_hash: null, baseline_status: 'ACTIVE', baseline_isActive: true, baseline_archivedAt: null, baseline_originalBaselineScore: null, baseline_latestBaselineScore: null, baseline_latestAssessmentId: null, baseline_firstAnalyzedAt: null, baseline_lastAnalyzedAt: null, baseline_isSynthetic: false, baseline_syntheticScenarioKey: null, baseline_syntheticRunId: null, baseline_syntheticCreatedAt: null, baseline_preserveFromCleanup: false }]),
         getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
       }),
     } as any;
@@ -1485,6 +1521,7 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ baseline_id: 'base-1', baseline_userId: 'u-1', baseline_version: 0, baseline_versionNumber: 1, baseline_originalFilename: 'resume.pdf', baseline_mimeType: 'application/pdf', baseline_storagePath: '/tmp/resume.pdf', baseline_hash: null, baseline_status: 'ACTIVE', baseline_isActive: true, baseline_archivedAt: null, baseline_originalBaselineScore: null, baseline_latestBaselineScore: null, baseline_latestAssessmentId: null, baseline_firstAnalyzedAt: null, baseline_lastAnalyzedAt: null, baseline_isSynthetic: false, baseline_syntheticScenarioKey: null, baseline_syntheticRunId: null, baseline_syntheticCreatedAt: null, baseline_preserveFromCleanup: false }]),
         getOne: jest.fn().mockResolvedValue({ overallScore: 90, inputsHash: 'inputs-1' }),
       }),
     } as any;
@@ -1563,6 +1600,7 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ baseline_id: 'base-1', baseline_userId: 'u-1', baseline_version: 0, baseline_versionNumber: 1, baseline_originalFilename: 'resume.pdf', baseline_mimeType: 'application/pdf', baseline_storagePath: '/tmp/resume.pdf', baseline_hash: null, baseline_status: 'ACTIVE', baseline_isActive: true, baseline_archivedAt: null, baseline_originalBaselineScore: null, baseline_latestBaselineScore: null, baseline_latestAssessmentId: null, baseline_firstAnalyzedAt: null, baseline_lastAnalyzedAt: null, baseline_isSynthetic: false, baseline_syntheticScenarioKey: null, baseline_syntheticRunId: null, baseline_syntheticCreatedAt: null, baseline_preserveFromCleanup: false }]),
         getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
       }),
     } as any;
@@ -1575,6 +1613,7 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ baseline_id: 'base-1', baseline_userId: 'u-1', baseline_version: 0, baseline_versionNumber: 1, baseline_originalFilename: 'resume.pdf', baseline_mimeType: 'application/pdf', baseline_storagePath: '/tmp/resume.pdf', baseline_hash: null, baseline_status: 'ACTIVE', baseline_isActive: true, baseline_archivedAt: null, baseline_originalBaselineScore: null, baseline_latestBaselineScore: null, baseline_latestAssessmentId: null, baseline_firstAnalyzedAt: null, baseline_lastAnalyzedAt: null, baseline_isSynthetic: false, baseline_syntheticScenarioKey: null, baseline_syntheticRunId: null, baseline_syntheticCreatedAt: null, baseline_preserveFromCleanup: false }]),
         getOne: jest.fn().mockResolvedValue({ overallScore: 83, inputsHash: 'inputs-1' }),
       }),
     } as any;
@@ -1654,4 +1693,5 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
     expect(state.coverLetter?.responseBody).not.toBeNull();
   });
 });
+
 

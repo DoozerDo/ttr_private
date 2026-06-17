@@ -394,7 +394,7 @@ export class StudioArtifactsService {
   }
 
   private async loadCanonicalBaselineReadModel(userId: string, baselineId: string) {
-    const baseline = await this.baselineRepository
+    const baselineRows = await this.baselineRepository
       .createQueryBuilder('baseline')
       .leftJoin('baseline.sections', 'sections')
       .leftJoin('baseline.parsedRecords', 'parsedRecords')
@@ -444,9 +444,70 @@ export class StudioArtifactsService {
       .andWhere('baseline.userId = :userId', { userId })
       .orderBy('sections.order', 'ASC')
       .addOrderBy('parsedRecords.createdAt', 'DESC')
-      .getOne();
+      .getRawMany();
 
-    return baseline as CanonicalBaselineReadModel | null;
+    if (!baselineRows.length) return null;
+
+    const firstRow = baselineRows[0] as Record<string, unknown>;
+    const baseline = {
+      id: firstRow['baseline_id'],
+      userId: firstRow['baseline_userId'],
+      version: firstRow['baseline_version'],
+      versionNumber: firstRow['baseline_versionNumber'],
+      originalFilename: firstRow['baseline_originalFilename'],
+      mimeType: firstRow['baseline_mimeType'],
+      storagePath: firstRow['baseline_storagePath'],
+      hash: firstRow['baseline_hash'],
+      status: firstRow['baseline_status'],
+      isActive: firstRow['baseline_isActive'],
+      archivedAt: firstRow['baseline_archivedAt'],
+      originalBaselineScore: firstRow['baseline_originalBaselineScore'],
+      latestBaselineScore: firstRow['baseline_latestBaselineScore'],
+      latestAssessmentId: firstRow['baseline_latestAssessmentId'],
+      firstAnalyzedAt: firstRow['baseline_firstAnalyzedAt'],
+      lastAnalyzedAt: firstRow['baseline_lastAnalyzedAt'],
+      isSynthetic: firstRow['baseline_isSynthetic'],
+      syntheticScenarioKey: firstRow['baseline_syntheticScenarioKey'],
+      syntheticRunId: firstRow['baseline_syntheticRunId'],
+      syntheticCreatedAt: firstRow['baseline_syntheticCreatedAt'],
+      preserveFromCleanup: firstRow['baseline_preserveFromCleanup'],
+      sections: [],
+      parsedRecords: [],
+    } as CanonicalBaselineReadModel;
+
+    for (const row of baselineRows) {
+      const sectionId = row['sections_id'];
+      if (sectionId) {
+        baseline.sections.push({
+          id: row['sections_id'] as string,
+          baselineId: row['sections_baselineId'] as string,
+          sectionType: row['sections_sectionType'] as any,
+          title: row['sections_title'] as string,
+          content: row['sections_content'] as string,
+          includePolicy: row['sections_includePolicy'] as any,
+          order: row['sections_order'] as number,
+          createdAt: row['sections_createdAt'] as any,
+          updatedAt: row['sections_updatedAt'] as any,
+        });
+      }
+      const parsedId = row['parsedRecords_id'];
+      if (parsedId) {
+        baseline.parsedRecords.push({
+          id: row['parsedRecords_id'] as string,
+          baselineId: row['parsedRecords_baselineId'] as string,
+          sourceFileId: row['parsedRecords_sourceFileId'] as string,
+          schemaVersion: row['parsedRecords_schemaVersion'] as string,
+          sourceFormat: row['parsedRecords_sourceFormat'] as 'docx' | 'pdf',
+          ingestedAt: row['parsedRecords_ingestedAt'] as any,
+          parsedJson: row['parsedRecords_parsedJson'] as any,
+          resumeV2Json: row['parsedRecords_resumeV2Json'] as any,
+          flagsJson: row['parsedRecords_flagsJson'] as any,
+          createdAt: row['parsedRecords_createdAt'] as any,
+        });
+      }
+    }
+
+    return baseline;
   }
 
   private cleanEvidenceText(value: unknown): string {
