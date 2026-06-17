@@ -120,6 +120,12 @@ type ArtifactWriteMetadata = Record<string, unknown> & {
   analysisId?: string | null;
 };
 
+type EvidenceContractBlocker = {
+  code: string;
+  message: string;
+  details?: Record<string, unknown> | null;
+};
+
 type CanonicalBaselineReadModel = Pick<
   Baseline,
   | 'id'
@@ -352,6 +358,16 @@ function detectMinimalResumeArtifact(responseBody: Record<string, unknown> | nul
 
 const shouldTraceArtifactIdentity = process.env.ARTIFACT_IDENTITY_TRACE === 'true';
 
+const GENERIC_FILLER_PATTERNS = [
+  /\bresults? driven\b/i,
+  /\bpassionate\b/i,
+  /\bteam player\b/i,
+  /\bsynergy\b/i,
+  /\bfast[-\s]?paced\b/i,
+  /\bdetail[-\s]?oriented\b/i,
+  /\bworld[-\s]?class\b/i,
+];
+
 @Injectable()
 export class StudioArtifactsService {
   constructor(
@@ -426,6 +442,154 @@ export class StudioArtifactsService {
       .getOne();
 
     return baseline as CanonicalBaselineReadModel | null;
+  }
+
+  private cleanEvidenceText(value: unknown): string {
+    return String(value ?? '').replace(/\s+/g, ' ').trim();
+  }
+
+  private detectGenericFiller(text: string) {
+    const normalized = this.cleanEvidenceText(text).toLowerCase();
+    if (!normalized) return true;
+    if (normalized.length < 20) return true;
+    return GENERIC_FILLER_PATTERNS.some((pattern) => pattern.test(normalized));
+  }
+
+  private collectArtifactEvidenceBlockers(
+    kind: StudioArtifactKind,
+    responseBody: Record<string, unknown>,
+  ): EvidenceContractBlocker[] {
+    const blockers: EvidenceContractBlocker[] = [];
+    const usedEvidenceIds = Array.isArray((responseBody as any)?.internalTrace?.usedEvidenceIds)
+      ? (responseBody as any).internalTrace.usedEvidenceIds.filter(Boolean)
+      : [];
+    if (kind === 'resume') {
+      const preview = normalizeRecord((responseBody as any)?.preview)?.resume ?? null;
+      const summary = this.cleanEvidenceText((preview as any)?.summary);
+      const experiences = Array.isArray((preview as any)?.experience) ? (preview as any).experience : [];
+      const seenBullets = new Map<string, string>();
+      let hasEvidence = usedEvidenceIds.length > 0;
+
+      if (!summary || this.detectGenericFiller(summary)) {
+        blockers.push({
+          code: 'resume_summary_unverified',
+          message: 'Resume summary is not traceable to verified baseline evidence.',
+        });
+      }
+
+      for (const employer of experiences) {
+        const employerName = this.cleanEvidenceText((employer as any)?.company || (employer as any)?.companyName);
+        const bullets = Array.isArray((employer as any)?.bullets) ? (employer as any).bullets : [];
+        for (const bullet of bullets) {
+          const bulletText = this.cleanEvidenceText(typeof bullet === 'string' ? bullet : (bullet as any)?.text);
+          const evidenceIds = Array.isArray((bullet as any)?.sourceEvidenceIds)
+            ? (bullet as any).sourceEvidenceIds.filter(Boolean)
+            : Array.isArray((bullet as any)?.source?.sourceEvidenceIds)
+              ? (bullet as any).source.sourceEvidenceIds.filter(Boolean)
+              : [];
+          if (!bulletText || this.detectGenericFiller(bulletText)) {
+            blockers.push({
+              code: 'resume_generic_filler',
+              message: 'Resume contains generic filler that is not evidence-backed.',
+              details: { employer: employerName || null, bullet: bulletText || null },
+            });
+            continue;
+          }
+          if (this.detectGenericFiller(bulletText)) {
+            blockers.push({
+              code: 'resume_generic_filler',
+              message: 'Resume contains generic filler that is not evidence-backed.',
+              details: { employer: employerName || null, bullet: bulletText },
+            });
+            continue;
+          }
+          if (evidenceIds.length === 0 && usedEvidenceIds.length === 0) {
+            blockers.push({
+              code: 'resume_missing_evidence',
+              message: 'Resume bullet is missing verified baseline evidence references.',
+              details: { employer: employerName || null, bullet: bulletText },
+            });
+            continue;
+          }
+          hasEvidence = true;
+          const previousEmployer = seenBullets.get(bulletText.toLowerCase());
+          if (previousEmployer && previousEmployer !== employerName) {
+            blockers.push({
+              code: 'resume_duplicate_bullet_across_employers',
+              message: 'The same resume bullet appears under more than one employer.',
+              details: { bullet: bulletText, firstEmployer: previousEmployer, secondEmployer: employerName || null },
+            });
+          } else {
+            seenBullets.set(bulletText.toLowerCase(), employerName || '');
+          }
+        }
+      }
+
+      if (!hasEvidence) {
+        blockers.push({
+          code: 'resume_missing_evidence',
+          message: 'Resume has no verified baseline evidence to mark current.',
+        });
+      }
+    } else {
+      const preview = normalizeRecord((responseBody as any)?.preview)?.coverLetter ?? null;
+      const paragraphs = Array.isArray((preview as any)?.paragraphs) ? (preview as any).paragraphs : [];
+      const paragraphEvidence = Array.isArray((responseBody as any)?.paragraphEvidence)
+        ? (responseBody as any).paragraphEvidence
+        : [];
+      let hasEvidence = usedEvidenceIds.length > 0;
+      for (const paragraph of paragraphs) {
+        const paragraphText = this.cleanEvidenceText(paragraph);
+        const meta = paragraphEvidence.find((entry: any) =>
+          this.cleanEvidenceText(entry?.paragraphKey) && entry.paragraphText
+            ? this.cleanEvidenceText(entry.paragraphText) === paragraphText
+            : false,
+        );
+        const sourceEvidenceIds = Array.isArray(meta?.sourceEvidenceIds) ? meta.sourceEvidenceIds.filter(Boolean) : [];
+        if (!paragraphText || this.detectGenericFiller(paragraphText)) {
+          blockers.push({
+            code: 'cover_letter_generic_filler',
+            message: 'Cover letter contains generic filler that is not evidence-backed.',
+            details: { paragraph: paragraphText || null },
+          });
+          continue;
+        }
+        if (sourceEvidenceIds.length === 0 && usedEvidenceIds.length === 0) {
+          blockers.push({
+            code: 'cover_letter_missing_evidence',
+            message: 'Cover letter paragraph is missing verified baseline evidence references.',
+            details: { paragraph: paragraphText },
+          });
+          continue;
+        }
+        hasEvidence = true;
+      }
+
+      if (!hasEvidence) {
+        blockers.push({
+          code: 'cover_letter_missing_evidence',
+          message: 'Cover letter has no verified baseline evidence to mark current.',
+        });
+      }
+    }
+
+    return blockers;
+  }
+
+  private assertCurrentArtifactEvidenceContract(
+    kind: StudioArtifactKind,
+    responseBody: Record<string, unknown>,
+  ): void {
+    const blockers = this.collectArtifactEvidenceBlockers(kind, responseBody);
+    if (blockers.length > 0) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'studio_artifact_evidence_contract_failed',
+          message: `${kind} artifact failed the evidence contract.`,
+          blockers,
+        },
+      });
+    }
   }
 
   async readState(input: {
@@ -1420,6 +1584,7 @@ export class StudioArtifactsService {
     metadata?: Record<string, unknown>;
     analysisId?: string | null;
   }): Promise<string> {
+    this.assertCurrentArtifactEvidenceContract('resume', input.responseBody);
     if (shouldTraceArtifactIdentity) {
       // eslint-disable-next-line no-console
       console.log(
@@ -1548,6 +1713,7 @@ export class StudioArtifactsService {
     metadata?: Record<string, unknown>;
     analysisId?: string | null;
   }): Promise<string> {
+    this.assertCurrentArtifactEvidenceContract('cover_letter', input.responseBody);
     if (shouldTraceArtifactIdentity) {
       // eslint-disable-next-line no-console
       console.log(

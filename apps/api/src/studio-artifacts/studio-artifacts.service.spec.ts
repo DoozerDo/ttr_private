@@ -1046,27 +1046,27 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
       jobFingerprint: 'job-fp-1',
       inputsHash: 'inputs-1',
       analysisId: 'analysis-1',
-      responseBody: { status: 'success', preview: { resume: { heading: {} } } },
+      responseBody: {
+        internalTrace: { usedEvidenceIds: ['e-1'] },
+        preview: { resume: { heading: {}, summary: 'Supported summary from evidence.', summaryEvidenceIds: ['e-1'] } },
+      },
       content: 'resume-content',
       metadata: { auditId: 'audit-1' },
     });
 
     expect(insertExecute).toHaveBeenCalled();
-    expect((createQueryBuilder.mock.results[0].value as any).valuesArg).toEqual(
-      expect.objectContaining({
-        userId: 'u-1',
-        baselineId: 'b-1',
-        jobId: 'j-1',
-        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
-        resumeInputsHash: 'inputs-1',
-        resumeResponseBody: { status: 'success', preview: { resume: { heading: {} } } },
-        resumeContent: 'resume-content',
-        resumeMetadata: expect.objectContaining({
-          analysisId: 'analysis-1',
-          auditId: 'audit-1',
-        }),
+    expect((createQueryBuilder.mock.results[0].value as any).valuesArg).toMatchObject({
+      userId: 'u-1',
+      baselineId: 'b-1',
+      jobId: 'j-1',
+      resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+      resumeInputsHash: 'inputs-1',
+      resumeContent: 'resume-content',
+      resumeMetadata: expect.objectContaining({
+        analysisId: 'analysis-1',
+        auditId: 'audit-1',
       }),
-    );
+    });
   });
 
   it('persists a canonical cover letter artifact row with baseline/job/analysis context and payload metadata', async () => {
@@ -1097,27 +1097,30 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
       jobFingerprint: 'job-fp-1',
       inputsHash: 'inputs-1',
       analysisId: 'analysis-1',
-      responseBody: { status: 'success', preview: { coverLetter: { paragraphs: [] } } },
+      responseBody: {
+        internalTrace: { usedEvidenceIds: ['e-1'] },
+        preview: { coverLetter: { paragraphs: ['I led support operations using evidence from my baseline.'] } },
+        paragraphEvidence: [
+          { paragraphKey: 'opening', paragraphText: 'I led support operations using evidence from my baseline.', sourceEvidenceIds: ['e-1'] },
+        ],
+      },
       content: 'cover-content',
       metadata: { auditId: 'audit-1' },
     });
 
     expect(insertExecute).toHaveBeenCalled();
-    expect((createQueryBuilder.mock.results[0].value as any).valuesArg).toEqual(
-      expect.objectContaining({
-        userId: 'u-1',
-        baselineId: 'b-1',
-        jobId: 'j-1',
-        coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
-        coverLetterInputsHash: 'inputs-1',
-        coverLetterResponseBody: { status: 'success', preview: { coverLetter: { paragraphs: [] } } },
-        coverLetterContent: 'cover-content',
-        coverLetterMetadata: expect.objectContaining({
-          analysisId: 'analysis-1',
-          auditId: 'audit-1',
-        }),
+    expect((createQueryBuilder.mock.results[0].value as any).valuesArg).toMatchObject({
+      userId: 'u-1',
+      baselineId: 'b-1',
+      jobId: 'j-1',
+      coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+      coverLetterInputsHash: 'inputs-1',
+      coverLetterContent: 'cover-content',
+      coverLetterMetadata: expect.objectContaining({
+        analysisId: 'analysis-1',
+        auditId: 'audit-1',
       }),
-    );
+    });
   });
 
   it('persists resume and cover letter into the same canonical row for the same baseline/job/analysis context', async () => {
@@ -1165,7 +1168,10 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
       jobFingerprint: 'job-fp-1',
       inputsHash: 'inputs-1',
       analysisId: 'analysis-1',
-      responseBody: { status: 'success', preview: { resume: { heading: {} } } },
+      responseBody: {
+        internalTrace: { usedEvidenceIds: ['e-1'] },
+        preview: { resume: { heading: {}, summary: 'Supported summary from evidence.', summaryEvidenceIds: ['e-1'] } },
+      },
       content: 'resume-content',
       metadata: {},
     });
@@ -1179,7 +1185,13 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
       jobFingerprint: 'job-fp-1',
       inputsHash: 'inputs-1',
       analysisId: 'analysis-1',
-      responseBody: { status: 'success', preview: { coverLetter: { paragraphs: [] } } },
+      responseBody: {
+        internalTrace: { usedEvidenceIds: ['e-1'] },
+        preview: { coverLetter: { paragraphs: ['I led support operations using evidence from my baseline.'] } },
+        paragraphEvidence: [
+          { paragraphKey: 'opening', paragraphText: 'I led support operations using evidence from my baseline.', sourceEvidenceIds: ['e-1'] },
+        ],
+      },
       content: 'cover-content-1',
       metadata: {},
     });
@@ -1188,6 +1200,206 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
     expect(coverLetterId).toBe('artifact-1');
     expect(updateExecute).toHaveBeenCalledTimes(1);
     expect(findOne).toHaveBeenCalled();
+  });
+
+  it('rejects repeated bullets across employers before marking resume current', async () => {
+    const service = buildServiceWithRepo({ createQueryBuilder: jest.fn(), findOne: jest.fn() } as any);
+    await expect(
+      service.recordResumeSuccess({
+        userId: 'u-1',
+        baselineId: 'b-1',
+        jobId: 'j-1',
+        baselineVersionId: 'bv-1',
+        baselineVersionHash: 'hash-1',
+        jobFingerprint: 'job-fp-1',
+        inputsHash: 'inputs-1',
+        analysisId: 'analysis-1',
+        responseBody: {
+          internalTrace: { usedEvidenceIds: ['e-1'] },
+          preview: {
+            resume: {
+              summary: 'Supported summary from evidence.',
+              summaryEvidenceIds: ['e-1'],
+              experience: [
+                {
+                  company: 'A',
+                  roleTitle: 'Role',
+                  bullets: [{ text: 'Improved service reliability.', sourceEvidenceIds: ['e-1'] }],
+                },
+                {
+                  company: 'B',
+                  roleTitle: 'Role',
+                  bullets: [{ text: 'Improved service reliability.', sourceEvidenceIds: ['e-2'] }],
+                },
+              ],
+            },
+          },
+        } as any,
+        content: 'resume-content',
+        metadata: {},
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: 'studio_artifact_evidence_contract_failed',
+          blockers: expect.arrayContaining([
+            expect.objectContaining({ code: 'resume_duplicate_bullet_across_employers' }),
+          ]),
+        },
+      },
+    });
+  });
+
+  it('rejects unsupported resume claims before marking resume current', async () => {
+    const service = buildServiceWithRepo({ createQueryBuilder: jest.fn(), findOne: jest.fn() } as any);
+    await expect(
+      service.recordResumeSuccess({
+        userId: 'u-1',
+        baselineId: 'b-1',
+        jobId: 'j-1',
+        baselineVersionId: 'bv-1',
+        baselineVersionHash: 'hash-1',
+        jobFingerprint: 'job-fp-1',
+        inputsHash: 'inputs-1',
+        analysisId: 'analysis-1',
+        responseBody: {
+          internalTrace: { usedEvidenceIds: ['e-1'] },
+          preview: {
+            resume: {
+              summary: 'Passionate leader driving synergy.',
+              summaryEvidenceIds: ['e-1'],
+              experience: [
+                {
+                  company: 'A',
+                  roleTitle: 'Role',
+                  bullets: [{ text: 'Delivered value.', sourceEvidenceIds: [] }],
+                },
+              ],
+            },
+          },
+        } as any,
+        content: 'resume-content',
+        metadata: {},
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          blockers: expect.arrayContaining([
+            expect.objectContaining({ code: 'resume_summary_unverified' }),
+            expect.objectContaining({ code: 'resume_generic_filler' }),
+          ]),
+        },
+      },
+    });
+  });
+
+  it('rejects generic cover letter content before marking cover letter current', async () => {
+    const service = buildServiceWithRepo({ createQueryBuilder: jest.fn(), findOne: jest.fn() } as any);
+    await expect(
+      service.recordCoverLetterSuccess({
+        userId: 'u-1',
+        baselineId: 'b-1',
+        jobId: 'j-1',
+        baselineVersionId: 'bv-1',
+        baselineVersionHash: 'hash-1',
+        jobFingerprint: 'job-fp-1',
+        inputsHash: 'inputs-1',
+        analysisId: 'analysis-1',
+        responseBody: {
+          internalTrace: { usedEvidenceIds: ['e-1'] },
+          preview: {
+            coverLetter: {
+              paragraphs: ['I am a passionate team player who thrives in fast-paced environments.'],
+            },
+          },
+          paragraphEvidence: [
+            { paragraphKey: 'opening', paragraphText: 'I am a passionate team player who thrives in fast-paced environments.', sourceEvidenceIds: ['e-1'] },
+          ],
+        } as any,
+        content: 'cover-content',
+        metadata: {},
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          blockers: expect.arrayContaining([
+            expect.objectContaining({ code: 'cover_letter_generic_filler' }),
+          ]),
+        },
+      },
+    });
+  });
+
+  it('persists evidence-backed resume and cover letter artifacts when the evidence contract passes', async () => {
+    const insertExecute = jest.fn().mockResolvedValue({ raw: [{ id: 'artifact-1' }] });
+    const createQueryBuilder = jest.fn(() => ({
+      insert: () => createQueryBuilder.mock.results[0].value,
+      into: () => createQueryBuilder.mock.results[0].value,
+      values: jest.fn(() => createQueryBuilder.mock.results[0].value),
+      onConflict: () => createQueryBuilder.mock.results[0].value,
+      returning: () => createQueryBuilder.mock.results[0].value,
+      execute: insertExecute,
+      update: () => createQueryBuilder.mock.results[0].value,
+      set: () => createQueryBuilder.mock.results[0].value,
+      where: () => createQueryBuilder.mock.results[0].value,
+    })) as any;
+    const service = buildServiceWithRepo({ createQueryBuilder, findOne: jest.fn() } as any);
+
+    await expect(
+      service.recordResumeSuccess({
+        userId: 'u-1',
+        baselineId: 'b-1',
+        jobId: 'j-1',
+        baselineVersionId: 'bv-1',
+        baselineVersionHash: 'hash-1',
+        jobFingerprint: 'job-fp-1',
+        inputsHash: 'inputs-1',
+        analysisId: 'analysis-1',
+        responseBody: {
+          internalTrace: { usedEvidenceIds: ['e-1'] },
+          preview: {
+            resume: {
+              summary: 'Led support operations across teams.',
+              experience: [
+                {
+                  company: 'A',
+                  roleTitle: 'Role',
+                  bullets: [{ text: 'Improved service reliability.', sourceEvidenceIds: ['e-1'] }],
+                },
+              ],
+            },
+          },
+        } as any,
+        content: 'resume-content',
+        metadata: {},
+      }),
+    ).resolves.toBe('artifact-1');
+
+    await expect(
+      service.recordCoverLetterSuccess({
+        userId: 'u-1',
+        baselineId: 'b-1',
+        jobId: 'j-1',
+        baselineVersionId: 'bv-1',
+        baselineVersionHash: 'hash-1',
+        jobFingerprint: 'job-fp-1',
+        inputsHash: 'inputs-1',
+        analysisId: 'analysis-1',
+        responseBody: {
+          internalTrace: { usedEvidenceIds: ['e-1'] },
+          preview: {
+            coverLetter: {
+              paragraphs: ['I led support operations using evidence from my baseline.'],
+            },
+          },
+          paragraphEvidence: [
+            { paragraphKey: 'opening', paragraphText: 'I led support operations using evidence from my baseline.', sourceEvidenceIds: ['e-1'] },
+          ],
+        } as any,
+        content: 'cover-content',
+        metadata: {},
+      }),
+    ).resolves.toBe('artifact-1');
   });
 
   it('preserves analysisId on reloadable artifact state', async () => {
@@ -1224,7 +1436,17 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
         coverLetterMetadata: { analysisId: 'analysis-1' },
       } as any),
     } as any;
-    const baselineRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }) } as any;
+    const baselineRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      }),
+    } as any;
     const baselineVersionRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }) } as any;
     const jobRepository = { findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }) } as any;
     const fitAssessmentRepository = {
