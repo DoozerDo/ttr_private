@@ -393,7 +393,7 @@ export class StudioArtifactsService {
     return ARTIFACT_CONTRACT_VERSION;
   }
 
-  private buildCanonicalBaselineRowsQuery(userId: string, baselineId: string) {
+  private buildCanonicalBaselineRawRowsQuery(userId: string, baselineId: string) {
     return this.baselineRepository
       .createQueryBuilder('baseline')
       .leftJoin('baseline.sections', 'sections')
@@ -447,7 +447,7 @@ export class StudioArtifactsService {
   }
 
   private async loadCanonicalBaselineReadModel(userId: string, baselineId: string) {
-    const baselineRows = await this.buildCanonicalBaselineRowsQuery(userId, baselineId).getRawMany();
+    const baselineRows = await this.buildCanonicalBaselineRawRowsQuery(userId, baselineId).getRawMany();
 
     if (!baselineRows.length) return null;
 
