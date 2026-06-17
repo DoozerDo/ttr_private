@@ -178,6 +178,29 @@ type ComplianceEvaluationResult = {
   scopeFlags: ComplianceFlag[];
 };
 
+type CanonicalBaselineRawRow = {
+  baseline_id: string;
+  section_id: string | null;
+  section_baselineId: string | null;
+  section_sectionType: BaselineSectionType | null;
+  section_title: string | null;
+  section_content: string | null;
+  section_includePolicy: BaselineIncludePolicy | null;
+  section_order: number | null;
+  section_createdAt: Date | string | null;
+  section_updatedAt: Date | string | null;
+  parsed_id: string | null;
+  parsed_baselineId: string | null;
+  parsed_sourceFileId: string | null;
+  parsed_schemaVersion: string | null;
+  parsed_sourceFormat: 'docx' | 'pdf' | null;
+  parsed_ingestedAt: Date | string | null;
+  parsed_parsedJson: Record<string, unknown> | null;
+  parsed_resumeV2Json: Record<string, unknown> | null;
+  parsed_flagsJson: Record<string, unknown> | null;
+  parsed_createdAt: Date | string | null;
+};
+
 type CoverLetterQualityResult = {
   generation: CoverLetterGenerationResult;
   flags: string[];
@@ -259,6 +282,84 @@ export class CoverLettersService {
     this.jobRepository = this.dataSource.getRepository(Job);
     this.fitAssessmentRepository = this.dataSource.getRepository(FitAssessment);
     this.generator = new TemplateCoverLetterGenerator();
+  }
+
+  private async loadCanonicalBaselineRawModel(
+    baselineId: string,
+    userId: string,
+  ): Promise<Baseline | null> {
+    const rows = (await this.baselineRepository
+      .createQueryBuilder('baseline')
+      .leftJoin('baseline.sections', 'section')
+      .leftJoin('baseline.parsedRecords', 'parsedRecord')
+      .select([
+        'baseline.id AS baseline_id',
+        'section.id AS section_id',
+        'section.baselineId AS section_baselineId',
+        'section.sectionType AS section_sectionType',
+        'section.title AS section_title',
+        'section.content AS section_content',
+        'section.includePolicy AS section_includePolicy',
+        'section.orderIndex AS section_order',
+        'section.createdAt AS section_createdAt',
+        'section.updatedAt AS section_updatedAt',
+        'parsedRecord.id AS parsed_id',
+        'parsedRecord.baselineId AS parsed_baselineId',
+        'parsedRecord.sourceFileId AS parsed_sourceFileId',
+        'parsedRecord.schemaVersion AS parsed_schemaVersion',
+        'parsedRecord.sourceFormat AS parsed_sourceFormat',
+        'parsedRecord.ingestedAt AS parsed_ingestedAt',
+        'parsedRecord.parsedJson AS parsed_parsedJson',
+        'parsedRecord.resumeV2Json AS parsed_resumeV2Json',
+        'parsedRecord.flagsJson AS parsed_flagsJson',
+        'parsedRecord.createdAt AS parsed_createdAt',
+      ])
+      .where('baseline.id = :baselineId', { baselineId })
+      .andWhere('baseline.userId = :userId', { userId })
+      .orderBy('section.orderIndex', 'ASC')
+      .addOrderBy('parsedRecord.createdAt', 'DESC')
+      .getRawMany()) as CanonicalBaselineRawRow[];
+
+    if (!rows.length) {
+      return null;
+    }
+
+    const sectionsById = new Map<string, BaselineSection>();
+    const parsedRecordsById = new Map<string, Baseline['parsedRecords'][number]>();
+
+    for (const row of rows) {
+      if (row.section_id && !sectionsById.has(row.section_id)) {
+        sectionsById.set(row.section_id, {
+          id: row.section_id,
+          baselineId: row.section_baselineId ?? baselineId,
+          sectionType: (row.section_sectionType ?? BaselineSectionType.OTHER) as BaselineSectionType,
+          title: row.section_title,
+          content: row.section_content ?? '',
+          includePolicy: (row.section_includePolicy ?? BaselineIncludePolicy.OPTIONAL) as BaselineIncludePolicy,
+          order: Number(row.section_order ?? 0),
+          createdAt: row.section_createdAt ? new Date(row.section_createdAt) : new Date(0),
+          updatedAt: row.section_updatedAt ? new Date(row.section_updatedAt) : new Date(0),
+        } as BaselineSection);
+      }
+
+      if (row.parsed_id && !parsedRecordsById.has(row.parsed_id)) {
+        parsedRecordsById.set(row.parsed_id, {
+          baselineId: row.parsed_baselineId ?? baselineId,
+          createdAt: row.parsed_createdAt ? new Date(row.parsed_createdAt) : new Date(0),
+          parsedJson: (row.parsed_parsedJson ?? {}) as Record<string, unknown>,
+          resumeV2Json: row.parsed_resumeV2Json,
+          flagsJson: (row.parsed_flagsJson ?? {}) as Record<string, unknown>,
+        } as Baseline['parsedRecords'][number]);
+      }
+    }
+
+    return {
+      id: rows[0].baseline_id,
+      sections: [...sectionsById.values()].sort((left, right) => left.order - right.order),
+      parsedRecords: [...parsedRecordsById.values()].sort(
+        (left, right) => right.createdAt.getTime() - left.createdAt.getTime(),
+      ) as Baseline['parsedRecords'],
+    } as Baseline;
   }
 
   private throwGenerationBlockedError(blockers: Array<{ code: string; message: string }>): never {
@@ -1287,11 +1388,7 @@ export class CoverLettersService {
     const baselineVersionId = input.baselineVersionId?.trim() || null;
     let analysisId = input.analysisId?.trim() || '';
 
-    const baseline = await this.baselineRepository.findOne({
-      where: { id: input.baselineId, userId },
-      relations: ['sections', 'parsedRecords'],
-      order: { sections: { order: 'ASC' } },
-    });
+    const baseline = await this.loadCanonicalBaselineRawModel(input.baselineId, userId);
 
     if (!baseline) {
       throw new NotFoundException('Baseline not found');
