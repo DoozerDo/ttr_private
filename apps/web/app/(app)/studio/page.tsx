@@ -31,7 +31,6 @@ import {
   applyTargetingExclusionsToReadiness,
   aggregateVerificationIssues,
   buildVerificationIssuesFromCanonicalClaims,
-  combinePairGenerationReadinessFromTransport,
   filterClaimVerificationsByExcludedLabels,
   reconcileReadinessWithClaimVerifications,
   type ArtifactReadinessContractState,
@@ -313,6 +312,8 @@ type BackendStudioArtifactsResponse = {
   jobId?: string;
   baselineVersionId?: string | null;
   baselineVersionHash?: string | null;
+  analysisId?: string | null;
+  assessmentScore?: number | string | null;
   jobFingerprint?: string | null;
   generationContractVersion?: string | null;
   artifactReadiness?: "ready" | "degraded" | "blocked";
@@ -343,6 +344,50 @@ const READINESS_LOADING_STATE: GenerationReadiness = {
   summary: "Fit score and generation readiness are resolved upstream before Studio opens.",
   verificationIssues: [],
 };
+
+const STUDIO_ARTIFACTS_READY_STATE: GenerationReadiness = {
+  status: "ready",
+  blocked: false,
+  reasonCodes: [],
+  reasons: [],
+  badgeLabel: "READY",
+  summary: "Persisted fit assessment, resume artifact, and cover letter artifact are available.",
+  verificationIssues: [],
+};
+
+function buildStudioArtifactsReadiness(payload: BackendStudioArtifactsResponse | null | undefined): GenerationReadiness {
+  const hasPersistedFitAssessment = typeof payload?.assessmentScore === "number" && Number.isFinite(payload.assessmentScore);
+  const hasPersistedResumeArtifact = getBackendArtifactStatus(payload?.resume) === "completed";
+  const hasPersistedCoverLetterArtifact = getBackendArtifactStatus(payload?.coverLetter) === "completed";
+
+  if (hasPersistedFitAssessment && hasPersistedResumeArtifact && hasPersistedCoverLetterArtifact) {
+    return STUDIO_ARTIFACTS_READY_STATE;
+  }
+
+  const missingReasonCodes: string[] = [];
+  if (!hasPersistedFitAssessment) missingReasonCodes.push("persisted_fit_assessment_missing");
+  if (!hasPersistedResumeArtifact) missingReasonCodes.push("persisted_resume_artifact_missing");
+  if (!hasPersistedCoverLetterArtifact) missingReasonCodes.push("persisted_cover_letter_artifact_missing");
+
+  const summary = `Studio artifacts are missing: ${missingReasonCodes.join(", ")}.`;
+  return {
+    status: "blocked",
+    blocked: true,
+    reasonCodes: missingReasonCodes,
+    reasons: [{ code: "personalization_limitation", message: summary }],
+    badgeLabel: "BLOCKED",
+    summary,
+    verificationIssues: missingReasonCodes.map((code) => ({
+      code: "missing_baseline_evidence",
+      severity: "block",
+      claim: null,
+      source: "targeting_context",
+      explanation: summary,
+      sourceContext: null,
+      recommendedAction: "Restore the missing persisted Studio artifact.",
+    })),
+  };
+}
 
 type DocumentState = {
   response: unknown | null;
@@ -1053,9 +1098,7 @@ export default function StudioPage() {
   const [postUnlockRetryError, setPostUnlockRetryError] = useState<string | null>(null);
   // Studio does not render an intermediate "generation ready" shell.
   const trackedStudioOpenRef = useRef(false);
-  const lastReadinessKeyRef = useRef<string | null>(null);
   const studioDecisionLogKeyRef = useRef<string | null>(null);
-  const failedReadinessKeysRef = useRef<Set<string>>(new Set());
   const generationSectionRef = useRef<HTMLElement | null>(null);
   const draftAnywayRequestedRef = useRef(false);
   const invalidGeneratedStateLoggedRef = useRef<string | null>(null);
@@ -3109,89 +3152,15 @@ export default function StudioPage() {
     router,
   ]);
   useEffect(() => {
-    if (!requestedAnalysisId || !effectiveJobId || !effectiveBaselineId) {
-      setGenerationReadiness(READINESS_LOADING_STATE);
-      setPairReadinessContractState({ resume: "unknown", cover: "unknown" });
-      setReadinessError(null);
-      return;
-    }
-    const readinessKey = [
-      requestedAnalysisId,
-      effectiveJobId,
-      effectiveBaselineId,
-      effectiveBaselineVersionId ?? "none",
-    ].join(":");
-    if (lastReadinessKeyRef.current === readinessKey) {
-      return;
-    }
-    lastReadinessKeyRef.current = readinessKey;
-    if (failedReadinessKeysRef.current.has(readinessKey)) {
-      return;
-    }
-
-    const body: Record<string, string> = {
-      analysisId: requestedAnalysisId,
-      jobId: effectiveJobId,
-      baselineId: effectiveBaselineId,
-    };
-    if (effectiveBaselineVersionId) {
-      body.baselineVersionId = effectiveBaselineVersionId;
-    }
-    void (async () => {
-      try {
-        const [resumeResponse, coverResponse] = await Promise.all([
-          fetch("/api/resume/readiness", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          }),
-          fetch("/api/cover-letters/readiness", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          }),
-        ]);
-        const resumePayload = (await readResponsePayload(resumeResponse)) as
-          | Record<string, unknown>
-          | null;
-        const coverPayload = (await readResponsePayload(coverResponse)) as
-          | Record<string, unknown>
-          | null;
-        const resolved = combinePairGenerationReadinessFromTransport(
-          {
-            ok: resumeResponse.ok,
-            status: resumeResponse.status,
-            payload:
-              resumePayload && typeof resumePayload === "object"
-                ? (resumePayload as Record<string, unknown>)
-                : null,
-          },
-          {
-            ok: coverResponse.ok,
-            status: coverResponse.status,
-            payload:
-              coverPayload && typeof coverPayload === "object"
-                ? (coverPayload as Record<string, unknown>)
-                : null,
-          },
-        );
-        setGenerationReadiness(resolved.readiness);
-        setPairReadinessContractState({
-          resume: resolved.resumeReadinessState,
-          cover: resolved.coverReadinessState,
-        });
-        if (!resumeResponse.ok || !coverResponse.ok) {
-          setReadinessError(`readiness_http_${resumeResponse.ok ? coverResponse.status : resumeResponse.status}`);
-          failedReadinessKeysRef.current.add(readinessKey);
-          return;
-        }
-        setReadinessError(null);
-      } catch {
-        setReadinessError("readiness_fetch_failed");
-        failedReadinessKeysRef.current.add(readinessKey);
-      }
-    })();
-  }, [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, requestedAnalysisId]);
+    if (!studioArtifactsPayload) return;
+    const readiness = buildStudioArtifactsReadiness(studioArtifactsPayload);
+    setGenerationReadiness(readiness);
+    setPairReadinessContractState({
+      resume: readiness.blocked ? "blocked" : "ready",
+      cover: readiness.blocked ? "blocked" : "ready",
+    });
+    setReadinessError(null);
+  }, [studioArtifactsPayload]);
   useEffect(() => {
     setExcludedTargetingLabels(new Set(queryExcludedRequirements));
     setTargetingAdjustmentFeedback(null);

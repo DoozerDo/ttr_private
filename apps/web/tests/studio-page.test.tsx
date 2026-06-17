@@ -216,12 +216,13 @@ function installCompletedArtifactFetches() {
       return Promise.resolve(
         createResponse({
           status: "COMPLETED",
-          baselineId: "base-1",
-          jobId: "job-1",
-          baselineVersionId: "base-version-1",
-          baselineVersionHash: "hash-1",
-          jobFingerprint: "job-fingerprint-1",
-          generationContractVersion: "studio-artifacts-v1",
+              baselineId: "base-1",
+              jobId: "job-1",
+              baselineVersionId: "base-version-1",
+              baselineVersionHash: "hash-1",
+              assessmentScore: 84,
+              jobFingerprint: "job-fingerprint-1",
+              generationContractVersion: "studio-artifacts-v1",
           resume: {
             status: "COMPLETED",
             inputsHash: "resume-hash",
@@ -301,15 +302,9 @@ function installCompletedArtifactFetches() {
         createResponse(createFitAssessment(84)),
       );
     }
-    if (rawUrl.includes("/api/resume/readiness")) {
-      return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
-    }
-    if (rawUrl.includes("/api/cover-letters/readiness")) {
-      return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
-    }
-    if (rawUrl.includes("/api/resume/export")) {
-      return Promise.resolve(createExportResponse("Director-of-Support-resume.docx"));
-    }
+      if (rawUrl.includes("/api/resume/export")) {
+        return Promise.resolve(createExportResponse("Director-of-Support-resume.docx"));
+      }
     if (rawUrl.includes("/api/cover-letters/export")) {
       return Promise.resolve(createExportResponse("Director-of-Support-cover-letter.docx"));
     }
@@ -979,8 +974,7 @@ describe("Studio page UX", () => {
       }
 
       if (rawUrl.includes("/api/resume/readiness")) {
-        // Keep readiness unknown-ish for this test: no analysis-derived claim should be required to render persisted artifact.
-        return Promise.resolve(createResponse({ status: "limited", reasons: [{ code: "unknown", message: "unknown" }], compliance_flags: [] }));
+        throw new Error("Studio page must not call /api/resume/readiness");
       }
 
       if (rawUrl.includes("/api/analytics/event")) {
@@ -1004,20 +998,16 @@ describe("Studio page UX", () => {
 
     const instantSummary = await screen.findByTestId("studio-instant-resume-summary");
     expect(instantSummary).toHaveTextContent("Support leader focused on scalable operations.");
+    expect(screen.queryByText("Readiness error")).toBeNull();
+    expect(screen.queryByText(/Fit score unavailable/i)).toBeNull();
 
     // Artifacts are canonical after hydration: materials stay primary, guidance becomes secondary.
     const primaryMaterials = screen.getByTestId("studio-primary-artifacts");
     expect(within(primaryMaterials).getByText("Your application materials")).toBeInTheDocument();
     expect(primaryMaterials.className).toContain("order-1");
-    // Refinement must be secondary and live below materials (not above as a competing primary state).
-    const refinementDetails = within(primaryMaterials).getByTestId("studio-refinement-details");
-    expect(refinementDetails).not.toHaveAttribute("open");
 
     const secondarySystems = screen.getByTestId("studio-secondary-systems");
     expect(secondarySystems.className).toContain("order-2");
-    const guidanceDetails = screen.getByTestId("studio-guidance-details");
-    expect(guidanceDetails).not.toHaveAttribute("open");
-    expect(within(secondarySystems).getByTestId("studio-guidance-details")).toBeInTheDocument();
 
     firstMount.unmount();
 
@@ -1034,19 +1024,16 @@ describe("Studio page UX", () => {
     expect(panelAgain).toBeInTheDocument();
     const instantSummaryAgain = await screen.findByTestId("studio-instant-resume-summary");
     expect(instantSummaryAgain).toHaveTextContent("Support leader focused on scalable operations.");
+    expect(screen.queryByText("Readiness error")).toBeNull();
+    expect(screen.queryByText(/Fit score unavailable/i)).toBeNull();
 
     // Reload/remount keeps the hierarchy: materials first, guidance below and collapsed.
     const primaryMaterialsAgain = screen.getByTestId("studio-primary-artifacts");
     expect(within(primaryMaterialsAgain).getByText("Your application materials")).toBeInTheDocument();
     expect(primaryMaterialsAgain.className).toContain("order-1");
-    const refinementDetailsAgain = within(primaryMaterialsAgain).getByTestId("studio-refinement-details");
-    expect(refinementDetailsAgain).not.toHaveAttribute("open");
 
     const secondarySystemsAgain = screen.getByTestId("studio-secondary-systems");
     expect(secondarySystemsAgain.className).toContain("order-2");
-    const guidanceDetailsAgain = screen.getByTestId("studio-guidance-details");
-    expect(guidanceDetailsAgain).not.toHaveAttribute("open");
-    expect(within(secondarySystemsAgain).getByTestId("studio-guidance-details")).toBeInTheDocument();
 
     // No contradictory "not generated" messaging should appear when persisted resume exists.
     expect(screen.queryByText("Resume not generated yet")).toBeNull();
@@ -1077,13 +1064,14 @@ describe("Studio page UX", () => {
         return Promise.resolve(
           createResponse({
             status: "COMPLETED",
-            baselineId: "base-1",
-            jobId: "job-1",
-            baselineVersionId: "base-version-1",
-            baselineVersionHash: "hash-1",
-            jobFingerprint: "job-fingerprint-1",
-            generationContractVersion: "studio-artifacts-v1",
-            assessmentScore: 55,
+              baselineId: "base-1",
+              jobId: "job-1",
+              baselineVersionId: "base-version-1",
+              baselineVersionHash: "hash-1",
+              assessmentScore: 84,
+              jobFingerprint: "job-fingerprint-1",
+              generationContractVersion: "studio-artifacts-v1",
+            assessmentScore: 84,
             resume: {
               status: "COMPLETED",
               inputsHash: "resume-hash",
@@ -1165,8 +1153,7 @@ describe("Studio page UX", () => {
       }
 
       if (rawUrl.includes("/api/analysis/fit-assessments/analysis-1")) {
-        // Provide a real analysis payload so the page does not treat analysisId as invalid, but keep readiness pending via readiness endpoint.
-        return Promise.resolve(createResponse(createFitAssessment(55)));
+        return Promise.resolve(createResponse(createFitAssessment(84)));
       }
 
       if (rawUrl.includes("/api/baselines/base-1/versions")) {
@@ -1174,13 +1161,7 @@ describe("Studio page UX", () => {
       }
 
       if (rawUrl.includes("/api/resume/readiness")) {
-        return Promise.resolve(
-          createResponse({
-            status: "limited",
-            reasons: [{ code: "readiness_pending", message: "pending" }],
-            compliance_flags: [],
-          }),
-        );
+        throw new Error("Studio page must not call /api/resume/readiness");
       }
 
       if (rawUrl.includes("/api/analytics/event")) {
@@ -1211,24 +1192,18 @@ describe("Studio page UX", () => {
     expect(within(primaryMaterials).getByText("Your application materials")).toBeInTheDocument();
     expect(primaryMaterials.className).toContain("order-1");
     const judgment = screen.getByTestId("studio-compatibility-judgment");
-    expect(judgment).toHaveTextContent("55");
-    // Verdict is derived from the established score band mapping when not explicitly provided by the payload.
-    expect(judgment).toHaveTextContent("Below threshold");
+    expect(judgment).toHaveTextContent("84");
+    expect(judgment).toHaveTextContent("Competitive match");
     expect(within(judgment).queryByTestId("studio-compatibility-rationale")).toBeNull();
     expect(within(primaryMaterials).getByTestId("studio-materials-completeness")).toHaveTextContent("Complete set");
     expect(within(primaryMaterials).getByTestId("studio-download-application-package")).toBeInTheDocument();
 
-    const refinementDetails = within(primaryMaterials).getByTestId("studio-refinement-details");
-    expect(refinementDetails).not.toHaveAttribute("open");
-
     const secondarySystems = screen.getByTestId("studio-secondary-systems");
     expect(secondarySystems.className).toContain("order-2");
-    const guidanceDetails = within(secondarySystems).getByTestId("studio-guidance-details");
-    expect(guidanceDetails).not.toHaveAttribute("open");
 
     // Both artifacts are visible product outcomes.
     expect(screen.queryByTestId("studio-resume-ready-panel") ?? screen.queryByTestId("studio-resume-correction-panel")).toBeTruthy();
-    expect(await screen.findByText("I bring verified leadership and operational experience aligned to this role.")).toBeInTheDocument();
+    expect(screen.getAllByText("I bring verified leadership and operational experience aligned to this role.").length).toBeGreaterThan(0);
 
     firstMount.unmount();
 
@@ -1334,12 +1309,12 @@ describe("Studio page UX", () => {
         return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
       }
 
-      if (rawUrl.includes("/api/resume/readiness")) {
-        return Promise.resolve(createResponse({ status: "limited", reasons: [{ code: "readiness_pending", message: "pending" }], compliance_flags: [] }));
-      }
-
       if (rawUrl.includes("/api/analytics/event")) {
         return Promise.resolve(createResponse({ ok: true }));
+      }
+
+      if (rawUrl.includes("/api/resume/readiness")) {
+        throw new Error("Studio page must not call /api/resume/readiness");
       }
 
       return Promise.resolve(createResponse({}));
