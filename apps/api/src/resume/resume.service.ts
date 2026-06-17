@@ -5732,10 +5732,25 @@ export class ResumeService {
           interpretedEvidenceForFailSafe.summary,
         );
 
+        const persistedResumeV2ForFailSafe = this.getLatestPersistedResumeV2Json(
+          baselineForFailSafe.parsedRecords,
+        ) as NormalizedResumeDocument | null;
+        const persistedResumeV2HasUsableExperience = (() => {
+          try {
+            const persisted = persistedResumeV2ForFailSafe;
+            if (!persisted || typeof persisted !== 'object') return false;
+            const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
+            validateNormalizedResumeDocument(normalized);
+            return Array.isArray((normalized as any)?.experience) && (normalized as any).experience.length > 0;
+          } catch {
+            return false;
+          }
+        })();
+
         const failSafeExperienceCount = Array.isArray((normalizedDocument as any)?.experience)
           ? (normalizedDocument as any).experience.length
           : 0;
-        if (failSafeExperienceCount <= 0) {
+        if (failSafeExperienceCount <= 0 && !persistedResumeV2HasUsableExperience) {
           // Narrow recovery: if minimal fail-safe normalization produced an empty experience array,
           // attempt to rebuild experience from current baseline sections using structured extraction.
           try {
@@ -5799,6 +5814,14 @@ export class ResumeService {
           if (recoveredExperienceCount > 0) {
             // Success is allowed only when experience is non-empty.
             // Continue to return the minimal fail-safe response shape below.
+          } else if (persistedResumeV2HasUsableExperience) {
+            try {
+              normalizedDocument = normalizeNormalizedResumeDocument(
+                persistedResumeV2ForFailSafe as NormalizedResumeDocument,
+              );
+            } catch {
+              // keep the existing minimal fail-safe document if normalization somehow fails here
+            }
           } else {
           throw new UnprocessableEntityException(buildArtifactFailurePayload({
             code: 'unsupported_input',
