@@ -1849,9 +1849,6 @@ export default function StudioPage() {
   }, []);
 
   const analysisScore = useMemo(() => { 
-    // Fail-closed: if analysis failed to load/run, do not reuse any hydrated/stored score.
-    // This prevents a mixed authority state where stale score implies READY while readiness/analysis errors imply repair required.
-    if (analysisError || readinessError) return null;
     const coerceScore = (value: unknown): number | null => {
       if (typeof value === "number" && Number.isFinite(value)) return value;
       if (typeof value === "string") {
@@ -1863,6 +1860,13 @@ export default function StudioPage() {
       return null;
     };
 
+    if (studioArtifactsPayload) {
+      return coerceScore(studioArtifactsPayload.assessmentScore);
+    }
+
+    // Fail-closed: if analysis failed to load/run, do not reuse any hydrated/stored score.
+    // This prevents a mixed authority state where stale score implies READY while readiness/analysis errors imply repair required.
+    if (analysisError || readinessError) return null;
     const assessment = analysis;
     const v2Raw = (assessment as { scoring_v2?: { score?: unknown } | null } | null)?.scoring_v2?.score;
     const v2 = coerceScore(v2Raw);
@@ -1871,7 +1875,7 @@ export default function StudioPage() {
     const overallRaw = (assessment as { overallScore?: unknown } | null)?.overallScore;
     const overall = coerceScore(overallRaw);
     return v2 ?? direct ?? overall ?? hydratedAnalysisScore ?? null;
-  }, [analysis, analysisError, hydratedAnalysisScore, readinessError]); 
+  }, [analysis, analysisError, hydratedAnalysisScore, readinessError, studioArtifactsPayload]); 
   const generateNowEligible = isGenerateNowEligible(analysisScore);
   const debugAuthorityEnabled = useMemo(() => searchParams?.get("debugAuthority") === "1", [searchParams]);
 
@@ -13064,9 +13068,11 @@ export default function StudioPage() {
                       : "Ready"}
               </p>
               <p className="text-sm text-slate-300">
-                {typeof analysisScore === "number"
+                {typeof analysisScore === "number" && !studioArtifactsPayload
                   ? `Fit score ${Math.round(analysisScore)} - `
-                  : "Fit score unavailable - "}
+                  : studioArtifactsPayload && typeof studioArtifactsPayload.assessmentScore === "number"
+                    ? `Fit score ${Math.round(studioArtifactsPayload.assessmentScore)} - `
+                    : "Fit score unavailable - "}
                 {(selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company")} -{" "}
                 {(selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Unknown role")}
               </p>
@@ -13109,7 +13115,7 @@ export default function StudioPage() {
                 </p>
               ) : null}
               <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-50">  
-                {readinessError
+                {readinessError && !studioArtifactsPayload
                   ? "Readiness error"
                   : workflowSurfaceAuthorityHero.canonicalState === "generation_in_progress"
                   ? "Generating your documents..."
@@ -13723,7 +13729,7 @@ export default function StudioPage() {
           Select a role from Results to generate documents.
         </Alert>
       ) : null}
-      {requestedAnalysisId && analysisError && !uiHasRenderablePair ? (
+      {requestedAnalysisId && analysisError && !uiHasRenderablePair && !studioArtifactsPayload ? (
         <Alert intent="warning" title="Role analysis unavailable">
           {analysisError}
         </Alert>
@@ -13796,9 +13802,11 @@ export default function StudioPage() {
                   }
                 }
                 const sourcedVerdict =
-                  typeof (analysis as LatestAnalysis | null)?.verdict === "string"
-                    ? (analysis as LatestAnalysis).verdict?.trim()
-                    : null;
+                  studioArtifactsPayload && typeof (studioArtifactsPayload as { verdict?: unknown }).verdict === "string"
+                    ? String((studioArtifactsPayload as { verdict?: string }).verdict).trim()
+                    : typeof (analysis as LatestAnalysis | null)?.verdict === "string"
+                      ? (analysis as LatestAnalysis).verdict?.trim()
+                      : null;
                 const verdict =
                   sourcedVerdict && sourcedVerdict.length
                     ? sourcedVerdict
@@ -13811,7 +13819,7 @@ export default function StudioPage() {
                 return `Compatibility: ${verdict} (${score})`;
               })()}
             </p>
-            {(() => {
+            {!studioArtifactsPayload ? (() => {
               const candidate =
                 typeof (analysis as LatestAnalysis | null)?.summary === "string" && (analysis as LatestAnalysis).summary?.trim()
                   ? (analysis as LatestAnalysis).summary!.trim()
@@ -13835,7 +13843,7 @@ export default function StudioPage() {
                   {clipped}
                 </p>
               );
-            })()}
+            })() : null}
           </div>
         ) : null}
         {!studioBlockedBaselineContract && !uiHasRenderableResume ? (
@@ -15185,7 +15193,15 @@ export default function StudioPage() {
 {JSON.stringify(debugAuthoritySnapshot ?? { debugAuthority: "enabled", snapshot: null }, null, 2)}
         </pre>
       ) : null}
-      {mounted ? (isStateInvalid ? invalidStateFallback : studioContent) : stableSkeleton}
+      {mounted ? (
+        studioArtifactsPayload ? (
+          studioContent
+        ) : isStateInvalid ? (
+          invalidStateFallback
+        ) : (
+          stableSkeleton
+        )
+      ) : stableSkeleton}
     </div>
   );
 }
